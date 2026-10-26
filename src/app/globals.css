@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #111111;
+  --card: #f7f7f7;
+  --card-foreground: #111111;
+  --muted: #efefef;
+  --muted-foreground: #5c5c5c;
+  --border: #dcdcdc;
+  --ring: #c2410c;
+  /* オレンジは主要操作・現在選択のみ */
+  --primary: #c2410c;
+  --primary-foreground: #ffffff;
+  /* 情報区別用 */
+  --info: #0f766e;
+  --success: #15803d;
+  --danger: #b91c1c;
+  --warn: #a16207;
+  --p-blue: #2563eb;
+  --p-green: #15803d;
+  --p-purple: #7e22ce;
+  --p-pink: #be185d;
+  --p-teal: #0f766e;
+}
+
+.dark {
+  --background: #0b0b0b;
+  --foreground: #f2f2f2;
+  --card: #171717;
+  --card-foreground: #f2f2f2;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --border: #333333;
+  --ring: #fb923c;
+  --primary: #fb923c;
+  --primary-foreground: #111111;
+  --info: #2dd4bf;
+  --success: #4ade80;
+  --danger: #f87171;
+  --warn: #facc15;
+  --p-blue: #60a5fa;
+  --p-green: #4ade80;
+  --p-purple: #c084fc;
+  --p-pink: #f472b6;
+  --p-teal: #2dd4bf;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-info: var(--info);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-p-blue: var(--p-blue);
+  --color-p-green: var(--p-green);
+  --color-p-purple: var(--p-purple);
+  --color-p-pink: var(--p-pink);
+  --color-p-teal: var(--p-teal);
+  --font-sans: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

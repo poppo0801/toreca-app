@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+.env
+.env.*
+!.env.example
+e2e/.results
+playwright-report
+*.tsbuildinfo
+next-env.d.ts
+Book.xlsx
+backups/
+supabase/.temp
+supabase/.branches

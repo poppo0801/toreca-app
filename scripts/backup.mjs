@@ -1,0 +1,41 @@
+// 論理バックアップ: トレカ専用プロジェクトの全テーブルをJSONで書き出す（復旧用ではなくデータ退避/CSV移行の下地）。
+// DB全体の復旧用バックアップは Supabase のバックアップ機能（docs/backup-and-ops.md）を使う。
+// 出力先 backups/ は個人データを含むため .gitignore 済み。service_role キーはこのスクリプトでのみ使用する。
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createClient } from "@supabase/supabase-js";
+
+process.loadEnvFile(".env.local");
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!url || !key) throw new Error(".env.local に URL と SUPABASE_SERVICE_ROLE_KEY が必要です");
+
+// 家計簿など別プロジェクトへ誤接続しないための照合
+const linked = readFileSync("supabase/.temp/project-ref", "utf8").trim();
+if (!url.includes(linked)) throw new Error("接続先がリンク済みのトレカ専用プロジェクトと一致しません。中止します。");
+
+const TABLES = [
+  "households", "household_members", "profiles", "chains", "stores", "products", "product_aliases",
+  "product_prices", "family_groups", "address_groups", "identities", "service_accounts",
+  "profile_target_rules", "audit_logs",
+];
+
+const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const dir = `backups/${stamp}`;
+mkdirSync(dir, { recursive: true });
+
+const counts = {};
+for (const table of TABLES) {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from(table).select("*").order(table === "household_members" ? "user_id" : "id").range(from, from + 999);
+    if (error) throw new Error(`${table}: ${error.message}`);
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  writeFileSync(`${dir}/${table}.json`, JSON.stringify(rows, null, 2));
+  counts[table] = rows.length;
+}
+writeFileSync(`${dir}/_manifest.json`, JSON.stringify({ createdAt: new Date().toISOString(), project: linked, counts }, null, 2));
+console.log(`バックアップ完了: ${dir}`);
+console.table(counts);
