@@ -16,6 +16,14 @@ const REQUIRED_ENV = [
 ] as const;
 const OPTIONAL_ENV = ["NEXT_PUBLIC_DATA_SOURCE", "VAPID_SUBJECT"] as const;
 
+function safeHostLabel(url: string): string | null {
+  try {
+    return new URL(url.trim()).hostname.split(".")[0];
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 運用確認用ヘルスチェック。CRON_SECRET による認証が必要（未認証は401。環境の構成を第三者に見せない）。
  * 返すのは設定の有無・疎通の可否・デプロイ情報のみで、秘密の値や個人情報は含まない。
@@ -61,6 +69,14 @@ export async function GET(req: NextRequest) {
     db,
     rlsAnonymous: rls,
     publishableKey: anonKey,
+    // 設定ミスの切り分け用（値そのものは返さない）。キーの形式と、接続先プロジェクトの識別子（URLの先頭ラベル）のみ
+    diagnostics: {
+      supabaseProjectRef: url ? safeHostLabel(url) : null,
+      publishableKeyShape: anon
+        ? { kind: anon.startsWith("sb_publishable_") ? "sb_publishable" : anon.startsWith("eyJ") ? "jwt" : "unknown", length: anon.length, hasWhitespace: /s/.test(anon), hasQuotes: /^["']|["']$/.test(anon) }
+        : null,
+      urlHasWhitespaceOrSlash: url ? /s|/$/.test(url) : null,
+    },
     deploy: {
       commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
       region: process.env.VERCEL_REGION ?? null,
