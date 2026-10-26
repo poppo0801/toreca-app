@@ -50,7 +50,7 @@ export function createWebPushSender(): PushSender {
   return async (sub, payload) => {
     if (!isAllowedPushEndpoint(sub.endpoint)) return { ok: false, gone: true, status: null };
     try {
-      await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: "high" });
+      await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: "high", timeout: 10_000 });
       return { ok: true };
     } catch (e) {
       const status = (e as { statusCode?: number }).statusCode ?? null;

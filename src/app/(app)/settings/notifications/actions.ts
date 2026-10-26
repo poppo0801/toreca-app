@@ -125,3 +125,21 @@ export async function sendTestPush(sub: unknown): Promise<Res> {
     return { ok: false, error: "通知サーバーの設定（VAPID）が未完了です" };
   }
 }
+
+/** 通知ジョブの稼働状況（件数・個人情報なし）。止まっていないかを画面で確認できる。 */
+export async function getNotificationJobStatus(): Promise<
+  Res<{ scheduled: boolean; lastRunAt: string | null; lastStatus: string | null; lastSuccessAt: string | null }>
+> {
+  const c = await authed();
+  if (!c) return NEED_LOGIN;
+  const { data, error } = await c.db.rpc("notification_job_status");
+  if (error) return { ok: false, error: "稼働状況の取得に失敗しました" };
+  const row = (data as { last_run_at: string | null; last_status: string | null; last_success_at: string | null; scheduled: boolean }[] | null)?.[0];
+  return {
+    ok: true,
+    scheduled: row?.scheduled ?? false,
+    lastRunAt: row?.last_run_at ?? null,
+    lastStatus: row?.last_status ?? null,
+    lastSuccessAt: row?.last_success_at ?? null,
+  };
+}

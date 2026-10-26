@@ -61,3 +61,9 @@
 | 9 通知冪等 | **対応済**: 配信権を先に確保（ON CONFLICT DO NOTHING）→送信→結果更新。失敗は最大3回、送信中のまま止まった行は10分後に再試行対象 |
 
 結合テスト: `tests/rules-notifications.integration.test.ts`。
+
+## Stage 3.5（通知の定期実行基盤: 20261026000008）
+- `pg_cron` / `pg_net` を有効化。URL・秘密は Supabase Vault。スケジュールは**未登録**（明示的に有効化）。
+- `notification_job_runs` / `notification_cron_calls`: RLS有効・クライアント権限なし（service_roleのみ）。件数・状態・短いエラー種別のみで個人情報なし。
+- 起動・スケジュール関数は service_role のみ実行可。稼働状況の参照用 `notification_job_status()` は件数を返さない。
+- 結合テスト: `tests/notification-ops.integration.test.ts`。

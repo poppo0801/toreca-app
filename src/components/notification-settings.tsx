@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import {
+  getNotificationJobStatus,
   getPushSubscriptionStatus,
   loadNotificationSettings,
   removePushSubscription,
@@ -36,6 +37,8 @@ export function NotificationSettings() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_NOTIFICATION_SETTINGS);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<{ scheduled: boolean; lastRunAt: string | null; lastStatus: string | null; lastSuccessAt: string | null } | null>(null);
+  const [nowMs] = useState(() => Date.now());
 
   const refreshDevice = useCallback(async () => {
     const sub = await currentSubscription();
@@ -60,6 +63,16 @@ export function NotificationSettings() {
       alive = false;
     };
   }, [profile.id]);
+
+  useEffect(() => {
+    let alive = true;
+    getNotificationJobStatus().then((r) => {
+      if (alive && r.ok) setJob(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const enable = async () => {
     setBusy(true);
@@ -140,6 +153,8 @@ export function NotificationSettings() {
           )}
         </div>
       </div>
+
+      <JobStatus job={job} nowMs={nowMs} />
 
       <fieldset className="space-y-3 rounded-md border p-3">
         <legend className="px-1 font-medium">プロフィール「{profile.label}」の通知ルール</legend>
@@ -231,6 +246,27 @@ export function NotificationSettings() {
           {message}
         </p>
       )}
+    </div>
+  );
+}
+
+const fmt = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "なし";
+
+/** 通知ジョブ（サーバーの定期実行）の稼働状況。数分おきに動く想定で、止まっていれば警告する。 */
+function JobStatus({ job, nowMs }: { job: { scheduled: boolean; lastRunAt: string | null; lastStatus: string | null; lastSuccessAt: string | null } | null; nowMs: number }) {
+  if (!job) return null;
+  const stale = job.scheduled && (!job.lastSuccessAt || nowMs - new Date(job.lastSuccessAt).getTime() > 15 * 60_000);
+  return (
+    <div className="space-y-1 rounded-md border p-3 text-xs" data-testid="job-status">
+      <p className="text-sm font-medium">通知ジョブ（サーバー）</p>
+      <p>
+        定期実行: {job.scheduled ? "有効" : "未設定（プッシュ通知はまだ送られません。画面の「要対応」で確認できます）"}
+        ／ 最終実行: {fmt(job.lastRunAt)}
+        {job.lastStatus === "error" && <span className="text-danger">（エラー）</span>}
+        ／ 最終成功: {fmt(job.lastSuccessAt)}
+      </p>
+      {stale && <p className="text-danger">通知ジョブが15分以上成功していません。設定を確認してください（docs/notifications.md）。</p>}
     </div>
   );
 }

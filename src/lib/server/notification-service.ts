@@ -34,7 +34,12 @@ export interface CycleResult {
   noDevice: number;
   /** 配信済み・他プロセスが処理中などで重複として見送った */
   duplicates: number;
+  /** 1回の実行での送信上限に達したため次回に回した件数 */
+  deferred: number;
 }
+
+/** 1回の実行で送るプッシュの上限（想定外の大量配信を防ぐ安全弁。残りは次回の実行で送る） */
+export const MAX_SENDS_PER_RUN = 100;
 
 const MAX_ATTEMPTS = 3;
 /** 送信中のまま止まった行（クラッシュ等）を再試行対象にするまでの時間 */
@@ -47,8 +52,9 @@ const STALE_SENDING_MS = 10 * 60_000;
  *  - 失敗は最大3回まで再試行。購読が失効(404/410)した端末は無効化する。
  * db は service_role のクライアント（世帯ごとに絞って読み込む）。
  */
-export async function runNotificationCycle(db: Db, send: PushSender, now: Date = new Date(), onlyHousehold?: string): Promise<CycleResult> {
-  const result: CycleResult = { households: 0, planned: 0, sent: 0, failed: 0, suppressed: 0, noDevice: 0, duplicates: 0 };
+export async function runNotificationCycle(db: Db, send: PushSender, now: Date = new Date(), onlyHousehold?: string, maxSends: number = MAX_SENDS_PER_RUN): Promise<CycleResult> {
+  const result: CycleResult = { households: 0, planned: 0, sent: 0, failed: 0, suppressed: 0, noDevice: 0, duplicates: 0, deferred: 0 };
+  let attempted = 0;
 
   const { data: households, error } = await db.from("households").select("id");
   if (error) throw new Error("世帯の取得に失敗しました");
@@ -87,15 +93,24 @@ export async function runNotificationCycle(db: Db, send: PushSender, now: Date =
         result.noDevice++;
         continue;
       }
+      if (attempted >= maxSends) {
+        result.deferred++;
+        continue;
+      }
       const claimed = await claim(db, h.id, n, now);
       if (!claimed) {
         result.duplicates++;
         continue;
       }
+      attempted++;
       let ok = false;
       let lastStatus: number | null = null;
       for (const t of targets) {
-        const res = await send({ endpoint: t.endpoint, keys: { p256dh: t.p256dh, auth: t.auth } }, { title: n.title, body: n.body, url: n.url, tag: n.tag, type: n.type });
+        // 送信側の想定外の例外でジョブ全体を止めない（この通知は失敗として記録し再試行対象にする）
+        const res = await send(
+          { endpoint: t.endpoint, keys: { p256dh: t.p256dh, auth: t.auth } },
+          { title: n.title, body: n.body, url: n.url, tag: n.tag, type: n.type },
+        ).catch((): { ok: false; gone: boolean; status: number | null } => ({ ok: false, gone: false, status: null }));
         if (res.ok) ok = true;
         else {
           lastStatus = res.status;

@@ -1127,6 +1127,33 @@ export type Database = {
           },
         ]
       }
+      notification_cron_calls: {
+        Row: {
+          called_at: string
+          error_msg: string | null
+          harvested_at: string | null
+          id: number
+          request_id: number | null
+          status_code: number | null
+        }
+        Insert: {
+          called_at?: string
+          error_msg?: string | null
+          harvested_at?: string | null
+          id?: never
+          request_id?: number | null
+          status_code?: number | null
+        }
+        Update: {
+          called_at?: string
+          error_msg?: string | null
+          harvested_at?: string | null
+          id?: never
+          request_id?: number | null
+          status_code?: number | null
+        }
+        Relationships: []
+      }
       notification_deliveries: {
         Row: {
           application_id: string | null
@@ -1186,6 +1213,54 @@ export type Database = {
             referencedColumns: ["id", "household_id"]
           },
         ]
+      }
+      notification_job_runs: {
+        Row: {
+          duplicates: number | null
+          duration_ms: number | null
+          error_code: string | null
+          failed: number | null
+          finished_at: string | null
+          id: string
+          no_device: number | null
+          planned: number | null
+          sent: number | null
+          started_at: string
+          status: string
+          suppressed: number | null
+          trigger: string
+        }
+        Insert: {
+          duplicates?: number | null
+          duration_ms?: number | null
+          error_code?: string | null
+          failed?: number | null
+          finished_at?: string | null
+          id?: string
+          no_device?: number | null
+          planned?: number | null
+          sent?: number | null
+          started_at?: string
+          status?: string
+          suppressed?: number | null
+          trigger?: string
+        }
+        Update: {
+          duplicates?: number | null
+          duration_ms?: number | null
+          error_code?: string | null
+          failed?: number | null
+          finished_at?: string | null
+          id?: string
+          no_device?: number | null
+          planned?: number | null
+          sent?: number | null
+          started_at?: string
+          status?: string
+          suppressed?: number | null
+          trigger?: string
+        }
+        Relationships: []
       }
       notification_settings: {
         Row: {
@@ -2082,11 +2157,29 @@ export type Database = {
     Functions: {
       bootstrap_household: { Args: never; Returns: string }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }
+      invoke_notify_job: {
+        Args: { p_secret?: string; p_url?: string }
+        Returns: number
+      }
       is_household_member: { Args: { hid: string }; Returns: boolean }
       is_test_household: { Args: { hid: string }; Returns: boolean }
       mark_purchased: {
         Args: { p_actor: string; p_application_id: string }
         Returns: undefined
+      }
+      notification_cron_disable: { Args: never; Returns: boolean }
+      notification_cron_enable: {
+        Args: { p_schedule?: string }
+        Returns: number
+      }
+      notification_job_status: {
+        Args: never
+        Returns: {
+          last_run_at: string
+          last_status: string
+          last_success_at: string
+          scheduled: boolean
+        }[]
       }
       purge_test_households: {
         Args: never

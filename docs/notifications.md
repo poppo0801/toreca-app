@@ -3,7 +3,7 @@
 ## 仕組み
 1. 端末で「通知を有効にする」→ Service Worker(`/sw.js`)が購読を作成 → サーバーへRPCで保存（端末×プロフィール）。
 2. プロフィールを切り替えると、その端末の通知先も自動で付け替わる（旧プロフィールへの紐付けは解除）。
-3. 外部スケジューラが `/api/cron/notify` を数分おきに呼ぶ。サーバーが全世帯の状態から「いま送るべき通知」を**毎回再計算**し、
+3. Supabase Cron（pg_cron + pg_net）が `/api/cron/notify` を 5 分おきに呼ぶ。サーバーが全世帯の状態から「いま送るべき通知」を**毎回再計算**し、
    `notification_deliveries` の `unique(profile_id, trigger_key)` で重複を防ぎながら Web Push を送る。
 4. 通知が使えない環境でも、抽選管理ページの「要対応」アラートで同じ内容を確認できる。
 
@@ -25,21 +25,49 @@
 - `CRON_SECRET`（32文字以上のランダム文字列）
 - `SUPABASE_SERVICE_ROLE_KEY`（通知ジョブのみが使用。クライアントへは出さない）
 
-## 定期実行（デプロイ後に設定）
-エンドポイント: `GET|POST https://<デプロイURL>/api/cron/notify` に `Authorization: Bearer $CRON_SECRET`。応答は件数のみ。
-- **Vercel Cron**: Hobby プランは1日1回までのため、分単位の通知には不向き（Proプランは分単位可。料金に注意）。
-- **GitHub Actions の `schedule`**（無料・5分間隔が下限、実行は多少遅れる）: `curl -fsS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" $URL`。
-- **Supabase pg_cron + pg_net**: DB側から定期的に上記URLを呼ぶ。
-遅延は許容（期限管理は画面の「要対応」でも確認できる）。どれを使うかは料金・手間の観点でデプロイ時に決める。
+## 定期実行（Supabase Cron）
+**方式**: Supabase の `pg_cron` が 5 分おきに `public.invoke_notify_job()` を実行 → `pg_net` が Vercel の `/api/cron/notify` へ HTTPS POST（`Authorization: Bearer <CRON_SECRET>`）。
+Vercel Cron は使わない（Hobby は 1 日 1 回までで、締切 15 分前のような通知には粗すぎるため）。
+
+```
+pg_cron (5分) → invoke_notify_job() → pg_net POST → Vercel /api/cron/notify → 通知計画の再計算 → 配信権の確保 → Web Push
+```
+- **秘密の保管**: URL と `CRON_SECRET` は Supabase Vault（暗号化）に保存。スケジュール定義・SQL・ログには出ない。
+- **有効化は明示的**: マイグレーションはスケジュールを登録しない。`npm run cron:setup -- --enable` で初めて登録される。`--disable` でいつでも停止。
+- **呼べる人**: `invoke_notify_job` / `notification_cron_enable` / `notification_cron_disable` は service_role のみ（一般ユーザー・匿名は実行不可）。エンドポイントは `CRON_SECRET` が無い呼び出しを 401 で拒否し、何も実行しない。
+- **重複防止**: 配信は `unique(profile_id, trigger_key)` を先に確保してから送信するため、重複起動・並行実行・再実行でも同じ通知は 1 回だけ。実行中の重複起動はスキップされる。
+- **再試行**: 送信失敗は次回以降の実行で最大 3 回まで再試行。送信中のまま止まった行は 10 分後に再試行対象。購読失効（404/410）の端末は自動で無効化。1 回の実行の送信上限は 100 件（超過分は次回）。
+- **エラー記録**（個人情報なし）:
+  - `notification_job_runs`: 実行ごとの状態・件数・所要時間・エラー種別（メッセージは保存しない）
+  - `notification_cron_calls`: pg_net の呼び出しと HTTP 応答コード（未設定・URL不正・無応答も記録）
+  - `notification_deliveries`: 通知ごとの送信状態・試行回数・エラーコード
+  - 画面: 設定 → 通知 → 「通知ジョブ（サーバー）」に最終実行・最終成功を表示。15 分以上成功していなければ警告。
+- 確認コマンド: `npm run cron:setup -- --status`
+
+### 頻度と想定コスト（推定。料金は変わりうるため公式で確認）
+| 項目 | 5分おき（推奨） | 10分おき | 1分おき（非推奨） |
+|---|---|---|---|
+| 呼び出し回数/月 | 約8,600回 | 約4,300回 | 約43,000回 |
+| 通知の最大遅延 | 約5分 | 約10分 | 約1分 |
+| Vercel Hobby | 無料枠内（1回数秒＝月5時間程度） | 同左 | 無料枠内だが無駄が多い |
+| Supabase（pg_cron / pg_net） | 追加料金なし | 同左 | 同左 |
+| Web Push（Apple / Google） | 無料 | 無料 | 無料 |
+
+推奨は 5 分（15 分前通知の遅れが許容範囲）。`--schedule "*/10 * * * *"` で変更可能。
+注意: Supabase の無料プランは**一定期間アクセスがないとプロジェクトが一時停止**し、日次バックアップも付きません。実データ運用では有料プラン（または定期的な `supabase db dump`）を検討してください。
+
+### 手順
+`docs/deploy-vercel.md` の「3. 通知の定期実行」を参照（`--url` → `--test` → 承認 → `--enable`）。
 
 ## iPhone の手順（iOS 16.4 以降）
 1. Safari でアプリのURLを開き、共有ボタン →「ホーム画面に追加」。
 2. **ホーム画面のアイコンから開く**（ブラウザのタブでは通知を受け取れない）。
 3. 設定 → 通知 →「（プロフィール名）としてこの端末の通知を有効にする」→ 通知を許可。「テスト通知を送る」で確認。
 4. 夫婦それぞれのiPhoneで、使うプロフィールを選んだ状態で有効にする。端末はプロフィール選択に追従する。
-※ 実機での受信確認は Stage 3 の完了条件（利用者の操作が必要）。
+詳しい手順書: `docs/iphone-setup.md`。実機での受信確認は利用者の操作が必要。
 
 ## セキュリティ
 - 購読の endpoint はプッシュサービスのホスト（FCM/Mozilla/Apple/Windows）のみ許可（SSRF防止）。
 - `push_subscriptions` は表への直接アクセス権なし。鍵は読み出せず、監査ログにも複製されない。
-- `/api/cron/notify` は `CRON_SECRET` 必須（未設定・短い場合は常に拒否）。タイミング攻撃対策の定数時間比較。
+- `/api/cron/notify` は `CRON_SECRET` 必須（未設定・32文字未満の場合は常に拒否）。定数時間比較。
+- 通知ジョブの記録表・起動関数は一般ユーザーからアクセスできない（稼働状況は件数なしの専用関数のみ）。

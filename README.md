@@ -48,5 +48,5 @@ npm run dev                        # http://localhost:3000
 - `supabase/migrations/` DBマイグレーション（適用: `npx supabase db push --linked`。リンク先はトレカ専用プロジェクトのみ）
 - `docs/db-review.md` DB草案の再点検結果
 
-通知（PWA/Web Push）のセットアップ・定期実行・iPhone手順は `docs/notifications.md`。
+通知（PWA/Web Push）の仕組み・定期実行（Supabase Cron）は `docs/notifications.md`、Vercelデプロイと環境変数は `docs/deploy-vercel.md`、iPhoneの手順書は `docs/iphone-setup.md`。
 運用・バックアップ・認証設定は `docs/backup-and-ops.md` を参照。
