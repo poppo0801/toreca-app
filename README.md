@@ -23,6 +23,9 @@ npm run dev                        # http://localhost:3000
 | `npm run test:e2e:supabase` | ログイン〜マスター登録のE2E（実Supabase・テストユーザー使用） |
 | `npm run test:db` | RLS・抽選の結合テスト（実Supabase。終了時にテストデータを自動掃除） |
 | `npm run backup` | 全テーブルのJSON書き出し（`backups/`、git管理外） |
+| `npm run restore:drill` | バックアップを使い捨てのローカルPostgresへ復元して整合を検証（本番に触れない） |
+| `npm run restore` | 空のDBへの復元（`docs/backup-and-ops.md`） |
+| `npm run verify:prod` | 本番URLの最終確認（認証・環境変数・RLS・秘密の漏えい） |
 
 ## データ源の切替
 - `NEXT_PUBLIC_DATA_SOURCE=mock` … 認証なし・架空データ（Stage 0と同じ。CI/E2E用）
@@ -48,5 +51,5 @@ npm run dev                        # http://localhost:3000
 - `supabase/migrations/` DBマイグレーション（適用: `npx supabase db push --linked`。リンク先はトレカ専用プロジェクトのみ）
 - `docs/db-review.md` DB草案の再点検結果
 
-通知（PWA/Web Push）の仕組み・定期実行（Supabase Cron）は `docs/notifications.md`、Vercelデプロイと環境変数は `docs/deploy-vercel.md`、iPhoneの手順書は `docs/iphone-setup.md`。
+通知（PWA/Web Push）の仕組み・定期実行（Supabase Cron）は `docs/notifications.md`、Vercelデプロイと環境変数は `docs/deploy-vercel.md`、iPhoneの手順書は `docs/iphone-setup.md`、実運用開始チェックは `docs/production-checklist.md`（`npm run verify:prod`）。
 運用・バックアップ・認証設定は `docs/backup-and-ops.md` を参照。

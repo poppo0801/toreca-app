@@ -59,6 +59,8 @@ const r = spawnSync("npx", ["playwright", "test"], {
   env: { ...process.env, E2E_MODE: "supabase", E2E_EMAIL: email, E2E_PASSWORD: password },
 });
 if (!process.env.E2E_BASE_URL) freePort();
+// 復元訓練用: E2E_BACKUP_BEFORE_CLEANUP=1 のとき、テストデータを掃除する前にバックアップを取る
+if (process.env.E2E_BACKUP_BEFORE_CLEANUP === "1") spawnSync("node", ["scripts/backup.mjs"], { stdio: "inherit" });
 // 掃除（テスト世帯とテストユーザーのみ。docs/backup-and-ops.md）
 const { cleanupTestData } = await import("./lib/test-cleanup.mjs");
 await cleanupTestData({ execute: true });

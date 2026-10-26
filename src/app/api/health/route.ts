@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
+import { isSupabaseUrl } from "@/lib/supabase/url";
 
 export const dynamic = "force-dynamic";
 
@@ -44,11 +45,12 @@ export async function GET(req: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (url && service) {
+  const urlValid = isSupabaseUrl(url);
+  if (url && service && urlValid) {
     const { error } = await createClient(url, service, { auth: { persistSession: false } }).from("households").select("id", { head: true, count: "exact" });
     db = error ? "error" : "ok";
   }
-  if (url && anon) {
+  if (url && anon && urlValid) {
     const { data } = await createClient(url, anon, { auth: { persistSession: false } }).from("households").select("id").limit(1);
     rls = (data ?? []).length === 0 ? "ok" : "leak";
     // 存在しない認証情報でログインを試す: 400(invalid_credentials)ならキーは有効、401/403ならキーが無効
@@ -61,8 +63,10 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    ok: missing.length === 0 && db === "ok" && rls === "ok" && anonKey === "valid" && IS_SUPABASE_MODE,
+    ok: missing.length === 0 && urlValid && db === "ok" && rls === "ok" && anonKey === "valid" && IS_SUPABASE_MODE,
     dataSource: IS_SUPABASE_MODE ? "supabase" : "mock",
+    /** NEXT_PUBLIC_SUPABASE_URL が Supabase の公式ホスト形式か */
+    supabaseUrlFormat: urlValid ? "ok" : "not_a_supabase_url",
     missingRequiredEnv: missing,
     env,
     vapidSubjectFallback: !process.env.VAPID_SUBJECT && !!process.env.VERCEL_PROJECT_PRODUCTION_URL,

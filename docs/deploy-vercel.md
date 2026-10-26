@@ -22,20 +22,23 @@
 ### 環境変数の一覧
 | 変数 | 値の出どころ | 公開範囲 | Vercel | 用途 |
 |---|---|---|---|---|
-| `NEXT_PUBLIC_DATA_SOURCE` | 固定値 `supabase` | ブラウザに埋め込み（公開情報） | Production | データ源の切替 |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API | ブラウザに埋め込み（公開情報） | Production | 接続先 |
+| `NEXT_PUBLIC_DATA_SOURCE` | 固定値 `supabase`（任意。未設定でも本番ビルドは認証必須の supabase になる） | ブラウザに埋め込み（公開情報） | Production | データ源の切替 |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API の **Project URL**。形式は必ず `https://<プロジェクトID>.supabase.co`（トレカ専用は `https://yofqgfarflrlhzufjhqs.supabase.co`）。**Vercelアプリ自身のURLやプロジェクト名ではない** | ブラウザに埋め込み（公開情報） | Production | 接続先 |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 同上（publishable/anon キー） | ブラウザに埋め込み（公開前提。RLSで保護） | Production | ログイン後のDBアクセス |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | `.env.local` | ブラウザに埋め込み（公開鍵） | Production | Push購読 |
-| `VAPID_SUBJECT` | `.env.local`（https URL か mailto:） | サーバーのみ | Production | Push送信者の連絡先。**個人メールは入れない** |
+| `VAPID_SUBJECT` | `.env.local`（https URL か mailto:）。任意（未設定なら本番URLで自動補完） | サーバーのみ | Production | Push送信者の連絡先。**個人メールは入れない** |
 | `VAPID_PRIVATE_KEY` | `.env.local` | **秘密**（サーバーのみ） | Production・**Sensitive** | Push送信の署名 |
 | `SUPABASE_SERVICE_ROLE_KEY` | `.env.local` | **秘密**（サーバーのみ。RLSを迂回できる最強権限） | Production・**Sensitive** | 通知ジョブのみが使用 |
 | `CRON_SECRET` | `.env.local`（32文字以上のランダム） | **秘密**（サーバーのみ） | Production・**Sensitive** | 通知ジョブ呼び出しの認証 |
 
+- **`NEXT_PUBLIC_` の変数は「ビルド時」に埋め込まれる**ため、追加・変更したら必ず **Redeploy**（Deployments → 最新 → ⋯ → Redeploy。「Use existing Build Cache」は OFF）。
+- 入力ミスの確認: デプロイ後に `npm run verify:prod` を実行すると、設定漏れ・URL形式・キーの有効性を（値を表示せずに）判定する。
 - `NEXT_PUBLIC_` で始まるものは**ブラウザのコードに含まれる**ため、秘密を入れない（上記は公開前提のもののみ）。
 - `SUPABASE_SERVICE_ROLE_KEY` / `VAPID_PRIVATE_KEY` / `CRON_SECRET` は `NEXT_PUBLIC_` を**付けない**。コードでは通知ジョブ（`src/app/api/cron/notify`）だけが読む。
 - 鍵が漏れた疑いがあるとき: 「6. 秘密の再発行」を実行。
 
 ## 2. あなたの操作: デプロイ後の確認
+（まず `npm run verify:prod` を実行すると、下の項目の多くを自動で判定します。実機・本番アカウントの確認項目は `docs/production-checklist.md`）
 1. 発行された URL（例 `https://toreca-app-xxxx.vercel.app`）を開き、共通ログインでログインできること。
 2. Supabase ダッシュボード → Authentication → **URL Configuration** → **Site URL** をその URL に更新（パスワードログインだけなら必須ではないが、将来のメール系機能のため）。
 3. 認証なしでジョブURLを開くと拒否されること（ブラウザで `https://<URL>/api/cron/notify` を開く → `{"error":"unauthorized"}`）。
