@@ -73,9 +73,9 @@ export async function GET(req: NextRequest) {
     diagnostics: {
       supabaseProjectRef: url ? safeHostLabel(url) : null,
       publishableKeyShape: anon
-        ? { kind: anon.startsWith("sb_publishable_") ? "sb_publishable" : anon.startsWith("eyJ") ? "jwt" : "unknown", length: anon.length, hasWhitespace: /s/.test(anon), hasQuotes: /^["']|["']$/.test(anon) }
+        ? { kind: anon.startsWith("sb_publishable_") ? "sb_publishable" : anon.startsWith("eyJ") ? "jwt" : "unknown", length: anon.length, hasWhitespace: /\s/.test(anon), hasQuotes: /^["']|["']$/.test(anon) }
         : null,
-      urlHasWhitespaceOrSlash: url ? /s|/$/.test(url) : null,
+      urlHasWhitespaceOrSlash: url ? /\s|\/$/.test(url) : null,
     },
     deploy: {
       commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
