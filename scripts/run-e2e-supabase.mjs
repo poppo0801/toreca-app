@@ -25,4 +25,7 @@ const r = spawnSync("npx", ["playwright", "test"], {
   shell: true,
   env: { ...process.env, E2E_MODE: "supabase", E2E_EMAIL: email, E2E_PASSWORD: password },
 });
+// 掃除（テスト世帯とテストユーザーのみ。docs/backup-and-ops.md）
+const { cleanupTestData } = await import("./lib/test-cleanup.mjs");
+await cleanupTestData({ execute: true });
 process.exit(r.status ?? 1);

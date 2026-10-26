@@ -14,8 +14,13 @@
 - `npm test` ... 単体テスト（DB不要）
 - `npm run test:db` ... RLS結合テスト（実Supabase）。固定テストユーザー `rls-test-1/2@example.invalid` を使う。
 - `npm run test:e2e` ... モック画面のE2E／ `npm run test:e2e:supabase` ... ログイン〜マスター登録のE2E（実Supabase）。
-- テストデータ（`rls-test-*` ユーザーとその世帯・`RLSテスト系列-*` 等）は監査ログが追記専用のため自動削除しない。
-  実データ運用開始前に Supabase ダッシュボードで該当ユーザーを削除する（ユーザーに確認の上で実施すること）。
+- テストデータは自動で掃除される（`test:db` と `test:e2e:supabase` の終了時）。手動で確認・削除する場合:
+  `npm run cleanup:testdata`（対象の確認のみ）→ `npm run cleanup:testdata -- --execute`（削除）。
+  削除は DB 関数 `purge_test_households()`（service_role 専用）と Auth 管理APIで行う。対象は
+  `rls-test-*@example.invalid` のユーザーだけが所属する世帯に限られ、本番の共通ログイン世帯には作用しない。
+  監査ログの追記専用トリガー・RLS・外部キーは無効化しない（削除は「テスト世帯の purge 実行中」の DELETE のみ許可）。
+- 背景: users→households/household_members は ON DELETE RESTRICT、監査ログは追記専用のため、ダッシュボードから
+  テストユーザーを直接削除すると外部キー違反になる（意図した安全装置）。
 
 ## 認証の運用
 - ログインは家族共通の1アカウント（メール+パスワード）。Supabase ダッシュボード > Authentication で作成し、

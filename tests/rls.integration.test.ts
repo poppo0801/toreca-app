@@ -1,12 +1,12 @@
 /**
  * RLS 結合テスト（実Supabaseに接続）。通常の `npm test` では実行されない。
  *   npm run test:db
- * 固定のテスト用ユーザー(rls-test-1/2@example.invalid)を再利用する。監査ログは追記専用で、
- * 世帯行は意図的に削除しない（テストデータは2世帯分のみで増え続けない）。
+ * 固定のテスト用ユーザー(rls-test-1/2@example.invalid)を作成し、終了時に purge_test_households() と
+ * ユーザー削除で完全に掃除する（RLS・外部キー・監査ログのトリガーは無効化しない）。
  */
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 try {
   process.loadEnvFile(".env.local");
@@ -29,6 +29,7 @@ describe.skipIf(!enabled)("RLS / 世帯分離", () => {
   let hid1: string;
   let hid2: string;
   const run = randomUUID().slice(0, 8);
+  const userIds: string[] = [];
   let chainId: string;
 
   async function newUser(n: number): Promise<SupabaseClient> {
@@ -44,6 +45,9 @@ describe.skipIf(!enabled)("RLS / 世帯分離", () => {
       if (upd.error) throw upd.error;
     }
     const client = createClient(url!, publishable!, opts);
+    const { data: found } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    const me = found?.users.find((u) => u.email === email);
+    if (me) userIds.push(me.id);
     const signIn = await client.auth.signInWithPassword({ email, password });
     if (signIn.error) throw signIn.error;
     return client;
@@ -56,6 +60,11 @@ describe.skipIf(!enabled)("RLS / 世帯分離", () => {
     u2 = await newUser(2);
     hid1 = (await u1.rpc("bootstrap_household")).data;
     hid2 = (await u2.rpc("bootstrap_household")).data;
+  });
+
+  afterAll(async () => {
+    await admin.rpc("purge_test_households");
+    for (const id of userIds) await admin.auth.admin.deleteUser(id);
   });
 
   it("未ログイン(anon)は何も読めず、世帯も作れない", async () => {
@@ -129,6 +138,14 @@ describe.skipIf(!enabled)("RLS / 世帯分離", () => {
     expect(tamper.error !== null || (tamper.data ?? []).length === 0).toBe(true);
     const wipe = await u1.from("audit_logs").delete().eq("id", last.id).select();
     expect(wipe.error !== null || (wipe.data ?? []).length === 0).toBe(true);
+  });
+
+  it("テスト世帯の削除関数は一般ユーザー・匿名では実行できない", async () => {
+    expect((await u1.rpc("purge_test_households")).error).not.toBeNull();
+    expect((await anon.rpc("purge_test_households")).error).not.toBeNull();
+    expect((await u1.rpc("is_test_household", { hid: hid1 })).error).not.toBeNull();
+    // 実行できなかったので世帯は残っている
+    expect((await u1.from("households").select("id")).data).toHaveLength(1);
   });
 
   it("入力制約: 不正な値はDBで拒否される", async () => {

@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "test:db": "node scripts/run-db-tests.mjs",
     "backup": "node scripts/backup.mjs",
-    "test:e2e:supabase": "node scripts/run-e2e-supabase.mjs"
+    "test:e2e:supabase": "node scripts/run-e2e-supabase.mjs",
+    "cleanup:testdata": "node scripts/cleanup-testdata.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.3.1",
