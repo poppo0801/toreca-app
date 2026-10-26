@@ -16,11 +16,13 @@
 復元は**空のDBにのみ**行い、既存データを上書き・削除しない（空でない場合は中止）。
 1. 新しい Supabase プロジェクトを作成し、`supabase link --project-ref <新ID>` → `npx supabase db push --linked`（マイグレーション適用）。`.env.local` と Vercel の環境変数を新プロジェクトの値に更新。
 2. Authentication で**共通ログインのユーザーを作成**し、「Allow new users to sign up」を OFF にする。**ログインする前に**次へ進む（初回ログインで空の世帯が作られるため）。
-3. 旧ユーザーID（バックアップの \`households.json\` の \`owner_auth_user_id\`）と新しいメールを対応付けて復元:
-   \`\`\`bash
+3. 旧ユーザーID（バックアップの `households.json` の `owner_auth_user_id`）と新しいメールを対応付けて復元:
+
+   ```bash
    node scripts/restore.mjs --backup backups/<日時> --target linked --yes-restore-into-linked \
         --map-owner <旧ユーザーID>=<共通ログインのメール>
-   \`\`\`
+   ```
+
    復元は1トランザクション。トリガー・外部キー検査を一時的に無効化して値をそのまま戻し、その後に **件数・ID・全外部キー（約100件）の整合** を自動検証する。
    ※ ホスト上のSupabase（linked）への復元はこのリポジトリでは**実機未検証**（訓練はローカルPostgresで実施）。`session_replication_role` の変更が許可されない場合はエラーで止まるので、②のSQLダンプからの復元（`psql` で `schema.sql` → `data.sql`）に切り替える。
 4. `npm run cron:setup -- --url https://<デプロイURL>/api/cron/notify` で Vault を再設定。各iPhoneで通知を有効にし直す。
