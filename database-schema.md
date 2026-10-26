@@ -2,7 +2,7 @@
 
 > **v0.2（Stage 1）**: P1テーブル（世帯・プロフィール・マスター・監査）は `supabase/migrations/` に実装済み。実装との差分・修正理由は `docs/db-review.md`。
 > 主な変更: 全テーブルに複合FK `(id, household_id)` で世帯整合を強制／`household_members` を追加／物理削除は不可で `archived_at`/`active`／`audit_logs` は追記専用トリガー／`product_prices` を分離／`profile_target_rules` は系列への実FK。
-> **v0.3（Stage 2）**: lotteries / lottery_items / lottery_management / campaigns / applications（当落・受取を統合）/ purchases / purchase_items / skip_rules(+exceptions) を実装済み。日付精度は3列化、実FK化、一意制約を反映（詳細は db-review.md）。P3以降（application_rules・通知）は未実装。
+> **v0.3（Stage 2）**: lotteries / lottery_items / lottery_management / campaigns / applications（当落・受取を統合）/ purchases / purchase_items / skip_rules(+exceptions) を実装済み。日付精度は3列化、実FK化、一意制約を反映（詳細は db-review.md）。**v0.4（Stage 3）**: application_rules / limit_exemptions / chain_requirements / account_eligibilities / eligibility_purchases / notification_settings / push_subscriptions / notification_deliveries を実装済み。profile_target_rules は店舗単位に拡張。
 
 - 基準文書：`requirements_v1.1.md`
 - ステータス：**設計草案**。実装前にマイグレーション・認可・制約を検証。

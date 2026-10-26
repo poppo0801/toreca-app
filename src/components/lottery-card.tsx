@@ -9,7 +9,8 @@ import { DuplicateDialog } from "@/components/duplicate-dialog";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { formatFlexible, remainingBadge } from "@/lib/datetime";
-import { accountsForLottery, effectiveEventState, isSkippedBy, judgeAccount } from "@/lib/eligibility";
+import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
+import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { formatItem, isManaged, isResultOverdue, type Tab } from "@/lib/lottery-view";
 import { cn } from "@/lib/utils";
 import type { AccountStatus, EventState, Lottery, ReceiveMethod, ResultStatus } from "@/types/domain";
@@ -20,6 +21,7 @@ export const STATUS_META: Record<AccountStatus, { symbol: string; label: string 
   covered_by_limit: { symbol: "◎", label: "枠充足" },
   skipped: { symbol: "⤼", label: "スルー" },
   ineligible: { symbol: "－", label: "対象外" },
+  unavailable: { symbol: "✕", label: "応募不可" },
   needs_review: { symbol: "？", label: "要確認" },
 };
 
@@ -70,7 +72,7 @@ export function LotteryCard({
   tab: Tab;
   detailMode: boolean;
 }) {
-  const { data, now, profile, actions, persistent } = useApp();
+  const { data, now, profile, actions, persistent, reload } = useApp();
   const [expanded, setExpanded] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -86,7 +88,16 @@ export function LotteryCard({
   const overdue = isResultOverdue(data, lottery, now);
   const accounts = accountsForLottery(data, lottery);
   const apps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied");
-  const mySkipped = isSkippedBy(data, profile.id, lottery);
+  const skipSource = skipSourceFor(data, profile.id, lottery);
+  const mySkipped = skipSource !== null;
+  const skipException = hasSkipException(data, profile.id, lottery);
+  const rules = effectiveRules(data, lottery);
+  const [ruleMsg, setRuleMsg] = useState<string | null>(null);
+  const runRule = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
+    const res = await fn();
+    setRuleMsg(res.ok ? null : (res.error ?? "失敗しました"));
+    if (res.ok) await reload();
+  };
   const hasMyScopeSkip = data.skipRules.some(
     (r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id,
   );
@@ -128,7 +139,8 @@ export function LotteryCard({
             {EVENT_LABEL[event] && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
             {overdue && <Chip className="border-danger font-bold text-danger">結果未登録（発表日超過）</Chip>}
             {!managed && <Chip className="text-muted-foreground">管理対象外</Chip>}
-            {mySkipped && <Chip className="text-muted-foreground">スルー中</Chip>}
+            {mySkipped && <Chip className="text-muted-foreground">{{ lottery: "今回スルー", store: "店舗スルー中", chain: "系列スルー中" }[skipSource]}</Chip>}
+            {!mySkipped && skipException && <Chip className="text-muted-foreground">スルー例外（今回だけ対象）</Chip>}
           </div>
           <ul className="mt-0.5 text-sm">
             {lottery.items.map((it, i) => (
@@ -230,6 +242,52 @@ export function LotteryCard({
               </>
             )}
           </dl>
+
+          <div>
+            <p className="mb-1 text-xs font-bold">応募アカウント別の判定</p>
+            <ul className="space-y-1 text-xs" data-testid="judge-list">
+              {accounts.map((acc) => {
+                const owner = data.profiles.find((p) => p.id === acc.profileId)!;
+                const j = judgeAccount(data, lottery, acc, now);
+                const exempt = data.limitExemptions.some((e) => e.lotteryId === lottery.id && e.accountId === acc.id);
+                return (
+                  <li key={acc.id} className="flex flex-wrap items-center gap-2">
+                    <ProfileAvatar profile={owner} size="sm" />
+                    <span className="font-medium">{acc.label}</span>
+                    <span>
+                      {STATUS_META[j.status].symbol} {STATUS_META[j.status].label}
+                    </span>
+                    <span className="text-muted-foreground">{j.reason}</span>
+                    {exempt && <Chip className="text-muted-foreground">制限の例外（規約確認済み）</Chip>}
+                    {persistent && (j.status === "covered_by_limit" || exempt) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => runRule(() => setLimitExemptionAction(lottery.id, acc.id, !exempt, "規約を確認し、この抽選では別枠として応募可能", profile.id))}
+                      >
+                        {exempt ? "例外を解除" : "規約確認済みの例外にする"}
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-1 text-xs text-muted-foreground" data-testid="rules-applied">
+              適用される応募制限: {rules.length > 0 ? rules.map(describeRule).join(" ／ ") : "未確認（要確認）"}
+            </p>
+            {persistent && (skipSource === "store" || skipSource === "chain" || skipException) && (
+              <div className="mt-1">
+                <Button size="sm" variant="outline" onClick={() => runRule(() => setSkipExceptionAction(profile.id, lottery.id, !skipException, profile.id))}>
+                  {skipException ? "今回だけの解除を取り消す" : `${profile.label}のスルーをこの抽選だけ解除`}
+                </Button>
+              </div>
+            )}
+            {ruleMsg && (
+              <p role="alert" className="mt-1 text-xs text-danger">
+                {ruleMsg}
+              </p>
+            )}
+          </div>
 
           {apps.length > 0 && (
             <div>

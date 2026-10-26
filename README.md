@@ -1,6 +1,6 @@
-# トレカ抽選管理アプリ（Stage 2）
+# トレカ抽選管理アプリ（Stage 3）
 
-家族共有のトレーディングカード抽選管理Webアプリ。**Stage 2**: Supabase（トレカ専用プロジェクト）による共通ログイン・プロフィール・マスター管理・RLS に加え、抽選の登録・編集・複製、★、応募（アカウント別）、当落、当選→購入、購入履歴をDBに保存。モックモードは認証なしのデモ（保存されない）。
+家族共有のトレーディングカード抽選管理Webアプリ。**Stage 2**: Supabase（トレカ専用プロジェクト）による共通ログイン・プロフィール・マスター管理・RLS に加え、抽選の登録・編集・複製、★、応募（アカウント別）、当落、当選→購入、購入履歴をDBに保存。Stage 3 で応募制限の詳細判定・スルー/応募対象・資格管理・段階的なWeb Push通知（PWA）を追加。モックモードは認証なしのデモ（保存されない）。
 仕様の正本は `requirements.md`、作業ルールは `CLAUDE.md`、段階は `implementation-plan.md` を参照。
 
 ## 起動
@@ -40,9 +40,13 @@ npm run dev                        # http://localhost:3000
 - `src/lib/supabase/` サーバー用クライアント、`src/proxy.ts` 認証ガード
 - `src/lib/server/lottery-service.ts` 抽選まわりのDB操作（Server Action から呼ぶ。RLS下・結合テスト対象）
 - `src/lib/lottery-input.ts` / `purchase-input.ts` 入力検証（クライアントとサーバーで共用）
+- `src/lib/eligibility.ts` 応募可能判定（応募制限の複合・資格・スルー・対象範囲）。`src/lib/notifications.ts` 通知計画（純関数）
+- `src/lib/server/notification-service.ts` / `push.ts` 通知ジョブと送信、`src/app/api/cron/notify` 定期実行エンドポイント
+- `public/sw.js` / `src/app/manifest.ts` PWA（Service Worker・manifest）
 - `src/types/database.ts` DB型（`npm run gen:types` で再生成）
 - `src/lib/masters.ts` マスター定義（フォーム・検証・保存先の単一の正）
 - `supabase/migrations/` DBマイグレーション（適用: `npx supabase db push --linked`。リンク先はトレカ専用プロジェクトのみ）
 - `docs/db-review.md` DB草案の再点検結果
 
+通知（PWA/Web Push）のセットアップ・定期実行・iPhone手順は `docs/notifications.md`。
 運用・バックアップ・認証設定は `docs/backup-and-ops.md` を参照。

@@ -49,3 +49,15 @@
 | 履歴保持 | 抽選は archived_at で取り下げ（物理削除不可）。DELETE可は設定的な子行（lottery_items置換・skip_rules・skip_rule_exceptions・略称）のみ |
 
 結合テスト: `tests/lottery.integration.test.ts`（過去抽選の同時登録、精度の保存、購入の冪等、世帯分離、制約、監査ログ、匿名拒否 ほか）。
+
+## Stage 3 での対応状況（マイグレーション 20261026000007）
+| # | 状況 |
+|---|---|
+| 2 応募制限のFK / ルール体系 | **対応済**: `application_rules`（系列標準/キャンペーン/抽選固有、scope別の実FK列＋CHECK、`counts_across` で店舗通算）。優先順位: 抽選固有があれば系列標準を上書き、キャンペーンは併用、同一(basis, across)は具体的なものが勝つ。未確認ルールは「要確認」 |
+| 例外処理 | **対応済**: `limit_exemptions`（規約確認済みの手動例外）、`skip_rule_exceptions`（常時スルーの今回だけ解除） |
+| 12 許可リスト | **店舗単位に拡張**: `profile_target_rules.store_id`（`(store_id, chain_id, household_id)` の複合FKで系列との整合を強制）。allowは「許可した系列または店舗のみ」、blockは常に除外 |
+| 資格管理 | **対応済**: `chain_requirements`（会員/ポイントカード/購入履歴/本人確認、有効月数）、`account_eligibilities`（アカウント別の状態・有効期限・複合FKで同系列のみ）、`eligibility_purchases`（購入実績と有効期限）。将来の失効通知・抽選時期予測の基礎データ |
+| 通知基盤 | **対応済**: `notification_settings`（プロフィール別）、`push_subscriptions`（端末×プロフィール。表への直接アクセス権なし・RPCのみ・監査トリガーなし=鍵をログへ複製しない）、`notification_deliveries`（`unique(profile_id, trigger_key)`で二重送信防止、service_role書き込みのみ） |
+| 9 通知冪等 | **対応済**: 配信権を先に確保（ON CONFLICT DO NOTHING）→送信→結果更新。失敗は最大3回、送信中のまま止まった行は10分後に再試行対象 |
+
+結合テスト: `tests/rules-notifications.integration.test.ts`。

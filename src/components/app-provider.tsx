@@ -5,6 +5,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import { createRepository } from "@/services";
+import { rebindPushSubscription } from "@/app/(app)/settings/notifications/actions";
+import { currentSubscription, pushSupported, registerServiceWorker } from "@/lib/push-client";
 import { localDeviceStore } from "@/services/local-device-store";
 import type { LotteryRepository, Outcome } from "@/services/types";
 import type { AppData, EventState, FulfillmentStatus, Profile, ResultStatus } from "@/types/domain";
@@ -136,6 +138,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       },
     };
   }, [data, now, profileId, repo, run, selectProfile, load, notice]);
+
+  // PWA: Service Worker を登録し、通知を許可済みの端末は選択プロフィールに通知先を付け替える
+  // （プロフィール切替時に旧プロフィールへの紐付けを解除。通知は担当プロフィールの端末へのみ届く）
+  const activeProfileId = value?.profile.id;
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_DATA_SOURCE !== "supabase") return;
+    void registerServiceWorker();
+  }, []);
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_DATA_SOURCE !== "supabase" || !activeProfileId) return;
+    if (!pushSupported() || Notification.permission !== "granted") return;
+    let alive = true;
+    currentSubscription().then((sub) => {
+      if (alive && sub) void rebindPushSubscription(sub.endpoint, activeProfileId);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [activeProfileId]);
 
   if (loadError) {
     return (

@@ -13,11 +13,13 @@ if (!url || !key) throw new Error(".env.local に URL と SUPABASE_SERVICE_ROLE_
 const linked = readFileSync("supabase/.temp/project-ref", "utf8").trim();
 if (!url.includes(linked)) throw new Error("接続先がリンク済みのトレカ専用プロジェクトと一致しません。中止します。");
 
+// push_subscriptions は購読鍵を含むためバックアップ対象外（端末で通知を有効にし直せば復元できる）
 const TABLES = [
   "households", "household_members", "profiles", "chains", "stores", "products", "product_aliases",
   "product_prices", "family_groups", "address_groups", "identities", "service_accounts",
   "profile_target_rules", "campaigns", "lotteries", "lottery_items", "lottery_management", "applications",
-  "purchases", "purchase_items", "skip_rules", "skip_rule_exceptions", "audit_logs",
+  "purchases", "purchase_items", "skip_rules", "skip_rule_exceptions", "application_rules", "limit_exemptions",
+  "chain_requirements", "account_eligibilities", "eligibility_purchases", "notification_settings", "notification_deliveries", "audit_logs",
 ];
 
 const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });

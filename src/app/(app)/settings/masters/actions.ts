@@ -58,7 +58,14 @@ export async function saveRecord(
   const ctx = await context();
   if (!ctx) return fail("ログインが必要です");
 
-  const row = { ...toDbValues(entity, parsed.data as Record<string, unknown>), updated_by_profile_id: actor.data };
+  const dbValues = toDbValues(entity, parsed.data as Record<string, unknown>);
+  // 資格はアカウントと同じ系列の条件にだけ紐づけられる（chain_id はアカウントから補完。複合FKで不一致はDBが拒否）
+  if (entity.key === "account_eligibilities") {
+    const { data: acc } = await ctx.supabase.from("service_accounts").select("chain_id").eq("id", String(dbValues.service_account_id)).maybeSingle();
+    if (!acc) return fail("応募アカウントが見つかりません");
+    dbValues.chain_id = acc.chain_id;
+  }
+  const row = { ...dbValues, updated_by_profile_id: actor.data };
   const table = ctx.supabase.from(entity.key);
   const { error } = id
     ? await table.update(row).eq("id", id.data!)
@@ -103,55 +110,6 @@ export async function setRetired(
             .eq("id", id.data)
         : await table.update({ active: !retired, updated_by_profile_id: actor.data }).eq("id", id.data);
   if (error) return dbError(error);
-
-  revalidatePath("/settings/masters");
-  return { ok: true };
-}
-
-const rulesSchema = z.object({
-  profileId: z.uuid(),
-  allow: z.array(z.uuid()).max(200),
-  block: z.array(z.uuid()).max(200),
-});
-
-/**
- * プロフィールの対象系列。allow が1件でもあれば許可リスト方式（Cなど）、block は常に除外。
- * 同じ系列を両方に入れることはできない。
- */
-export async function setProfileRules(
-  input: z.input<typeof rulesSchema>,
-  actorRaw: string | null,
-): Promise<ActionResult> {
-  const parsed = rulesSchema.safeParse(input);
-  const actor = actorSchema.safeParse(actorRaw);
-  if (!parsed.success || !actor.success) return fail("リクエストが不正です");
-  const { profileId, allow, block } = parsed.data;
-  if (allow.some((c) => block.includes(c))) return fail("同じ系列を許可と除外の両方には指定できません");
-
-  const ctx = await context();
-  if (!ctx) return fail("ログインが必要です");
-
-  const desired = [
-    ...allow.map((chain_id) => ({ chain_id, mode: "allow" as const })),
-    ...block.map((chain_id) => ({ chain_id, mode: "block" as const })),
-  ];
-  if (desired.length > 0) {
-    const { error } = await ctx.supabase.from("profile_target_rules").upsert(
-      desired.map((d) => ({
-        household_id: ctx.householdId,
-        profile_id: profileId,
-        chain_id: d.chain_id,
-        mode: d.mode,
-        updated_by_profile_id: actor.data,
-      })),
-      { onConflict: "profile_id,chain_id" },
-    );
-    if (error) return dbError(error);
-  }
-  const keep = desired.map((d) => d.chain_id);
-  const del = ctx.supabase.from("profile_target_rules").delete().eq("profile_id", profileId);
-  const { error: delError } = keep.length > 0 ? await del.not("chain_id", "in", `(${keep.join(",")})`) : await del;
-  if (delError) return dbError(delError);
 
   revalidatePath("/settings/masters");
   return { ok: true };

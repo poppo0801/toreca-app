@@ -6,12 +6,8 @@ import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ENTITIES, ENTITY_KEYS, type Entity, type EntityKey, type Field } from "@/lib/masters";
-import {
-  saveRecord,
-  setProfileRules,
-  setRetired,
-  type ActionResult,
-} from "@/app/(app)/settings/masters/actions";
+import { saveRecord, setRetired, type ActionResult } from "@/app/(app)/settings/masters/actions";
+import { setProfileTargetsAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 
 export type Row = Record<string, unknown> & { id: string };
@@ -20,6 +16,7 @@ export interface RuleRow {
   id: string;
   profile_id: string;
   chain_id: string;
+  store_id: string | null;
   mode: "allow" | "block";
 }
 
@@ -126,13 +123,13 @@ function MasterItem({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-bold">
-            {String(row[entity.titleField])}
+            {(entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ")}
             {retired && <span className="ml-2 text-xs font-normal text-muted-foreground">（{entity.retire === "active" ? "無効" : "アーカイブ済み"}）</span>}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
-          {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} rules={rules} />}
+          {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} stores={rows.stores} rules={rules} />}
           <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline">編集</Button>} />
           <Button size="sm" variant="outline" onClick={toggle} disabled={pending}>
             {entity.retire === "delete" ? "削除" : retired ? "復元" : entity.retire === "active" ? "無効化" : "アーカイブ"}
@@ -158,7 +155,7 @@ function FieldInput({ field, rows, value, onChange }: { field: Field; rows: Mast
       : (field.options ?? []);
     return (
       <select value={value} onChange={(e) => onChange(e.target.value)} className={common} required={field.required}>
-        <option value="">選択してください</option>
+        <option value="">{field.optionalRef ? "指定なし" : "選択してください"}</option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -255,33 +252,52 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
   );
 }
 
-function RulesDialog({ profile, chains, rules }: { profile: Row; chains: Row[]; rules: RuleRow[] }) {
-  const { profile: actor } = useApp();
+type Mode = "none" | "allow" | "block";
+
+/** プロフィールの応募対象。許可を1つでも選ぶと許可リスト方式（許可した系列・店舗のみ対象）。除外は常に対象外。 */
+function RulesDialog({ profile, chains, stores, rules }: { profile: Row; chains: Row[]; stores: Row[]; rules: RuleRow[] }) {
+  const { profile: actor, reload } = useApp();
   const router = useRouter();
-  const current = (chainId: string): "none" | "allow" | "block" =>
-    rules.find((r) => r.profile_id === profile.id && r.chain_id === chainId)?.mode ?? "none";
-  const init = () => Object.fromEntries(chains.map((c) => [c.id, current(c.id)])) as Record<string, "none" | "allow" | "block">;
+  const current = (chainId: string, storeId: string | null): Mode =>
+    rules.find((r) => r.profile_id === profile.id && r.chain_id === chainId && r.store_id === storeId)?.mode ?? "none";
+  const init = () => ({
+    chains: Object.fromEntries(chains.map((c) => [c.id, current(c.id, null)])) as Record<string, Mode>,
+    stores: Object.fromEntries(stores.map((s) => [s.id, current(String(s.chain_id), s.id)])) as Record<string, Mode>,
+  });
   const [open, setOpen] = useState(false);
   const [modes, setModes] = useState(init);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const active = chains.filter((c) => c.archived_at == null);
+  const activeChains = chains.filter((c) => c.archived_at == null);
+  const activeStores = stores.filter((s) => s.archived_at == null);
+  const ids = (m: Record<string, Mode>, mode: Mode) => Object.entries(m).filter(([, v]) => v === mode).map(([id]) => id);
 
   const save = () =>
     start(async () => {
-      const res = await setProfileRules(
+      const res = await setProfileTargetsAction(
         {
           profileId: profile.id,
-          allow: Object.entries(modes).filter(([, m]) => m === "allow").map(([id]) => id),
-          block: Object.entries(modes).filter(([, m]) => m === "block").map(([id]) => id),
+          chainAllow: ids(modes.chains, "allow"),
+          chainBlock: ids(modes.chains, "block"),
+          storeAllow: ids(modes.stores, "allow"),
+          storeBlock: ids(modes.stores, "block"),
         },
         actor.id,
       );
       if (res.ok) {
         setOpen(false);
         router.refresh();
+        void reload();
       } else setError(res.error);
     });
+
+  const select = (label: string, value: Mode, onChange: (v: Mode) => void) => (
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Mode)} className="min-h-10 rounded-md border bg-background px-2">
+      <option value="none">指定なし</option>
+      <option value="allow">許可</option>
+      <option value="block">除外</option>
+    </select>
+  );
 
   return (
     <>
@@ -294,31 +310,34 @@ function RulesDialog({ profile, chains, rules }: { profile: Row; chains: Row[]; 
           setOpen(true);
         }}
       >
-        対象系列
+        応募対象
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto">
-          <DialogTitle>{String(profile.label)} の対象系列</DialogTitle>
+          <DialogTitle>{String(profile.label)} の応募対象</DialogTitle>
           <DialogDescription>
-            「許可」を1つでも選ぶと許可リスト方式（選んだ系列だけが対象）になります。「除外」は常に対象外です。すべて「指定なし」なら全系列が対象です。
+            「許可」を1つでも選ぶと許可リスト方式（許可した系列・店舗のみが応募漏れの対象）になります。「除外」は常に対象外です。すべて「指定なし」なら全系列・全店舗が対象です。
           </DialogDescription>
-          {active.length === 0 ? (
+          {activeChains.length === 0 ? (
             <p className="mt-3 text-sm text-muted-foreground">先に系列を登録してください。</p>
           ) : (
-            <ul className="mt-3 space-y-2">
-              {active.map((c) => (
-                <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span>{String(c.name)}</span>
-                  <select
-                    aria-label={`${String(c.name)}の対象設定`}
-                    value={modes[c.id] ?? "none"}
-                    onChange={(e) => setModes((s) => ({ ...s, [c.id]: e.target.value as "none" | "allow" | "block" }))}
-                    className="min-h-10 rounded-md border bg-background px-2"
-                  >
-                    <option value="none">指定なし</option>
-                    <option value="allow">許可</option>
-                    <option value="block">除外</option>
-                  </select>
+            <ul className="mt-3 space-y-3">
+              {activeChains.map((c) => (
+                <li key={c.id} className="rounded-md border p-2">
+                  <div className="flex items-center justify-between gap-2 text-sm font-medium">
+                    <span>{String(c.name)}（系列全体）</span>
+                    {select(`${String(c.name)}の対象設定`, modes.chains[c.id] ?? "none", (v) => setModes((s) => ({ ...s, chains: { ...s.chains, [c.id]: v } })))}
+                  </div>
+                  <ul className="mt-1 space-y-1 pl-3">
+                    {activeStores
+                      .filter((st) => st.chain_id === c.id)
+                      .map((st) => (
+                        <li key={st.id} className="flex items-center justify-between gap-2 text-sm">
+                          <span>{String(st.name)}</span>
+                          {select(`${String(c.name)} ${String(st.name)}の対象設定`, modes.stores[st.id] ?? "none", (v) => setModes((s) => ({ ...s, stores: { ...s.stores, [st.id]: v } })))}
+                        </li>
+                      ))}
+                  </ul>
                 </li>
               ))}
             </ul>

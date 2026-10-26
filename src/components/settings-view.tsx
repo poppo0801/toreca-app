@@ -4,6 +4,7 @@ import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { NotificationSettings } from "@/components/notification-settings";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { ProfileSwitcher } from "@/components/profile-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -34,7 +35,7 @@ export function SettingsView() {
               <ProfileAvatar profile={p} />
               <span>プロフィール{p.label}</span>
               <span className="text-xs text-muted-foreground">
-                {SUPABASE ? "対象系列はマスター管理で設定" : p.allowedChainIds === null
+                {SUPABASE ? "応募対象はマスター管理で設定" : p.allowedChainIds === null
                   ? "全系列が対象"
                   : `許可リスト: ${p.allowedChainIds.map((id) => data.chains.find((c) => c.id === id)?.name).join("、")}`}
               </span>
@@ -54,6 +55,23 @@ export function SettingsView() {
         ) : (
           <p className="text-sm text-muted-foreground">Supabaseモードでのみ利用できます（現在はローカルモック）。</p>
         )}
+      </Section>
+
+      <Section title="応募ルール・スルー">
+        {SUPABASE ? (
+          <>
+            <p className="mb-2 text-xs text-muted-foreground">店舗・系列単位のスルー、系列の標準の応募制限（1人1回・1家族1回など）を管理します。</p>
+            <Button asChild variant="outline">
+              <Link href="/settings/rules">応募ルールを開く</Link>
+            </Button>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">Supabaseモードでのみ利用できます。</p>
+        )}
+      </Section>
+
+      <Section title="通知">
+        {SUPABASE ? <NotificationSettings /> : <p className="text-sm text-muted-foreground">Supabaseモードでのみ利用できます。</p>}
       </Section>
 
       <Section title="テーマ">

@@ -39,6 +39,86 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_eligibilities: {
+        Row: {
+          archived_at: string | null
+          chain_id: string
+          created_at: string
+          household_id: string
+          id: string
+          memo: string
+          requirement_id: string
+          service_account_id: string
+          state: string
+          updated_at: string
+          updated_by_profile_id: string | null
+          valid_from: string | null
+          valid_until: string | null
+          verified_on: string | null
+        }
+        Insert: {
+          archived_at?: string | null
+          chain_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          memo?: string
+          requirement_id: string
+          service_account_id: string
+          state?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+          valid_from?: string | null
+          valid_until?: string | null
+          verified_on?: string | null
+        }
+        Update: {
+          archived_at?: string | null
+          chain_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          memo?: string
+          requirement_id?: string
+          service_account_id?: string
+          state?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+          valid_from?: string | null
+          valid_until?: string | null
+          verified_on?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_eligibilities_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_eligibilities_requirement_id_chain_id_household_id_fkey"
+            columns: ["requirement_id", "chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chain_requirements"
+            referencedColumns: ["id", "chain_id", "household_id"]
+          },
+          {
+            foreignKeyName: "account_eligibilities_service_account_id_chain_id_househol_fkey"
+            columns: ["service_account_id", "chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "service_accounts"
+            referencedColumns: ["id", "chain_id", "household_id"]
+          },
+          {
+            foreignKeyName: "account_eligibilities_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       address_groups: {
         Row: {
           archived_at: string | null
@@ -77,6 +157,93 @@ export type Database = {
           },
           {
             foreignKeyName: "address_groups_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      application_rules: {
+        Row: {
+          basis: string
+          campaign_id: string | null
+          chain_id: string | null
+          confidence: string
+          counts_across: string
+          created_at: string
+          household_id: string
+          id: string
+          lottery_id: string | null
+          max_count: number
+          memo: string
+          scope_type: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          basis: string
+          campaign_id?: string | null
+          chain_id?: string | null
+          confidence?: string
+          counts_across?: string
+          created_at?: string
+          household_id: string
+          id?: string
+          lottery_id?: string | null
+          max_count?: number
+          memo?: string
+          scope_type: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          basis?: string
+          campaign_id?: string | null
+          chain_id?: string | null
+          confidence?: string
+          counts_across?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          lottery_id?: string | null
+          max_count?: number
+          memo?: string
+          scope_type?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_rules_campaign_id_household_id_fkey"
+            columns: ["campaign_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "application_rules_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "application_rules_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_rules_lottery_id_household_id_fkey"
+            columns: ["lottery_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "application_rules_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -273,6 +440,76 @@ export type Database = {
           },
         ]
       }
+      chain_requirements: {
+        Row: {
+          archived_at: string | null
+          chain_id: string
+          created_at: string
+          description: string
+          household_id: string
+          id: string
+          kind: string
+          label: string
+          min_purchase_amount_yen: number | null
+          min_purchase_count: number | null
+          updated_at: string
+          updated_by_profile_id: string | null
+          valid_months: number | null
+        }
+        Insert: {
+          archived_at?: string | null
+          chain_id: string
+          created_at?: string
+          description?: string
+          household_id: string
+          id?: string
+          kind: string
+          label: string
+          min_purchase_amount_yen?: number | null
+          min_purchase_count?: number | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+          valid_months?: number | null
+        }
+        Update: {
+          archived_at?: string | null
+          chain_id?: string
+          created_at?: string
+          description?: string
+          household_id?: string
+          id?: string
+          kind?: string
+          label?: string
+          min_purchase_amount_yen?: number | null
+          min_purchase_count?: number | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+          valid_months?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chain_requirements_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "chain_requirements_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chain_requirements_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       chains: {
         Row: {
           archived_at: string | null
@@ -317,6 +554,83 @@ export type Database = {
           },
           {
             foreignKeyName: "chains_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      eligibility_purchases: {
+        Row: {
+          amount_yen: number | null
+          archived_at: string | null
+          counts_until: string | null
+          created_at: string
+          household_id: string
+          id: string
+          note: string
+          purchased_on: string | null
+          quantity: number | null
+          service_account_id: string
+          store_id: string | null
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          amount_yen?: number | null
+          archived_at?: string | null
+          counts_until?: string | null
+          created_at?: string
+          household_id: string
+          id?: string
+          note?: string
+          purchased_on?: string | null
+          quantity?: number | null
+          service_account_id: string
+          store_id?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          amount_yen?: number | null
+          archived_at?: string | null
+          counts_until?: string | null
+          created_at?: string
+          household_id?: string
+          id?: string
+          note?: string
+          purchased_on?: string | null
+          quantity?: number | null
+          service_account_id?: string
+          store_id?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eligibility_purchases_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eligibility_purchases_service_account_id_household_id_fkey"
+            columns: ["service_account_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "service_accounts"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "eligibility_purchases_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "eligibility_purchases_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -474,6 +788,68 @@ export type Database = {
           },
           {
             foreignKeyName: "identities_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      limit_exemptions: {
+        Row: {
+          created_at: string
+          household_id: string
+          id: string
+          lottery_id: string
+          reason: string
+          service_account_id: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          household_id: string
+          id?: string
+          lottery_id: string
+          reason?: string
+          service_account_id: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          household_id?: string
+          id?: string
+          lottery_id?: string
+          reason?: string
+          service_account_id?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "limit_exemptions_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "limit_exemptions_lottery_id_household_id_fkey"
+            columns: ["lottery_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "limit_exemptions_service_account_id_household_id_fkey"
+            columns: ["service_account_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "service_accounts"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "limit_exemptions_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -751,6 +1127,142 @@ export type Database = {
           },
         ]
       }
+      notification_deliveries: {
+        Row: {
+          application_id: string | null
+          attempts: number
+          created_at: string
+          error_code: string | null
+          household_id: string
+          id: string
+          lottery_id: string | null
+          profile_id: string
+          sent_at: string | null
+          status: string
+          trigger_key: string
+          type: string
+        }
+        Insert: {
+          application_id?: string | null
+          attempts?: number
+          created_at?: string
+          error_code?: string | null
+          household_id: string
+          id?: string
+          lottery_id?: string | null
+          profile_id: string
+          sent_at?: string | null
+          status: string
+          trigger_key: string
+          type: string
+        }
+        Update: {
+          application_id?: string | null
+          attempts?: number
+          created_at?: string
+          error_code?: string | null
+          household_id?: string
+          id?: string
+          lottery_id?: string | null
+          profile_id?: string
+          sent_at?: string | null
+          status?: string
+          trigger_key?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_deliveries_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_deliveries_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      notification_settings: {
+        Row: {
+          created_at: string
+          date_only_policy: string
+          deadline_offsets_min: number[]
+          eligibility_expiry_days: number
+          enabled: boolean
+          household_id: string
+          id: string
+          morning_time: string
+          procedure_enabled: boolean
+          procedure_lead_hours: number[]
+          profile_id: string
+          result_enabled: boolean
+          result_reminder_hours: number[]
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          date_only_policy?: string
+          deadline_offsets_min?: number[]
+          eligibility_expiry_days?: number
+          enabled?: boolean
+          household_id: string
+          id?: string
+          morning_time?: string
+          procedure_enabled?: boolean
+          procedure_lead_hours?: number[]
+          profile_id: string
+          result_enabled?: boolean
+          result_reminder_hours?: number[]
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          date_only_policy?: string
+          deadline_offsets_min?: number[]
+          eligibility_expiry_days?: number
+          enabled?: boolean
+          household_id?: string
+          id?: string
+          morning_time?: string
+          procedure_enabled?: boolean
+          procedure_lead_hours?: number[]
+          profile_id?: string
+          result_enabled?: boolean
+          result_reminder_hours?: number[]
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_settings_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "notification_settings_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       product_aliases: {
         Row: {
           alias: string
@@ -938,6 +1450,7 @@ export type Database = {
           id: string
           mode: string
           profile_id: string
+          store_id: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
@@ -948,6 +1461,7 @@ export type Database = {
           id?: string
           mode: string
           profile_id: string
+          store_id?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -958,6 +1472,7 @@ export type Database = {
           id?: string
           mode?: string
           profile_id?: string
+          store_id?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -982,6 +1497,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "profile_target_rules_store_fk"
+            columns: ["store_id", "chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "chain_id", "household_id"]
           },
           {
             foreignKeyName: "profile_target_rules_updated_by_profile_id_household_id_fkey"
@@ -1195,6 +1717,66 @@ export type Database = {
           {
             foreignKeyName: "purchases_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          device_label: string
+          enabled: boolean
+          endpoint: string
+          failure_count: number
+          household_id: string
+          id: string
+          last_seen_at: string
+          p256dh: string
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          device_label?: string
+          enabled?: boolean
+          endpoint: string
+          failure_count?: number
+          household_id: string
+          id?: string
+          last_seen_at?: string
+          p256dh: string
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          device_label?: string
+          enabled?: boolean
+          endpoint?: string
+          failure_count?: number
+          household_id?: string
+          id?: string
+          last_seen_at?: string
+          p256dh?: string
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_subscriptions_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id", "household_id"]
@@ -1512,6 +2094,31 @@ export type Database = {
           owner_email: string
           purged_household: string
         }[]
+      }
+      push_subscription_status: {
+        Args: { p_endpoint: string }
+        Returns: {
+          enabled: boolean
+          profile_id: string
+        }[]
+      }
+      rebind_push_subscription: {
+        Args: { p_endpoint: string; p_profile: string }
+        Returns: boolean
+      }
+      register_push_subscription: {
+        Args: {
+          p_auth: string
+          p_endpoint: string
+          p_label: string
+          p_p256dh: string
+          p_profile: string
+        }
+        Returns: undefined
+      }
+      remove_push_subscription: {
+        Args: { p_endpoint: string }
+        Returns: undefined
       }
     }
     Enums: {

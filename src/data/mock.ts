@@ -178,9 +178,9 @@ export function createMockData(now: Date): AppData {
 
   return {
     profiles: [
-      { id: "pA", label: "A", color: "blue", initial: "A", allowedChainIds: null, blockedChainIds: [] },
-      { id: "pB", label: "B", color: "green", initial: "B", allowedChainIds: null, blockedChainIds: [] },
-      { id: "pC", label: "C", color: "purple", initial: "C", allowedChainIds: ["c1"], blockedChainIds: [] },
+      { id: "pA", label: "A", color: "blue", initial: "A", allowedChainIds: null, allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
+      { id: "pB", label: "B", color: "green", initial: "B", allowedChainIds: null, allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
+      { id: "pC", label: "C", color: "purple", initial: "C", allowedChainIds: ["c1"], allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
     ],
     chains: [
       { id: "c1", name: "サンプル電機" },
@@ -272,6 +272,10 @@ export function createMockData(now: Date): AppData {
       },
     ],
     skipRules: [{ id: "sk1", profileId: "pA", scope: "store", scopeId: "s5", exceptionLotteryIds: [] }],
+    applicationRules: [],
+    limitExemptions: [],
+    requirements: [],
+    eligibilities: [],
     audit: [],
   };
 }

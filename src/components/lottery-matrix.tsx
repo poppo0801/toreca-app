@@ -22,9 +22,22 @@ export function LotteryMatrix({ lotteries, actionOnly }: { lotteries: Lottery[];
     .filter((r) => !actionOnly || r.cells.some((c) => c && NEEDS_ACTION.includes(c.status)));
 
   if (rows.length === 0) return null;
+  const missedCount = rows.filter((r) => r.cells.some((c) => c?.status === "eligible_unapplied")).length;
 
   return (
-    <div className="overflow-x-auto rounded-lg border" data-testid="matrix">
+    <div className="space-y-2" data-testid="matrix">
+      <p className="text-xs" data-testid="matrix-summary">
+        応募漏れの可能性: <strong className={missedCount > 0 ? "text-primary" : ""}>{missedCount}件</strong>
+        <span className="ml-2 text-muted-foreground">（行の太枠＝未応募の応募アカウントあり）</span>
+      </p>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="凡例">
+        {(Object.keys(STATUS_META) as AccountStatus[]).map((k) => (
+          <li key={k}>
+            <span aria-hidden="true">{STATUS_META[k].symbol}</span> {STATUS_META[k].label}
+          </li>
+        ))}
+      </ul>
+    <div className="overflow-x-auto rounded-lg border">
       <table className="w-full min-w-max border-collapse text-sm">
         <thead>
           <tr className="bg-muted">
@@ -50,7 +63,7 @@ export function LotteryMatrix({ lotteries, actionOnly }: { lotteries: Lottery[];
             const chain = data.chains.find((c) => c.id === l.chainId);
             const store = data.stores.find((s) => s.id === l.storeId);
             return (
-              <tr key={l.id} className="border-t">
+              <tr key={l.id} className={cn("border-t", cells.some((c) => c?.status === "eligible_unapplied") && "bg-muted/60")} data-missed={cells.some((c) => c?.status === "eligible_unapplied")}>
                 <th
                   scope="row"
                   className="sticky left-0 z-10 bg-background px-2 py-2 text-left text-xs font-normal whitespace-nowrap"
@@ -65,6 +78,7 @@ export function LotteryMatrix({ lotteries, actionOnly }: { lotteries: Lottery[];
                         className={cn(
                           "inline-flex min-w-14 items-center justify-center gap-0.5 rounded border px-1 py-0.5 text-xs",
                           NEEDS_ACTION.includes(c.status) && "border-primary font-bold",
+                          c.status === "eligible_unapplied" && "border-2",
                         )}
                       >
                         <span aria-hidden="true">{STATUS_META[c.status].symbol}</span>
@@ -82,6 +96,7 @@ export function LotteryMatrix({ lotteries, actionOnly }: { lotteries: Lottery[];
           })}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }

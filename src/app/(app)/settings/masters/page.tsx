@@ -18,7 +18,7 @@ export default async function MastersPage() {
   const results = await Promise.all(
     ENTITY_KEYS.map((k) => supabase.from(k).select("*").order("created_at")),
   );
-  const rules = await supabase.from("profile_target_rules").select("id,profile_id,chain_id,mode");
+  const rules = await supabase.from("profile_target_rules").select("id,profile_id,chain_id,store_id,mode");
   const failed = results.find((r) => r.error) ?? (rules.error ? rules : null);
   if (failed) throw new Error("マスターの取得に失敗しました");
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LayoutList, Rows3, Search, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { AlertsBar } from "@/components/alerts-bar";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
@@ -92,6 +93,7 @@ export function LotteryBoard() {
           </Button>
         )}
       </div>
+      <AlertsBar />
       {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
       <div role="tablist" aria-label="抽選の表示切替" className="grid grid-cols-4 rounded-lg border p-0.5">
         {TABS.map((t) => {

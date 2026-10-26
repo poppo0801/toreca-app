@@ -16,6 +16,8 @@ export interface Field {
   step?: number;
   /** 参照先エンティティ（選択肢をそのマスターから作る） */
   ref?: EntityKey;
+  /** 参照が任意（未選択=NULL） */
+  optionalRef?: boolean;
   options?: { value: string; label: string }[];
   default?: string | number;
 }
@@ -30,6 +32,9 @@ export const ENTITY_KEYS = [
   "address_groups",
   "identities",
   "service_accounts",
+  "chain_requirements",
+  "account_eligibilities",
+  "eligibility_purchases",
 ] as const;
 export type EntityKey = (typeof ENTITY_KEYS)[number];
 
@@ -41,6 +46,8 @@ export interface Entity {
   retire: "archived_at" | "active" | "delete";
   /** 一覧の主表示に使う列 */
   titleField: string;
+  /** 主表示を複数列の組み合わせにする場合（参照列は参照先の名前で表示） */
+  titleFields?: string[];
   /** 一覧のサブ表示に使う列（参照列は参照先の名前で表示） */
   subFields?: string[];
 }
@@ -172,6 +179,81 @@ export const ENTITIES: Record<EntityKey, Entity> = {
       },
     ],
   },
+  chain_requirements: {
+    key: "chain_requirements",
+    label: "系列の応募条件",
+    retire: "archived_at",
+    titleField: "label",
+    titleFields: ["chain_id", "label"],
+    subFields: ["kind", "valid_months"],
+    fields: [
+      { name: "chain_id", label: "系列", type: "select", required: true, ref: "chains" },
+      {
+        name: "kind",
+        label: "種類",
+        type: "select",
+        required: true,
+        default: "membership",
+        options: [
+          { value: "membership", label: "会員登録" },
+          { value: "point_card", label: "ポイントカード" },
+          { value: "purchase_history", label: "購入履歴" },
+          { value: "id_verification", label: "本人確認" },
+          { value: "other", label: "その他" },
+        ],
+      },
+      { name: "label", label: "条件名（例: 会員登録）", type: "text", required: true, max: 80 },
+      { name: "description", label: "内容・メモ", type: "textarea", max: 1000 },
+      { name: "valid_months", label: "有効月数（任意）", type: "number", min: 1, max: 240, step: 1 },
+      { name: "min_purchase_count", label: "必要な購入回数（任意）", type: "number", min: 0, max: 100000, step: 1 },
+      { name: "min_purchase_amount_yen", label: "必要な購入金額・円（任意）", type: "number", min: 0, max: 100000000, step: 1 },
+    ],
+  },
+  account_eligibilities: {
+    key: "account_eligibilities",
+    label: "アカウントの資格",
+    retire: "archived_at",
+    titleField: "service_account_id",
+    titleFields: ["service_account_id", "requirement_id"],
+    subFields: ["state", "valid_until"],
+    fields: [
+      { name: "service_account_id", label: "応募アカウント", type: "select", required: true, ref: "service_accounts" },
+      { name: "requirement_id", label: "応募条件（同じ系列のもの）", type: "select", required: true, ref: "chain_requirements" },
+      {
+        name: "state",
+        label: "資格の状態",
+        type: "select",
+        required: true,
+        default: "unknown",
+        options: [
+          { value: "eligible", label: "満たしている" },
+          { value: "ineligible", label: "満たしていない" },
+          { value: "unknown", label: "未確認" },
+        ],
+      },
+      { name: "verified_on", label: "確認日（任意）", type: "date" },
+      { name: "valid_from", label: "有効開始日（任意）", type: "date" },
+      { name: "valid_until", label: "有効期限（任意。過ぎると要確認になります）", type: "date" },
+      { name: "memo", label: "メモ", type: "text", max: 1000 },
+    ],
+  },
+  eligibility_purchases: {
+    key: "eligibility_purchases",
+    label: "購入実績（資格用）",
+    retire: "archived_at",
+    titleField: "service_account_id",
+    titleFields: ["service_account_id", "purchased_on"],
+    subFields: ["store_id", "amount_yen", "counts_until"],
+    fields: [
+      { name: "service_account_id", label: "応募アカウント", type: "select", required: true, ref: "service_accounts" },
+      { name: "store_id", label: "店舗（任意）", type: "select", ref: "stores", optionalRef: true },
+      { name: "purchased_on", label: "購入日（不明なら空欄）", type: "date" },
+      { name: "amount_yen", label: "金額・円（不明なら空欄）", type: "number", min: 0, max: 100000000, step: 1 },
+      { name: "quantity", label: "数量（任意）", type: "number", min: 1, max: 9999, step: 1 },
+      { name: "counts_until", label: "この実績が有効な期限（任意）", type: "date" },
+      { name: "note", label: "メモ", type: "text", max: 500 },
+    ],
+  },
 };
 
 /** 略称の正規化（全角半角・大小文字・空白の揺れを吸収）。一致しても自動確定には使わない。 */
@@ -200,7 +282,9 @@ export function buildSchema(entity: Entity) {
         break;
       case "select":
         s = f.ref
-          ? z.uuid("選択してください")
+          ? f.optionalRef
+            ? z.preprocess(emptyToNull, z.uuid("選択してください").nullable())
+            : z.uuid("選択してください")
           : z.enum(f.options!.map((o) => o.value) as [string, ...string[]], "選択してください");
         break;
       default: {

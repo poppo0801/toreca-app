@@ -31,10 +31,15 @@ export interface Profile {
   color: ProfileColor;
   /** 丸アイコン内に表示する1文字（色だけに依存しない） */
   initial: string;
-  /** null = すべての系列が対象。配列 = 許可リスト方式（Cなど） */
+  /**
+   * 許可リスト方式（Cなど）。許可された系列(allowedChainIds)または店舗(allowedStoreIds)のみが対象。
+   * どちらも空/nullなら全系列が対象。
+   */
   allowedChainIds: string[] | null;
-  /** 許可リストとは別の除外設定（A/B向け） */
+  allowedStoreIds: string[];
+  /** 許可リストとは別の除外設定（A/B向け）。常に対象外 */
   blockedChainIds: string[];
+  blockedStoreIds: string[];
 }
 
 export interface Chain {
@@ -213,7 +218,53 @@ export type AccountStatus =
   | "covered_by_limit"
   | "skipped"
   | "ineligible"
+  /** 受付期間外（受付前・受付終了・中止）。対象外とは区別する */
+  | "unavailable"
   | "needs_review";
+
+export type LimitScope = "chain" | "campaign" | "lottery";
+
+/** 応募制限ルール。同じ (basis, across) は 抽選固有 > キャンペーン > 系列標準 で上書き、異なるものは併用。 */
+export interface ApplicationRule {
+  id: string;
+  scope: LimitScope;
+  scopeId: string;
+  basis: Exclude<LimitBasis, "unknown">;
+  maxCount: number;
+  /** campaign = 同時開催キャンペーン内の全店舗を通算 */
+  across: "lottery" | "campaign";
+  /** unconfirmed は規約未確認。枠が埋まっていなければ「要確認」にする */
+  confidence: "confirmed" | "unconfirmed";
+}
+
+/** 規約確認済みの手動例外: 指定アカウントはその抽選の応募制限の対象外 */
+export interface LimitExemption {
+  lotteryId: string;
+  accountId: string;
+  reason: string;
+}
+
+export type RequirementKind = "membership" | "point_card" | "purchase_history" | "id_verification" | "other";
+
+/** 系列の応募条件（会員登録・ポイントカード・購入履歴条件など） */
+export interface ChainRequirement {
+  id: string;
+  chainId: string;
+  kind: RequirementKind;
+  label: string;
+  validMonths: number | null;
+}
+
+/** 応募アカウントごとの資格状態。valid_until を過ぎたものは要確認扱い */
+export interface AccountEligibility {
+  id: string;
+  accountId: string;
+  requirementId: string;
+  state: MembershipState;
+  verifiedOn: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+}
 
 export interface AppData {
   profiles: Profile[];
@@ -229,5 +280,9 @@ export interface AppData {
   applications: Application[];
   purchases: Purchase[];
   skipRules: SkipRule[];
+  applicationRules: ApplicationRule[];
+  limitExemptions: LimitExemption[];
+  requirements: ChainRequirement[];
+  eligibilities: AccountEligibility[];
   audit: AuditEntry[];
 }

@@ -58,32 +58,46 @@ export async function currentHouseholdId(db: Db): Promise<string | null> {
 }
 
 // ------------------------------------------------------------------ 読み込み
-export async function loadAppData(db: Db): Promise<AppData> {
+/**
+ * 世帯の全データを読み込む。householdId を指定すると、その世帯だけに絞る
+ * （service_role で複数世帯を扱う通知ジョブ用。通常のユーザー接続はRLSで自世帯のみ）。
+ */
+export async function loadAppData(db: Db, householdId?: string): Promise<AppData> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- テーブル名ごとの型を問わない共通の取得ヘルパー
+  const sel = (table: string): any => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const q = (db as any).from(table).select("*");
+    return householdId ? q.eq("household_id", householdId) : q;
+  };
   const q = await Promise.all([
-    db.from("profiles").select("*").order("sort_order").order("created_at"),
-    db.from("profile_target_rules").select("*"),
-    db.from("chains").select("*").order("created_at"),
-    db.from("stores").select("*").order("created_at"),
-    db.from("products").select("*").order("created_at"),
-    db.from("product_aliases").select("*"),
-    db.from("family_groups").select("*"),
-    db.from("identities").select("*"),
-    db.from("service_accounts").select("*"),
-    db.from("campaigns").select("*"),
-    db.from("lotteries").select("*").is("archived_at", null).limit(5000),
-    db.from("lottery_items").select("*").limit(20000),
-    db.from("lottery_management").select("*").limit(5000),
-    db.from("applications").select("*").limit(20000),
-    db.from("purchases").select("*").limit(20000),
-    db.from("purchase_items").select("*").limit(50000),
-    db.from("skip_rules").select("*"),
-    db.from("skip_rule_exceptions").select("*"),
-    db.from("audit_logs").select("*").order("occurred_at", { ascending: false }).limit(50),
+    sel("profiles").order("sort_order").order("created_at"),
+    sel("profile_target_rules"),
+    sel("chains").order("created_at"),
+    sel("stores").order("created_at"),
+    sel("products").order("created_at"),
+    sel("product_aliases"),
+    sel("family_groups"),
+    sel("identities"),
+    sel("service_accounts"),
+    sel("campaigns"),
+    sel("lotteries").is("archived_at", null).limit(5000),
+    sel("lottery_items").limit(20000),
+    sel("lottery_management").limit(5000),
+    sel("applications").limit(20000),
+    sel("purchases").limit(20000),
+    sel("purchase_items").limit(50000),
+    sel("skip_rules"),
+    sel("skip_rule_exceptions"),
+    sel("audit_logs").order("occurred_at", { ascending: false }).limit(50),
+    sel("application_rules"),
+    sel("limit_exemptions"),
+    sel("chain_requirements").is("archived_at", null),
+    sel("account_eligibilities").is("archived_at", null),
   ] as const);
   const failed = q.find((r) => r.error);
   if (failed?.error) throw new Error(`データの取得に失敗しました: ${failed.error.code ?? ""}`);
 
-  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit] =
+  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig] =
     q.map((r) => r.data ?? []) as unknown as [
       Database["public"]["Tables"]["profiles"]["Row"][],
       Database["public"]["Tables"]["profile_target_rules"]["Row"][],
@@ -104,21 +118,28 @@ export async function loadAppData(db: Db): Promise<AppData> {
       Database["public"]["Tables"]["skip_rules"]["Row"][],
       Database["public"]["Tables"]["skip_rule_exceptions"]["Row"][],
       Database["public"]["Tables"]["audit_logs"]["Row"][],
+      Database["public"]["Tables"]["application_rules"]["Row"][],
+      Database["public"]["Tables"]["limit_exemptions"]["Row"][],
+      Database["public"]["Tables"]["chain_requirements"]["Row"][],
+      Database["public"]["Tables"]["account_eligibilities"]["Row"][],
     ];
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
 
   return {
     profiles: profiles.map((p) => {
-      const allow = rules.filter((r) => r.profile_id === p.id && r.mode === "allow").map((r) => r.chain_id);
+      const mine = rules.filter((r) => r.profile_id === p.id);
+      const allowChains = mine.filter((r) => r.mode === "allow" && r.store_id === null).map((r) => r.chain_id);
       return {
         id: p.id,
         label: p.label,
         initial: p.initial,
         color: p.color as ProfileColor,
         active: p.active,
-        allowedChainIds: allow.length > 0 ? allow : null,
-        blockedChainIds: rules.filter((r) => r.profile_id === p.id && r.mode === "block").map((r) => r.chain_id),
+        allowedChainIds: allowChains.length > 0 ? allowChains : null,
+        allowedStoreIds: mine.filter((r) => r.mode === "allow" && r.store_id !== null).map((r) => r.store_id as string),
+        blockedChainIds: mine.filter((r) => r.mode === "block" && r.store_id === null).map((r) => r.chain_id),
+        blockedStoreIds: mine.filter((r) => r.mode === "block" && r.store_id !== null).map((r) => r.store_id as string),
       };
     }),
     chains: chains.map((c) => ({ id: c.id, name: c.name, archived: c.archived_at != null })),
@@ -214,6 +235,32 @@ export async function loadAppData(db: Db): Promise<AppData> {
       scope: s.scope_type as "lottery" | "store" | "chain",
       scopeId: (s.lottery_id ?? s.store_id ?? s.chain_id) as string,
       exceptionLotteryIds: skipEx.filter((e) => e.skip_rule_id === s.id).map((e) => e.lottery_id),
+    })),
+    applicationRules: appRules.map((r) => ({
+      id: r.id,
+      scope: r.scope_type as "chain" | "campaign" | "lottery",
+      scopeId: (r.chain_id ?? r.campaign_id ?? r.lottery_id) as string,
+      basis: r.basis as "account" | "person" | "family" | "address",
+      maxCount: r.max_count,
+      across: r.counts_across as "lottery" | "campaign",
+      confidence: r.confidence as "confirmed" | "unconfirmed",
+    })),
+    limitExemptions: exemptions.map((e) => ({ lotteryId: e.lottery_id, accountId: e.service_account_id, reason: e.reason })),
+    requirements: reqs.map((r) => ({
+      id: r.id,
+      chainId: r.chain_id,
+      kind: r.kind as "membership" | "point_card" | "purchase_history" | "id_verification" | "other",
+      label: r.label,
+      validMonths: r.valid_months,
+    })),
+    eligibilities: elig.map((e) => ({
+      id: e.id,
+      accountId: e.service_account_id,
+      requirementId: e.requirement_id,
+      state: e.state as "eligible" | "ineligible" | "unknown",
+      verifiedOn: e.verified_on,
+      validFrom: e.valid_from,
+      validUntil: e.valid_until,
     })),
     audit: audit.map((a) => ({
       id: a.id,
