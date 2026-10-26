@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import { createRepository } from "@/services";
+import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { rebindPushSubscription } from "@/app/(app)/settings/notifications/actions";
 import { currentSubscription, pushSupported, registerServiceWorker } from "@/lib/push-client";
 import { localDeviceStore } from "@/services/local-device-store";
@@ -143,11 +144,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // （プロフィール切替時に旧プロフィールへの紐付けを解除。通知は担当プロフィールの端末へのみ届く）
   const activeProfileId = value?.profile.id;
   useEffect(() => {
-    if (process.env.NEXT_PUBLIC_DATA_SOURCE !== "supabase") return;
+    if (!IS_SUPABASE_MODE) return;
     void registerServiceWorker();
   }, []);
   useEffect(() => {
-    if (process.env.NEXT_PUBLIC_DATA_SOURCE !== "supabase" || !activeProfileId) return;
+    if (!IS_SUPABASE_MODE || !activeProfileId) return;
     if (!pushSupported() || Notification.permission !== "granted") return;
     let alive = true;
     currentSubscription().then((sub) => {

@@ -1,12 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { IS_SUPABASE_MODE } from "@/lib/data-source";
+import { hardenCookie } from "@/lib/supabase/cookies";
 
 /**
  * 認証ガード（Supabaseモード時のみ）。未ログインは /login へ。セッションCookieもここで更新する。
  * 実際の認可は各クエリのRLSが担う（これは画面への導線制御）。
  */
 export async function proxy(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_DATA_SOURCE !== "supabase") return NextResponse.next();
+  if (!IS_SUPABASE_MODE) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(
@@ -18,7 +20,7 @@ export async function proxy(request: NextRequest) {
         setAll(list) {
           list.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
-          list.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+          list.forEach(({ name, value, options }) => response.cookies.set(name, value, hardenCookie(options)));
         },
       },
     },
@@ -43,5 +45,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/cron/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|js|webmanifest)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/cron/|api/health|.*\\.(?:svg|png|jpg|jpeg|gif|webp|js|webmanifest)$).*)"],
 };

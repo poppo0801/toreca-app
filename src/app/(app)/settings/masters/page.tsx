@@ -10,7 +10,7 @@ export default async function MastersPage() {
   if (!isSupabaseMode) {
     return (
       <p className="text-sm text-muted-foreground">
-        マスター管理は Supabase モード（NEXT_PUBLIC_DATA_SOURCE=supabase）でのみ利用できます。
+        マスター管理は Supabase モード（ログイン後）でのみ利用できます。
       </p>
     );
   }

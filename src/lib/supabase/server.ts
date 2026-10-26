@@ -1,6 +1,7 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { hardenCookie } from "@/lib/supabase/cookies";
 import { supabaseEnv } from "@/lib/supabase/env";
 
 /**
@@ -15,7 +16,7 @@ export async function createClient() {
       getAll: () => cookieStore.getAll(),
       setAll(list) {
         try {
-          list.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+          list.forEach(({ name, value, options }) => cookieStore.set(name, value, hardenCookie(options)));
         } catch {
           /* Server Component からの呼び出し時は無視（proxy でセッション更新済み） */
         }

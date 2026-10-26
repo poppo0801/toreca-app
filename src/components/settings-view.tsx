@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { signOut } from "@/app/login/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-const SUPABASE = process.env.NEXT_PUBLIC_DATA_SOURCE === "supabase";
+const SUPABASE = IS_SUPABASE_MODE;
 
 export function SettingsView() {
   const { data, profile } = useApp();

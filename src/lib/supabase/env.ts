@@ -1,5 +1,7 @@
-/** データ源。mock=Stage 0のローカルモック（認証なし）/ supabase=Supabase認証＋DB */
-export const isSupabaseMode = process.env.NEXT_PUBLIC_DATA_SOURCE === "supabase";
+import { IS_SUPABASE_MODE } from "@/lib/data-source";
+
+/** データ源。mock=ローカルモック（認証なし）/ supabase=Supabase認証＋DB（本番ビルドの既定） */
+export const isSupabaseMode = IS_SUPABASE_MODE;
 
 export function supabaseEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

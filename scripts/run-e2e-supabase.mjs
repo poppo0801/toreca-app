@@ -52,13 +52,13 @@ const userClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.en
   await getOrCreate("service_accounts", { ...H, chain_id: chain, identity_id: ident, account_label: "E2E-acc" }, { managed_by_profile_id: profA, membership_state: "eligible" });
 }
 
-freePort();
+if (!process.env.E2E_BASE_URL) freePort();
 const r = spawnSync("npx", ["playwright", "test"], {
   stdio: "inherit",
   shell: true,
   env: { ...process.env, E2E_MODE: "supabase", E2E_EMAIL: email, E2E_PASSWORD: password },
 });
-freePort();
+if (!process.env.E2E_BASE_URL) freePort();
 // 掃除（テスト世帯とテストユーザーのみ。docs/backup-and-ops.md）
 const { cleanupTestData } = await import("./lib/test-cleanup.mjs");
 await cleanupTestData({ execute: true });

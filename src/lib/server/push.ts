@@ -41,9 +41,11 @@ export type PushSender = (sub: PushSubscriptionInput, payload: PushPayload) => P
 export function createWebPushSender(): PushSender {
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT;
+  // 連絡先は未設定ならデプロイ先の公開URLで補完する（個人のメールアドレスは使わない）
+  const productionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  const subject = process.env.VAPID_SUBJECT || (productionUrl ? `https://${productionUrl}` : undefined);
   if (!publicKey || !privateKey || !subject) {
-    throw new Error("VAPID の設定（NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT）が未設定です");
+    throw new Error("VAPID の設定（NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY）が未設定です");
   }
   webpush.setVapidDetails(subject, publicKey, privateKey);
 
