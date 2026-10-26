@@ -16,7 +16,8 @@ if (!url.includes(linked)) throw new Error("接続先がリンク済みのトレ
 const TABLES = [
   "households", "household_members", "profiles", "chains", "stores", "products", "product_aliases",
   "product_prices", "family_groups", "address_groups", "identities", "service_accounts",
-  "profile_target_rules", "audit_logs",
+  "profile_target_rules", "campaigns", "lotteries", "lottery_items", "lottery_management", "applications",
+  "purchases", "purchase_items", "skip_rules", "skip_rule_exceptions", "audit_logs",
 ];
 
 const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -28,7 +29,7 @@ const counts = {};
 for (const table of TABLES) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from(table).select("*").order(table === "household_members" ? "user_id" : "id").range(from, from + 999);
+    const { data, error } = await supabase.from(table).select("*").order({ household_members: "user_id", lottery_management: "lottery_id" }[table] ?? "id").range(from, from + 999);
     if (error) throw new Error(`${table}: ${error.message}`);
     rows.push(...data);
     if (data.length < 1000) break;

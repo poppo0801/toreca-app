@@ -5,6 +5,8 @@ import { ChevronDown, ExternalLink, Star } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
+import { DuplicateDialog } from "@/components/duplicate-dialog";
+import { LotteryFormDialog } from "@/components/lottery-form";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { formatFlexible, remainingBadge } from "@/lib/datetime";
 import { accountsForLottery, effectiveEventState, isSkippedBy, judgeAccount } from "@/lib/eligibility";
@@ -68,9 +70,12 @@ export function LotteryCard({
   tab: Tab;
   detailMode: boolean;
 }) {
-  const { data, now, profile, actions } = useApp();
+  const { data, now, profile, actions, persistent } = useApp();
   const [expanded, setExpanded] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const open = detailMode || expanded;
 
   const chain = data.chains.find((c) => c.id === lottery.chainId);
@@ -266,10 +271,65 @@ export function LotteryCard({
             >
               {hasMyScopeSkip ? `${profile.label}のスルーを解除` : `${profile.label}は今回スルー`}
             </Button>
+            {lottery.eventState !== "cancelled" ? (
+              <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "cancelled")}>
+                中止にする
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "open")}>
+                中止を取り消す
+              </Button>
+            )}
+            {lottery.eventState !== "postponed" ? (
+              <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "postponed")}>
+                発表延期にする
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "open")}>
+                延期を解除
+              </Button>
+            )}
+            {persistent && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                  編集
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setDuplicating(true)}>
+                  他店舗に複製
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmArchive(true)}>
+                  登録を取り下げる
+                </Button>
+              </>
+            )}
           </div>
         </div>
       )}
 
+      {editing && <LotteryFormDialog open lottery={lottery} onOpenChange={setEditing} />}
+      {duplicating && <DuplicateDialog open lottery={lottery} onOpenChange={setDuplicating} />}
+      <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
+        <DialogContent>
+          <DialogTitle>この抽選の登録を取り下げますか？</DialogTitle>
+          <DialogDescription>
+            誤登録の整理用です。一覧から表示されなくなりますが、応募・当落・購入の記録はデータとして保持され、削除はされません。
+          </DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">キャンセル</Button>
+            </DialogClose>
+            <Button
+              variant="danger"
+              onClick={() => {
+                actions.archiveLottery(lottery.id);
+                setConfirmArchive(false);
+              }}
+            >
+              取り下げる
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={confirmOff} onOpenChange={setConfirmOff}>
         <DialogContent>
           <DialogTitle>管理対象（★）をOFFにしますか？</DialogTitle>

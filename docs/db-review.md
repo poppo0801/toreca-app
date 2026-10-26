@@ -34,3 +34,18 @@
 | 13 重複サービスアカウント | **対応済**: unique(household, identity, chain, account_label) |
 
 結合テスト: `tests/rls.integration.test.ts`（匿名拒否・他世帯の読書き/参照拒否・なりすまし拒否・削除不可・監査ログ改ざん不可・制約）。
+
+## Stage 2 での対応状況（マイグレーション 20261026000005 / 06）
+| # | 状況 |
+|---|---|
+| 1 日付精度 | **対応済**: lotteries の応募開始/締切/発表/購入期限を (precision, date, at) の3列化。`flex_ok()` のCHECKで整合を強制（不明→両方NULL、日付のみ→dateのみ、日時→atのみ）。購入日も `purchased_at` / `purchased_date` の排他 |
+| 2 応募制限のFK | スルーは scope別の実FK列＋CHECK（`skip_rules`）で対応済み。`application_rules`（複合制限）は Stage 3。当面は lotteries.limit_basis / limit_max_count と campaigns.store_rule で判定 |
+| 3 キャンペーン1店舗 | **対応済**: `campaigns`（store_rule）。判定は eligibility.ts |
+| 6 登録日時と実施日時 | **対応済**: created_at（登録）と applied_at / result_confirmed_at / purchased_at（実施、不明はNULL）を分離 |
+| 7 購入の二重生成 | **対応済**: `unique(application_id)`（部分一意）＋ `mark_purchased()`（原子的・冪等） |
+| 8 応募一意性 | **対応済**: unique(lottery_id, service_account_id)。取消は state 更新 |
+| 11 スルー例外 | **対応済**: `skip_rule_exceptions`（複数例外可）。UIは Stage 3 |
+| 設計変更 | 当落(application_results)・受取(award_fulfillments)は1応募=1件の関係のため `applications` に統合（CHECK: 購入状態は当選のみ） |
+| 履歴保持 | 抽選は archived_at で取り下げ（物理削除不可）。DELETE可は設定的な子行（lottery_items置換・skip_rules・skip_rule_exceptions・略称）のみ |
+
+結合テスト: `tests/lottery.integration.test.ts`（過去抽選の同時登録、精度の保存、購入の冪等、世帯分離、制約、監査ログ、匿名拒否 ほか）。

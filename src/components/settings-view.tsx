@@ -60,7 +60,7 @@ export function SettingsView() {
         <ThemeToggle />
       </Section>
 
-      <Section title="抽選の操作履歴（デモ・このセッションのみ）">
+      <Section title={SUPABASE ? "操作履歴（直近50件・全員共通）" : "抽選の操作履歴（デモ・このセッションのみ）"}>
         {data.audit.length === 0 ? (
           <p className="text-sm text-muted-foreground">まだ操作はありません。★や応募を操作すると記録されます。</p>
         ) : (

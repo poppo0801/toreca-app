@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LayoutList, Rows3, Search, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
 import { Button } from "@/components/ui/button";
@@ -57,7 +58,8 @@ function Select({
 }
 
 export function LotteryBoard() {
-  const { data, now } = useApp();
+  const { data, now, persistent } = useApp();
+  const [registering, setRegistering] = useState(false);
   const [tab, setTab] = useState<Tab>("managed");
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [density, setDensity] = useState<(typeof DENSITY)[number]>("compact");
@@ -80,6 +82,17 @@ export function LotteryBoard() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {persistent ? "家族共通の抽選情報です。" : "デモデータ（保存されません）"}
+        </p>
+        {persistent && (
+          <Button size="sm" onClick={() => setRegistering(true)}>
+            ＋ 抽選を登録
+          </Button>
+        )}
+      </div>
+      {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
       <div role="tablist" aria-label="抽選の表示切替" className="grid grid-cols-4 rounded-lg border p-0.5">
         {TABS.map((t) => {
           const count = selectLotteries(data, t.value, DEFAULT_FILTERS, now).length;

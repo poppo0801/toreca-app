@@ -1,6 +1,7 @@
-// RUN_DB_TESTS=1 を付けて RLS 結合テストのみ実行（OS差異回避のためnode経由）
+// RUN_DB_TESTS=1 を付けて結合テスト（実Supabase）のみ実行。
+// ファイル並列を無効化する: 各スイートの終了時にテスト世帯を purge するため、並列だと他スイートのデータを消してしまう。
 import { spawnSync } from "node:child_process";
-const r = spawnSync("npx", ["vitest", "run", "tests/rls.integration.test.ts"], {
+const r = spawnSync("npx", ["vitest", "run", "--no-file-parallelism", "tests/rls.integration.test.ts", "tests/lottery.integration.test.ts"], {
   stdio: "inherit",
   shell: true,
   env: { ...process.env, RUN_DB_TESTS: "1" },

@@ -259,7 +259,18 @@ export function createMockData(now: Date): AppData {
       app("ap9", "L9", "a-c2", "pending"),
       app("ap10", "L10", "a-c3", "lost"),
     ],
-    purchases: [{ id: "pur1", applicationId: "ap7", purchasedAt: iso(-24 * 6) }],
+    purchases: [
+      {
+        id: "pur1",
+        applicationId: "ap7",
+        storeId: "s2",
+        purchasedOn: h(-24 * 6),
+        channel: "store",
+        source: "lottery",
+        items: [{ productId: "p1", quantity: 1, unit: "box", amountPaid: null }],
+        note: "",
+      },
+    ],
     skipRules: [{ id: "sk1", profileId: "pA", scope: "store", scopeId: "s5", exceptionLotteryIds: [] }],
     audit: [],
   };

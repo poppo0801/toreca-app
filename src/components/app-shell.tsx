@@ -6,7 +6,6 @@ import { BarChart3, Settings, Ticket } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { ProfileSwitcher } from "@/components/profile-switcher";
 import { cn } from "@/lib/utils";
-import type { Profile } from "@/types/domain";
 
 const NAV = [
   { href: "/lotteries", label: "抽選管理", icon: Ticket },
@@ -16,7 +15,7 @@ const NAV = [
 
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { profile } = useApp();
+  const { profile, notice, dismissNotice } = useApp();
   return (
     <div className="min-h-dvh md:flex">
       {/* PC: 左ナビ */}
@@ -60,6 +59,14 @@ function Shell({ children }: { children: React.ReactNode }) {
           <p className="sr-only" aria-live="polite">
             現在の操作プロフィール: {profile.label}
           </p>
+          {notice && (
+            <div role="alert" className="mb-3 flex items-start justify-between gap-2 rounded-md border border-danger p-2 text-sm text-danger">
+              <span>{notice}</span>
+              <button type="button" onClick={dismissNotice} className="shrink-0 underline">
+                閉じる
+              </button>
+            </div>
+          )}
           {children}
         </main>
         {/* モバイル: 下部メイン3項目 */}
@@ -90,15 +97,9 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function AppShell({
-  children,
-  profiles,
-}: {
-  children: React.ReactNode;
-  profiles?: Profile[];
-}) {
+export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <AppProvider profiles={profiles}>
+    <AppProvider>
       <Shell>{children}</Shell>
     </AppProvider>
   );

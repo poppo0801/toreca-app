@@ -1,6 +1,6 @@
-# トレカ抽選管理アプリ（Stage 1）
+# トレカ抽選管理アプリ（Stage 2）
 
-家族共有のトレーディングカード抽選管理Webアプリ。**Stage 1**: Supabase（トレカ専用プロジェクト）による共通ログイン・プロフィール・マスター管理・RLS。抽選一覧はまだデモデータ（Stage 2でDB化）。
+家族共有のトレーディングカード抽選管理Webアプリ。**Stage 2**: Supabase（トレカ専用プロジェクト）による共通ログイン・プロフィール・マスター管理・RLS に加え、抽選の登録・編集・複製、★、応募（アカウント別）、当落、当選→購入、購入履歴をDBに保存。モックモードは認証なしのデモ（保存されない）。
 仕様の正本は `requirements.md`、作業ルールは `CLAUDE.md`、段階は `implementation-plan.md` を参照。
 
 ## 起動
@@ -21,12 +21,12 @@ npm run dev                        # http://localhost:3000
 | `npm run build` | 本番ビルド |
 | `npm run test:e2e` | Playwright（モックのモバイル/PC幅。スクリーンショットは `docs/screenshots/`） |
 | `npm run test:e2e:supabase` | ログイン〜マスター登録のE2E（実Supabase・テストユーザー使用） |
-| `npm run test:db` | RLS結合テスト（実Supabase） |
+| `npm run test:db` | RLS・抽選の結合テスト（実Supabase。終了時にテストデータを自動掃除） |
 | `npm run backup` | 全テーブルのJSON書き出し（`backups/`、git管理外） |
 
 ## データ源の切替
 - `NEXT_PUBLIC_DATA_SOURCE=mock` … 認証なし・架空データ（Stage 0と同じ。CI/E2E用）
-- `NEXT_PUBLIC_DATA_SOURCE=supabase` … 共通ログイン＋実プロフィール＋マスターDB
+- `NEXT_PUBLIC_DATA_SOURCE=supabase` … 共通ログイン＋DB保存（抽選・応募・当落・購入・マスター）
 
 ## 環境変数
 `.env.example` を `.env.local` にコピーして設定（`.env.local` はコミットしない）。`SUPABASE_SERVICE_ROLE_KEY` と `VAPID_PRIVATE_KEY` はサーバー専用で、コミット禁止。
@@ -38,6 +38,9 @@ npm run dev                        # http://localhost:3000
 - `src/lib/mutations.ts` 状態変更の純関数（監査ログ・冪等）
 - `src/services/` データ層の境界（`LotteryRepository` / `DeviceStore`）。Stage 1 でSupabase実装に差替え
 - `src/lib/supabase/` サーバー用クライアント、`src/proxy.ts` 認証ガード
+- `src/lib/server/lottery-service.ts` 抽選まわりのDB操作（Server Action から呼ぶ。RLS下・結合テスト対象）
+- `src/lib/lottery-input.ts` / `purchase-input.ts` 入力検証（クライアントとサーバーで共用）
+- `src/types/database.ts` DB型（`npm run gen:types` で再生成）
 - `src/lib/masters.ts` マスター定義（フォーム・検証・保存先の単一の正）
 - `supabase/migrations/` DBマイグレーション（適用: `npx supabase db push --linked`。リンク先はトレカ専用プロジェクトのみ）
 - `docs/db-review.md` DB草案の再点検結果

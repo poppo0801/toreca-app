@@ -1,21 +1,28 @@
-import type { AppData, FulfillmentStatus, ResultStatus } from "@/types/domain";
+import type { LotteryInput } from "@/lib/lottery-input";
+import type { ManualPurchaseInput } from "@/lib/purchase-input";
+import type { AppData, EventState, FulfillmentStatus, ResultStatus } from "@/types/domain";
+
+/** 更新系の結果。成功時は最新スナップショット、失敗時は利用者向けメッセージ。 */
+export type Outcome = { ok: true; data: AppData; createdIds?: string[] } | { ok: false; error: string };
 
 /**
- * データ層の境界。Stage 0 は InMemory（ローカルモック）、Stage 1 で Supabase 実装に差し替える。
- * 更新系は変更後のスナップショットを返す。実行プロフィール(actor)は監査ログ用に必須。
- * Supabase 版では actor を鵜呑みにせず、認証済みの世帯(household)の範囲でのみ書き込むこと。
+ * データ層の境界。mock は InMemory（CI/デモ）、supabase は Server Action 経由で DB に保存する。
+ * 実行プロフィール(actor)は監査ログ用。サーバー側は認証済みの世帯の範囲でのみ書き込む（RLS）。
  */
 export interface LotteryRepository {
+  /** 抽選の登録・編集・複製など、DB保存を伴う機能が使えるか（mockでは不可） */
+  readonly persistent: boolean;
   load(now: Date): Promise<AppData>;
-  setManaged(actorId: string, lotteryId: string, isManaged: boolean): Promise<AppData>;
-  setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean): Promise<AppData>;
-  setResult(actorId: string, applicationId: string, result: ResultStatus): Promise<AppData>;
-  setFulfillment(
-    actorId: string,
-    applicationId: string,
-    fulfillment: FulfillmentStatus,
-  ): Promise<AppData>;
-  setLotterySkip(profileId: string, lotteryId: string, skip: boolean): Promise<AppData>;
+  setManaged(actorId: string, lotteryId: string, isManaged: boolean): Promise<Outcome>;
+  setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean): Promise<Outcome>;
+  setResult(actorId: string, applicationId: string, result: ResultStatus): Promise<Outcome>;
+  setFulfillment(actorId: string, applicationId: string, fulfillment: FulfillmentStatus): Promise<Outcome>;
+  setLotterySkip(profileId: string, lotteryId: string, skip: boolean): Promise<Outcome>;
+  setEventState(actorId: string, lotteryId: string, state: EventState): Promise<Outcome>;
+  saveLottery(actorId: string, id: string | null, input: LotteryInput): Promise<Outcome>;
+  duplicateLottery(actorId: string, lotteryId: string, storeIds: string[]): Promise<Outcome>;
+  archiveLottery(actorId: string, lotteryId: string): Promise<Outcome>;
+  addManualPurchase(actorId: string, input: ManualPurchaseInput): Promise<Outcome>;
 }
 
 /** 端末(ブラウザ)単位のUI状態。サーバーや他端末とは同期しない（requirements 2.1）。 */

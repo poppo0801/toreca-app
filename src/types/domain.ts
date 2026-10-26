@@ -25,6 +25,8 @@ export type ProfileColor = "blue" | "green" | "purple" | "pink" | "teal";
 
 export interface Profile {
   id: string;
+  /** 無効化されたプロフィールは切替対象から外す（履歴表示には残す）。未指定=有効 */
+  active?: boolean;
   label: string;
   color: ProfileColor;
   /** 丸アイコン内に表示する1文字（色だけに依存しない） */
@@ -38,6 +40,8 @@ export interface Profile {
 export interface Chain {
   id: string;
   name: string;
+  /** アーカイブ済み（新規登録の選択肢から外す。履歴表示には残す） */
+  archived?: boolean;
 }
 
 export interface Store {
@@ -45,6 +49,7 @@ export interface Store {
   chainId: string;
   name: string;
   prefecture: string;
+  archived?: boolean;
 }
 
 export interface Product {
@@ -54,6 +59,7 @@ export interface Product {
   code: string;
   /** 商品ごとの入数。固定30Pと決めつけない */
   packsPerBox: number;
+  archived?: boolean;
 }
 
 export interface FamilyGroup {
@@ -154,11 +160,27 @@ export interface Application {
   createdAt: string;
 }
 
-/** 当選からの購入記録。applicationId で一意（二重生成禁止） */
+export type PurchaseChannel = "store" | "shipping" | "online" | "other";
+
+export interface PurchaseItem {
+  productId: string | null;
+  quantity: number;
+  unit: ItemUnit;
+  /** 不明は null（捏造しない） */
+  amountPaid: number | null;
+}
+
+/** 購入履歴。当選からの購入は applicationId で一意（二重生成禁止）。抽選外の購入は applicationId = null。 */
 export interface Purchase {
   id: string;
-  applicationId: string;
-  purchasedAt: string;
+  applicationId: string | null;
+  storeId: string | null;
+  /** 購入日時。日付のみ・不明を区別する（捏造しない） */
+  purchasedOn: FlexibleDate;
+  channel: PurchaseChannel;
+  source: "lottery" | "manual" | "import";
+  items: PurchaseItem[];
+  note: string;
 }
 
 export type SkipScope = "lottery" | "store" | "chain";

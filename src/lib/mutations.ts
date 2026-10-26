@@ -2,7 +2,9 @@ import type {
   AppData,
   Application,
   AuditEntry,
+  EventState,
   FulfillmentStatus,
+  Purchase,
   ResultStatus,
   SkipRule,
 } from "@/types/domain";
@@ -155,7 +157,7 @@ export function setFulfillment(
     applications: data.applications.map((a) => (a.id === applicationId ? { ...a, fulfillment } : a)),
     purchases:
       fulfillment === "purchased" && !hasPurchase
-        ? [...data.purchases, { id: newId("pur"), applicationId, purchasedAt: at.toISOString() }]
+        ? [...data.purchases, purchaseFromLottery(data, app, at)]
         : data.purchases,
     audit: withAudit(data, {
       actorProfileId,
@@ -198,6 +200,46 @@ export function setLotterySkip(
       action: skip ? "skip_on" : "skip_off",
       before: { skipped: !skip },
       after: { skipped: skip },
+    }),
+  };
+}
+
+/** 当選した抽選の商品明細から購入記録を作る（金額は不明=null） */
+function purchaseFromLottery(data: AppData, app: Application, at: Date): Purchase {
+  const lottery = data.lotteries.find((l) => l.id === app.lotteryId);
+  return {
+    id: newId("pur"),
+    applicationId: app.id,
+    storeId: lottery?.storeId ?? null,
+    purchasedOn: { precision: "date_time", at: at.toISOString() },
+    channel: lottery?.receiveMethod === "shipping" ? "shipping" : "store",
+    source: "lottery",
+    items: (lottery?.items ?? []).map((i) => ({ productId: i.productId, quantity: i.quantity, unit: i.unit, amountPaid: null })),
+    note: "",
+  };
+}
+
+/** 抽選全体の状態（中止・発表延期など）。個別の当落とは別。 */
+export function setEventState(
+  data: AppData,
+  actorProfileId: string,
+  lotteryId: string,
+  state: EventState,
+  at: Date,
+): AppData {
+  const lot = data.lotteries.find((l) => l.id === lotteryId);
+  if (!lot || lot.eventState === state) return data;
+  return {
+    ...data,
+    lotteries: data.lotteries.map((l) => (l.id === lotteryId ? { ...l, eventState: state } : l)),
+    audit: withAudit(data, {
+      actorProfileId,
+      at: at.toISOString(),
+      entityType: "lottery",
+      entityId: lotteryId,
+      action: "set_event_state",
+      before: { eventState: lot.eventState },
+      after: { eventState: state },
     }),
   };
 }

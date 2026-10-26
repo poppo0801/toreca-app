@@ -13,7 +13,7 @@ export function ProfileSwitcher({ className }: { className?: string }) {
       aria-label="操作プロフィール"
       className={cn("flex items-center gap-1", className)}
     >
-      {data.profiles.map((p) => {
+      {data.profiles.filter((p) => p.active !== false).map((p) => {
         const selected = p.id === profile.id;
         return (
           <button

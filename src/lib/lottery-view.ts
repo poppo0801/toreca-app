@@ -151,7 +151,7 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date):
 }
 
 /** 数量のBOX/パック換算表示。商品ごとの入数を使い、固定30Pとしない。 */
-export function formatItem(item: LotteryItem, product: Product | undefined): string {
+export function formatItem(item: Pick<LotteryItem, "quantity" | "unit">, product: Product | undefined): string {
   const name = product?.aliases[0] ?? product?.officialName ?? "商品未登録";
   if (item.unit === "set") return `${name} ×${item.quantity}セット`;
   if (item.unit === "pack") return `${name} ${item.quantity}P`;
