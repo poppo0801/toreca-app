@@ -3,6 +3,12 @@ import { AppShell } from "@/components/app-shell";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
+/**
+ * 認証が必要な画面はすべてリクエストごとに描画する（ビルド時に静的生成しない）。
+ * 環境変数の設定ミスがあってもビルドは通り、実行時に明確なエラーとして現れる。
+ */
+export const dynamic = "force-dynamic";
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   if (isSupabaseMode) {
     const supabase = await createClient();
