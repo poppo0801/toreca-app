@@ -29,7 +29,10 @@ export async function GET(req: NextRequest) {
   const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
 
   let db: "ok" | "error" | "skipped" = "skipped";
-  let rls: "ok" | "error" | "skipped" = "skipped";
+  /** 未ログインのキーで世帯データが読めないこと。拒否(権限エラー)または0件ならOK、1件でも読めたら漏えい */
+  let rls: "ok" | "leak" | "skipped" = "skipped";
+  /** publishableキーがこのプロジェクトで有効か（無効だとログインできない） */
+  let anonKey: "valid" | "invalid" | "skipped" = "skipped";
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -38,19 +41,26 @@ export async function GET(req: NextRequest) {
     db = error ? "error" : "ok";
   }
   if (url && anon) {
-    // 未ログイン(anon)キーでは世帯データが1件も読めないこと（RLSが効いていること）
-    const { data, error } = await createClient(url, anon, { auth: { persistSession: false } }).from("households").select("id").limit(1);
-    rls = !error && (data ?? []).length === 0 ? "ok" : "error";
+    const { data } = await createClient(url, anon, { auth: { persistSession: false } }).from("households").select("id").limit(1);
+    rls = (data ?? []).length === 0 ? "ok" : "leak";
+    // 存在しない認証情報でログインを試す: 400(invalid_credentials)ならキーは有効、401/403ならキーが無効
+    const res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: anon, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "healthcheck@example.invalid", password: "not-a-real-password" }),
+    }).catch(() => null);
+    anonKey = res && res.status === 400 ? "valid" : "invalid";
   }
 
   return NextResponse.json({
-    ok: missing.length === 0 && db === "ok" && rls === "ok" && IS_SUPABASE_MODE,
+    ok: missing.length === 0 && db === "ok" && rls === "ok" && anonKey === "valid" && IS_SUPABASE_MODE,
     dataSource: IS_SUPABASE_MODE ? "supabase" : "mock",
     missingRequiredEnv: missing,
     env,
     vapidSubjectFallback: !process.env.VAPID_SUBJECT && !!process.env.VERCEL_PROJECT_PRODUCTION_URL,
     db,
     rlsAnonymous: rls,
+    publishableKey: anonKey,
     deploy: {
       commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
       region: process.env.VERCEL_REGION ?? null,
