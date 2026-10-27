@@ -32,7 +32,10 @@ async function removeHouseholdImages(admin, hid) {
   const files = [];
   const walk = async (prefix) => {
     const { data } = await admin.storage.from("product-images").list(prefix, { limit: 1000 });
-    for (const e of data ?? []) (e.id ? files.push(`${prefix}/${e.name}`) : await walk(`${prefix}/${e.name}`));
+    for (const e of data ?? []) {
+      if (e.id) files.push(`${prefix}/${e.name}`);
+      else await walk(`${prefix}/${e.name}`);
+    }
   };
   await walk(hid);
   if (files.length) await admin.storage.from("product-images").remove(files);

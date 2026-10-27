@@ -135,7 +135,8 @@ const upload = async (img, replace) => {
     ? await db.from("product_images").update({ storage_path: path, sha256: img.sha256, width: img.width, height: img.height }).eq("product_id", productId).eq("kind", img.kind)
     : await db.from("product_images").insert(row);
   if (error) result.failed.push(`画像記録 ${img.file}: ${error.message}`);
-  else replace ? result.imagesReplaced++ : result.imagesAdded++;
+  else if (replace) result.imagesReplaced++;
+  else result.imagesAdded++;
 };
 for (const img of plan.imageAdd) await upload(img, false);
 for (const img of plan.imageReplace) await upload(img, true);
