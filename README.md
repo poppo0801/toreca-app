@@ -56,3 +56,7 @@ npm run dev                        # http://localhost:3000
 
 ## Stage 3.5 の主な機能
 マスター未登録でも抽選登録（自動仮登録）／複数商品抽選（B/C/D）／ユーザー別の色・マーク・通知先／ベル通知／収支管理（支出・売却・年間実績）／スマホ向けコンパクトUI・Safe Area・ダークモード／ローカル定期バックアップ（暗号化）。詳細は `implementation-plan.md`・`docs/backup-and-ops.md`。
+
+## AI読み取り（Stage 4B）
+
+抽選登録の「AIで読み取る」（文章・画像・店舗URL・X投稿URL）。設計・設定・費用・安全対策は [docs/ai-import.md](docs/ai-import.md)。

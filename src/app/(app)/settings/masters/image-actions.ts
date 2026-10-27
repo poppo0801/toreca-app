@@ -73,3 +73,35 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
   revalidatePath("/settings/masters");
   return { ok: true };
 }
+
+const displaySchema = z.object({
+  productId: z.uuid(),
+  kind: kindSchema,
+  actor: z.uuid().nullable(),
+  scale: z.number().min(0.5).max(3),
+  offsetX: z.number().int().min(-50).max(50),
+  offsetY: z.number().int().min(-50).max(50),
+});
+
+/**
+ * 画像の表示倍率・表示位置の調整。元画像は変更せず、表示時にだけ適用する。
+ * 再取り込みは画像の中身を差し替えない限りこの設定に触れない。
+ */
+export async function updateProductImageDisplay(input: z.input<typeof displaySchema>): Promise<ImageActionResult> {
+  const parsed = displaySchema.safeParse(input);
+  if (!parsed.success) return fail("調整値が範囲外です");
+  const { productId, kind, actor, scale, offsetX, offsetY } = parsed.data;
+  const supabase = await createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return fail("ログインが必要です");
+  const { data, error } = await supabase
+    .from("product_images")
+    .update({ display_scale: Math.round(scale * 100) / 100, offset_x: offsetX, offset_y: offsetY, updated_by_profile_id: actor })
+    .eq("product_id", productId)
+    .eq("kind", kind)
+    .select("id");
+  if (error) return fail("調整の保存に失敗しました");
+  if (!data || data.length === 0) return fail("画像が見つかりません");
+  revalidatePath("/settings/masters");
+  return { ok: true };
+}

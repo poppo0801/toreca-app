@@ -3,6 +3,7 @@
 // 出力先 backups/ は個人データを含むため .gitignore 済み。service_role キーはこのスクリプトでのみ使用する。
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 // ローカルでは .env.local、なければ環境変数から読む
@@ -53,6 +54,25 @@ for (const table of TABLES) {
   counts[table] = rows.length;
   sha256[table] = createHash("sha256").update(body).digest("hex"); // 破損・改変の検出用（verify-backup.mjs）
 }
-writeFileSync(`${dir}/_manifest.json`, JSON.stringify({ createdAt: new Date().toISOString(), project: linked, counts, sha256 }, null, 2));
+// 商品画像（Supabase Storage の非公開バケット）の実ファイルも退避する。DBのJSONだけでは画像本体は復元できないため。
+// 画像が1枚でも取得できなければバックアップ全体を失敗扱いにする（欠けたまま成功にしない）。
+const images = { count: 0, bytes: 0, files: {} };
+if (!SKIP.has("product_images")) {
+  const { data: imgRows, error: imgErr } = await supabase.from("product_images").select("storage_path").order("id");
+  if (imgErr) throw new Error(`product_images: ${imgErr.message}`);
+  for (const { storage_path: path } of imgRows) {
+    const { data: blob, error } = await supabase.storage.from("product-images").download(path);
+    if (error || !blob) throw new Error(`商品画像を取得できません（${path}）: ${error?.message ?? "不明"}`);
+    const buf = Buffer.from(await blob.arrayBuffer());
+    const out = `${dir}/storage/product-images/${path}`;
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, buf);
+    images.files[path] = { sha256: createHash("sha256").update(buf).digest("hex"), bytes: buf.length };
+    images.count++;
+    images.bytes += buf.length;
+  }
+}
+writeFileSync(`${dir}/_manifest.json`, JSON.stringify({ createdAt: new Date().toISOString(), project: linked, counts, sha256, images }, null, 2));
 console.log(`バックアップ完了: ${dir}`);
 console.table(counts);
+console.log(`商品画像: ${images.count}枚（${images.bytes.toLocaleString()} bytes）`);

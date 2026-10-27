@@ -164,6 +164,53 @@ export type Database = {
           },
         ]
       }
+      ai_extraction_logs: {
+        Row: {
+          created_at: string
+          engine: string
+          household_id: string
+          id: string
+          input_tokens: number | null
+          kind: string
+          output_tokens: number | null
+          source_host: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          engine: string
+          household_id: string
+          id?: string
+          input_tokens?: number | null
+          kind: string
+          output_tokens?: number | null
+          source_host?: string | null
+          status: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          engine?: string
+          household_id?: string
+          id?: string
+          input_tokens?: number | null
+          kind?: string
+          output_tokens?: number | null
+          source_host?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_extraction_logs_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       application_item_results: {
         Row: {
           application_id: string
@@ -1474,6 +1521,9 @@ export type Database = {
       product_images: {
         Row: {
           created_at: string
+          display_scale: number
+          offset_x: number
+          offset_y: number
           height: number | null
           household_id: string
           id: string
@@ -1488,6 +1538,9 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          display_scale?: number
+          offset_x?: number
+          offset_y?: number
           height?: number | null
           household_id: string
           id?: string
@@ -1502,6 +1555,9 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          display_scale?: number
+          offset_x?: number
+          offset_y?: number
           height?: number | null
           household_id?: string
           id?: string

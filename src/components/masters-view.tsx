@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { useApp } from "@/components/app-provider";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
+import { SetCompositionButton } from "@/components/product-set-dialog";
+import { normName } from "@/lib/norm";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ENTITIES, ENTITY_KEYS, type Entity, type EntityKey, type Field } from "@/lib/masters";
@@ -38,7 +40,28 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
     return m;
   }, [rows]);
 
-  const visible = rows[key].filter((r) => showRetired || !isRetired(entity, r));
+  // 商品の検索・絞り込み（名称・コード・略称 / シリーズ・区分 / コード種別）
+  const [q, setQ] = useState("");
+  const [category, setCategory] = useState("");
+  const [codeKind, setCodeKind] = useState("");
+  const aliasByProduct = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const a of rows.product_aliases) m.set(String(a.product_id), [...(m.get(String(a.product_id)) ?? []), String(a.alias)]);
+    return m;
+  }, [rows.product_aliases]);
+  const categories = useMemo(() => [...new Set(rows.products.map((r) => String(r.category ?? "")).filter(Boolean))].sort(), [rows.products]);
+  const isProducts = key === "products";
+  const nq = normName(q);
+
+  const visible = rows[key]
+    .filter((r) => showRetired || !isRetired(entity, r))
+    .filter((r) => {
+      if (!isProducts) return true;
+      if (category && r.category !== category) return false;
+      if (codeKind === "none" ? r.product_code != null : codeKind ? r.product_code_kind !== codeKind : false) return false;
+      if (!nq) return true;
+      return [String(r.official_name ?? ""), String(r.product_code ?? ""), ...(aliasByProduct.get(r.id) ?? [])].some((t) => normName(t).includes(nq));
+    });
 
   return (
     <div className="space-y-3">
@@ -67,6 +90,36 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
         </label>
         <RecordDialog entity={entity} rows={rows} record={null} trigger={<Button size="sm">＋ 追加</Button>} />
       </div>
+
+      {isProducts && (
+        <div className="grid grid-cols-2 gap-2" role="search" aria-label="商品の検索">
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="名称・コード・略称で検索"
+            aria-label="商品を検索"
+            className="col-span-2 min-h-11 w-full rounded-md border bg-input px-3 text-sm"
+          />
+          <select aria-label="シリーズ・区分で絞り込み" value={category} onChange={(e) => setCategory(e.target.value)} className="min-h-11 rounded-md border bg-input px-2 text-sm">
+            <option value="">すべての区分</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <select aria-label="コード種別で絞り込み" value={codeKind} onChange={(e) => setCodeKind(e.target.value)} className="min-h-11 rounded-md border bg-input px-2 text-sm">
+            <option value="">すべてのコード種別</option>
+            <option value="official">公式番号</option>
+            <option value="custom">独自コード</option>
+            <option value="none">コードなし</option>
+          </select>
+          <p className="col-span-2 text-xs text-muted-foreground" data-testid="product-count">
+            {visible.length}件 / 全{rows.products.filter((r) => showRetired || !isRetired(entity, r)).length}件
+          </p>
+        </div>
+      )}
 
       <ul className="space-y-2" aria-label={`${entity.label}一覧`}>
         {visible.map((r) => (
@@ -137,6 +190,7 @@ function MasterItem({
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
           {entity.key === "products" && <ProductImagesButton productId={row.id} name={String(row.official_name)} />}
+          {entity.key === "products" && <SetCompositionButton productId={row.id} name={String(row.official_name)} />}
           {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} stores={rows.stores} rules={rules} />}
           <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline">編集</Button>} />
           <Button size="sm" variant="outline" onClick={toggle} disabled={pending}>

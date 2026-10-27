@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { uploadProductImage } from "@/app/(app)/settings/masters/image-actions";
+import { updateProductImageDisplay, uploadProductImage } from "@/app/(app)/settings/masters/image-actions";
 import { cn } from "@/lib/utils";
 import type { Product, ProductImage, ProductImageKind } from "@/types/domain";
 
@@ -30,7 +30,11 @@ export function ImagePlaceholder({ className, label }: { className?: string; lab
  * 透過PNGはカード/入力欄の面の色がそのまま透けるので、ライト・ダークどちらでも自然に見える。
  */
 export function ProductImageView({ image, alt, heightClass = "h-14" }: { image: ProductImage; alt: string; heightClass?: string }) {
-  return (
+  const scale = image.scale ?? 1;
+  const dx = image.offsetX ?? 0;
+  const dy = image.offsetY ?? 0;
+  const adjusted = scale !== 1 || dx !== 0 || dy !== 0;
+  const img = (
     // eslint-disable-next-line @next/next/no-img-element -- 期限付きの署名URL（next/image の最適化対象外）。幅・高さ属性で表示領域を先に確保
     <img
       src={image.url}
@@ -39,8 +43,78 @@ export function ProductImageView({ image, alt, heightClass = "h-14" }: { image: 
       height={image.height ?? undefined}
       loading="lazy"
       decoding="async"
-      className={cn("w-auto max-w-full object-contain", heightClass)}
+      className={cn("w-auto max-w-full object-contain", adjusted ? "h-full" : heightClass)}
+      style={adjusted ? { transform: `translate(${dx}%, ${dy}%) scale(${scale})` } : undefined}
     />
+  );
+  // 倍率・位置を調整した画像は、枠(高さ固定)の外にはみ出さないよう切り取って表示する（元画像は変更しない）
+  return adjusted ? <span className={cn("inline-flex overflow-hidden rounded-sm", heightClass)}>{img}</span> : img;
+}
+
+/** 画像の表示倍率・位置の調整（倍率 50〜300%、位置 ±50%）。プレビューを見ながら保存する */
+function ImageAdjust({ productId, name }: { productId: string; name: string }) {
+  const { data, profile, reload } = useApp();
+  const product = data.products.find((p) => p.id === productId);
+  const kinds = (["box", "pack", "unit"] as const).filter((k) => product?.images?.[k]);
+  const [kind, setKind] = useState<ProductImageKind>(kinds[0] ?? "box");
+  const img = product?.images?.[kind];
+  const [scale, setScale] = useState(img?.scale ?? 1);
+  const [dx, setDx] = useState(img?.offsetX ?? 0);
+  const [dy, setDy] = useState(img?.offsetY ?? 0);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (kinds.length === 0 || !img) return null;
+
+  const pick = (k: ProductImageKind) => {
+    const i = product?.images?.[k];
+    setKind(k);
+    setScale(i?.scale ?? 1);
+    setDx(i?.offsetX ?? 0);
+    setDy(i?.offsetY ?? 0);
+    setMsg(null);
+  };
+  const save = async () => {
+    setBusy(true);
+    const res = await updateProductImageDisplay({ productId, kind, actor: profile.id, scale, offsetX: dx, offsetY: dy });
+    setBusy(false);
+    if (res.ok) {
+      setMsg("保存しました");
+      await reload();
+    } else setMsg(res.error);
+  };
+  const slider = (label: string, value: number, set: (n: number) => void, min: number, max: number, step: number, unit: string) => (
+    <label className="grid grid-cols-[4.5rem_1fr_3.5rem] items-center gap-2 text-xs">
+      {label}
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => set(Number(e.target.value))} aria-label={label} className="w-full" />
+      <span className="text-right tabular-nums">{unit === "%" && label === "倍率" ? Math.round(value * 100) : value}{unit}</span>
+    </label>
+  );
+  return (
+    <div className="space-y-2 rounded-md border p-2" data-testid="image-adjust">
+      <p className="text-xs font-medium">表示の調整（一覧・抽選カードでの見え方。元画像は変わりません）</p>
+      <div className="flex gap-1">
+        {kinds.map((k) => (
+          <button key={k} type="button" aria-pressed={k === kind} onClick={() => pick(k)} className={cn("min-h-9 rounded-md border px-2 text-xs", k === kind ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}>
+            {IMAGE_KIND_LABEL[k]}
+          </button>
+        ))}
+      </div>
+      <div className="flex h-28 items-center justify-center rounded bg-muted/50">
+        <ProductImageView image={{ ...img, scale, offsetX: dx, offsetY: dy }} alt={`${name} 調整プレビュー`} heightClass="h-24" />
+      </div>
+      {slider("倍率", scale, setScale, 0.5, 3, 0.05, "%")}
+      {slider("横位置", dx, setDx, -50, 50, 1, "%")}
+      {slider("縦位置", dy, setDy, -50, 50, 1, "%")}
+      <div className="flex items-center justify-between gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={() => { setScale(1); setDx(0); setDy(0); }}>
+          等倍に戻す
+        </Button>
+        <Button type="button" size="sm" onClick={save} disabled={busy}>
+          {busy ? "保存中…" : "調整を保存"}
+        </Button>
+      </div>
+      {msg && <p role="status" className="text-xs text-muted-foreground">{msg}</p>}
+    </div>
   );
 }
 
@@ -106,6 +180,7 @@ export function ProductImagePanel({ productId }: { productId: string }) {
           );
         })}
       </ul>
+      <ImageAdjust key={`${productId}-${Object.keys(product?.images ?? {}).join(",")}`} productId={productId} name={product?.officialName ?? ""} />
       <p className="text-xs text-muted-foreground">PNG・JPEG・WebP（3MBまで）。縦横比はそのまま表示されます。手動で入れた画像は、再取り込みでは上書きされません。</p>
       {error && (
         <p role="alert" className="text-sm text-danger">

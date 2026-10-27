@@ -15,7 +15,7 @@ const REQUIRED_ENV = [
   "VAPID_PRIVATE_KEY",
   "CRON_SECRET",
 ] as const;
-const OPTIONAL_ENV = ["NEXT_PUBLIC_DATA_SOURCE", "VAPID_SUBJECT"] as const;
+const OPTIONAL_ENV = ["NEXT_PUBLIC_DATA_SOURCE", "VAPID_SUBJECT", "ANTHROPIC_API_KEY"] as const;
 
 function safeHostLabel(url: string): string | null {
   try {

@@ -20,7 +20,8 @@ export default defineConfig({
     // 別モードのビルドを使い回さない
     reuseExistingServer: false,
     timeout: 240_000,
-    env: { NEXT_PUBLIC_DATA_SOURCE: mode },
+    // AI読み取りはテストではモックエンジン（固定のサンプル）を使う。実際のAI APIは呼ばない
+    env: { NEXT_PUBLIC_DATA_SOURCE: mode, AI_PROVIDER: "mock" },
   },
   projects: [
     { name: "mobile", use: { ...devices["Pixel 7"] } },

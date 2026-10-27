@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Plus, Sparkles, Trash2 } from "lucide-react";
+import { AiImportDialog } from "@/components/ai-import-dialog";
+import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { MasterCombobox } from "@/components/master-combobox";
@@ -13,6 +15,9 @@ import {
   type FlexInput,
   type LotteryInput,
 } from "@/lib/lottery-input";
+import type { DraftDuplicate, LotteryDraft } from "@/lib/lottery-match";
+import type { FieldKey } from "@/lib/ai/extraction";
+import { flexToJstDate } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -46,6 +51,17 @@ function Select<T extends string>({
         </option>
       ))}
     </select>
+  );
+}
+
+/** AI読み取りで「要確認」とされた項目の注意表示 */
+function FlagNote({ text }: { text?: string }) {
+  if (!text) return null;
+  return (
+    <p className="mt-1 flex gap-1 text-xs text-warn" data-testid="ai-flag">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+      <span>要確認: {text}</span>
+    </p>
   );
 }
 
@@ -172,7 +188,24 @@ export function LotteryFormDialog({
   const [urlsText, setUrlsText] = useState(() => (lottery?.sourceUrls ?? []).join("\n"));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [flags, setFlags] = useState<Partial<Record<FieldKey, string>>>({});
+  const [modePending, setModePending] = useState(false);
+  const [duplicates, setDuplicates] = useState<DraftDuplicate[]>([]);
+  const [dupAck, setDupAck] = useState(false);
+  const [aiFilled, setAiFilled] = useState(false);
   const isEdit = lottery !== null;
+
+  const applyDraft = (d: LotteryDraft) => {
+    setV(d.input);
+    setUrlsText(d.input.sourceUrls.join("\n"));
+    setFlags(d.flags);
+    setModePending(d.modePending);
+    setDuplicates(d.duplicates);
+    setDupAck(false);
+    setAiFilled(true);
+    setError(null);
+  };
 
   const set = <K extends keyof LotteryInput>(k: K, val: LotteryInput[K]) => setV((s) => ({ ...s, [k]: val }));
 
@@ -188,7 +221,7 @@ export function LotteryFormDialog({
     [data.stores, v.chain.id, v.store.id],
   );
   const productOptions = useMemo(
-    () => data.products.filter((p) => !p.archived || v.items.some((i) => i.product.id === p.id)).map((p) => ({ id: p.id, name: p.officialName, hint: p.provisional ? "仮登録" : p.code || undefined })),
+    () => data.products.filter((p) => !p.archived || v.items.some((i) => i.product.id === p.id)).map((p) => ({ id: p.id, name: p.officialName, hint: p.provisional ? "仮登録" : p.code || undefined, thumb: <ProductThumb product={p} heightClass="h-9" /> })),
     [data.products, v.items],
   );
   const campaigns = data.campaigns.filter((c) => c.chainId === v.chain.id);
@@ -203,16 +236,26 @@ export function LotteryFormDialog({
         ...(status === "none" ? [] : [{ profileId, status: status as "applied" | "won" | "lost" }]),
       ],
     );
-  const setMode = (mode: NonNullable<LotteryInput["multiMode"]>) =>
+  const setMode = (mode: NonNullable<LotteryInput["multiMode"]>) => {
+    setModePending(false);
     setV((s) => {
       const items = mode === "single" ? s.items.slice(0, 1) : s.items.length < 2 ? [...s.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" as const }] : s.items;
       // 方式を変えると商品別の当落の意味が変わるため、同時登録する応募状況はリセットする
       return { ...s, multiMode: mode, items, applications: [] };
     });
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (modePending) {
+      setError("複数商品の応募方式を選択してください（告知から判断できませんでした）");
+      return;
+    }
+    if (duplicates.some((d) => d.level === "high") && !dupAck) {
+      setError("同じ抽選が登録済みの可能性があります。内容を確認し、「重複ではないことを確認した」にチェックしてください");
+      return;
+    }
     const input: LotteryInput = {
       ...v,
       sourceUrls: urlsText.split("\n").map((s) => s.trim()).filter(Boolean),
@@ -239,6 +282,42 @@ export function LotteryFormDialog({
         </DialogDescription>
         {(
           <form onSubmit={submit} className="mt-3 space-y-4" noValidate>
+            {!isEdit && (
+              <div className="space-y-1">
+                <Button type="button" variant="outline" className="w-full" onClick={() => setAiOpen(true)} data-testid="ai-open">
+                  <Sparkles className="size-4 text-primary" aria-hidden="true" /> AIで読み取る（文章・画像・URL）
+                </Button>
+                {aiFilled && (
+                  <p className="text-xs text-muted-foreground" data-testid="ai-filled-note">
+                    AIの読み取り結果を入力しました。内容は候補です。「要確認」の項目を含め、必ず確認・修正してから保存してください。
+                  </p>
+                )}
+              </div>
+            )}
+            {duplicates.length > 0 && (
+              <div role="alert" className="space-y-1 rounded-md border border-warn p-2 text-sm" data-testid="dup-warning">
+                <p className="flex gap-1 font-medium text-warn">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" /> 登録済みの抽選と重複している可能性があります
+                </p>
+                <ul className="list-disc space-y-0.5 pl-5 text-xs">
+                  {duplicates.map((d) => {
+                    const l = data.lotteries.find((x) => x.id === d.lotteryId);
+                    return (
+                      <li key={d.lotteryId}>
+                        {l ? `${data.stores.find((s) => s.id === l.storeId)?.name ?? ""} / ${l.items.map((i) => data.products.find((p) => p.id === i.productId)?.officialName ?? "").join("・")} / 締切 ${flexToJstDate(l.applyDeadline) ?? "不明"}` : ""}
+                        — {d.reason}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {duplicates.some((d) => d.level === "high") && (
+                  <label className="flex min-h-10 items-center gap-2 text-sm">
+                    <input type="checkbox" checked={dupAck} onChange={(e) => setDupAck(e.target.checked)} className="size-4" />
+                    重複ではないことを確認した
+                  </label>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <div className="text-sm">
                 <span>系列</span>
@@ -269,11 +348,31 @@ export function LotteryFormDialog({
               </div>
             </div>
 
+            {(flags.chain || flags.store) && (
+              <div>
+                <FlagNote text={flags.chain && `系列: ${flags.chain}`} />
+                <FlagNote text={flags.store && `店舗: ${flags.store}`} />
+              </div>
+            )}
+
             <div className="text-sm">
               <label className="block">
                 抽選の方式
-                <Select label="抽選の方式" value={v.multiMode ?? "single"} onChange={setMode} options={MODE_OPTIONS.map((m) => ({ value: m.value, label: m.label }))} />
+                <select
+                  aria-label="抽選の方式"
+                  value={modePending ? "" : (v.multiMode ?? "single")}
+                  onChange={(e) => setMode(e.target.value as NonNullable<LotteryInput["multiMode"]>)}
+                  className={field}
+                >
+                  {modePending && <option value="">未確認（方式を選んでください）</option>}
+                  {MODE_OPTIONS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
               </label>
+              <FlagNote text={flags.multiMode} />
               <p className="mt-0.5 text-xs text-muted-foreground">
                 商品ごとに独立して応募する告知（方式E）は、商品ごとに別の抽選として登録してください。
               </p>
@@ -361,6 +460,7 @@ export function LotteryFormDialog({
                   </div>
                 </div>
               ))}
+              <FlagNote text={flags.items} />
               {multi && (
                 <Button type="button" size="sm" variant="outline" onClick={() => set("items", [...v.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" }])}>
                   <Plus className="size-4" /> 商品を追加
@@ -369,10 +469,22 @@ export function LotteryFormDialog({
             </fieldset>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <FlexField label="応募開始" value={v.applyStart} onChange={(x) => set("applyStart", x)} />
-              <FlexField label="応募締切" value={v.applyDeadline} onChange={(x) => set("applyDeadline", x)} />
-              <FlexField label="当選発表" value={v.resultDate} onChange={(x) => set("resultDate", x)} />
-              <FlexField label="購入・受取期限" value={v.procedureDeadline} onChange={(x) => set("procedureDeadline", x)} />
+              <div>
+                <FlexField label="応募開始" value={v.applyStart} onChange={(x) => set("applyStart", x)} />
+                <FlagNote text={flags.applyStart} />
+              </div>
+              <div>
+                <FlexField label="応募締切" value={v.applyDeadline} onChange={(x) => set("applyDeadline", x)} />
+                <FlagNote text={flags.applyDeadline} />
+              </div>
+              <div>
+                <FlexField label="当選発表" value={v.resultDate} onChange={(x) => set("resultDate", x)} />
+                <FlagNote text={flags.resultDate} />
+              </div>
+              <div>
+                <FlexField label="購入・受取期限" value={v.procedureDeadline} onChange={(x) => set("procedureDeadline", x)} />
+                <FlagNote text={flags.procedureDeadline} />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -439,9 +551,17 @@ export function LotteryFormDialog({
               </label>
             </div>
 
+            {(flags.applyMethod || flags.receiveMethod || flags.limit) && (
+              <div>
+                <FlagNote text={flags.applyMethod && `応募方法: ${flags.applyMethod}`} />
+                <FlagNote text={flags.receiveMethod && `受取方法: ${flags.receiveMethod}`} />
+                <FlagNote text={flags.limit && `応募制限: ${flags.limit}`} />
+              </div>
+            )}
             <label className="block text-sm">
               応募条件
               <textarea value={v.conditionsText} onChange={(e) => set("conditionsText", e.target.value)} rows={2} className={cn(field, "py-2")} />
+              <FlagNote text={flags.conditions} />
             </label>
             <label className="block text-sm">
               本人確認・必要書類（書類の画像・番号は入力しない）
@@ -523,6 +643,7 @@ export function LotteryFormDialog({
           </form>
         )}
       </DialogContent>
+      {aiOpen && <AiImportDialog open onOpenChange={setAiOpen} onApply={applyDraft} />}
     </Dialog>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { normName } from "@/lib/norm";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,8 @@ export interface MasterOption {
   id: string;
   name: string;
   hint?: string;
+  /** 商品画像などの小さな見た目（任意） */
+  thumb?: ReactNode;
 }
 
 /**
@@ -91,7 +93,8 @@ export function MasterCombobox({
                 }}
                 className="flex min-h-11 w-full items-center justify-between gap-2 px-3 text-left hover:bg-muted"
               >
-                <span className="truncate">{o.name}</span>
+                {o.thumb && <span className="flex w-9 shrink-0 justify-center">{o.thumb}</span>}
+                <span className="min-w-0 flex-1 truncate">{o.name}</span>
                 {o.hint && <span className="shrink-0 text-xs text-muted-foreground">{o.hint}</span>}
               </button>
             </li>

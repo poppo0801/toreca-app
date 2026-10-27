@@ -99,6 +99,18 @@ export interface ProductImage {
   height: number | null;
   /** import=Excel/画像の一括取り込み / manual=アプリで手動アップロード（再取り込みで上書きしない） */
   source: "import" | "manual";
+  /** 表示の倍率（1=等倍）と位置のずれ（%、-50〜50）。元画像は変えず、表示時だけ適用する */
+  scale?: number;
+  offsetX?: number;
+  offsetY?: number;
+}
+
+/** セット商品と構成商品（構造のみ。購入の数量・金額には加算しない） */
+export interface ProductSetItem {
+  id: string;
+  setProductId: string;
+  componentProductId: string;
+  quantity: number;
 }
 
 export interface FamilyGroup {
@@ -343,6 +355,8 @@ export interface AppData {
   chains: Chain[];
   stores: Store[];
   products: Product[];
+  /** セット商品の構成（未設定のデータ・モックでは省略） */
+  productSetItems?: ProductSetItem[];
   familyGroups: FamilyGroup[];
   identities: Identity[];
   accounts: ServiceAccount[];

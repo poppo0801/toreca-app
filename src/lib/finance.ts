@@ -239,3 +239,47 @@ export function annualStats(data: AppData, year: number): { total: SellerStats; 
   }
   return { total, bySeller: [...map.values()] };
 }
+
+// ------------------------------------------------------------------ 商品別の購入実績（セット構成を含む）
+export interface ProductPurchaseRow {
+  productId: string;
+  /** その商品として直接購入した数量（単位ごと） */
+  direct: Partial<Record<ItemUnit, number>>;
+  /** 直接購入分の支払額の合計（金額未入力の明細は含めない）と、未入力の明細数 */
+  directAmount: number;
+  directAmountUnknown: number;
+  /** セット商品の購入に含まれる構成数量（セット数 × 構成数量）。購入金額は構成商品へ按分せず、二重計上しない */
+  viaSet: number;
+}
+
+/**
+ * 年ごとの商品別購入実績。セット商品の購入は「セット商品1件」として数え、構成商品には数量(参考)だけを加える。
+ * 金額はセット商品側にのみ計上し、構成商品へ配らない（二重計上しない）。構成が未登録のセットは構成商品に何も加えない。
+ */
+export function productPurchaseStats(data: AppData, year: number): ProductPurchaseRow[] {
+  const map = new Map<string, ProductPurchaseRow>();
+  const row = (id: string) => {
+    let r = map.get(id);
+    if (!r) {
+      r = { productId: id, direct: {}, directAmount: 0, directAmountUnknown: 0, viaSet: 0 };
+      map.set(id, r);
+    }
+    return r;
+  };
+  const comps = new Map<string, { componentProductId: string; quantity: number }[]>();
+  for (const s of data.productSetItems ?? []) comps.set(s.setProductId, [...(comps.get(s.setProductId) ?? []), s]);
+
+  for (const p of data.purchases) {
+    const date = flexToJstDate(p.purchasedOn);
+    if (!date || !date.startsWith(`${year}-`)) continue;
+    for (const it of p.items) {
+      if (!it.productId) continue;
+      const r = row(it.productId);
+      r.direct[it.unit] = (r.direct[it.unit] ?? 0) + it.quantity;
+      if (it.amountPaid === null) r.directAmountUnknown++;
+      else r.directAmount += it.amountPaid;
+      for (const c of comps.get(it.productId) ?? []) row(c.componentProductId).viaSet += c.quantity * it.quantity;
+    }
+  }
+  return [...map.values()].sort((a, b) => b.directAmount - a.directAmount);
+}

@@ -7,7 +7,8 @@ import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { jstDateString } from "@/lib/datetime";
-import { annualStats, type SellerStats } from "@/lib/finance";
+import { ProductThumb } from "@/components/product-image";
+import { annualStats, productPurchaseStats, UNIT_LABEL, type SellerStats } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
@@ -49,6 +50,7 @@ export function AnalysisView() {
   const { data } = useApp();
   const [year, setYear] = useState(() => Number(jstDateString(new Date()).slice(0, 4)));
   const { total, bySeller } = useMemo(() => annualStats(data, year), [data, year]);
+  const productRows = useMemo(() => productPurchaseStats(data, year), [data, year]);
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -86,6 +88,36 @@ export function AnalysisView() {
             </section>
           );
         })}
+      <section aria-label="商品別の購入実績" className="rounded-lg border bg-card p-3" data-testid="product-stats">
+        <h2 className="mb-1.5 text-sm font-bold">商品別の購入実績</h2>
+        {productRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">この年の購入はありません。</p>
+        ) : (
+          <ul className="divide-y">
+            {productRows.map((r) => {
+              const p = data.products.find((x) => x.id === r.productId);
+              const direct = (Object.entries(r.direct) as [keyof typeof UNIT_LABEL, number][]).map(([u, n]) => `${n}${UNIT_LABEL[u]}`).join("・");
+              return (
+                <li key={r.productId} className="flex items-center gap-2 py-1.5 text-sm" data-testid="product-stat-row">
+                  <ProductThumb product={p} heightClass="h-10" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{p?.officialName ?? "商品未登録"}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {direct ? `購入 ${direct}` : "単独の購入なし"}
+                      {r.viaSet > 0 && ` ／ セットに含まれる分 ${r.viaSet}点（参考・金額には含めません）`}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs">
+                    {r.directAmount > 0 || r.directAmountUnknown === 0 ? yen(r.directAmount) : "金額未入力"}
+                    {r.directAmountUnknown > 0 && r.directAmount > 0 && <span className="block text-muted-foreground">未入力{r.directAmountUnknown}件</span>}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="mt-1 text-xs text-muted-foreground">セット商品の購入金額はセット商品にのみ計上し、構成商品には加算しません（二重計上なし）。</p>
+      </section>
       <p className="text-xs text-muted-foreground">
         参考利益 = 売却金額 − 購入原価 − 販売手数料 − 送料。売却名義人は実際に売却手続きを行った人で、所得の帰属を示すものではありません。推移グラフや相場分析は今後の拡張で追加します。
       </p>

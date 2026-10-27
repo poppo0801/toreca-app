@@ -438,3 +438,122 @@ test("通知設定の画面: 端末の状態とプロフィール別の通知ル
   await page.reload();
   await expect(page.getByLabel("時刻が不明（日付のみ）の期限")).toHaveValue("none");
 });
+
+test("AIで読み取る: 文章→確認→フォーム入力→保存（未設定の環境では案内を表示し、手動登録は使える）", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  const dialog = page.getByRole("dialog").first();
+  await dialog.getByTestId("ai-open").click();
+  const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
+  // 4つの入力方法
+  await expect(ai.getByRole("tab")).toHaveCount(4);
+  await ai.getByRole("tab", { name: "文章" }).click();
+  await ai.getByLabel("告知の文章を貼り付け").fill("【複数商品】抽選販売のお知らせ。サンプル電機 三宮店。応募は1月20日まで。");
+  await ai.getByRole("button", { name: "読み取る" }).click();
+
+  const result = ai.getByTestId("ai-result");
+  const fail = ai.getByTestId("ai-fail");
+  await expect(result.or(fail)).toBeVisible({ timeout: 20000 });
+  if (await fail.isVisible()) {
+    // AI APIが未設定の環境（本番など）: 壊れずに案内し、手動登録に戻れる
+    await expect(fail).toContainText("設定されていません");
+    await ai.getByRole("button", { name: "閉じる" }).click();
+    await fillMasters(dialog, "E2E電機", "E2E店", "E2Eテスト商品");
+    await expect(dialog.getByRole("button", { name: "保存" })).toBeEnabled();
+    return;
+  }
+
+  // モックエンジン: 実際のAI解析ではないことが明示される
+  await expect(ai.getByTestId("ai-mock-banner")).toContainText("モック");
+  await expect(result).toContainText("複数商品の応募方式が告知から判断できませんでした");
+  await page.screenshot({ path: "docs/screenshots/stage4b-ai-result-mobile.png" });
+  await ai.getByRole("button", { name: "フォームに入力" }).click();
+
+  // フォーム: 候補として入力され、要確認が表示される。方式が未確定のままでは保存できない
+  await expect(dialog.getByTestId("ai-filled-note")).toBeVisible();
+  await expect(dialog.getByTestId("ai-flag").first()).toContainText("要確認");
+  await expect(dialog.getByLabel("抽選の方式")).toHaveValue("");
+  await expect(dialog.getByRole("combobox", { name: "商品2", exact: true })).toHaveValue("サンプル拡張パック「ほしぞら」");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog.getByRole("alert").filter({ hasText: "応募方式" })).toBeVisible();
+  await page.screenshot({ path: "docs/screenshots/stage4b-ai-form-mobile.png" });
+
+  // 方式を選べば保存でき、通常のカードとして表示される（未登録のマスターは仮登録）
+  await dialog.getByLabel("抽選の方式").selectOption({ label: "C. 複数商品が対象（当選はいずれか1商品まで）" });
+  await dialog.getByLabel("応募締切の精度").selectOption("date_time");
+  await dialog.getByLabel("応募締切の日付").fill("2027-01-20");
+  await dialog.getByLabel("応募締切の時刻").fill("23:59");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+  const card = page.getByTestId("lottery-card").filter({ hasText: "テスト拡張パック「ひかりの森」" });
+  await expect(card).toHaveCount(1);
+
+  // 同じ内容を再度読み取ると、登録済みとして重複の注意が出る（二重登録の防止）
+  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  const d2 = page.getByRole("dialog").first();
+  await d2.getByTestId("ai-open").click();
+  const ai2 = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
+  await ai2.getByLabel("告知の文章を貼り付け").fill("【複数商品】抽選販売のお知らせ。サンプル電機 三宮店。応募は1月20日まで。");
+  await ai2.getByRole("button", { name: "読み取る" }).click();
+  await expect(ai2.getByTestId("ai-duplicates")).toBeVisible({ timeout: 20000 });
+  await ai2.getByRole("button", { name: "フォームに入力" }).click();
+  await expect(d2.getByTestId("dup-warning")).toContainText("重複");
+  await d2.getByLabel("抽選の方式").selectOption({ label: "C. 複数商品が対象（当選はいずれか1商品まで）" });
+  await d2.getByRole("button", { name: "保存" }).click();
+  await expect(d2.getByRole("alert").filter({ hasText: "重複ではないことを確認" })).toBeVisible();
+});
+
+test("商品マスター: 検索・絞り込み、セット構成の登録、画像の表示調整（倍率・位置）", async ({ page }) => {
+  await login(page);
+  // 抽選登録の自動仮登録で2商品を用意（セット商品と構成商品）
+  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  const dialog = page.getByRole("dialog");
+  await fillMasters(dialog, "E2Eセット電機", "E2Eセット店", "E2Eセット商品");
+  await dialog.getByLabel("抽選の方式").selectOption({ label: "B. 1回の応募で複数商品に参加（商品ごとに当落）" });
+  await dialog.getByRole("combobox", { name: "商品2", exact: true }).fill("E2E構成商品");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.goto("/settings/masters");
+  await page.getByRole("tab", { name: "商品", exact: true }).click();
+  // 検索（名称・コード・略称）で絞り込める
+  await page.getByRole("searchbox", { name: "商品を検索" }).fill("ｅ2ｅ構成");
+  await expect(page.getByTestId("master-row")).toHaveCount(1);
+  await expect(page.getByTestId("product-count")).toContainText("1件");
+  await page.getByRole("searchbox", { name: "商品を検索" }).fill("");
+
+  // セット構成: 構成商品を追加して保存→開き直しても保持。未登録のうちは空
+  const setRow = page.getByTestId("master-row").filter({ hasText: "E2Eセット商品" });
+  await setRow.getByRole("button", { name: /セット構成を管理/ }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toContainText("構成は未登録です");
+  await dlg.getByLabel("構成に追加する商品").selectOption({ label: "E2E構成商品" });
+  await dlg.getByRole("button", { name: "追加" }).click();
+  await dlg.getByLabel("E2E構成商品の数量").fill("3");
+  await dlg.getByRole("button", { name: "保存" }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(setRow.getByRole("button", { name: /セット構成を管理/ })).toContainText("(1)");
+  await setRow.getByRole("button", { name: /セット構成を管理/ }).click();
+  await expect(page.getByTestId("set-component")).toContainText("E2E構成商品");
+  await expect(page.getByLabel("E2E構成商品の数量")).toHaveValue("3");
+  // 自分自身は構成に追加できない（候補に出ない）
+  await expect(page.getByLabel("構成に追加する商品").locator("option", { hasText: "E2Eセット商品" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // 画像の表示調整: 画像を入れてから倍率・位置を保存でき、再読込後も保持される
+  const compRow = page.getByTestId("master-row").filter({ hasText: "E2E構成商品" });
+  await compRow.getByRole("button", { name: /の画像を管理/ }).click();
+  const img = page.getByRole("dialog");
+  await img.getByLabel("BOX画像を選択").setInputFiles({ name: "x_b.png", mimeType: "image/png", buffer: makePng(425, 500, [200, 60, 60]) });
+  await expect(img.getByTestId("image-slot-box")).toContainText("手動で登録");
+  const adjust = img.getByTestId("image-adjust");
+  await adjust.getByLabel("倍率").fill("1.5");
+  await adjust.getByLabel("横位置").fill("10");
+  await adjust.getByRole("button", { name: "調整を保存" }).click();
+  await expect(adjust.getByRole("status")).toContainText("保存しました");
+  await page.reload();
+  await page.getByRole("tab", { name: "商品", exact: true }).click();
+  await page.getByTestId("master-row").filter({ hasText: "E2E構成商品" }).getByRole("button", { name: /の画像を管理/ }).click();
+  await expect(page.getByTestId("image-adjust").getByLabel("倍率")).toHaveValue("1.5");
+  await expect(page.getByTestId("image-adjust").getByLabel("横位置")).toHaveValue("10");
+});

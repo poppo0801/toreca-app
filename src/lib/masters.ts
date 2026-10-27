@@ -108,7 +108,7 @@ export const ENTITIES: Record<EntityKey, Entity> = {
     label: "商品",
     retire: "archived_at",
     titleField: "official_name",
-    subFields: ["product_code", "packs_per_box"],
+    subFields: ["category", "product_code", "product_code_kind", "packs_per_box"],
     fields: [
       { name: "official_name", label: "正式名称", type: "text", required: true, max: 120 },
       { name: "product_code", label: "商品コード（任意。公式番号があれば公式番号、なければ独自コード）", type: "text", max: 30 },

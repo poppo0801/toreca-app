@@ -100,11 +100,12 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     sel("application_item_results").limit(50000),
     sel("sales").is("archived_at", null).limit(20000),
     sel("product_images"),
+    sel("product_set_items"),
   ] as const);
   const failed = q.find((r) => r.error);
   if (failed?.error) throw new Error(`データの取得に失敗しました: ${failed.error.code ?? ""}`);
 
-  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig, itemResults, sales, productImages] =
+  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig, itemResults, sales, productImages, setItems] =
     q.map((r) => r.data ?? []) as unknown as [
       Database["public"]["Tables"]["profiles"]["Row"][],
       Database["public"]["Tables"]["profile_target_rules"]["Row"][],
@@ -132,6 +133,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       Database["public"]["Tables"]["application_item_results"]["Row"][],
       Database["public"]["Tables"]["sales"]["Row"][],
       Database["public"]["Tables"]["product_images"]["Row"][],
+      Database["public"]["Tables"]["product_set_items"]["Row"][],
     ];
   // Storage は非公開。表示用に期限付きURLをまとめて発行する（秘密鍵は使わず、ログイン中の本人の権限で）
   const signed = new Map<string, string>();
@@ -179,11 +181,12 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       images: Object.fromEntries(
         productImages
           .filter((i) => i.product_id === p.id && signed.has(i.storage_path))
-          .map((i) => [i.kind, { url: signed.get(i.storage_path)!, width: i.width, height: i.height, source: i.source as "import" | "manual" }]),
+          .map((i) => [i.kind, { url: signed.get(i.storage_path)!, width: i.width, height: i.height, source: i.source as "import" | "manual", scale: i.display_scale != null ? Number(i.display_scale) : 1, offsetX: i.offset_x ?? 0, offsetY: i.offset_y ?? 0 }]),
       ),
       codeKind: p.product_code_kind as "official" | "custom" | null,
       archived: p.archived_at != null,
     })),
+    productSetItems: setItems.map((s) => ({ id: s.id, setProductId: s.set_product_id, componentProductId: s.component_product_id, quantity: s.quantity })),
     familyGroups: families.map((f) => ({ id: f.id, label: f.label })),
     identities: identities.map((i) => ({
       id: i.id,
