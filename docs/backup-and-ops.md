@@ -5,12 +5,41 @@
 |---|---|---|---|
 | ① 論理エクスポート(JSON) | データ退避・復元・将来のCSV/移行の下地 | `npm run backup` → `backups/<日時>/`（全テーブル。個人データを含むため git 管理外） | 復元訓練で検証済み |
 | ② DBダンプ(SQL) | スキーマ＋データ全体の退避 | `npx supabase db dump --linked -f backups/schema.sql` と `--data-only -f backups/data.sql`（DBパスワード不要のログインロール経由。Docker が必要） | 取得を確認済み |
-| ③ Supabase のバックアップ | 障害・誤操作からの復旧（日次/PITR） | ダッシュボード > Database > Backups。**無料プランは日次バックアップが付かない**ため、①を下記「自動バックアップ」で毎日取得する | 未契約（`npm run backup` を定期取得） |
+| ③ Supabase のバックアップ | 障害・誤操作からの復旧（日次/PITR） | ダッシュボード > Database > Backups。**無料プランは日次バックアップが付かない**ため、①を下記「自動バックアップ」で毎日取得する | 未契約（ローカル定期バックアップで代替） |
 | ④ コード・マイグレーション | アプリ/スキーマの復元 | GitHub 非公開リポジトリ（`supabase/migrations/` が正本）。Vercel の過去デプロイへロールバック可 | 運用中 |
 
 - `npm run backup` は service_role キー（`.env.local`）を使い、接続先がリンク済みのトレカ専用プロジェクトと一致しない場合は中止する。
 - バックアップに**含まれないもの**: 認証ユーザー(`auth.users`)、プッシュ通知の購読（鍵を含むため。端末で通知を有効にし直せば復元）、Vault の秘密（`CRON_SECRET`/URL。`npm run cron:setup -- --url` で再設定）。
 - **推奨の取得タイミング**: 実データを大きく入力した日、マイグレーション適用前（`npm run backup`）、月1回の定期取得。取得したファイルは暗号化できる場所（パスワード付きZIP/暗号化ドライブ）へ。**クラウドの共有フォルダや GitHub には置かない**。
+
+## ローカル定期バックアップ（Windows タスクスケジューラ）
+既存の `backup.mjs`（取得）・`verify-backup.mjs`（検証）・`restore.mjs` / `restore-drill.mjs`（復元）を再利用します。**GitHub などの外部サービスには秘密も個人データも渡しません**（service_role キーは今までどおり手元の `.env.local` のみ。権限は「このプロジェクトの全データの読み取り＋書き込み」で、バックアップ専用に絞れない点は従来と同じです）。
+
+| 項目 | 内容 |
+|---|---|
+| 頻度 | 毎日 03:30 と、ログオン時。PCが止まっていて取り逃した場合は、起動後できるだけ早く実行（`StartWhenAvailable`）。直近20時間以内に成功済みなら重複取得しない |
+| 流れ | 取得 → 検証（件数・SHA-256・世帯/プロフィールが空でない）→ AES-256-GCM で暗号化 → **復号して一致を確認**してから保存 → 世代管理 |
+| 暗号化 | Node標準の crypto（scrypt で鍵導出）。改ざん・誤ったパスフレーズは復号時に必ず失敗。平文は一時フォルダにのみ作り、成功・失敗に関わらず削除 |
+| 保存先 | `BACKUP_DIR`（既定 `%USERPROFILE%\TorecaBackups`）。**リポジトリ内は指定不可**（コミット・公開の防止）。暗号化済みなので、クラウド同期フォルダや外付けドライブを指定してもよい |
+| 世代 | 直近14世代 + 月ごとの最新12個（`BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` で変更可）。1ファイル数百KB規模 |
+| 失敗の検知 | Windows のトースト通知 + 保存先に `BACKUP_FAILED.txt` + `last-status.json`。**最終成功から36時間を超えて再実行したときも警告**。`npm run backup:status` で確認（異常なら終了コード1） |
+| 秘密情報 | キー・パスフレーズはログ・状態ファイル・通知に出ない（出力は伏せ字処理。ログは件数と成否のみ） |
+
+### あなたの操作（初回のみ）
+1. `.env.local` に `BACKUP_PASSPHRASE=`（**16文字以上の長いランダムな文字列**）を追加する。必要なら `BACKUP_DIR=` も。**パスフレーズを失うとバックアップを開けません。パスワードマネージャー等、このPC以外にも必ず控えてください**
+2. `npm run backup:local -- --force` を1回実行し、保存先に `tcg-backup-….tcgbak` ができ、`npm run backup:status` が正常なことを確認する
+3. タスクを登録する: `powershell -ExecutionPolicy Bypass -File scripts\install-backup-task.ps1`（ユーザー権限・パスワード保存なし。解除は `-Remove`）
+4. 月1回程度、**復元訓練**（下記）を実施する
+
+### 暗号化バックアップからの復元・訓練
+```bash
+npm run backup:decrypt -- <保存先>\tcg-backup-XXXX.tcgbak --out restored   # BACKUP_PASSPHRASE で復号
+node scripts/verify-backup.mjs --dir restored                                  # 整合の確認
+npm run restore:drill -- --backup restored                                     # 使い捨てPostgresへ復元して検証（本番に触れない）
+# 災害時の復元は「復元手順」の restore.mjs（空のDBにのみ）に --backup restored を指定。終わったら restored フォルダは削除
+```
+- **制約**: PCの電源が入っていない間は取得されません（起動後に自動で取り戻します）。PCの故障に備え、`BACKUP_DIR` は別ドライブやクラウド同期フォルダにすることを推奨します。
+- 将来、バックアップ専用の読み取り専用DBロールを使う方式（権限をさらに限定）も検討できますが、DBパスワードの管理が増えるため現時点では採用していません。
 
 ## 復元手順（災害時: 新しい Supabase プロジェクトへ）
 復元は**空のDBにのみ**行い、既存データを上書き・削除しない（空でない場合は中止）。

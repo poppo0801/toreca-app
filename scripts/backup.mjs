@@ -32,7 +32,8 @@ const TABLES = [
 
 const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const dir = `backups/${stamp}`;
+// 出力先は BACKUP_OUT_DIR（local-backup.mjs が一時ディレクトリを指定。平文は暗号化後に削除される）。既定は backups/
+const dir = `${process.env.BACKUP_OUT_DIR ?? "backups"}/${stamp}`;
 mkdirSync(dir, { recursive: true });
 
 const counts = {};
