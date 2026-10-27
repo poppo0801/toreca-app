@@ -59,7 +59,9 @@ if (!flag("verify-only")) {
   for (const t of ORDER) {
     const rows = tables[t];
     if (rows.length === 0) continue;
-    sql += `insert into public.${t} select * from jsonb_populate_recordset(null::public.${t}, $${tag}$${JSON.stringify(rows)}$${tag}$::jsonb);\n`;
+    // バックアップに存在する列だけを明示して投入する。後から追加された列（旧バックアップに無い列）は既定値になる
+    const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].map((c) => `"${c}"`).join(", ");
+    sql += `insert into public.${t} (${cols}) select ${cols} from jsonb_populate_recordset(null::public.${t}, $${tag}$${JSON.stringify(rows)}$${tag}$::jsonb);\n`;
   }
   const map = opt("map-owner");
   if (map) {

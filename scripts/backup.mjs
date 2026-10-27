@@ -20,6 +20,7 @@ const TABLES = [
   "profile_target_rules", "campaigns", "lotteries", "lottery_items", "lottery_management", "applications",
   "purchases", "purchase_items", "skip_rules", "skip_rule_exceptions", "application_rules", "limit_exemptions",
   "chain_requirements", "account_eligibilities", "eligibility_purchases", "notification_settings", "notification_deliveries", "audit_logs",
+  "application_item_results", "sales",
 ];
 
 const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });

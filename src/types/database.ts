@@ -164,6 +164,68 @@ export type Database = {
           },
         ]
       }
+      application_item_results: {
+        Row: {
+          application_id: string
+          created_at: string
+          household_id: string
+          id: string
+          lottery_item_id: string
+          result_status: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          application_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          lottery_item_id: string
+          result_status?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          application_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          lottery_item_id?: string
+          result_status?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_item_results_application_id_household_id_fkey"
+            columns: ["application_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "applications"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "application_item_results_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_item_results_lottery_item_id_household_id_fkey"
+            columns: ["lottery_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lottery_items"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "application_item_results_updated_by_profile_id_household_i_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       application_rules: {
         Row: {
           basis: string
@@ -263,6 +325,7 @@ export type Database = {
           procedure_completed_at: string | null
           result_confirmed_at: string | null
           result_status: string
+          selected_item_id: string | null
           service_account_id: string
           state: string
           updated_at: string
@@ -279,6 +342,7 @@ export type Database = {
           procedure_completed_at?: string | null
           result_confirmed_at?: string | null
           result_status?: string
+          selected_item_id?: string | null
           service_account_id: string
           state?: string
           updated_at?: string
@@ -295,6 +359,7 @@ export type Database = {
           procedure_completed_at?: string | null
           result_confirmed_at?: string | null
           result_status?: string
+          selected_item_id?: string | null
           service_account_id?: string
           state?: string
           updated_at?: string
@@ -313,6 +378,13 @@ export type Database = {
             columns: ["lottery_id", "household_id"]
             isOneToOne: false
             referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "applications_selected_item_id_household_id_fkey"
+            columns: ["selected_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lottery_items"
             referencedColumns: ["id", "household_id"]
           },
           {
@@ -517,6 +589,7 @@ export type Database = {
           default_application_rule: string
           household_id: string
           id: string
+          is_provisional: boolean
           memo: string
           name: string
           updated_at: string
@@ -528,6 +601,7 @@ export type Database = {
           default_application_rule?: string
           household_id: string
           id?: string
+          is_provisional?: boolean
           memo?: string
           name: string
           updated_at?: string
@@ -539,6 +613,7 @@ export type Database = {
           default_application_rule?: string
           household_id?: string
           id?: string
+          is_provisional?: boolean
           memo?: string
           name?: string
           updated_at?: string
@@ -880,6 +955,7 @@ export type Database = {
           limit_basis: string
           limit_max_count: number
           memo: string
+          multi_mode: string
           procedure_deadline_at: string | null
           procedure_deadline_date: string | null
           procedure_deadline_precision: string
@@ -916,6 +992,7 @@ export type Database = {
           limit_basis?: string
           limit_max_count?: number
           memo?: string
+          multi_mode?: string
           procedure_deadline_at?: string | null
           procedure_deadline_date?: string | null
           procedure_deadline_precision?: string
@@ -952,6 +1029,7 @@ export type Database = {
           limit_basis?: string
           limit_max_count?: number
           memo?: string
+          multi_mode?: string
           procedure_deadline_at?: string | null
           procedure_deadline_date?: string | null
           procedure_deadline_precision?: string
@@ -1462,10 +1540,14 @@ export type Database = {
           created_at: string
           household_id: string
           id: string
+          image_url: string | null
+          is_provisional: boolean
+          manual_override_fields: string[]
           official_name: string
           pack_image_ref: string | null
           packs_per_box: number
           product_code: string | null
+          product_code_kind: string | null
           release_date: string | null
           updated_at: string
           updated_by_profile_id: string | null
@@ -1477,10 +1559,14 @@ export type Database = {
           created_at?: string
           household_id: string
           id?: string
+          image_url?: string | null
+          is_provisional?: boolean
+          manual_override_fields?: string[]
           official_name: string
           pack_image_ref?: string | null
           packs_per_box?: number
           product_code?: string | null
+          product_code_kind?: string | null
           release_date?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -1492,10 +1578,14 @@ export type Database = {
           created_at?: string
           household_id?: string
           id?: string
+          image_url?: string | null
+          is_provisional?: boolean
+          manual_override_fields?: string[]
           official_name?: string
           pack_image_ref?: string | null
           packs_per_box?: number
           product_code?: string | null
+          product_code_kind?: string | null
           release_date?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -1593,11 +1683,14 @@ export type Database = {
         Row: {
           active: boolean
           color: string
+          color_hex: string | null
           created_at: string
           household_id: string
+          icon_mark: string
           id: string
           initial: string
           label: string
+          notify_recipient_ids: string[] | null
           sort_order: number
           updated_at: string
           updated_by_profile_id: string | null
@@ -1605,11 +1698,14 @@ export type Database = {
         Insert: {
           active?: boolean
           color?: string
+          color_hex?: string | null
           created_at?: string
           household_id: string
+          icon_mark?: string
           id?: string
           initial: string
           label: string
+          notify_recipient_ids?: string[] | null
           sort_order?: number
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -1617,11 +1713,14 @@ export type Database = {
         Update: {
           active?: boolean
           color?: string
+          color_hex?: string | null
           created_at?: string
           household_id?: string
+          icon_mark?: string
           id?: string
           initial?: string
           label?: string
+          notify_recipient_ids?: string[] | null
           sort_order?: number
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -1649,7 +1748,9 @@ export type Database = {
           created_at: string
           household_id: string
           id: string
+          lottery_item_id: string | null
           product_id: string | null
+          product_label: string | null
           purchase_id: string
           quantity: number
           unit: string
@@ -1661,7 +1762,9 @@ export type Database = {
           created_at?: string
           household_id: string
           id?: string
+          lottery_item_id?: string | null
           product_id?: string | null
+          product_label?: string | null
           purchase_id: string
           quantity: number
           unit: string
@@ -1673,7 +1776,9 @@ export type Database = {
           created_at?: string
           household_id?: string
           id?: string
+          lottery_item_id?: string | null
           product_id?: string | null
+          product_label?: string | null
           purchase_id?: string
           quantity?: number
           unit?: string
@@ -1687,6 +1792,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "households"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_items_lottery_item_id_household_id_fkey"
+            columns: ["lottery_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lottery_items"
+            referencedColumns: ["id", "household_id"]
           },
           {
             foreignKeyName: "purchase_items_product_id_household_id_fkey"
@@ -1714,6 +1826,7 @@ export type Database = {
       purchases: {
         Row: {
           application_id: string | null
+          archived_at: string | null
           buyer_profile_id: string | null
           channel: string
           created_at: string
@@ -1725,11 +1838,13 @@ export type Database = {
           record_kind: string
           source_kind: string
           store_id: string | null
+          store_label: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
         Insert: {
           application_id?: string | null
+          archived_at?: string | null
           buyer_profile_id?: string | null
           channel?: string
           created_at?: string
@@ -1741,11 +1856,13 @@ export type Database = {
           record_kind?: string
           source_kind?: string
           store_id?: string | null
+          store_label?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
         Update: {
           application_id?: string | null
+          archived_at?: string | null
           buyer_profile_id?: string | null
           channel?: string
           created_at?: string
@@ -1757,6 +1874,7 @@ export type Database = {
           record_kind?: string
           source_kind?: string
           store_id?: string | null
+          store_label?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1852,6 +1970,111 @@ export type Database = {
           {
             foreignKeyName: "push_subscriptions_profile_id_household_id_fkey"
             columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      sales: {
+        Row: {
+          amount: number
+          archived_at: string | null
+          cost_amount: number | null
+          cost_purchase_item_id: string | null
+          cost_quantity: number | null
+          created_at: string
+          fee: number
+          household_id: string
+          id: string
+          memo: string
+          platform: string
+          product_id: string | null
+          product_label: string | null
+          quantity: number
+          seller_profile_id: string
+          shipping: number
+          sold_on: string
+          unit: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          amount: number
+          archived_at?: string | null
+          cost_amount?: number | null
+          cost_purchase_item_id?: string | null
+          cost_quantity?: number | null
+          created_at?: string
+          fee?: number
+          household_id: string
+          id?: string
+          memo?: string
+          platform?: string
+          product_id?: string | null
+          product_label?: string | null
+          quantity: number
+          seller_profile_id: string
+          shipping?: number
+          sold_on: string
+          unit?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          amount?: number
+          archived_at?: string | null
+          cost_amount?: number | null
+          cost_purchase_item_id?: string | null
+          cost_quantity?: number | null
+          created_at?: string
+          fee?: number
+          household_id?: string
+          id?: string
+          memo?: string
+          platform?: string
+          product_id?: string | null
+          product_label?: string | null
+          quantity?: number
+          seller_profile_id?: string
+          shipping?: number
+          sold_on?: string
+          unit?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_cost_purchase_item_id_household_id_fkey"
+            columns: ["cost_purchase_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_items"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "sales_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "sales_seller_profile_id_household_id_fkey"
+            columns: ["seller_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "sales_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id", "household_id"]
@@ -2085,6 +2308,7 @@ export type Database = {
           created_at: string
           household_id: string
           id: string
+          is_provisional: boolean
           latitude: number | null
           longitude: number | null
           name: string
@@ -2101,6 +2325,7 @@ export type Database = {
           created_at?: string
           household_id: string
           id?: string
+          is_provisional?: boolean
           latitude?: number | null
           longitude?: number | null
           name: string
@@ -2117,6 +2342,7 @@ export type Database = {
           created_at?: string
           household_id?: string
           id?: string
+          is_provisional?: boolean
           latitude?: number | null
           longitude?: number | null
           name?: string
@@ -2156,6 +2382,7 @@ export type Database = {
     }
     Functions: {
       bootstrap_household: { Args: never; Returns: string }
+      ensure_profile_accounts: { Args: never; Returns: number }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }
       invoke_notify_job: {
         Args: { p_secret?: string; p_url?: string }
@@ -2167,6 +2394,7 @@ export type Database = {
         Args: { p_actor: string; p_application_id: string }
         Returns: undefined
       }
+      norm_name: { Args: { s: string }; Returns: string }
       notification_cron_disable: { Args: never; Returns: boolean }
       notification_cron_enable: {
         Args: { p_schedule?: string }
@@ -2211,6 +2439,11 @@ export type Database = {
       }
       remove_push_subscription: {
         Args: { p_endpoint: string }
+        Returns: undefined
+      }
+      save_lottery_tx: { Args: { p: Json; p_actor: string }; Returns: string }
+      set_item_results: {
+        Args: { p_actor: string; p_application_id: string; p_results: Json }
         Returns: undefined
       }
     }
