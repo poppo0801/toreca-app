@@ -19,11 +19,14 @@ export const dbTestsEnabled = process.env.RUN_DB_TESTS === "1" && !!url && !!pub
 
 const opts = { auth: { persistSession: false, autoRefreshToken: false } };
 
+// 実DBテストが無効(CI等でSupabaseの値が無い)でも、describe の本体はテスト収集時に実行されるため、
+// クライアント生成で例外を出さないよう仮の値を使う（無効時はテスト自体がスキップされ、通信は行われない）。
+const PLACEHOLDER_URL = "http://127.0.0.1:1";
 export function adminClient(): SupabaseClient {
-  return createClient(url!, serviceKey!, opts);
+  return createClient(url ?? PLACEHOLDER_URL, serviceKey ?? "placeholder", opts);
 }
 export function anonClient(): SupabaseClient {
-  return createClient(url!, publishable!, opts);
+  return createClient(url ?? PLACEHOLDER_URL, publishable ?? "placeholder", opts);
 }
 
 /** テストユーザーを用意してログイン済みクライアントを返す。 */
