@@ -53,3 +53,6 @@ npm run dev                        # http://localhost:3000
 
 通知（PWA/Web Push）の仕組み・定期実行（Supabase Cron）は `docs/notifications.md`、Vercelデプロイと環境変数は `docs/deploy-vercel.md`、iPhoneの手順書は `docs/iphone-setup.md`、実運用開始チェックは `docs/production-checklist.md`（`npm run verify:prod`）。
 運用・バックアップ・認証設定は `docs/backup-and-ops.md` を参照。
+
+## Stage 3.5 の主な機能
+マスター未登録でも抽選登録（自動仮登録）／複数商品抽選（B/C/D）／ユーザー別の色・マーク・通知先／ベル通知／収支管理（支出・売却・年間実績）／スマホ向けコンパクトUI・Safe Area・ダークモード。詳細は `implementation-plan.md`・`docs/backup-and-ops.md`。

@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "test:db": "node scripts/run-db-tests.mjs",
     "backup": "node scripts/backup.mjs",
+    "backup:verify": "node scripts/verify-backup.mjs",
     "test:e2e:supabase": "node scripts/run-e2e-supabase.mjs",
     "cleanup:testdata": "node scripts/cleanup-testdata.mjs",
     "gen:types": "npx supabase gen types typescript --linked > src/types/database.ts",

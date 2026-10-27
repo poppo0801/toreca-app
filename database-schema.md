@@ -85,3 +85,11 @@
 - `lotteries` の日付のみ・時刻ありのフィールド分割と通知タイミングの統一。
 - 買取価格／移動コスト・応募価値判定の段階導入範囲。
 - 過去購入「累計」と個別明細の差分調整・重複検出の正確なアルゴリズム。
+
+## v0.5 追加（Stage 3.5・マイグレーション 10〜13）
+- `profiles`: `icon_mark`, `color_hex`, `notify_recipient_ids uuid[]`（NULL=本人のみ / 空=通知なし）
+- `chains/stores/products`: `is_provisional`（抽選登録時の自動仮登録）。`products`: `product_code_kind`, `image_url`, `manual_override_fields`, `list_price_box/pack`
+- `lotteries.multi_mode`（single/all/one_win/choose_one）、`applications.selected_item_id`、`application_item_results`（商品別の当落。`applications.result_status` は集計値）
+- `purchases`: `store_label`, `archived_at`（論理削除）。`purchase_items`: `product_label`, `lottery_item_id`。購入記録は応募ごとに1件のまま、当選した明細のみ作成
+- `sales`（売却）: 売却名義人 `seller_profile_id`、原価 `cost_amount`（NULL=未設定）、原価の紐づけ `cost_purchase_item_id/cost_quantity`（トリガーで購入数量超過を拒否）
+- 関数: `save_lottery_tx`（マスター照合・自動作成+抽選+明細+★+応募を1トランザクション）、`set_item_results`、`ensure_profile_accounts`、`norm_name`、`mark_purchased`（当選商品のみ・定価の仮入力）

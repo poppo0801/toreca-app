@@ -5,7 +5,7 @@
 |---|---|---|---|
 | ① 論理エクスポート(JSON) | データ退避・復元・将来のCSV/移行の下地 | `npm run backup` → `backups/<日時>/`（全テーブル。個人データを含むため git 管理外） | 復元訓練で検証済み |
 | ② DBダンプ(SQL) | スキーマ＋データ全体の退避 | `npx supabase db dump --linked -f backups/schema.sql` と `--data-only -f backups/data.sql`（DBパスワード不要のログインロール経由。Docker が必要） | 取得を確認済み |
-| ③ Supabase のバックアップ | 障害・誤操作からの復旧（日次/PITR） | ダッシュボード > Database > Backups。**無料プランは日次バックアップが付かない**。実データ運用前に有料プランにするか、①②を定期取得する（料金が発生するため要判断） | 未契約（要判断） |
+| ③ Supabase のバックアップ | 障害・誤操作からの復旧（日次/PITR） | ダッシュボード > Database > Backups。**無料プランは日次バックアップが付かない**ため、①を下記「自動バックアップ」で毎日取得する | 未契約（`npm run backup` を定期取得） |
 | ④ コード・マイグレーション | アプリ/スキーマの復元 | GitHub 非公開リポジトリ（`supabase/migrations/` が正本）。Vercel の過去デプロイへロールバック可 | 運用中 |
 
 - `npm run backup` は service_role キー（`.env.local`）を使い、接続先がリンク済みのトレカ専用プロジェクトと一致しない場合は中止する。
