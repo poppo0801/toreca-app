@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ExternalLink, Star } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { ProductThumb } from "@/components/product-image";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { DuplicateDialog } from "@/components/duplicate-dialog";
@@ -155,8 +156,9 @@ export function LotteryCard({
           </div>
           <ul className="mt-0.5 text-sm" data-testid="lottery-items">
             {(open ? lottery.items : lottery.items.slice(0, 1)).map((it, i) => (
-              <li key={i}>
-                {formatItem(it, data.products.find((p) => p.id === it.productId))}
+              <li key={i} className="flex items-center gap-1.5">
+                <ProductThumb product={data.products.find((p) => p.id === it.productId)} heightClass="h-9" />
+                <span>{formatItem(it, data.products.find((p) => p.id === it.productId))}</span>
                 {open && it.id && <ItemResultTags lottery={lottery} itemId={it.id} apps={apps} />}
               </li>
             ))}

@@ -71,8 +71,16 @@ export interface Product {
   officialName: string;
   aliases: string[];
   code: string;
-  /** 商品ごとの入数。固定30Pと決めつけない（仮登録の商品では未確認） */
-  packsPerBox: number;
+  /** 商品ごとの入数。固定30Pと決めつけない（仮登録・単品/セット商品では未設定=null） */
+  packsPerBox: number | null;
+  /** 単品・セット定価（円） */
+  listPriceUnit?: number | null;
+  memo?: string | null;
+  sourceUrl?: string | null;
+  /** pack_box=パック/BOX販売 / single_set=単品・セット等 / null=未判定 */
+  salesForm?: "pack_box" | "single_set" | null;
+  /** 商品画像（表示用の期限付きURL）。無い種類は未設定 → プレースホルダー */
+  images?: Partial<Record<ProductImageKind, ProductImage>>;
   provisional?: boolean;
   /** 定価（円）。収支入力の金額仮計算に使う。未設定は null */
   listPriceBox?: number | null;
@@ -80,6 +88,17 @@ export interface Product {
   /** 公式番号か独自コードか */
   codeKind?: "official" | "custom" | null;
   archived?: boolean;
+}
+
+export type ProductImageKind = "box" | "pack" | "unit";
+
+export interface ProductImage {
+  /** サーバーが発行した期限付きURL（Storageは非公開） */
+  url: string;
+  width: number | null;
+  height: number | null;
+  /** import=Excel/画像の一括取り込み / manual=アプリで手動アップロード（再取り込みで上書きしない） */
+  source: "import" | "manual";
 }
 
 export interface FamilyGroup {

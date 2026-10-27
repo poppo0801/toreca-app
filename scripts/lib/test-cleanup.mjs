@@ -27,6 +27,18 @@ export async function listTestUsers(admin) {
   return data.users.filter((u) => TEST_EMAIL.test(u.email ?? ""));
 }
 
+/** purge したテスト世帯の商品画像（Storage）を削除する。対象はテスト世帯のフォルダのみ */
+async function removeHouseholdImages(admin, hid) {
+  const files = [];
+  const walk = async (prefix) => {
+    const { data } = await admin.storage.from("product-images").list(prefix, { limit: 1000 });
+    for (const e of data ?? []) (e.id ? files.push(`${prefix}/${e.name}`) : await walk(`${prefix}/${e.name}`));
+  };
+  await walk(hid);
+  if (files.length) await admin.storage.from("product-images").remove(files);
+  return files.length;
+}
+
 /** execute=false なら対象の列挙のみ（何も変更しない） */
 export async function cleanupTestData({ execute }) {
   const admin = adminClient();
@@ -40,6 +52,10 @@ export async function cleanupTestData({ execute }) {
   const { data: purged, error } = await admin.rpc("purge_test_households");
   if (error) throw error;
   console.log(`削除したテスト世帯: ${purged.length} 件`);
+  for (const p of purged) {
+    const n = await removeHouseholdImages(admin, p.purged_household);
+    if (n) console.log(`  削除したテスト画像: ${n} 件`);
+  }
 
   for (const u of users) {
     // 世帯が残っているユーザーは削除しない（外部キーのRESTRICTを回避しない）

@@ -1471,6 +1471,73 @@ export type Database = {
           },
         ]
       }
+      product_images: {
+        Row: {
+          created_at: string
+          height: number | null
+          household_id: string
+          id: string
+          kind: string
+          product_id: string
+          sha256: string
+          source: string
+          storage_path: string
+          updated_at: string
+          updated_by_profile_id: string | null
+          width: number | null
+        }
+        Insert: {
+          created_at?: string
+          height?: number | null
+          household_id: string
+          id?: string
+          kind: string
+          product_id: string
+          sha256: string
+          source?: string
+          storage_path: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+          width?: number | null
+        }
+        Update: {
+          created_at?: string
+          height?: number | null
+          household_id?: string
+          id?: string
+          kind?: string
+          product_id?: string
+          sha256?: string
+          source?: string
+          storage_path?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_images_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_images_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "product_images_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       product_prices: {
         Row: {
           amount_yen: number
@@ -1532,6 +1599,68 @@ export type Database = {
           },
         ]
       }
+      product_set_items: {
+        Row: {
+          component_product_id: string
+          created_at: string
+          household_id: string
+          id: string
+          quantity: number
+          set_product_id: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          component_product_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          quantity?: number
+          set_product_id: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          component_product_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          quantity?: number
+          set_product_id?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_set_items_component_product_id_household_id_fkey"
+            columns: ["component_product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "product_set_items_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_set_items_set_product_id_household_id_fkey"
+            columns: ["set_product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "product_set_items_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       products: {
         Row: {
           archived_at: string | null
@@ -1544,13 +1673,17 @@ export type Database = {
           is_provisional: boolean
           list_price_box: number | null
           list_price_pack: number | null
+          list_price_unit: number | null
           manual_override_fields: string[]
+          memo: string | null
           official_name: string
           pack_image_ref: string | null
-          packs_per_box: number
+          packs_per_box: number | null
           product_code: string | null
           product_code_kind: string | null
           release_date: string | null
+          sales_form: string | null
+          source_url: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
@@ -1565,13 +1698,17 @@ export type Database = {
           is_provisional?: boolean
           list_price_box?: number | null
           list_price_pack?: number | null
+          list_price_unit?: number | null
           manual_override_fields?: string[]
+          memo?: string | null
           official_name: string
           pack_image_ref?: string | null
-          packs_per_box?: number
+          packs_per_box?: number | null
           product_code?: string | null
           product_code_kind?: string | null
           release_date?: string | null
+          sales_form?: string | null
+          source_url?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1586,13 +1723,17 @@ export type Database = {
           is_provisional?: boolean
           list_price_box?: number | null
           list_price_pack?: number | null
+          list_price_unit?: number | null
           manual_override_fields?: string[]
+          memo?: string | null
           official_name?: string
           pack_image_ref?: string | null
-          packs_per_box?: number
+          packs_per_box?: number | null
           product_code?: string | null
           product_code_kind?: string | null
           release_date?: string | null
+          sales_form?: string | null
+          source_url?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }

@@ -99,11 +99,12 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     sel("account_eligibilities").is("archived_at", null),
     sel("application_item_results").limit(50000),
     sel("sales").is("archived_at", null).limit(20000),
+    sel("product_images"),
   ] as const);
   const failed = q.find((r) => r.error);
   if (failed?.error) throw new Error(`データの取得に失敗しました: ${failed.error.code ?? ""}`);
 
-  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig, itemResults, sales] =
+  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig, itemResults, sales, productImages] =
     q.map((r) => r.data ?? []) as unknown as [
       Database["public"]["Tables"]["profiles"]["Row"][],
       Database["public"]["Tables"]["profile_target_rules"]["Row"][],
@@ -130,7 +131,14 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       Database["public"]["Tables"]["account_eligibilities"]["Row"][],
       Database["public"]["Tables"]["application_item_results"]["Row"][],
       Database["public"]["Tables"]["sales"]["Row"][],
+      Database["public"]["Tables"]["product_images"]["Row"][],
     ];
+  // Storage は非公開。表示用に期限付きURLをまとめて発行する（秘密鍵は使わず、ログイン中の本人の権限で）
+  const signed = new Map<string, string>();
+  if (productImages.length > 0) {
+    const { data } = await db.storage.from("product-images").createSignedUrls(productImages.map((i) => i.storage_path), 60 * 60);
+    for (const s of data ?? []) if (s.path && s.signedUrl) signed.set(s.path, s.signedUrl);
+  }
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
 
@@ -164,6 +172,15 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       provisional: p.is_provisional,
       listPriceBox: p.list_price_box,
       listPricePack: p.list_price_pack,
+      listPriceUnit: p.list_price_unit,
+      memo: p.memo,
+      sourceUrl: p.source_url,
+      salesForm: p.sales_form as "pack_box" | "single_set" | null,
+      images: Object.fromEntries(
+        productImages
+          .filter((i) => i.product_id === p.id && signed.has(i.storage_path))
+          .map((i) => [i.kind, { url: signed.get(i.storage_path)!, width: i.width, height: i.height, source: i.source as "import" | "manual" }]),
+      ),
       codeKind: p.product_code_kind as "official" | "custom" | null,
       archived: p.archived_at != null,
     })),

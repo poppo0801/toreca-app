@@ -128,9 +128,14 @@ export function monthSummary(data: AppData, ym: string): MonthSummary {
 
 // ------------------------------------------------------------------ 金額の仮計算
 /** 定価からの仮計算。定価がない単位（セット等）は null（推測しない）。 */
-export function suggestedAmount(product: Pick<Product, "listPriceBox" | "listPricePack"> | undefined, unit: ItemUnit, quantity: number): number | null {
+export function suggestedAmount(
+  product: Pick<Product, "listPriceBox" | "listPricePack"> & { listPriceUnit?: number | null } | undefined,
+  unit: ItemUnit,
+  quantity: number,
+): number | null {
   if (!product || !Number.isFinite(quantity) || quantity < 1) return null;
-  const unitPrice = unit === "box" ? product.listPriceBox : unit === "pack" ? product.listPricePack : null;
+  // BOX=BOX定価 / パック=1パック定価 / セット(単品・セット商品)=単品・セット定価。無ければ推測しない
+  const unitPrice = unit === "box" ? product.listPriceBox : unit === "pack" ? product.listPricePack : (product.listPriceUnit ?? null);
   return unitPrice == null ? null : unitPrice * quantity;
 }
 

@@ -176,6 +176,6 @@ export function formatItem(item: Pick<LotteryItem, "quantity" | "unit">, product
   if (item.unit === "set") return `${name} ×${item.quantity}セット`;
   if (item.unit === "pack") return `${name} ${item.quantity}P`;
   // 仮登録の商品は入数が未確認のため、パック換算は表示しない（既定値を事実として見せない）
-  const packs = product && !product.provisional ? ` (${item.quantity * product.packsPerBox}P)` : "";
+  const packs = product && !product.provisional && product.packsPerBox ? ` (${item.quantity * product.packsPerBox}P)` : "";
   return `${name} ${item.quantity}BOX${packs}`;
 }

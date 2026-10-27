@@ -125,9 +125,12 @@ export const ENTITIES: Record<EntityKey, Entity> = {
       },
       { name: "list_price_box", label: "BOX定価・円（任意。収支の金額の仮計算に使用）", type: "number", min: 0, max: 10000000, step: 1 },
       { name: "list_price_pack", label: "パック定価・円（任意）", type: "number", min: 0, max: 10000000, step: 1 },
-      { name: "category", label: "カテゴリ", type: "text", required: true, max: 40, default: "pokemon_card" },
+      { name: "category", label: "シリーズ・区分（例: 拡張パック、カードセット）", type: "text", max: 40 },
       { name: "release_date", label: "発売日（任意）", type: "date" },
-      { name: "packs_per_box", label: "1BOXのパック数", type: "number", required: true, min: 1, max: 500, step: 1, default: 30 },
+      { name: "packs_per_box", label: "1BOX入数・パック（BOX販売の商品のみ。不明は空欄）", type: "number", min: 1, max: 500, step: 1 },
+      { name: "list_price_unit", label: "単品・セット定価・円（任意）", type: "number", min: 0, max: 10000000, step: 1 },
+      { name: "source_url", label: "情報確認元URL（任意）", type: "text", max: 2000 },
+      { name: "memo", label: "備考", type: "textarea", max: 2000 },
     ],
   },
   product_aliases: {
@@ -313,6 +316,11 @@ export function buildSchema(entity: Entity) {
 /** 商品コードのみ「空欄=NULL」（一意制約のため空文字を避ける） */
 export function toDbValues(entity: Entity, values: Record<string, unknown>): Record<string, unknown> {
   const out = { ...values };
+  if (entity.key === "products") {
+    // 任意のテキスト項目は空欄=未設定(NULL)。source_url は空文字だとDBの形式チェックに反する
+    if (out.source_url === "") out.source_url = null;
+    if (out.memo === "") out.memo = null;
+  }
   if (entity.key === "products" && out.product_code === "") {
     out.product_code = null;
     out.product_code_kind = null;

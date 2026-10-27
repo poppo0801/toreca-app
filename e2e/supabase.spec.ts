@@ -1,4 +1,24 @@
+import { crc32, deflateSync } from "node:zlib";
 import { expect, test, type Page } from "@playwright/test";
+
+/** 透過PNG（w×h・半透明の単色）をその場で生成する（リポジトリに画像を置かない） */
+function makePng(w: number, h: number, rgb: [number, number, number]): Buffer {
+  const raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw.set([...rgb, x < 3 ? 0 : 255], y * (w * 4 + 1) + 1 + x * 4);
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
 
 const email = process.env.E2E_EMAIL!;
 const password = process.env.E2E_PASSWORD!;
@@ -339,6 +359,71 @@ test("ユーザー設定: 表示名・色・マーク・通知先を変更でき
   await page.getByRole("button", { name: /ユーザー切り替え/ }).click();
   await page.getByRole("radio", { name: "プロフィール サブ" }).click();
   await expect(page.locator("header").getByTestId("current-profile")).toHaveText("サブ");
+});
+
+test("商品画像: 画像なしはプレースホルダー、手動アップロードで縦横比を保って表示、差し替え・商品編集もできる", async ({ page }) => {
+  await login(page);
+  // 画像なしの商品を（抽選登録の自動仮登録で）用意
+  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  const dialog = page.getByRole("dialog");
+  await fillMasters(dialog, "E2E画像電機", "E2E画像店", "E2E画像商品");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+  // 抽選カード: 画像が無くても問題なく表示（共通プレースホルダー）
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card = page.getByTestId("lottery-card").filter({ hasText: "E2E画像商品" });
+  await expect(card.getByTestId("image-placeholder")).toBeVisible();
+
+  await page.goto("/settings/masters");
+  await page.getByRole("tab", { name: "商品", exact: true }).click();
+  const row = page.getByTestId("master-row").filter({ hasText: "E2E画像商品" });
+  await expect(row.getByTestId("image-placeholder")).toBeVisible();
+  await row.getByRole("button", { name: /の画像を管理/ }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByTestId("image-slot-box").getByTestId("image-placeholder")).toBeVisible();
+
+  // BOX画像（425x500）をアップロード → 縦横比を保って表示される（正方形に変形されない）
+  await dlg.getByLabel("BOX画像を選択").setInputFiles({ name: "x_b.png", mimeType: "image/png", buffer: makePng(425, 500, [200, 60, 60]) });
+  const box = dlg.getByTestId("image-slot-box").getByRole("img", { name: /BOX/ });
+  await expect(box).toBeVisible();
+  await expect(dlg.getByTestId("image-slot-box")).toContainText("手動で登録");
+  await expect(dlg.getByTestId("image-slot-pack").getByTestId("image-placeholder")).toBeVisible(); // 片方だけでも問題なし
+  const b = (await box.boundingBox())!;
+  expect(Math.abs(b.width / b.height - 425 / 500)).toBeLessThan(0.03);
+
+  // パック画像（266x500）も追加し、BOXを差し替え
+  await dlg.getByLabel("パック画像を選択").setInputFiles({ name: "x_p.png", mimeType: "image/png", buffer: makePng(266, 500, [60, 60, 200]) });
+  const pack = dlg.getByTestId("image-slot-pack").getByRole("img", { name: /パック/ });
+  await expect(pack).toBeVisible();
+  const pb = (await pack.boundingBox())!;
+  expect(Math.abs(pb.width / pb.height - 266 / 500)).toBeLessThan(0.03);
+  await dlg.getByLabel("BOX画像を選択").setInputFiles({ name: "x_b2.png", mimeType: "image/png", buffer: makePng(425, 500, [60, 200, 60]) });
+  await expect(dlg.getByTestId("image-slot-box")).toContainText("手動で登録");
+  // 画像以外・大きすぎるファイルは拒否される
+  await dlg.getByLabel("単品・セット画像を選択").setInputFiles({ name: "x.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
+  await expect(dlg.getByRole("alert")).toContainText("PNG・JPEG・WebP");
+  await page.keyboard.press("Escape");
+
+  // 一覧のサムネイルと抽選カードに表示され、再読込後も保持される
+  await page.reload();
+  await page.getByRole("tab", { name: "商品", exact: true }).click();
+  await expect(page.getByTestId("master-row").filter({ hasText: "E2E画像商品" }).getByRole("img", { name: /E2E画像商品 BOX/ })).toBeVisible();
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  await expect(page.getByTestId("lottery-card").filter({ hasText: "E2E画像商品" }).getByRole("img", { name: /E2E画像商品 BOX/ })).toBeVisible();
+  await page.screenshot({ path: "docs/screenshots/stage4a-card-mobile.png" });
+
+  // 商品情報の編集（定価・入数）。仮登録は確定扱いになる。単品の入数は未設定のまま
+  await page.goto("/settings/masters");
+  await page.getByRole("tab", { name: "商品", exact: true }).click();
+  const r2 = page.getByTestId("master-row").filter({ hasText: "E2E画像商品" });
+  await expect(r2.getByTestId("provisional-badge")).toBeVisible();
+  await r2.getByRole("button", { name: "編集" }).click();
+  await page.getByLabel(/商品コード（任意/).fill("E2E-IMG");
+  await page.getByLabel(/BOX定価/).fill("5400");
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(r2.getByTestId("provisional-badge")).toHaveCount(0);
+  await expect(r2).toContainText("E2E-IMG");
 });
 
 test("通知設定の画面: 端末の状態とプロフィール別の通知ルール", async ({ page }) => {

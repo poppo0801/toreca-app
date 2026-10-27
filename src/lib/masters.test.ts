@@ -15,13 +15,17 @@ describe("マスター入力検証", () => {
 
   it("商品: 入数は1以上の整数。任意の日付は空欄でnull", () => {
     const s = buildSchema(ENTITIES.products);
-    const base = { official_name: "P", product_code: "", category: "pokemon_card", release_date: "", packs_per_box: "20", product_code_kind: "custom", list_price_box: "", list_price_pack: "180" };
+    const base = { official_name: "P", product_code: "", category: "pokemon_card", release_date: "", packs_per_box: "20", product_code_kind: "custom", list_price_box: "", list_price_pack: "180", list_price_unit: "", source_url: "", memo: "" };
     const ok = s.parse(base) as Record<string, unknown>;
     expect(ok.packs_per_box).toBe(20);
     expect(ok.release_date).toBeNull();
     // 定価は任意（空欄=null）。コードが空ならコード種別も保存しない
     expect(ok.list_price_box).toBeNull();
     expect(ok.list_price_pack).toBe(180);
+    expect(ok.list_price_unit).toBeNull();
+    const db = toDbValues(ENTITIES.products, ok);
+    expect(db.source_url).toBeNull();
+    expect(db.memo).toBeNull();
     expect(toDbValues(ENTITIES.products, ok).product_code_kind).toBeNull();
     expect(toDbValues(ENTITIES.products, ok).product_code).toBeNull();
     expect(s.safeParse({ ...base, packs_per_box: "0" }).success).toBe(false);

@@ -21,15 +21,17 @@ if (!linked) throw new Error("接続先の照合ができません（supabase li
 if (!url.includes(linked)) throw new Error("接続先がリンク済みのトレカ専用プロジェクトと一致しません。中止します。");
 
 // push_subscriptions は購読鍵を含むためバックアップ対象外（端末で通知を有効にし直せば復元できる）
-const TABLES = [
+const SKIP = new Set((process.env.BACKUP_SKIP_TABLES ?? "").split(",").filter(Boolean)); // 未適用のマイグレーションで追加予定のテーブルを除く場合のみ使用
+const TABLES_ALL = [
   "households", "household_members", "profiles", "chains", "stores", "products", "product_aliases",
   "product_prices", "family_groups", "address_groups", "identities", "service_accounts",
   "profile_target_rules", "campaigns", "lotteries", "lottery_items", "lottery_management", "applications",
   "purchases", "purchase_items", "skip_rules", "skip_rule_exceptions", "application_rules", "limit_exemptions",
   "chain_requirements", "account_eligibilities", "eligibility_purchases", "notification_settings", "notification_deliveries", "audit_logs",
-  "application_item_results", "sales",
+  "application_item_results", "sales", "product_set_items", "product_images",
 ];
 
+const TABLES = TABLES_ALL.filter((t) => !SKIP.has(t));
 const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 // 出力先は BACKUP_OUT_DIR（local-backup.mjs が一時ディレクトリを指定。平文は暗号化後に削除される）。既定は backups/

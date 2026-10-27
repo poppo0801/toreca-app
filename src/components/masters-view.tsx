@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { useApp } from "@/components/app-provider";
+import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ENTITIES, ENTITY_KEYS, type Entity, type EntityKey, type Field } from "@/lib/masters";
@@ -121,7 +122,8 @@ function MasterItem({
   return (
     <li className={cn("rounded-lg border bg-card p-3", retired && "opacity-60")} data-testid="master-row">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        {entity.key === "products" && <ProductThumbById productId={row.id} heightClass="h-16" />}
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-bold">
             {(entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ")}
             {row.is_provisional === true && (
@@ -134,6 +136,7 @@ function MasterItem({
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {entity.key === "products" && <ProductImagesButton productId={row.id} name={String(row.official_name)} />}
           {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} stores={rows.stores} rules={rules} />}
           <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline">編集</Button>} />
           <Button size="sm" variant="outline" onClick={toggle} disabled={pending}>
