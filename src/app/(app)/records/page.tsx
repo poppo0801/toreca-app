@@ -3,7 +3,7 @@ import { RecordsView } from "@/components/records-view";
 export default function RecordsPage() {
   return (
     <>
-      <h1 className="mb-3 text-lg font-bold">記録・分析</h1>
+      <h1 className="mb-2 text-base font-bold">応募・当選実績</h1>
       <RecordsView />
     </>
   );

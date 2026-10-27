@@ -1,12 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
-import { dbToFlex, flexInputToDb, lotteryInputSchema, type LotteryInput } from "@/lib/lottery-input";
+import { dbToFlex, flexInputToDb, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
 import type { Database } from "@/types/database";
 import type {
   AppData,
   EventState,
   FulfillmentStatus,
+  MultiMode,
   ProfileColor,
   ResultStatus,
 } from "@/types/domain";
@@ -33,10 +34,13 @@ export function mapDbError(e: PgError): string {
     case "23503":
       return "参照先が存在しない、または他の世帯のデータです";
     case "23514":
-      return e.message.includes("fulfillment_status")
-        ? "購入手続き済みの応募の結果は変更できません"
-        : "入力値が制約に違反しています";
+      if (e.message.includes("fulfillment_status") || e.message.includes("already purchased")) return "購入済みの応募の結果は変更できません";
+      if (e.message.includes("only one item can win")) return "この抽選は当選できる商品が1つまでです";
+      if (e.message.includes("cost quantity exceeds")) return "この購入分の原価は既に他の売却に使われています（数量を超えています）";
+      if (e.message.includes("single lottery") || e.message.includes("multi lottery")) return "抽選方式と商品数が一致していません";
+      return "入力値が制約に違反しています";
     case "22023":
+      if (e.message.includes("selected item")) return "応募時に選んだ商品のみ結果を登録できます";
       return "当選した応募のみ操作できます";
     case "P0002":
       return "対象のデータが見つかりません";
@@ -84,7 +88,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     sel("lottery_items").limit(20000),
     sel("lottery_management").limit(5000),
     sel("applications").limit(20000),
-    sel("purchases").limit(20000),
+    sel("purchases").is("archived_at", null).limit(20000),
     sel("purchase_items").limit(50000),
     sel("skip_rules"),
     sel("skip_rule_exceptions"),
@@ -93,11 +97,13 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     sel("limit_exemptions"),
     sel("chain_requirements").is("archived_at", null),
     sel("account_eligibilities").is("archived_at", null),
+    sel("application_item_results").limit(50000),
+    sel("sales").is("archived_at", null).limit(20000),
   ] as const);
   const failed = q.find((r) => r.error);
   if (failed?.error) throw new Error(`データの取得に失敗しました: ${failed.error.code ?? ""}`);
 
-  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig] =
+  const [profiles, rules, chains, stores, products, aliases, families, identities, accounts, campaigns, lotteries, items, mgmt, apps, purchases, pitems, skips, skipEx, audit, appRules, exemptions, reqs, elig, itemResults, sales] =
     q.map((r) => r.data ?? []) as unknown as [
       Database["public"]["Tables"]["profiles"]["Row"][],
       Database["public"]["Tables"]["profile_target_rules"]["Row"][],
@@ -122,6 +128,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       Database["public"]["Tables"]["limit_exemptions"]["Row"][],
       Database["public"]["Tables"]["chain_requirements"]["Row"][],
       Database["public"]["Tables"]["account_eligibilities"]["Row"][],
+      Database["public"]["Tables"]["application_item_results"]["Row"][],
+      Database["public"]["Tables"]["sales"]["Row"][],
     ];
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
@@ -135,6 +143,9 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         label: p.label,
         initial: p.initial,
         color: p.color as ProfileColor,
+        colorHex: p.color_hex,
+        iconMark: p.icon_mark,
+        notifyRecipientIds: p.notify_recipient_ids,
         active: p.active,
         allowedChainIds: allowChains.length > 0 ? allowChains : null,
         allowedStoreIds: mine.filter((r) => r.mode === "allow" && r.store_id !== null).map((r) => r.store_id as string),
@@ -142,14 +153,18 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         blockedStoreIds: mine.filter((r) => r.mode === "block" && r.store_id !== null).map((r) => r.store_id as string),
       };
     }),
-    chains: chains.map((c) => ({ id: c.id, name: c.name, archived: c.archived_at != null })),
-    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, archived: s.archived_at != null })),
+    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null })),
+    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null })),
     products: products.map((p) => ({
       id: p.id,
       officialName: p.official_name,
       aliases: aliases.filter((a) => a.product_id === p.id).map((a) => a.alias),
       code: p.product_code ?? "",
       packsPerBox: p.packs_per_box,
+      provisional: p.is_provisional,
+      listPriceBox: p.list_price_box,
+      listPricePack: p.list_price_pack,
+      codeKind: p.product_code_kind as "official" | "custom" | null,
       archived: p.archived_at != null,
     })),
     familyGroups: families.map((f) => ({ id: f.id, label: f.label })),
@@ -177,7 +192,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       items: items
         .filter((i) => i.lottery_id === l.id)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .map((i) => ({ productId: i.product_id, quantity: i.quantity, unit: i.unit as "box" | "pack" | "set" })),
+        .map((i) => ({ id: i.id, productId: i.product_id, quantity: i.quantity, unit: i.unit as "box" | "pack" | "set" })),
+      multiMode: l.multi_mode as MultiMode,
       applyStart: dbToFlex(l.apply_start_precision, l.apply_start_date, l.apply_start_at),
       applyDeadline: dbToFlex(l.apply_deadline_precision, l.apply_deadline_date, l.apply_deadline_at),
       resultDate: dbToFlex(l.result_precision, l.result_date, l.result_at),
@@ -213,6 +229,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         appliedAt: a.applied_at,
         state: a.state as "applied" | "cancelled",
         result: a.result_status as ResultStatus,
+        itemResults: Object.fromEntries(itemResults.filter((r) => r.application_id === a.id).map((r) => [r.lottery_item_id, r.result_status as ResultStatus])),
+        selectedItemId: a.selected_item_id,
         resultConfirmedAt: a.result_confirmed_at,
         fulfillment: a.fulfillment_status as FulfillmentStatus,
         createdAt: a.created_at,
@@ -221,13 +239,31 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       id: p.id,
       applicationId: p.application_id,
       storeId: p.store_id,
+      storeLabel: p.store_label,
       purchasedOn: dbToFlex(p.purchased_at ? "date_time" : p.purchased_date ? "date_only" : "unknown", p.purchased_date, p.purchased_at),
       channel: p.channel as "store" | "shipping" | "online" | "other",
       source: p.source_kind as "lottery" | "manual" | "import",
       note: p.note,
       items: pitems
         .filter((i) => i.purchase_id === p.id)
-        .map((i) => ({ productId: i.product_id, quantity: i.quantity, unit: i.unit as "box" | "pack" | "set", amountPaid: i.amount_paid })),
+        .map((i) => ({ id: i.id, productId: i.product_id, productLabel: i.product_label, lotteryItemId: i.lottery_item_id, quantity: i.quantity, unit: i.unit as "box" | "pack" | "set", amountPaid: i.amount_paid })),
+    })),
+    sales: sales.map((x) => ({
+      id: x.id,
+      soldOn: x.sold_on,
+      platform: x.platform,
+      productId: x.product_id,
+      productLabel: x.product_label,
+      quantity: x.quantity,
+      unit: x.unit as "box" | "pack" | "set" | "piece",
+      amount: x.amount,
+      sellerProfileId: x.seller_profile_id,
+      costAmount: x.cost_amount,
+      costPurchaseItemId: x.cost_purchase_item_id,
+      costQuantity: x.cost_quantity,
+      fee: x.fee,
+      shipping: x.shipping,
+      memo: x.memo,
     })),
     skipRules: skips.map((s) => ({
       id: s.id,
@@ -278,11 +314,6 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
 // ------------------------------------------------------------------ 抽選の登録・編集
 type LotteryInsert = Database["public"]["Tables"]["lotteries"]["Insert"];
 
-async function loadStore(db: Db, storeId: string) {
-  const { data } = await db.from("stores").select("id,chain_id,name").eq("id", storeId).maybeSingle();
-  return data;
-}
-
 function lotteryRow(input: z.output<typeof lotteryInputSchema>, actor: string | null) {
   const s = flexInputToDb(input.applyStart);
   const d = flexInputToDb(input.applyDeadline);
@@ -309,8 +340,10 @@ function lotteryRow(input: z.output<typeof lotteryInputSchema>, actor: string | 
 }
 
 /**
- * 抽選の新規登録(id=null)／編集。新規時は応募状況（応募済み/当選/落選）も同時登録でき、
- * 応募開始・締切が過去でもエラーにしない。編集時は応募・当落には触れない。
+ * 抽選の新規登録(id=null)／編集。系列・店舗・商品は既存マスターの選択でも未登録名の自由入力でもよく、
+ * 未登録なら仮登録として自動作成する（名称照合で重複作成しない）。マスター・抽選・明細・★・応募状況は
+ * DB関数 save_lottery_tx 内の1トランザクションで保存され、途中で失敗すると全体がロールバックされる。
+ * 新規時は応募状況（応募済み/当選/落選）も同時登録でき、締切が過去でもエラーにしない。編集時は応募・当落に触れない。
  */
 export async function saveLottery(
   db: Db,
@@ -324,110 +357,36 @@ export async function saveLottery(
   const input = parsed.data;
   if (actor !== null && !uuid.safeParse(actor).success) return fail("リクエストが不正です");
   if (id !== null && !uuid.safeParse(id).success) return fail("リクエストが不正です");
-
-  const store = await loadStore(db, input.storeId);
-  if (!store) return fail("店舗が見つかりません");
-  if (store.chain_id !== input.chainId) return fail("店舗が選択した系列に属していません");
-
-  // キャンペーン（既存選択 or 新規作成）
-  let campaignId = input.campaignId;
-  if (input.newCampaign) {
-    const { data, error } = await db
-      .from("campaigns")
-      .insert({ household_id: householdId, chain_id: input.chainId, name: input.newCampaign.name, store_rule: input.newCampaign.storeRule, updated_by_profile_id: actor })
-      .select("id")
-      .single();
-    if (error) return fail(mapDbError(error));
-    campaignId = data.id;
-  } else if (campaignId) {
-    const { data } = await db.from("campaigns").select("chain_id").eq("id", campaignId).maybeSingle();
-    if (!data || data.chain_id !== input.chainId) return fail("キャンペーンが選択した系列に属していません");
+  const modeError = validateMultiMode(input.multiMode, input.items.length);
+  if (modeError) return fail(modeError);
+  if (input.multiMode === "choose_one" && input.applications.length > 0) {
+    // 「どの商品に応募したか」はユーザーごとに必要なため、登録後にカード上で選択する
+    return fail("希望商品を1つ選んで応募する方式では、登録後に応募するユーザーごとに希望商品を選択してください");
   }
 
-  const base = {
-    ...lotteryRow(input, actor),
-    campaign_id: campaignId,
-    chain_id: input.chainId,
-    store_id: input.storeId,
-  };
-
-  let lotteryId: string;
-  if (id === null) {
-    const { data, error } = await db
-      .from("lotteries")
-      .insert({ ...base, household_id: householdId })
-      .select("id")
-      .single();
-    if (error) return fail(mapDbError(error));
-    lotteryId = data.id;
-  } else {
-    const { data, error } = await db.from("lotteries").update(base).eq("id", id).select("id").maybeSingle();
-    if (error) return fail(mapDbError(error));
-    if (!data) return fail("対象のデータが見つかりません");
-    lotteryId = data.id;
-  }
-
-  // 失敗時に中途半端な抽選を残さない（新規のみ。削除はせずアーカイブで退避）
-  const abort = async (message: string) => {
-    if (id === null) await db.from("lotteries").update({ archived_at: nowIso() }).eq("id", lotteryId);
-    return fail(message);
-  };
-
-  // 商品明細: 先に新規を入れてから旧明細を除去（途中失敗でも明細が0件にならない）
-  const { data: oldItems } = await db.from("lottery_items").select("id").eq("lottery_id", lotteryId);
-  const { error: itemError } = await db.from("lottery_items").insert(
-    input.items.map((i) => ({
-      household_id: householdId,
-      lottery_id: lotteryId,
-      product_id: i.productId,
+  const payload = {
+    id,
+    chain: { id: input.chain.id, name: input.chain.name },
+    store: { id: input.store.id, name: input.store.name, prefecture: input.store.prefecture },
+    campaign: {
+      id: input.campaignId,
+      new: input.newCampaign ? { name: input.newCampaign.name, store_rule: input.newCampaign.storeRule } : null,
+    },
+    lottery: { ...lotteryRow(input, actor), multi_mode: input.multiMode },
+    items: input.items.map((i) => ({
+      id: i.id ?? null,
+      product: { id: i.product.id, name: i.product.name },
       quantity: i.quantity,
       unit: i.unit,
-      updated_by_profile_id: actor,
     })),
-  );
-  if (itemError) return abort(mapDbError(itemError));
-  if (oldItems && oldItems.length > 0) {
-    const { error } = await db.from("lottery_items").delete().in("id", oldItems.map((o) => o.id));
-    if (error) return fail(mapDbError(error));
-  }
-
-  if (id === null) {
-    const { error: mErr } = await db.from("lottery_management").insert({
-      lottery_id: lotteryId,
-      household_id: householdId,
-      is_managed: input.isManaged ?? true,
-      managed_source: "manual",
-      managed_at: nowIso(),
-      updated_by_profile_id: actor,
-    });
-    if (mErr) return abort(mapDbError(mErr));
-
-    // 応募状況の同時登録（締切後の過去抽選でも可）
-    if (input.applications.length > 0) {
-      const { data: accounts } = await db
-        .from("service_accounts")
-        .select("id,chain_id,active")
-        .in("id", input.applications.map((a) => a.accountId));
-      const okIds = new Set((accounts ?? []).filter((a) => a.chain_id === input.chainId && a.active).map((a) => a.id));
-      if (input.applications.some((a) => !okIds.has(a.accountId))) {
-        return abort("この系列で有効な応募アカウントのみ指定できます");
-      }
-      const appliedAt = input.appliedAt ? new Date(`${input.appliedAt}:00+09:00`).toISOString() : null;
-      const { error } = await db.from("applications").insert(
-        input.applications.map((a) => ({
-          household_id: householdId,
-          lottery_id: lotteryId,
-          service_account_id: a.accountId,
-          applied_at: appliedAt,
-          state: "applied",
-          result_status: a.status === "applied" ? "pending" : a.status,
-          updated_by_profile_id: actor,
-        })),
-      );
-      if (error) return abort(mapDbError(error));
-    }
-  }
-  return ok({ id: lotteryId });
+    is_managed: input.isManaged ?? true,
+    applications: input.applications.map((a) => ({ profile_id: a.profileId, status: a.status })),
+    applied_at: input.appliedAt ? new Date(`${input.appliedAt}:00+09:00`).toISOString() : "",
+  };
+  void householdId;
+  const { data, error } = await db.rpc("save_lottery_tx", { p: payload as never, p_actor: actor as string });
+  if (error) return fail(mapDbError(error));
+  return ok({ id: data as string });
 }
 
 /** 同系列の他店舗へ複製。店舗ごとに独立した抽選を作り、同じキャンペーンに関連づける（応募・当落は複製しない）。 */
@@ -487,6 +446,7 @@ export async function duplicateLottery(
         event_state: ["cancelled", "closed"].includes(src.event_state) ? "open" : src.event_state,
         limit_basis: src.limit_basis,
         limit_max_count: src.limit_max_count,
+        multi_mode: src.multi_mode,
         source_kind: "manual",
         memo: src.memo,
         updated_by_profile_id: actor,
@@ -539,13 +499,33 @@ export async function setManaged(db: Db, householdId: string, lotteryId: string,
 }
 
 /** 応募の記録／取消。抽選×アカウントで一意。取消しても行は残す。 */
-export async function setApplied(db: Db, householdId: string, lotteryId: string, accountId: string, applied: boolean, actor: string | null): Promise<ServiceResult> {
+export async function setApplied(
+  db: Db,
+  householdId: string,
+  lotteryId: string,
+  accountId: string,
+  applied: boolean,
+  actor: string | null,
+  selectedItemId: string | null = null,
+): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success || !uuid.safeParse(accountId).success) return fail("リクエストが不正です");
+  if (selectedItemId !== null && !uuid.safeParse(selectedItemId).success) return fail("リクエストが不正です");
+  const { data: mode } = await db.from("lotteries").select("multi_mode").eq("id", lotteryId).maybeSingle();
+  if (!mode) return fail("対象のデータが見つかりません");
+  if (applied && mode.multi_mode === "choose_one") {
+    if (!selectedItemId) return fail("応募する商品を選択してください");
+    const { data: it } = await db.from("lottery_items").select("id").eq("id", selectedItemId).eq("lottery_id", lotteryId).maybeSingle();
+    if (!it) return fail("選択した商品がこの抽選にありません");
+  }
+  const selected = mode.multi_mode === "choose_one" ? selectedItemId : null;
   const state = applied ? "applied" : "cancelled";
   const { data: existing } = await db.from("applications").select("id,state").eq("lottery_id", lotteryId).eq("service_account_id", accountId).maybeSingle();
   if (existing) {
     if (existing.state === state) return ok(undefined);
-    const { error } = await db.from("applications").update({ state, updated_by_profile_id: actor }).eq("id", existing.id);
+    const { error } = await db
+      .from("applications")
+      .update({ state, ...(applied && selected ? { selected_item_id: selected } : {}), updated_by_profile_id: actor })
+      .eq("id", existing.id);
     return error ? fail(mapDbError(error)) : ok(undefined);
   }
   if (!applied) return ok(undefined);
@@ -553,7 +533,7 @@ export async function setApplied(db: Db, householdId: string, lotteryId: string,
   const { data: acc } = await db.from("service_accounts").select("chain_id,active").eq("id", accountId).maybeSingle();
   if (!lot || !acc || lot.chain_id !== acc.chain_id || !acc.active) return fail("この抽選に応募できるアカウントではありません");
   const { error } = await db.from("applications").insert({
-    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: nowIso(), state: "applied", updated_by_profile_id: actor,
+    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: nowIso(), state: "applied", selected_item_id: selected, updated_by_profile_id: actor,
   });
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
@@ -561,6 +541,11 @@ export async function setApplied(db: Db, householdId: string, lotteryId: string,
 export async function setResult(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
   const r = z.enum(["pending", "won", "lost", "unknown"]).safeParse(result);
   if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  // 複数商品抽選は商品別の当落(setItemResults)で登録する（集計値を直接書き換えない）
+  const { data: target } = await db.from("applications").select("lotteries(multi_mode)").eq("id", applicationId).maybeSingle();
+  const lot = target?.lotteries as { multi_mode: string } | { multi_mode: string }[] | null | undefined;
+  const mode = Array.isArray(lot) ? lot[0]?.multi_mode : lot?.multi_mode;
+  if (mode && mode !== "single") return fail("複数商品の抽選は商品ごとに当落を登録してください");
   const { data, error } = await db
     .from("applications")
     .update({ result_status: r.data, result_confirmed_at: r.data === "pending" ? null : nowIso(), updated_by_profile_id: actor })
@@ -642,4 +627,68 @@ export async function addManualPurchase(db: Db, householdId: string, raw: Manual
   );
   if (iErr) return fail(mapDbError(iErr));
   return ok({ id: data.id });
+}
+
+// ------------------------------------------------------------------ 複数商品抽選: 商品別の当落
+const itemResultsSchema = z
+  .array(z.object({ itemId: z.uuid(), result: z.enum(["pending", "won", "lost", "unknown"]) }))
+  .min(1)
+  .max(20);
+
+/**
+ * 商品別の当落を登録する（B/C/D方式）。DB関数が方式のルール（Cは当選1商品まで、Dは選択商品のみ）を検証し、
+ * 応募全体の当落（集計値）を再計算する。購入済みの応募は変更できない。
+ */
+export async function setItemResults(
+  db: Db,
+  applicationId: string,
+  results: { itemId: string; result: ResultStatus }[],
+  actor: string | null,
+): Promise<ServiceResult> {
+  const r = itemResultsSchema.safeParse(results);
+  if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  const { error } = await db.rpc("set_item_results", {
+    p_application_id: applicationId,
+    p_results: r.data.map((x) => ({ item_id: x.itemId, result: x.result })) as never,
+    p_actor: actor as string,
+  });
+  return error ? fail(mapDbError(error)) : ok(undefined);
+}
+
+// ------------------------------------------------------------------ プロフィール（表示名・色・マーク・通知先）
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+export const profileSettingsSchema = z.object({
+  label: z.string().trim().min(1, "表示名を入力してください").max(20, "表示名は20文字以内です"),
+  color: z.enum(["blue", "green", "purple", "pink", "teal"]),
+  colorHex: hex.nullable(),
+  iconMark: z.string().trim().min(1).max(20),
+  /** null=本人のみ / 空配列=通知なし */
+  notifyRecipientIds: z.array(z.uuid()).max(10).nullable(),
+});
+export type ProfileSettingsInput = z.input<typeof profileSettingsSchema>;
+
+export async function updateProfileSettings(db: Db, profileId: string, raw: ProfileSettingsInput, actor: string | null): Promise<ServiceResult> {
+  const p = profileSettingsSchema.safeParse(raw);
+  if (!p.success || !uuid.safeParse(profileId).success) return fail(p.success ? "リクエストが不正です" : (p.error.issues[0]?.message ?? "入力内容を確認してください"));
+  const v = p.data;
+  const { data: all } = await db.from("profiles").select("id,active");
+  const valid = new Set((all ?? []).filter((x) => x.active).map((x) => x.id));
+  if (v.notifyRecipientIds?.some((id) => !valid.has(id))) return fail("通知先に無効なユーザーが含まれています");
+  const initial = Array.from(v.label)[0] ?? "A";
+  const { data, error } = await db
+    .from("profiles")
+    .update({
+      label: v.label,
+      initial,
+      color: v.color,
+      color_hex: v.colorHex,
+      icon_mark: v.iconMark,
+      notify_recipient_ids: v.notifyRecipientIds,
+      updated_by_profile_id: actor,
+    })
+    .eq("id", profileId)
+    .select("id")
+    .maybeSingle();
+  if (error) return fail(error.code === "23505" ? "同じ表示名のユーザーが既にいます" : mapDbError(error));
+  return data ? ok(undefined) : fail("対象のデータが見つかりません");
 }

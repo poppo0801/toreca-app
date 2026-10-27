@@ -10,6 +10,12 @@ import {
   setLotterySkipAction,
   setManagedAction,
   setResultAction,
+  setItemResultsAction,
+  saveExpenseAction,
+  deleteExpenseAction,
+  saveSaleAction,
+  deleteSaleAction,
+  updateProfileAction,
 } from "@/app/(app)/lotteries/actions";
 import type { LotteryRepository } from "@/services/types";
 
@@ -23,7 +29,13 @@ export class ServerActionRepository implements LotteryRepository {
     return res.data;
   }
   setManaged = (actor: string, id: string, v: boolean) => setManagedAction(id, v, actor);
-  setApplied = (actor: string, id: string, acc: string, v: boolean) => setAppliedAction(id, acc, v, actor);
+  setApplied = (actor: string, id: string, acc: string, v: boolean, selected: string | null = null) => setAppliedAction(id, acc, v, actor, selected);
+  setItemResults = (actor: string, appId: string, results: Parameters<typeof setItemResultsAction>[1]) => setItemResultsAction(appId, results, actor);
+  saveExpense = (actor: string, id: string | null, input: Parameters<typeof saveExpenseAction>[1]) => saveExpenseAction(id, input, actor);
+  deleteExpense = (actor: string, id: string) => deleteExpenseAction(id, actor);
+  saveSale = (actor: string, id: string | null, input: Parameters<typeof saveSaleAction>[1]) => saveSaleAction(id, input, actor);
+  deleteSale = (actor: string, id: string) => deleteSaleAction(id, actor);
+  updateProfile = (actor: string, profileId: string, input: Parameters<typeof updateProfileAction>[1]) => updateProfileAction(profileId, input, actor);
   setResult = (actor: string, appId: string, r: Parameters<typeof setResultAction>[1]) => setResultAction(appId, r, actor);
   setFulfillment = (actor: string, appId: string, f: Parameters<typeof setFulfillmentAction>[1]) => setFulfillmentAction(appId, f, actor);
   setLotterySkip = (profileId: string, id: string, v: boolean) => setLotterySkipAction(profileId, id, v, profileId);

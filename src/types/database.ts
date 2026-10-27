@@ -1542,6 +1542,8 @@ export type Database = {
           id: string
           image_url: string | null
           is_provisional: boolean
+          list_price_box: number | null
+          list_price_pack: number | null
           manual_override_fields: string[]
           official_name: string
           pack_image_ref: string | null
@@ -1561,6 +1563,8 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_provisional?: boolean
+          list_price_box?: number | null
+          list_price_pack?: number | null
           manual_override_fields?: string[]
           official_name: string
           pack_image_ref?: string | null
@@ -1580,6 +1584,8 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_provisional?: boolean
+          list_price_box?: number | null
+          list_price_pack?: number | null
           manual_override_fields?: string[]
           official_name?: string
           pack_image_ref?: string | null

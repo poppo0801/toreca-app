@@ -13,7 +13,14 @@ import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/set
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { formatItem, isManaged, isResultOverdue, type Tab } from "@/lib/lottery-view";
 import { cn } from "@/lib/utils";
-import type { AccountStatus, EventState, Lottery, ReceiveMethod, ResultStatus } from "@/types/domain";
+import type { AccountStatus, Application, EventState, Lottery, MultiMode, ReceiveMethod, ResultStatus } from "@/types/domain";
+
+const MODE_LABEL: Record<MultiMode, string | null> = {
+  single: null,
+  all: "商品ごとに当落",
+  one_win: "当選は1商品まで",
+  choose_one: "1商品を選んで応募",
+};
 
 export const STATUS_META: Record<AccountStatus, { symbol: string; label: string }> = {
   applied: { symbol: "●", label: "応募済み" },
@@ -67,10 +74,12 @@ export function LotteryCard({
   lottery,
   tab,
   detailMode,
+  highlighted = false,
 }: {
   lottery: Lottery;
   tab: Tab;
   detailMode: boolean;
+  highlighted?: boolean;
 }) {
   const { data, now, profile, actions, persistent, reload } = useApp();
   const [expanded, setExpanded] = useState(false);
@@ -78,7 +87,8 @@ export function LotteryCard({
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
-  const open = detailMode || expanded;
+  const [choosing, setChoosing] = useState<string | null>(null);
+  const open = detailMode || expanded || highlighted;
 
   const chain = data.chains.find((c) => c.id === lottery.chainId);
   const store = data.stores.find((s) => s.id === lottery.storeId);
@@ -114,6 +124,7 @@ export function LotteryCard({
       className={cn(
         "rounded-lg border bg-card p-3 text-card-foreground",
         overdue && "border-danger border-2",
+        highlighted && "ring-2 ring-primary",
       )}
     >
       {/* 1行目: ★ / 店舗 / バッジ / 残り時間 */}
@@ -142,11 +153,20 @@ export function LotteryCard({
             {mySkipped && <Chip className="text-muted-foreground">{{ lottery: "今回スルー", store: "店舗スルー中", chain: "系列スルー中" }[skipSource]}</Chip>}
             {!mySkipped && skipException && <Chip className="text-muted-foreground">スルー例外（今回だけ対象）</Chip>}
           </div>
-          <ul className="mt-0.5 text-sm">
-            {lottery.items.map((it, i) => (
-              <li key={i}>{formatItem(it, data.products.find((p) => p.id === it.productId))}</li>
+          <ul className="mt-0.5 text-sm" data-testid="lottery-items">
+            {(open ? lottery.items : lottery.items.slice(0, 1)).map((it, i) => (
+              <li key={i}>
+                {formatItem(it, data.products.find((p) => p.id === it.productId))}
+                {open && it.id && <ItemResultTags lottery={lottery} itemId={it.id} apps={apps} />}
+              </li>
             ))}
+            {!open && lottery.items.length > 1 && (
+              <li className="text-xs text-muted-foreground">＋他{lottery.items.length - 1}商品</li>
+            )}
           </ul>
+          {MODE_LABEL[lottery.multiMode] && (
+            <Chip className="mt-0.5 border-info text-info">{MODE_LABEL[lottery.multiMode]}</Chip>
+          )}
         </div>
         {remaining && event !== "closed" && (
           <Chip className={cn("shrink-0 font-bold", LEVEL_CLASS[remaining.level])}>{remaining.label}</Chip>
@@ -171,7 +191,10 @@ export function LotteryCard({
                 <button
                   type="button"
                   disabled={!toggleable}
-                  onClick={() => actions.setApplied(lottery.id, acc.id, j.status !== "applied")}
+                  onClick={() => {
+                    if (j.status !== "applied" && lottery.multiMode === "choose_one") setChoosing(acc.id);
+                    else actions.setApplied(lottery.id, acc.id, j.status !== "applied");
+                  }}
                   aria-label={`${owner.label}: ${meta.label}（${j.reason}）`}
                   title={`${owner.label}: ${meta.label}（${j.reason}）`}
                   data-status={j.status}
@@ -291,28 +314,38 @@ export function LotteryCard({
 
           {apps.length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-bold">応募アカウント別の結果</p>
-              <ul className="space-y-1">
+              <p className="mb-1 text-xs font-bold">ユーザー別の結果</p>
+              <ul className="space-y-1.5">
                 {apps.map((a) => {
                   const acc = data.accounts.find((x) => x.id === a.accountId)!;
                   const owner = data.profiles.find((p) => p.id === acc.profileId)!;
                   return (
-                    <li key={a.id} className="flex flex-wrap items-center gap-2">
-                      <ProfileAvatar profile={owner} size="sm" />
-                      <span className="text-xs">{RESULT_LABEL[a.result]}</span>
-                      <span className="flex gap-1" role="group" aria-label={`${owner.label}の結果を登録`}>
-                        {(["pending", "won", "lost"] as const).map((r) => (
-                          <Button
-                            key={r}
-                            size="sm"
-                            variant={a.result === r ? "default" : "outline"}
-                            aria-pressed={a.result === r}
-                            onClick={() => actions.setResult(a.id, r)}
-                          >
-                            {RESULT_LABEL[r]}
-                          </Button>
-                        ))}
-                      </span>
+                    <li key={a.id} className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <ProfileAvatar profile={owner} size="sm" />
+                        <span className="text-xs">{owner.label}</span>
+                        {lottery.multiMode === "single" ? (
+                          <>
+                            <span className="text-xs">{RESULT_LABEL[a.result]}</span>
+                            <span className="flex gap-1" role="group" aria-label={`${owner.label}の結果を登録`}>
+                              {(["pending", "won", "lost"] as const).map((r) => (
+                                <Button
+                                  key={r}
+                                  size="sm"
+                                  variant={a.result === r ? "default" : "outline"}
+                                  aria-pressed={a.result === r}
+                                  onClick={() => actions.setResult(a.id, r)}
+                                >
+                                  {RESULT_LABEL[r]}
+                                </Button>
+                              ))}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">全体: {RESULT_LABEL[a.result]}</span>
+                        )}
+                      </div>
+                      {lottery.multiMode !== "single" && <ItemResultEditor lottery={lottery} app={a} ownerLabel={owner.label} />}
                     </li>
                   );
                 })}
@@ -366,6 +399,29 @@ export function LotteryCard({
 
       {editing && <LotteryFormDialog open lottery={lottery} onOpenChange={setEditing} />}
       {duplicating && <DuplicateDialog open lottery={lottery} onOpenChange={setDuplicating} />}
+      <Dialog open={choosing !== null} onOpenChange={(v) => !v && setChoosing(null)}>
+        <DialogContent>
+          <DialogTitle>応募する商品を選択</DialogTitle>
+          <DialogDescription>この抽選は、複数商品から希望の1つを選んで応募します。選んだ商品はユーザーごとに記録されます。</DialogDescription>
+          <ul className="mt-3 space-y-1.5">
+            {lottery.items.map((it) => (
+              <li key={it.id}>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={async () => {
+                    const accId = choosing;
+                    setChoosing(null);
+                    if (accId && it.id) await actions.setApplied(lottery.id, accId, true, it.id);
+                  }}
+                >
+                  {formatItem(it, data.products.find((p) => p.id === it.productId))}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </DialogContent>
+      </Dialog>
       <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
         <DialogContent>
           <DialogTitle>この抽選の登録を取り下げますか？</DialogTitle>
@@ -414,6 +470,65 @@ export function LotteryCard({
   );
 }
 
+/** 商品名の横に、ユーザーごとの当落を小さく添える（複数商品の詳細表示用） */
+function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; itemId: string; apps: Application[] }) {
+  const { data } = useApp();
+  if (lottery.multiMode === "single") return null;
+  return (
+    <span className="ml-2 inline-flex flex-wrap gap-1 align-middle">
+      {apps.map((a) => {
+        if (lottery.multiMode === "choose_one" && a.selectedItemId !== itemId) return null;
+        const owner = data.profiles.find((p) => p.id === data.accounts.find((x) => x.id === a.accountId)?.profileId);
+        if (!owner) return null;
+        const r = a.itemResults[itemId] ?? "pending";
+        return (
+          <span key={a.id} className="inline-flex items-center gap-0.5 text-xs" data-testid="item-result-tag">
+            <ProfileAvatar profile={owner} size="xs" />
+            <span className={cn(r === "won" && "font-bold text-success")}>{RESULT_LABEL[r]}</span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/** 商品別の当落入力（B/C/D方式）。Cは当選1商品まで、Dは応募時に選んだ商品のみ。購入済みは変更不可。 */
+function ItemResultEditor({ lottery, app, ownerLabel }: { lottery: Lottery; app: Application; ownerLabel: string }) {
+  const { data, actions } = useApp();
+  const locked = app.fulfillment === "purchased";
+  const items = lottery.multiMode === "choose_one" ? lottery.items.filter((i) => i.id === app.selectedItemId) : lottery.items;
+  const wonId = Object.entries(app.itemResults).find(([, r]) => r === "won")?.[0];
+  return (
+    <ul className="ml-8 space-y-1" aria-label={`${ownerLabel}の商品別の当落`}>
+      {items.map((it) => {
+        const id = it.id!;
+        const current = app.itemResults[id] ?? "pending";
+        const name = formatItem(it, data.products.find((p) => p.id === it.productId));
+        return (
+          <li key={id} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="min-w-0 flex-1 truncate">{name}</span>
+            <span className="flex gap-1" role="group" aria-label={`${ownerLabel} ${name}の結果`}>
+              {(["pending", "won", "lost"] as const).map((r) => (
+                <Button
+                  key={r}
+                  size="sm"
+                  variant={current === r ? "default" : "outline"}
+                  aria-pressed={current === r}
+                  disabled={locked || (r === "won" && lottery.multiMode === "one_win" && !!wonId && wonId !== id)}
+                  onClick={() => actions.setItemResults(app.id, [{ itemId: id, result: r }])}
+                >
+                  {RESULT_LABEL[r]}
+                </Button>
+              ))}
+            </span>
+          </li>
+        );
+      })}
+      {locked && <li className="text-xs text-muted-foreground">購入済みのため結果は変更できません</li>}
+    </ul>
+  );
+}
+
 /** 当選タブ: 購入手続き／購入済みをワンアクションで。購入記録は応募ごとに1件のみ作成される。 */
 function WonActions({ lottery }: { lottery: Lottery }) {
   const { data, actions } = useApp();
@@ -429,6 +544,14 @@ function WonActions({ lottery }: { lottery: Lottery }) {
           <li key={a.id} className="flex flex-wrap items-center gap-2 text-xs">
             <ProfileAvatar profile={owner} size="sm" />
             <span className="font-bold text-success">当選</span>
+            {lottery.multiMode !== "single" && (
+              <span className="text-muted-foreground">
+                {lottery.items
+                  .filter((i) => i.id && a.itemResults[i.id] === "won")
+                  .map((i) => formatItem(i, data.products.find((p) => p.id === i.productId)))
+                  .join(" / ")}
+              </span>
+            )}
             <span>期限 {formatFlexible(lottery.procedureDeadline)}</span>
             {a.fulfillment === "purchased" ? (
               <Chip className="border-success text-success">購入・受取済み</Chip>

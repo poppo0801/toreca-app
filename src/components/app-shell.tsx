@@ -2,35 +2,38 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Settings, Ticket } from "lucide-react";
+import { Settings, Ticket, Wallet } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
-import { ProfileSwitcher } from "@/components/profile-switcher";
+import { NotificationBell } from "@/components/notification-bell";
+import { ProfileChip } from "@/components/profile-switcher";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/lotteries", label: "抽選管理", icon: Ticket },
-  { href: "/records", label: "記録・分析", icon: BarChart3 },
+  { href: "/finance", label: "収支", icon: Wallet },
   { href: "/settings", label: "設定", icon: Settings },
 ] as const;
 
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, notice, dismissNotice } = useApp();
+  // 収支の関連ページ(/records の応募実績)は「収支」ではなく抽選側の分析なので、現在地は最も近い項目に寄せる
+  const isActive = (href: string) => pathname.startsWith(href) || (href === "/finance" && pathname.startsWith("/records"));
   return (
     <div className="min-h-dvh md:flex">
-      {/* PC: 左ナビ */}
-      <aside className="hidden w-56 shrink-0 flex-col gap-6 border-r p-4 md:flex">
-        <div className="text-base font-bold">トレカ抽選管理</div>
+      {/* PC: 左ナビ（ユーザー切替・通知はヘッダーに集約） */}
+      <aside className="hidden w-52 shrink-0 flex-col gap-4 border-r bg-header p-4 md:flex">
+        <div className="text-sm font-bold">トレカ抽選管理</div>
         <nav aria-label="メイン" className="flex flex-col gap-1">
           {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname.startsWith(href);
+            const active = isActive(href);
             return (
               <Link
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex min-h-11 items-center gap-2 rounded-md px-3 text-sm",
+                  "flex min-h-10 items-center gap-2 rounded-md px-3 text-sm",
                   active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
                 )}
               >
@@ -40,22 +43,21 @@ function Shell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-        <div className="mt-auto">
-          <p className="mb-1 text-xs text-muted-foreground">操作プロフィール</p>
-          <ProfileSwitcher />
-        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* モバイル: 上部に現在の操作対象を常時表示 */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-background/95 px-4 py-1 backdrop-blur md:hidden">
-          <span className="text-sm font-bold">トレカ抽選管理</span>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">操作中</span>
-            <ProfileSwitcher />
+        {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザーのみ。ノッチ/ステータスバー分は Safe Area で確保 */}
+        <header className="sticky top-0 z-30 border-b bg-header pt-safe px-safe">
+          <div className="flex h-10 items-center justify-between px-3">
+            <span className="text-xs font-semibold md:hidden">トレカ抽選管理</span>
+            <span className="hidden md:block" />
+            <div className="flex items-center gap-0.5">
+              <NotificationBell />
+              <ProfileChip />
+            </div>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-3 pb-24 pt-3 md:px-6 md:pb-8">
+        <main className="mx-auto w-full max-w-5xl flex-1 px-3 pb-[calc(3.25rem+env(safe-area-inset-bottom)+0.75rem)] pt-2 md:px-6 md:pb-8 md:pt-3">
           <p className="sr-only" aria-live="polite">
             現在の操作プロフィール: {profile.label}
           </p>
@@ -69,28 +71,30 @@ function Shell({ children }: { children: React.ReactNode }) {
           )}
           {children}
         </main>
-        {/* モバイル: 下部メイン3項目 */}
+        {/* モバイル: 下部メイン3項目。操作部分はホームインジケーターの上に収め、背景だけが下端まで伸びる */}
         <nav
           aria-label="メイン"
-          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t bg-background md:hidden"
+          className="fixed inset-x-0 bottom-0 z-30 border-t bg-header pb-safe px-safe md:hidden"
         >
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname.startsWith(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-14 flex-col items-center justify-center gap-0.5 text-xs",
-                  active ? "font-bold text-primary" : "text-muted-foreground",
-                )}
-              >
-                <Icon className="size-5" aria-hidden="true" />
-                {label}
-              </Link>
-            );
-          })}
+          <div className="grid h-[3.25rem] grid-cols-3">
+            {NAV.map(({ href, label, icon: Icon }) => {
+              const active = isActive(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-0.5 text-[11px]",
+                    active ? "font-bold text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  <Icon className="size-5" aria-hidden="true" />
+                  {label}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
       </div>
     </div>
@@ -104,4 +108,3 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </AppProvider>
   );
 }
-

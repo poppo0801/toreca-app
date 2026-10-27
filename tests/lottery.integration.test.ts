@@ -3,14 +3,13 @@
  *   npm run test:db
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { EMPTY_FLEX, type LotteryInput } from "@/lib/lottery-input";
+import { EMPTY_FLEX } from "@/lib/lottery-input";
 import {
   addManualPurchase,
   archiveLottery,
   currentHouseholdId,
   duplicateLottery,
   loadAppData,
-  saveLottery,
   setApplied,
   setEventState,
   setFulfillment,
@@ -19,6 +18,7 @@ import {
   setResult,
   type Db,
 } from "@/lib/server/lottery-service";
+import { saveLegacy as saveLottery, type LegacyInput } from "./helpers/legacy";
 import { adminClient, anonClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
 describe.skipIf(!dbTestsEnabled)("抽選・応募・購入の保存と世帯分離", () => {
@@ -42,7 +42,7 @@ describe.skipIf(!dbTestsEnabled)("抽選・応募・購入の保存と世帯分�
     return (r as { value: T }).value;
   };
 
-  const base = (over: Partial<LotteryInput> = {}): LotteryInput => ({
+  const base = (over: Partial<LegacyInput> = {}): LegacyInput => ({
     chainId,
     storeId: storeA,
     campaignId: null,
@@ -163,7 +163,8 @@ describe.skipIf(!dbTestsEnabled)("抽選・応募・購入の保存と世帯分�
     ok(await saveLottery(u1, hid1, pastId, base({ items: [{ productId, quantity: 3, unit: "pack" }], memo: "編集済み" }), profA));
     const data = await loadAppData(u1);
     const lot = data.lotteries.find((l) => l.id === pastId)!;
-    expect(lot.items).toEqual([{ productId, quantity: 3, unit: "pack" }]);
+    expect(lot.items).toMatchObject([{ productId, quantity: 3, unit: "pack" }]);
+    expect(lot.multiMode).toBe("single");
     expect(lot.memo).toBe("編集済み");
     expect(data.applications.filter((a) => a.lotteryId === pastId)).toHaveLength(2);
   });
@@ -179,7 +180,7 @@ describe.skipIf(!dbTestsEnabled)("抽選・応募・購入の保存と世帯分�
     const after = await loadAppData(u1);
     const purchases = after.purchases.filter((p) => p.applicationId === won.id);
     expect(purchases).toHaveLength(1);
-    expect(purchases[0].items).toEqual([{ productId, quantity: 3, unit: "pack", amountPaid: null }]);
+    expect(purchases[0].items).toMatchObject([{ productId, quantity: 3, unit: "pack", amountPaid: null }]);
     expect(purchases[0].source).toBe("lottery");
     expect(after.applications.find((a) => a.id === won.id)?.fulfillment).toBe("purchased");
 
@@ -250,7 +251,9 @@ describe.skipIf(!dbTestsEnabled)("抽選・応募・購入の保存と世帯分�
     expect(copy.storeId).toBe(storeB);
     expect(copy.campaignId).toBe(original.campaignId);
     expect(d.campaigns.find((c) => c.id === copy.campaignId)?.storeRule).toBe("one_store");
-    expect(copy.items).toEqual(original.items);
+    expect(copy.items.map(({ productId, quantity, unit }) => ({ productId, quantity, unit }))).toEqual(
+      original.items.map(({ productId, quantity, unit }) => ({ productId, quantity, unit })),
+    );
     expect(d.applications.filter((a) => a.lotteryId === copy.id)).toHaveLength(0);
     expect(d.management.find((m) => m.lotteryId === copy.id)?.isManaged).toBe(true);
     // 別系列の店舗は不可

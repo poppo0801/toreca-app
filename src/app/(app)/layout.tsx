@@ -16,6 +16,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (!auth.user) redirect("/login");
     // 世帯が未作成なら作る（冪等）。以降のクエリはRLSで自世帯のみ。
     await supabase.rpc("bootstrap_household");
+    // 応募名義はユーザー(プロフィール)ごとに1つ。系列ごとの内部アカウントを自動で保証する（画面での管理は不要）
+    await supabase.rpc("ensure_profile_accounts");
   }
   return <AppShell>{children}</AppShell>;
 }

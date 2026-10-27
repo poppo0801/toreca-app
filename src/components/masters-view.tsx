@@ -124,6 +124,11 @@ function MasterItem({
         <div className="min-w-0">
           <p className="text-sm font-bold">
             {(entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ")}
+            {row.is_provisional === true && (
+              <span className="ml-2 rounded border border-info px-1 text-xs font-normal text-info" data-testid="provisional-badge">
+                仮登録（情報を補完してください）
+              </span>
+            )}
             {retired && <span className="ml-2 text-xs font-normal text-muted-foreground">（{entity.retire === "active" ? "無効" : "アーカイブ済み"}）</span>}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
@@ -146,7 +151,7 @@ function MasterItem({
 }
 
 function FieldInput({ field, rows, value, onChange }: { field: Field; rows: MasterRows; value: string; onChange: (v: string) => void }) {
-  const common = "mt-1 min-h-11 w-full rounded-md border bg-background px-3 text-sm";
+  const common = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
   if (field.type === "select") {
     const options = field.ref
       ? rows[field.ref]
@@ -292,7 +297,7 @@ function RulesDialog({ profile, chains, stores, rules }: { profile: Row; chains:
     });
 
   const select = (label: string, value: Mode, onChange: (v: Mode) => void) => (
-    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Mode)} className="min-h-10 rounded-md border bg-background px-2">
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Mode)} className="min-h-10 rounded-md border bg-input px-2">
       <option value="none">指定なし</option>
       <option value="allow">許可</option>
       <option value="block">除外</option>

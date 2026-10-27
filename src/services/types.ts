@@ -1,3 +1,5 @@
+import type { ExpenseInput, SaleInput } from "@/lib/finance-input";
+import type { ProfileSettingsInput } from "@/lib/server/lottery-service";
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import type { AppData, EventState, FulfillmentStatus, ResultStatus } from "@/types/domain";
@@ -14,7 +16,13 @@ export interface LotteryRepository {
   readonly persistent: boolean;
   load(now: Date): Promise<AppData>;
   setManaged(actorId: string, lotteryId: string, isManaged: boolean): Promise<Outcome>;
-  setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean): Promise<Outcome>;
+  setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean, selectedItemId?: string | null): Promise<Outcome>;
+  setItemResults(actorId: string, applicationId: string, results: { itemId: string; result: ResultStatus }[]): Promise<Outcome>;
+  saveExpense(actorId: string, id: string | null, input: ExpenseInput): Promise<Outcome>;
+  deleteExpense(actorId: string, id: string): Promise<Outcome>;
+  saveSale(actorId: string, id: string | null, input: SaleInput): Promise<Outcome>;
+  deleteSale(actorId: string, id: string): Promise<Outcome>;
+  updateProfile(actorId: string, profileId: string, input: ProfileSettingsInput): Promise<Outcome>;
   setResult(actorId: string, applicationId: string, result: ResultStatus): Promise<Outcome>;
   setFulfillment(actorId: string, applicationId: string, fulfillment: FulfillmentStatus): Promise<Outcome>;
   setLotterySkip(profileId: string, lotteryId: string, skip: boolean): Promise<Outcome>;

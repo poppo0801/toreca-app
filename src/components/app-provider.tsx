@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { LotteryInput } from "@/lib/lottery-input";
+import type { ExpenseInput, SaleInput } from "@/lib/finance-input";
+import type { ProfileSettingsInput } from "@/lib/server/lottery-service";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import { createRepository } from "@/services";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
@@ -26,7 +28,13 @@ interface AppContextValue {
   dismissNotice: () => void;
   actions: {
     setManaged: (lotteryId: string, v: boolean) => Promise<Outcome>;
-    setApplied: (lotteryId: string, accountId: string, v: boolean) => Promise<Outcome>;
+    setApplied: (lotteryId: string, accountId: string, v: boolean, selectedItemId?: string | null) => Promise<Outcome>;
+    setItemResults: (applicationId: string, results: { itemId: string; result: ResultStatus }[]) => Promise<Outcome>;
+    saveExpense: (id: string | null, input: ExpenseInput) => Promise<Outcome>;
+    deleteExpense: (id: string) => Promise<Outcome>;
+    saveSale: (id: string | null, input: SaleInput) => Promise<Outcome>;
+    deleteSale: (id: string) => Promise<Outcome>;
+    updateProfile: (profileId: string, input: ProfileSettingsInput) => Promise<Outcome>;
     setResult: (applicationId: string, r: ResultStatus) => Promise<Outcome>;
     setFulfillment: (applicationId: string, f: FulfillmentStatus) => Promise<Outcome>;
     setLotterySkip: (lotteryId: string, v: boolean) => Promise<Outcome>;
@@ -127,7 +135,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dismissNotice: () => setNotice(null),
       actions: {
         setManaged: (id, v) => run((a) => repo.setManaged(a, id, v)),
-        setApplied: (id, acc, v) => run((a) => repo.setApplied(a, id, acc, v)),
+        setApplied: (id, acc, v, sel) => run((a) => repo.setApplied(a, id, acc, v, sel)),
+        setItemResults: (id, r) => run((a) => repo.setItemResults(a, id, r)),
+        saveExpense: (id, input) => run((a) => repo.saveExpense(a, id, input)),
+        deleteExpense: (id) => run((a) => repo.deleteExpense(a, id)),
+        saveSale: (id, input) => run((a) => repo.saveSale(a, id, input)),
+        deleteSale: (id) => run((a) => repo.deleteSale(a, id)),
+        updateProfile: (pid, input) => run((a) => repo.updateProfile(a, pid, input)),
         setResult: (id, r) => run((a) => repo.setResult(a, id, r)),
         setFulfillment: (id, f) => run((a) => repo.setFulfillment(a, id, f)),
         setLotterySkip: (id, v) => run((a) => repo.setLotterySkip(a, id, v)),

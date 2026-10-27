@@ -30,7 +30,7 @@ describe("応募締切の段階通知", () => {
     expect(n[0].type).toBe("deadline_before");
     expect(n[0].triggerKey).toContain("m120");
     expect(n[0].body).toContain("あと1時間40分");
-    expect(n[0].body).toContain("a-c3".replace("a-c3", "A c3")); // 未応募アカウント名
+    expect(n[0].body).toContain("未応募: A"); // 未応募のユーザー名
   });
 
   it("15分前の窓では最も締切に近い1件だけ送り、手前の段階は抑止（連続送信しない）", () => {

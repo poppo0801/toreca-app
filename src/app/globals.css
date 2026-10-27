@@ -3,13 +3,16 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #111111;
-  --card: #f7f7f7;
-  --card-foreground: #111111;
-  --muted: #efefef;
-  --muted-foreground: #5c5c5c;
-  --border: #dcdcdc;
+  /* ライト: 背景はごく薄いグレー、ヘッダー・カードは白、入力欄は一段沈める（面の差で境界を示す） */
+  --background: #f4f4f5;
+  --foreground: #111113;
+  --header: #ffffff;
+  --card: #ffffff;
+  --card-foreground: #111113;
+  --input: #f0f0f2;
+  --muted: #ececef;
+  --muted-foreground: #5b5b63;
+  --border: #dcdce0;
   --ring: #c2410c;
   /* オレンジは主要操作・現在選択のみ */
   --primary: #c2410c;
@@ -27,13 +30,16 @@
 }
 
 .dark {
-  --background: #0b0b0b;
-  --foreground: #f2f2f2;
-  --card: #171717;
-  --card-foreground: #f2f2f2;
-  --muted: #262626;
-  --muted-foreground: #a3a3a3;
-  --border: #333333;
+  /* ダーク: 背景(ほぼ黒) < ヘッダー < カード < 入力欄 の順に明るくして、枠線に頼らず階層を示す */
+  --background: #0b0b0d;
+  --foreground: #f5f5f5;
+  --header: #161619;
+  --card: #1c1c20;
+  --card-foreground: #f5f5f5;
+  --input: #27272c;
+  --muted: #2a2a2f;
+  --muted-foreground: #a8a8b0;
+  --border: #35353a;
   --ring: #fb923c;
   --primary: #fb923c;
   --primary-foreground: #111111;
@@ -51,6 +57,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-header: var(--header);
+  --color-input: var(--input);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-muted: var(--muted);
@@ -69,6 +77,18 @@
   --color-p-pink: var(--p-pink);
   --color-p-teal: var(--p-teal);
   --font-sans: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+}
+
+/* iPhone の Safe Area（ノッチ・Dynamic Island・ホームインジケーター）。値は端末ごとに env() が決める */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility px-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 @layer base {

@@ -36,15 +36,29 @@ const httpUrl = z
   .max(2000)
   .refine((v) => /^https?:\/\/\S+$/i.test(v), "URLは http(s):// で始まる形式で入力してください");
 
+/**
+ * マスター参照。既存マスターを選んだ場合は id、未登録の名称を自由入力した場合は id=null + name。
+ * 名称が既存マスター（略称含む・全半角/空白差を無視）と一致するときはサーバー側で既存を使い、重複作成しない。
+ */
+const masterRef = (label: string, max: number) =>
+  z
+    .object({ id: z.uuid().nullable(), name: z.string().trim().max(max, `${label}は${max}文字以内で入力してください`) })
+    .refine((v) => v.id !== null || v.name.length > 0, { message: `${label}を選択または入力してください` });
+
+export const MULTI_MODES = ["single", "all", "one_win", "choose_one"] as const;
+
 const itemSchema = z.object({
-  productId: z.uuid("商品を選択してください"),
+  /** 編集時の既存明細ID（当落・購入の紐づけを保つ） */
+  id: z.uuid().nullable().optional(),
+  product: masterRef("商品", 120),
   quantity: z.number().int().min(1, "数量は1以上").max(9999),
   unit: z.enum(["box", "pack", "set"]),
 });
 
 export const lotteryInputSchema = z.object({
-  chainId: z.uuid("系列を選択してください"),
-  storeId: z.uuid("店舗を選択してください"),
+  chain: masterRef("系列", 80),
+  store: masterRef("店舗", 80).and(z.object({ prefecture: z.string().trim().max(10).default("") })),
+  multiMode: z.enum(MULTI_MODES).default("single"),
   campaignId: z.uuid().nullable(),
   newCampaign: z
     .object({ name: z.string().trim().min(1, "キャンペーン名を入力してください").max(100), storeRule: z.enum(["one_store", "multi"]) })
@@ -69,12 +83,19 @@ export const lotteryInputSchema = z.object({
   isManaged: z.boolean().optional(),
   /** 新規登録時のみ（過去抽選の応募済み・当落まで同時登録）。実際の応募日時が不明なら appliedAt は空 */
   applications: z
-    .array(z.object({ accountId: z.uuid(), status: z.enum(["applied", "won", "lost"]) }))
+    .array(z.object({ profileId: z.uuid(), status: z.enum(["applied", "won", "lost"]) }))
     .max(50)
     .default([]),
   appliedAt: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)]).default(""),
 });
 export type LotteryInput = z.input<typeof lotteryInputSchema>;
+
+/** 方式と明細数の整合（A=単一は1商品、B/C/Dは2商品以上） */
+export function validateMultiMode(mode: (typeof MULTI_MODES)[number], itemCount: number): string | null {
+  if (mode === "single" && itemCount > 1) return "単一商品の抽選には商品を1つだけ指定してください（複数商品の場合は方式を選択）";
+  if (mode !== "single" && itemCount < 2) return "複数商品の抽選には商品を2つ以上指定してください";
+  return null;
+}
 export type LotteryInputParsed = z.output<typeof lotteryInputSchema>;
 
 /** JST の日付+時刻 → UTC ISO */

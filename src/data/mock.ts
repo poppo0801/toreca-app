@@ -12,6 +12,7 @@ export function createMockData(now: Date): AppData {
   const iso = (hours: number) => new Date(now.getTime() + hours * 3600_000).toISOString();
 
   const base = {
+    multiMode: "single" as const,
     applyStart: h(-24 * 5),
     procedureDeadline: UNKNOWN_DATE,
     receiveMethod: "store" as const,
@@ -60,9 +61,10 @@ export function createMockData(now: Date): AppData {
       id: "L3",
       chainId: "c2",
       storeId: "s3",
+      multiMode: "all" as const,
       items: [
-        { productId: "p1", quantity: 2, unit: "box" },
-        { productId: "p2", quantity: 1, unit: "box" },
+        { id: "i3a", productId: "p1", quantity: 2, unit: "box" },
+        { id: "i3b", productId: "p2", quantity: 1, unit: "box" },
       ],
       applyDeadline: d(2),
       resultDate: d(5),
@@ -171,6 +173,8 @@ export function createMockData(now: Date): AppData {
     appliedAt: iso(-24 * 7),
     state: "applied",
     result,
+    itemResults: {},
+    selectedItemId: null,
     resultConfirmedAt: result === "pending" ? null : iso(-24),
     fulfillment,
     createdAt: iso(-24 * 7),
@@ -259,6 +263,7 @@ export function createMockData(now: Date): AppData {
       app("ap9", "L9", "a-c2", "pending"),
       app("ap10", "L10", "a-c3", "lost"),
     ],
+    sales: [],
     purchases: [
       {
         id: "pur1",

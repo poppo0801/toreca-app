@@ -29,8 +29,14 @@ export interface Profile {
   active?: boolean;
   label: string;
   color: ProfileColor;
+  /** 自由な色指定（#RRGGBB）。あれば color より優先 */
+  colorHex?: string | null;
   /** 丸アイコン内に表示する1文字（色だけに依存しない） */
   initial: string;
+  /** アイコンのマーク（"initial" = 頭文字。それ以外は ICON_MARKS のキー） */
+  iconMark?: string;
+  /** 通知の送り先プロフィールID。null/未指定=本人のみ、空配列=通知なし */
+  notifyRecipientIds?: string[] | null;
   /**
    * 許可リスト方式（Cなど）。許可された系列(allowedChainIds)または店舗(allowedStoreIds)のみが対象。
    * どちらも空/nullなら全系列が対象。
@@ -45,6 +51,8 @@ export interface Profile {
 export interface Chain {
   id: string;
   name: string;
+  /** 抽選登録時に自動作成された仮登録（後からマスター管理で補完） */
+  provisional?: boolean;
   /** アーカイブ済み（新規登録の選択肢から外す。履歴表示には残す） */
   archived?: boolean;
 }
@@ -54,6 +62,7 @@ export interface Store {
   chainId: string;
   name: string;
   prefecture: string;
+  provisional?: boolean;
   archived?: boolean;
 }
 
@@ -62,8 +71,14 @@ export interface Product {
   officialName: string;
   aliases: string[];
   code: string;
-  /** 商品ごとの入数。固定30Pと決めつけない */
+  /** 商品ごとの入数。固定30Pと決めつけない（仮登録の商品では未確認） */
   packsPerBox: number;
+  provisional?: boolean;
+  /** 定価（円）。収支入力の金額仮計算に使う。未設定は null */
+  listPriceBox?: number | null;
+  listPricePack?: number | null;
+  /** 公式番号か独自コードか */
+  codeKind?: "official" | "custom" | null;
   archived?: boolean;
 }
 
@@ -108,7 +123,12 @@ export interface Campaign {
   storeRule: "one_store" | "multi";
 }
 
+/** single=単一 / all=商品ごとに当落 / one_win=当選は最大1商品 / choose_one=希望商品を1つ選んで応募 */
+export type MultiMode = "single" | "all" | "one_win" | "choose_one";
+
 export interface LotteryItem {
+  /** DB上の明細ID（新規入力中は未設定） */
+  id?: string;
   productId: string;
   quantity: number;
   unit: ItemUnit;
@@ -120,6 +140,7 @@ export interface Lottery {
   chainId: string;
   storeId: string;
   items: LotteryItem[];
+  multiMode: MultiMode;
   applyStart: FlexibleDate;
   applyDeadline: FlexibleDate;
   resultDate: FlexibleDate;
@@ -159,7 +180,12 @@ export interface Application {
   /** 実際に応募した日時。不明は null（登録日時 createdAt とは別） */
   appliedAt: string | null;
   state: "applied" | "cancelled";
+  /** 集計値。複数商品では商品別の当落から導出（1つでも当選=won） */
   result: ResultStatus;
+  /** 複数商品抽選の商品別当落（明細ID → 結果）。single では空 */
+  itemResults: Record<string, ResultStatus>;
+  /** choose_one で応募時に選んだ明細ID */
+  selectedItemId: string | null;
   resultConfirmedAt: string | null;
   fulfillment: FulfillmentStatus;
   createdAt: string;
@@ -168,7 +194,12 @@ export interface Application {
 export type PurchaseChannel = "store" | "shipping" | "online" | "other";
 
 export interface PurchaseItem {
+  /** DB上の明細ID（新規入力中は未設定） */
+  id?: string;
   productId: string | null;
+  /** マスター未登録の商品名（自由入力） */
+  productLabel?: string | null;
+  lotteryItemId?: string | null;
   quantity: number;
   unit: ItemUnit;
   /** 不明は null（捏造しない） */
@@ -180,12 +211,34 @@ export interface Purchase {
   id: string;
   applicationId: string | null;
   storeId: string | null;
+  /** マスター未登録の店舗名（自由入力） */
+  storeLabel?: string | null;
   /** 購入日時。日付のみ・不明を区別する（捏造しない） */
   purchasedOn: FlexibleDate;
   channel: PurchaseChannel;
   source: "lottery" | "manual" | "import";
   items: PurchaseItem[];
   note: string;
+}
+
+/** 売却(収入)。原価 costAmount=null は未設定で、0円とはみなさない。 */
+export interface Sale {
+  id: string;
+  soldOn: string;
+  platform: string;
+  productId: string | null;
+  productLabel: string | null;
+  quantity: number;
+  unit: "box" | "pack" | "set" | "piece";
+  amount: number;
+  /** 売却手続きを行った人（所得帰属ではない） */
+  sellerProfileId: string;
+  costAmount: number | null;
+  costPurchaseItemId: string | null;
+  costQuantity: number | null;
+  fee: number;
+  shipping: number;
+  memo: string;
 }
 
 export type SkipScope = "lottery" | "store" | "chain";
@@ -279,6 +332,7 @@ export interface AppData {
   management: Management[];
   applications: Application[];
   purchases: Purchase[];
+  sales: Sale[];
   skipRules: SkipRule[];
   applicationRules: ApplicationRule[];
   limitExemptions: LimitExemption[];

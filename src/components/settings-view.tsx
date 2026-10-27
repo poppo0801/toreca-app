@@ -6,8 +6,7 @@ import { signOut } from "@/app/login/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { NotificationSettings } from "@/components/notification-settings";
-import { ProfileAvatar } from "@/components/profile-avatar";
-import { ProfileSwitcher } from "@/components/profile-switcher";
+import { ProfileSettings } from "@/components/profile-settings";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -25,24 +24,11 @@ export function SettingsView() {
   const { data, profile } = useApp();
   return (
     <div className="space-y-4">
-      <Section title="操作プロフィール">
+      <Section title="ユーザー">
         <p className="mb-2 text-xs text-muted-foreground">
-          選択は<strong>この端末のみ</strong>に保存され、他の端末とは同期しません。本人認証ではなく、操作履歴に残す「誰として操作したか」の選択です。
+          操作中のユーザーはヘッダー右上のアイコンからも切り替えられます。選択は<strong>この端末のみ</strong>に保存され、他の端末とは同期しません（本人認証ではなく「誰として記録するか」の選択です）。
         </p>
-        <ProfileSwitcher />
-        <ul className="mt-3 space-y-2 text-sm">
-          {data.profiles.map((p) => (
-            <li key={p.id} className="flex items-center gap-2">
-              <ProfileAvatar profile={p} />
-              <span>プロフィール{p.label}</span>
-              <span className="text-xs text-muted-foreground">
-                {SUPABASE ? "応募対象はマスター管理で設定" : p.allowedChainIds === null
-                  ? "全系列が対象"
-                  : `許可リスト: ${p.allowedChainIds.map((id) => data.chains.find((c) => c.id === id)?.name).join("、")}`}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <ProfileSettings />
       </Section>
 
       <Section title="マスター管理">

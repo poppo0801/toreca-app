@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { addSkipRuleAction, removeSkipRuleAction, setChainRulesAction } from "@/app/(app)/settings/rules/actions";
 import type { ChainRuleInput } from "@/lib/server/rules-service";
 
-const field = "min-h-10 rounded-md border bg-background px-2 text-sm";
+const field = "min-h-10 rounded-md border bg-input px-2 text-sm";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

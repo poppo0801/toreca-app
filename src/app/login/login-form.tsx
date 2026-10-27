@@ -17,7 +17,7 @@ export function LoginForm() {
           type="email"
           autoComplete="username"
           required
-          className="mt-1 min-h-11 w-full rounded-md border bg-background px-3"
+          className="mt-1 min-h-11 w-full rounded-md border bg-input px-3"
         />
       </label>
       <label className="block text-sm">
@@ -27,7 +27,7 @@ export function LoginForm() {
           type="password"
           autoComplete="current-password"
           required
-          className="mt-1 min-h-11 w-full rounded-md border bg-background px-3"
+          className="mt-1 min-h-11 w-full rounded-md border bg-input px-3"
         />
       </label>
       {state.error && (

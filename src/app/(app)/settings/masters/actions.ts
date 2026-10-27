@@ -65,7 +65,9 @@ export async function saveRecord(
     if (!acc) return fail("応募アカウントが見つかりません");
     dbValues.chain_id = acc.chain_id;
   }
-  const row = { ...dbValues, updated_by_profile_id: actor.data };
+  // 仮登録（抽選登録時に自動作成）されたマスターは、マスター管理で保存した時点で確定扱いにする
+  const confirmsProvisional = id && (entity.key === "chains" || entity.key === "stores" || entity.key === "products");
+  const row = { ...dbValues, ...(confirmsProvisional ? { is_provisional: false } : {}), updated_by_profile_id: actor.data };
   const table = ctx.supabase.from(entity.key);
   const { error } = id
     ? await table.update(row).eq("id", id.data!)

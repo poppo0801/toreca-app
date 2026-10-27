@@ -4,8 +4,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { judgeAccount } from "@/lib/eligibility";
-import { EMPTY_FLEX, flexToInput, type LotteryInput } from "@/lib/lottery-input";
-import { loadAppData, saveLottery, setApplied, setLotterySkip, type Db } from "@/lib/server/lottery-service";
+import { EMPTY_FLEX, flexToInput } from "@/lib/lottery-input";
+import { saveLegacy as saveLottery, type LegacyInput } from "./helpers/legacy";
+import { loadAppData, setApplied, setLotterySkip, type Db } from "@/lib/server/lottery-service";
 import { runNotificationCycle } from "@/lib/server/notification-service";
 import type { PushResult, PushSender } from "@/lib/server/push";
 import {
@@ -51,7 +52,7 @@ describe.skipIf(!dbTestsEnabled)("応募ルール・スルー・資格・通知�
     return data as { id: string };
   };
 
-  const lotteryInput = (over: Partial<LotteryInput> = {}): LotteryInput => ({
+  const lotteryInput = (over: Partial<LegacyInput> = {}): LegacyInput => ({
     chainId,
     storeId: storeA,
     campaignId: null,

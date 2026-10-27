@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { MasterCombobox } from "@/components/master-combobox";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   EMPTY_FLEX,
@@ -13,9 +14,16 @@ import {
   type LotteryInput,
 } from "@/lib/lottery-input";
 import { cn } from "@/lib/utils";
-import type { Lottery } from "@/types/domain";
+import type { AppData, Lottery } from "@/types/domain";
 
-const field = "mt-1 min-h-11 w-full rounded-md border bg-background px-3 text-sm";
+const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
+
+const MODE_OPTIONS = [
+  { value: "single", label: "A. 単一商品に応募" },
+  { value: "all", label: "B. 1回の応募で複数商品に参加（商品ごとに当落）" },
+  { value: "one_win", label: "C. 複数商品が対象（当選はいずれか1商品まで）" },
+  { value: "choose_one", label: "D. 複数商品から希望の1つを選んで応募" },
+] as const;
 
 function Select<T extends string>({
   value,
@@ -81,13 +89,14 @@ function FlexField({ label, value, onChange }: { label: string; value: FlexInput
   );
 }
 
-function emptyInput(chainId: string): LotteryInput {
+function emptyInput(): LotteryInput {
   return {
-    chainId,
-    storeId: "",
+    chain: { id: null, name: "" },
+    store: { id: null, name: "", prefecture: "" },
+    multiMode: "single",
     campaignId: null,
     newCampaign: null,
-    items: [],
+    items: [{ product: { id: null, name: "" }, quantity: 1, unit: "box" }],
     applyStart: EMPTY_FLEX,
     applyDeadline: EMPTY_FLEX,
     resultDate: EMPTY_FLEX,
@@ -109,13 +118,21 @@ function emptyInput(chainId: string): LotteryInput {
   };
 }
 
-function fromLottery(l: Lottery): LotteryInput {
+function fromLottery(l: Lottery, data: AppData): LotteryInput {
+  const chain = data.chains.find((c) => c.id === l.chainId);
+  const store = data.stores.find((s) => s.id === l.storeId);
   return {
-    chainId: l.chainId,
-    storeId: l.storeId,
+    chain: { id: l.chainId, name: chain?.name ?? "" },
+    store: { id: l.storeId, name: store?.name ?? "", prefecture: store?.prefecture ?? "" },
+    multiMode: l.multiMode,
     campaignId: l.campaignId ?? null,
     newCampaign: null,
-    items: l.items.map((i) => ({ ...i })),
+    items: l.items.map((i) => ({
+      id: i.id ?? null,
+      product: { id: i.productId, name: data.products.find((p) => p.id === i.productId)?.officialName ?? "" },
+      quantity: i.quantity,
+      unit: i.unit,
+    })),
     applyStart: flexToInput(l.applyStart),
     applyDeadline: flexToInput(l.applyDeadline),
     resultDate: flexToInput(l.resultDate),
@@ -151,8 +168,7 @@ export function LotteryFormDialog({
   lottery: Lottery | null;
 }) {
   const { data, actions } = useApp();
-  const activeChains = data.chains.filter((c) => c.id === lottery?.chainId || !c.archived);
-  const [v, setV] = useState<LotteryInput>(() => (lottery ? fromLottery(lottery) : emptyInput(data.chains[0]?.id ?? "")));
+  const [v, setV] = useState<LotteryInput>(() => (lottery ? fromLottery(lottery, data) : emptyInput()));
   const [urlsText, setUrlsText] = useState(() => (lottery?.sourceUrls ?? []).join("\n"));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -160,22 +176,39 @@ export function LotteryFormDialog({
 
   const set = <K extends keyof LotteryInput>(k: K, val: LotteryInput[K]) => setV((s) => ({ ...s, [k]: val }));
 
-  const stores = data.stores.filter((s) => s.chainId === v.chainId && (!s.archived || s.id === v.storeId));
-  const products = data.products.filter((p) => !p.archived || v.items.some((i) => i.productId === p.id));
-  const campaigns = data.campaigns.filter((c) => c.chainId === v.chainId);
-  const accounts = useMemo(
-    () => data.accounts.filter((a) => a.chainId === v.chainId && a.active),
-    [data.accounts, v.chainId],
+  const chainOptions = useMemo(
+    () => data.chains.filter((c) => c.id === lottery?.chainId || !c.archived).map((c) => ({ id: c.id, name: c.name, hint: c.provisional ? "仮登録" : undefined })),
+    [data.chains, lottery?.chainId],
   );
-  const appStatus = (accountId: string) => v.applications?.find((a) => a.accountId === accountId)?.status ?? "none";
-  const setAppStatus = (accountId: string, status: string) =>
+  const storeOptions = useMemo(
+    () =>
+      data.stores
+        .filter((s) => s.chainId === v.chain.id && (!s.archived || s.id === v.store.id))
+        .map((s) => ({ id: s.id, name: s.name, hint: s.prefecture || undefined })),
+    [data.stores, v.chain.id, v.store.id],
+  );
+  const productOptions = useMemo(
+    () => data.products.filter((p) => !p.archived || v.items.some((i) => i.product.id === p.id)).map((p) => ({ id: p.id, name: p.officialName, hint: p.provisional ? "仮登録" : p.code || undefined })),
+    [data.products, v.items],
+  );
+  const campaigns = data.campaigns.filter((c) => c.chainId === v.chain.id);
+  const profiles = data.profiles.filter((p) => p.active !== false);
+  const multi = v.multiMode !== "single";
+  const appStatus = (profileId: string) => v.applications?.find((a) => a.profileId === profileId)?.status ?? "none";
+  const setAppStatus = (profileId: string, status: string) =>
     set(
       "applications",
       [
-        ...(v.applications ?? []).filter((a) => a.accountId !== accountId),
-        ...(status === "none" ? [] : [{ accountId, status: status as "applied" | "won" | "lost" }]),
+        ...(v.applications ?? []).filter((a) => a.profileId !== profileId),
+        ...(status === "none" ? [] : [{ profileId, status: status as "applied" | "won" | "lost" }]),
       ],
     );
+  const setMode = (mode: NonNullable<LotteryInput["multiMode"]>) =>
+    setV((s) => {
+      const items = mode === "single" ? s.items.slice(0, 1) : s.items.length < 2 ? [...s.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" as const }] : s.items;
+      // 方式を変えると商品別の当落の意味が変わるため、同時登録する応募状況はリセットする
+      return { ...s, multiMode: mode, items, applications: [] };
+    });
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,49 +230,53 @@ export function LotteryFormDialog({
     else setError(res.error);
   };
 
-  const noMasters = data.chains.length === 0 || data.stores.length === 0 || data.products.length === 0;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92dvh] max-w-xl overflow-y-auto">
         <DialogTitle>{isEdit ? "抽選を編集" : "抽選を登録"}</DialogTitle>
         <DialogDescription>
-          応募期限が過去でも登録できます。不明な日時は「不明」のままで構いません。
+          系列・店舗・商品は検索して選ぶか、未登録なら名称を入力するだけで登録できます（自動で仮登録）。応募期限が過去でも登録できます。
         </DialogDescription>
-        {noMasters ? (
-          <p className="mt-3 text-sm">
-            先に「設定 → マスター管理」で系列・店舗・商品を登録してください。
-          </p>
-        ) : (
+        {(
           <form onSubmit={submit} className="mt-3 space-y-4" noValidate>
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-sm">
-                系列
-                <select
-                  aria-label="系列"
-                  value={v.chainId}
-                  onChange={(e) => setV((s) => ({ ...s, chainId: e.target.value, storeId: "", campaignId: null, newCampaign: null, applications: [] }))}
-                  className={field}
+              <div className="text-sm">
+                <span>系列</span>
+                <MasterCombobox
+                  label="系列"
+                  value={v.chain}
                   disabled={isEdit}
-                >
-                  {activeChains.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  options={chainOptions}
+                  onChange={(chain) =>
+                    setV((s) => ({
+                      ...s,
+                      chain,
+                      store: chain.id === s.chain.id ? s.store : { id: null, name: "", prefecture: "" },
+                      campaignId: chain.id === s.chain.id ? s.campaignId : null,
+                      newCampaign: chain.id === s.chain.id ? s.newCampaign : null,
+                    }))
+                  }
+                />
+              </div>
+              <div className="text-sm">
+                <span>店舗</span>
+                <MasterCombobox
+                  label="店舗"
+                  value={v.store}
+                  options={storeOptions}
+                  onChange={(store) => set("store", { ...store, prefecture: store.id ? "" : (v.store.prefecture ?? "") })}
+                />
+              </div>
+            </div>
+
+            <div className="text-sm">
+              <label className="block">
+                抽選の方式
+                <Select label="抽選の方式" value={v.multiMode ?? "single"} onChange={setMode} options={MODE_OPTIONS.map((m) => ({ value: m.value, label: m.label }))} />
               </label>
-              <label className="text-sm">
-                店舗
-                <select aria-label="店舗" value={v.storeId} onChange={(e) => set("storeId", e.target.value)} className={field}>
-                  <option value="">選択してください</option>
-                  {stores.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                商品ごとに独立して応募する告知（方式E）は、商品ごとに別の抽選として登録してください。
+              </p>
             </div>
 
             <label className="block text-sm">
@@ -284,49 +321,51 @@ export function LotteryFormDialog({
             )}
 
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">商品・数量</legend>
+              <legend className="text-sm font-medium">商品・数量{multi && "（2商品以上）"}</legend>
               {v.items.map((it, i) => (
-                <div key={i} className="flex gap-2">
-                  <select
-                    aria-label={`商品${i + 1}`}
-                    value={it.productId}
-                    onChange={(e) => set("items", v.items.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}
-                    className={cn(field, "mt-0 min-w-0 flex-1")}
-                  >
-                    <option value="">商品を選択</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.officialName}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min={1}
-                    aria-label={`数量${i + 1}`}
-                    value={it.quantity}
-                    onChange={(e) => set("items", v.items.map((x, j) => (j === i ? { ...x, quantity: Number(e.target.value) } : x)))}
-                    className={cn(field, "mt-0 w-20")}
-                  />
-                  <Select
-                    label={`単位${i + 1}`}
-                    value={it.unit}
-                    onChange={(unit) => set("items", v.items.map((x, j) => (j === i ? { ...x, unit } : x)))}
-                    className="mt-0 w-24"
-                    options={[
-                      { value: "box", label: "BOX" },
-                      { value: "pack", label: "パック" },
-                      { value: "set", label: "セット" },
-                    ]}
-                  />
-                  <Button type="button" variant="ghost" size="icon" aria-label={`商品${i + 1}を削除`} onClick={() => set("items", v.items.filter((_, j) => j !== i))}>
-                    <Trash2 className="size-4" />
-                  </Button>
+                <div key={i} className="space-y-1 rounded-md border p-2 sm:border-0 sm:p-0">
+                  <div className="flex gap-2">
+                    <MasterCombobox
+                      label={`商品${i + 1}`}
+                      value={it.product}
+                      options={productOptions}
+                      className="min-w-0 flex-1"
+                      onChange={(product) => set("items", v.items.map((x, j) => (j === i ? { ...x, product } : x)))}
+                    />
+                    {multi && v.items.length > 2 && (
+                      <Button type="button" variant="ghost" size="icon" aria-label={`商品${i + 1}を削除`} onClick={() => set("items", v.items.filter((_, j) => j !== i))}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      aria-label={`数量${i + 1}`}
+                      value={it.quantity}
+                      onChange={(e) => set("items", v.items.map((x, j) => (j === i ? { ...x, quantity: Number(e.target.value) } : x)))}
+                      className={cn(field, "mt-0 w-24")}
+                    />
+                    <Select
+                      label={`単位${i + 1}`}
+                      value={it.unit}
+                      onChange={(unit) => set("items", v.items.map((x, j) => (j === i ? { ...x, unit } : x)))}
+                      className="mt-0 w-28"
+                      options={[
+                        { value: "box", label: "BOX" },
+                        { value: "pack", label: "パック" },
+                        { value: "set", label: "セット" },
+                      ]}
+                    />
+                  </div>
                 </div>
               ))}
-              <Button type="button" size="sm" variant="outline" onClick={() => set("items", [...v.items, { productId: "", quantity: 1, unit: "box" }])}>
-                <Plus className="size-4" /> 商品を追加
-              </Button>
+              {multi && (
+                <Button type="button" size="sm" variant="outline" onClick={() => set("items", [...v.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" }])}>
+                  <Plus className="size-4" /> 商品を追加
+                </Button>
+              )}
             </fieldset>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -435,30 +474,26 @@ export function LotteryFormDialog({
                 </label>
                 <fieldset className="space-y-2 rounded-md border p-3">
                   <legend className="px-1 text-sm font-medium">応募状況（過去の抽選はここで登録）</legend>
-                  {accounts.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">この系列の応募アカウントが未登録です（マスター管理で追加）。</p>
+                  {multi && v.multiMode !== "choose_one" && <p className="text-xs text-muted-foreground">複数商品の当落は、登録後に商品ごとに入力します。</p>}
+                  {v.multiMode === "choose_one" ? (
+                    <p className="text-xs text-muted-foreground">希望商品を選んで応募する方式では、登録後にカード上でユーザーごとに希望商品を選択して応募を記録します。</p>
                   ) : (
-                    accounts.map((a) => {
-                      const owner = data.profiles.find((p) => p.id === a.profileId);
-                      return (
-                        <label key={a.id} className="flex items-center justify-between gap-2 text-sm">
-                          <span>
-                            {owner?.label} / {a.label}
-                          </span>
-                          <select
-                            aria-label={`${owner?.label} ${a.label}の応募状況`}
-                            value={appStatus(a.id)}
-                            onChange={(e) => setAppStatus(a.id, e.target.value)}
-                            className="min-h-10 rounded-md border bg-background px-2"
-                          >
-                            <option value="none">未応募</option>
-                            <option value="applied">応募済み（結果待ち）</option>
-                            <option value="won">当選</option>
-                            <option value="lost">落選</option>
-                          </select>
-                        </label>
-                      );
-                    })
+                    profiles.map((p) => (
+                      <label key={p.id} className="flex items-center justify-between gap-2 text-sm">
+                        <span>{p.label}</span>
+                        <select
+                          aria-label={`${p.label}の応募状況`}
+                          value={appStatus(p.id)}
+                          onChange={(e) => setAppStatus(p.id, e.target.value)}
+                          className="min-h-10 rounded-md border bg-input px-2"
+                        >
+                          <option value="none">未応募</option>
+                          <option value="applied">応募済み（結果待ち）</option>
+                          {!multi && <option value="won">当選</option>}
+                          {!multi && <option value="lost">落選</option>}
+                        </select>
+                      </label>
+                    ))
                   )}
                   {(v.applications?.length ?? 0) > 0 && (
                     <label className="block text-sm">

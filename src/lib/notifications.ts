@@ -1,7 +1,7 @@
 import { formatFlexible, isPast, jstDateString } from "@/lib/datetime";
 import { effectiveEventState, judgeAccount } from "@/lib/eligibility";
 import { formatItem, isManaged } from "@/lib/lottery-view";
-import type { AppData, FlexibleDate, Lottery } from "@/types/domain";
+import type { AppData, FlexibleDate, Lottery, Profile } from "@/types/domain";
 
 /**
  * 通知の計画（純関数）。「いま送るべき通知」を現在の状態から毎回再計算する。
@@ -73,6 +73,16 @@ export interface NotificationPlan {
   suppressed: SuppressedNotification[];
 }
 
+/** 通知の送り先。未設定(null/undefined)は本人のみ、空配列は通知なし。 */
+export function recipientsOf(p: Pick<Profile, "id" | "notifyRecipientIds">): string[] {
+  return p.notifyRecipientIds == null ? [p.id] : p.notifyRecipientIds;
+}
+
+/** recipientId 宛ての通知対象となる応募ユーザー（本人＋通知先に指定してくれているユーザー）。有効なプロフィールのみ。 */
+export function applicantsFor(data: AppData, recipientId: string): Profile[] {
+  return data.profiles.filter((p) => p.active !== false && recipientsOf(p).includes(recipientId));
+}
+
 const HOUR = 3600_000;
 const MIN = 60_000;
 /** 結果型など「時刻に紐づく通知」を、本来の時刻からどれだけ遅れて送ってよいか */
@@ -133,7 +143,14 @@ export function planNotifications(
     if (profile.active === false) continue;
     const s = settingsByProfile[profile.id] ?? DEFAULT_NOTIFICATION_SETTINGS;
     if (!s.enabled) continue;
-    const accounts = data.accounts.filter((a) => a.profileId === profile.id && a.active);
+    // 応募名義と通知先は別。この受信者宛てに集約する応募ユーザー（本人＋通知先に指定したユーザー）の分を1通にまとめる
+    const applicantIds = new Set(applicantsFor(data, profile.id).map((p) => p.id));
+    if (applicantIds.size === 0) continue;
+    const accounts = data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active);
+    const ownerName = (accountId: string) => {
+      const acc = accounts.find((x) => x.id === accountId);
+      return data.profiles.find((p) => p.id === acc?.profileId)?.label ?? acc?.label;
+    };
 
     for (const l of data.lotteries) {
       const label = lotteryLabel(data, l);
@@ -146,7 +163,7 @@ export function planNotifications(
       if (isManaged(data, l.id) && effectiveEventState(l, now) === "open") {
         const missing = myAccounts.filter((a) => judgeAccount(data, l, a, now).status === "eligible_unapplied");
         if (missing.length > 0) {
-          const who = missing.map((a) => a.label).join("、");
+          const who = [...new Set(missing.map((a) => ownerName(a.id)))].join("、");
           const dl = l.applyDeadline;
           const dlKey = flexKey(dl);
           if (dl.precision === "date_time") {
@@ -200,10 +217,7 @@ export function planNotifications(
         const baseline = new Date(Math.max(...pending.map((a) => new Date(a.createdAt).getTime())));
         const rd = l.resultDate;
         const rKey = flexKey(rd);
-        const who = pending
-          .map((a) => myAccounts.find((x) => x.id === a.accountId)?.label)
-          .filter(Boolean)
-          .join("、");
+        const who = [...new Set(pending.map((a) => ownerName(a.accountId)).filter(Boolean))].join("、");
         const mk = (type: NotificationType, tier: string, dueAt: Date, title: string, body: string, group?: string): Candidate => ({
           ...base,
           type,
@@ -240,7 +254,7 @@ export function planNotifications(
       if (s.procedureEnabled && won.length > 0) {
         const pd = l.procedureDeadline;
         const pKey = flexKey(pd);
-        const who = won.map((a) => myAccounts.find((x) => x.id === a.accountId)?.label).filter(Boolean).join("、");
+        const who = [...new Set(won.map((a) => ownerName(a.accountId)).filter(Boolean))].join("、");
         const mk = (tier: string, dueAt: Date, expiresAt: Date, body: string): Candidate => ({
           ...base,
           type: "procedure_before",
@@ -281,7 +295,7 @@ export function planNotifications(
           url: "/settings/masters",
           tag: `eligibility:${e.id}`,
           title: "応募資格の有効期限が近づいています",
-          body: `${chain} ${req?.label ?? ""}（${acc.label}）\n有効期限 ${e.validUntil.slice(5).replace("-", "/")}`,
+          body: `${chain} ${req?.label ?? ""}（${ownerName(acc.id) ?? acc.label}）\n有効期限 ${e.validUntil.slice(5).replace("-", "/")}`,
         });
       }
     }
@@ -324,6 +338,8 @@ export function planNotifications(
 
 // ------------------------------------------------------------------ 画面内アラート（通知が使えない環境の代替）
 export interface InAppAlert {
+  /** 既読管理用の安定キー（種別 + 抽選 + 期限）。期限が変わると新しい通知として扱う */
+  key: string;
   kind: "apply_soon" | "result_overdue" | "procedure_soon" | "eligibility_expiring";
   lotteryId?: string;
   title: string;
@@ -334,7 +350,9 @@ export interface InAppAlert {
 /** 現在のプロフィールが対応すべき項目。プッシュ通知の有無に関わらず画面で確認できる。 */
 export function computeAlerts(data: AppData, profileId: string, now: Date): InAppAlert[] {
   const alerts: InAppAlert[] = [];
-  const mine = data.accounts.filter((a) => a.profileId === profileId && a.active);
+  const applicantIds = new Set(applicantsFor(data, profileId).map((p) => p.id));
+  const mine = data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active);
+  const owner = (accountId: string) => data.profiles.find((p) => p.id === mine.find((a) => a.id === accountId)?.profileId)?.label ?? "";
   const day = jstDateString(now);
 
   for (const l of data.lotteries) {
@@ -348,9 +366,9 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
       if (missing.length > 0) {
         const remainMs = dl.precision === "date_time" ? new Date(dl.at).getTime() - now.getTime() : null;
         if (dl.precision === "date_time" && remainMs !== null && remainMs <= 24 * HOUR) {
-          alerts.push({ kind: "apply_soon", lotteryId: l.id, title: `未応募: ${label}`, detail: `${missing.map((a) => a.label).join("、")} ／ 締切 ${formatFlexible(dl)}（${remainingText(new Date(dl.at), now)}）`, urgent: remainMs <= 3 * HOUR });
+          alerts.push({ key: `apply:${l.id}:${flexKey(dl)}`, kind: "apply_soon", lotteryId: l.id, title: `未応募: ${label}`, detail: `${[...new Set(missing.map((a) => owner(a.id)))].join("、")} ／ 締切 ${formatFlexible(dl)}（${remainingText(new Date(dl.at), now)}）`, urgent: remainMs <= 3 * HOUR });
         } else if (dl.precision === "date_only" && dl.date === day) {
-          alerts.push({ kind: "apply_soon", lotteryId: l.id, title: `本日締切: ${label}`, detail: `${missing.map((a) => a.label).join("、")} ／ 締切 ${formatFlexible(dl)}`, urgent: true });
+          alerts.push({ key: `apply:${l.id}:${flexKey(dl)}`, kind: "apply_soon", lotteryId: l.id, title: `本日締切: ${label}`, detail: `${[...new Set(missing.map((a) => owner(a.id)))].join("、")} ／ 締切 ${formatFlexible(dl)}`, urgent: true });
         }
       }
     }
@@ -359,7 +377,7 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
       (a) => a.lotteryId === l.id && a.state === "applied" && a.result === "pending" && accs.some((x) => x.id === a.accountId),
     );
     if (pending && isPast(l.resultDate, now) === true && l.eventState !== "cancelled") {
-      alerts.push({ kind: "result_overdue", lotteryId: l.id, title: `結果が未登録: ${label}`, detail: `発表 ${formatFlexible(l.resultDate)} を過ぎています`, urgent: true });
+      alerts.push({ key: `result:${l.id}:${flexKey(l.resultDate)}`, kind: "result_overdue", lotteryId: l.id, title: `結果が未登録: ${label}`, detail: `発表 ${formatFlexible(l.resultDate)} を過ぎています`, urgent: true });
     }
 
     const won = data.applications.some(
@@ -373,7 +391,7 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
           : pd.precision === "date_only"
             ? pd.date >= day && pd.date <= addDaysJst(day, 3)
             : false;
-      if (soon) alerts.push({ kind: "procedure_soon", lotteryId: l.id, title: `購入・受取の期限: ${label}`, detail: `期限 ${formatFlexible(pd)}`, urgent: true });
+      if (soon) alerts.push({ key: `procedure:${l.id}:${flexKey(pd)}`, kind: "procedure_soon", lotteryId: l.id, title: `購入・受取の期限: ${label}`, detail: `期限 ${formatFlexible(pd)}`, urgent: true });
     }
   }
 
@@ -382,8 +400,27 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
     if (!acc || e.state !== "eligible" || !e.validUntil) continue;
     if (e.validUntil >= day && e.validUntil <= addDaysJst(day, 14)) {
       const req = data.requirements.find((r) => r.id === e.requirementId);
-      alerts.push({ kind: "eligibility_expiring", title: `資格の有効期限が近い: ${req?.label ?? ""}（${acc.label}）`, detail: `有効期限 ${e.validUntil}`, urgent: false });
+      alerts.push({ key: `elig:${e.id}:${e.validUntil}`, kind: "eligibility_expiring", title: `資格の有効期限が近い: ${req?.label ?? ""}（${acc.label}）`, detail: `有効期限 ${e.validUntil}`, urgent: false });
     }
   }
   return alerts.sort((a, b) => Number(b.urgent) - Number(a.urgent));
+}
+
+/**
+ * タブの赤丸と未対応件数。件数は「抽選」単位で数え、1応募に複数商品があっても重複計上しない。
+ *  - appliedDot: 発表日を過ぎても結果が未登録の応募がある（「応募済み」タブ）
+ *  - wonDot: 当選済みで購入・受取が完了していない応募がある（「当選」タブ）
+ */
+export function tabDots(data: AppData, profileId: string, now: Date): { appliedDot: boolean; wonDot: boolean } {
+  const applicantIds = new Set(applicantsFor(data, profileId).map((p) => p.id));
+  const mine = new Set(data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active).map((a) => a.id));
+  let appliedDot = false;
+  let wonDot = false;
+  for (const l of data.lotteries) {
+    if (l.eventState === "cancelled") continue;
+    const apps = data.applications.filter((a) => a.lotteryId === l.id && a.state === "applied" && mine.has(a.accountId));
+    if (!appliedDot && isPast(l.resultDate, now) === true && apps.some((a) => a.result === "pending")) appliedDot = true;
+    if (!wonDot && apps.some((a) => a.result === "won" && a.fulfillment !== "purchased")) wonDot = true;
+  }
+  return { appliedDot, wonDot };
 }

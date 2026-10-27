@@ -6,11 +6,11 @@ import { manualPurchaseSchema } from "@/lib/purchase-input";
 
 const uuid = "123e4567-e89b-42d3-a456-426614174000";
 const valid = {
-  chainId: uuid,
-  storeId: uuid,
+  chain: { id: uuid, name: "" },
+  store: { id: uuid, name: "" },
   campaignId: null,
   newCampaign: null,
-  items: [{ productId: uuid, quantity: 1, unit: "box" as const }],
+  items: [{ product: { id: uuid, name: "" }, quantity: 1, unit: "box" as const }],
   applyStart: EMPTY_FLEX,
   applyDeadline: EMPTY_FLEX,
   resultDate: EMPTY_FLEX,
@@ -42,7 +42,7 @@ describe("抽選入力の検証", () => {
   });
   it("商品必須・数量1以上・URLはhttp(s)のみ", () => {
     expect(lotteryInputSchema.safeParse({ ...valid, items: [] }).success).toBe(false);
-    expect(lotteryInputSchema.safeParse({ ...valid, items: [{ productId: uuid, quantity: 0, unit: "box" }] }).success).toBe(false);
+    expect(lotteryInputSchema.safeParse({ ...valid, items: [{ product: { id: uuid, name: "" }, quantity: 0, unit: "box" }] }).success).toBe(false);
     expect(lotteryInputSchema.safeParse({ ...valid, announcementUrl: "javascript:alert(1)" }).success).toBe(false);
     expect(lotteryInputSchema.safeParse({ ...valid, sourceUrls: ["ftp://x"] }).success).toBe(false);
     expect(lotteryInputSchema.safeParse({ ...valid, announcementUrl: "https://example.com/a" }).success).toBe(true);

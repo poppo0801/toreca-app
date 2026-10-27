@@ -42,6 +42,24 @@ export class InMemoryRepository implements LotteryRepository {
   async setEventState(actorId: string, lotteryId: string, state: Parameters<typeof m.setEventState>[3]) {
     return this.apply((d) => m.setEventState(d, actorId, lotteryId, state, new Date()));
   }
+  async setItemResults() {
+    return UNSUPPORTED;
+  }
+  async saveExpense() {
+    return UNSUPPORTED;
+  }
+  async deleteExpense() {
+    return UNSUPPORTED;
+  }
+  async saveSale() {
+    return UNSUPPORTED;
+  }
+  async deleteSale() {
+    return UNSUPPORTED;
+  }
+  async updateProfile() {
+    return UNSUPPORTED;
+  }
   async saveLottery() {
     return UNSUPPORTED;
   }

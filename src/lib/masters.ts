@@ -111,7 +111,20 @@ export const ENTITIES: Record<EntityKey, Entity> = {
     subFields: ["product_code", "packs_per_box"],
     fields: [
       { name: "official_name", label: "正式名称", type: "text", required: true, max: 120 },
-      { name: "product_code", label: "商品コード（任意）", type: "text", max: 30 },
+      { name: "product_code", label: "商品コード（任意。公式番号があれば公式番号、なければ独自コード）", type: "text", max: 30 },
+      {
+        name: "product_code_kind",
+        label: "コード種別（コードを入力した場合）",
+        type: "select",
+        required: true,
+        default: "custom",
+        options: [
+          { value: "official", label: "公式番号" },
+          { value: "custom", label: "独自コード" },
+        ],
+      },
+      { name: "list_price_box", label: "BOX定価・円（任意。収支の金額の仮計算に使用）", type: "number", min: 0, max: 10000000, step: 1 },
+      { name: "list_price_pack", label: "パック定価・円（任意）", type: "number", min: 0, max: 10000000, step: 1 },
       { name: "category", label: "カテゴリ", type: "text", required: true, max: 40, default: "pokemon_card" },
       { name: "release_date", label: "発売日（任意）", type: "date" },
       { name: "packs_per_box", label: "1BOXのパック数", type: "number", required: true, min: 1, max: 500, step: 1, default: 30 },
@@ -300,7 +313,10 @@ export function buildSchema(entity: Entity) {
 /** 商品コードのみ「空欄=NULL」（一意制約のため空文字を避ける） */
 export function toDbValues(entity: Entity, values: Record<string, unknown>): Record<string, unknown> {
   const out = { ...values };
-  if (entity.key === "products" && out.product_code === "") out.product_code = null;
+  if (entity.key === "products" && out.product_code === "") {
+    out.product_code = null;
+    out.product_code_kind = null;
+  }
   if (entity.key === "product_aliases") out.normalized_alias = normalizeAlias(String(out.alias));
   return out;
 }

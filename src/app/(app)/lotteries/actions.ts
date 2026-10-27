@@ -15,9 +15,14 @@ import {
   setLotterySkip,
   setManaged,
   setResult,
+  setItemResults,
+  updateProfileSettings,
+  type ProfileSettingsInput,
   type Db,
   type ServiceResult,
 } from "@/lib/server/lottery-service";
+import { deleteExpense, deleteSale, saveExpense, saveSale } from "@/lib/server/finance-service";
+import type { ExpenseInput, SaleInput } from "@/lib/finance-input";
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import type { AppData, EventState, FulfillmentStatus, ResultStatus } from "@/types/domain";
@@ -78,8 +83,38 @@ export async function setManagedAction(lotteryId: string, isManaged: boolean, ac
   return mutate((c) => setManaged(c.db, c.householdId, lotteryId, isManaged, actor));
 }
 
-export async function setAppliedAction(lotteryId: string, accountId: string, applied: boolean, actor: string | null): Promise<MutationResult> {
-  return mutate((c) => setApplied(c.db, c.householdId, lotteryId, accountId, applied, actor));
+export async function setAppliedAction(
+  lotteryId: string,
+  accountId: string,
+  applied: boolean,
+  actor: string | null,
+  selectedItemId: string | null = null,
+): Promise<MutationResult> {
+  return mutate((c) => setApplied(c.db, c.householdId, lotteryId, accountId, applied, actor, selectedItemId));
+}
+
+export async function setItemResultsAction(
+  applicationId: string,
+  results: { itemId: string; result: ResultStatus }[],
+  actor: string | null,
+): Promise<MutationResult> {
+  return mutate((c) => setItemResults(c.db, applicationId, results, actor));
+}
+
+export async function saveExpenseAction(id: string | null, input: ExpenseInput, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => saveExpense(c.db, c.householdId, id, input, actor));
+}
+export async function deleteExpenseAction(id: string, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => deleteExpense(c.db, id, actor));
+}
+export async function saveSaleAction(id: string | null, input: SaleInput, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => saveSale(c.db, c.householdId, id, input, actor));
+}
+export async function deleteSaleAction(id: string, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => deleteSale(c.db, id, actor));
+}
+export async function updateProfileAction(profileId: string, input: ProfileSettingsInput, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => updateProfileSettings(c.db, profileId, input, actor));
 }
 
 export async function setResultAction(applicationId: string, result: ResultStatus, actor: string | null): Promise<MutationResult> {

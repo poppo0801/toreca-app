@@ -90,6 +90,8 @@ export function setApplied(
           appliedAt: nowIso,
           state,
           result: "pending" as const,
+          itemResults: {},
+          selectedItemId: null,
           resultConfirmedAt: null,
           fulfillment: "none" as const,
           createdAt: nowIso,

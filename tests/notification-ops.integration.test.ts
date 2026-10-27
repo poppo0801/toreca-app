@@ -3,8 +3,9 @@
  * 起動関数の権限。実際のプッシュ送信は行わない（偽の送信関数）。  npm run test:db
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { EMPTY_FLEX, flexToInput, type LotteryInput } from "@/lib/lottery-input";
-import { saveLottery, setApplied, setManaged, type Db } from "@/lib/server/lottery-service";
+import { EMPTY_FLEX, flexToInput } from "@/lib/lottery-input";
+import { saveLegacy as saveLottery, type LegacyInput } from "./helpers/legacy";
+import { setApplied, setManaged, type Db } from "@/lib/server/lottery-service";
 import { runNotifyJob } from "@/lib/server/notify-job";
 import type { PushResult, PushSender } from "@/lib/server/push";
 import { addSkipRule, setProfileTargets } from "@/lib/server/rules-service";
@@ -49,7 +50,7 @@ describe.skipIf(!dbTestsEnabled)("通知運用の検証", () => {
     return data as { id: string };
   };
   const soon = (min: number) => flexToInput({ precision: "date_time", at: new Date(Date.now() + min * 60_000).toISOString() });
-  const input = (over: Partial<LotteryInput>): LotteryInput => ({
+  const input = (over: Partial<LegacyInput>): LegacyInput => ({
     chainId,
     storeId,
     campaignId: null,
@@ -134,8 +135,8 @@ describe.skipIf(!dbTestsEnabled)("通知運用の検証", () => {
     // A・B・C それぞれが自分のアカウントについて未応募 → 各自の端末に1件ずつ
     expect(recipients("ELIGIBLE".length ? "運用電機 本店" : "")).toEqual(["A", "B", "C"]);
     for (const w of ["A", "B", "C"]) expect(sent.filter((s) => s.endpoint === endpoints[w])).toHaveLength(1);
-    expect(sent.find((s) => s.endpoint === endpoints.A)!.body).toContain("A-acc");
-    expect(sent.find((s) => s.endpoint === endpoints.A)!.body).not.toContain("B-acc");
+    expect(sent.find((s) => s.endpoint === endpoints.A)!.body).toContain("未応募: A");
+    expect(sent.find((s) => s.endpoint === endpoints.A)!.body).not.toContain("未応募: A、");
   });
 
   it("応募済み・スルー・対象外・枠充足・要確認・★OFFのプロフィールには通知されない", async () => {

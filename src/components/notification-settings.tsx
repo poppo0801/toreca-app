@@ -168,7 +168,7 @@ export function NotificationSettings() {
             type="time"
             value={settings.morningTime}
             onChange={(e) => setSettings({ ...settings, morningTime: e.target.value })}
-            className="min-h-10 rounded-md border bg-background px-2"
+            className="min-h-10 rounded-md border bg-input px-2"
           />
         </label>
         <div>
@@ -215,7 +215,7 @@ export function NotificationSettings() {
           <select
             value={settings.dateOnlyPolicy}
             onChange={(e) => setSettings({ ...settings, dateOnlyPolicy: e.target.value as Settings["dateOnlyPolicy"] })}
-            className="mt-1 min-h-10 w-full rounded-md border bg-background px-2"
+            className="mt-1 min-h-10 w-full rounded-md border bg-input px-2"
           >
             <option value="morning_of">当日の朝に「時刻未確認」として通知する</option>
             <option value="none">通知しない（画面で確認する）</option>
@@ -226,7 +226,7 @@ export function NotificationSettings() {
           <select
             value={settings.eligibilityExpiryDays}
             onChange={(e) => setSettings({ ...settings, eligibilityExpiryDays: Number(e.target.value) })}
-            className="mt-1 min-h-10 w-full rounded-md border bg-background px-2"
+            className="mt-1 min-h-10 w-full rounded-md border bg-input px-2"
           >
             <option value={0}>通知しない</option>
             <option value={7}>7日前</option>

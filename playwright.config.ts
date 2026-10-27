@@ -24,6 +24,13 @@ export default defineConfig({
   },
   projects: [
     { name: "mobile", use: { ...devices["Pixel 7"] } },
-    ...(mode === "mock" ? [{ name: "desktop", use: { viewport: { width: 1280, height: 800 } } }] : []),
+    // 実DBを使うE2E(supabase)は同じ世帯を共有するため mobile のみ。表示系は mock で PC・iPhone 相当も確認する
+    ...(mode === "mock"
+      ? [
+          { name: "desktop", use: { viewport: { width: 1280, height: 800 } } },
+          // iPhone 相当の画面サイズ・タッチ（WebKit を別途入れずに済むよう Chromium でエミュレート。Safe Area の実機確認は docs/iphone-setup.md）
+          { name: "iphone", use: { ...devices["iPhone 14"], defaultBrowserType: "chromium" as const } },
+        ]
+      : []),
   ],
 });

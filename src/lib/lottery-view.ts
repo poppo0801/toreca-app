@@ -1,14 +1,20 @@
 import { isPast, sortKey } from "@/lib/datetime";
-import { effectiveEventState } from "@/lib/eligibility";
+import { effectiveEventState, isSkippedBy } from "@/lib/eligibility";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
 export type Tab = "managed" | "applied" | "won" | "all";
 export type AllFilter = "any" | "unmanaged" | "skipped" | "history";
 export type SortMode = "deadline" | "result";
 
+/** ★管理対象タブのスルー表示: normal=自分がスルーしていないもの / include=すべて / only=自分がスルーしたもの */
+export type SkipView = "normal" | "include" | "only";
+
 export interface Filters {
   query: string;
   chainId: string;
+  /** 商品で絞り込み（複数商品の抽選も、いずれかの明細に含まれていれば対象） */
+  productId: string;
+  skip: SkipView;
   prefecture: string;
   receiveMethod: string;
   allFilter: AllFilter;
@@ -18,6 +24,8 @@ export interface Filters {
 export const DEFAULT_FILTERS: Filters = {
   query: "",
   chainId: "",
+  productId: "",
+  skip: "normal",
   prefecture: "",
   receiveMethod: "",
   allFilter: "any",
@@ -79,6 +87,7 @@ function matchFilters(data: AppData, lottery: Lottery, f: Filters): boolean {
   const store = data.stores.find((s) => s.id === lottery.storeId);
   if (f.prefecture && store?.prefecture !== f.prefecture) return false;
   if (f.receiveMethod && lottery.receiveMethod !== f.receiveMethod) return false;
+  if (f.productId && !lottery.items.some((i) => i.productId === f.productId)) return false;
   const q = f.query.trim().toLowerCase();
   if (q) {
     const chain = data.chains.find((c) => c.id === lottery.chainId);
@@ -125,11 +134,22 @@ function wonRank(data: AppData, l: Lottery): number {
   return apps.every((a) => a.fulfillment === "purchased") ? 1 : 0; // 完了済みは後ろ
 }
 
-export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date): Lottery[] {
+/**
+ * スルーはユーザー別。★管理対象タブでは、既定で「自分がスルーした抽選」を一覧から外す（他のユーザーには影響しない）。
+ * profileId を渡さない場合（集計用途など）はスルーで絞らない。
+ */
+function matchSkipView(data: AppData, lottery: Lottery, f: Filters, tab: Tab, profileId?: string): boolean {
+  if (tab !== "managed" || !profileId || f.skip === "include") return true;
+  const skipped = isSkippedBy(data, profileId, lottery);
+  return f.skip === "only" ? skipped : !skipped;
+}
+
+export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string): Lottery[] {
   const list = data.lotteries.filter(
     (l) =>
       inTab(data, l, tab, now) &&
       matchFilters(data, l, f) &&
+      matchSkipView(data, l, f, tab, profileId) &&
       (tab !== "all" || matchAllFilter(data, l, f.allFilter, now)),
   );
 
@@ -155,6 +175,7 @@ export function formatItem(item: Pick<LotteryItem, "quantity" | "unit">, product
   const name = product?.aliases[0] ?? product?.officialName ?? "商品未登録";
   if (item.unit === "set") return `${name} ×${item.quantity}セット`;
   if (item.unit === "pack") return `${name} ${item.quantity}P`;
-  const packs = product ? ` (${item.quantity * product.packsPerBox}P)` : "";
+  // 仮登録の商品は入数が未確認のため、パック換算は表示しない（既定値を事実として見せない）
+  const packs = product && !product.provisional ? ` (${item.quantity * product.packsPerBox}P)` : "";
   return `${name} ${item.quantity}BOX${packs}`;
 }
