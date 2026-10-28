@@ -465,6 +465,9 @@ test("通知設定の画面: 端末の状態とプロフィール別の通知ル
 });
 
 test("AIで読み取る: 文章→確認→フォーム入力→保存（未設定の環境では案内を表示し、手動登録は使える）", async ({ page }) => {
+  // 本番URL（E2E_BASE_URL）ではAPIキーが設定済みで、実際のAIが呼ばれて費用が発生するため実行しない。
+  // 実AIの検証は e2e/ai-live.spec.ts（docs/ai-live-verification.md）。ここはモックエンジンまたは未設定の環境（ローカル・CI）での画面の確認。
+  test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証（ai-live）で確認する。費用を発生させない");
   await login(page);
   await page.getByRole("button", { name: "＋抽選を登録" }).click();
   const dialog = page.getByRole("dialog").first();
