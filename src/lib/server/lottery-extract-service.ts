@@ -38,6 +38,9 @@ export type ExtractResult =
       /** 取得できないときに案内する代替の入力方法 */
       suggest?: "text" | "image";
       engine?: "anthropic" | "mock" | "none";
+      /** 解析は行われたが結果として失敗（抽選でない等）のとき、費用管理のために使用モデルとトークン数を返す */
+      model?: string;
+      usage?: { input: number; output: number };
     };
 
 export interface ExtractDeps {
@@ -115,15 +118,15 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
     const out = await deps.extractor.extract(req);
     const extraction = normalizeExtraction(out.raw, deps.now);
     if (!extraction.isLotteryAnnouncement) {
-      return { ok: false, kind, code: "not_lottery", engine: out.engine, message: "抽選販売の告知とは判断できませんでした。内容を確認してください" };
+      return { ok: false, kind, code: "not_lottery", engine: out.engine, model: out.model, usage: out.usage, message: "抽選販売の告知とは判断できませんでした。内容を確認してください" };
     }
     if (!hasAnyContent(extraction)) {
-      return { ok: false, kind, code: "nothing_found", engine: out.engine, message: "抽選に関する情報を読み取れませんでした。画像が不鮮明でないか、文章に抽選の情報が含まれているか確認してください", suggest: kind === "image" ? "text" : "image" };
+      return { ok: false, kind, code: "nothing_found", engine: out.engine, model: out.model, usage: out.usage, message: "抽選に関する情報を読み取れませんでした。画像が不鮮明でないか、文章に抽選の情報が含まれているか確認してください", suggest: kind === "image" ? "text" : "image" };
     }
     return { ok: true, kind, engine: out.engine, model: out.model, usage: out.usage, extraction, sourceUrl: req.sourceUrl, notices };
   } catch (e) {
     if (e instanceof ExtractorError) {
-      return { ok: false, kind, code: e.code === "rate_limited" ? "rate_limited" : "ai_failed", engine: deps.extractor.engine, message: e.message };
+      return { ok: false, kind, code: e.code === "rate_limited" ? "rate_limited" : "ai_failed", engine: deps.extractor.engine, model: e.model, usage: e.usage, message: e.message };
     }
     return { ok: false, kind, code: "ai_failed", engine: deps.extractor.engine, message: "読み取り中にエラーが発生しました。時間をおいて再度お試しください" };
   }

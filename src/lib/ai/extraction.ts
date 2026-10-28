@@ -197,7 +197,8 @@ const httpUrl = (v: string) => (/^https?:\/\/\S+$/i.test(v) ? v : "");
 /** AIの生の出力 → 検証済みの ExtractedLottery */
 export function normalizeExtraction(raw: unknown, now: Date): ExtractedLottery {
   const r = rawExtractionSchema.parse(raw && typeof raw === "object" ? raw : {});
-  const warnings = [...r.warnings];
+  // AIが書いた注意のうち、内部用語（year・null）を含むものは、システム側の注意（年の補完など）と重複するので除く
+  const warnings = r.warnings.filter((w) => !/(year|null)/i.test(w));
   const items: ExtractedItem[] = r.products
     .filter((p) => p.name.length > 0)
     .map((p) => ({ name: p.name, code: p.code, quantity: p.quantity, unit: p.unit ?? "box", unitAssumed: p.unit === null }));

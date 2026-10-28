@@ -136,20 +136,37 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     if (ex.confidence[key] === "low") flags[key] = flags[key] ?? `${label}は読み取りに自信がありません`;
   };
 
-  // 系列
-  const chainM = matchChain(ex.chainName, data.chains);
-  const chainRef = chainM.item ? { id: chainM.item.id, name: chainM.item.name } : { id: null, name: ex.chainName };
-  if (!ex.chainName) flags.chain = "系列名が読み取れませんでした";
+  // 系列。AIが「テスト玩具 本店」のように系列と店名を分けられなかった場合は、店舗名の先頭が既存の系列名なら分ける（要確認）
+  let chainName = ex.chainName;
+  let storeName = ex.storeName;
+  let derivedChain: string | null = null;
+  if (!chainName && storeName) {
+    const sn = cleanName(storeName);
+    const hit = data.chains
+      .filter((c) => !c.archived)
+      .map((c) => ({ c, n: cleanName(c.name) }))
+      .filter((x) => x.n.length >= 2 && sn.startsWith(x.n) && sn.length > x.n.length)
+      .sort((a, b) => b.n.length - a.n.length)[0];
+    if (hit) {
+      chainName = hit.c.name;
+      derivedChain = hit.c.name;
+      storeName = storeName.trim().startsWith(hit.c.name) ? storeName.trim().slice(hit.c.name.length).trim() : sn.slice(hit.n.length);
+    }
+  }
+  const chainM = matchChain(chainName, data.chains);
+  const chainRef = chainM.item ? { id: chainM.item.id, name: chainM.item.name } : { id: null, name: chainName };
+  if (derivedChain) flags.chain = `店舗名の先頭から系列「${derivedChain}」と推定しました。違う場合は修正してください`;
+  else if (!chainName) flags.chain = "系列名が読み取れませんでした";
   else if (chainM.kind === "partial" || chainM.kind === "fuzzy") flags.chain = `既存の系列「${chainM.item!.name}」を候補にしました（${MATCH_LABEL[chainM.kind]}）`;
   else if (chainM.kind === "none") flags.chain = "マスターに無い系列です。保存すると仮登録されます";
   else lowFlag("chain", "系列");
 
   // 店舗
-  const storeM = matchStore(ex.storeName, chainRef.id, data.stores, chainRef.name);
+  const storeM = matchStore(storeName, chainRef.id, data.stores, chainRef.name);
   const storeRef = storeM.item
     ? { id: storeM.item.id, name: storeM.item.name, prefecture: "" }
-    : { id: null, name: ex.storeName, prefecture: ex.prefecture };
-  if (!ex.storeName) flags.store = "店舗名が読み取れませんでした（オンライン抽選などの場合も、店舗名を入力してください）";
+    : { id: null, name: storeName, prefecture: ex.prefecture };
+  if (!storeName) flags.store = "店舗名が読み取れませんでした（オンライン抽選などの場合も、店舗名を入力してください）";
   else if (storeM.kind === "partial" || storeM.kind === "fuzzy") flags.store = `既存の店舗「${storeM.item!.name}」を候補にしました（${MATCH_LABEL[storeM.kind]}）`;
   else if (storeM.kind === "none") flags.store = "マスターに無い店舗です。保存すると仮登録されます";
   else lowFlag("store", "店舗");

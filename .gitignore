@@ -15,3 +15,6 @@ supabase/.branches
 
 # 取り込み元データ（Excel・画像）はコミットしない
 data/import/
+
+# 実AI検証の出力（コミットしない）
+e2e/ai-live-output

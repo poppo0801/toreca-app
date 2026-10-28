@@ -113,9 +113,10 @@ export async function POST(request: NextRequest) {
       engine: result.ok ? result.engine : (result.engine ?? "none"),
       status,
       source_host: host,
-      input_tokens: result.ok ? (result.usage?.input ?? null) : null,
-      output_tokens: result.ok ? (result.usage?.output ?? null) : null,
-      model: result.ok && result.engine === "anthropic" ? (result.model ?? null) : null,
+      // 「抽選ではない」などの結果でも、AIは呼ばれて費用が発生するので、使用量を記録する
+      input_tokens: result.usage?.input ?? null,
+      output_tokens: result.usage?.output ?? null,
+      model: result.engine === "anthropic" ? (result.model ?? null) : null,
     });
   }
   return NextResponse.json(result, { status: result.ok ? 200 : result.code === "rate_limited" ? 429 : 200 });

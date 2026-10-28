@@ -12,7 +12,8 @@ import sharp from "sharp";
 const email = process.env.E2E_EMAIL!;
 const password = process.env.E2E_PASSWORD!;
 const CASES = new Set((process.env.AI_LIVE_CASES ?? "connect").split(",").map((s) => s.trim()));
-const OUT = "e2e/.results/ai-live";
+// 注意: e2e/.results は実行のたびに消されるため、別の場所に保存する（.gitignore 済み）
+const OUT = "e2e/ai-live-output";
 mkdirSync(OUT, { recursive: true });
 
 async function login(page: Page) {
@@ -153,4 +154,13 @@ run("u2")("u2: 取得を拒否すべきURL（内部アドレス・メタデー�
 run("x1")("x1: 公開X投稿のURL（oEmbedで取得できるか）", async ({ page }) => {
   await login(page);
   await call(page, "x1", { kind: "x_url", url: "https://x.com/jack/status/20" });
+});
+
+run("u1b")("u1b: 抽選販売を扱う公開記事のURL（トレカの地図）", async ({ page }) => {
+  await login(page);
+  await call(page, "u1b", { kind: "url", url: "https://torecamap.co.jp/news/pokemoncards-30th/" });
+});
+run("x1b")("x1b: 公開X投稿のURL（oEmbed。抽選の告知ではない投稿での取得確認）", async ({ page }) => {
+  await login(page);
+  await call(page, "x1b", { kind: "x_url", url: "https://x.com/elonmusk/status/1519480761749016577" });
 });
