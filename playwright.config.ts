@@ -11,6 +11,8 @@ export default defineConfig({
   testMatch: mode === "supabase" ? "supabase.spec.ts" : "lotteries.spec.ts",
   outputDir: "./e2e/.results",
   workers: mode === "supabase" ? 1 : undefined,
+  // 実DB・本番URLは通信遅延があるため、画面の反映を待つ上限を長めにする（テストの内容は変えない）
+  expect: { timeout: mode === "supabase" ? 10_000 : 5_000 },
   use: { baseURL: remoteBaseUrl ?? `http://localhost:${PORT}` },
   webServer: remoteBaseUrl
     ? undefined
