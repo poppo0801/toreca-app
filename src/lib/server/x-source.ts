@@ -4,7 +4,7 @@ import { safeFetch } from "@/lib/server/safe-fetch";
 
 /**
  * X（旧Twitter）の投稿URLから本文を取得する。
- * 利用するのは公式の公開エンドポイント「publish.twitter.com/oembed」だけ（APIキー・契約・課金は不要）。
+ * 利用するのは公式の公開エンドポイント「publish.x.com/oembed」（旧 publish.twitter.com は publish.x.com へ転送される）だけ（APIキー・契約・課金は不要）。
  * 非公開アカウント・削除済み・年齢制限・取得制限の投稿、引用や画像だけの投稿は取得できないことがある。
  * 不安定なスクレイピングや、ログイン・制限の回避は行わない。取得できないときは文章・画像の入力へ案内する。
  */
@@ -46,7 +46,7 @@ export async function fetchXPost(rawUrl: string): Promise<XFetchResult> {
   const parsed = parseXStatusUrl(rawUrl);
   if (!parsed) return { ok: false, message: "Xの投稿URL（https://x.com/ユーザー名/status/数字）を入力してください" };
   const canonical = `https://twitter.com/${parsed.user}/status/${parsed.id}`;
-  const api = `https://publish.twitter.com/oembed?omit_script=1&dnt=true&lang=ja&url=${encodeURIComponent(canonical)}`;
+  const api = `https://publish.x.com/oembed?omit_script=1&dnt=true&lang=ja&url=${encodeURIComponent(canonical)}`;
   const res = await safeFetch(api, { accept: ["application/json"], timeoutMs: 8_000, maxBytes: 200_000 });
   if (!res.ok) {
     const why =

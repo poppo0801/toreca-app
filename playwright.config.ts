@@ -8,7 +8,8 @@ const remoteBaseUrl = process.env.E2E_BASE_URL;
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: mode === "supabase" ? "supabase.spec.ts" : "lotteries.spec.ts",
+  // E2E_SPEC: 実AI検証（e2e/ai-live.spec.ts）など、通常は実行しないスペックを指定する
+  testMatch: process.env.E2E_SPEC ?? (mode === "supabase" ? "supabase.spec.ts" : "lotteries.spec.ts"),
   outputDir: "./e2e/.results",
   workers: mode === "supabase" ? 1 : undefined,
   // 実DB・本番URLは通信遅延があるため、画面の反映を待つ上限を長めにする（テストの内容は変えない）

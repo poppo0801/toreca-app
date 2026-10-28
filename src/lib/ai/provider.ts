@@ -147,6 +147,28 @@ export function buildUserText(req: ExtractRequest): string {
   return `${head}${src}${body}${tail}\n\nrecord_lottery ツールで結果を記録してください。`;
 }
 
+/**
+ * Anthropic API のエラーを、利用者に出す案内に変換する。APIキー・リクエスト内容を含みうるため、メッセージ本体は返さない
+ * （残高不足の判定にだけ内部で使う）。再試行の自動繰り返しはしない（SDKの自動再試行は1回まで）。
+ */
+export function mapApiError(e: unknown): ExtractorError {
+  if (e instanceof Anthropic.RateLimitError) return new ExtractorError("rate_limited", "AIの利用上限に達しました。しばらくしてからお試しください");
+  if (e instanceof Anthropic.AuthenticationError) return new ExtractorError("api_error", "AI APIの認証に失敗しました。APIキーが無効か失効している可能性があります（Vercelの環境変数とAnthropic Consoleを確認してください）");
+  if (e instanceof Anthropic.PermissionDeniedError) return new ExtractorError("api_error", "AI APIの利用が許可されていません（APIキーの権限・組織の設定をAnthropic Consoleで確認してください）");
+  if (e instanceof Anthropic.NotFoundError) return new ExtractorError("api_error", "指定したAIモデルが見つかりません（環境変数 AI_MODEL を確認してください）");
+  if (e instanceof Anthropic.APIError) {
+    // 残高不足は 400（invalid_request_error）で返る。文言の一部だけで判定し、本文は返さない
+    if (e.status === 400 && /credit balance|billing|plan/i.test(String(e.message))) {
+      return new ExtractorError("api_error", "AIの利用残高が不足しています。Anthropic Consoleでクレジットを確認してください（手動登録は引き続き使えます）");
+    }
+    if (e.status === 529 || e.status === 503) return new ExtractorError("api_error", "AIサービスが混み合っています。しばらくしてからお試しください");
+    if (e.status === 413) return new ExtractorError("api_error", "送信した内容が大きすぎます。画像を小さくするか、文章を短くしてください");
+    return new ExtractorError("api_error", `AI APIでエラーが発生しました（状態 ${e.status ?? "不明"}）`);
+  }
+  if (e instanceof Anthropic.APIConnectionTimeoutError) return new ExtractorError("api_error", "AIの応答に時間がかかりすぎました。しばらくしてからお試しください");
+  return new ExtractorError("api_error", "AI APIに接続できませんでした");
+}
+
 // ------------------------------------------------------------------ Claude 実装
 /** 標準は費用の安い Haiku（公式料金・モデルIDは src/lib/ai-cost.ts）。実際の読み取り精度は未検証。精度が足りなければ AI_MODEL で Sonnet に切り替える */
 const DEFAULT_MODEL = DEFAULT_AI_MODEL;
@@ -181,11 +203,7 @@ class AnthropicExtractor implements LotteryExtractor {
         messages: [{ role: "user", content }],
       });
     } catch (e) {
-      // APIキー・リクエスト内容を含みうるため、メッセージ本体は返さずステータスだけを伝える
-      if (e instanceof Anthropic.RateLimitError) throw new ExtractorError("rate_limited", "AIの利用上限に達しました。しばらくしてからお試しください");
-      if (e instanceof Anthropic.AuthenticationError) throw new ExtractorError("api_error", "AI APIの認証に失敗しました（APIキーの設定を確認してください）");
-      if (e instanceof Anthropic.APIError) throw new ExtractorError("api_error", `AI APIでエラーが発生しました（状態 ${e.status ?? "不明"}）`);
-      throw new ExtractorError("api_error", "AI APIに接続できませんでした");
+      throw mapApiError(e);
     }
     if (res.stop_reason === "refusal") throw new ExtractorError("refused", "AIがこの内容の読み取りを行いませんでした。文章や画像を確認してください");
     const tool = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "record_lottery");
