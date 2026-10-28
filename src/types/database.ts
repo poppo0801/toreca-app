@@ -218,8 +218,51 @@ export type Database = {
         }
         Relationships: []
       }
+      household_settings: {
+        Row: {
+          ai_monthly_budget_jpy: number
+          auto_ai_enabled: boolean
+          card_display: Json
+          distance_bands_km: Json
+          home_address: string | null
+          home_lat: number | null
+          home_lng: number | null
+          household_id: string
+          travel_review_needed: boolean
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          ai_monthly_budget_jpy?: number
+          auto_ai_enabled?: boolean
+          card_display?: Json
+          distance_bands_km?: Json
+          home_address?: string | null
+          home_lat?: number | null
+          home_lng?: number | null
+          household_id: string
+          travel_review_needed?: boolean
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          ai_monthly_budget_jpy?: number
+          auto_ai_enabled?: boolean
+          card_display?: Json
+          distance_bands_km?: Json
+          home_address?: string | null
+          home_lat?: number | null
+          home_lng?: number | null
+          household_id?: string
+          travel_review_needed?: boolean
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: []
+      }
       ai_extraction_logs: {
         Row: {
+          model: string | null
           created_at: string
           engine: string
           household_id: string
@@ -232,6 +275,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          model?: string | null
           created_at?: string
           engine: string
           household_id: string
@@ -244,6 +288,7 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          model?: string | null
           created_at?: string
           engine?: string
           household_id?: string
@@ -2565,6 +2610,8 @@ export type Database = {
       }
       stores: {
         Row: {
+          round_trip_fare: number | null
+          memo: string
           address_optional: string
           archived_at: string | null
           chain_id: string
@@ -2582,6 +2629,8 @@ export type Database = {
           updated_by_profile_id: string | null
         }
         Insert: {
+          round_trip_fare?: number | null
+          memo?: string
           address_optional?: string
           archived_at?: string | null
           chain_id: string
@@ -2599,6 +2648,8 @@ export type Database = {
           updated_by_profile_id?: string | null
         }
         Update: {
+          round_trip_fare?: number | null
+          memo?: string
           address_optional?: string
           archived_at?: string | null
           chain_id?: string

@@ -1,3 +1,4 @@
+import { DEFAULT_AI_MODEL } from "@/lib/ai-cost";
 import Anthropic from "@anthropic-ai/sdk";
 import { jstToday } from "@/lib/ai/extraction";
 
@@ -147,7 +148,8 @@ export function buildUserText(req: ExtractRequest): string {
 }
 
 // ------------------------------------------------------------------ Claude 実装
-const DEFAULT_MODEL = "claude-sonnet-5-5";
+/** 標準は費用の安い Haiku（公式料金・モデルIDは src/lib/ai-cost.ts）。実際の読み取り精度は未検証。精度が足りなければ AI_MODEL で Sonnet に切り替える */
+const DEFAULT_MODEL = DEFAULT_AI_MODEL;
 
 class AnthropicExtractor implements LotteryExtractor {
   readonly engine = "anthropic" as const;
@@ -244,7 +246,7 @@ class MockExtractor implements LotteryExtractor {
 /**
  * 使うエンジンを環境変数から決める。
  *  - AI_PROVIDER=mock : モック（開発・テスト用。画面に「サンプル」と明示する）
- *  - ANTHROPIC_API_KEY が設定済み : Claude（モデルは AI_MODEL、既定は claude-sonnet-5-5）
+ *  - ANTHROPIC_API_KEY が設定済み : Claude（モデルは AI_MODEL、既定は claude-haiku-5-5）
  *  - それ以外: null（未設定。画面で案内する）
  */
 export function getExtractor(env: Record<string, string | undefined> = process.env): LotteryExtractor | null {

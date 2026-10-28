@@ -93,7 +93,7 @@ describe("距離計算（Haversine・直線距離）", () => {
   });
 
   it("位置が未設定の店舗・自宅では距離を出さない（推測しない）", () => {
-    const settings = { homeLat: sannomiya.lat, homeLng: sannomiya.lng, cardDisplay: DEFAULT_CARD_DISPLAY, distanceBandsKm: [5, 15, 30, 60], aiMonthlyBudgetJpy: 3000, autoAiEnabled: true };
+    const settings = { homeLat: sannomiya.lat, homeLng: sannomiya.lng, cardDisplay: DEFAULT_CARD_DISPLAY, distanceBandsKm: [5, 15, 30, 60], aiMonthlyBudgetJpy: 3000, autoAiEnabled: true, travelReviewNeeded: false };
     expect(storeDistance({ settings }, { lat: null, lng: null })).toBeNull();
     expect(storeDistance({ settings }, undefined)).toBeNull();
     expect(storeDistance({ settings: { ...settings, homeLat: null, homeLng: null } }, osaka)).toBeNull();

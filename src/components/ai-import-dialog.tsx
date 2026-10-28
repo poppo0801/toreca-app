@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { AiBudgetNote } from "@/components/household-settings";
 import type { ExtractResult } from "@/lib/server/lottery-extract-service";
 import { buildDraft, type LotteryDraft, type MatchKind } from "@/lib/lottery-match";
 import { cn } from "@/lib/utils";
@@ -118,6 +119,7 @@ export function AiImportDialog({
         <DialogDescription>
           告知の文章・画像・URLから抽選情報を読み取り、登録フォームに入力します。読み取り結果は候補です。必ず内容を確認・修正してから保存してください。
         </DialogDescription>
+        <AiBudgetNote />
 
         {done ? (
           <div className="mt-3 space-y-3" data-testid="ai-result">

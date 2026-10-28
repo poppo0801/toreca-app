@@ -833,3 +833,120 @@ test("対戦記録: 登録→一覧・勝率→編集→削除。再読込でも
   await page.goto("/finance");
   await expect(page.getByTestId("ledger-row").filter({ hasText: "E2Eデッキ" })).toHaveCount(0);
 });
+
+test("店舗の位置・交通費・直線距離・カード表示項目・AI料金管理（自宅の位置は通常表示しない）", async ({ page }) => {
+  test.setTimeout(120_000);
+  page.on("dialog", (d) => d.accept());
+  await login(page);
+
+  // 店舗マスターを用意（抽選登録の自動仮登録）
+  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  const form = page.getByTestId("lottery-form");
+  await fillMasters(form, "E2E位置電機", "E2E位置店", "E2E位置商品");
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(form).toHaveCount(0);
+
+  // 自宅の位置: 未設定 → 住所は普段は表示されない。手入力で設定（外部の住所検索は押さない限り使わない）
+  await page.goto("/settings");
+  const home = page.getByTestId("home-location");
+  await expect(home.getByTestId("home-status")).toContainText("未設定");
+  await expect(home.getByRole("textbox")).toHaveCount(0); // 住所の入力欄（=住所の表示）は開くまで出ない
+  await home.getByRole("button", { name: "住所を表示して変更" }).click();
+  await home.getByLabel("自宅の住所").fill("E2E架空市1-2-3");
+  await home.getByRole("button", { name: "緯度・経度を手入力" }).click();
+  await home.getByLabel("緯度").fill("34.6948");
+  await home.getByLabel("経度").fill("135.1955");
+  await home.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(home.getByTestId("home-status")).toContainText("設定済み");
+  await expect(page.getByTestId("travel-review")).toHaveCount(0); // 初回は見直し不要
+
+  // 店舗: 住所・都道府県・位置・往復交通費を登録。緯度だけでは保存できない
+  await page.goto("/settings/masters");
+  await page.getByRole("tab", { name: "店舗", exact: true }).click();
+  const row = page.getByTestId("master-row").filter({ hasText: "E2E位置店" });
+  await expect(row.getByTestId("store-place")).toContainText("位置未設定");
+  await row.getByRole("button", { name: "編集" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByLabel(/都道府県/).fill("大阪府");
+  await dlg.getByLabel(/店舗の住所/).fill("大阪府大阪市北区E2E");
+  await dlg.getByLabel(/緯度/).fill("34.7025");
+  await dlg.getByRole("button", { name: "保存" }).click();
+  await expect(dlg.getByRole("alert")).toContainText("緯度と経度は両方");
+  await dlg.getByLabel(/経度/).fill("135.4959");
+  await dlg.getByLabel(/往復交通費/).fill("1280");
+  await dlg.getByRole("button", { name: "保存" }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(row.getByTestId("store-place")).toContainText("往復交通費 1,280円");
+  await expect(row.getByTestId("store-place")).toContainText(/自宅から直線 \d+km/);
+
+  // 抽選カード: 都道府県ラベルと距離（既定で表示）。交通費は既定では非表示
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card = page.getByTestId("lottery-card").filter({ hasText: "E2E位置店" });
+  await expect(card.getByTestId("card-place")).toContainText("大阪府");
+  await expect(card.getByTestId("card-distance")).toHaveText(/^\d+km$/);
+  await expect(card.getByTestId("card-place")).not.toContainText("¥1,280");
+  await page.screenshot({ path: "docs/screenshots/stage5b-card-mobile.png" });
+
+  // 表示項目の設定（家族共通）: 都道府県を隠し、交通費を表示。再読込後も保持され、締切の警告などは常に表示
+  await page.goto("/settings");
+  const cd = page.getByTestId("card-display");
+  await cd.getByLabel("都道府県").uncheck();
+  await cd.getByLabel("往復交通費").check();
+  await cd.getByRole("button", { name: "表示設定を保存" }).click();
+  await expect(cd.getByRole("status")).toContainText("保存しました");
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card2 = page.getByTestId("lottery-card").filter({ hasText: "E2E位置店" });
+  await expect(card2.getByTestId("card-place")).not.toContainText("大阪府");
+  await expect(card2.getByTestId("card-place")).toContainText("¥1,280");
+  await expect(card2.getByTestId("card-distance")).toBeVisible();
+  await expect(card2.getByLabel("応募アカウントの状態")).toBeVisible(); // ★・ユーザー別状態の操作は設定に関係なく表示
+
+  // 距離の区分は後から変更できる（昇順4つの正の数）。不正な値は保存されない
+  await page.goto("/settings");
+  const cd2 = page.getByTestId("card-display");
+  await cd2.getByLabel("距離区分の上限2").fill("3");
+  await cd2.getByRole("button", { name: "表示設定を保存" }).click();
+  await expect(cd2.getByRole("alert")).toContainText("小さい順");
+  await cd2.getByLabel("距離区分の上限2").fill("20");
+  await cd2.getByRole("button", { name: "表示設定を保存" }).click();
+  await expect(cd2.getByRole("status")).toContainText("保存しました");
+  await page.reload();
+  await expect(page.getByTestId("card-display").getByLabel("距離区分の上限2")).toHaveValue("20");
+  await expect(page.getByTestId("card-display").getByLabel("都道府県")).not.toBeChecked();
+
+  // 自宅の位置を変えると、交通費の見直しを促す（自動計算はしない）
+  const home2 = page.getByTestId("home-location");
+  await home2.getByRole("button", { name: "住所を表示して変更" }).click();
+  await expect(home2.getByLabel("自宅の住所")).toHaveValue("E2E架空市1-2-3");
+  await home2.getByRole("button", { name: "緯度・経度を手入力" }).click();
+  await home2.getByLabel("緯度").fill("34.9");
+  await home2.getByLabel("経度").fill("135.4");
+  await home2.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByTestId("travel-review")).toContainText("往復交通費");
+  await page.getByTestId("travel-review").getByRole("button", { name: "見直した" }).click();
+  await expect(page.getByTestId("travel-review")).toHaveCount(0);
+  // 位置情報の削除 → 距離は出なくなる
+  await home2.getByRole("button", { name: "位置情報を削除" }).click();
+  await expect(home2.getByTestId("home-status")).toContainText("未設定");
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  await expect(page.getByTestId("lottery-card").filter({ hasText: "E2E位置店" }).getByTestId("card-distance")).toHaveCount(0);
+
+  // AI利用状況・料金: 回数・推定料金・予算・警告。予算を超えたら警告と自動解析の停止を表示
+  await page.goto("/settings");
+  const ai = page.getByTestId("ai-usage");
+  await expect(ai).toContainText("使用モデル");
+  await expect(ai.getByTestId("ai-cost")).toHaveText(/円$/);
+  await expect(ai).toContainText("推定額");
+  await expect(ai).toContainText("Anthropic Console");
+  await ai.getByLabel("AIの月間予算（円）").fill("0");
+  await ai.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(ai.getByTestId("ai-budget-warning")).toContainText("停止");
+  await ai.getByLabel("AIの月間予算（円）").fill("3000");
+  await ai.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(ai.getByTestId("ai-budget-warning")).toHaveCount(0);
+  await expect(ai).toContainText("1,000円 / 2,000円 / 2,500円");
+  await page.screenshot({ path: "docs/screenshots/stage5b-settings-mobile.png", fullPage: true });
+});

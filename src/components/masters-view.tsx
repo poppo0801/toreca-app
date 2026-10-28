@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ENTITIES, ENTITY_KEYS, type Entity, type EntityKey, type Field } from "@/lib/masters";
 import { saveRecord, setRetired, type ActionResult } from "@/app/(app)/settings/masters/actions";
+import { geocodeAddress, type GeoCandidate } from "@/app/(app)/settings/household-actions";
+import { BAND_CLASS, formatKm } from "@/lib/geo";
+import { storeDistance } from "@/lib/store-distance";
 import { setProfileTargetsAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 
@@ -148,11 +151,13 @@ function MasterItem({
   names: Record<string, string>;
   rules: RuleRow[];
 }) {
-  const { profile } = useApp();
+  const { profile, data } = useApp();
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const retired = isRetired(entity, row);
+  const dist = entity.key === "stores" ? storeDistance(data, { lat: row.latitude as number | null, lng: row.longitude as number | null }) : null;
+  const hasPos = entity.key === "stores" && row.latitude != null && row.longitude != null;
 
   const sub = (entity.subFields ?? [])
     .map((f) => {
@@ -187,6 +192,16 @@ function MasterItem({
             {retired && <span className="ml-2 text-xs font-normal text-muted-foreground">（{entity.retire === "active" ? "無効" : "アーカイブ済み"}）</span>}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
+          {entity.key === "stores" && (
+            <p className="flex flex-wrap items-center gap-x-2 text-xs" data-testid="store-place">
+              {dist ? (
+                <span className={cn("font-medium", BAND_CLASS[dist.band].split(" ")[1])}>自宅から直線 {formatKm(dist.km)}</span>
+              ) : (
+                <span className="text-muted-foreground">{hasPos ? "自宅の位置が未設定（距離なし）" : "位置未設定（距離なし）"}</span>
+              )}
+              <span className="text-muted-foreground">{row.round_trip_fare != null ? `往復交通費 ${Number(row.round_trip_fare).toLocaleString("ja-JP")}円` : "交通費 未設定"}</span>
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
           {entity.key === "products" && <ProductImagesButton productId={row.id} name={String(row.official_name)} />}
@@ -253,6 +268,13 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [geo, setGeo] = useState<{ busy: boolean; candidates: GeoCandidate[]; error: string | null }>({ busy: false, candidates: [], error: null });
+
+  const lookup = async () => {
+    setGeo({ busy: true, candidates: [], error: null });
+    const r = await geocodeAddress(values.address_optional ?? "");
+    setGeo(r.ok ? { busy: false, candidates: r.candidates, error: null } : { busy: false, candidates: [], error: r.error });
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,6 +314,37 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
                 <FieldInput field={f} rows={rows} value={values[f.name] ?? ""} onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))} />
               </label>
             ))}
+            {entity.key === "stores" && (
+              <div className="space-y-1.5 rounded-md border p-2" data-testid="store-geocode">
+                <p className="text-[11px] text-muted-foreground">「住所から位置を取得」を押すと、上の店舗の住所を国土地理院の住所検索（無料）に送り、緯度経度の候補を調べます（押さない限り送信しません）。取得できない場合は緯度・経度を手入力できます。</p>
+                <Button type="button" size="sm" variant="outline" onClick={lookup} disabled={geo.busy || (values.address_optional ?? "").trim().length < 3}>
+                  {geo.busy ? "検索中…" : "住所から位置を取得"}
+                </Button>
+                {geo.error && (
+                  <p role="alert" className="text-xs text-danger">
+                    {geo.error}
+                  </p>
+                )}
+                {geo.candidates.length > 0 && (
+                  <ul className="space-y-1" aria-label="位置の候補">
+                    {geo.candidates.map((c, i) => (
+                      <li key={i}>
+                        <button
+                          type="button"
+                          className="min-h-10 w-full rounded-md border px-2 text-left text-xs hover:bg-muted"
+                          onClick={() => {
+                            setValues((s) => ({ ...s, latitude: String(c.lat), longitude: String(c.lng), prefecture: s.prefecture || c.prefecture || "" }));
+                            setGeo({ busy: false, candidates: [], error: null });
+                          }}
+                        >
+                          {c.title}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             {error && (
               <p role="alert" className="text-sm text-danger">
                 {error}

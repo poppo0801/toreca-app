@@ -115,6 +115,7 @@ export async function POST(request: NextRequest) {
       source_host: host,
       input_tokens: result.ok ? (result.usage?.input ?? null) : null,
       output_tokens: result.ok ? (result.usage?.output ?? null) : null,
+      model: result.ok && result.engine === "anthropic" ? (result.model ?? null) : null,
     });
   }
   return NextResponse.json(result, { status: result.ok ? 200 : result.code === "rate_limited" ? 429 : 200 });

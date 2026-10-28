@@ -34,8 +34,14 @@ describe("マスター入力検証", () => {
 
   it("店舗: 緯度経度は範囲内のみ、空欄はnull。参照はUUID必須", () => {
     const s = buildSchema(ENTITIES.stores);
-    const base = { chain_id: uuid, name: "S", prefecture: "", nearest_station: "", address_optional: "", parking_memo: "", latitude: "", longitude: "" };
+    const base = { chain_id: uuid, name: "S", prefecture: "", nearest_station: "", address_optional: "", parking_memo: "", memo: "", round_trip_fare: "", latitude: "", longitude: "" };
     expect((s.parse(base) as Record<string, unknown>).latitude).toBeNull();
+    // 往復交通費: 空欄=未設定(null)、0〜100万円の整数のみ
+    expect((s.parse(base) as Record<string, unknown>).round_trip_fare).toBeNull();
+    expect((s.parse({ ...base, round_trip_fare: "1280" }) as Record<string, unknown>).round_trip_fare).toBe(1280);
+    expect(s.safeParse({ ...base, round_trip_fare: "-1" }).success).toBe(false);
+    expect(s.safeParse({ ...base, round_trip_fare: "12.5" }).success).toBe(false);
+    expect(s.safeParse({ ...base, round_trip_fare: "1000001" }).success).toBe(false);
     expect(s.safeParse({ ...base, latitude: "91" }).success).toBe(false);
     expect(s.safeParse({ ...base, chain_id: "not-uuid" }).success).toBe(false);
   });

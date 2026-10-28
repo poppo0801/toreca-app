@@ -86,6 +86,8 @@ export interface HouseholdSettings {
   aiMonthlyBudgetJpy: number;
   /** 自動AI解析（Stage 4C）を許可するか。予算超過時に止めるための構造 */
   autoAiEnabled: boolean;
+  /** 自宅の位置が変わったため、店舗の往復交通費の見直しが必要 */
+  travelReviewNeeded: boolean;
 }
 
 export interface Product {

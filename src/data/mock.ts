@@ -1,3 +1,4 @@
+import { DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { dateOnly, dateTime, jstDateString, UNKNOWN_DATE } from "@/lib/datetime";
 import type { AppData, Application, Lottery } from "@/types/domain";
 
@@ -193,10 +194,11 @@ export function createMockData(now: Date): AppData {
       { id: "c4", name: "ダミー書店" },
     ],
     stores: [
-      { id: "s1", chainId: "c1", name: "三宮店", prefecture: "兵庫県" },
-      { id: "s2", chainId: "c1", name: "名谷店", prefecture: "兵庫県" },
-      { id: "s3", chainId: "c2", name: "梅田店", prefecture: "大阪府" },
-      { id: "s4", chainId: "c3", name: "本店", prefecture: "東京都" },
+      // 架空の位置（デモ用）。自宅は三宮付近とし、店舗までの直線距離の表示を確認できる
+      { id: "s1", chainId: "c1", name: "三宮店", prefecture: "兵庫県", lat: 34.6948, lng: 135.1955, roundTripFare: 0 },
+      { id: "s2", chainId: "c1", name: "名谷店", prefecture: "兵庫県", lat: 34.6535, lng: 135.0894, roundTripFare: 640 },
+      { id: "s3", chainId: "c2", name: "梅田店", prefecture: "大阪府", lat: 34.7025, lng: 135.4959, roundTripFare: 1280 },
+      { id: "s4", chainId: "c3", name: "本店", prefecture: "東京都", lat: 35.6812, lng: 139.7671, roundTripFare: 28000 },
       { id: "s5", chainId: "c4", name: "北店", prefecture: "京都府" },
       { id: "s6", chainId: "c2", name: "なんば店", prefecture: "大阪府" },
     ],
@@ -282,5 +284,14 @@ export function createMockData(now: Date): AppData {
     requirements: [],
     eligibilities: [],
     audit: [],
+    settings: {
+      homeLat: 34.6901,
+      homeLng: 135.1956,
+      cardDisplay: { ...DEFAULT_CARD_DISPLAY, travelCost: true },
+      distanceBandsKm: [5, 15, 30, 60],
+      aiMonthlyBudgetJpy: 3000,
+      autoAiEnabled: true,
+      travelReviewNeeded: false,
+    },
   };
 }

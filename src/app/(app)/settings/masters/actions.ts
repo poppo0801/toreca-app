@@ -59,6 +59,8 @@ export async function saveRecord(
   if (!ctx) return fail("ログインが必要です");
 
   const dbValues = toDbValues(entity, parsed.data as Record<string, unknown>);
+  // 店舗の位置は緯度と経度が両方あるときだけ有効（片方だけでは距離を計算できない）
+  if (entity.key === "stores" && (dbValues.latitude == null) !== (dbValues.longitude == null)) return fail("緯度と経度は両方入力してください（住所から位置を取得することもできます）");
   // 資格はアカウントと同じ系列の条件にだけ紐づけられる（chain_id はアカウントから補完。複合FKで不一致はDBが拒否）
   if (entity.key === "account_eligibilities") {
     const { data: acc } = await ctx.supabase.from("service_accounts").select("chain_id").eq("id", String(dbValues.service_account_id)).maybeSingle();

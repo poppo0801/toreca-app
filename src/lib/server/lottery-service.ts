@@ -107,7 +107,7 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
     /* 未適用 */
   }
   try {
-    const r = await scope(from("household_settings").select("home_lat,home_lng,card_display,distance_bands_km,ai_monthly_budget_jpy,auto_ai_enabled")).maybeSingle();
+    const r = await scope(from("household_settings").select("home_lat,home_lng,card_display,distance_bands_km,ai_monthly_budget_jpy,auto_ai_enabled,travel_review_needed")).maybeSingle();
     if (!r.error && r.data) {
       settings = {
         homeLat: r.data.home_lat === null ? null : Number(r.data.home_lat),
@@ -116,6 +116,7 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
         distanceBandsKm: validBands(r.data.distance_bands_km) ? r.data.distance_bands_km : [...DEFAULT_DISTANCE_BANDS_KM],
         aiMonthlyBudgetJpy: typeof r.data.ai_monthly_budget_jpy === "number" ? r.data.ai_monthly_budget_jpy : 3000,
         autoAiEnabled: r.data.auto_ai_enabled !== false,
+        travelReviewNeeded: r.data.travel_review_needed === true,
       };
     }
   } catch {
@@ -226,7 +227,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       };
     }),
     chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null })),
-    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null })),
+    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null })),
     products: products.map((p) => ({
       id: p.id,
       officialName: p.official_name,

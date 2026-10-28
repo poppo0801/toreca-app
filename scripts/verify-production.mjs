@@ -26,7 +26,7 @@ const get = (path, init) => fetch(base + path, { redirect: "manual", ...init });
 console.log(`対象: ${base}\n`);
 
 // 1. 認証ガード
-for (const p of ["/lotteries", "/records", "/settings", "/settings/masters", "/settings/rules"]) {
+for (const p of ["/lotteries", "/purchases", "/records", "/battles", "/settings", "/settings/masters", "/settings/rules"]) {
   const r = await get(p);
   check(r.status === 307 && (r.headers.get("location") ?? "").endsWith("/login"), `未ログインで ${p} は /login へ`, `status ${r.status}`);
 }

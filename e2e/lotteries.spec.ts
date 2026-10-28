@@ -377,3 +377,26 @@ test("対戦記録: 設定から開ける。モックでは保存できない旨
   await expect(page.getByRole("heading", { name: "対戦記録" })).toBeVisible();
   await expect(page.getByText("マイグレーション")).toBeVisible();
 });
+
+test("抽選カード右上に都道府県と自宅からの直線距離（区分ごとの色）。位置がない店舗では距離を出さない", async ({ page }) => {
+  // 三宮店（自宅の近く）: 兵庫県ラベル＋短い距離
+  const near = page.locator(`[data-lottery-id="L1"]`).or(page.getByTestId("lottery-card").filter({ hasText: "三宮店" }).first());
+  const place = near.first().getByTestId("card-place");
+  await expect(place).toContainText("兵庫県");
+  const d = near.first().getByTestId("card-distance");
+  await expect(d).toHaveText(/^\d+(\.\d)?km$/);
+  // 距離は区分ごとに色が違う（近い=緑、遠い=赤）。東京の店舗は60km以上
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const tokyo = page.getByTestId("lottery-card").filter({ hasText: "本店" }).first();
+  await expect(tokyo.getByTestId("card-place")).toContainText("東京都");
+  const color = (loc: ReturnType<typeof page.locator>) => loc.evaluate((e) => getComputedStyle(e).color);
+  expect(await color(tokyo.getByTestId("card-distance"))).not.toBe(await color(d.first()));
+  // 詳細パネルでは「直線」と明示（道路距離と混同しない）
+  await tokyo.getByRole("button", { name: /の詳細を開く/ }).click();
+  await expect(page.getByTestId("lottery-detail")).toContainText("直線");
+  await expect(page.getByTestId("lottery-detail")).toContainText("往復交通費");
+  // 都道府県・距離ラベルは商品画像や締切と重ならない
+  await page.getByTestId("lottery-detail-sheet").getByRole("button", { name: "閉じる" }).click();
+  const [img, pl] = [(await tokyo.getByTestId("card-image").boundingBox())!, (await tokyo.getByTestId("card-place").boundingBox())!];
+  expect(pl.x).toBeGreaterThan(img.x + img.width);
+});

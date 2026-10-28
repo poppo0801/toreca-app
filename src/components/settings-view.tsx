@@ -5,6 +5,7 @@ import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { signOut } from "@/app/login/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
 import { NotificationSettings } from "@/components/notification-settings";
 import { ProfileSettings } from "@/components/profile-settings";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -70,6 +71,20 @@ export function SettingsView() {
           <p className="text-sm text-muted-foreground">Supabaseモードでのみ利用できます。</p>
         )}
       </Section>
+
+      {SUPABASE && (
+        <>
+          <Section title="自宅の位置（距離の基準）">
+            <HomeLocationSection />
+          </Section>
+          <Section title="抽選カードの表示項目・距離の区分">
+            <CardDisplaySection />
+          </Section>
+          <Section title="AI読み取りの利用状況・料金">
+            <AiUsageSection />
+          </Section>
+        </>
+      )}
 
       <Section title="通知">
         {SUPABASE ? <NotificationSettings /> : <p className="text-sm text-muted-foreground">Supabaseモードでのみ利用できます。</p>}
