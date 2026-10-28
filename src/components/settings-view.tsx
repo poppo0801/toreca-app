@@ -44,6 +44,20 @@ export function SettingsView() {
         )}
       </Section>
 
+      <Section title="記録・分析">
+        <p className="mb-2 text-xs text-muted-foreground">対戦記録（収支・抽選とは独立）と、応募・当落の実績から集計した当選率を見られます。</p>
+        <div className="flex flex-wrap gap-2">
+          {SUPABASE && (
+            <Button asChild variant="outline">
+              <Link href="/battles">対戦記録</Link>
+            </Button>
+          )}
+          <Button asChild variant="outline">
+            <Link href="/records">応募実績・当選率</Link>
+          </Button>
+        </div>
+      </Section>
+
       <Section title="応募ルール・スルー">
         {SUPABASE ? (
           <>

@@ -164,6 +164,60 @@ export type Database = {
           },
         ]
       }
+      battle_records: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          household_id: string
+          id: string
+          format: string
+          memo: string
+          my_deck: string
+          opponent: string
+          opponent_deck: string
+          played_on: string
+          profile_id: string | null
+          result: string
+          turn_order: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          household_id: string
+          id?: string
+          format?: string
+          memo?: string
+          my_deck?: string
+          opponent?: string
+          opponent_deck?: string
+          played_on: string
+          profile_id?: string | null
+          result: string
+          turn_order?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          household_id?: string
+          id?: string
+          format?: string
+          memo?: string
+          my_deck?: string
+          opponent?: string
+          opponent_deck?: string
+          played_on?: string
+          profile_id?: string | null
+          result?: string
+          turn_order?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: []
+      }
       ai_extraction_logs: {
         Row: {
           created_at: string

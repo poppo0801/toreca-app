@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Ticket, Wallet } from "lucide-react";
+import { ReceiptText, Settings, Ticket, Wallet } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
 import { NotificationBell } from "@/components/notification-bell";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/lotteries", label: "抽選管理", icon: Ticket },
+  { href: "/purchases", label: "購入記録", icon: ReceiptText },
   { href: "/finance", label: "収支", icon: Wallet },
   { href: "/settings", label: "設定", icon: Settings },
 ] as const;
@@ -18,8 +19,9 @@ const NAV = [
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, notice, dismissNotice } = useApp();
-  // 収支の関連ページ(/records の応募実績)は「収支」ではなく抽選側の分析なので、現在地は最も近い項目に寄せる
-  const isActive = (href: string) => pathname.startsWith(href) || (href === "/finance" && pathname.startsWith("/records"));
+  // 応募実績・当選率(/records)は抽選側の分析、対戦記録(/battles)は設定からの機能なので、現在地は最も近い項目に寄せる
+  const isActive = (href: string) =>
+    pathname.startsWith(href) || (href === "/lotteries" && pathname.startsWith("/records")) || (href === "/settings" && pathname.startsWith("/battles"));
   return (
     <div className="min-h-dvh md:flex">
       {/* PC: 左ナビ（ユーザー切替・通知はヘッダーに集約） */}
@@ -72,12 +74,12 @@ function Shell({ children }: { children: React.ReactNode }) {
           )}
           {children}
         </main>
-        {/* モバイル: 下部メイン3項目。操作部分はホームインジケーターの上に収め、背景だけが下端まで伸びる */}
+        {/* モバイル: 下部メイン4項目。操作部分はホームインジケーターの上に収め、背景だけが下端まで伸びる */}
         <nav
           aria-label="メイン"
           className="fixed inset-x-0 bottom-0 z-30 border-t bg-header pb-safe px-safe md:hidden"
         >
-          <div className="grid h-[3.25rem] grid-cols-3">
+          <div className="grid h-[3.25rem] grid-cols-4">
             {NAV.map(({ href, label, icon: Icon }) => {
               const active = isActive(href);
               return (

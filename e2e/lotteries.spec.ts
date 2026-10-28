@@ -278,7 +278,7 @@ test("収支ページ: 当月表示・月移動・タブ切替・分析ページ
   await expect(page.getByTestId("annual-total")).toContainText("家族全体の合計");
   await expect(page.getByTestId("annual-seller")).toHaveCount(3);
   // メインナビには分析ページを常設しない
-  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(3);
+  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(4); // 抽選管理・購入記録・収支・設定
 });
 
 test.describe("レイアウト（Safe Area・固定メニュー）", () => {
@@ -332,3 +332,48 @@ for (const scheme of ["light", "dark"] as const) {
     await page.screenshot({ path: `docs/screenshots/${info.project.name}-${scheme}.png` });
   });
 }
+
+test("購入記録: 下部メニューから開け、履歴と商品別の累計・期間・絞り込みが使える。金額未入力は0円としない", async ({ page }) => {
+  await page.getByRole("navigation", { name: "メイン" }).last().getByRole("link", { name: "購入記録" }).click();
+  await expect(page).toHaveURL(/\/purchases$/);
+  await expect(page.getByRole("heading", { name: "購入記録" })).toBeVisible();
+  // 全期間にすると、モックの購入が一覧に出る
+  await page.getByRole("tab", { name: "全期間" }).click();
+  const rows = page.getByTestId("purchase-row");
+  await expect(rows.first()).toBeVisible();
+  const n = await rows.count();
+  await expect(page.getByTestId("purchase-count")).toHaveText(`${n}件`);
+  // 商品別の累計
+  await page.getByRole("tab", { name: "商品別の累計" }).click();
+  await expect(page.getByTestId("product-total-row").first()).toBeVisible();
+  // 期間（月）と前後移動
+  await page.getByRole("tab", { name: "月", exact: true }).click();
+  const label = page.getByTestId("period-label");
+  const before = await label.innerText();
+  await page.getByRole("button", { name: "前の期間" }).click();
+  expect(await label.innerText()).not.toBe(before);
+  // 4項目のナビで、現在地が分かる
+  await expect(page.getByRole("navigation", { name: "メイン" }).last().getByRole("link", { name: "購入記録" })).toHaveAttribute("aria-current", "page");
+});
+
+test("応募実績・当選率: 抽選管理から開け、期間・ユーザー別に切り替えられる。未確認・中止は母数に入れない説明がある", async ({ page }) => {
+  await page.getByRole("link", { name: "応募実績・当選率を見る" }).click();
+  await expect(page).toHaveURL(/\/records$/);
+  await expect(page.getByTestId("win-overall")).toContainText("当落が確定した応募");
+  await expect(page.getByTestId("win-overall")).toContainText("未確認は当落が未登録の応募");
+  await expect(page.getByTestId("win-by-chain").getByTestId("rate-row").first()).toBeVisible();
+  await expect(page.getByTestId("win-by-profile")).toBeVisible();
+  await page.getByRole("group", { name: "対象ユーザー" }).getByRole("button", { name: "B", exact: true }).click();
+  await expect(page.getByTestId("win-by-profile")).toHaveCount(0); // ユーザーを選ぶとユーザー別の表は出さない
+  await page.getByRole("tab", { name: "年間" }).click();
+  await expect(page.getByTestId("period-label")).toContainText("年");
+  // 横にはみ出さない
+  const w = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(w).toBeLessThanOrEqual(1);
+});
+
+test("対戦記録: 設定から開ける。モックでは保存できない旨を表示し、画面は壊れない", async ({ page }) => {
+  await page.goto("/battles");
+  await expect(page.getByRole("heading", { name: "対戦記録" })).toBeVisible();
+  await expect(page.getByText("マイグレーション")).toBeVisible();
+});

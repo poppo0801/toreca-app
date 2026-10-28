@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { normalizeCardDisplay } from "@/lib/card-display";
+import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
 import { dbToFlex, flexInputToDb, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
 import type { Database } from "@/types/database";
@@ -71,6 +73,56 @@ export async function currentHouseholdId(db: Db): Promise<string | null> {
 }
 
 // ------------------------------------------------------------------ 読み込み
+/**
+ * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
+ * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
+ */
+async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"] }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
+  const from = (t: string): any => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const q = (db as any).from(t);
+    return q;
+  };
+  const scope = <T extends { eq: (c: string, v: string) => T }>(q: T): T => (householdId ? q.eq("household_id", householdId) : q);
+  let battles: AppData["battles"];
+  let settings: AppData["settings"];
+  try {
+    const b = await scope(from("battle_records").select("*").is("archived_at", null).order("played_on", { ascending: false }).limit(5000));
+    if (!b.error) {
+      battles = (b.data as Database["public"]["Tables"]["battle_records"]["Row"][]).map((r) => ({
+        id: r.id,
+        playedOn: r.played_on,
+        profileId: r.profile_id,
+        myDeck: r.my_deck,
+        opponent: r.opponent,
+        opponentDeck: r.opponent_deck,
+        result: r.result as "win" | "lose" | "draw",
+        turnOrder: r.turn_order as "first" | "second" | "",
+        format: r.format,
+        memo: r.memo,
+      }));
+    }
+  } catch {
+    /* 未適用 */
+  }
+  try {
+    const r = await scope(from("household_settings").select("home_lat,home_lng,card_display,distance_bands_km,ai_monthly_budget_jpy,auto_ai_enabled")).maybeSingle();
+    if (!r.error && r.data) {
+      settings = {
+        homeLat: r.data.home_lat === null ? null : Number(r.data.home_lat),
+        homeLng: r.data.home_lng === null ? null : Number(r.data.home_lng),
+        cardDisplay: normalizeCardDisplay(r.data.card_display),
+        distanceBandsKm: validBands(r.data.distance_bands_km) ? r.data.distance_bands_km : [...DEFAULT_DISTANCE_BANDS_KM],
+        aiMonthlyBudgetJpy: typeof r.data.ai_monthly_budget_jpy === "number" ? r.data.ai_monthly_budget_jpy : 3000,
+        autoAiEnabled: r.data.auto_ai_enabled !== false,
+      };
+    }
+  } catch {
+    /* 未適用 */
+  }
+  return { battles, settings };
+}
 /**
  * 世帯の全データを読み込む。householdId を指定すると、その世帯だけに絞る
  * （service_role で複数世帯を扱う通知ジョブ用。通常のユーザー接続はRLSで自世帯のみ）。
@@ -152,6 +204,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   }
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
+  const { battles, settings } = await loadOptional(db, householdId);
 
   return {
     profiles: profiles.map((p) => {
@@ -339,6 +392,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       before: a.before_json,
       after: a.after_json,
     })),
+    battles,
+    settings,
   };
 }
 
