@@ -500,7 +500,8 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   await expect(d2.getByTestId("dup-warning")).toContainText("重複");
   await d2.getByLabel("抽選の方式").selectOption({ label: "C. 複数商品が対象（当選はいずれか1商品まで）" });
   await d2.getByRole("button", { name: "保存" }).click();
-  await expect(d2.getByRole("alert").filter({ hasText: "重複ではないことを確認" })).toBeVisible();
+  await expect(d2.getByTestId("dup-warning")).toBeVisible();
+  await expect(d2.getByText("「重複ではないことを確認した」にチェックしてください")).toBeVisible();
 });
 
 test("商品マスター: 検索・絞り込み、セット構成の登録、画像の表示調整（倍率・位置）", async ({ page }) => {
