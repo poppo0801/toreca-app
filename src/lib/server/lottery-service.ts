@@ -55,6 +55,15 @@ export function mapDbError(e: PgError): string {
 const uuid = z.uuid();
 const nowIso = () => new Date().toISOString();
 
+/** DB の content_box（jsonb）を検証して読む。壊れた値は補正なし(null) */
+function parseContentBox(v: unknown): { x: number; y: number; w: number; h: number } | null {
+  if (!v || typeof v !== "object") return null;
+  const b = v as Record<string, unknown>;
+  const n = (k: string) => (typeof b[k] === "number" && Number.isFinite(b[k]) ? (b[k] as number) : null);
+  const [x, y, w, h] = [n("x"), n("y"), n("w"), n("h")];
+  return x !== null && y !== null && w !== null && h !== null && x >= 0 && y >= 0 && w > 0 && h > 0 ? { x, y, w, h } : null;
+}
+
 /** 認証済みユーザーの世帯ID（RLSにより自世帯のみ見える） */
 export async function currentHouseholdId(db: Db): Promise<string | null> {
   const { data } = await db.from("households").select("id").maybeSingle();
@@ -181,7 +190,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       images: Object.fromEntries(
         productImages
           .filter((i) => i.product_id === p.id && signed.has(i.storage_path))
-          .map((i) => [i.kind, { url: signed.get(i.storage_path)!, width: i.width, height: i.height, source: i.source as "import" | "manual", scale: i.display_scale != null ? Number(i.display_scale) : 1, offsetX: i.offset_x ?? 0, offsetY: i.offset_y ?? 0 }]),
+          .map((i) => [i.kind, { url: signed.get(i.storage_path)!, width: i.width, height: i.height, source: i.source as "import" | "manual", scale: i.display_scale != null ? Number(i.display_scale) : 1, offsetX: i.offset_x ?? 0, offsetY: i.offset_y ?? 0, contentBox: parseContentBox(i.content_box) }]),
       ),
       codeKind: p.product_code_kind as "official" | "custom" | null,
       archived: p.archived_at != null,
@@ -231,6 +240,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       isNew: l.is_new,
       memo: l.memo,
       createdAt: l.created_at,
+      updatedAt: l.updated_at,
+      unconfirmedFields: l.unconfirmed_fields ?? [],
     })),
     management: mgmt
       .filter((m) => liveLotteryIds.has(m.lottery_id))
@@ -406,6 +417,9 @@ export async function saveLottery(
   void householdId;
   const { data, error } = await db.rpc("save_lottery_tx", { p: payload as never, p_actor: actor as string });
   if (error) return fail(mapDbError(error));
+  // 初期値のまま（利用者が確認していない）項目を記録する。確認済みの項目は外す（応募方法・受取方法の「初期値」表示用）。
+  // 保存は主処理とは別の更新だが、失敗しても抽選自体は保存済み（表示上の印が付かないだけ）なのでエラーにはしない。
+  await db.from("lotteries").update({ unconfirmed_fields: input.unconfirmedFields }).eq("id", data as string);
   return ok({ id: data as string });
 }
 

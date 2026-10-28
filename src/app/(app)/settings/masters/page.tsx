@@ -4,7 +4,7 @@ import { ENTITY_KEYS } from "@/lib/masters";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
-export const metadata = { title: "マスター管理 | トレカ抽選管理" };
+export const metadata = { title: "マスター管理 | トレマネ" };
 
 export default async function MastersPage() {
   if (!isSupabaseMode) {

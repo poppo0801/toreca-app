@@ -1,13 +1,22 @@
 import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "next-themes";
+import { APP_DESCRIPTION, APP_NAME, APP_SUBTITLE } from "@/lib/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "トレカ抽選管理",
-  description: "トレーディングカードの抽選応募・当落・購入を家族で管理するアプリ（Stage 0: ローカルモック）",
+  title: { default: `${APP_NAME} ${APP_SUBTITLE}`, template: `%s | ${APP_NAME}` },
+  applicationName: APP_NAME,
+  description: APP_DESCRIPTION,
   robots: { index: false, follow: false },
-  icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },
-  appleWebApp: { capable: true, title: "トレカ抽選", statusBarStyle: "black-translucent" },
+  icons: {
+    icon: [
+      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/favicon-48.png", sizes: "48x48", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/icons/apple-touch-icon.png",
+  },
+  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {

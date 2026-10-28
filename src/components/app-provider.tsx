@@ -22,7 +22,8 @@ interface AppContextValue {
   selectProfile: (id: string) => void;
   /** DB保存を伴う機能（抽選登録・編集・複製・購入入力）が使えるか。mockでは false */
   persistent: boolean;
-  reload: () => Promise<void>;
+  /** 最新のデータを取得して画面に反映し、そのデータを返す（失敗時は null） */
+  reload: () => Promise<AppData | null>;
   /** 操作失敗の通知（画面全体は止めない） */
   notice: string | null;
   dismissNotice: () => void;
@@ -68,15 +69,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const firstLoad = useRef(true);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<AppData | null> => {
     const start = new Date();
     try {
       const d = await repo.load(start);
       setData(d);
       setNow(start);
       setLoadError(null);
+      return d;
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "データの取得に失敗しました");
+      return null;
     }
   }, [repo]);
 

@@ -170,6 +170,14 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, 
   });
 }
 
+/** 数量のみの表記（カード用）。BOXは入数が確認できる商品だけパック換算を添える。 */
+export function formatQuantity(item: Pick<LotteryItem, "quantity" | "unit">, product: Product | undefined): string {
+  if (item.unit === "set") return `${item.quantity}セット`;
+  if (item.unit === "pack") return `${item.quantity}P`;
+  const packs = product && !product.provisional && product.packsPerBox ? `(${item.quantity * product.packsPerBox}P)` : "";
+  return `${item.quantity}BOX${packs}`;
+}
+
 /** 数量のBOX/パック換算表示。商品ごとの入数を使い、固定30Pとしない。 */
 export function formatItem(item: Pick<LotteryItem, "quantity" | "unit">, product: Product | undefined): string {
   const name = product?.aliases[0] ?? product?.officialName ?? "商品未登録";

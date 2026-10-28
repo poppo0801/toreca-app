@@ -24,7 +24,7 @@ if (user) {
 // マスター（系列・店舗・商品）は下準備しない。Stage 3.5 から、抽選登録画面の名称入力だけで仮登録される動作もE2Eで確認する。
 
 if (!process.env.E2E_BASE_URL) freePort();
-const r = spawnSync("npx", ["playwright", "test"], {
+const r = spawnSync("npx", ["playwright", "test", ...process.argv.slice(2)], {
   stdio: "inherit",
   shell: true,
   env: { ...process.env, E2E_MODE: "supabase", E2E_EMAIL: email, E2E_PASSWORD: password },

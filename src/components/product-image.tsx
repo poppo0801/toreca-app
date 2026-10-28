@@ -1,7 +1,7 @@
 "use client";
 
 import { ImageOff } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -34,7 +34,24 @@ export function ProductImageView({ image, alt, heightClass = "h-14" }: { image: 
   const dx = image.offsetX ?? 0;
   const dy = image.offsetY ?? 0;
   const adjusted = scale !== 1 || dx !== 0 || dy !== 0;
-  const img = (
+  const uid = useId().replace(/:/g, "");
+  const cb = image.contentBox && image.width && image.height ? image.contentBox : null;
+  const transform = adjusted ? { transform: `translate(${dx}%, ${dy}%) scale(${scale})` } : undefined;
+  const img = cb ? (
+    // 透明な余白を除いた範囲(contentBox)だけを枠いっぱいに表示する。縦横比は保ったまま（viewBox の meet）で、元画像は変更しない
+    <svg
+      viewBox={`${cb.x} ${cb.y} ${cb.w} ${cb.h}`}
+      role="img"
+      aria-label={alt}
+      className={cn("w-auto max-w-full", adjusted ? "h-full" : heightClass)}
+      style={transform}
+    >
+      <clipPath id={`cb-${uid}`}>
+        <rect x={cb.x} y={cb.y} width={cb.w} height={cb.h} />
+      </clipPath>
+      <image href={image.url} width={image.width!} height={image.height!} clipPath={`url(#cb-${uid})`} />
+    </svg>
+  ) : (
     // eslint-disable-next-line @next/next/no-img-element -- 期限付きの署名URL（next/image の最適化対象外）。幅・高さ属性で表示領域を先に確保
     <img
       src={image.url}
@@ -44,7 +61,7 @@ export function ProductImageView({ image, alt, heightClass = "h-14" }: { image: 
       loading="lazy"
       decoding="async"
       className={cn("w-auto max-w-full object-contain", adjusted ? "h-full" : heightClass)}
-      style={adjusted ? { transform: `translate(${dx}%, ${dy}%) scale(${scale})` } : undefined}
+      style={transform}
     />
   );
   // 倍率・位置を調整した画像は、枠(高さ固定)の外にはみ出さないよう切り取って表示する（元画像は変更しない）

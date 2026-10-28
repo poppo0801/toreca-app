@@ -19,6 +19,10 @@ export const flexInputSchema = z
     time: z.string(),
   })
   .superRefine((v, ctx) => {
+    // 時刻だけが入力されている（日付が空）状態は、時刻を捨てて保存してしまわないよう受け付けない
+    if (v.precision === "unknown" && v.time.trim() !== "") {
+      ctx.addIssue({ code: "custom", message: "時刻だけでは登録できません。日付も入力してください", path: ["date"] });
+    }
     if (v.precision !== "unknown" && !dateStr.safeParse(v.date).success) {
       ctx.addIssue({ code: "custom", message: "日付を入力してください", path: ["date"] });
     }
@@ -29,6 +33,17 @@ export const flexInputSchema = z
 export type FlexInput = z.infer<typeof flexInputSchema>;
 
 export const EMPTY_FLEX: FlexInput = { precision: "unknown", date: "", time: "" };
+
+/**
+ * 日付欄・時刻欄の入力から精度を決める。空欄=不明 / 日付のみ=日付のみ / 日付+時刻=日時。
+ * 時刻が入力されていれば（0:00 を含めて）日時、空なら日付のみ。時刻を推測で補わない（23:59 などにしない）。
+ */
+export function flexFromParts(date: string, time: string): FlexInput {
+  const d = date.trim();
+  const t = time.trim();
+  if (!d) return { precision: "unknown", date: "", time: t };
+  return { precision: t ? "date_time" : "date_only", date: d, time: t };
+}
 
 const httpUrl = z
   .string()
@@ -46,6 +61,9 @@ const masterRef = (label: string, max: number) =>
     .refine((v) => v.id !== null || v.name.length > 0, { message: `${label}を選択または入力してください` });
 
 export const MULTI_MODES = ["single", "all", "one_win", "choose_one"] as const;
+
+/** 初期値を設定する項目（初期値のまま保存された場合は「未確認」として記録する） */
+export const UNCONFIRMABLE_FIELDS = ["applyMethod", "receiveMethod", "limitBasis"] as const;
 
 const itemSchema = z.object({
   /** 編集時の既存明細ID（当落・購入の紐づけを保つ） */
@@ -87,6 +105,8 @@ export const lotteryInputSchema = z.object({
     .max(50)
     .default([]),
   appliedAt: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)]).default(""),
+  /** 初期値のまま（利用者が選んでいない）の項目。確認済みとは区別して保存する */
+  unconfirmedFields: z.array(z.enum(UNCONFIRMABLE_FIELDS)).max(UNCONFIRMABLE_FIELDS.length).default([]),
 });
 export type LotteryInput = z.input<typeof lotteryInputSchema>;
 

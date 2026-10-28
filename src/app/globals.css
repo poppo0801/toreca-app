@@ -27,19 +27,22 @@
   --p-purple: #7e22ce;
   --p-pink: #be185d;
   --p-teal: #0f766e;
+  /* 固定ヘッダーの高さ（上部の線2px+本体2.5rem+下線1px+Safe Area）。その下に固定する要素の位置に使う */
+  --header-h: calc(2.5rem + 3px + env(safe-area-inset-top));
 }
 
 .dark {
-  /* ダーク: 背景(ほぼ黒) < ヘッダー < カード < 入力欄 の順に明るくして、枠線に頼らず階層を示す */
-  --background: #0b0b0d;
-  --foreground: #f5f5f5;
-  --header: #161619;
-  --card: #1c1c20;
-  --card-foreground: #f5f5f5;
-  --input: #27272c;
-  --muted: #2a2a2f;
-  --muted-foreground: #a8a8b0;
-  --border: #35353a;
+  /* ダーク: 背景(黒) < ヘッダー < カード < 入力欄 < ボタン面 の順に明るくする。低輝度の画面でも面の差が分かるよう、
+     各段の差を大きめにし、細い枠線(--border)を併用する。背景は黒基調のまま */
+  --background: #08080a;
+  --foreground: #f7f7f8;
+  --header: #17171b;
+  --card: #212127;
+  --card-foreground: #f7f7f8;
+  --input: #30303a;
+  --muted: #33333c;
+  --muted-foreground: #b4b4be;
+  --border: #484852;
   --ring: #fb923c;
   --primary: #fb923c;
   --primary-foreground: #111111;
@@ -77,6 +80,35 @@
   --color-p-pink: var(--p-pink);
   --color-p-teal: var(--p-teal);
   --font-sans: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+  /* カード・ボトムシートの控えめな影（ライト・ダーク共通。ダークでは枠線と併せて浮き上がりを出す） */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.1);
+  --shadow-sheet: 0 -6px 24px rgb(0 0 0 / 0.35);
+}
+
+/* ボトムシートの出入り（下から）。動きを減らす設定では base の reduced-motion で実質無効 */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes sheet-out {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* iPhone の Safe Area（ノッチ・Dynamic Island・ホームインジケーター）。値は端末ごとに env() が決める */

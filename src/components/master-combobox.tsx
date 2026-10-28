@@ -72,7 +72,7 @@ export function MasterCombobox({
       {value.id !== null && <span className="sr-only">既存のマスターを選択中</span>}
       {isNew && (
         <p className="mt-0.5 text-xs text-info" data-testid="new-master-hint">
-          未登録の名称です。保存時に「{value.name.trim()}」を仮登録します（後からマスター管理で補完できます）
+          未登録: 保存時に仮登録します
         </p>
       )}
       {focused && matches.length > 0 && !disabled && (

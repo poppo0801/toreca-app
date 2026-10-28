@@ -2,6 +2,7 @@
  * ドメイン型。database-schema.md の設計草案を、docs/db-review.md の修正案を反映して型にしたもの。
  * Stage 1 で Supabase に接続する際も、この型を境界（services/）の入出力として使う。
  */
+import type { CardDisplay } from "@/lib/card-display";
 
 /** 日時の精度。「日付だけ判明」を0時のtimestampに偽変換しないために分離する。 */
 export type DatePrecision = "unknown" | "date_only" | "date_time";
@@ -64,6 +65,27 @@ export interface Store {
   prefecture: string;
   provisional?: boolean;
   archived?: boolean;
+  /** 店舗の住所・位置（緯度経度は内部情報で画面には出さない）。不明は null/未設定 */
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  /** 往復交通費（円）。手動登録のみ。未設定は null（0円とはみなさない） */
+  roundTripFare?: number | null;
+  memo?: string | null;
+}
+
+/** 世帯共通の設定。自宅の位置は内部情報（住所の文字列はこの型に含めず、設定画面でだけ読む） */
+export interface HouseholdSettings {
+  homeLat: number | null;
+  homeLng: number | null;
+  /** 抽選カードに表示する項目 */
+  cardDisplay: CardDisplay;
+  /** 距離区分の上限（km, 昇順4つ） */
+  distanceBandsKm: number[];
+  /** AIの月間予算（円） */
+  aiMonthlyBudgetJpy: number;
+  /** 自動AI解析（Stage 4C）を許可するか。予算超過時に止めるための構造 */
+  autoAiEnabled: boolean;
 }
 
 export interface Product {
@@ -103,6 +125,8 @@ export interface ProductImage {
   scale?: number;
   offsetX?: number;
   offsetY?: number;
+  /** 透明な余白を除いた表示範囲（元画像のピクセル座標）。未計算・余白なしは省略 */
+  contentBox?: { x: number; y: number; w: number; h: number } | null;
 }
 
 /** セット商品と構成商品（構造のみ。購入の数量・金額には加算しない） */
@@ -191,6 +215,10 @@ export interface Lottery {
   isNew: boolean;
   memo: string;
   createdAt: string;
+  /** 初期値のまま保存された（確認していない）項目名。ユーザーが選び直すと外れる */
+  unconfirmedFields?: string[];
+  /** 最終更新（他端末での更新を検出するため）。モックでは未設定 */
+  updatedAt?: string;
 }
 
 export interface Management {
@@ -372,4 +400,26 @@ export interface AppData {
   requirements: ChainRequirement[];
   eligibilities: AccountEligibility[];
   audit: AuditEntry[];
+  /** 世帯設定（カード表示項目・自宅の位置など）。未設定のデータ・モックでは省略 */
+  settings?: HouseholdSettings;
+  /** 対戦記録（Stage 5A）。モックでは省略 */
+  battles?: BattleRecord[];
+}
+
+export type BattleResult = "win" | "lose" | "draw";
+
+/** 対戦記録。収支・抽選とは独立した記録 */
+export interface BattleRecord {
+  id: string;
+  playedOn: string;
+  /** 使用した人（任意） */
+  profileId: string | null;
+  myDeck: string;
+  opponent: string;
+  opponentDeck: string;
+  result: BattleResult;
+  /** 先攻・後攻など。不明は空 */
+  turnOrder: "first" | "second" | "";
+  format: string;
+  memo: string;
 }

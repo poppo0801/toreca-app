@@ -5,6 +5,13 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId("lottery-card").first()).toBeVisible();
 });
 
+/** 詳細フィルターを開く（既に開いていれば何もしない） */
+async function openFilters(page: Page) {
+  const btn = page.getByRole("button", { name: "詳細フィルターを開く" });
+  if ((await btn.getAttribute("aria-pressed")) !== "true") await btn.click();
+  await expect(page.getByRole("group", { name: "詳細フィルター" })).toBeVisible();
+}
+
 async function switchProfile(page: Page, label: string) {
   await page.getByRole("button", { name: /ユーザー切り替え/ }).click();
   await page.getByRole("radio", { name: `プロフィール ${label}` }).click();
@@ -54,25 +61,45 @@ test("見出しと登録ボタンは1行。説明文は無く、タブは 全情
   expect(Math.abs((a!.y + a!.height / 2) - (b!.y + b!.height / 2))).toBeLessThan(12);
 });
 
-test("検索は1行、主要フィルターは横1行。縦幅が大きく広がらない", async ({ page }) => {
+test("検索は1行でコンパクト。詳細フィルターは初期状態で非表示、フィルターボタンで展開し、適用中は件数で示す", async ({ page }) => {
   const search = page.getByRole("searchbox");
-  const filters = page.getByRole("group", { name: "主要フィルター" });
   const s = (await search.boundingBox())!;
-  const f = (await filters.boundingBox())!;
   expect(s.height).toBeLessThan(48);
-  expect(f.height).toBeLessThan(48);
-  // 検索欄＋主要フィルター＋タブ＋見出しの合計が画面高の半分に収まる
+  // 「系列: すべて」などは初期状態では出ていない
+  await expect(page.getByRole("group", { name: "詳細フィルター" })).toHaveCount(0);
+  await expect(page.getByLabel("系列")).toHaveCount(0);
+  // 見出し・タブ・検索を含めても、最初のカードが画面の上半分に入る
   const firstCard = (await page.getByTestId("lottery-card").first().boundingBox())!;
   const vp = page.viewportSize()!;
-  expect(firstCard.y).toBeLessThan(vp.height * 0.45);
-  // 詳細フィルターは展開式
-  await expect(page.getByRole("group", { name: "詳細フィルター" })).toHaveCount(0);
-  await page.getByRole("button", { name: "詳細フィルターを開く" }).click();
-  await expect(page.getByRole("group", { name: "詳細フィルター" })).toBeVisible();
+  expect(firstCard.y).toBeLessThan(vp.height * 0.4);
+  await openFilters(page);
+  await expect(page.getByTestId("filter-count")).toHaveCount(0);
+  await page.getByRole("group", { name: "詳細フィルター" }).getByLabel("受取方法").selectOption("store");
+  await expect(page.getByTestId("filter-count")).toHaveText("1");
+});
+
+test("見出しとタブは固定され、その下だけがスクロールする。フィルター状態は再読込後も保持される", async ({ page }) => {
+  const tabs = page.getByRole("tablist", { name: "抽選の表示切替" });
+  const header = (await page.locator("header").boundingBox())!;
+  await page.evaluate(() => window.scrollTo(0, 400));
+  const t = (await tabs.boundingBox())!;
+  // スクロールしてもタブはヘッダーの直下に留まる
+  expect(t.y).toBeGreaterThanOrEqual(header.y + header.height - 2);
+  expect(t.y).toBeLessThan(header.y + header.height + 60);
+  // 見出し＋タブの固定領域は画面を占有しすぎない
+  const vp = page.viewportSize()!;
+  expect(t.y + t.height - header.y).toBeLessThan(vp.height * 0.3);
+
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  await page.getByRole("searchbox").fill("ほしぞら");
+  await page.reload();
+  await expect(page.getByRole("tab", { name: /全情報/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("searchbox")).toHaveValue("ほしぞら");
 });
 
 test("スルー表示フィルター: 通常は自分のスルーを除き、含む/のみで切り替えられる。他のユーザーには影響しない", async ({ page }) => {
   // Aは s5(ダミー書店) をスルー中（モック）。L10 などは★管理外のため、★対象のスルー対象を確認する
+  await openFilters(page);
   const skipSelect = page.getByLabel("スルー表示");
   await expect(skipSelect).toHaveValue("normal");
   const countOf = async () => Number((await page.getByRole("tab", { name: /★管理対象/ }).innerText()).match(/(\d+)\s*$/)![1]);
@@ -86,6 +113,7 @@ test("スルー表示フィルター: 通常は自分のスルーを除き、含
   void countOf;
   // Bに切り替えるとBのスルー（なし）が基準になる
   await switchProfile(page, "B");
+  await openFilters(page);
   await page.getByLabel("スルー表示").selectOption("only");
   await expect(page.getByTestId("lottery-card")).toHaveCount(0);
 });
@@ -128,18 +156,92 @@ test("タブ・詳細・マトリクスを切り替えられる", async ({ page 
   await expect(page.getByRole("button", { name: "購入済み" }).first()).toBeVisible();
   await page.getByRole("tab", { name: /★管理対象/ }).click();
   await page.getByRole("button", { name: "詳細表示にする" }).click();
-  await expect(page.getByTestId("lottery-detail").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "シンプル表示にする" })).toBeVisible();
   await page.getByRole("button", { name: "応募マトリクスにする" }).click();
   await expect(page.getByTestId("matrix")).toBeVisible();
 });
 
-test("複数商品の抽選は、シンプル表示では「＋他N商品」、詳細表示では全商品と方式を確認できる", async ({ page }) => {
+test("カードは商品画像を左に大きく表示し、タップで詳細（下から開くパネル）が開く。閉じるとスクロール位置が戻る", async ({ page }) => {
+  const card = page.locator('[data-lottery-id="L1"]');
+  const img = (await card.getByTestId("card-image").boundingBox())!;
+  expect(img.width).toBeGreaterThanOrEqual(72);
+  expect(img.height).toBeGreaterThanOrEqual(88);
+  // 画像は左端、テキストはその右
+  const box = (await card.boundingBox())!;
+  expect(img.x - box.x).toBeLessThan(24);
+
+  await page.evaluate(() => window.scrollTo(0, 120));
+  const y0 = await page.evaluate(() => window.scrollY);
+  await card.getByRole("button", { name: /の詳細を開く/ }).click();
+  const sheet = page.getByTestId("lottery-detail-sheet");
+  await expect(sheet).toBeVisible();
+  await expect(page.getByTestId("lottery-detail")).toContainText("応募締切");
+  await expect(page.getByTestId("lottery-detail")).toContainText("ユーザー別の応募状況・当落");
+  const vp = page.viewportSize()!;
+  if (vp.width < 768) {
+    // スマホでは画面下から開く（下端が画面の下端に揃う）
+    await expect
+      .poll(async () => {
+        const sb = (await sheet.boundingBox())!;
+        return Math.abs(sb.y + sb.height - vp.height);
+      })
+      .toBeLessThan(2); // 開くアニメーションの完了を待つ
+  }
+  await sheet.getByRole("button", { name: "閉じる" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - y0)).toBeLessThan(4);
+});
+
+test("応募状態のアイコンは意味を画面内で確認できる（凡例）。「？」だけの表示は使わない", async ({ page }) => {
+  await page.getByRole("button", { name: "アイコンの意味を表示" }).click();
+  const legend = page.getByTestId("legend");
+  await expect(legend).toContainText("要確認");
+  await expect(legend).toContainText("未応募");
+  await expect(page.getByTestId("lottery-card").first().getByText("？")).toHaveCount(0);
+});
+
+test("応募マトリクス: A/B/C が横スクロールなしで同時に見え、状態はアイコンで示す", async ({ page }) => {
+  await page.getByRole("button", { name: "応募マトリクスにする" }).click();
+  const matrix = page.getByTestId("matrix");
+  await expect(matrix).toBeVisible();
+  const table = matrix.locator("table");
+  const dims = await table.evaluate((e) => ({ sw: e.scrollWidth, cw: (e.parentElement as HTMLElement).clientWidth }));
+  expect(dims.sw).toBeLessThanOrEqual(dims.cw + 1);
+  await expect(matrix.locator("thead th")).toHaveCount(4); // 抽選 + A/B/C
+  await expect(matrix.locator("tbody tr").first().locator("[data-status]").first()).toBeVisible();
+  // 系列と店舗は別行（補助文字）
+  await expect(matrix.locator("tbody th").first().locator("span")).toHaveCount(2);
+  await matrix.getByRole("button", { name: "アイコンの意味", exact: true }).click();
+  await expect(page.getByTestId("matrix-legend")).toBeVisible();
+});
+
+test("名称はトレマネ。ヘッダー・ページタイトル・PWAの表示名に反映され、旧名称は残っていない", async ({ page, request }) => {
+  await expect(page.locator("header").getByTestId("brand")).toContainText("トレマネ");
+  await expect(page).toHaveTitle(/トレマネ/);
+  const res = await request.get("/manifest.webmanifest");
+  const m = await res.json();
+  expect(m.short_name).toBe("トレマネ");
+  expect(m.name).toContain("トレマネ");
+  expect(m.name).toContain("TCG manager");
+  expect(m.icons.map((i: { src: string }) => i.src)).toContain("/icons/icon-512.png");
+  await expect(page.locator("body")).not.toContainText("トレカ抽選管理");
+  for (const path of ["/icons/icon-192.png", "/icons/apple-touch-icon.png", "/icons/maskable-512.png", "/icons/favicon-32.png"]) {
+    expect((await request.get(path)).status()).toBe(200);
+  }
+});
+
+test("複数商品の抽選は、シンプル表示では「＋他N商品」、詳細表示と詳細パネルでは全商品と方式を確認できる", async ({ page }) => {
   const card = page.locator('[data-lottery-id="L3"]');
-  await expect(card.getByTestId("lottery-items").getByRole("listitem")).toHaveCount(2); // 先頭商品 + 「＋他1商品」
   await expect(card).toContainText("＋他1商品");
-  await expect(card).toContainText("商品ごとに当落");
-  await card.getByRole("button", { name: "詳細" }).click();
-  await expect(card.getByTestId("lottery-items").getByRole("listitem")).toHaveCount(2);
+  await expect(card.getByTestId("lottery-items")).not.toContainText("ほしぞら");
+  await card.getByRole("button", { name: /の詳細を開く/ }).click();
+  const detail = page.getByTestId("lottery-detail");
+  await expect(detail.getByTestId("lottery-items").getByRole("listitem")).toHaveCount(2);
+  await expect(detail.getByTestId("lottery-items")).toContainText("ほしぞら");
+  await expect(detail).toContainText("商品ごとに当落");
+  await page.getByTestId("lottery-detail-sheet").getByRole("button", { name: "閉じる" }).click();
+  // 詳細表示に切り替えると、カード上にも全商品が並ぶ
+  await page.getByRole("button", { name: "詳細表示にする" }).click();
   await expect(card).not.toContainText("＋他1商品");
   await expect(card.getByTestId("lottery-items")).toContainText("ほしぞら");
 });
@@ -149,8 +251,12 @@ test("応募済み・当選タブの赤丸は、未対応がある場合に表�
 });
 
 test("日付のみの締切には残り時間バッジを出さない", async ({ page }) => {
-  await expect(page.locator('[data-lottery-id="L3"]')).toContainText("時刻未確認");
-  await expect(page.locator('[data-lottery-id="L3"]')).not.toContainText("あと");
+  const card = page.locator('[data-lottery-id="L3"]');
+  await expect(card).not.toContainText("あと");
+  // 一覧では時刻を出さず日付だけ（「—」でも0:00でもない）。詳細では「時刻未確認」と明示する
+  await expect(card.getByLabel(/応募締切 .*時刻未確認/)).toBeVisible();
+  await card.getByRole("button", { name: /の詳細を開く/ }).click();
+  await expect(page.getByTestId("lottery-detail")).toContainText("時刻未確認");
 });
 
 test("収支ページ: 当月表示・月移動・タブ切替・分析ページへのリンク", async ({ page }) => {

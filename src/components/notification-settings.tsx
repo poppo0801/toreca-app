@@ -35,6 +35,8 @@ export function NotificationSettings() {
   const [subscribed, setSubscribed] = useState(false);
   const [boundProfileId, setBoundProfileId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_NOTIFICATION_SETTINGS);
+  // 保存済みの設定を読み込むまでは編集・保存できない（読み込み結果が入力を上書きして既定値のまま保存されるのを防ぐ）
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<{ scheduled: boolean; lastRunAt: string | null; lastStatus: string | null; lastSuccessAt: string | null } | null>(null);
@@ -57,7 +59,9 @@ export function NotificationSettings() {
   useEffect(() => {
     let alive = true;
     loadNotificationSettings(profile.id).then((r) => {
-      if (alive && r.ok) setSettings(r.settings);
+      if (!alive) return;
+      if (r.ok) setSettings(r.settings);
+      setLoadedFor(profile.id);
     });
     return () => {
       alive = false;
@@ -156,7 +160,7 @@ export function NotificationSettings() {
 
       <JobStatus job={job} nowMs={nowMs} />
 
-      <fieldset className="space-y-3 rounded-md border p-3">
+      <fieldset className="space-y-3 rounded-md border p-3" disabled={loadedFor !== profile.id} aria-busy={loadedFor !== profile.id}>
         <legend className="px-1 font-medium">プロフィール「{profile.label}」の通知ルール</legend>
         <label className="flex min-h-10 items-center gap-2">
           <input type="checkbox" className="size-4" checked={settings.enabled} onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })} />

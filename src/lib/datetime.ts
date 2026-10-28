@@ -80,6 +80,26 @@ export function formatFlexible(value: FlexibleDate): string {
   }
 }
 
+/**
+ * 一覧用の短い表記。不明は「—」、日付のみは「10/27」（時刻は出さない）、日時は「10/27 21:00」。
+ * 時刻なしと 0:00 は区別される（0:00 は「10/27 0:00」と表示される）。
+ */
+export function formatShort(value: FlexibleDate): string {
+  switch (value.precision) {
+    case "unknown":
+      return "—";
+    case "date_only": {
+      const [, m, d] = value.date.split("-");
+      return `${Number(m)}/${Number(d)}`;
+    }
+    case "date_time": {
+      const parts = jstPartsFormat.formatToParts(new Date(value.at));
+      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+      return `${get("month")}/${get("day")} ${Number(get("hour"))}:${get("minute")}`;
+    }
+  }
+}
+
 export type RemainingLevel = "urgent" | "soon" | "today" | "normal" | "expired";
 
 export interface Remaining {

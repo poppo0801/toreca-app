@@ -7,9 +7,9 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "トレカ抽選管理", body: event.data ? event.data.text() : "" };
+    payload = { title: "トレマネ", body: event.data ? event.data.text() : "" };
   }
-  const title = payload.title || "トレカ抽選管理";
+  const title = payload.title || "トレマネ";
   event.waitUntil(
     self.registration.showNotification(title, {
       body: payload.body || "",

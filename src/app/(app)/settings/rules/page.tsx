@@ -2,7 +2,7 @@ import Link from "next/link";
 import { RulesView } from "@/components/rules-view";
 import { isSupabaseMode } from "@/lib/supabase/env";
 
-export const metadata = { title: "応募ルール | トレカ抽選管理" };
+export const metadata = { title: "応募ルール | トレマネ" };
 
 export default function RulesPage() {
   return (

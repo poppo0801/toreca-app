@@ -981,6 +981,7 @@ export type Database = {
       }
       lotteries: {
         Row: {
+          unconfirmed_fields: string[]
           announcement_method: string
           announcement_url: string | null
           apply_deadline_at: string | null
@@ -1018,6 +1019,7 @@ export type Database = {
           verification_text: string
         }
         Insert: {
+          unconfirmed_fields?: string[]
           announcement_method?: string
           announcement_url?: string | null
           apply_deadline_at?: string | null
@@ -1055,6 +1057,7 @@ export type Database = {
           verification_text?: string
         }
         Update: {
+          unconfirmed_fields?: string[]
           announcement_method?: string
           announcement_url?: string | null
           apply_deadline_at?: string | null
@@ -1520,6 +1523,7 @@ export type Database = {
       }
       product_images: {
         Row: {
+          content_box: Json | null
           created_at: string
           display_scale: number
           offset_x: number
@@ -1537,6 +1541,7 @@ export type Database = {
           width: number | null
         }
         Insert: {
+          content_box?: Json | null
           created_at?: string
           display_scale?: number
           offset_x?: number
@@ -1554,6 +1559,7 @@ export type Database = {
           width?: number | null
         }
         Update: {
+          content_box?: Json | null
           created_at?: string
           display_scale?: number
           offset_x?: number

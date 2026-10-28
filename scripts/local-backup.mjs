@@ -53,7 +53,7 @@ $x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Wind
 $t=$x.GetElementsByTagName('text')
 [void]$t.Item(0).AppendChild($x.CreateTextNode('${title}'))
 [void]$t.Item(1).AppendChild($x.CreateTextNode('${body}'))
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('トレカ抽選管理').Show([Windows.UI.Notifications.ToastNotification]::new($x))`;
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('トレマネ').Show([Windows.UI.Notifications.ToastNotification]::new($x))`;
   spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(ps, "utf16le").toString("base64")], { stdio: "ignore" });
 }
 
@@ -77,7 +77,7 @@ function fail(message) {
   } catch {
     /* noop */
   }
-  toast("バックアップに失敗しました", "トレカ抽選管理の自動バックアップが失敗しました。ログを確認してください。");
+  toast("バックアップに失敗しました", "トレマネの自動バックアップが失敗しました。ログを確認してください。");
   process.exit(1);
 }
 
@@ -109,7 +109,7 @@ mkdirSync(BACKUP_DIR, { recursive: true });
 // PCが止まっていて長く取れていない場合は、スキップ判定の前に警告する
 const before = readStatus();
 if (before?.lastSuccessAt && hoursSince(before.lastSuccessAt) > STALE_H) {
-  toast("バックアップが止まっています", "トレカ抽選管理のバックアップが1日半以上取れていません。いま取得します。");
+  toast("バックアップが止まっています", "トレマネのバックアップが1日半以上取れていません。いま取得します。");
 }
 if (!args.has("--force") && before?.lastSuccessAt && hoursSince(before.lastSuccessAt) < MIN_INTERVAL_H) {
   log(`スキップ: 直近の成功が${hoursSince(before.lastSuccessAt).toFixed(1)}時間前のため`);

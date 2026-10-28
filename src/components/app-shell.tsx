@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings, Ticket, Wallet } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
+import { BrandLogo } from "@/components/brand-logo";
 import { NotificationBell } from "@/components/notification-bell";
 import { ProfileChip } from "@/components/profile-switcher";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-dvh md:flex">
       {/* PC: 左ナビ（ユーザー切替・通知はヘッダーに集約） */}
       <aside className="hidden w-52 shrink-0 flex-col gap-4 border-r bg-header p-4 md:flex">
-        <div className="text-sm font-bold">トレカ抽選管理</div>
+        <BrandLogo className="px-1 pt-1" />
         <nav aria-label="メイン" className="flex flex-col gap-1">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = isActive(href);
@@ -47,9 +48,9 @@ function Shell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザーのみ。ノッチ/ステータスバー分は Safe Area で確保 */}
-        <header className="sticky top-0 z-30 border-b bg-header pt-safe px-safe">
+        <header className="sticky top-0 z-30 border-b border-t-2 border-t-primary bg-header pt-safe px-safe shadow-card">
           <div className="flex h-10 items-center justify-between px-3">
-            <span className="text-xs font-semibold md:hidden">トレカ抽選管理</span>
+            <BrandLogo className="md:hidden" />
             <span className="hidden md:block" />
             <div className="flex items-center gap-0.5">
               <NotificationBell />

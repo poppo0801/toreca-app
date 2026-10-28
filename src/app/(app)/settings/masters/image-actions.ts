@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { computeContentBox } from "@/lib/image-trim";
 import { createClient } from "@/lib/supabase/server";
 
 export type ImageActionResult = { ok: true } | { ok: false; error: string };
@@ -63,6 +64,13 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
   if (error) {
     await supabase.storage.from("product-images").remove([path]);
     return fail("画像の登録に失敗しました");
+  }
+  // 透明な余白を除いた表示範囲（表示時だけ使う。計算や保存に失敗しても画像の登録自体は成功のまま）
+  try {
+    const box = await computeContentBox(buf);
+    await supabase.from("product_images").update({ content_box: box }).eq("product_id", productId.data).eq("kind", kind.data);
+  } catch {
+    /* 補正なしで表示される */
   }
   // 手動で差し替えた項目として記録（自動更新・再取り込みで上書きしない）
   const field = `${kind.data}_image`;
