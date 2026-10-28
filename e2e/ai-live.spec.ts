@@ -164,3 +164,22 @@ run("x1b")("x1b: 公開X投稿のURL（oEmbed。抽選の告知ではない投�
   await login(page);
   await call(page, "x1b", { kind: "x_url", url: "https://x.com/elonmusk/status/1519480761749016577" });
 });
+
+run("usage")("usage: 実際の利用がアプリ内の「AI利用状況」に反映される（抽選でない判定でも使用量が記録される）", async ({ page }) => {
+  await login(page);
+  const r = await call(page, "usage-t3", { kind: "text", text: TEXT_NOT_LOTTERY });
+  expect(r.code).toBe("not_lottery");
+  expect(r.model).toBe("claude-haiku-5-5");
+  expect(r.usage?.input).toBeGreaterThan(0);
+  expect(r.usage?.output).toBeGreaterThan(0);
+  await page.goto("/settings");
+  const ai = page.getByTestId("ai-usage");
+  await expect(ai.getByTestId("ai-calls")).toHaveText("1回");
+  await expect(ai.getByTestId("ai-cost")).not.toHaveText("0円"); // 1円未満でも0円とは表示しない
+  const text = (await ai.innerText()).replace(/s+/g, " ");
+  writeFileSync(`${OUT}/usage-panel.json`, JSON.stringify({ panel: text, apiUsage: r.usage }, null, 2));
+  console.log("利用状況:", text.slice(0, 420));
+  await expect(ai).toContainText("claude-haiku-5-5");
+  await expect(ai).toContainText("文章 1回");
+  await page.screenshot({ path: "docs/screenshots/stage4b-ai-usage-live.png", fullPage: false });
+});

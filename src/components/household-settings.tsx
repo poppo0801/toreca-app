@@ -292,6 +292,8 @@ export function AiBudgetNote() {
 
 const KIND_LABEL = { text: "文章", image: "画像", url: "URL", x_url: "X投稿" } as const;
 const yen = (n: number) => `${Math.round(n).toLocaleString("ja-JP")}円`;
+/** 推定料金の表示。1回あたり1円未満のことが多いので、少額は小数で表示する（0円と区別する） */
+const yenFine = (n: number) => (n > 0 && n < 10 ? `${n.toFixed(2)}円` : yen(n));
 const LEVEL_CLASS = { ok: "bg-success", warn1: "bg-warn", warn2: "bg-primary", warn3: "bg-danger", over: "bg-danger" } as const;
 
 export function AiUsageSection() {
@@ -353,7 +355,7 @@ export function AiUsageSection() {
         <div className="flex items-end justify-between">
           <p className="text-[13px] font-medium">今月（{current.month}）の推定料金</p>
           <p className="text-lg font-extrabold tabular-nums" data-testid="ai-cost">
-            {yen(current.costJpy)}
+            {yenFine(current.costJpy)}
           </p>
         </div>
         <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="月間予算の使用率" aria-valuenow={Math.round((b.usedRate ?? 0) * 100)} aria-valuemin={0} aria-valuemax={100}>
@@ -415,7 +417,7 @@ export function AiUsageSection() {
                 <tr key={m.month} className="border-t">
                   <td className="px-2 py-1">{m.month}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{m.calls}</td>
-                  <td className="px-2 py-1 text-right tabular-nums">{yen(m.costJpy)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{yenFine(m.costJpy)}</td>
                 </tr>
               ))}
             </tbody>
