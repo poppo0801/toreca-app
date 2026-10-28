@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { SplashScreen } from "@/components/splash-screen";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -9,7 +11,8 @@ import { createClient } from "@/lib/supabase/server";
  */
 export const dynamic = "force-dynamic";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
+/** ログイン確認と世帯の準備（DBへの問い合わせ）。完了するまでの間は Suspense のロード画面が表示される */
+async function AuthGate({ children }: { children: React.ReactNode }) {
   if (isSupabaseMode) {
     const supabase = await createClient();
     const { data: auth } = await supabase.auth.getUser();
@@ -20,4 +23,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     await supabase.rpc("ensure_profile_accounts");
   }
   return <AppShell>{children}</AppShell>;
+}
+
+/**
+ * 起動時は、認証確認が終わるのを待たずに最初にロード画面のHTMLを返す（ストリーミング）。
+ * 以降のページ移動ではこのレイアウトは再描画されないので、ロード画面は起動・再読み込みのときだけ出る。
+ */
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<SplashScreen />}>
+      <AuthGate>{children}</AuthGate>
+    </Suspense>
+  );
 }

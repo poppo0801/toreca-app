@@ -400,3 +400,72 @@ test("抽選カード右上に都道府県と自宅からの直線距離（区�
   const [img, pl] = [(await tokyo.getByTestId("card-image").boundingBox())!, (await tokyo.getByTestId("card-place").boundingBox())!];
   expect(pl.x).toBeGreaterThan(img.x + img.width);
 });
+
+test.describe("起動時のロード画面", () => {
+  test("最初のHTMLにロゴ・名称・スピナー・読み込み中...が含まれ、JavaScriptやデータを待つ間も黒い画面にならない", async ({ request }) => {
+    const html = await (await request.get("/lotteries")).text();
+    expect(html).toContain('data-testid="splash"');
+    expect(html).toContain("トレマネ");
+    expect(html).toContain("TCG manager");
+    expect(html).toContain("読み込み中...");
+    expect(html).toContain("animate-spin");
+  });
+
+  test("JavaScriptが動く前でも、ロゴと「読み込み中...」がテーマの背景色で表示される（ライト）", async ({ browser }) => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false, colorScheme: "light" });
+    const page = await ctx.newPage();
+    await page.goto("/lotteries");
+    const splash = page.getByTestId("splash");
+    await expect(splash).toBeVisible();
+    await expect(splash).toContainText("読み込み中...");
+    await expect(splash.locator("svg").first()).toBeVisible(); // ロゴ
+    const bg = await splash.evaluate((e) => getComputedStyle(e).backgroundColor);
+    expect(bg).toBe("rgb(244, 244, 245)"); // ライトの背景。黒ではない
+    await page.screenshot({ path: `docs/screenshots/stage45-splash-light.png` });
+    await ctx.close();
+  });
+
+  test("ダーク: 起動の準備中はダークの背景でロゴと読み込み中を表示し、準備ができたら自動で通常画面になる。固定秒数は待たない", async ({ browser }) => {
+    const ctx = await browser.newContext({ colorScheme: "dark" });
+    const page = await ctx.newPage();
+    // アプリのスクリプトの到着を遅らせ、準備中の画面を確認する（テーマ設定のインラインスクリプトは遅れない）
+    await page.route(/\/_next\/static\/.*\.js/, async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    const t0 = Date.now();
+    await page.goto("/lotteries", { waitUntil: "commit" });
+    const splash = page.getByTestId("splash");
+    await expect(splash).toBeVisible();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    const bg = await splash.evaluate((e) => getComputedStyle(e).backgroundColor);
+    expect(bg).toBe("rgb(8, 8, 10)"); // アプリのダーク背景（スクリプト待ちの間も表示される）
+    await expect(splash).toContainText("TCG manager");
+    await page.screenshot({ path: `docs/screenshots/stage45-splash-dark.png` });
+    await page.unroute(/\/_next\/static\/.*\.js/);
+    await expect(page.getByTestId("lottery-card").first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("splash")).toHaveCount(0);
+    expect(Date.now() - t0).toBeLessThan(15000);
+    await ctx.close();
+  });
+
+  test("起動後のページ移動・データ更新では、全面のロード画面を出さない", async ({ page }) => {
+    await page.goto("/lotteries");
+    await expect(page.getByTestId("lottery-card").first()).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as { __splashSeen: number }).__splashSeen = 0;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-testid="splash"]')) (window as unknown as { __splashSeen: number }).__splashSeen++;
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    const nav = page.getByRole("navigation", { name: "メイン" }).last();
+    await nav.getByRole("link", { name: "購入記録" }).click();
+    await expect(page).toHaveURL(/\/purchases$/);
+    await nav.getByRole("link", { name: "収支" }).click();
+    await expect(page).toHaveURL(/\/finance$/);
+    await nav.getByRole("link", { name: "抽選管理" }).click();
+    await expect(page.getByTestId("lottery-card").first()).toBeVisible();
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    expect(await page.evaluate(() => (window as unknown as { __splashSeen: number }).__splashSeen)).toBe(0);
+  });
+});

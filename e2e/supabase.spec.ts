@@ -950,3 +950,33 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   await expect(ai).toContainText("1,000円 / 2,000円 / 2,500円");
   await page.screenshot({ path: "docs/screenshots/stage5b-settings-mobile.png", fullPage: true });
 });
+
+test("起動: ログイン後の起動でもロード画面のHTMLを先に返し、準備完了で通常画面へ。起動後の画面遷移では出ない", async ({ page }) => {
+  await login(page);
+  // 認証確認・世帯の準備を待たずに最初に返るHTMLにロード画面が含まれる（ストリーミング）
+  const html = await (await page.context().request.get("/lotteries")).text();
+  expect(html).toContain('data-testid="splash"');
+  expect(html).toContain("読み込み中...");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "抽選管理" })).toBeVisible();
+  await expect(page.getByTestId("splash")).toHaveCount(0);
+  await page.evaluate(() => {
+    (window as unknown as { __splashSeen: number }).__splashSeen = 0;
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid="splash"]')) (window as unknown as { __splashSeen: number }).__splashSeen++;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  const nav = page.getByRole("navigation", { name: "メイン" }).last();
+  await nav.getByRole("link", { name: "購入記録" }).click();
+  await expect(page).toHaveURL(/\/purchases$/);
+  await nav.getByRole("link", { name: "設定" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await nav.getByRole("link", { name: "抽選管理" }).click();
+  await expect(page.getByRole("heading", { name: "抽選管理" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __splashSeen: number }).__splashSeen)).toBe(0);
+  // 未ログインの状態は従来どおりログイン画面へ（認証の挙動は変わらない）
+  await page.context().clearCookies();
+  await page.goto("/lotteries");
+  await expect(page).toHaveURL(/\/login$/);
+});

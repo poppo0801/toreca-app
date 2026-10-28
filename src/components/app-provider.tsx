@@ -10,6 +10,7 @@ import { createRepository } from "@/services";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { rebindPushSubscription } from "@/app/(app)/settings/notifications/actions";
 import { currentSubscription, pushSupported, registerServiceWorker } from "@/lib/push-client";
+import { SplashScreen } from "@/components/splash-screen";
 import { localDeviceStore } from "@/services/local-device-store";
 import type { LotteryRepository, Outcome } from "@/services/types";
 import type { AppData, EventState, FulfillmentStatus, Profile, ResultStatus } from "@/types/domain";
@@ -59,8 +60,21 @@ export function useApp(): AppContextValue {
  * データ・現在時刻・操作プロフィールを保持する。
  * 選択プロフィールは端末(localStorage)ごと。サーバー/他端末とは同期しない。
  */
-export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [repo] = useState<LotteryRepository>(() => createRepository());
+/** 起動時の読み込みの上限。これを超えたら無限に待たず、エラーと再試行を出す */
+const LOAD_TIMEOUT_MS = 25_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("読み込みに時間がかかっています。通信環境を確認して、再試行してください")), ms);
+    p.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
+}
+
+export function AppProvider({ children, repository }: { children: React.ReactNode; /** テスト用: データの取得元を差し替える */ repository?: LotteryRepository }) {
+  const [repo] = useState<LotteryRepository>(() => repository ?? createRepository());
   const pathname = usePathname();
   const [data, setData] = useState<AppData | null>(null);
   const [now, setNow] = useState<Date | null>(null);
@@ -68,17 +82,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const firstLoad = useRef(true);
+  // 一度でも読み込めたあとの更新失敗では、画面全体をエラーにせず通知にとどめる（全面ローディング/エラーは起動時だけ）
+  const hasData = useRef(false);
 
   const load = useCallback(async (): Promise<AppData | null> => {
     const start = new Date();
     try {
-      const d = await repo.load(start);
+      const d = await withTimeout(repo.load(start), LOAD_TIMEOUT_MS);
+      hasData.current = true;
       setData(d);
       setNow(start);
       setLoadError(null);
       return d;
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "データの取得に失敗しました");
+      const message = e instanceof Error && e.message ? e.message : "データの取得に失敗しました";
+      if (hasData.current) setNotice(`最新のデータを取得できませんでした（${message}）`);
+      else setLoadError(message);
       return null;
     }
   }, [repo]);
@@ -176,21 +195,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [activeProfileId]);
 
-  if (loadError) {
+  if (loadError && !data) {
     return (
-      <p role="alert" className="p-6 text-sm text-danger">
-        {loadError}
-      </p>
+      <SplashScreen
+        error={loadError}
+        onRetry={() => {
+          setLoadError(null);
+          void load();
+        }}
+      />
     );
   }
   if (!value) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground" aria-busy="true">
-        {data && data.profiles.every((p) => p.active === false)
-          ? "有効なプロフィールがありません。設定のマスター管理で有効化してください。"
-          : "読み込み中…"}
-      </div>
-    );
+    if (data && data.profiles.every((p) => p.active === false)) {
+      return (
+        <div className="p-6 text-sm text-muted-foreground" role="alert">
+          有効なプロフィールがありません。設定のマスター管理で有効化してください。
+        </div>
+      );
+    }
+    return <SplashScreen />;
   }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

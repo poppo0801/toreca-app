@@ -124,6 +124,14 @@
 }
 
 @layer base {
+  /* 最初の描画前・オーバースクロール時にも、テーマの背景色になる（黒い画面を残さない） */
+  html {
+    background: var(--background);
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
   * {
     border-color: var(--border);
   }
