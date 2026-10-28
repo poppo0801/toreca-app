@@ -1,0 +1,84 @@
+{
+ "model": "claude-haiku-5-5",
+ "usage": {
+  "input": 3923,
+  "output": 1135
+ },
+ "extraction": {
+  "isLotteryAnnouncement": true,
+  "chainName": "サンプル電機",
+  "storeName": "三宮店",
+  "prefecture": "",
+  "items": [
+   {
+    "name": "ポケモンカードゲーム 拡張パック「ひかりの森」 1BOX（30パック入り）",
+    "code": "",
+    "quantity": 1,
+    "unit": "box",
+    "unitAssumed": false
+   }
+  ],
+  "multiMode": "single",
+  "applyStart": {
+   "precision": "date_time",
+   "date": "2026-11-05",
+   "time": "10:00",
+   "yearAssumed": true
+  },
+  "applyDeadline": {
+   "precision": "date_time",
+   "date": "2026-11-10",
+   "time": "23:59",
+   "yearAssumed": true
+  },
+  "resultDate": {
+   "precision": "date_only",
+   "date": "2026-11-13",
+   "time": "",
+   "yearAssumed": true
+  },
+  "procedureDeadline": {
+   "precision": "date_only",
+   "date": "2026-11-20",
+   "time": "",
+   "yearAssumed": true
+  },
+  "announcementMethod": "メール",
+  "announcementUrl": "",
+  "applyUrl": "https://example.invalid/lottery/hikari",
+  "applyMethod": "app",
+  "receiveMethod": "store",
+  "limitBasis": "person",
+  "limitMaxCount": 1,
+  "purchaseLimitText": "お一人様1回限り、1BOXまで",
+  "conditionsText": "サンプル電機会員（無料）の方。応募はサンプル電機公式アプリ内の応募フォームより。",
+  "verificationText": "受取時に顔写真付きの身分証明書",
+  "notes": "応募期間・当選発表・購入受取期限の年が告知に書かれていません。",
+  "confidence": {
+   "chain": "high",
+   "store": "high",
+   "items": "high",
+   "multiMode": "high",
+   "applyStart": "medium",
+   "applyDeadline": "medium",
+   "resultDate": "medium",
+   "procedureDeadline": "medium",
+   "announcement": "high",
+   "applyMethod": "high",
+   "receiveMethod": "high",
+   "limit": "high",
+   "conditions": "high"
+  },
+  "warnings": [
+   "応募期間・当選発表日・購入受取期限の年が書かれていません。日付は告知の表記どおりに確認してください。",
+   "当選発表時刻は書かれていません。",
+   "購入・受取は店頭受取のみです。受取時に顔写真付きの身分証明書が必要です。",
+   "応募は公式アプリ内の応募フォームからです。サンプル電機会員（無料）の登録が必要です。",
+   "お一人様1回限り・1BOXまでです。",
+   "応募開始: 年の記載がないため2026年と仮定しました。確認してください",
+   "応募締切: 年の記載がないため2026年と仮定しました。確認してください",
+   "当選発表: 年の記載がないため2026年と仮定しました。確認してください",
+   "購入・受取期限: 年の記載がないため2026年と仮定しました。確認してください"
+  ]
+ }
+}

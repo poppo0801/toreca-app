@@ -175,11 +175,55 @@ run("usage")("usage: 実際の利用がアプリ内の「AI利用状況」に反
   await page.goto("/settings");
   const ai = page.getByTestId("ai-usage");
   await expect(ai.getByTestId("ai-calls")).toHaveText("1回");
-  await expect(ai.getByTestId("ai-cost")).not.toHaveText("0円"); // 1円未満でも0円とは表示しない
   const text = (await ai.innerText()).replace(/s+/g, " ");
   writeFileSync(`${OUT}/usage-panel.json`, JSON.stringify({ panel: text, apiUsage: r.usage }, null, 2));
   console.log("利用状況:", text.slice(0, 420));
+  await expect(ai.getByTestId("ai-cost")).not.toHaveText("0円"); // 1円未満でも0円とは表示しない
   await expect(ai).toContainText("claude-haiku-5-5");
-  await expect(ai).toContainText("文章 1回");
+  await expect(ai).toContainText(/文章[s　]*1回/);
   await page.screenshot({ path: "docs/screenshots/stage4b-ai-usage-live.png", fullPage: false });
+});
+
+run("ui1")("ui1: 画面から文章を読み取り→登録フォームへ反映→保存→一覧に表示（実AI）", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  const form = page.getByTestId("lottery-form");
+  await form.getByTestId("ai-open").click();
+  const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
+  await ai.getByRole("tab", { name: "文章" }).click();
+  await ai.getByLabel("告知の文章を貼り付け").fill(TEXT_FULL);
+  const resp = page.waitForResponse((r) => r.url().includes("/api/lottery-extract"));
+  await ai.getByRole("button", { name: "読み取る" }).click();
+  const json = await (await resp).json();
+  writeFileSync(`${OUT}/ui1-response.json`, JSON.stringify({ model: json.model, usage: json.usage, extraction: json.extraction }, null, 2));
+  await expect(ai.getByTestId("ai-result")).toBeVisible({ timeout: 30000 });
+  await expect(ai.getByTestId("ai-mock-banner")).toHaveCount(0); // モックではなく実際のAIの結果
+  await page.screenshot({ path: "docs/screenshots/stage4b-ai-result-live.png" });
+  await ai.getByRole("button", { name: "フォームに入力" }).click();
+
+  // フォームへ反映（候補。確認・修正してから保存する）
+  await expect(form.getByTestId("ai-filled-note")).toBeVisible();
+  await expect(form.getByRole("combobox", { name: "系列", exact: true })).toHaveValue("サンプル電機");
+  await expect(form.getByRole("combobox", { name: "店舗", exact: true })).toHaveValue("三宮店");
+  await expect(form.getByRole("combobox", { name: "商品1", exact: true })).toHaveValue(/ひかりの森/);
+  await expect(form.getByLabel("応募開始の日付")).toHaveValue("2026-11-05");
+  await expect(form.getByLabel("応募開始の時刻")).toHaveValue("10:00");
+  await expect(form.getByLabel("応募締切の日付")).toHaveValue("2026-11-10");
+  await expect(form.getByLabel("応募締切の時刻")).toHaveValue("23:59");
+  await expect(form.getByLabel("当選発表の日付")).toHaveValue("2026-11-13");
+  await expect(form.getByLabel("当選発表の時刻")).toHaveValue(""); // 日付のみ。時刻を補わない
+  await expect(form.getByLabel("購入・受取期限の日付")).toHaveValue("2026-11-20");
+  await expect(form.getByLabel("購入・受取期限の時刻")).toHaveValue("");
+  await expect(form.getByLabel("応募方法", { exact: true })).toHaveValue("app");
+  await expect(form.getByLabel("受取方法", { exact: true })).toHaveValue("store");
+  await expect(form.getByTestId("tag-ai").first()).toBeVisible(); // AIが読み取った値の印
+  await expect(form.getByLabel("応募制限", { exact: true })).toHaveValue("person");
+  await page.screenshot({ path: "docs/screenshots/stage4b-ai-form-live.png" });
+
+  // 保存（テスト世帯。実行後に掃除される）→ 一覧に表示
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(form).toHaveCount(0);
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  await expect(page.getByTestId("lottery-card").filter({ hasText: "三宮店" })).toHaveCount(1);
 });
