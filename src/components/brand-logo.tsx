@@ -1,15 +1,10 @@
 import { APP_NAME, APP_SUBTITLE } from "@/lib/brand";
-import { LOGO_DARK, LOGO_LIGHT, logoMarkInner } from "@/lib/brand-svg";
 import { cn } from "@/lib/utils";
 
-/** ロゴマーク（ライト・ダークで線色を切り替える。ダークは .dark の祖先で切替） */
+/** ロゴマーク（ユーザー提供の原本画像 toremane_icon.jpg から生成した画像。ライト・ダーク共通の濃色の角丸アイコン） */
 export function LogoMark({ className }: { className?: string }) {
-  return (
-    <>
-      <svg viewBox="-50 -50 100 100" aria-hidden="true" className={cn("dark:hidden", className)} dangerouslySetInnerHTML={{ __html: logoMarkInner(LOGO_LIGHT) }} />
-      <svg viewBox="-50 -50 100 100" aria-hidden="true" className={cn("hidden dark:block", className)} dangerouslySetInnerHTML={{ __html: logoMarkInner(LOGO_DARK) }} />
-    </>
-  );
+  // eslint-disable-next-line @next/next/no-img-element -- 小さな固定画像。最適化は不要
+  return <img src="/icons/v2/mark-96.png" alt="" width={48} height={48} aria-hidden="true" draggable={false} className={cn("rounded-[22%]", className)} />;
 }
 
 /** ロゴ＋「トレマネ」（＋英語の副題）。ヘッダーは横並び、ログイン画面は縦並び */

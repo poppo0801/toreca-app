@@ -236,7 +236,7 @@ test("PWA・通知基盤: manifest/SWは未ログインでも取得でき、通�
   const sw = await request.get("/sw.js");
   expect(sw.status()).toBe(200);
   expect(await sw.text()).toContain("showNotification");
-  expect((await request.get("/icons/icon-192.png")).status()).toBe(200);
+  expect((await request.get("/icons/v2/icon-192.png")).status()).toBe(200);
 
   // 通知ジョブ: 認証なし・誤った秘密は401（個人データを返さない）
   expect((await request.get("/api/cron/notify")).status()).toBe(401);

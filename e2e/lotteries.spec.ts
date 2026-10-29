@@ -223,9 +223,9 @@ test("名称はトレマネ。ヘッダー・ページタイトル・PWAの表�
   expect(m.short_name).toBe("トレマネ");
   expect(m.name).toContain("トレマネ");
   expect(m.name).toContain("TCG manager");
-  expect(m.icons.map((i: { src: string }) => i.src)).toContain("/icons/icon-512.png");
+  expect(m.icons.map((i: { src: string }) => i.src)).toContain("/icons/v2/icon-512.png");
   await expect(page.locator("body")).not.toContainText("トレカ抽選管理");
-  for (const path of ["/icons/icon-192.png", "/icons/apple-touch-icon.png", "/icons/maskable-512.png", "/icons/favicon-32.png"]) {
+  for (const path of ["/icons/v2/icon-192.png", "/icons/v2/apple-touch-icon.png", "/icons/v2/maskable-512.png", "/icons/v2/favicon-32.png", "/icons/v2/favicon-16.png"]) {
     expect((await request.get(path)).status()).toBe(200);
   }
 });

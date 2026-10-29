@@ -5,7 +5,6 @@ import { DEFAULT_DISTANCE_BANDS_KM, distanceBand, formatKm, haversineKm, isValid
 import { DRAFT_TTL_MS, clearDraft, fingerprint, listDraftKeys, loadDraft, saveDraft, type DraftStorage } from "@/lib/lottery-draft";
 import { EMPTY_FLEX, flexFromParts, flexInputSchema, flexInputToDb } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
-import { logoMarkSvg, LOGO_DARK } from "@/lib/brand-svg";
 
 class MemStorage implements DraftStorage {
   private m = new Map<string, string>();
@@ -164,14 +163,5 @@ describe("下書き（端末内保存）", () => {
   it("指紋は同じ内容で同じ、違う内容で異なる", () => {
     expect(fingerprint({ a: 1 })).toBe(fingerprint({ a: 1 }));
     expect(fingerprint({ a: 1 })).not.toBe(fingerprint({ a: 2 }));
-  });
-});
-
-describe("ロゴ", () => {
-  it("案1の構成（3枚のカード＋星）で、ダーク用は明るい線とオレンジを使う", () => {
-    const svg = logoMarkSvg(LOGO_DARK);
-    expect((svg.match(/<rect/g) ?? []).length).toBe(3);
-    expect(svg).toContain("<path"); // 星
-    expect(svg).toContain(LOGO_DARK.accent);
   });
 });

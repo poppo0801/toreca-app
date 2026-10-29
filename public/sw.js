@@ -14,8 +14,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(title, {
       body: payload.body || "",
       tag: payload.tag || undefined, // 同じ対象の通知は通知センター上で1件にまとまる
-      icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
+      icon: "/icons/v2/icon-192.png",
+      badge: "/icons/v2/icon-192.png",
       data: { url: payload.url || "/lotteries" },
     }),
   );
