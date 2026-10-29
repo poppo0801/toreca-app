@@ -983,3 +983,91 @@ test("起動: ログイン後の起動でもロード画面のHTMLを先に返�
   await page.goto("/lotteries");
   await expect(page).toHaveURL(/\/login$/);
 });
+
+test("Excel取り込み・出力: テンプレート→確認→適用→再取り込みは重複エラー→出力して更新→履歴。エラー一覧と店舗の系列エラーも確認できる", async ({ page }) => {
+  const ExcelJS = (await import("exceljs")).default;
+  const stamp = Date.now().toString(36);
+  await login(page);
+  await page.goto("/settings/masters");
+  await page.getByTestId("link-master-import").click();
+  await expect(page.getByRole("heading", { name: "Excel取り込み・出力" })).toBeVisible();
+
+  // テンプレートのダウンロード（ログイン中のみ）
+  const tpl = await page.context().request.get("/api/master-import?kind=products&type=template");
+  expect(tpl.status()).toBe(200);
+  expect(tpl.headers()["content-type"]).toContain("spreadsheetml");
+  const tplBuf = Buffer.from(await tpl.body());
+  const book = async (rows: string[][]) => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(tplBuf as unknown as ArrayBuffer);
+    const ws = wb.getWorksheet("商品")!;
+    rows.forEach((r, i) => r.forEach((v, c) => (ws.getCell(i + 2, c + 1).value = v === "" ? null : v)));
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  };
+  const upload = (name: string, buffer: Buffer) => page.getByTestId("import-file").setInputFiles({ name, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer });
+  const nameA = `E2E取込商品A${stamp}`;
+  const nameB = `E2E取込商品B${stamp}`;
+
+  // 新規2件: 確認 → 適用
+  await upload("new.xlsx", await book([["", "", "", nameA, `略称A${stamp}`, "", "2026-12-05", "", "30", "5400", "", ""], ["", "", "", nameB, "", "", "", "", "", "", "", ""]]));
+  await expect(page.getByTestId("import-preview")).toBeVisible();
+  await expect(page.getByTestId("count-new")).toHaveText("2");
+  await expect(page.getByTestId("count-error")).toHaveText("0");
+  await expect(page.getByTestId("import-rows")).toContainText("（自動採番）");
+  await page.getByTestId("import-apply").click();
+  await expect(page.getByTestId("import-done")).toContainText("新規 2件");
+  await expect(page.getByTestId("import-done")).toContainText(/PR\d{6}/);
+
+  // 同じファイルをもう一度: 同名の商品が既にあるためエラー。適用できず、エラー一覧をダウンロードできる
+  await upload("new.xlsx", await book([["", "", "", nameA, "", "", "", "", "", "", "", ""]]));
+  await expect(page.getByTestId("count-error")).toHaveText("1");
+  await expect(page.getByTestId("import-rows")).toContainText("同じ名前の商品が既にあります");
+  await expect(page.getByTestId("import-apply")).toBeDisabled();
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "エラー一覧をダウンロード" }).click()]);
+  expect(dl.suggestedFilename()).toContain("errors");
+
+  // 出力 → 1件のメモを書き換えて取り込む（他の行は変更なし）
+  const exp = await page.context().request.get("/api/master-import?kind=products&type=export");
+  expect(exp.status()).toBe(200);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await exp.body()) as unknown as ArrayBuffer);
+  const ws = wb.getWorksheet("商品")!;
+  let hit = 0;
+  ws.eachRow((row, n) => {
+    if (n > 1 && String(row.getCell(4).value) === nameB) {
+      row.getCell(12).value = `更新メモ${stamp}`;
+      hit++;
+    }
+  });
+  expect(hit).toBe(1);
+  await upload("export-edited.xlsx", Buffer.from(await wb.xlsx.writeBuffer()));
+  await expect(page.getByTestId("count-update")).toHaveText("1");
+  await expect(page.getByTestId("count-error")).toHaveText("0");
+  await expect(page.getByTestId("import-rows")).toContainText(`更新メモ${stamp}`);
+  await page.getByTestId("import-apply").click();
+  await expect(page.getByTestId("import-done")).toContainText("更新 1件");
+
+  // 履歴（ファイル名・件数）
+  await page.reload();
+  await expect(page.getByTestId("import-history")).toContainText("export-edited.xlsx");
+  await expect(page.getByTestId("import-history")).toContainText("new.xlsx");
+
+  // 店舗: 未登録の系列はエラー。商品用のファイルは拒否
+  await page.getByRole("tab", { name: "店舗" }).click();
+  const stpl = Buffer.from(await (await page.context().request.get("/api/master-import?kind=stores&type=template")).body());
+  const swb = new ExcelJS.Workbook();
+  await swb.xlsx.load(stpl as unknown as ArrayBuffer);
+  swb.getWorksheet("店舗")!.getCell(2, 2).value = `存在しない系列${stamp}`;
+  swb.getWorksheet("店舗")!.getCell(2, 3).value = "E2E店";
+  await upload("stores.xlsx", Buffer.from(await swb.xlsx.writeBuffer()));
+  await expect(page.getByTestId("import-rows")).toContainText("登録されていません");
+  await expect(page.getByTestId("import-apply")).toBeDisabled();
+  await upload("wrong-kind.xlsx", await book([["", "", "", "x", "", "", "", "", "", "", "", ""]]));
+  await expect(page.getByTestId("import-error")).toContainText("商品用");
+
+  // 未ログインでは取得できない
+  await page.context().clearCookies();
+  const anon = await page.context().request.get("/api/master-import?kind=products&type=export", { maxRedirects: 0 });
+  expect([301, 302, 303, 307, 308, 401]).toContain(anon.status());
+  expect(anon.headers()["content-type"] ?? "").not.toContain("spreadsheetml");
+});

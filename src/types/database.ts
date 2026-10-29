@@ -1541,6 +1541,95 @@ export type Database = {
           },
         ]
       }
+      management_counters: {
+        Row: {
+          household_id: string
+          kind: string
+          last_value: number
+        }
+        Insert: {
+          household_id: string
+          kind: string
+          last_value?: number
+        }
+        Update: {
+          household_id?: string
+          kind?: string
+          last_value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "management_counters_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_import_history: {
+        Row: {
+          composition_count: number
+          created_at: string
+          created_count: number
+          details: Json
+          file_name: string
+          file_sha256: string
+          fingerprint: string
+          household_id: string
+          id: string
+          imported_by_profile_id: string | null
+          kind: string
+          unchanged_count: number
+          updated_count: number
+        }
+        Insert: {
+          composition_count?: number
+          created_at?: string
+          created_count?: number
+          details?: Json
+          file_name: string
+          file_sha256: string
+          fingerprint: string
+          household_id: string
+          id?: string
+          imported_by_profile_id?: string | null
+          kind: string
+          unchanged_count?: number
+          updated_count?: number
+        }
+        Update: {
+          composition_count?: number
+          created_at?: string
+          created_count?: number
+          details?: Json
+          file_name?: string
+          file_sha256?: string
+          fingerprint?: string
+          household_id?: string
+          id?: string
+          imported_by_profile_id?: string | null
+          kind?: string
+          unchanged_count?: number
+          updated_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_import_history_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "master_import_history_imported_by_profile_id_household_id_fkey"
+            columns: ["imported_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       notification_cron_calls: {
         Row: {
           called_at: string
@@ -2022,6 +2111,7 @@ export type Database = {
           list_price_box: number | null
           list_price_pack: number | null
           list_price_unit: number | null
+          management_no: string | null
           manual_override_fields: string[]
           memo: string | null
           official_name: string
@@ -2029,6 +2119,7 @@ export type Database = {
           packs_per_box: number | null
           product_code: string | null
           product_code_kind: string | null
+          product_group: string | null
           release_date: string | null
           sales_form: string | null
           source_url: string | null
@@ -2047,6 +2138,7 @@ export type Database = {
           list_price_box?: number | null
           list_price_pack?: number | null
           list_price_unit?: number | null
+          management_no?: string | null
           manual_override_fields?: string[]
           memo?: string | null
           official_name: string
@@ -2054,6 +2146,7 @@ export type Database = {
           packs_per_box?: number | null
           product_code?: string | null
           product_code_kind?: string | null
+          product_group?: string | null
           release_date?: string | null
           sales_form?: string | null
           source_url?: string | null
@@ -2072,6 +2165,7 @@ export type Database = {
           list_price_box?: number | null
           list_price_pack?: number | null
           list_price_unit?: number | null
+          management_no?: string | null
           manual_override_fields?: string[]
           memo?: string | null
           official_name?: string
@@ -2079,6 +2173,7 @@ export type Database = {
           packs_per_box?: number | null
           product_code?: string | null
           product_code_kind?: string | null
+          product_group?: string | null
           release_date?: string | null
           sales_form?: string | null
           source_url?: string | null
@@ -2853,6 +2948,7 @@ export type Database = {
       stores: {
         Row: {
           address_optional: string
+          apply_method: string | null
           archived_at: string | null
           chain_id: string
           created_at: string
@@ -2860,18 +2956,23 @@ export type Database = {
           id: string
           is_provisional: boolean
           latitude: number | null
+          location_review_needed: boolean
           longitude: number | null
+          management_no: string | null
           memo: string
           name: string
           nearest_station: string
           parking_memo: string
           prefecture: string
+          receive_method: string | null
           round_trip_fare: number | null
+          store_url: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
         Insert: {
           address_optional?: string
+          apply_method?: string | null
           archived_at?: string | null
           chain_id: string
           created_at?: string
@@ -2879,18 +2980,23 @@ export type Database = {
           id?: string
           is_provisional?: boolean
           latitude?: number | null
+          location_review_needed?: boolean
           longitude?: number | null
+          management_no?: string | null
           memo?: string
           name: string
           nearest_station?: string
           parking_memo?: string
           prefecture?: string
+          receive_method?: string | null
           round_trip_fare?: number | null
+          store_url?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
         Update: {
           address_optional?: string
+          apply_method?: string | null
           archived_at?: string | null
           chain_id?: string
           created_at?: string
@@ -2898,13 +3004,17 @@ export type Database = {
           id?: string
           is_provisional?: boolean
           latitude?: number | null
+          location_review_needed?: boolean
           longitude?: number | null
+          management_no?: string | null
           memo?: string
           name?: string
           nearest_station?: string
           parking_memo?: string
           prefecture?: string
+          receive_method?: string | null
           round_trip_fare?: number | null
+          store_url?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -2938,6 +3048,18 @@ export type Database = {
     }
     Functions: {
       ack_travel_review: { Args: { p_actor: string }; Returns: undefined }
+      apply_master_import: {
+        Args: {
+          p_actor: string
+          p_file_name: string
+          p_file_sha: string
+          p_fingerprint: string
+          p_kind: string
+          p_ops: Json
+          p_unchanged: number
+        }
+        Returns: Json
+      }
       bootstrap_household: { Args: never; Returns: string }
       current_household_id: { Args: never; Returns: string }
       ensure_profile_accounts: { Args: never; Returns: number }
@@ -2956,6 +3078,10 @@ export type Database = {
       mark_purchased: {
         Args: { p_actor: string; p_application_id: string }
         Returns: undefined
+      }
+      next_management_no: {
+        Args: { p_household: string; p_kind: string }
+        Returns: string
       }
       norm_name: { Args: { s: string }; Returns: string }
       notification_cron_disable: { Args: never; Returns: boolean }

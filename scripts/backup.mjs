@@ -32,6 +32,8 @@ const TABLES_ALL = [
   "application_item_results", "sales", "product_set_items", "product_images",
   // Stage 5A以降に追加したテーブル（対戦記録・世帯設定（自宅の住所を含むため、バックアップは暗号化して保管する）・AI利用ログ・フィードバック・別表記）
   "battle_records", "household_settings", "ai_extraction_logs", "ai_extraction_feedback", "chain_aliases", "store_aliases",
+  // Stage 5C: Excel取り込み履歴（管理番号の採番カウンターは、復元時に商品・店舗の管理番号の最大値から自動で再構成される）
+  "master_import_history",
 ];
 
 const TABLES = TABLES_ALL.filter((t) => !SKIP.has(t));

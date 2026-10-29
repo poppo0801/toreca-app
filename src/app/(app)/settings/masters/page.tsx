@@ -30,7 +30,12 @@ export default async function MastersPage() {
           ← 設定
         </Link>
       </p>
-      <h1 className="mb-3 text-lg font-bold">マスター管理</h1>
+      <h1 className="mb-1 text-lg font-bold">マスター管理</h1>
+      <p className="mb-3 text-xs">
+        <Link href="/settings/masters/import" className="underline" data-testid="link-master-import">
+          商品・店舗をExcelで取り込み・出力
+        </Link>
+      </p>
       <MastersView rows={rows} rules={(rules.data ?? []) as RuleRow[]} />
     </>
   );

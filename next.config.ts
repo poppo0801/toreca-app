@@ -12,6 +12,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Excel入出力(exceljs)はサーバーで動かす。バンドルせず外部パッケージとして読む
+  serverExternalPackages: ["exceljs"],
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
