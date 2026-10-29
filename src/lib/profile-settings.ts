@@ -9,6 +9,24 @@ import { CARD_FIELDS, normalizeCardDisplay, type CardDisplay } from "@/lib/card-
 export type CardView = "simple" | "detail";
 export type ThemePref = "light" | "dark" | "system";
 
+/** コレクションの表示（列数・画像/テキスト・演出）。お気に入りの順位はここに含めない（個人の選択なのでコピーしない） */
+export interface CollectionPrefs {
+  cols: 3 | 4 | 5;
+  view: "grid" | "list";
+  /** 光沢などの演出（既定ON。OSの「視差効果を減らす」でも無効になる） */
+  fx: boolean;
+}
+export const DEFAULT_COLLECTION_PREFS: CollectionPrefs = { cols: 4, view: "grid", fx: true };
+
+export function normalizeCollectionPrefs(raw: unknown): CollectionPrefs {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    cols: r.cols === 3 || r.cols === 5 ? r.cols : 4,
+    view: r.view === "list" ? "list" : "grid",
+    fx: r.fx !== false,
+  };
+}
+
 export interface ProfileSettings {
   /** 下部メニューに直接表示する機能IDの並び（最大5枠。「その他」を出す場合は4つまで） */
   nav?: string[];
@@ -17,6 +35,7 @@ export interface ProfileSettings {
   /** 抽選カードの表示項目（未設定なら世帯の設定を使う） */
   cardDisplay?: CardDisplay;
   theme?: ThemePref;
+  collection?: CollectionPrefs;
 }
 
 export type ProfileSettingKey = keyof ProfileSettings;
@@ -27,6 +46,7 @@ export const COPY_ITEMS: { key: ProfileSettingKey; label: string; hint: string }
   { key: "cardView", label: "抽選カードのシンプル／詳細表示", hint: "一覧の表示モード" },
   { key: "cardDisplay", label: "抽選カードの表示項目", hint: "締切・発表日・受取方法などの表示のON/OFF" },
   { key: "theme", label: "テーマ（ライト／ダーク）", hint: "画面の配色" },
+  { key: "collection", label: "コレクションの表示（列数・画像/テキスト・演出）", hint: "お気に入りの順位は含みません" },
 ];
 export const SETTING_KEYS: ProfileSettingKey[] = COPY_ITEMS.map((c) => c.key);
 
@@ -45,8 +65,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "finance", href: "/finance", label: "収支", available: true, match: ["/finance"] },
   { id: "purchases", href: "/purchases", label: "購入記録", available: true, match: ["/purchases"] },
   { id: "battles", href: "/battles", label: "対戦記録", available: true, match: ["/battles"] },
-  // Stage 5F で実装するまで available=false（壊れたメニューを出さない）
-  { id: "collection", href: "/collection", label: "コレクション", available: false, match: ["/collection"] },
+  { id: "collection", href: "/collection", label: "コレクション", available: true, match: ["/collection"] },
 ];
 export const DEFAULT_NAV = ["lotteries", "purchases", "finance", "battles"];
 export const MAX_NAV_SLOTS = 5;
@@ -65,6 +84,7 @@ export function normalizeProfileSettings(raw: unknown): ProfileSettings {
     // 一部のキーだけでも受け付け、欠けは既定値で補う
     if (CARD_FIELDS.some((k) => typeof cd[k] === "boolean")) out.cardDisplay = normalizeCardDisplay(cd);
   }
+  if (r.collection && typeof r.collection === "object") out.collection = normalizeCollectionPrefs(r.collection);
   if (r.theme === "light" || r.theme === "dark" || r.theme === "system") out.theme = r.theme;
   return out;
 }

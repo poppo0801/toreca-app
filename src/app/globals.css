@@ -164,3 +164,52 @@
     opacity: 1;
   }
 }
+
+/* コレクション: 一覧の順次フェードイン（左上から。先頭24件だけ、1件あたり22msずつずらす。動きを減らす設定では実質無効） */
+@keyframes card-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.card-fade {
+  animation: card-fade 0.26s ease-out both;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+/* ハイレアカードの控えめな光沢（高レアリティだけ。常時のアニメーションはせず、押した・ホバーしたときと、詳細を開いたとき1回だけ）。画像の上に薄く重ねるだけ */
+.card-shine {
+  position: relative;
+}
+.card-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / 0.28) 45%, rgb(255 220 150 / 0.22) 52%, transparent 68%);
+  background-size: 250% 100%;
+  background-position: 130% 0;
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+.card-shine:hover::after,
+.card-shine:active::after {
+  opacity: 1;
+  animation: card-shine-sweep 0.9s ease-out both;
+}
+.card-shine-once::after {
+  opacity: 1;
+  animation: card-shine-sweep 1.2s ease-out 0.25s both;
+}
+@keyframes card-shine-sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}

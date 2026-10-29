@@ -163,18 +163,25 @@ describe("プロフィール別の設定と下部メニュー", () => {
     expect(SETTING_KEYS).toEqual(COPY_ITEMS.map((c) => c.key));
   });
 
-  it("既定: 4項目すべて直接表示で「その他」なし。コレクション（未実装）は候補に出ない", () => {
+  it("既定: 4項目を直接表示し、コレクションは「その他」から開ける。未実装の機能（available:false）は候補に出ない", () => {
     const r = resolveNav(undefined);
     expect(r.direct.map((n) => n.id)).toEqual(DEFAULT_NAV);
-    expect(r.more).toEqual([]);
-    expect(availableNav().some((n) => n.id === "collection")).toBe(false);
-    expect(resolveNav(["collection", "lotteries"]).direct.map((n) => n.id)).toEqual(["lotteries"]); // 未実装の項目は無視
+    expect(r.more.map((n) => n.id)).toEqual(["collection"]);
+    expect(availableNav().some((n) => n.id === "collection")).toBe(true);
+    expect(resolveNav(["collection", "lotteries"]).direct.map((n) => n.id)).toEqual(["collection", "lotteries"]); // コレクションも直接表示にできる
+    NAV_ITEMS.push({ id: "future", href: "/future", label: "未実装", available: false });
+    try {
+      expect(availableNav().some((n) => n.id === "future")).toBe(false);
+      expect(resolveNav(["future", "lotteries"]).direct.map((n) => n.id)).toEqual(["lotteries"]); // 未実装の項目は無視
+    } finally {
+      NAV_ITEMS.pop();
+    }
   });
 
   it("隠れた機能があれば「その他」が出る。重複・存在しないIDは除き、全部外しても最低1つは出る。設定への入口（歯車）とは独立", () => {
     const r = resolveNav(["finance", "lotteries", "lotteries", "nope"]);
     expect(r.direct.map((n) => n.id)).toEqual(["finance", "lotteries"]);
-    expect(r.more.map((n) => n.id).sort()).toEqual(["battles", "purchases"]);
+    expect(r.more.map((n) => n.id).sort()).toEqual(["battles", "collection", "purchases"]);
     expect(resolveNav([]).direct).toHaveLength(1);
     expect(resolveNav(["nope"]).direct).toHaveLength(1);
     // 枠の上限: 「その他」を含めて最大5枠

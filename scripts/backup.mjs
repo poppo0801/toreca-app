@@ -33,7 +33,7 @@ const TABLES_ALL = [
   // Stage 5A以降に追加したテーブル（対戦記録・世帯設定（自宅の住所を含むため、バックアップは暗号化して保管する）・AI利用ログ・フィードバック・別表記）
   "battle_records", "household_settings", "ai_extraction_logs", "ai_extraction_feedback", "chain_aliases", "store_aliases",
   // Stage 5C: Excel取り込み履歴（管理番号の採番カウンターは、復元時に商品・店舗の管理番号の最大値から自動で再構成される）
-  "master_import_history", "profile_settings",
+  "master_import_history", "profile_settings", "card_masters", "card_holdings", "card_prices", "card_favorites", "ai_jobs", "ai_job_items",
 ];
 
 const TABLES = TABLES_ALL.filter((t) => !SKIP.has(t));
@@ -48,7 +48,7 @@ const sha256 = {};
 for (const table of TABLES) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from(table).select("*").order({ household_members: "user_id", lottery_management: "lottery_id", household_settings: "household_id" }[table] ?? "id").range(from, from + 999);
+    const { data, error } = await supabase.from(table).select("*").order({ household_members: "user_id", lottery_management: "lottery_id", household_settings: "household_id", profile_settings: "profile_id" }[table] ?? "id").range(from, from + 999);
     if (error) throw new Error(`${table}: ${error.message}`);
     rows.push(...data);
     if (data.length < 1000) break;

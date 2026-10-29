@@ -287,7 +287,7 @@ test("収支ページ: 当月表示・月移動・タブ切替・分析ページ
   await expect(page.getByTestId("annual-total")).toContainText("家族全体の合計");
   await expect(page.getByTestId("annual-seller")).toHaveCount(3);
   // メインナビには分析ページを常設しない
-  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(4); // 抽選管理・購入記録・収支・設定
+  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(5); // 抽選管理・収支・購入記録・対戦記録・コレクション（PCの左ナビは利用できる機能すべて）
 });
 
 test.describe("レイアウト（Safe Area・固定メニュー）", () => {
@@ -565,10 +565,23 @@ test.describe("設定とナビゲーション", () => {
     await expect(page.getByTestId("nav-order").locator("li").nth(1)).toContainText("購入記録");
   });
 
-  test("コレクション（未実装）はメニュー候補に出ない。すべて直接表示なら「その他」は出ない", async ({ page, isMobile }) => {
+  test("コレクション: 初期は「その他」から開け、下部メニューに直接表示することもできる（メニューが壊れない）", async ({ page, isMobile }) => {
     await page.goto("/settings/display");
-    await expect(page.getByTestId("display-settings")).not.toContainText("コレクション");
-    if (isMobile) await expect(page.getByTestId("nav-more")).toHaveCount(0);
+    await expect(page.getByTestId("nav-hidden")).toContainText("コレクション");
+    if (isMobile) {
+      await page.getByTestId("nav-more").click();
+      await expect(page.getByTestId("more-sheet").getByRole("link", { name: "コレクション" })).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
+    // 直接表示にすると「その他」は出なくなる（隠れた機能が無いため）
+    await page.getByRole("button", { name: "コレクションを表示する" }).click();
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
+    await expect(page.getByTestId("nav-hidden")).toHaveCount(0);
+    if (isMobile) {
+      await expect(page.getByTestId("nav-more")).toHaveCount(0);
+      await expect(page.getByTestId("bottom-nav").getByRole("link", { name: "コレクション" })).toBeVisible();
+    }
+    await page.getByRole("button", { name: "初期の並びに戻す" }).click();
   });
 
   test("設定のコピー: 確認ダイアログのあと、選んだ項目だけがコピーされる（コピーしない項目の説明あり）", async ({ page, isMobile }) => {

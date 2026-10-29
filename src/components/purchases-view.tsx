@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useApp } from "@/components/app-provider";
@@ -11,7 +12,7 @@ import { productName, purchaseStoreName, purchaseTotal, UNIT_LABEL } from "@/lib
 import { flexToJstDate } from "@/lib/finance";
 import { filterPurchases, periodLabel, productTotals, quantityLabel, shiftPeriod, summarize, type Period, type PeriodKind } from "@/lib/purchase-records";
 import { cn } from "@/lib/utils";
-import type { ItemUnit } from "@/types/domain";
+import type { ItemUnit, Purchase } from "@/types/domain";
 
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
 const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
@@ -35,6 +36,17 @@ const chip = "h-9 min-w-0 shrink rounded-full border bg-input px-3 text-xs";
  * 抽選で「購入済み」にした当選も、ここから登録した購入も、同じ一覧に出て、編集・削除はどこからでも反映される。
  * 家族共通の記録で、プロフィール別には分けない。
  */
+/** シングルカードの購入を、コレクションの登録画面へ引き継ぐリンク（購入記録・収支は変更しない。参照のみ） */
+function collectionHref(p: Purchase, name: string, store: string): string {
+  const it = p.items[0];
+  const unit = it.amountPaid !== null && it.quantity > 0 && it.amountPaid % it.quantity === 0 ? it.amountPaid / it.quantity : null;
+  const date = flexToJstDate(p.purchasedOn);
+  const q = new URLSearchParams({ add: "1", name, qty: String(it.quantity), purchase: p.id, source: store });
+  if (unit !== null) q.set("price", String(unit));
+  if (date) q.set("date", date);
+  return `/collection?${q.toString()}`;
+}
+
 export function PurchasesView() {
   const { data, persistent } = useApp();
   const [period, setPeriod] = useState<Period>(() => ({ kind: "month", value: jstDateString(new Date()).slice(0, 7) }));
@@ -196,6 +208,11 @@ export function PurchasesView() {
                           {t.unknown === p.items.length ? <span className="text-xs font-normal text-muted-foreground">金額未入力</span> : yen(t.total)}
                         </span>
                       </button>
+                      {persistent && p.source === "manual" && p.items.length === 1 && (
+                        <Link href={collectionHref(p, productName(data, first.productId, first.productLabel), purchaseStoreName(data, p))} data-testid="to-collection" className="block px-2.5 pb-1.5 text-right text-xs text-info underline">
+                          コレクションに追加
+                        </Link>
+                      )}
                     </li>
                   );
                 })}

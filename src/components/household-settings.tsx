@@ -281,7 +281,7 @@ export function AiBudgetNote() {
   );
 }
 
-const KIND_LABEL = { text: "文章", image: "画像", url: "URL", x_url: "X投稿" } as const;
+const KIND_LABEL = { text: "文章", image: "画像", url: "URL", x_url: "X投稿", card_image: "カード画像" } as const;
 const yen = (n: number) => `${Math.round(n).toLocaleString("ja-JP")}円`;
 /** 推定料金の表示。1回あたり1円未満のことが多いので、少額は小数で表示する（0円と区別する） */
 const yenFine = (n: number) => (n > 0 && n < 10 ? `${n.toFixed(2)}円` : yen(n));

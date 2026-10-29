@@ -309,6 +309,161 @@ export type Database = {
           },
         ]
       }
+      ai_job_items: {
+        Row: {
+          attempts: number
+          created_at: string
+          dedupe_key: string | null
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          household_id: string
+          id: string
+          image_paths: string[]
+          job_id: string
+          lease_until: string | null
+          lottery_id: string | null
+          position: number
+          result: Json | null
+          run_id: string | null
+          source_kind: string
+          source_text: string | null
+          source_url: string | null
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          dedupe_key?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          household_id: string
+          id?: string
+          image_paths?: string[]
+          job_id: string
+          lease_until?: string | null
+          lottery_id?: string | null
+          position?: number
+          result?: Json | null
+          run_id?: string | null
+          source_kind: string
+          source_text?: string | null
+          source_url?: string | null
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          dedupe_key?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          household_id?: string
+          id?: string
+          image_paths?: string[]
+          job_id?: string
+          lease_until?: string | null
+          lottery_id?: string | null
+          position?: number
+          result?: Json | null
+          run_id?: string | null
+          source_kind?: string
+          source_text?: string | null
+          source_url?: string | null
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_job_items_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_job_items_job_id_household_id_fkey"
+            columns: ["job_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "ai_jobs"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "ai_job_items_lottery_id_household_id_fkey"
+            columns: ["lottery_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "ai_job_items_run_id_household_id_fkey"
+            columns: ["run_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "ai_extraction_logs"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      ai_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          household_id: string
+          id: string
+          label: string
+          seen_at: string | null
+          status: string
+          total_items: number
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id: string
+          id?: string
+          label?: string
+          seen_at?: string | null
+          status?: string
+          total_items?: number
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id?: string
+          id?: string
+          label?: string
+          seen_at?: string | null
+          status?: string
+          total_items?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_jobs_created_by_profile_id_household_id_fkey"
+            columns: ["created_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "ai_jobs_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       application_item_results: {
         Row: {
           application_id: string
@@ -726,6 +881,291 @@ export type Database = {
           },
           {
             foreignKeyName: "campaigns_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      card_favorites: {
+        Row: {
+          card_id: string
+          created_at: string
+          household_id: string
+          id: string
+          profile_id: string
+          rank: number
+          updated_at: string
+        }
+        Insert: {
+          card_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          profile_id: string
+          rank?: number
+          updated_at?: string
+        }
+        Update: {
+          card_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          profile_id?: string
+          rank?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_favorites_card_id_household_id_fkey"
+            columns: ["card_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "card_masters"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_favorites_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_favorites_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      card_holdings: {
+        Row: {
+          acquired_on: string | null
+          archived_at: string | null
+          card_id: string
+          condition: string
+          created_at: string
+          household_id: string
+          id: string
+          note: string
+          purchase_id: string | null
+          quantity: number
+          source: string
+          unit_price_yen: number | null
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          acquired_on?: string | null
+          archived_at?: string | null
+          card_id: string
+          condition?: string
+          created_at?: string
+          household_id: string
+          id?: string
+          note?: string
+          purchase_id?: string | null
+          quantity: number
+          source?: string
+          unit_price_yen?: number | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          acquired_on?: string | null
+          archived_at?: string | null
+          card_id?: string
+          condition?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          note?: string
+          purchase_id?: string | null
+          quantity?: number
+          source?: string
+          unit_price_yen?: number | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_holdings_card_id_household_id_fkey"
+            columns: ["card_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "card_masters"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_holdings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_holdings_purchase_id_household_id_fkey"
+            columns: ["purchase_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "purchases"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_holdings_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      card_masters: {
+        Row: {
+          analysis_run_id: string | null
+          archived_at: string | null
+          card_number: string
+          card_type: string
+          created_at: string
+          household_id: string
+          id: string
+          image_path: string | null
+          image_sha256: string | null
+          name: string
+          product_id: string | null
+          product_name: string
+          rarity: string
+          set_code: string
+          source_url: string | null
+          thumb_path: string | null
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          analysis_run_id?: string | null
+          archived_at?: string | null
+          card_number?: string
+          card_type?: string
+          created_at?: string
+          household_id: string
+          id?: string
+          image_path?: string | null
+          image_sha256?: string | null
+          name: string
+          product_id?: string | null
+          product_name?: string
+          rarity?: string
+          set_code?: string
+          source_url?: string | null
+          thumb_path?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          analysis_run_id?: string | null
+          archived_at?: string | null
+          card_number?: string
+          card_type?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          image_path?: string | null
+          image_sha256?: string | null
+          name?: string
+          product_id?: string | null
+          product_name?: string
+          rarity?: string
+          set_code?: string
+          source_url?: string | null
+          thumb_path?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_masters_analysis_run_id_household_id_fkey"
+            columns: ["analysis_run_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "ai_extraction_logs"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_masters_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_masters_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_masters_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      card_prices: {
+        Row: {
+          amount_yen: number
+          card_id: string
+          confirmed_on: string
+          created_at: string
+          household_id: string
+          id: string
+          kind: string
+          source: string
+          source_url: string | null
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          amount_yen: number
+          card_id: string
+          confirmed_on?: string
+          created_at?: string
+          household_id: string
+          id?: string
+          kind: string
+          source?: string
+          source_url?: string | null
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          amount_yen?: number
+          card_id?: string
+          confirmed_on?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          kind?: string
+          source?: string
+          source_url?: string | null
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_prices_card_id_household_id_fkey"
+            columns: ["card_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "card_masters"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_prices_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_prices_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -3119,6 +3559,38 @@ export type Database = {
         Returns: Json
       }
       bootstrap_household: { Args: never; Returns: string }
+      claim_ai_job_items: {
+        Args: { p_lease_secs?: number; p_limit: number }
+        Returns: {
+          attempts: number
+          created_at: string
+          dedupe_key: string | null
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          household_id: string
+          id: string
+          image_paths: string[]
+          job_id: string
+          lease_until: string | null
+          lottery_id: string | null
+          position: number
+          result: Json | null
+          run_id: string | null
+          source_kind: string
+          source_text: string | null
+          source_url: string | null
+          started_at: string | null
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ai_job_items"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       copy_profile_settings: {
         Args: {
           p_actor: string
@@ -3141,6 +3613,10 @@ export type Database = {
       log_settings_change: {
         Args: { p_actor: string; p_changed: string[]; p_household: string }
         Returns: undefined
+      }
+      mark_job_item_saved: {
+        Args: { p_item: string; p_lottery: string }
+        Returns: boolean
       }
       mark_purchased: {
         Args: { p_actor: string; p_application_id: string }
@@ -3183,6 +3659,7 @@ export type Database = {
         Args: { p_endpoint: string; p_profile: string }
         Returns: boolean
       }
+      refresh_ai_job: { Args: { p_job: string }; Returns: string }
       register_push_subscription: {
         Args: {
           p_auth: string
@@ -3196,6 +3673,10 @@ export type Database = {
       remove_push_subscription: {
         Args: { p_endpoint: string }
         Returns: undefined
+      }
+      save_card_with_holding: {
+        Args: { p: Json; p_actor: string }
+        Returns: string
       }
       save_home_location: {
         Args: {

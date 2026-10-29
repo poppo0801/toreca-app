@@ -1120,3 +1120,137 @@ test("Excel取り込み・出力: テンプレート→確認→適用→再取�
   expect([301, 302, 303, 307, 308, 401]).toContain(anon.status());
   expect(anon.headers()["content-type"] ?? "").not.toContain("spreadsheetml");
 });
+
+test("コレクション: 手入力・画像からAI登録・重複は所有記録の追加・一括登録・3/4/5列と一覧・お気に入りと並び替え・相場と差額・削除（購入記録は残る）", async ({ page }) => {
+  test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証で確認する。費用を発生させない");
+  test.setTimeout(180_000);
+  await login(page);
+  await page.goto("/collection");
+  await expect(page.getByTestId("collection-empty")).toBeVisible();
+
+  // 手入力で登録（所持2枚・購入金額1枚15,000円）
+  await page.getByTestId("add-card").click();
+  const form = page.getByTestId("card-form");
+  await form.getByLabel("カード名").fill("E2Eピカチュウex");
+  await form.getByLabel("カード番号").fill("201/165");
+  await form.getByLabel("商品コード").fill("e2e1");
+  await form.getByLabel("レアリティ").fill("SAR");
+  await form.getByLabel("所持枚数").fill("2");
+  await form.getByLabel("購入金額").fill("15000");
+  await form.getByTestId("card-save").click();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByTestId("card-tile")).toHaveCount(1);
+  await expect(page.getByTestId("tile-qty")).toHaveText("×2");
+  await expect(page.getByTestId("collection-summary")).toContainText("1種・2枚");
+  await expect(page.getByTestId("collection-summary")).toContainText("30,000円");
+
+  // 同じカード（商品コード・番号・レアリティ）は新規にせず、所有記録を追加（1枚・18,000円）
+  await page.getByTestId("add-card").click();
+  const f2 = page.getByTestId("card-form");
+  await f2.getByLabel("カード名").fill("E2Eピカチュウex");
+  await f2.getByLabel("カード番号").fill("201/165");
+  await f2.getByLabel("商品コード").fill("E2E1");
+  await f2.getByLabel("レアリティ").fill("sar");
+  await expect(f2.getByTestId("card-match")).toContainText("所有記録を追加");
+  await f2.getByLabel("購入金額").fill("18000");
+  await f2.getByTestId("card-save").click();
+  await expect(f2).toHaveCount(0);
+  await expect(page.getByTestId("card-tile")).toHaveCount(1); // 新しいカードにはならない
+  await expect(page.getByTestId("tile-qty")).toHaveText("×3");
+
+  // 画像1枚: AI（モック）が読み取って入力する。読み取れた項目だけ入り、保存すると画像つきのカードになる
+  await page.getByTestId("collection-file").setInputFiles({ name: "c1.png", mimeType: "image/png", buffer: makePng(60, 84, [200, 120, 40]) });
+  const f3 = page.getByTestId("card-form");
+  await expect(f3.getByLabel("カード名")).toHaveValue(/テスト/, { timeout: 20000 });
+  await expect(f3.getByTestId("card-preview").locator("img")).toBeVisible();
+  await expect(f3.getByText("外部サイトとの照合は行っていません")).toBeVisible(); // 実際にWeb照合していないことを明示
+  await f3.getByLabel("カード名").fill("E2E画像カード");
+  await f3.getByLabel("カード番号").fill("9/9");
+  await f3.getByLabel("商品コード").fill("e2e9");
+  await f3.getByLabel("レアリティ").fill("SR");
+  await f3.getByTestId("card-save").click();
+  await expect(f3).toHaveCount(0);
+  await expect(page.getByTestId("card-tile")).toHaveCount(2);
+  const imgTile = page.getByTestId("card-tile").filter({ has: page.getByRole("img", { name: "E2E画像カード" }) });
+  await expect(imgTile).toHaveCount(1); // サムネイル画像が表示される
+
+  // 複数画像: 画像1枚＝カード1種類として一括登録。同じ画像は重複の候補（既定で除外）
+  const png = (c: number) => ({ name: `b${c}.png`, mimeType: "image/png", buffer: makePng(50 + c * 7, 70, [c * 40, 90, 160]) });
+  await page.getByTestId("collection-file").setInputFiles([png(1), png(2), png(1)]);
+  const bulk = page.getByTestId("card-bulk");
+  await expect(bulk.getByTestId("bulk-item")).toHaveCount(3);
+  await expect(bulk.locator('[data-testid="bulk-item"][data-status="done"]')).toHaveCount(3, { timeout: 30000 });
+  await expect(bulk).toContainText("重複の可能性");
+  const saveBtn = bulk.getByTestId("bulk-save");
+  await expect(saveBtn).toContainText("2件を登録"); // 重複の1件は既定で除外
+  // 1件ずつ修正できる（名前を直す）
+  await bulk.getByTestId("bulk-item").first().getByRole("button").first().click();
+  await bulk.getByLabel("画像1のカード名").fill("E2E一括A");
+  await bulk.getByLabel("画像1のカード番号").fill("11/11");
+  await bulk.getByTestId("bulk-item").nth(1).getByRole("button").first().click();
+  await bulk.getByLabel("画像2のカード名").fill("E2E一括B");
+  await bulk.getByLabel("画像2のカード番号").fill("12/12");
+  await saveBtn.click();
+  await expect(bulk.getByTestId("bulk-summary")).toContainText("2件を登録しました");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("card-tile")).toHaveCount(4);
+
+  // 表示: 既定4列。3/5列とテキスト一覧に切り替えられ、再読込後も保持（プロフィール別）
+  await expect(page.getByTestId("card-grid")).toHaveAttribute("data-cols", "4");
+  await page.getByTestId("cols").getByRole("radio", { name: "5列" }).click();
+  await expect(page.getByTestId("card-grid")).toHaveAttribute("data-cols", "5");
+  await page.getByTestId("cols").getByRole("radio", { name: "3列" }).click();
+  await expect(page.getByTestId("card-grid")).toHaveAttribute("data-cols", "3");
+  await page.getByTestId("view-toggle").click();
+  await expect(page.getByTestId("card-row")).toHaveCount(4);
+  await page.waitForTimeout(800);
+  await page.reload();
+  await expect(page.getByTestId("card-row")).toHaveCount(4);
+  await page.getByTestId("view-toggle").click();
+  await page.getByTestId("cols").getByRole("radio", { name: "4列" }).click();
+
+  // 検索・お気に入り・並び替え
+  await page.getByLabel("コレクションを検索").fill("一括");
+  await expect(page.getByTestId("card-tile")).toHaveCount(2);
+  await page.getByLabel("コレクションを検索").fill("");
+  await page.getByTestId("card-tile").filter({ has: page.getByRole("img", { name: "E2E画像カード" }) }).getByTestId("tile-fav").click();
+  await page.getByTestId("card-tile").filter({ hasText: "×3" }).getByTestId("tile-fav").click();
+  await page.getByTestId("fav-filter").click();
+  await expect(page.getByTestId("card-tile")).toHaveCount(2);
+  await page.getByTestId("reorder-toggle").click();
+  const order = page.getByTestId("reorder-list").locator("li");
+  const first = await order.first().innerText();
+  await order.nth(1).getByRole("button", { name: /を上へ/ }).click();
+  await expect.poll(async () => (await order.first().innerText()) !== first).toBe(true);
+  await page.getByTestId("reorder-toggle").click();
+  await page.getByTestId("fav-filter").click();
+
+  // 詳細: 参考相場の登録と購入額との差額（3枚の購入額 15,000×2＋18,000＝48,000円）
+  await page.getByTestId("card-tile").filter({ hasText: "×3" }).getByRole("button", { name: /の詳細を開く/ }).click();
+  const detail = page.getByTestId("card-detail");
+  await expect(detail.getByTestId("holdings").locator("li")).toHaveCount(2);
+  await expect(detail.getByTestId("diff-sale")).toHaveText("—"); // 相場が未設定の間は差額を出さない（0円にしない）
+  await detail.getByLabel("相場の価格").fill("20000");
+  await detail.getByLabel("相場の情報源").fill("E2E店");
+  await detail.getByTestId("price-add").click();
+  await expect(detail.getByTestId("detail-msg")).toContainText("登録しました");
+  await expect(detail.getByTestId("price-history")).toContainText("販売 20,000円");
+  await expect(detail.getByTestId("diff-sale")).toHaveText("+12,000円"); // 20,000×3 − 48,000
+  await expect(detail.getByTestId("diff-buyback")).toHaveText("—"); // 買取相場は未設定
+
+  // 削除: 取得記録1件／カード全体を確認ダイアログのあとで。購入記録・収支には触れない
+  await detail.getByTestId("holdings").locator("li").first().getByRole("button", { name: "この記録を削除" }).click();
+  await expect(page.getByTestId("card-confirm")).toContainText("購入記録・収支の履歴は削除されません");
+  await page.getByTestId("confirm-ok").click();
+  await expect(detail.getByTestId("holdings").locator("li")).toHaveCount(1);
+  await detail.getByTestId("card-delete").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(detail).toHaveCount(0);
+  await expect(page.getByTestId("card-tile")).toHaveCount(3);
+
+  // 下部メニュー: コレクションは「その他」から開ける
+  await page.goto("/lotteries");
+  await page.getByTestId("nav-more").click();
+  await page.getByTestId("more-sheet").getByRole("link", { name: "コレクション" }).click();
+  await expect(page).toHaveURL(/\/collection$/);
+});

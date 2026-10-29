@@ -54,7 +54,7 @@ export interface ExtractDeps {
 }
 
 export const MAX_TEXT_CHARS = 20_000;
-export const MAX_IMAGES = 4;
+export const MAX_IMAGES = 5;
 
 export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Promise<ExtractResult> {
   const fetchPage = deps.fetchPage ?? ((u: string) => fetchRespectingRobots(u));

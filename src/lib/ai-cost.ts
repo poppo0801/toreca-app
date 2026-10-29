@@ -34,7 +34,7 @@ export function estimateCostJpy(model: string | null | undefined, inputTokens: n
   return ((inputTokens * p.input + outputTokens * p.output) / 1_000_000) * rate;
 }
 
-export type AiKind = "text" | "image" | "url" | "x_url";
+export type AiKind = "text" | "image" | "url" | "x_url" | "card_image";
 
 export interface AiLogRow {
   created_at: string;
@@ -66,7 +66,7 @@ export interface UsageSummary {
 
 const jstMonth = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(new Date(iso)).slice(0, 7);
 
-export const emptySummary = (month: string): UsageSummary => ({ month, calls: 0, byKind: { text: 0, image: 0, url: 0, x_url: 0 }, inputTokens: 0, outputTokens: 0, byModel: {}, costJpy: 0, unestimated: 0, mockCalls: 0 });
+export const emptySummary = (month: string): UsageSummary => ({ month, calls: 0, byKind: { text: 0, image: 0, url: 0, x_url: 0, card_image: 0 }, inputTokens: 0, outputTokens: 0, byModel: {}, costJpy: 0, unestimated: 0, mockCalls: 0 });
 
 /** 月ごとの利用状況（新しい月順）。実際のAI呼び出し(engine=anthropic)だけが料金の対象 */
 export function summarizeUsage(logs: AiLogRow[], rate = USD_JPY_ESTIMATE): UsageSummary[] {

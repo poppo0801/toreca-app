@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
-import { Banknote, Ellipsis, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
+import { Banknote, Ellipsis, Layers, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
 import { LayoutDiagnostics, useDiagEnabled } from "@/components/layout-diagnostics";
@@ -21,6 +21,7 @@ const NAV_ICON: Record<string, LucideIcon> = {
   purchases: ReceiptText,
   finance: Wallet,
   battles: Swords,
+  collection: Layers,
 };
 const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
 
