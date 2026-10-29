@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { useAiJobs } from "@/components/ai-jobs-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
@@ -81,6 +82,7 @@ export function LotteryBoard() {
   const { data, now, persistent, profile, settings, saveSettings } = useApp();
   const params = useSearchParams();
   const focusId = params.get("focus");
+  const { unseen: unseenJobs } = useAiJobs();
   const [registering, setRegistering] = useState(false);
   const [tab, setTab] = useState<Tab>("managed");
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
@@ -171,6 +173,14 @@ export function LotteryBoard() {
             </button>
             {persistent ? (
               <>
+                <Button asChild size="sm" variant="outline" className="relative">
+                  <Link href="/lotteries/bulk" data-testid="bulk-link">
+                    まとめて読み取り
+                    {unseenJobs > 0 && (
+                      <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-primary" data-testid="bulk-badge" aria-label={`確認待ちの結果 ${unseenJobs}件`} />
+                    )}
+                  </Link>
+                </Button>
                 <Button size="sm" onClick={() => setRegistering(true)}>
                   ＋抽選を登録
                 </Button>

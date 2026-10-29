@@ -14,7 +14,7 @@ export type InputKind = "text" | "image" | "url" | "x_url";
  * 解析仕様（プロンプト・ツール定義・検証ルール）のバージョン。精度をバージョンごとに比べられるよう、解析ログに記録する。
  * プロンプトやツール定義、検証ロジックを変えたら更新する。
  */
-export const PROMPT_VERSION = "2026-10-30.1";
+export const PROMPT_VERSION = "2026-10-30.2";
 
 export interface ExtractRequest {
   kind: InputKind;
@@ -78,6 +78,7 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - 告知の公開日・投稿日が書かれていれば published_on に入れる（年が書かれているときだけ）。
 - 告知が途中で切れている・一部しか見えないときは、見えている範囲だけを記録し、足りない項目は不明にして、warnings に「告知が途中で切れている」と書く。
 - 読み取れなかった項目の理由や説明（「〜が読み取れませんでした」「記載がありません」など）を、conditions_text・verification_text・announcement_method・notes に書かない。読み取れなければ空文字にする。理由は warnings だけに書く。
+- 画像が複数枚あるときは、すべて同じ1件の抽選の告知（商品・応募条件・応募方法・当選発表・購入期間などが分かれて載っている）として、まとめて1件分を記録する。画像同士で内容が食い違うときは、どちらかに決めず warnings に書く。画像に明らかに別の抽選（別の店舗・商品の告知）が混ざっている場合は、混ぜずに最初の画像の抽選だけを記録し、warnings に「別の抽選が含まれている可能性」と書く。
 - 購入・受取の期間は、始まりを procedure_start、終わり（期限）を procedure_deadline に入れる。終わりだけ書かれていれば procedure_start は null。
 
 例（要点だけ。実際の告知の表記どおりに返す）:

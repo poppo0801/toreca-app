@@ -287,7 +287,7 @@ test("収支ページ: 当月表示・月移動・タブ切替・分析ページ
   await expect(page.getByTestId("annual-total")).toContainText("家族全体の合計");
   await expect(page.getByTestId("annual-seller")).toHaveCount(3);
   // メインナビには分析ページを常設しない
-  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(5); // 抽選管理・収支・購入記録・対戦記録・コレクション（PCの左ナビは利用できる機能すべて）
+  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(page.viewportSize()!.width >= 768 ? 5 : 4); // PCの左ナビは利用できる機能すべて（5）。スマホの下部メニューは直接表示の4つ＋「その他」
 });
 
 test.describe("レイアウト（Safe Area・固定メニュー）", () => {

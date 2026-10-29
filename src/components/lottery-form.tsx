@@ -283,11 +283,17 @@ export function LotteryFormDialog({
   open,
   onOpenChange,
   lottery,
+  prefill,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   /** 編集対象。null なら新規登録 */
   lottery: Lottery | null;
+  /** 一括解析の結果など、AIの解析結果をあらかじめ入力して開く（新規登録のみ） */
+  prefill?: { draft: LotteryDraft; runId: string | null };
+  /** 保存に成功したときに呼ばれる（新規登録なら作成した抽選のID） */
+  onSaved?: (lotteryId: string | null) => void;
 }) {
   const { data, actions, reload } = useApp();
   const isEdit = lottery !== null;
@@ -369,6 +375,16 @@ export function LotteryFormDialog({
     setReason("");
     setError(null);
   };
+
+  // 解析結果つきで開いたときは、最初に一度だけ入力する
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefill && !prefilled.current && !isEdit) {
+      prefilled.current = true;
+      applyDraft(prefill.draft, prefill.runId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const set = <K extends keyof LotteryInput>(k: K, val: LotteryInput[K]) => setV((s) => ({ ...s, [k]: val }));
   /** 初期値を持つ項目を利用者が選んだ: 以降は「利用者が選んだ値」として扱う */
@@ -468,7 +484,10 @@ export function LotteryFormDialog({
     }
     const res = await actions.saveLottery(lottery?.id ?? null, input);
     setSaving(false);
-    if (res.ok) finish();
+    if (res.ok) {
+      onSaved?.(res.createdIds?.[0] ?? null);
+      finish();
+    }
     else setError(res.error);
   };
 

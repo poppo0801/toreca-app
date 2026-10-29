@@ -1254,3 +1254,87 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
   await page.getByTestId("more-sheet").getByRole("link", { name: "コレクション" }).click();
   await expect(page).toHaveURL(/\/collection$/);
 });
+
+test("まとめてAI読み取り: 文章・画像（A=1件に複数枚/B=1枚ずつ）・ジョブの状態の保持・完了通知・確認して保存・一括保存・重複（AIはモック）", async ({ page }) => {
+  test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証で確認する。費用を発生させない");
+  test.setTimeout(180_000);
+  await login(page);
+  await page.goto("/lotteries/bulk");
+  const bulk = page.getByTestId("bulk-ai");
+  await expect(bulk).toBeVisible();
+
+  // 項目の追加: 文章2件、画像A（2枚で1件）、画像B（2枚を別々に）。画像を複数選んだだけで別々の抽選にはならない
+  const t = (n: number) => `【抽選販売のお知らせ${n}】サンプル電機 三宮店。応募は1月20日23:59まで。`;
+  for (const n of [1, 2]) {
+    await bulk.getByLabel("告知の文章").fill(t(n));
+    await bulk.getByRole("button", { name: "追加" }).first().click();
+  }
+  const png = (c: number) => ({ name: `j${c}.png`, mimeType: "image/png", buffer: makePng(44 + c * 5, 66, [c * 30, 100, 150]) });
+  await bulk.getByRole("radio", { name: /A\./ }).check();
+  await bulk.getByTestId("bulk-files").setInputFiles([png(1), png(2)]);
+  await expect(bulk.getByTestId("pending-item")).toHaveCount(3);
+  await expect(bulk.getByTestId("pending-list")).toContainText("画像2枚"); // A: 2枚で1件
+  await bulk.getByRole("radio", { name: /B\./ }).check();
+  await bulk.getByTestId("bulk-files").setInputFiles([png(3), png(4)]);
+  await expect(bulk.getByTestId("pending-item")).toHaveCount(5); // B: 1枚ずつ別の件
+  // URL: 改行区切りで貼り付け。重複・不正な行は除く
+  await bulk.getByLabel("URL（改行区切り）").fill("https://example.invalid/a\nhttps://example.invalid/a/\nnot a url");
+  await bulk.getByTestId("add-urls").click();
+  await expect(bulk.getByTestId("pending-item")).toHaveCount(6);
+  await expect(bulk.getByTestId("bulk-msg")).toContainText("読み取れない行");
+  // 外すこともできる
+  await bulk.getByTestId("pending-item").last().getByRole("button", { name: "この項目を外す" }).click();
+  await expect(bulk.getByTestId("pending-item")).toHaveCount(5);
+
+  await bulk.getByTestId("bulk-start").click();
+  await expect(page).toHaveURL(/\/lotteries\/bulk\?job=/);
+  const detail = page.getByTestId("job-detail");
+  await expect(detail.getByTestId("job-item")).toHaveCount(5);
+
+  // 解析は裏で進む: 他の画面へ移動しても続き、完了すると小さな通知が出る（タップで結果へ）
+  await page.goto("/purchases");
+  const toast = page.getByTestId("ai-job-toast");
+  await expect(toast).toBeVisible({ timeout: 60000 });
+  await expect(toast).toContainText("AI読み取りが完了しました");
+  await page.goto("/lotteries");
+  await expect(page.getByTestId("bulk-badge")).toBeVisible(); // 未確認の結果がある（再読み込み後も）
+  await page.getByTestId("bulk-link").click();
+  await page.getByTestId("job-row").first().click();
+  const d2 = page.getByTestId("job-detail");
+  await expect(d2.locator('[data-testid="job-item"][data-status="done"]')).toHaveCount(5, { timeout: 30000 });
+  await expect(d2.getByTestId("job-status")).toContainText("確認待ち");
+  // 確認画面を開いたので、未確認のバッジは消える
+  await page.goto("/lotteries");
+  await expect(page.getByTestId("bulk-badge")).toHaveCount(0);
+  await page.goto("/lotteries/bulk");
+  await page.getByTestId("job-row").first().click();
+
+  // 1件ずつ確認・修正して保存（解析結果がフォームに入力される。まだ登録されていない）
+  const d3 = page.getByTestId("job-detail");
+  await expect(d3.getByTestId("job-item").first()).toContainText("サンプル電機");
+  await d3.getByTestId("job-item").first().getByTestId("item-open").click();
+  const form = page.getByTestId("lottery-form");
+  await expect(form.getByRole("combobox", { name: "系列", exact: true })).toHaveValue("サンプル電機");
+  await form.getByLabel("応募締切の日付").fill("2027-01-20");
+  // 同じ内容の抽選が既にある場合（他のテストの登録）は、重複ではないことの確認が必要
+  if (await form.getByLabel("重複ではないことを確認した").count()) await form.getByLabel("重複ではないことを確認した").check();
+  await form.getByRole("button", { name: "保存" }).click();
+  await expect(form).toHaveCount(0);
+  await expect(d3.locator('[data-testid="job-item"][data-status="saved"]')).toHaveCount(1, { timeout: 15000 });
+
+  // 1件を除外し、残りを選択してまとめて保存（重複の可能性が高いものは個別確認になる）
+  await d3.locator('[data-testid="job-item"][data-status="done"]').first().getByTestId("item-skip").click();
+  await expect(d3.locator('[data-testid="job-item"][data-status="skipped"]')).toHaveCount(1);
+  await d3.getByRole("button", { name: "すべて選択" }).click();
+  await d3.getByTestId("bulk-save-selected").click();
+  await expect(d3.getByTestId("save-report")).toBeVisible({ timeout: 30000 });
+  // 先に保存した抽選と同じ（同じ店舗・商品・締切）ものは、重複の可能性が高いので自動では保存せず、個別の確認になる
+  await expect(d3.getByTestId("save-report")).toContainText("重複の可能性が高い");
+  const savedCount = await d3.locator('[data-testid="job-item"][data-status="saved"]').count();
+  expect(savedCount).toBeGreaterThanOrEqual(1);
+  await expect(d3.locator('[data-testid="job-item"][data-status="done"] [data-testid="item-open"]')).toHaveCount(5 - savedCount - 1);
+
+  // 再読み込みしても状態・結果が残る
+  await page.reload();
+  await expect(page.getByTestId("job-detail").locator('[data-testid="job-item"][data-status="saved"]')).toHaveCount(savedCount);
+});

@@ -20,7 +20,7 @@ const TABS: { key: Tab; label: string; icon: typeof FileText }[] = [
   { key: "x_url", label: "X投稿", icon: Link2 },
 ];
 
-const MAX_IMAGES = 4;
+const MAX_IMAGES = 5;
 const MAX_SIDE = 1800;
 
 /** スクリーンショットを縮小・JPEG化して送信サイズを抑える（本番の関数は4.5MBまで）。元の画像は保存しない */
@@ -196,7 +196,7 @@ export function AiImportDialog({
             )}
             {tab === "image" && (
               <div className="space-y-2 text-sm">
-                <p>告知のスクリーンショットや画像を選択（{MAX_IMAGES}枚まで）。送信前に縮小され、画像自体は保存されません。</p>
+                <p>告知のスクリーンショットや画像を選択（{MAX_IMAGES}枚まで）。複数枚は<strong>まとめて1件の抽選</strong>として読み取ります（別々の抽選は「まとめて読み取り」画面で）。送信前に縮小され、画像自体は保存されません。</p>
                 <input
                   ref={fileRef}
                   type="file"
@@ -215,10 +215,18 @@ export function AiImportDialog({
                 <ul className="space-y-1">
                   {files.map((f, i) => (
                     <li key={i} className="flex items-center justify-between gap-2 rounded border px-2 py-1 text-xs">
-                      <span className="truncate">{f.name}</span>
-                      <button type="button" aria-label={`${f.name}を外す`} onClick={() => setFiles(files.filter((_, j) => j !== i))} className="p-1">
-                        <X className="size-3.5" />
-                      </button>
+                      <span className="truncate">{i + 1}. {f.name}</span>
+                      <span className="flex shrink-0 items-center">
+                        <button type="button" aria-label={`${f.name}を前へ`} disabled={i === 0} onClick={() => setFiles(files.map((x, j) => (j === i - 1 ? files[i] : j === i ? files[i - 1] : x)))} className="p-1.5 disabled:opacity-30">
+                          ↑
+                        </button>
+                        <button type="button" aria-label={`${f.name}を後ろへ`} disabled={i === files.length - 1} onClick={() => setFiles(files.map((x, j) => (j === i + 1 ? files[i] : j === i ? files[i + 1] : x)))} className="p-1.5 disabled:opacity-30">
+                          ↓
+                        </button>
+                        <button type="button" aria-label={`${f.name}を外す`} onClick={() => setFiles(files.filter((_, j) => j !== i))} className="p-1.5">
+                          <X className="size-3.5" />
+                        </button>
+                      </span>
                     </li>
                   ))}
                 </ul>

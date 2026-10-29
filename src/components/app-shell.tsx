@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { Banknote, Ellipsis, Layers, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
+import { AiJobsProvider } from "@/components/ai-jobs-provider";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
 import { LayoutDiagnostics, useDiagEnabled } from "@/components/layout-diagnostics";
@@ -204,7 +205,9 @@ function Shell({ children }: { children: React.ReactNode }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <AppProvider>
-      <Shell>{children}</Shell>
+      <AiJobsProvider>
+        <Shell>{children}</Shell>
+      </AiJobsProvider>
     </AppProvider>
   );
 }
