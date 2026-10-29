@@ -52,6 +52,8 @@ export interface Profile {
 export interface Chain {
   id: string;
   name: string;
+  /** 別表記（「Joshin」「ジョーシン」など）。照合に使う。一致しても利用者が確認する */
+  aliases?: string[];
   /** 抽選登録時に自動作成された仮登録（後からマスター管理で補完） */
   provisional?: boolean;
   /** アーカイブ済み（新規登録の選択肢から外す。履歴表示には残す） */
@@ -62,6 +64,7 @@ export interface Store {
   id: string;
   chainId: string;
   name: string;
+  aliases?: string[];
   prefecture: string;
   provisional?: boolean;
   archived?: boolean;

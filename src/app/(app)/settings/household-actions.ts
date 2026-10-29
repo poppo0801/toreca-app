@@ -5,6 +5,7 @@ import { z } from "zod";
 import { budgetStatus, DEFAULT_AI_MODEL, DEFAULT_BUDGET_JPY, emptySummary, summarizeUsage, type AiLogRow, type BudgetStatus, type UsageSummary } from "@/lib/ai-cost";
 import { CARD_FIELDS, normalizeCardDisplay, type CardDisplay } from "@/lib/card-display";
 import { prefectureOf, validBands } from "@/lib/geo";
+import { summarizeQuality, type FeedbackRow, type QualitySummary } from "@/lib/ai/quality";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -195,4 +196,20 @@ export async function loadAiUsage(): Promise<R<{ usage: AiUsageView }>> {
       note: NOTE,
     },
   };
+}
+
+/**
+ * AI解析の修正状況（登録まで進んだ解析の、AIの抽出結果と最終登録内容の比較）。自世帯の記録だけ（RLS）。
+ * 修正率はAIの誤認識率ではない（理由は src/lib/ai/quality.ts）。モックの解析は含めない。
+ */
+export async function loadAiQuality(): Promise<R<{ quality: QualitySummary }>> {
+  const supabase = await authed();
+  if (!supabase) return fail("ログインが必要です");
+  const since = new Date(Date.now() - 400 * 86400_000).toISOString();
+  const [fb, logs] = await Promise.all([
+    supabase.from("ai_extraction_feedback").select("engine,kind,prompt_version,field_results").gte("created_at", since).order("created_at", { ascending: false }).limit(3000),
+    supabase.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("engine", "anthropic").gte("created_at", since),
+  ]);
+  if (fb.error || logs.error) return fail("修正状況を取得できませんでした");
+  return { ok: true, quality: summarizeQuality(fb.data as unknown as FeedbackRow[], logs.count ?? 0) };
 }

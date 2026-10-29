@@ -48,14 +48,16 @@ describe("系列と店舗: AIが「系列 店名」を分けられなかった�
 });
 
 describe("AIの注意（warnings）", () => {
-  it("内部用語（year・null）を含む注意は除き、システム側の「年を仮定」の注意だけを出す", () => {
+  it("内部用語（year・null）を含む注意は除く。自然な年の補完では注意を出さない", () => {
     const e = normalizeExtraction(
       { ...base, chain_name: "A", apply_deadline: { year: null, month: 11, day: 5, hour: 23, minute: 59 }, warnings: ["応募期間の年の記載がないため year は null とした。", "都道府県の記載がないため空欄とした。", "unit は null とした"] },
       NOW,
     );
     expect(e.warnings.some((w) => /year|null/i.test(w))).toBe(false);
     expect(e.warnings).toContain("都道府県の記載がないため空欄とした。");
-    expect(e.warnings.filter((w) => w.includes("年の記載がないため2026年と仮定"))).toHaveLength(1);
+    // 11/5 は今日(10/28)に近く自然な年の推定なので、システム側の注意も出さない
+    expect(e.warnings.filter((w) => w.includes("年の記載がない"))).toHaveLength(0);
+    expect(e.applyDeadline).toMatchObject({ yearAssumed: true, yearUncertain: false });
   });
 });
 

@@ -66,7 +66,8 @@ export function AiImportDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onApply: (draft: LotteryDraft) => void;
+  /** runId: 解析ログの実行ID（登録時にAIの抽出結果との比較を記録するため）。モック・記録なしは null */
+  onApply: (draft: LotteryDraft, runId: string | null) => void;
 }) {
   const { data } = useApp();
   const [tab, setTab] = useState<Tab>("text");
@@ -76,7 +77,7 @@ export function AiImportDialog({
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [fail, setFail] = useState<{ message: string; code: string; suggest?: "text" | "image" } | null>(null);
-  const [done, setDone] = useState<{ result: Extract<ExtractResult, { ok: true }>; draft: LotteryDraft } | null>(null);
+  const [done, setDone] = useState<{ result: Extract<ExtractResult, { ok: true }>; draft: LotteryDraft; runId: string | null } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canSubmit = !busy && (tab === "text" ? text.trim().length >= 10 : tab === "image" ? files.length > 0 : tab === "url" ? url.trim() !== "" : xUrl.trim() !== "");
@@ -96,7 +97,7 @@ export function AiImportDialog({
       const json = (await res.json().catch(() => null)) as ExtractResult | { ok: false; code: string; message: string } | null;
       if (!json) setFail({ code: "network", message: "サーバーから想定外の応答が返りました。時間をおいて再度お試しください" });
       else if (!json.ok) setFail({ code: json.code, message: json.message, suggest: "suggest" in json ? json.suggest : undefined });
-      else setDone({ result: json, draft: buildDraft(json.extraction, data, { sourceUrl: json.sourceUrl }) });
+      else setDone({ result: json, draft: buildDraft(json.extraction, data, { sourceUrl: json.sourceUrl }), runId: (json as { runId?: string }).runId ?? null });
     } catch {
       setFail({ code: "network", message: "通信に失敗しました。接続を確認してもう一度お試しください" });
     } finally {
@@ -179,7 +180,7 @@ export function AiImportDialog({
               </Button>
               <Button
                 onClick={() => {
-                  onApply(done.draft);
+                  onApply(done.draft, done.runId);
                   onOpenChange(false);
                 }}
               >

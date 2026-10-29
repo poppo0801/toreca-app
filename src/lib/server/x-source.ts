@@ -32,6 +32,18 @@ export function isXHost(raw: string): boolean {
 }
 
 /** oEmbed の html（blockquote）から投稿本文とリンクを取り出す */
+const EN_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+/** 投稿日（oEmbedの日付リンク）。「2026年10月5日」または「October 5, 2026」。無ければ空 */
+export function parseOembedDate(html: string): string {
+  const tail = html.slice(html.lastIndexOf("&mdash;") >= 0 ? html.lastIndexOf("&mdash;") : 0);
+  const ja = /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/.exec(tail);
+  if (ja) return `${ja[1]}-${ja[2].padStart(2, "0")}-${ja[3].padStart(2, "0")}`;
+  const en = /([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})/.exec(tail);
+  const mi = en ? EN_MONTHS.indexOf(en[1].toLowerCase()) : -1;
+  return en && mi >= 0 ? `${en[3]}-${String(mi + 1).padStart(2, "0")}-${en[2].padStart(2, "0")}` : "";
+}
+
 export function parseOembedHtml(html: string): { text: string; links: string[]; author: string } {
   const p = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(html)?.[1] ?? "";
   const links = [...p.matchAll(/<a[^>]+href=["']([^"']+)["']/gi)].map((m) => decodeEntities(m[1])).filter((h) => /^https?:\/\//i.test(h));
@@ -40,7 +52,7 @@ export function parseOembedHtml(html: string): { text: string; links: string[]; 
   return { text, links, author };
 }
 
-export type XFetchResult = { ok: true; text: string; author: string; notice: string[] } | { ok: false; message: string };
+export type XFetchResult = { ok: true; text: string; author: string; notice: string[]; postedOn: string } | { ok: false; message: string };
 
 export async function fetchXPost(rawUrl: string): Promise<XFetchResult> {
   const parsed = parseXStatusUrl(rawUrl);
@@ -74,5 +86,5 @@ export async function fetchXPost(rawUrl: string): Promise<XFetchResult> {
   }
   const notice = ["Xの投稿に添付された画像は取得できません。告知が画像の場合は、スクリーンショットを読み取ってください"];
   const text = [`【Xの投稿】${post.author ? `（${post.author}）` : ""}`, post.text, expanded.length ? `\n【投稿内のリンク】\n${expanded.join("\n")}` : ""].filter(Boolean).join("\n");
-  return { ok: true, text, author: post.author, notice };
+  return { ok: true, text, author: post.author, notice, postedOn: parseOembedDate(html) };
 }

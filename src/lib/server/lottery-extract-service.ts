@@ -1,7 +1,8 @@
 import "server-only";
 import { hasAnyContent, normalizeExtraction, type ExtractedLottery } from "@/lib/ai/extraction";
 import { extractPageText, pageToPrompt } from "@/lib/ai/page-text";
-import { ExtractorError, type ExtractRequest, type InputKind, type LotteryExtractor } from "@/lib/ai/provider";
+import { validateExtraction } from "@/lib/ai/validate";
+import { ExtractorError, PROMPT_VERSION, type ExtractRequest, type InputKind, type LotteryExtractor } from "@/lib/ai/provider";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXPost, isXHost, type XFetchResult } from "@/lib/server/x-source";
 
@@ -26,6 +27,8 @@ export type ExtractResult =
       model?: string;
       usage?: { input: number; output: number };
       extraction: ExtractedLottery;
+      /** 解析仕様のバージョン（解析ログ・精度比較用） */
+      promptVersion: string;
       sourceUrl?: string;
       /** 画面に出す補足（一部しか取得できなかった等） */
       notices: string[];
@@ -92,7 +95,7 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
         const x = await fetchX(input.url);
         if (!x.ok) return { ok: false, kind, code: "fetch_failed", message: x.message, suggest: "text" };
         notices.push(...x.notice);
-        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), sourceUrl: input.url.trim(), now: deps.now };
+        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), sourceUrl: input.url.trim(), postedOn: x.postedOn || undefined, now: deps.now };
       } else {
         const page = await fetchPage(input.url);
         if (!page.ok) return { ok: false, kind, code: "fetch_failed", message: `${page.message}。告知の文章をコピーして貼り付けるか、スクリーンショットを読み取ってください`, suggest: "text" };
@@ -108,7 +111,7 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
         }
         if (text.truncated || page.truncated) notices.push("ページが長いため、前半部分だけを読み取りました");
         notices.push("取得したページ本文のみを読み取っています。画像内の文字は読み取れないため、告知が画像の場合はスクリーンショットを使ってください");
-        req = { kind, text: pageToPrompt(text), sourceUrl: page.finalUrl, now: deps.now };
+        req = { kind, text: pageToPrompt(text), sourceUrl: page.finalUrl, postedOn: text.publishedOn || undefined, now: deps.now };
       }
       break;
     }
@@ -116,14 +119,15 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
 
   try {
     const out = await deps.extractor.extract(req);
-    const extraction = normalizeExtraction(out.raw, deps.now);
+    // 正規化（年の推定は告知の公開日があればそれを基準にする）→ プログラム側の検証（根拠の原文照合・矛盾の検出）
+    const extraction = validateExtraction(normalizeExtraction(out.raw, deps.now, { postedOn: req.postedOn }), req.text ?? null);
     if (!extraction.isLotteryAnnouncement) {
       return { ok: false, kind, code: "not_lottery", engine: out.engine, model: out.model, usage: out.usage, message: "抽選販売の告知とは判断できませんでした。内容を確認してください" };
     }
     if (!hasAnyContent(extraction)) {
       return { ok: false, kind, code: "nothing_found", engine: out.engine, model: out.model, usage: out.usage, message: "抽選に関する情報を読み取れませんでした。画像が不鮮明でないか、文章に抽選の情報が含まれているか確認してください", suggest: kind === "image" ? "text" : "image" };
     }
-    return { ok: true, kind, engine: out.engine, model: out.model, usage: out.usage, extraction, sourceUrl: req.sourceUrl, notices };
+    return { ok: true, kind, engine: out.engine, model: out.model, usage: out.usage, extraction, promptVersion: PROMPT_VERSION, sourceUrl: req.sourceUrl, notices };
   } catch (e) {
     if (e instanceof ExtractorError) {
       return { ok: false, kind, code: e.code === "rate_limited" ? "rate_limited" : "ai_failed", engine: deps.extractor.engine, model: e.model, usage: e.usage, message: e.message };

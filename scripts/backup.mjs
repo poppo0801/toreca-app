@@ -30,6 +30,8 @@ const TABLES_ALL = [
   "purchases", "purchase_items", "skip_rules", "skip_rule_exceptions", "application_rules", "limit_exemptions",
   "chain_requirements", "account_eligibilities", "eligibility_purchases", "notification_settings", "notification_deliveries", "audit_logs",
   "application_item_results", "sales", "product_set_items", "product_images",
+  // Stage 5A以降に追加したテーブル（対戦記録・世帯設定（自宅の住所を含むため、バックアップは暗号化して保管する）・AI利用ログ・フィードバック・別表記）
+  "battle_records", "household_settings", "ai_extraction_logs", "ai_extraction_feedback", "chain_aliases", "store_aliases",
 ];
 
 const TABLES = TABLES_ALL.filter((t) => !SKIP.has(t));
@@ -44,7 +46,7 @@ const sha256 = {};
 for (const table of TABLES) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from(table).select("*").order({ household_members: "user_id", lottery_management: "lottery_id" }[table] ?? "id").range(from, from + 999);
+    const { data, error } = await supabase.from(table).select("*").order({ household_members: "user_id", lottery_management: "lottery_id", household_settings: "household_id" }[table] ?? "id").range(from, from + 999);
     if (error) throw new Error(`${table}: ${error.message}`);
     rows.push(...data);
     if (data.length < 1000) break;

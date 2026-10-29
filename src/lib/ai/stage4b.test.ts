@@ -25,9 +25,9 @@ describe("normalizeExtraction（AI出力の検証・正規化）", () => {
     const e = normalizeExtraction({ ...base, apply_start: d(11, 1), result_date: d(1, 10) }, NOW);
     expect(e.applyDeadline).toMatchObject({ precision: "date_time", date: "2026-11-05", time: "23:59", yearAssumed: true });
     expect(e.applyStart).toMatchObject({ precision: "date_only", date: "2026-11-01" });
-    // 1/10 は今日(10/28)より2か月以上前 → 翌年の告知と仮定
-    expect(e.resultDate.date).toBe("2027-01-10");
-    expect(e.warnings.some((w) => w.includes("年の記載がない"))).toBe(true);
+    // 1/10 は、直前の日付(11/5)より後で最も近い年 → 翌年（年またぎ）。自然な推定なので注意は出さない
+    expect(e.resultDate).toMatchObject({ date: "2027-01-10", yearAssumed: true, yearUncertain: false });
+    expect(e.warnings.some((w) => w.includes("年の記載がない"))).toBe(false);
   });
 
   it("年が書かれていればそのまま使い、現在から離れた年・存在しない日付は不明にする", () => {
@@ -125,8 +125,12 @@ describe("buildDraft（登録フォームの下書き）", () => {
   it("同じ商品を2行に割り当てない。年を補った日時と空の項目に注意を付ける", () => {
     const dup = buildDraft(ex({ products: [{ name: "ひかりの森", quantity: 1, unit: "box" }, { name: "テスト拡張パック「ひかりの森」", quantity: 1, unit: "box" }], multi_mode: "all" }), data);
     expect(dup.input.items.filter((i) => i.product.id === "p1")).toHaveLength(1);
-    const draft = buildDraft(ex({ result_date: null }), data);
-    expect(draft.flags.applyDeadline).toContain("年");
+    const high = Object.fromEntries(["chain", "store", "products", "multi_mode", "apply_start", "apply_deadline", "result_date", "procedure_deadline", "announcement", "apply_method", "receive_method", "limit", "conditions"].map((k) => [k, "high"]));
+    const draft = buildDraft(ex({ result_date: null, confidence: high }), data);
+    // 年の補完が自然なら注意は出さない。基準日から離れた過去の日付（年が不確か）のときだけ要確認
+    expect(draft.flags.applyDeadline).toBeUndefined();
+    const old = buildDraft(ex({ apply_deadline: d(6, 1, 12, 0), confidence: high }), data);
+    expect(old.flags.applyDeadline).toContain("年");
     expect(draft.flags.limit).toBeTruthy();
   });
 });

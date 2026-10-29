@@ -107,6 +107,17 @@ export const lotteryInputSchema = z.object({
   appliedAt: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)]).default(""),
   /** 初期値のまま（利用者が選んでいない）の項目。確認済みとは区別して保存する */
   unconfirmedFields: z.array(z.enum(UNCONFIRMABLE_FIELDS)).max(UNCONFIRMABLE_FIELDS.length).default([]),
+  /**
+   * AI読み取りの結果から登録するとき（新規登録のみ）。解析の実行ID・フォームに入力した直後の値・任意の修正理由。
+   * 保存時に、AIの抽出結果との比較を1回だけ記録する（登録後の通常編集では記録しない）。
+   */
+  aiFeedback: z
+    .object({
+      runId: z.uuid(),
+      filled: z.record(z.string(), z.unknown()),
+      reason: z.enum(["ai_wrong", "other_source", "official_name", "other"]).nullable().default(null),
+    })
+    .optional(),
 });
 export type LotteryInput = z.input<typeof lotteryInputSchema>;
 

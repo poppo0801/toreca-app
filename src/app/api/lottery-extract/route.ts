@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getExtractor } from "@/lib/ai/provider";
+import { getExtractor, PROMPT_VERSION } from "@/lib/ai/provider";
+import type { Json } from "@/types/database";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { MAX_IMAGES, runExtraction, type ExtractInput, type ExtractResult } from "@/lib/server/lottery-extract-service";
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest) {
   }
 
   const result: ExtractResult = await runExtraction(input, { extractor, now: new Date() });
+  let runId: string | null = null;
 
   if (supabase && householdId) {
     const status = result.ok
@@ -107,7 +109,7 @@ export async function POST(request: NextRequest) {
         host = null;
       }
     }
-    await supabase.from("ai_extraction_logs").insert({
+    const { data: logRow } = await supabase.from("ai_extraction_logs").insert({
       household_id: householdId,
       kind: result.kind,
       engine: result.ok ? result.engine : (result.engine ?? "none"),
@@ -117,7 +119,11 @@ export async function POST(request: NextRequest) {
       input_tokens: result.usage?.input ?? null,
       output_tokens: result.usage?.output ?? null,
       model: result.engine === "anthropic" ? (result.model ?? null) : null,
-    });
+      // 解析仕様のバージョンと、検証済みの抽出結果（登録後の修正との比較・精度の評価用）。入力した本文・画像そのものは保存しない
+      prompt_version: result.ok ? result.promptVersion : PROMPT_VERSION,
+      extraction: result.ok ? (result.extraction as unknown as Json) : null,
+    }).select("id").single();
+    runId = logRow?.id ?? null;
   }
-  return NextResponse.json(result, { status: result.ok ? 200 : result.code === "rate_limited" ? 429 : 200 });
+  return NextResponse.json(runId ? { ...result, runId } : result, { status: result.ok ? 200 : result.code === "rate_limited" ? 429 : 200 });
 }

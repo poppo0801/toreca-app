@@ -28,6 +28,8 @@ export const ENTITY_KEYS = [
   "stores",
   "products",
   "product_aliases",
+  "chain_aliases",
+  "store_aliases",
   "family_groups",
   "address_groups",
   "identities",
@@ -144,6 +146,28 @@ export const ENTITIES: Record<EntityKey, Entity> = {
     fields: [
       { name: "product_id", label: "商品", type: "select", required: true, ref: "products" },
       { name: "alias", label: "略称", type: "text", required: true, max: 80 },
+    ],
+  },
+  chain_aliases: {
+    key: "chain_aliases",
+    label: "系列の別表記",
+    retire: "delete",
+    titleField: "alias",
+    subFields: ["chain_id"],
+    fields: [
+      { name: "chain_id", label: "系列", type: "select", required: true, ref: "chains" },
+      { name: "alias", label: "別表記（例: Joshin、ジョーシン）", type: "text", required: true, max: 80 },
+    ],
+  },
+  store_aliases: {
+    key: "store_aliases",
+    label: "店舗の別表記",
+    retire: "delete",
+    titleField: "alias",
+    subFields: ["store_id"],
+    fields: [
+      { name: "store_id", label: "店舗", type: "select", required: true, ref: "stores" },
+      { name: "alias", label: "別表記", type: "text", required: true, max: 80 },
     ],
   },
   family_groups: {
@@ -327,6 +351,6 @@ export function toDbValues(entity: Entity, values: Record<string, unknown>): Rec
     out.product_code = null;
     out.product_code_kind = null;
   }
-  if (entity.key === "product_aliases") out.normalized_alias = normalizeAlias(String(out.alias));
+  if (entity.key === "product_aliases" || entity.key === "chain_aliases" || entity.key === "store_aliases") out.normalized_alias = normalizeAlias(String(out.alias));
   return out;
 }

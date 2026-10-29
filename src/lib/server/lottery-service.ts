@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { normalizeCardDisplay } from "@/lib/card-display";
+import { recordAiFeedback } from "@/lib/server/ai-feedback-service";
 import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
 import { dbToFlex, flexInputToDb, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
@@ -77,7 +78,7 @@ export async function currentHouseholdId(db: Db): Promise<string | null> {
  * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
  * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
  */
-async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"] }> {
+async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[] }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
   const from = (t: string): any => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,6 +88,15 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   const scope = <T extends { eq: (c: string, v: string) => T }>(q: T): T => (householdId ? q.eq("household_id", householdId) : q);
   let battles: AppData["battles"];
   let settings: AppData["settings"];
+  let chainAliases: { chain_id: string; alias: string }[] = [];
+  let storeAliases: { store_id: string; alias: string }[] = [];
+  try {
+    const [c, st] = await Promise.all([scope(from("chain_aliases").select("chain_id,alias")), scope(from("store_aliases").select("store_id,alias"))]);
+    if (!c.error) chainAliases = c.data;
+    if (!st.error) storeAliases = st.data;
+  } catch {
+    /* 未適用 */
+  }
   try {
     const b = await scope(from("battle_records").select("*").is("archived_at", null).order("played_on", { ascending: false }).limit(5000));
     if (!b.error) {
@@ -122,7 +132,7 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   } catch {
     /* 未適用 */
   }
-  return { battles, settings };
+  return { battles, settings, chainAliases, storeAliases };
 }
 /**
  * 世帯の全データを読み込む。householdId を指定すると、その世帯だけに絞る
@@ -205,7 +215,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   }
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const { battles, settings } = await loadOptional(db, householdId);
+  const { battles, settings, chainAliases, storeAliases } = await loadOptional(db, householdId);
 
   return {
     profiles: profiles.map((p) => {
@@ -226,8 +236,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         blockedStoreIds: mine.filter((r) => r.mode === "block" && r.store_id !== null).map((r) => r.store_id as string),
       };
     }),
-    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null })),
-    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null })),
+    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
+    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null })),
     products: products.map((p) => ({
       id: p.id,
       officialName: p.official_name,
@@ -476,6 +486,14 @@ export async function saveLottery(
   // 初期値のまま（利用者が確認していない）項目を記録する。確認済みの項目は外す（応募方法・受取方法の「初期値」表示用）。
   // 保存は主処理とは別の更新だが、失敗しても抽選自体は保存済み（表示上の印が付かないだけ）なのでエラーにはしない。
   await db.from("lotteries").update({ unconfirmed_fields: input.unconfirmedFields }).eq("id", data as string);
+  // AI読み取りから新規登録した場合: AIの抽出結果と最終内容の比較を1回だけ記録する（失敗しても登録自体は成功のまま）
+  if (id === null && input.aiFeedback) {
+    try {
+      await recordAiFeedback(db, data as string, input, actor);
+    } catch {
+      /* 記録できなくても抽選の保存には影響しない */
+    }
+  }
   return ok({ id: data as string });
 }
 

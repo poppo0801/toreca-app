@@ -177,7 +177,7 @@ describe("共通パイプライン（runExtraction）", () => {
     expect(u).toMatchObject({ ok: true, kind: "url", sourceUrl: "https://shop.example.invalid/n/1" });
     const x = await runExtraction(
       { kind: "url", url: "https://x.com/shop/status/1234567890" },
-      { extractor: fake, now: NOW, fetchX: async () => ({ ok: true, text: "【Xの投稿】抽選", author: "", notice: ["画像は取得できません"] }) },
+      { extractor: fake, now: NOW, fetchX: async () => ({ ok: true, text: "【Xの投稿】抽選", author: "", notice: ["画像は取得できません"], postedOn: "" }) },
     );
     expect(x).toMatchObject({ ok: true, kind: "x_url" });
     expect(x.ok && x.notices).toContain("画像は取得できません");

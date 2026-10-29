@@ -13,6 +13,8 @@ import { clearDraft, fingerprint, loadDraft, saveDraft, type FieldSource, type F
 import type { DraftDuplicate, LotteryDraft } from "@/lib/lottery-match";
 import type { FieldKey } from "@/lib/ai/extraction";
 import { flexToJstDate } from "@/lib/finance";
+import { FEEDBACK_REASONS, REASON_LABEL, type FeedbackReason } from "@/lib/ai/feedback";
+import type { Product, Chain, Store } from "@/types/domain";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -63,6 +65,21 @@ function FlagNote({ text }: { text?: string }) {
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
       <span>要確認: {text}</span>
     </p>
+  );
+}
+
+/** 一致が不確実なマスターの候補（近い順）。選ぶと選択済みになる。自動では確定しない */
+function CandidateButtons({ label, names, onPick }: { label: string; names: string[]; onPick: (index: number) => void }) {
+  if (names.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1" role="group" aria-label={label} data-testid="candidates">
+      <span className="text-[11px] text-muted-foreground">候補:</span>
+      {names.map((n, i) => (
+        <button key={n} type="button" onClick={() => onPick(i)} className="min-h-8 max-w-full truncate rounded-full border bg-input px-2.5 text-xs hover:bg-muted">
+          {n}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -250,6 +267,10 @@ export function LotteryFormDialog({
   const [duplicates, setDuplicates] = useState<DraftDuplicate[]>([]);
   const [dupAck, setDupAck] = useState(false);
   const [aiFilled, setAiFilled] = useState(false);
+  // AI読み取りから入力したときの、解析の実行IDとフォームに入力した直後の値（登録時にAIの抽出結果との比較を1回だけ記録する）
+  const [aiRun, setAiRun] = useState<{ runId: string; filled: LotteryInput } | null>(null);
+  const [reason, setReason] = useState<FeedbackReason | "">("");
+  const [candidates, setCandidates] = useState<{ chain: Chain[]; store: Store[]; items: Product[][] }>({ chain: [], store: [], items: [] });
   const modeRef = useRef<HTMLSelectElement>(null);
 
   const dirty = fingerprint({ i: v, u: urlsText }) !== initialFp;
@@ -288,7 +309,7 @@ export function LotteryFormDialog({
     onOpenChange(false);
   };
 
-  const applyDraft = (d: LotteryDraft) => {
+  const applyDraft = (d: LotteryDraft, runId: string | null = null) => {
     const next = { ...d.input };
     const src: Record<string, FieldSource> = { ...sources };
     // AIが読み取れた方法は「AI」、読み取れなかった項目は標準の初期値（未確認）にする
@@ -309,6 +330,10 @@ export function LotteryFormDialog({
     setDuplicates(d.duplicates);
     setDupAck(false);
     setAiFilled(true);
+    setCandidates(d.candidates);
+    // 初期値（未確認の仮設定）は「AIが入力した値」ではないので、比較用の値からは外す
+    setAiRun(runId ? { runId, filled: { ...next, applyMethod: src.applyMethod === "default" ? "unknown" : next.applyMethod, receiveMethod: src.receiveMethod === "default" ? "unknown" : next.receiveMethod } } : null);
+    setReason("");
     setError(null);
   };
 
@@ -373,6 +398,8 @@ export function LotteryFormDialog({
     applications: isEdit ? [] : v.applications,
     // 初期値のまま（利用者が選んでいない）の項目は「未確認」として記録する
     unconfirmedFields: DEFAULTABLE.filter((k) => sources[k] === "default"),
+    // 新規登録のAI読み取り結果のときだけ、修正の記録に使う情報を送る（登録後の編集では送らない）
+    aiFeedback: !isEdit && aiRun ? { runId: aiRun.runId, filled: aiRun.filled as unknown as Record<string, unknown>, reason: reason || null } : undefined,
   });
 
   const submit = async (e: React.FormEvent, overwrite = false) => {
@@ -437,6 +464,9 @@ export function LotteryFormDialog({
     setDuplicates([]);
     setDupAck(false);
     setAiFilled(false);
+    setAiRun(null);
+    setReason("");
+    setCandidates({ chain: [], store: [], items: [] });
     setConflict(false);
     setError(null);
     setPending(null);
@@ -593,7 +623,13 @@ export function LotteryFormDialog({
               {(flags.chain || flags.store) && (
                 <div>
                   <FlagNote text={flags.chain && `系列: ${flags.chain}`} />
+                  {!v.chain.id && (
+                    <CandidateButtons label="系列の候補" names={candidates.chain.map((c) => c.name)} onPick={(i) => chooseChain({ id: candidates.chain[i].id, name: candidates.chain[i].name })} />
+                  )}
                   <FlagNote text={flags.store && `店舗: ${flags.store}`} />
+                  {!v.store.id && (
+                    <CandidateButtons label="店舗の候補" names={candidates.store.map((c) => c.name)} onPick={(i) => set("store", { id: candidates.store[i].id, name: candidates.store[i].name, prefecture: "" })} />
+                  )}
                 </div>
               )}
 
@@ -638,6 +674,16 @@ export function LotteryFormDialog({
                   </div>
                 ))}
                 <FlagNote text={flags.items} />
+                {v.items.map((it, i) =>
+                  !it.product.id && candidates.items[i]?.length ? (
+                    <CandidateButtons
+                      key={`cand-${i}`}
+                      label={`商品${i + 1}の候補`}
+                      names={candidates.items[i].map((p) => p.officialName)}
+                      onPick={(k) => set("items", v.items.map((x, j) => (j === i ? { ...x, product: { id: candidates.items[i][k].id, name: candidates.items[i][k].officialName } } : x)))}
+                    />
+                  ) : null,
+                )}
                 {multi ? (
                   <Button type="button" size="sm" variant="outline" onClick={() => set("items", [...v.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" }])}>
                     <Plus className="size-4" /> 商品を追加
@@ -892,6 +938,22 @@ export function LotteryFormDialog({
                 </fieldset>
               )}
 
+              {aiRun && !isEdit && (
+                <details className="rounded-lg border" data-testid="ai-reason">
+                  <summary className="flex min-h-10 cursor-pointer items-center px-3 text-sm">AI読み取りの修正理由（任意）</summary>
+                  <div className="space-y-1 border-t p-3 text-sm">
+                    <select aria-label="AI読み取りの修正理由" value={reason} onChange={(e) => setReason(e.target.value as FeedbackReason | "")} className={field}>
+                      <option value="">指定しない</option>
+                      {FEEDBACK_REASONS.map((r) => (
+                        <option key={r} value={r}>
+                          {REASON_LABEL[r]}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">AIの結果を修正して保存したときだけ、理由として記録します。選ばなくても保存できます。</p>
+                  </div>
+                </details>
+              )}
               {error && (
                 <div role="alert" className="space-y-2 text-sm text-danger">
                   <p>{error}</p>

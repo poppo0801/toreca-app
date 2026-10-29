@@ -5,7 +5,7 @@ import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { signOut } from "@/app/login/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
-import { AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
+import { AiQualitySection, AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
 import { NotificationSettings } from "@/components/notification-settings";
 import { ProfileSettings } from "@/components/profile-settings";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -82,6 +82,9 @@ export function SettingsView() {
           </Section>
           <Section title="AI読み取りの利用状況・料金">
             <AiUsageSection />
+          </Section>
+          <Section title="AI読み取りの修正状況">
+            <AiQualitySection />
           </Section>
         </>
       )}

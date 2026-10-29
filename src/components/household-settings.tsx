@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
-import { ackTravelReview, geocodeAddress, getHomeAddress, loadAiUsage, saveHomeLocation, saveHouseholdSettings, type AiUsageView, type GeoCandidate } from "@/app/(app)/settings/household-actions";
+import { ackTravelReview, geocodeAddress, getHomeAddress, loadAiQuality, loadAiUsage, saveHomeLocation, saveHouseholdSettings, type AiUsageView, type GeoCandidate } from "@/app/(app)/settings/household-actions";
 import { budgetThresholds } from "@/lib/ai-cost";
+import { FIELD_LABEL, type QualitySummary } from "@/lib/ai/quality";
+import { FEEDBACK_FIELDS } from "@/lib/ai/feedback";
 import { CARD_FIELD_LABEL, CARD_FIELDS, DEFAULT_CARD_DISPLAY, type CardDisplay } from "@/lib/card-display";
 import { BAND_CLASS, DEFAULT_DISTANCE_BANDS_KM, bandLabel, validBands, type DistanceBand } from "@/lib/geo";
 import { cn } from "@/lib/utils";
@@ -425,6 +427,96 @@ export function AiUsageSection() {
         </details>
       )}
       <p className="text-[11px] text-muted-foreground">{usage.note}</p>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ AI解析の修正状況（精度改善の材料）
+const pct = (r: number | null) => (r === null ? "—" : `${Math.round(r * 100)}%`);
+
+/**
+ * AI読み取り結果を登録したとき、AIの抽出と最終登録内容を比べた記録の集計。
+ * 修正率はAIの誤認識率ではない（別の情報源で補った・好みで直した場合も含む）。「誤認識（明示）」は、利用者が理由として選んだ項目だけ。
+ */
+export function AiQualitySection() {
+  const [q, setQ] = useState<QualitySummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadAiQuality()
+      .then((r) => {
+        if (!alive) return;
+        if (r.ok) setQ(r.quality);
+        else setError(r.error);
+      })
+      .catch(() => alive && setError("読み込めませんでした"));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (error) return <p className="text-xs text-danger">{error}</p>;
+  if (!q) return <p className="text-xs text-muted-foreground">読み込み中…</p>;
+  const rows = FEEDBACK_FIELDS.map((f) => [f, q.byField[f]] as const).filter(([, r]) => r && r.total > 0);
+  return (
+    <div className="space-y-2 text-xs" data-testid="ai-quality">
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg border p-2">
+          <dt className="text-[10px] text-muted-foreground">AI解析</dt>
+          <dd className="text-sm font-bold tabular-nums">{q.analyses}回</dd>
+        </div>
+        <div className="rounded-lg border p-2">
+          <dt className="text-[10px] text-muted-foreground">登録まで進んだ</dt>
+          <dd className="text-sm font-bold tabular-nums" data-testid="ai-registered">
+            {q.registered}件
+          </dd>
+        </div>
+        <div className="rounded-lg border p-2">
+          <dt className="text-[10px] text-muted-foreground">項目の修正率</dt>
+          <dd className="text-sm font-bold tabular-nums">{pct(q.overall.modifiedRate)}</dd>
+        </div>
+      </dl>
+      {rows.length > 0 && (
+        <table className="w-full table-fixed text-[11px]">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="py-1 font-normal">項目</th>
+              <th className="w-9 text-right font-normal">採用</th>
+              <th className="w-9 text-right font-normal">修正</th>
+              <th className="w-9 text-right font-normal">補完</th>
+              <th className="w-10 text-right font-normal">正規化</th>
+              <th className="w-11 text-right font-normal">誤認識</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([f, r]) => (
+              <tr key={f} className="border-t">
+                <th scope="row" className="truncate py-1 text-left font-normal">
+                  {FIELD_LABEL[f]}
+                </th>
+                <td className="text-right tabular-nums">{r!.adopted}</td>
+                <td className="text-right tabular-nums">{r!.modified}</td>
+                <td className="text-right tabular-nums">{r!.supplemented}</td>
+                <td className="text-right tabular-nums">{r!.normalized}</td>
+                <td className="text-right tabular-nums">{r!.explicit}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {Object.keys(q.byKind).length > 0 && (
+        <p className="text-muted-foreground">
+          入力別: {Object.entries(q.byKind).map(([k, r]) => `${{ text: "文章", image: "画像", url: "URL", x_url: "X" }[k] ?? k} ${r.runs}件（修正率 ${pct(r.modifiedRate)}）`).join(" ／ ")}
+        </p>
+      )}
+      {Object.keys(q.byPromptVersion).length > 0 && (
+        <p className="text-muted-foreground">
+          解析仕様別: {Object.entries(q.byPromptVersion).map(([k, r]) => `${k} ${r.runs}件（修正率 ${pct(r.modifiedRate)}）`).join(" ／ ")}
+        </p>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        修正率は、AIの結果を登録するときに利用者が変更した項目の割合です。AIの正答率・誤認識率ではありません（別の情報源で補った・好みで直した場合も含み、気づかなかった誤りは数えられません）。
+        「誤認識」は、修正理由として「AIの読み取りが間違っていた」を選んだ項目だけです。登録後の通常の編集は含みません。
+      </p>
     </div>
   );
 }

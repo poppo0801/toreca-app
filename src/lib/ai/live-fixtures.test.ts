@@ -37,17 +37,16 @@ describe("実AIの結果 → マスター照合・フォーム下書き", () => 
     expect(d.input.procedureDeadline).toEqual({ precision: "date_only", date: "2026-11-20", time: "" });
     expect(d.input.applyMethod).toBe("app");
     expect(d.input.receiveMethod).toBe("store");
-    expect(d.warnings.filter((w) => w.includes("年の記載がないため2026年と仮定"))).toHaveLength(4);
     // 保存できる形か（モックのIDはUUIDではないため、ID以外の項目だけ検証する。実際の保存は本番の画面テストで確認済み）
     const issues = lotteryInputSchema.safeParse(d.input).error?.issues ?? [];
     expect(issues.filter((i) => !String(i.path.join(".")).match(/(^|.)id$/))).toEqual([]);
   });
 
-  it("商品名に数量・入数が混ざっていても、既存の商品に「部分一致」の候補として選び、要確認にする（確定扱いにしない）", () => {
+  it("商品名にブランド名・数量・入数（ポケモンカードゲーム／1BOX（30パック入り））が混ざっていても、正式名称の商品に一致する", () => {
     const d = buildDraft(ex, dataWith(null));
-    expect(d.summary.items[0].kind).toBe("partial");
+    expect(d.summary.items[0].kind).toBe("exact");
     expect(d.input.items[0].product.id).toBe("p-hikari");
-    expect(d.flags.items).toBeDefined();
+    expect(d.candidates.items[0]).toEqual([]);
   });
 
   it("商品マスターに無い場合は名称のまま（保存時に仮登録）で、別の商品に誤って割り当てない", () => {

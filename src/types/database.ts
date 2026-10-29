@@ -164,138 +164,137 @@ export type Database = {
           },
         ]
       }
-      battle_records: {
+      ai_extraction_feedback: {
         Row: {
-          archived_at: string | null
+          adopted_count: number
           created_at: string
+          engine: string
+          explicit_error_count: number
+          field_results: Json
+          finalized_by_profile_id: string | null
           household_id: string
           id: string
-          format: string
-          memo: string
-          my_deck: string
-          opponent: string
-          opponent_deck: string
-          played_on: string
-          profile_id: string | null
-          result: string
-          turn_order: string
-          updated_at: string
-          updated_by_profile_id: string | null
+          kind: string
+          lottery_id: string
+          model: string | null
+          modified_count: number
+          normalized_count: number
+          prompt_version: string | null
+          reason: string | null
+          run_id: string
+          supplemented_count: number
         }
         Insert: {
-          archived_at?: string | null
+          adopted_count?: number
           created_at?: string
+          engine: string
+          explicit_error_count?: number
+          field_results: Json
+          finalized_by_profile_id?: string | null
           household_id: string
           id?: string
-          format?: string
-          memo?: string
-          my_deck?: string
-          opponent?: string
-          opponent_deck?: string
-          played_on: string
-          profile_id?: string | null
-          result: string
-          turn_order?: string
-          updated_at?: string
-          updated_by_profile_id?: string | null
+          kind: string
+          lottery_id: string
+          model?: string | null
+          modified_count?: number
+          normalized_count?: number
+          prompt_version?: string | null
+          reason?: string | null
+          run_id: string
+          supplemented_count?: number
         }
         Update: {
-          archived_at?: string | null
+          adopted_count?: number
           created_at?: string
+          engine?: string
+          explicit_error_count?: number
+          field_results?: Json
+          finalized_by_profile_id?: string | null
           household_id?: string
           id?: string
-          format?: string
-          memo?: string
-          my_deck?: string
-          opponent?: string
-          opponent_deck?: string
-          played_on?: string
-          profile_id?: string | null
-          result?: string
-          turn_order?: string
-          updated_at?: string
-          updated_by_profile_id?: string | null
+          kind?: string
+          lottery_id?: string
+          model?: string | null
+          modified_count?: number
+          normalized_count?: number
+          prompt_version?: string | null
+          reason?: string | null
+          run_id?: string
+          supplemented_count?: number
         }
-        Relationships: []
-      }
-      household_settings: {
-        Row: {
-          ai_monthly_budget_jpy: number
-          auto_ai_enabled: boolean
-          card_display: Json
-          distance_bands_km: Json
-          home_address: string | null
-          home_lat: number | null
-          home_lng: number | null
-          household_id: string
-          travel_review_needed: boolean
-          updated_at: string
-          updated_by_profile_id: string | null
-        }
-        Insert: {
-          ai_monthly_budget_jpy?: number
-          auto_ai_enabled?: boolean
-          card_display?: Json
-          distance_bands_km?: Json
-          home_address?: string | null
-          home_lat?: number | null
-          home_lng?: number | null
-          household_id: string
-          travel_review_needed?: boolean
-          updated_at?: string
-          updated_by_profile_id?: string | null
-        }
-        Update: {
-          ai_monthly_budget_jpy?: number
-          auto_ai_enabled?: boolean
-          card_display?: Json
-          distance_bands_km?: Json
-          home_address?: string | null
-          home_lat?: number | null
-          home_lng?: number | null
-          household_id?: string
-          travel_review_needed?: boolean
-          updated_at?: string
-          updated_by_profile_id?: string | null
-        }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ai_extraction_feedback_finalized_by_profile_id_household_i_fkey"
+            columns: ["finalized_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "ai_extraction_feedback_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_extraction_feedback_lottery_id_household_id_fkey"
+            columns: ["lottery_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "ai_extraction_feedback_run_id_household_id_fkey"
+            columns: ["run_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "ai_extraction_logs"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
       }
       ai_extraction_logs: {
         Row: {
-          model: string | null
           created_at: string
           engine: string
+          extraction: Json | null
           household_id: string
           id: string
           input_tokens: number | null
           kind: string
+          model: string | null
           output_tokens: number | null
+          prompt_version: string | null
           source_host: string | null
           status: string
           user_id: string
         }
         Insert: {
-          model?: string | null
           created_at?: string
           engine: string
+          extraction?: Json | null
           household_id: string
           id?: string
           input_tokens?: number | null
           kind: string
+          model?: string | null
           output_tokens?: number | null
+          prompt_version?: string | null
           source_host?: string | null
           status: string
           user_id?: string
         }
         Update: {
-          model?: string | null
           created_at?: string
           engine?: string
+          extraction?: Json | null
           household_id?: string
           id?: string
           input_tokens?: number | null
           kind?: string
+          model?: string | null
           output_tokens?: number | null
+          prompt_version?: string | null
           source_host?: string | null
           status?: string
           user_id?: string
@@ -603,6 +602,82 @@ export type Database = {
           },
         ]
       }
+      battle_records: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          format: string
+          household_id: string
+          id: string
+          memo: string
+          my_deck: string
+          opponent: string
+          opponent_deck: string
+          played_on: string
+          profile_id: string | null
+          result: string
+          turn_order: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          format?: string
+          household_id: string
+          id?: string
+          memo?: string
+          my_deck?: string
+          opponent?: string
+          opponent_deck?: string
+          played_on: string
+          profile_id?: string | null
+          result: string
+          turn_order?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          format?: string
+          household_id?: string
+          id?: string
+          memo?: string
+          my_deck?: string
+          opponent?: string
+          opponent_deck?: string
+          played_on?: string
+          profile_id?: string | null
+          result?: string
+          turn_order?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "battle_records_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "battle_records_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "battle_records_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           chain_id: string
@@ -651,6 +726,61 @@ export type Database = {
           },
           {
             foreignKeyName: "campaigns_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      chain_aliases: {
+        Row: {
+          alias: string
+          chain_id: string
+          created_at: string
+          household_id: string
+          id: string
+          normalized_alias: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          alias: string
+          chain_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          normalized_alias: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          alias?: string
+          chain_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          normalized_alias?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chain_aliases_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "chain_aliases_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chain_aliases_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -930,6 +1060,63 @@ export type Database = {
           },
         ]
       }
+      household_settings: {
+        Row: {
+          ai_monthly_budget_jpy: number
+          auto_ai_enabled: boolean
+          card_display: Json
+          distance_bands_km: Json
+          home_address: string | null
+          home_lat: number | null
+          home_lng: number | null
+          household_id: string
+          travel_review_needed: boolean
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          ai_monthly_budget_jpy?: number
+          auto_ai_enabled?: boolean
+          card_display?: Json
+          distance_bands_km?: Json
+          home_address?: string | null
+          home_lat?: number | null
+          home_lng?: number | null
+          household_id: string
+          travel_review_needed?: boolean
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          ai_monthly_budget_jpy?: number
+          auto_ai_enabled?: boolean
+          card_display?: Json
+          distance_bands_km?: Json
+          home_address?: string | null
+          home_lat?: number | null
+          home_lng?: number | null
+          household_id?: string
+          travel_review_needed?: boolean
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "household_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: true
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "household_settings_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       households: {
         Row: {
           created_at: string
@@ -1080,7 +1267,6 @@ export type Database = {
       }
       lotteries: {
         Row: {
-          unconfirmed_fields: string[]
           announcement_method: string
           announcement_url: string | null
           apply_deadline_at: string | null
@@ -1113,12 +1299,12 @@ export type Database = {
           source_kind: string
           source_urls: string[]
           store_id: string
+          unconfirmed_fields: string[]
           updated_at: string
           updated_by_profile_id: string | null
           verification_text: string
         }
         Insert: {
-          unconfirmed_fields?: string[]
           announcement_method?: string
           announcement_url?: string | null
           apply_deadline_at?: string | null
@@ -1151,12 +1337,12 @@ export type Database = {
           source_kind?: string
           source_urls?: string[]
           store_id: string
+          unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
           verification_text?: string
         }
         Update: {
-          unconfirmed_fields?: string[]
           announcement_method?: string
           announcement_url?: string | null
           apply_deadline_at?: string | null
@@ -1189,6 +1375,7 @@ export type Database = {
           source_kind?: string
           source_urls?: string[]
           store_id?: string
+          unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
           verification_text?: string
@@ -1625,12 +1812,12 @@ export type Database = {
           content_box: Json | null
           created_at: string
           display_scale: number
-          offset_x: number
-          offset_y: number
           height: number | null
           household_id: string
           id: string
           kind: string
+          offset_x: number
+          offset_y: number
           product_id: string
           sha256: string
           source: string
@@ -1643,12 +1830,12 @@ export type Database = {
           content_box?: Json | null
           created_at?: string
           display_scale?: number
-          offset_x?: number
-          offset_y?: number
           height?: number | null
           household_id: string
           id?: string
           kind: string
+          offset_x?: number
+          offset_y?: number
           product_id: string
           sha256: string
           source?: string
@@ -1661,12 +1848,12 @@ export type Database = {
           content_box?: Json | null
           created_at?: string
           display_scale?: number
-          offset_x?: number
-          offset_y?: number
           height?: number | null
           household_id?: string
           id?: string
           kind?: string
+          offset_x?: number
+          offset_y?: number
           product_id?: string
           sha256?: string
           source?: string
@@ -2608,10 +2795,63 @@ export type Database = {
           },
         ]
       }
+      store_aliases: {
+        Row: {
+          alias: string
+          created_at: string
+          household_id: string
+          id: string
+          normalized_alias: string
+          store_id: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          alias: string
+          created_at?: string
+          household_id: string
+          id?: string
+          normalized_alias: string
+          store_id: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          alias?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          normalized_alias?: string
+          store_id?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_aliases_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "store_aliases_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "store_aliases_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       stores: {
         Row: {
-          round_trip_fare: number | null
-          memo: string
           address_optional: string
           archived_at: string | null
           chain_id: string
@@ -2621,16 +2861,16 @@ export type Database = {
           is_provisional: boolean
           latitude: number | null
           longitude: number | null
+          memo: string
           name: string
           nearest_station: string
           parking_memo: string
           prefecture: string
+          round_trip_fare: number | null
           updated_at: string
           updated_by_profile_id: string | null
         }
         Insert: {
-          round_trip_fare?: number | null
-          memo?: string
           address_optional?: string
           archived_at?: string | null
           chain_id: string
@@ -2640,16 +2880,16 @@ export type Database = {
           is_provisional?: boolean
           latitude?: number | null
           longitude?: number | null
+          memo?: string
           name: string
           nearest_station?: string
           parking_memo?: string
           prefecture?: string
+          round_trip_fare?: number | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
         Update: {
-          round_trip_fare?: number | null
-          memo?: string
           address_optional?: string
           archived_at?: string | null
           chain_id?: string
@@ -2659,10 +2899,12 @@ export type Database = {
           is_provisional?: boolean
           latitude?: number | null
           longitude?: number | null
+          memo?: string
           name?: string
           nearest_station?: string
           parking_memo?: string
           prefecture?: string
+          round_trip_fare?: number | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -2695,15 +2937,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ack_travel_review: { Args: { p_actor: string }; Returns: undefined }
       bootstrap_household: { Args: never; Returns: string }
+      current_household_id: { Args: never; Returns: string }
       ensure_profile_accounts: { Args: never; Returns: number }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }
+      get_home_address: { Args: never; Returns: string }
       invoke_notify_job: {
         Args: { p_secret?: string; p_url?: string }
         Returns: number
       }
       is_household_member: { Args: { hid: string }; Returns: boolean }
       is_test_household: { Args: { hid: string }; Returns: boolean }
+      log_settings_change: {
+        Args: { p_actor: string; p_changed: string[]; p_household: string }
+        Returns: undefined
+      }
       mark_purchased: {
         Args: { p_actor: string; p_application_id: string }
         Returns: undefined
@@ -2753,6 +3002,25 @@ export type Database = {
       }
       remove_push_subscription: {
         Args: { p_endpoint: string }
+        Returns: undefined
+      }
+      save_home_location: {
+        Args: {
+          p_actor: string
+          p_address: string
+          p_lat: number
+          p_lng: number
+        }
+        Returns: undefined
+      }
+      save_household_settings: {
+        Args: {
+          p_actor: string
+          p_auto_ai: boolean
+          p_bands: Json
+          p_budget: number
+          p_card_display: Json
+        }
         Returns: undefined
       }
       save_lottery_tx: { Args: { p: Json; p_actor: string }; Returns: string }

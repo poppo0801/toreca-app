@@ -22,6 +22,24 @@ export interface PageText {
   links: { text: string; href: string }[];
   /** 本文が上限で切り詰められた */
   truncated: boolean;
+  /** ページのメタ情報から取れた公開日（YYYY-MM-DD）。無ければ空 */
+  publishedOn: string;
+}
+
+/** ページの公開日（メタタグ・<time>・JSON-LD の datePublished）。見つからなければ空。年の推定の基準に使う */
+export function findPublishedOn(html: string): string {
+  const keys = ["article:published_time", "og:article:published_time", "pubdate", "date", "DC.date.issued", "datePublished"];
+  const cands: string[] = keys.map((k) => meta(html, k));
+  cands.push(/<time[^>]+datetime=["']([^"']+)["']/i.exec(html)?.[1] ?? "");
+  cands.push(/"datePublished"\s*:\s*"([^"]+)"/i.exec(html)?.[1] ?? "");
+  for (const c of cands) {
+    const m = /(\d{4})-(\d{2})-(\d{2})/.exec(c);
+    if (m) {
+      const y = Number(m[1]);
+      if (y >= 2000 && y <= 2100 && Number(m[2]) >= 1 && Number(m[2]) <= 12 && Number(m[3]) >= 1 && Number(m[3]) <= 31) return `${m[1]}-${m[2]}-${m[3]}`;
+    }
+  }
+  return "";
 }
 
 function meta(html: string, key: string): string {
@@ -65,7 +83,7 @@ export function extractPageText(html: string, baseUrl: string, maxChars = 20_000
   if (truncated) text = text.slice(0, maxChars);
   // 同じ文言の繰り返し（ナビゲーション等）でトークンを使わないよう、連続する同一行は1つにする
   text = text.split("\n").filter((l, i, a) => i === 0 || l !== a[i - 1]).join("\n");
-  return { title, description, text, links, truncated };
+  return { title, description, text, links, truncated, publishedOn: findPublishedOn(html) };
 }
 
 /** AIに渡す本文を組み立てる（タイトル・説明・本文・関連リンク） */
