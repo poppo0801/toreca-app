@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { normalizeCardDisplay } from "@/lib/card-display";
+import { normalizeProfileSettings } from "@/lib/profile-settings";
 import { recordAiFeedback } from "@/lib/server/ai-feedback-service";
 import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
@@ -78,7 +79,7 @@ export async function currentHouseholdId(db: Db): Promise<string | null> {
  * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
  * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
  */
-async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[] }> {
+async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"] }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
   const from = (t: string): any => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,7 +133,16 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   } catch {
     /* 未適用 */
   }
-  return { battles, settings, chainAliases, storeAliases };
+  let profileSettings: AppData["profileSettings"];
+  try {
+    const ps = await scope(from("profile_settings").select("profile_id,settings"));
+    if (!ps.error) {
+      profileSettings = Object.fromEntries((ps.data as { profile_id: string; settings: unknown }[]).map((r) => [r.profile_id, normalizeProfileSettings(r.settings)]));
+    }
+  } catch {
+    /* 未適用 */
+  }
+  return { battles, settings, chainAliases, storeAliases, profileSettings };
 }
 /**
  * 世帯の全データを読み込む。householdId を指定すると、その世帯だけに絞る
@@ -215,7 +225,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   }
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const { battles, settings, chainAliases, storeAliases } = await loadOptional(db, householdId);
+  const { battles, settings, chainAliases, storeAliases, profileSettings } = await loadOptional(db, householdId);
 
   return {
     profiles: profiles.map((p) => {
@@ -290,6 +300,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       applyStart: dbToFlex(l.apply_start_precision, l.apply_start_date, l.apply_start_at),
       applyDeadline: dbToFlex(l.apply_deadline_precision, l.apply_deadline_date, l.apply_deadline_at),
       resultDate: dbToFlex(l.result_precision, l.result_date, l.result_at),
+      procedureStart: dbToFlex(l.procedure_start_precision, l.procedure_start_date, l.procedure_start_at),
       procedureDeadline: dbToFlex(l.procedure_deadline_precision, l.procedure_deadline_date, l.procedure_deadline_at),
       receiveMethod: l.receive_method as "store" | "shipping" | "either" | "unknown",
       applyMethod: l.apply_method as "web" | "store" | "app" | "unknown",
@@ -405,6 +416,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     })),
     battles,
     settings,
+    profileSettings,
   };
 }
 
@@ -415,11 +427,13 @@ function lotteryRow(input: z.output<typeof lotteryInputSchema>, actor: string | 
   const s = flexInputToDb(input.applyStart);
   const d = flexInputToDb(input.applyDeadline);
   const r = flexInputToDb(input.resultDate);
+  const ps = flexInputToDb(input.procedureStart);
   const p = flexInputToDb(input.procedureDeadline);
   return {
     apply_start_precision: s.precision, apply_start_date: s.date, apply_start_at: s.at,
     apply_deadline_precision: d.precision, apply_deadline_date: d.date, apply_deadline_at: d.at,
     result_precision: r.precision, result_date: r.date, result_at: r.at,
+    procedure_start_precision: ps.precision, procedure_start_date: ps.date, procedure_start_at: ps.at,
     procedure_deadline_precision: p.precision, procedure_deadline_date: p.date, procedure_deadline_at: p.at,
     receive_method: input.receiveMethod,
     apply_method: input.applyMethod,
@@ -543,6 +557,7 @@ export async function duplicateLottery(
         apply_start_precision: src.apply_start_precision, apply_start_date: src.apply_start_date, apply_start_at: src.apply_start_at,
         apply_deadline_precision: src.apply_deadline_precision, apply_deadline_date: src.apply_deadline_date, apply_deadline_at: src.apply_deadline_at,
         result_precision: src.result_precision, result_date: src.result_date, result_at: src.result_at,
+        procedure_start_precision: src.procedure_start_precision, procedure_start_date: src.procedure_start_date, procedure_start_at: src.procedure_start_at,
         procedure_deadline_precision: src.procedure_deadline_precision, procedure_deadline_date: src.procedure_deadline_date, procedure_deadline_at: src.procedure_deadline_at,
         receive_method: src.receive_method,
         apply_method: src.apply_method,

@@ -22,6 +22,7 @@ export const FEEDBACK_FIELDS = [
   "applyStart",
   "applyDeadline",
   "resultDate",
+  "procedureStart",
   "procedureDeadline",
   "applyMethod",
   "receiveMethod",
@@ -61,6 +62,8 @@ const flexOf = (f: { precision: string; date: string; time: string }) => (f.prec
 
 /** AIの抽出結果（検証済み）→ 比較用の値 */
 export function aiSnapshot(ex: ExtractedLottery): Snapshot {
+  // 購入・受取開始が無かった頃に保存した抽出結果も読めるようにする
+  const NO_FLEX: ExtractedFlex = { precision: "unknown", date: "", time: "", yearAssumed: false, yearUncertain: false };
   const fx = (f: ExtractedFlex) => flexOf(f);
   return {
     chain: s(ex.chainName) || null,
@@ -71,6 +74,7 @@ export function aiSnapshot(ex: ExtractedLottery): Snapshot {
     applyStart: fx(ex.applyStart),
     applyDeadline: fx(ex.applyDeadline),
     resultDate: fx(ex.resultDate),
+    procedureStart: fx(ex.procedureStart ?? NO_FLEX),
     procedureDeadline: fx(ex.procedureDeadline),
     applyMethod: ex.applyMethod === "unknown" ? null : ex.applyMethod,
     receiveMethod: ex.receiveMethod === "unknown" ? null : ex.receiveMethod,
@@ -95,6 +99,7 @@ export function inputSnapshot(i: LotteryInput): Snapshot {
     applyStart: flexInput(i.applyStart),
     applyDeadline: flexInput(i.applyDeadline),
     resultDate: flexInput(i.resultDate),
+    procedureStart: flexInput(i.procedureStart),
     procedureDeadline: flexInput(i.procedureDeadline),
     // 初期値のまま（利用者が確認していない）の応募方法・受取方法は、利用者の補完としては数えない
     applyMethod: i.applyMethod === "unknown" || i.unconfirmedFields?.includes("applyMethod") ? null : i.applyMethod,

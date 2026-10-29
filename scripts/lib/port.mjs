@@ -1,7 +1,7 @@
 // E2Eが使うポート(3100)に残った自プロジェクトのサーバーを停止する（Playwrightが子プロセスを残すことがあるため）。
 import { execFileSync } from "node:child_process";
 
-export function freePort(port = 3100) {
+export function freePort(port = Number(process.env.E2E_PORT) || 3100) {
   try {
     if (process.platform === "win32") {
       const out = execFileSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8" });

@@ -15,6 +15,7 @@ export function createMockData(now: Date): AppData {
   const base = {
     multiMode: "single" as const,
     applyStart: h(-24 * 5),
+    procedureStart: UNKNOWN_DATE,
     procedureDeadline: UNKNOWN_DATE,
     receiveMethod: "store" as const,
     applyMethod: "web" as const,

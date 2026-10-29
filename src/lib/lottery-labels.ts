@@ -53,3 +53,15 @@ export const LEVEL_CLASS = {
 } as const;
 
 export const LIMIT_BASIS_LABEL = { account: "1アカウント", person: "1人", family: "1家族", address: "1住所" } as const;
+
+/**
+ * 抽選カード右上の受取場所の表示。応募方法ではなく「受取方法」で決める。
+ *  - 発送 → 「通販」（店舗が登録されていても）
+ *  - 店頭 / 店頭か発送 → 受取店舗の都道府県（登録がなければ出さない）
+ *  - 不明 → 出さない（推測で都道府県を出さない）
+ */
+export function placeLabel(receive: "store" | "shipping" | "either" | "unknown", prefecture: string | null | undefined): string | null {
+  if (receive === "shipping") return "通販";
+  if ((receive === "store" || receive === "either") && prefecture) return prefecture;
+  return null;
+}

@@ -52,4 +52,20 @@ export const EVAL_CASES: EvalCase[] = [
     now: NOW,
     expect: { applyStart: "2026-11-05", applyDeadline: "2026-11-10", noIssues: ["applyDeadline", "applyStart"], noWarnings: true },
   },
+  {
+    id: "analysis-note-not-in-field",
+    title: "AIが応募条件欄に「読み取れませんでした」と書いても、欄は空にして要確認の詳細へ移す",
+    source: null,
+    raw: { ...base, conditions_text: "投稿本文が途中で切れているため、応募条件を読み取れませんでした" },
+    now: NOW,
+    expect: { conditionsText: "", issues: ["conditions"] },
+  },
+  {
+    id: "procedure-period",
+    title: "購入・受取の期間（開始〜終了）を日付のみで読み取り、時刻を補わない",
+    source: "購入・お渡し期間は11月14日〜11月20日です。",
+    raw: { ...base, procedure_start: d(11, 14), procedure_deadline: d(11, 20), evidence: { procedure_start: "11月14日", procedure_deadline: "11月20日" } },
+    now: NOW,
+    expect: { procedureStart: "2026-11-14", procedureDeadline: "2026-11-20", noTime: ["procedureStart", "procedureDeadline"], noIssues: ["procedureStart", "procedureDeadline"] },
+  },
 ];

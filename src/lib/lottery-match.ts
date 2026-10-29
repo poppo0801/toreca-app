@@ -162,6 +162,10 @@ export interface LotteryDraft {
   modePending: boolean;
   duplicates: DraftDuplicate[];
   warnings: string[];
+  /** 項目ごとの原文の抜粋（解析の根拠）。「要確認」の詳細で見せる。入力値には使わない */
+  evidence: Partial<Record<FieldKey, { quote: string; verified: boolean | null }>>;
+  /** 特定の項目に結びつかない注意（検証で見つかったもの）。「要確認」の詳細で見せる */
+  generalNotes: string[];
   /** 一致が不確実な系列・店舗・商品の候補（近い順）。利用者が選ぶ */
   candidates: { chain: Chain[]; store: Store[]; items: Product[][] };
   summary: {
@@ -171,7 +175,7 @@ export interface LotteryDraft {
   };
 }
 
-const toFlex = (f: ExtractedFlex): FlexInput => (f.precision === "unknown" ? EMPTY_FLEX : { precision: f.precision, date: f.date, time: f.time });
+const toFlex = (f: ExtractedFlex | undefined): FlexInput => (!f || f.precision === "unknown" ? EMPTY_FLEX : { precision: f.precision, date: f.date, time: f.time });
 const MATCH_LABEL: Record<MatchKind, string> = {
   exact: "",
   alias: "",
@@ -264,7 +268,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   else if (multi && ex.confidence.multiMode === "low") flags.multiMode = "応募方式の読み取りに自信がありません。告知を確認してください";
 
   // 日時
-  const flexFlag = (key: "applyStart" | "applyDeadline" | "resultDate" | "procedureDeadline", f: ExtractedFlex, label: string) => {
+  const flexFlag = (key: "applyStart" | "applyDeadline" | "resultDate" | "procedureStart" | "procedureDeadline", f: ExtractedFlex, label: string) => {
     if (f.yearUncertain) flags[key] = "告知に年の記載がなく、補った年が確かではありません。確認してください";
     else if (f.precision !== "unknown") lowFlag(key, label);
     else if (key === "applyDeadline") flags[key] = "応募締切が読み取れませんでした";
@@ -272,7 +276,8 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   flexFlag("applyStart", ex.applyStart, "応募開始");
   flexFlag("applyDeadline", ex.applyDeadline, "応募締切");
   flexFlag("resultDate", ex.resultDate, "当選発表");
-  flexFlag("procedureDeadline", ex.procedureDeadline, "購入・受取期限");
+  if (ex.procedureStart) flexFlag("procedureStart", ex.procedureStart, "購入・受取開始");
+  flexFlag("procedureDeadline", ex.procedureDeadline, "購入・受取終了");
 
   if (ex.applyMethod !== "unknown") lowFlag("applyMethod", "応募方法");
   if (ex.receiveMethod !== "unknown") lowFlag("receiveMethod", "受取方法");
@@ -306,6 +311,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     applyStart: toFlex(ex.applyStart),
     applyDeadline: toFlex(ex.applyDeadline),
     resultDate: toFlex(ex.resultDate),
+    procedureStart: toFlex(ex.procedureStart),
     procedureDeadline: toFlex(ex.procedureDeadline),
     receiveMethod: ex.receiveMethod,
     applyMethod: ex.applyMethod,
@@ -324,12 +330,21 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   };
 
   const duplicates = findDuplicates(input, data.lotteries, opts.sourceUrl);
+  const evidence: LotteryDraft["evidence"] = {};
+  for (const [k, ev] of Object.entries(ex.evidence ?? {})) {
+    if (!ev || !ev.quote) continue;
+    const key = (k === "applyUrl" || k === "announcementUrl" ? "announcement" : k) as FieldKey;
+    if (!evidence[key]) evidence[key] = { quote: ev.quote, verified: ev.verified };
+  }
+  const generalNotes = (ex.issues ?? []).filter((i) => i.field === "general").map((i) => i.message);
   return {
     input,
     flags,
     modePending,
     duplicates,
     warnings,
+    evidence,
+    generalNotes,
     candidates: { chain: chainM.candidates, store: storeM.candidates, items: itemCandidates },
     summary: { chain: chainM.kind, store: storeM.kind, items: itemSummary },
   };

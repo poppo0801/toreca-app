@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { AiImportDialog } from "@/components/ai-import-dialog";
 import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { MasterCombobox } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
-import { clearDraft, fingerprint, loadDraft, saveDraft, type FieldSource, type FormDraft } from "@/lib/lottery-draft";
+import { fingerprint, purgeLegacyDrafts, type FieldSource } from "@/lib/lottery-draft";
+import { FlagChip, FlagPanel, type FlagEvidence } from "@/components/review-flag";
 import type { DraftDuplicate, LotteryDraft } from "@/lib/lottery-match";
 import type { FieldKey } from "@/lib/ai/extraction";
 import { flexToJstDate } from "@/lib/finance";
@@ -57,17 +58,6 @@ function Select<T extends string>({
   );
 }
 
-/** AI読み取りで「要確認」とされた項目の注意表示 */
-function FlagNote({ text }: { text?: string }) {
-  if (!text) return null;
-  return (
-    <p className="mt-1 flex gap-1 text-xs text-warn" data-testid="ai-flag">
-      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-      <span>要確認: {text}</span>
-    </p>
-  );
-}
-
 /** 一致が不確実なマスターの候補（近い順）。選ぶと選択済みになる。自動では確定しない */
 function CandidateButtons({ label, names, onPick }: { label: string; names: string[]; onPick: (index: number) => void }) {
   if (names.length === 0) return null;
@@ -94,11 +84,14 @@ function SourceTag({ source }: { source?: FieldSource }) {
  * 日付と時刻の入力。空欄=不明 / 日付のみ=日付のみ / 日付+時刻=日時（事前の精度選択は不要）。
  * 時刻は任意で、未入力と 0:00 は区別される。時刻を推測で補わない。
  */
-function FlexField({ label, value, onChange }: { label: string; value: FlexInput; onChange: (v: FlexInput) => void }) {
+function FlexField({ label, value, onChange, chip }: { label: string; value: FlexInput; onChange: (v: FlexInput) => void; chip?: React.ReactNode }) {
   const timeOnly = value.precision === "unknown" && value.time !== "";
   return (
     <div className="min-w-0 text-sm">
-      <span className="block text-[13px] font-medium">{label}</span>
+      <span className="flex items-center gap-1 text-[13px] font-medium">
+        {label}
+        {chip}
+      </span>
       <div className="mt-1 grid grid-cols-[minmax(0,1fr)_4.6rem] gap-1">
         <input
           type="date"
@@ -148,6 +141,7 @@ function emptyInput(data: AppData): LotteryInput {
     applyStart: EMPTY_FLEX,
     applyDeadline: EMPTY_FLEX,
     resultDate: EMPTY_FLEX,
+    procedureStart: EMPTY_FLEX,
     procedureDeadline: EMPTY_FLEX,
     receiveMethod: d.receiveMethod,
     applyMethod: d.applyMethod,
@@ -184,6 +178,7 @@ function fromLottery(l: Lottery, data: AppData): LotteryInput {
     applyStart: flexToInput(l.applyStart),
     applyDeadline: flexToInput(l.applyDeadline),
     resultDate: flexToInput(l.resultDate),
+    procedureStart: flexToInput(l.procedureStart),
     procedureDeadline: flexToInput(l.procedureDeadline),
     receiveMethod: l.receiveMethod,
     applyMethod: l.applyMethod,
@@ -209,11 +204,81 @@ function sourcesFromLottery(l: Lottery | null): Record<string, FieldSource> {
 
 /**
  * 抽選の登録・編集（下から開くパネル）。
- *  - 入力は端末内に下書き保存され、最小化・閉じる・再読込のあとも復元できる（登録完了で削除）。
+ *  - 上部のハンドルを下へスワイプすると最小化し、一覧を見ながら入力を保持できる（下部の再開バーのタップ／上スワイプで再開）。
+ *    入力内容は画面内の状態としてだけ保持し、再読み込みで破棄する（長期の下書き保存はしない）。
  *  - 応募期限が過去でも保存でき、新規登録時は応募済み／当選／落選まで同時に登録できる。
  *  - 日時は空欄=不明・日付のみ・日付+時刻。応募方法・受取方法の初期値は「未確認」として区別して保存する。
  *  - 編集中に他の端末で更新された場合は、保存前に気づけるよう警告する。
  */
+/** 最小化中の再開バー。タップ・上へのスワイプ・Enter/Space で再開。右端の×で破棄（入力があれば確認） */
+function MinimizedBar({
+  title,
+  summary,
+  dirty,
+  onResume,
+  onDiscard,
+  confirming,
+  setConfirming,
+}: {
+  title: string;
+  summary: string;
+  dirty: boolean;
+  onResume: () => void;
+  onDiscard: () => void;
+  confirming: boolean;
+  setConfirming: (v: boolean) => void;
+}) {
+  const start = useRef<{ y: number; moved: boolean } | null>(null);
+  return (
+    <div
+      data-testid="form-minimized"
+      className="fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom)+0.5rem)] z-40 rounded-xl border border-primary bg-card shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
+    >
+      {confirming ? (
+        <div role="alert" className="flex items-center gap-2 p-2 text-sm">
+          <span className="min-w-0 flex-1">入力中の内容を破棄しますか？</span>
+          <Button size="sm" variant="danger" onClick={onDiscard} data-testid="form-minimized-discard-ok">
+            破棄
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+            続ける
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center">
+          <button
+            type="button"
+            aria-label={`${title}を再開（タップまたは上へスワイプ）`}
+            onClick={() => {
+              if (!start.current?.moved) onResume();
+            }}
+            onPointerDown={(e) => {
+              start.current = { y: e.clientY, moved: false };
+            }}
+            onPointerMove={(e) => {
+              if (start.current && start.current.y - e.clientY > 8) start.current.moved = true;
+            }}
+            onPointerUp={(e) => {
+              if (start.current && start.current.y - e.clientY > 30) onResume();
+            }}
+            className="flex min-h-12 min-w-0 flex-1 touch-pan-x items-center gap-2 px-3 text-left"
+          >
+            <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs text-muted-foreground">{title}（入力途中）</span>
+              <span className="block truncate text-sm font-medium">{summary}</span>
+            </span>
+            <span className="shrink-0 text-xs font-bold text-primary">再開</span>
+          </button>
+          <button type="button" aria-label="入力を破棄" onClick={() => (dirty ? setConfirming(true) : onDiscard())} className="flex size-11 shrink-0 items-center justify-center text-muted-foreground" data-testid="form-minimized-discard">
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LotteryFormDialog({
   open,
   onOpenChange,
@@ -226,7 +291,6 @@ export function LotteryFormDialog({
 }) {
   const { data, actions, reload } = useApp();
   const isEdit = lottery !== null;
-  const draftKey = lottery?.id ?? "new";
   // 編集を始めた時点の更新日時。保存の直前に最新と比べ、他の端末で更新されていないか確認する
   const [baseVersion, setBaseVersion] = useState<string | null>(lottery?.updatedAt ?? null);
   const freshRef = useRef<{ data: AppData; lottery: Lottery } | null>(null);
@@ -240,33 +304,26 @@ export function LotteryFormDialog({
   }, []);
   const [initialFp, setInitialFp] = useState(() => fingerprint({ i: initial.input, u: initial.urlsText }));
 
-  // 下書きの復元（新規: 常に復元。編集: 下書きの作成後に抽選が更新されていなければ復元、更新されていれば確認）
-  const restored = useMemo(() => {
-    const d = loadDraft(draftKey);
-    if (!d) return { draft: null as FormDraft | null, stale: false };
-    const stale = isEdit && d.base !== baseVersion;
-    return { draft: d, stale };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const useDraftNow = restored.draft !== null && !restored.stale;
-
-  const [v, setV] = useState<LotteryInput>(() => (useDraftNow ? restored.draft!.input : initial.input));
-  const [urlsText, setUrlsText] = useState(() => (useDraftNow ? restored.draft!.urlsText : initial.urlsText));
-  const [sources, setSources] = useState<Record<string, FieldSource>>(() => (useDraftNow ? restored.draft!.sources : initial.sources));
-  const [staleDraft, setStaleDraft] = useState<FormDraft | null>(restored.stale ? restored.draft : null);
-  const [draftRestored, setDraftRestored] = useState(useDraftNow);
+  const [v, setV] = useState<LotteryInput>(() => initial.input);
+  const [urlsText, setUrlsText] = useState(() => initial.urlsText);
+  const [sources, setSources] = useState<Record<string, FieldSource>>(() => initial.sources);
   const [minimized, setMinimized] = useState(false);
-  const [pending, setPending] = useState<null | "close" | "reset">(null);
+  const [pending, setPending] = useState<null | "discard" | "reset">(null);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(() => (useDraftNow ? restored.draft!.input.multiMode !== "single" : initial.input.multiMode !== "single"));
+  const [detailsOpen, setDetailsOpen] = useState(() => initial.input.multiMode !== "single");
   const [flags, setFlags] = useState<Partial<Record<FieldKey, string>>>({});
+  const [evidence, setEvidence] = useState<Partial<Record<FieldKey, FlagEvidence>>>({});
+  const [generalNotes, setGeneralNotes] = useState<string[]>([]);
+  /** 展開中の「要確認」の詳細（一度に1項目） */
+  const [openFlag, setOpenFlag] = useState<FieldKey | null>(null);
   const [modePending, setModePending] = useState(false);
   const [duplicates, setDuplicates] = useState<DraftDuplicate[]>([]);
   const [dupAck, setDupAck] = useState(false);
   const [aiFilled, setAiFilled] = useState(false);
+  const [discardOnBar, setDiscardOnBar] = useState(false);
   // AI読み取りから入力したときの、解析の実行IDとフォームに入力した直後の値（登録時にAIの抽出結果との比較を1回だけ記録する）
   const [aiRun, setAiRun] = useState<{ runId: string; filled: LotteryInput } | null>(null);
   const [reason, setReason] = useState<FeedbackReason | "">("");
@@ -275,39 +332,12 @@ export function LotteryFormDialog({
 
   const dirty = fingerprint({ i: v, u: urlsText }) !== initialFp;
 
-  // 入力のたびに下書きを保存（変更がなければ下書きを残さない）。ページを離れる直前にも書き出す
-  const latest = useRef({ v, urlsText, sources, dirty, base: baseVersion });
+  // 以前の版が端末に残した長期の下書きは不要になったので、一度だけ消す
   useEffect(() => {
-    latest.current = { v, urlsText, sources, dirty, base: baseVersion };
-  });
-  const flush = useCallback(() => {
-    const s = latest.current;
-    if (s.dirty) saveDraft(draftKey, { input: s.v, urlsText: s.urlsText, sources: s.sources, base: s.base });
-    else clearDraft(draftKey);
-  }, [draftKey]);
-  const closedRef = useRef(false);
-  useEffect(() => {
-    if (closedRef.current) return;
-    const t = window.setTimeout(flush, 300);
-    return () => window.clearTimeout(t);
-  }, [v, urlsText, sources, flush]);
-  useEffect(() => {
-    const onHide = () => {
-      if (!closedRef.current) flush();
-    };
-    window.addEventListener("pagehide", onHide);
-    document.addEventListener("visibilitychange", onHide);
-    return () => {
-      window.removeEventListener("pagehide", onHide);
-      document.removeEventListener("visibilitychange", onHide);
-    };
-  }, [flush]);
+    purgeLegacyDrafts();
+  }, []);
 
-  const finish = (discard: boolean) => {
-    closedRef.current = true;
-    if (discard) clearDraft(draftKey);
-    onOpenChange(false);
-  };
+  const finish = () => onOpenChange(false);
 
   const applyDraft = (d: LotteryDraft, runId: string | null = null) => {
     const next = { ...d.input };
@@ -325,6 +355,9 @@ export function LotteryFormDialog({
     setUrlsText(d.input.sourceUrls.join("\n"));
     setSources(src);
     setFlags(d.flags);
+    setEvidence(d.evidence);
+    setGeneralNotes(d.generalNotes);
+    setOpenFlag(null);
     setModePending(d.modePending);
     setDetailsOpen(d.modePending || next.multiMode !== "single");
     setDuplicates(d.duplicates);
@@ -435,7 +468,7 @@ export function LotteryFormDialog({
     }
     const res = await actions.saveLottery(lottery?.id ?? null, input);
     setSaving(false);
-    if (res.ok) finish(true);
+    if (res.ok) finish();
     else setError(res.error);
   };
 
@@ -452,7 +485,6 @@ export function LotteryFormDialog({
     setInitialFp(fingerprint({ i: input, u: urls }));
     setConflict(false);
     setError(null);
-    clearDraft(draftKey);
   };
 
   const reset = () => {
@@ -470,45 +502,41 @@ export function LotteryFormDialog({
     setConflict(false);
     setError(null);
     setPending(null);
-    setDraftRestored(false);
-    clearDraft(draftKey);
+    setEvidence({});
+    setGeneralNotes([]);
+    setOpenFlag(null);
   };
 
+  /** 項目名の横の「要確認」の印と、その下に出す詳細 */
+  const flagChip = (k: FieldKey, label: string) => <FlagChip text={flags[k]} open={openFlag === k} onToggle={() => setOpenFlag(openFlag === k ? null : k)} panelId={`flag-${k}`} label={label} />;
+  const flagPanel = (k: FieldKey) => <FlagPanel id={`flag-${k}`} text={flags[k]} evidence={evidence[k]} open={openFlag === k} />;
+  const flagCount = Object.values(flags).filter(Boolean).length;
   const title = isEdit ? "抽選を編集" : "抽選を登録";
   const summary = [v.chain.name, v.store.name].filter(Boolean).join(" ") || "（系列・店舗 未入力）";
 
   return (
     <>
       <Sheet open={open && !minimized} onOpenChange={(o) => !o && setMinimized(true)}>
-        <SheetContent aria-describedby="lottery-form-desc" data-testid="lottery-form" onOpenAutoFocus={(e) => e.preventDefault()}>
-          <div className="flex items-center gap-1 px-4 pb-2 pt-1">
+        <SheetContent aria-describedby="lottery-form-desc" data-testid="lottery-form" onOpenAutoFocus={(e) => e.preventDefault()} onSwipeDismiss={() => setMinimized(true)}>
+          <div className="flex items-center gap-1 px-4 pb-2">
             <div className="min-w-0 flex-1">
               <SheetTitle>{title}</SheetTitle>
               <SheetDescription id="lottery-form-desc" className="truncate">
-                未登録の系列・店舗・商品は名称を入力するだけで仮登録されます。入力は自動で下書き保存されます。
+                未登録の系列・店舗・商品は名称を入力するだけで仮登録されます。
               </SheetDescription>
             </div>
             <button type="button" onClick={() => setPending("reset")} aria-label="入力をリセット" className="flex size-10 items-center justify-center rounded-md hover:bg-muted">
               <RotateCcw className="size-[18px]" aria-hidden="true" />
             </button>
-            <button type="button" onClick={() => setMinimized(true)} aria-label="最小化（入力は保持されます）" className="flex size-10 items-center justify-center rounded-md hover:bg-muted">
-              <ChevronDown className="size-5" aria-hidden="true" />
-            </button>
-            <button type="button" onClick={() => (dirty ? setPending("close") : finish(true))} aria-label="閉じる" className="flex size-10 items-center justify-center rounded-md hover:bg-muted">
-              <X className="size-5" aria-hidden="true" />
-            </button>
           </div>
 
           {pending && (
             <div role="alert" className="mx-4 mb-2 space-y-2 rounded-md border border-warn p-2 text-sm" data-testid="form-confirm">
-              {pending === "close" ? (
+              {pending === "discard" ? (
                 <>
-                  <p>入力中の内容があります。どうしますか？</p>
+                  <p>入力中の内容を破棄して閉じます。よろしいですか？</p>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => finish(false)}>
-                      下書きとして残して閉じる
-                    </Button>
-                    <Button size="sm" variant="danger" onClick={() => finish(true)}>
+                    <Button size="sm" variant="danger" onClick={finish}>
                       破棄して閉じる
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setPending(null)}>
@@ -534,52 +562,14 @@ export function LotteryFormDialog({
 
           <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
             <SheetBody className="space-y-3 border-t pt-3">
-              {draftRestored && (
-                <p className="rounded-md bg-muted p-2 text-xs" data-testid="draft-restored">
-                  前回の入力途中の内容を復元しました。
-                </p>
-              )}
-              {staleDraft && (
-                <div className="space-y-1 rounded-md border border-warn p-2 text-xs" role="alert" data-testid="draft-stale">
-                  <p>この抽選は、以前の下書きを作ったあとに更新されています。下書きを使うと、その後の更新を上書きする可能性があります。</p>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setV(staleDraft.input);
-                        setUrlsText(staleDraft.urlsText);
-                        setSources(staleDraft.sources);
-                        setStaleDraft(null);
-                        setDraftRestored(true);
-                      }}
-                    >
-                      下書きの内容を使う
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        clearDraft(draftKey);
-                        setStaleDraft(null);
-                      }}
-                    >
-                      下書きを捨てる
-                    </Button>
-                  </div>
-                </div>
-              )}
-
               {!isEdit && (
                 <div className="space-y-1">
                   <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => setAiOpen(true)} data-testid="ai-open">
                     <Sparkles className="size-4 text-primary" aria-hidden="true" /> AIで読み取る（文章・画像・URL）
                   </Button>
                   {aiFilled && (
-                    <p className="text-xs text-muted-foreground" data-testid="ai-filled-note">
-                      AIの読み取り結果を入力しました。内容は候補です。「要確認」の項目を含め、必ず確認・修正してから保存してください。
+                    <p className="text-[11px] text-muted-foreground" data-testid="ai-filled-note">
+                      AIの読み取り結果を入力しました{flagCount > 0 ? `（要確認 ${flagCount}件）` : ""}。保存前に確認してください。
                     </p>
                   )}
                 </div>
@@ -612,21 +602,27 @@ export function LotteryFormDialog({
               {/* 1. 系列・店舗 */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">系列</span>
+                  <span className="flex items-center gap-1 text-[13px] font-medium">
+                    系列
+                    {flagChip("chain", "系列")}
+                  </span>
                   <MasterCombobox label="系列" value={v.chain} disabled={isEdit} options={chainOptions} onChange={chooseChain} />
                 </div>
                 <div className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">店舗</span>
+                  <span className="flex items-center gap-1 text-[13px] font-medium">
+                    店舗
+                    {flagChip("store", "店舗")}
+                  </span>
                   <MasterCombobox label="店舗" value={v.store} options={storeOptions} onChange={(store) => set("store", { ...store, prefecture: store.id ? "" : (v.store.prefecture ?? "") })} />
                 </div>
               </div>
-              {(flags.chain || flags.store) && (
+              {(openFlag === "chain" || openFlag === "store" || (!v.chain.id && candidates.chain.length > 0) || (!v.store.id && candidates.store.length > 0)) && (
                 <div>
-                  <FlagNote text={flags.chain && `系列: ${flags.chain}`} />
+                  {flagPanel("chain")}
                   {!v.chain.id && (
                     <CandidateButtons label="系列の候補" names={candidates.chain.map((c) => c.name)} onPick={(i) => chooseChain({ id: candidates.chain[i].id, name: candidates.chain[i].name })} />
                   )}
-                  <FlagNote text={flags.store && `店舗: ${flags.store}`} />
+                  {flagPanel("store")}
                   {!v.store.id && (
                     <CandidateButtons label="店舗の候補" names={candidates.store.map((c) => c.name)} onPick={(i) => set("store", { id: candidates.store[i].id, name: candidates.store[i].name, prefecture: "" })} />
                   )}
@@ -635,9 +631,12 @@ export function LotteryFormDialog({
 
               {/* 2. 対象商品・数量 */}
               <fieldset className="space-y-1.5">
-                <legend className="text-[13px] font-medium">対象商品・数量{multi && "（2商品以上）"}</legend>
+                <legend className="flex items-center gap-1 text-[13px] font-medium">
+                  対象商品・数量{multi && "（2商品以上）"}
+                  {flagChip("items", "商品")}
+                </legend>
                 {v.items.map((it, i) => (
-                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_3.4rem_4.6rem_auto] items-start gap-1">
+                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_3.4rem_4.6rem_auto] items-start gap-1" data-testid="item-row">
                     <MasterCombobox
                       label={`商品${i + 1}`}
                       value={it.product}
@@ -651,13 +650,13 @@ export function LotteryFormDialog({
                       aria-label={`数量${i + 1}`}
                       value={it.quantity}
                       onChange={(e) => set("items", v.items.map((x, j) => (j === i ? { ...x, quantity: Number(e.target.value) } : x)))}
-                      className="mt-1 min-h-11 min-w-0 rounded-md border bg-input px-1 text-center text-sm"
+                      className="mt-0 h-11 min-w-0 rounded-md border bg-input px-1 text-center text-sm"
                     />
                     <Select
                       label={`単位${i + 1}`}
                       value={it.unit}
                       onChange={(unit) => set("items", v.items.map((x, j) => (j === i ? { ...x, unit } : x)))}
-                      className="px-1"
+                      className="mt-0 h-11 px-1"
                       options={[
                         { value: "box", label: "BOX" },
                         { value: "pack", label: "パック" },
@@ -665,7 +664,7 @@ export function LotteryFormDialog({
                       ]}
                     />
                     {multi && v.items.length > 2 ? (
-                      <Button type="button" variant="ghost" size="icon" className="mt-1 size-11" aria-label={`商品${i + 1}を削除`} onClick={() => set("items", v.items.filter((_, j) => j !== i))}>
+                      <Button type="button" variant="ghost" size="icon" className="mt-0 size-11" aria-label={`商品${i + 1}を削除`} onClick={() => set("items", v.items.filter((_, j) => j !== i))}>
                         <Trash2 className="size-4" />
                       </Button>
                     ) : (
@@ -673,7 +672,7 @@ export function LotteryFormDialog({
                     )}
                   </div>
                 ))}
-                <FlagNote text={flags.items} />
+                {flagPanel("items")}
                 {v.items.map((it, i) =>
                   !it.product.id && candidates.items[i]?.length ? (
                     <CandidateButtons
@@ -705,29 +704,35 @@ export function LotteryFormDialog({
               {/* 3-4. 日時（2カラム） */}
               <div className="grid grid-cols-2 gap-x-2 gap-y-2">
                 <div>
-                  <FlexField label="応募開始" value={v.applyStart} onChange={(x) => set("applyStart", x)} />
-                  <FlagNote text={flags.applyStart} />
+                  <FlexField label="応募開始" value={v.applyStart} onChange={(x) => set("applyStart", x)} chip={flagChip("applyStart", "応募開始")} />
+                  {flagPanel("applyStart")}
                 </div>
                 <div>
-                  <FlexField label="応募締切" value={v.applyDeadline} onChange={(x) => set("applyDeadline", x)} />
-                  <FlagNote text={flags.applyDeadline} />
+                  <FlexField label="応募締切" value={v.applyDeadline} onChange={(x) => set("applyDeadline", x)} chip={flagChip("applyDeadline", "応募締切")} />
+                  {flagPanel("applyDeadline")}
                 </div>
                 <div>
-                  <FlexField label="当選発表" value={v.resultDate} onChange={(x) => set("resultDate", x)} />
-                  <FlagNote text={flags.resultDate} />
+                  <FlexField label="当選発表" value={v.resultDate} onChange={(x) => set("resultDate", x)} chip={flagChip("resultDate", "当選発表")} />
+                  {flagPanel("resultDate")}
+                </div>
+                <span aria-hidden="true" />
+                <div>
+                  <FlexField label="購入・受取開始" value={v.procedureStart ?? EMPTY_FLEX} onChange={(x) => set("procedureStart", x)} chip={flagChip("procedureStart", "購入・受取開始")} />
+                  {flagPanel("procedureStart")}
                 </div>
                 <div>
-                  <FlexField label="購入・受取期限" value={v.procedureDeadline} onChange={(x) => set("procedureDeadline", x)} />
-                  <FlagNote text={flags.procedureDeadline} />
+                  <FlexField label="購入・受取終了" value={v.procedureDeadline} onChange={(x) => set("procedureDeadline", x)} chip={flagChip("procedureDeadline", "購入・受取終了")} />
+                  {flagPanel("procedureDeadline")}
                 </div>
               </div>
 
               {/* 5. 応募方法・受取方法（初期値は未確認の仮設定） */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">
+                  <span className="flex items-center gap-1 text-[13px] font-medium">
                     応募方法
                     <SourceTag source={sources.applyMethod} />
+                    {flagChip("applyMethod", "応募方法")}
                   </span>
                   <Select
                     label="応募方法"
@@ -743,9 +748,10 @@ export function LotteryFormDialog({
                   />
                 </div>
                 <div className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">
+                  <span className="flex items-center gap-1 text-[13px] font-medium">
                     受取方法
                     <SourceTag source={sources.receiveMethod} />
+                    {flagChip("receiveMethod", "受取方法")}
                   </span>
                   <Select
                     label="受取方法"
@@ -764,18 +770,20 @@ export function LotteryFormDialog({
               {(sources.applyMethod === "default" || sources.receiveMethod === "default") && (
                 <p className="text-[11px] text-muted-foreground">点線の欄は初期値（未確認）です。内容を確認して選び直すと確認済みになります。</p>
               )}
-              {(flags.applyMethod || flags.receiveMethod || flags.limit) && (
+              {(openFlag === "applyMethod" || openFlag === "receiveMethod") && (
                 <div>
-                  <FlagNote text={flags.applyMethod && `応募方法: ${flags.applyMethod}`} />
-                  <FlagNote text={flags.receiveMethod && `受取方法: ${flags.receiveMethod}`} />
-                  <FlagNote text={flags.limit && `応募制限: ${flags.limit}`} />
+                  {flagPanel("applyMethod")}
+                  {flagPanel("receiveMethod")}
                 </div>
               )}
 
               {/* 6. URL */}
               <div className="grid grid-cols-2 gap-2">
                 <label className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">発表方法</span>
+                  <span className="flex items-center gap-1 text-[13px] font-medium">
+                    発表方法
+                    {flagChip("announcement", "発表方法")}
+                  </span>
                   <input value={v.announcementMethod} onChange={(e) => set("announcementMethod", e.target.value)} className={field} placeholder="メール等" />
                 </label>
                 <label className="min-w-0 text-sm">
@@ -783,6 +791,7 @@ export function LotteryFormDialog({
                   <input value={v.announcementUrl} onChange={(e) => set("announcementUrl", e.target.value)} className={field} inputMode="url" placeholder="https://" />
                 </label>
               </div>
+              {flagPanel("announcement")}
               <label className="block text-sm">
                 <span className="text-[13px] font-medium">情報源URL（1行に1つ）</span>
                 <textarea value={urlsText} onChange={(e) => setUrlsText(e.target.value)} rows={1} className={cn(field, "py-2")} />
@@ -790,13 +799,19 @@ export function LotteryFormDialog({
 
               {/* 7. 応募条件・制限 */}
               <label className="block text-sm">
-                <span className="text-[13px] font-medium">応募条件</span>
+                <span className="flex items-center gap-1 text-[13px] font-medium">
+                  応募条件
+                  {flagChip("conditions", "応募条件")}
+                </span>
                 <textarea value={v.conditionsText} onChange={(e) => set("conditionsText", e.target.value)} rows={2} className={cn(field, "py-2")} />
-                <FlagNote text={flags.conditions} />
               </label>
+              {flagPanel("conditions")}
               <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-2">
                 <label className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">応募制限</span>
+                  <span className="flex items-center gap-1 text-[13px] font-medium">
+                    応募制限
+                    {flagChip("limit", "応募制限")}
+                  </span>
                   <Select
                     label="応募制限"
                     value={v.limitBasis}
@@ -815,6 +830,7 @@ export function LotteryFormDialog({
                   <input type="number" min={1} max={99} value={v.limitMaxCount} onChange={(e) => set("limitMaxCount", Number(e.target.value))} className={cn(field, "text-center")} />
                 </label>
               </div>
+              {flagPanel("limit")}
 
               {/* 8-9. 詳細設定（抽選方式・キャンペーン・状態・本人確認・メモ） */}
               <details open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded-lg border" data-testid="form-details">
@@ -825,7 +841,10 @@ export function LotteryFormDialog({
                 <div className="space-y-3 border-t p-3">
                   <div className="text-sm">
                     <label className="block">
-                      <span className="text-[13px] font-medium">抽選の方式</span>
+                      <span className="flex items-center gap-1 text-[13px] font-medium">
+                        抽選の方式
+                        {flagChip("multiMode", "抽選の方式")}
+                      </span>
                       <select
                         ref={modeRef}
                         aria-label="抽選の方式"
@@ -841,7 +860,7 @@ export function LotteryFormDialog({
                         ))}
                       </select>
                     </label>
-                    <FlagNote text={flags.multiMode} />
+                    {flagPanel("multiMode")}
                     <p className="mt-0.5 text-xs text-muted-foreground">商品ごとに独立して応募する告知（方式E）は、商品ごとに別の抽選として登録してください。</p>
                   </div>
                   <label className="block text-sm">
@@ -938,6 +957,16 @@ export function LotteryFormDialog({
                 </fieldset>
               )}
 
+              {generalNotes.length > 0 && (
+                <details className="rounded-lg border text-xs" data-testid="ai-general-notes">
+                  <summary className="flex min-h-10 cursor-pointer items-center px-3">AIの読み取りについての補足（{generalNotes.length}件）</summary>
+                  <ul className="list-disc space-y-0.5 border-t p-3 pl-7">
+                    {generalNotes.map((n, i) => (
+                      <li key={i}>{n}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               {aiRun && !isEdit && (
                 <details className="rounded-lg border" data-testid="ai-reason">
                   <summary className="flex min-h-10 cursor-pointer items-center px-3 text-sm">AI読み取りの修正理由（任意）</summary>
@@ -971,9 +1000,8 @@ export function LotteryFormDialog({
               )}
             </SheetBody>
             <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-              <span className="mr-auto truncate text-xs text-muted-foreground">{dirty ? "下書き保存中" : ""}</span>
-              <Button type="button" variant="outline" onClick={() => setMinimized(true)}>
-                最小化
+              <Button type="button" variant="outline" className="mr-auto" onClick={() => (dirty ? setPending("discard") : finish())} data-testid="form-discard">
+                破棄
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? "保存中…" : "保存"}
@@ -984,21 +1012,9 @@ export function LotteryFormDialog({
         {aiOpen && <AiImportDialog open onOpenChange={setAiOpen} onApply={applyDraft} />}
       </Sheet>
 
-      {/* 最小化中: 抽選一覧を見ながら、タップで入力を再開できる */}
+      {/* 最小化中: 抽選一覧を見ながら、タップまたは上へのスワイプで入力を再開できる */}
       {open && minimized && (
-        <button
-          type="button"
-          onClick={() => setMinimized(false)}
-          data-testid="form-minimized"
-          className="fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom)+0.5rem)] z-40 flex min-h-12 items-center gap-2 rounded-xl border border-primary bg-card px-3 text-left shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
-        >
-          <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs text-muted-foreground">{title}（入力途中）</span>
-            <span className="block truncate text-sm font-medium">{summary}</span>
-          </span>
-          <span className="shrink-0 text-xs font-bold text-primary">再開</span>
-        </button>
+        <MinimizedBar title={title} summary={summary} dirty={dirty} onResume={() => setMinimized(false)} onDiscard={finish} confirming={discardOnBar} setConfirming={setDiscardOnBar} />
       )}
     </>
   );

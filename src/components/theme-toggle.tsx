@@ -1,6 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
+import { useApp } from "@/components/app-provider";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ const OPTIONS = [
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
+  const { saveSettings } = useApp();
   const [mounted, setMounted] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR差異を避けるためマウント後に表示
   useEffect(() => setMounted(true), []);
@@ -25,7 +27,10 @@ export function ThemeToggle() {
             type="button"
             role="radio"
             aria-checked={selected}
-            onClick={() => setTheme(o.value)}
+            onClick={() => {
+              setTheme(o.value);
+              void saveSettings({ theme: o.value });
+            }}
             className={cn(
               "min-h-10 rounded px-3 text-sm",
               selected ? "bg-primary text-primary-foreground" : "hover:bg-muted",

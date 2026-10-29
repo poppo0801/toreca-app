@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 3100;
+// E2E_PORT で変更できる（他のアプリが3100を使っているときに、そのプロセスを止めないため）
+const PORT = Number(process.env.E2E_PORT) || 3100;
 /** mock: ローカルモック（認証なし） / supabase: 実Supabaseへのログインフロー（scripts/run-e2e-supabase.mjs 経由） */
 const mode = process.env.E2E_MODE === "supabase" ? "supabase" : "mock";
 /** 本番などデプロイ済みのURLに対して実行する場合に指定（ローカルのビルド・起動は行わない） */
@@ -22,6 +23,8 @@ export default defineConfig({
     url: `http://localhost:${PORT}`,
     // 別モードのビルドを使い回さない
     reuseExistingServer: false,
+    stdout: "pipe",
+    stderr: "pipe",
     timeout: 240_000,
     // AI読み取りはテストではモックエンジン（固定のサンプル）を使う。実際のAI APIは呼ばない
     env: { NEXT_PUBLIC_DATA_SOURCE: mode, AI_PROVIDER: "mock" },

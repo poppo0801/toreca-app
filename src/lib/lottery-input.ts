@@ -85,6 +85,7 @@ export const lotteryInputSchema = z.object({
   applyStart: flexInputSchema,
   applyDeadline: flexInputSchema,
   resultDate: flexInputSchema,
+  procedureStart: flexInputSchema.default({ precision: "unknown", date: "", time: "" }),
   procedureDeadline: flexInputSchema,
   receiveMethod: z.enum(["store", "shipping", "either", "unknown"]),
   applyMethod: z.enum(["web", "store", "app", "unknown"]),
@@ -118,6 +119,16 @@ export const lotteryInputSchema = z.object({
       reason: z.enum(["ai_wrong", "other_source", "official_name", "other"]).nullable().default(null),
     })
     .optional(),
+}).superRefine((v, ctx) => {
+  // 購入・受取の期間: 開始が終了より後ろなら保存できない（日付のみ・日時が混在するときは日付で比べる）
+  const s = v.procedureStart;
+  const e = v.procedureDeadline;
+  if (s.precision !== "unknown" && e.precision !== "unknown" && s.date && e.date) {
+    const both = s.precision === "date_time" && e.precision === "date_time";
+    const a = both ? `${s.date}T${s.time}` : s.date;
+    const b = both ? `${e.date}T${e.time}` : e.date;
+    if (a > b) ctx.addIssue({ code: "custom", message: "購入・受取の開始が終了より後になっています", path: ["procedureStart"] });
+  }
 });
 export type LotteryInput = z.input<typeof lotteryInputSchema>;
 

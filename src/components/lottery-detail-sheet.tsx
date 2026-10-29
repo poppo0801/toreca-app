@@ -10,7 +10,7 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { STATUS_META, StatusIcon } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { formatFlexible, remainingBadge } from "@/lib/datetime";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
@@ -100,7 +100,6 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
             >
               <Star className={cn("size-5", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
             </button>
-            <SheetClose className="min-h-10 shrink-0 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted">閉じる</SheetClose>
           </div>
 
           <SheetBody data-testid="lottery-detail" className="space-y-4 border-t pt-3">
@@ -149,7 +148,11 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 {remaining && event !== "closed" && <Chip className={cn("ml-1 font-bold", LEVEL_CLASS[remaining.level])}>{remaining.label}</Chip>}
               </Field>
               <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : formatFlexible(lottery.resultDate)}</Field>
-              <Field label="購入・受取期限">{lottery.procedureDeadline.precision === "unknown" ? DASH : formatFlexible(lottery.procedureDeadline)}</Field>
+              <Field label="購入・受取期間">
+                {lottery.procedureStart.precision === "unknown" && lottery.procedureDeadline.precision === "unknown"
+                  ? DASH
+                  : `${lottery.procedureStart.precision === "unknown" ? "" : formatFlexible(lottery.procedureStart)}〜${lottery.procedureDeadline.precision === "unknown" ? "" : formatFlexible(lottery.procedureDeadline)}`}
+              </Field>
             </dl>
 
             {/* 3. 方法 */}

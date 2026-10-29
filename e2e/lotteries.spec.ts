@@ -155,8 +155,13 @@ test("タブ・詳細・マトリクスを切り替えられる", async ({ page 
   await page.getByRole("tab", { name: /当選/ }).click();
   await expect(page.getByRole("button", { name: "購入済み" }).first()).toBeVisible();
   await page.getByRole("tab", { name: /★管理対象/ }).click();
+  // 既定は詳細表示。シンプルにするとコンパクトな1行カード（★・小さな画像・店名・商品名・自分の応募状態）になる
+  await expect(page.getByTestId("card-simple")).toHaveCount(0);
+  await page.getByRole("button", { name: "シンプル表示にする" }).click();
+  await expect(page.getByRole("button", { name: "詳細表示にする" })).toBeVisible();
+  await expect(page.getByTestId("card-simple").first()).toBeVisible();
   await page.getByRole("button", { name: "詳細表示にする" }).click();
-  await expect(page.getByRole("button", { name: "シンプル表示にする" })).toBeVisible();
+  await expect(page.getByTestId("card-simple")).toHaveCount(0);
   await page.getByRole("button", { name: "応募マトリクスにする" }).click();
   await expect(page.getByTestId("matrix")).toBeVisible();
 });
@@ -187,7 +192,10 @@ test("カードは商品画像を左に大きく表示し、タップで詳細�
       })
       .toBeLessThan(2); // 開くアニメーションの完了を待つ
   }
-  await sheet.getByRole("button", { name: "閉じる" }).click();
+  // 右上の閉じるボタンは無い。上部のハンドルのタップ（スマホ）／Esc・背景タップで閉じる
+  await expect(sheet.getByRole("button", { name: "閉じる", exact: true })).toHaveCount(0);
+  if (vp.width < 768) await sheet.getByTestId("sheet-handle").click();
+  else await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
   await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - y0)).toBeLessThan(4);
 });
@@ -230,20 +238,21 @@ test("名称はトレマネ。ヘッダー・ページタイトル・PWAの表�
   }
 });
 
-test("複数商品の抽選は、シンプル表示では「＋他N商品」、詳細表示と詳細パネルでは全商品と方式を確認できる", async ({ page }) => {
+test("複数商品の抽選は、詳細表示では全商品、シンプル表示では「＋他N商品」。詳細パネルでも全商品と方式を確認できる", async ({ page }) => {
   const card = page.locator('[data-lottery-id="L3"]');
-  await expect(card).toContainText("＋他1商品");
-  await expect(card.getByTestId("lottery-items")).not.toContainText("ほしぞら");
+  // 既定の詳細表示: カード上に全商品が並ぶ
+  await expect(card).not.toContainText("＋他1商品");
+  await expect(card.getByTestId("lottery-items")).toContainText("ほしぞら");
   await card.getByRole("button", { name: /の詳細を開く/ }).click();
   const detail = page.getByTestId("lottery-detail");
   await expect(detail.getByTestId("lottery-items").getByRole("listitem")).toHaveCount(2);
   await expect(detail.getByTestId("lottery-items")).toContainText("ほしぞら");
   await expect(detail).toContainText("商品ごとに当落");
-  await page.getByTestId("lottery-detail-sheet").getByRole("button", { name: "閉じる" }).click();
-  // 詳細表示に切り替えると、カード上にも全商品が並ぶ
-  await page.getByRole("button", { name: "詳細表示にする" }).click();
-  await expect(card).not.toContainText("＋他1商品");
-  await expect(card.getByTestId("lottery-items")).toContainText("ほしぞら");
+  await page.keyboard.press("Escape");
+  // シンプル表示に切り替えると、代表商品と「＋他N商品」だけになる
+  await page.getByRole("button", { name: "シンプル表示にする" }).click();
+  await expect(card).toContainText("＋他1商品");
+  await expect(card).not.toContainText("ほしぞら");
 });
 
 test("応募済み・当選タブの赤丸は、未対応がある場合に表示される", async ({ page }) => {
@@ -378,25 +387,25 @@ test("対戦記録: 設定から開ける。モックでは保存できない旨
   await expect(page.getByText("マイグレーション")).toBeVisible();
 });
 
-test("抽選カード右上に都道府県と自宅からの直線距離（区分ごとの色）。位置がない店舗では距離を出さない", async ({ page }) => {
-  // 三宮店（自宅の近く）: 兵庫県ラベル＋短い距離
-  const near = page.locator(`[data-lottery-id="L1"]`).or(page.getByTestId("lottery-card").filter({ hasText: "三宮店" }).first());
-  const place = near.first().getByTestId("card-place");
-  await expect(place).toContainText("兵庫県");
-  const d = near.first().getByTestId("card-distance");
-  await expect(d).toHaveText(/^\d+(\.\d)?km$/);
-  // 距離は区分ごとに色が違う（近い=緑、遠い=赤）。東京の店舗は60km以上
+test("抽選カード右上は受取方法で決まる（店頭=受取店舗の都道府県、発送=通販）。カードに距離は出さず、詳細パネルには残る", async ({ page }) => {
   await page.getByRole("tab", { name: /全情報/ }).click();
+  // 店頭受取（三宮店・自宅の近く）: 都道府県。距離はカードに出さない
+  const near = page.getByTestId("lottery-card").filter({ hasText: "三宮店" }).first();
+  await expect(near.getByTestId("card-place")).toContainText("兵庫県");
+  await expect(near.getByTestId("card-place")).not.toContainText("通販");
+  await expect(page.getByTestId("card-distance")).toHaveCount(0);
+  // 受取方法が発送の抽選（L4）は、店舗が登録されていても「通販」
+  const ship = page.locator('[data-lottery-id="L4"]');
+  await expect(ship.getByTestId("card-place")).toHaveText("通販");
+  // 東京の店舗（店頭受取）は都道府県
   const tokyo = page.getByTestId("lottery-card").filter({ hasText: "本店" }).first();
   await expect(tokyo.getByTestId("card-place")).toContainText("東京都");
-  const color = (loc: ReturnType<typeof page.locator>) => loc.evaluate((e) => getComputedStyle(e).color);
-  expect(await color(tokyo.getByTestId("card-distance"))).not.toBe(await color(d.first()));
-  // 詳細パネルでは「直線」と明示（道路距離と混同しない）
+  // 詳細パネルでは位置情報（直線距離・交通費）を引き続き確認できる（道路距離と混同しない表記）
   await tokyo.getByRole("button", { name: /の詳細を開く/ }).click();
   await expect(page.getByTestId("lottery-detail")).toContainText("直線");
   await expect(page.getByTestId("lottery-detail")).toContainText("往復交通費");
-  // 都道府県・距離ラベルは商品画像や締切と重ならない
-  await page.getByTestId("lottery-detail-sheet").getByRole("button", { name: "閉じる" }).click();
+  await page.keyboard.press("Escape");
+  // 受取場所ラベルは商品画像と重ならない
   const [img, pl] = [(await tokyo.getByTestId("card-image").boundingBox())!, (await tokyo.getByTestId("card-place").boundingBox())!];
   expect(pl.x).toBeGreaterThan(img.x + img.width);
 });
@@ -418,7 +427,7 @@ test.describe("起動時のロード画面", () => {
     const splash = page.getByTestId("splash");
     await expect(splash).toBeVisible();
     await expect(splash).toContainText("読み込み中...");
-    await expect(splash.locator("svg").first()).toBeVisible(); // ロゴ
+    await expect(splash.locator("img").first()).toBeVisible(); // ロゴ（原本画像から生成したアイコン）
     const bg = await splash.evaluate((e) => getComputedStyle(e).backgroundColor);
     expect(bg).toBe("rgb(244, 244, 245)"); // ライトの背景。黒ではない
     await page.screenshot({ path: `docs/screenshots/stage45-splash-light.png` });
@@ -467,5 +476,158 @@ test.describe("起動時のロード画面", () => {
     await expect(page.getByTestId("lottery-card").first()).toBeVisible();
     await page.getByRole("tab", { name: /全情報/ }).click();
     expect(await page.evaluate(() => (window as unknown as { __splashSeen: number }).__splashSeen)).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------------ Stage 5D/5E: ヘッダーの設定・下部メニューのカスタマイズ・設定の一覧・設定のコピー
+test.describe("設定とナビゲーション", () => {
+  test("設定はヘッダーの歯車から開く。下部メニューには設定が無く、重ならずに押せる", async ({ page }) => {
+    const gear = page.getByTestId("header-settings");
+    await expect(gear).toBeVisible();
+    const g = (await gear.boundingBox())!;
+    expect(g.width).toBeGreaterThanOrEqual(40);
+    expect(g.height).toBeGreaterThanOrEqual(40);
+    const [bell, chip] = [(await page.getByTestId("notification-bell").boundingBox())!, (await page.getByTestId("current-profile").boundingBox())!];
+    expect(bell.x + bell.width).toBeLessThanOrEqual(chip.x + 1);
+    expect(g.x).toBeGreaterThanOrEqual(chip.x + chip.width - 1);
+    // 下部メニュー（スマホ）/左ナビ（PC）に「設定」は無い
+    await expect(page.getByRole("navigation", { name: "メイン" }).getByRole("link", { name: "設定" })).toHaveCount(0);
+    await gear.click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByTestId("settings-menu")).toBeVisible();
+    // どの主要ページからも開ける
+    await page.goto("/finance");
+    await page.getByTestId("header-settings").click();
+    await expect(page).toHaveURL(/\/settings$/);
+  });
+
+  test("設定は見出しの一覧。小さな項目はアコーディオンで開き、大きな項目は別ページ。以前の項目へ辿れる", async ({ page }) => {
+    await page.goto("/settings");
+    const menu = page.getByTestId("settings-menu");
+    for (const t of ["ユーザー管理", "メニュー・表示設定", "記録・分析", "データ管理・バックアップ", "アプリについて・ログアウト"]) await expect(menu).toContainText(t);
+    // アコーディオン: 開くまで中身は描画されない
+    const acc = page.getByTestId("acc-records");
+    await expect(acc.getByRole("link", { name: "応募実績・当選率" })).toHaveCount(0);
+    await acc.getByRole("button", { name: /記録・分析/ }).click();
+    await expect(acc.getByRole("link", { name: "応募実績・当選率" })).toBeVisible();
+    await expect(acc.getByRole("button", { name: /記録・分析/ })).toHaveAttribute("aria-expanded", "true");
+    // 別ページへ: 戻るリンクで一覧へ
+    await page.getByTestId("menu-display").click();
+    await expect(page).toHaveURL(/\/settings\/display$/);
+    await expect(page.getByTestId("display-settings")).toBeVisible();
+    await page.getByRole("link", { name: "← 設定" }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await page.getByTestId("menu-users").click();
+    await expect(page.getByRole("heading", { name: "ユーザー管理" })).toBeVisible();
+    await expect(page.getByTestId("settings-copy")).toBeVisible();
+  });
+
+  test("動きを減らす設定では、ページ移動のアニメーションが実質無効になる", async ({ browser }) => {
+    const ctx = await browser.newContext({ reducedMotion: "reduce" });
+    const page = await ctx.newPage();
+    await page.goto("/settings/display");
+    await expect(page.getByTestId("display-settings")).toBeVisible();
+    const d = await page.getByTestId("display-settings").evaluate((e) => getComputedStyle(e.parentElement!).animationDuration);
+    expect(parseFloat(d)).toBeLessThan(0.05);
+    await ctx.close();
+  });
+
+  test("下部メニュー: 項目の非表示・並び替え・「その他」。設定はユーザーごとで、ユーザーを切り替えると変わる", async ({ page, isMobile }) => {
+    await page.goto("/settings/display");
+    const order = page.getByTestId("nav-order");
+    await expect(order.locator("li")).toHaveCount(4);
+    await order.getByRole("button", { name: "収支を上へ" }).click();
+    await expect(order.locator("li").nth(1)).toContainText("収支");
+    // 1つ非表示にすると「その他」ができる（隠れた機能へ辿れる）
+    await order.getByRole("button", { name: "対戦記録を表示しない" }).click();
+    await expect(page.getByTestId("nav-hidden")).toContainText("対戦記録");
+    if (isMobile) {
+      const nav = page.getByTestId("bottom-nav");
+      await expect(nav.getByRole("link")).toHaveCount(3);
+      await expect(nav.getByTestId("nav-more")).toBeVisible();
+      await nav.getByTestId("nav-more").click();
+      const more = page.getByTestId("more-sheet");
+      await expect(more.getByRole("link", { name: "対戦記録" })).toBeVisible();
+      await more.getByRole("link", { name: "対戦記録" }).click();
+      await expect(page).toHaveURL(/\/battles$/);
+    }
+    // 別のユーザーは影響を受けない
+    await switchProfile(page, "B");
+    await page.goto("/settings/display");
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(4);
+    await switchProfile(page, "A");
+    await page.goto("/settings/display");
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(3);
+    // 表示していない機能を戻せる。初期の並びにも戻せる
+    await page.getByTestId("nav-hidden").getByRole("button", { name: "対戦記録を表示する" }).click();
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(4);
+    await page.getByRole("button", { name: "初期の並びに戻す" }).click();
+    await expect(page.getByTestId("nav-order").locator("li").nth(1)).toContainText("購入記録");
+  });
+
+  test("コレクション（未実装）はメニュー候補に出ない。すべて直接表示なら「その他」は出ない", async ({ page, isMobile }) => {
+    await page.goto("/settings/display");
+    await expect(page.getByTestId("display-settings")).not.toContainText("コレクション");
+    if (isMobile) await expect(page.getByTestId("nav-more")).toHaveCount(0);
+  });
+
+  test("設定のコピー: 確認ダイアログのあと、選んだ項目だけがコピーされる（コピーしない項目の説明あり）", async ({ page, isMobile }) => {
+    await page.goto("/settings/display");
+    await page.getByTestId("nav-order").getByRole("button", { name: "対戦記録を表示しない" }).click();
+    await page.getByRole("radio", { name: "シンプル", exact: true }).click();
+    await page.goto("/settings/users");
+    const copy = page.getByTestId("settings-copy");
+    await expect(copy).toContainText("プロフィール名・アイコン・応募/当落/スルーの履歴");
+    await copy.getByLabel("コピー先のプロフィール").selectOption({ label: "B" });
+    await copy.getByRole("radio", { name: "項目を選んでコピー" }).check();
+    await expect(copy.getByTestId("copy-start")).toBeDisabled(); // 項目を選ぶまで押せない
+    await copy.getByRole("checkbox", { name: /下部メニュー/ }).check();
+    await copy.getByTestId("copy-start").click();
+    const dlg = page.getByTestId("copy-confirm");
+    await expect(dlg).toContainText("Bの現在の設定は上書きされます");
+    await expect(dlg).toContainText("下部メニューの表示項目・並び順");
+    await expect(dlg).not.toContainText("抽選カードのシンプル／詳細表示");
+    await dlg.getByRole("button", { name: "キャンセル" }).click();
+    // キャンセルでは何も変わらない
+    await switchProfile(page, "B");
+    await page.goto("/settings/display");
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(4);
+    await switchProfile(page, "A");
+    await page.goto("/settings/users");
+    await copy.getByLabel("コピー先のプロフィール").selectOption({ label: "B" });
+    await copy.getByRole("radio", { name: "項目を選んでコピー" }).check();
+    await copy.getByRole("checkbox", { name: /下部メニュー/ }).check();
+    await copy.getByTestId("copy-start").click();
+    await page.getByTestId("copy-confirm-ok").click();
+    await expect(page.getByTestId("copy-result")).toContainText("コピーしました");
+    // B: メニューはコピーされ、カードの表示（選ばなかった項目）は変わらない
+    await switchProfile(page, "B");
+    await page.goto("/settings/display");
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(3);
+    await expect(page.getByRole("radio", { name: "詳細", exact: true })).toHaveAttribute("aria-checked", "true");
+    if (isMobile) await expect(page.getByTestId("nav-more")).toBeVisible();
+  });
+
+  test("カードのシンプル／詳細はユーザーごと。Aをシンプルにしても、Bは詳細のまま", async ({ page }) => {
+    await page.getByRole("button", { name: "シンプル表示にする" }).click();
+    await expect(page.getByTestId("card-simple").first()).toBeVisible();
+    await switchProfile(page, "B");
+    await expect(page.getByRole("button", { name: "シンプル表示にする" })).toBeVisible();
+    await expect(page.getByTestId("card-simple")).toHaveCount(0);
+    await switchProfile(page, "A");
+    await expect(page.getByTestId("card-simple").first()).toBeVisible();
+  });
+
+  test("シンプル表示のカード: 低く、★・小さな画像・店名・商品名・現在のユーザーの状態だけ。応募の操作も使える", async ({ page }) => {
+    await page.getByRole("button", { name: "シンプル表示にする" }).click();
+    const card = page.locator('[data-lottery-id="L1"]');
+    await expect(card.getByTestId("card-simple")).toBeVisible();
+    const h = (await card.boundingBox())!.height;
+    expect(h).toBeLessThan(90);
+    const img = (await card.getByTestId("card-image").boundingBox())!;
+    expect(img.height).toBeLessThanOrEqual(65);
+    await expect(card.getByLabel("応募アカウントの状態")).toHaveCount(0); // 全員分の状態は出さない
+    await expect(card.locator("[data-status]")).toHaveCount(1); // 現在のユーザーのみ
+    await expect(card.getByRole("button", { name: /管理対象（★）をOFF/ })).toBeVisible();
   });
 });

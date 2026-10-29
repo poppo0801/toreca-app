@@ -21,7 +21,7 @@ export interface EvalCase {
     applyDeadline?: string;
     resultDate?: string;
     /** 時刻が空（日付のみ）であるべき項目 */
-    noTime?: Array<"applyStart" | "applyDeadline" | "resultDate" | "procedureDeadline">;
+    noTime?: Array<"applyStart" | "applyDeadline" | "resultDate" | "procedureStart" | "procedureDeadline">;
     itemNames?: string[];
     multiMode?: ExtractedLottery["multiMode"];
     /** 検証で issue が付いているべき項目 */
@@ -31,6 +31,10 @@ export interface EvalCase {
     /** 要確認の注意（warnings）が出ないこと */
     noWarnings?: boolean;
     applyUrl?: string;
+    /** 応募条件の欄に入る値（解析上の説明文が入っていないこと） */
+    conditionsText?: string;
+    procedureStart?: string;
+    procedureDeadline?: string;
   };
 }
 
@@ -53,6 +57,9 @@ export function runEvalCase(c: EvalCase): EvalResult {
   for (const k of x.noTime ?? []) eq(`${k}.time`, e[k].time, "");
   if (x.itemNames) eq("itemNames", e.items.map((i) => i.name), x.itemNames);
   if (x.multiMode) eq("multiMode", e.multiMode, x.multiMode);
+  if (x.conditionsText !== undefined) eq("conditionsText", e.conditionsText, x.conditionsText);
+  if (x.procedureStart !== undefined) eq("procedureStart", e.procedureStart.date, x.procedureStart);
+  if (x.procedureDeadline !== undefined) eq("procedureDeadline", e.procedureDeadline.date, x.procedureDeadline);
   if (x.applyUrl !== undefined) eq("applyUrl", e.applyUrl, x.applyUrl);
   const codes = e.issues.map((i) => i.field as string);
   for (const code of x.issues ?? []) if (!codes.includes(code)) failures.push(`${code} の issue が出ていない（実際: ${codes.join(",") || "なし"}）`);

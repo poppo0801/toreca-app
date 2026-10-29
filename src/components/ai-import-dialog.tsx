@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { AiBudgetNote } from "@/components/household-settings";
 import type { ExtractResult } from "@/lib/server/lottery-extract-service";
-import { buildDraft, type LotteryDraft, type MatchKind } from "@/lib/lottery-match";
+import { AiResultList } from "@/components/ai-result-list";
+import { buildDraft, type LotteryDraft } from "@/lib/lottery-match";
 import { cn } from "@/lib/utils";
 
 type Tab = "text" | "image" | "url" | "x_url";
@@ -18,15 +19,6 @@ const TABS: { key: Tab; label: string; icon: typeof FileText }[] = [
   { key: "url", label: "店舗URL", icon: Link2 },
   { key: "x_url", label: "X投稿", icon: Link2 },
 ];
-
-const MATCH_TEXT: Record<MatchKind, string> = {
-  exact: "一致",
-  alias: "略称で一致",
-  code: "コードで一致",
-  partial: "部分一致（要確認）",
-  fuzzy: "似ている（要確認）",
-  none: "未登録（仮登録）",
-};
 
 const MAX_IMAGES = 4;
 const MAX_SIDE = 1800;
@@ -80,6 +72,7 @@ export function AiImportDialog({
   const [done, setDone] = useState<{ result: Extract<ExtractResult, { ok: true }>; draft: LotteryDraft; runId: string | null } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const extraNotes = done ? [...done.result.notices, ...done.draft.warnings, ...done.draft.generalNotes] : [];
   const canSubmit = !busy && (tab === "text" ? text.trim().length >= 10 : tab === "image" ? files.length > 0 : tab === "url" ? url.trim() !== "" : xUrl.trim() !== "");
 
   const run = async () => {
@@ -117,62 +110,38 @@ export function AiImportDialog({
           <Sparkles className="size-4 text-primary" aria-hidden="true" />
           AIで読み取る
         </DialogTitle>
-        <DialogDescription>
-          告知の文章・画像・URLから抽選情報を読み取り、登録フォームに入力します。読み取り結果は候補です。必ず内容を確認・修正してから保存してください。
-        </DialogDescription>
+        <DialogDescription className="text-xs">告知の文章・画像・URLから抽選情報を読み取ります。</DialogDescription>
         <AiBudgetNote />
 
         {done ? (
-          <div className="mt-3 space-y-3" data-testid="ai-result">
+          <div className="mt-2 space-y-2" data-testid="ai-result">
             {done.result.engine === "mock" && (
-              <p role="status" className="rounded-md border border-warn p-2 text-xs" data-testid="ai-mock-banner">
-                これは開発用のモック（サンプルデータ）です。実際のAI解析の結果ではありません。
+              <p role="status" className="rounded-md border border-warn p-1.5 text-[11px]" data-testid="ai-mock-banner">
+                開発用のモック（サンプルデータ）です。実際のAI解析の結果ではありません。
               </p>
             )}
-            <p className="text-sm font-medium">読み取りました。次の内容をフォームに入力します（保存前に確認できます）。</p>
-            <dl className="grid grid-cols-[6rem_1fr] gap-x-2 gap-y-1 rounded-md border p-2 text-sm">
-              <dt className="text-muted-foreground">系列</dt>
-              <dd>
-                {done.draft.input.chain.name || "—"} <span className="text-xs text-muted-foreground">［{MATCH_TEXT[done.draft.summary.chain]}］</span>
-              </dd>
-              <dt className="text-muted-foreground">店舗</dt>
-              <dd>
-                {done.draft.input.store.name || "—"} <span className="text-xs text-muted-foreground">［{MATCH_TEXT[done.draft.summary.store]}］</span>
-              </dd>
-              <dt className="text-muted-foreground">商品</dt>
-              <dd>
-                {done.draft.summary.items.length === 0 && "—"}
-                {done.draft.summary.items.map((s, i) => (
-                  <span key={i} className="block">
-                    {s.name} <span className="text-xs text-muted-foreground">［{MATCH_TEXT[s.kind]}{s.matchedName && s.kind !== "exact" ? `: ${s.matchedName}` : ""}］</span>
-                  </span>
-                ))}
-              </dd>
-              <dt className="text-muted-foreground">応募締切</dt>
-              <dd>
-                {done.draft.input.applyDeadline.precision === "unknown"
-                  ? "不明"
-                  : `${done.draft.input.applyDeadline.date} ${done.draft.input.applyDeadline.time}`}
-              </dd>
-            </dl>
+            <AiResultList draft={done.draft} applyUrl={done.result.extraction.applyUrl} purchaseLimitText={done.result.extraction.purchaseLimitText} />
             {done.draft.modePending && (
-              <p role="alert" className="flex gap-2 text-sm text-warn">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                複数商品の応募方式が告知から判断できませんでした。フォームで方式を選んでください。
+              <p role="alert" className="flex gap-1.5 text-xs text-warn">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                複数商品の応募方式は、フォームで選んでください。
               </p>
             )}
             {done.draft.duplicates.length > 0 && (
-              <p role="alert" className="flex gap-2 text-sm text-warn" data-testid="ai-duplicates">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                同じ抽選が登録済みの可能性があります（{done.draft.duplicates.length}件）。フォームで確認してください。
+              <p role="alert" className="flex gap-1.5 text-xs text-warn" data-testid="ai-duplicates">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                同じ抽選が登録済みの可能性があります（{done.draft.duplicates.length}件）。
               </p>
             )}
-            {[...done.result.notices, ...done.draft.warnings].length > 0 && (
-              <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
-                {[...done.result.notices, ...done.draft.warnings].map((n, i) => (
-                  <li key={i}>{n}</li>
-                ))}
-              </ul>
+            {extraNotes.length > 0 && (
+              <details className="rounded-lg border text-xs" data-testid="ai-notes">
+                <summary className="flex min-h-9 cursor-pointer items-center px-2.5 text-muted-foreground">補足（{extraNotes.length}件）</summary>
+                <ul className="list-disc space-y-0.5 border-t p-2.5 pl-6 text-muted-foreground">
+                  {extraNotes.map((n, i) => (
+                    <li key={i}>{n}</li>
+                  ))}
+                </ul>
+              </details>
             )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={reset}>

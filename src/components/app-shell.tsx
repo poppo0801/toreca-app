@@ -2,54 +2,104 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReceiptText, Settings, Ticket, Wallet } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
+import { Banknote, Ellipsis, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
 import { NotificationBell } from "@/components/notification-bell";
 import { ProfileChip } from "@/components/profile-switcher";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { href: "/lotteries", label: "抽選管理", icon: Ticket },
-  { href: "/purchases", label: "購入記録", icon: ReceiptText },
-  { href: "/finance", label: "収支", icon: Wallet },
-  { href: "/settings", label: "設定", icon: Settings },
-] as const;
+/** メニュー項目のアイコン。機能を足すときは NAV_ITEMS（profile-settings.ts）と、ここに1行ずつ足す */
+const NAV_ICON: Record<string, LucideIcon> = {
+  lotteries: Ticket,
+  purchases: ReceiptText,
+  finance: Wallet,
+  battles: Swords,
+};
+const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
+
+/**
+ * iOS（特にホーム画面追加のPWA）で、起動直後に下部固定の要素が本来より上に出て、操作すると戻ることがある。
+ * 起動・復帰・向き変更のあとに（resize では行わない: 固定要素の再計算が連鎖しないようにする）、固定要素の位置を再計算させる（1フレームだけ無害な変更を入れて戻す）。
+ * 実機でしか再現しないため、効果は実機で確認が必要。
+ */
+function useFixedLayoutRefresh() {
+  useEffect(() => {
+    const root = document.documentElement;
+    let raf = 0;
+    const refresh = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        root.style.setProperty("--layout-nudge", "0.01px");
+        raf = requestAnimationFrame(() => root.style.removeProperty("--layout-nudge"));
+      });
+    };
+    refresh();
+    const timers = [120, 600].map((ms) => window.setTimeout(refresh, ms));
+    const onShow = () => refresh();
+    window.addEventListener("pageshow", onShow);
+    window.addEventListener("orientationchange", onShow);
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      cancelAnimationFrame(raf);
+      timers.forEach(window.clearTimeout);
+      window.removeEventListener("pageshow", onShow);
+      window.removeEventListener("orientationchange", onShow);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, []);
+}
+
+/** プロフィールに保存されたテーマを、そのプロフィールに切り替えたときに適用する */
+function useProfileTheme() {
+  const { settings, profile } = useApp();
+  const { setTheme } = useTheme();
+  const saved = settings.theme;
+  useEffect(() => {
+    if (saved) setTheme(saved);
+    // プロフィールを切り替えたときだけ反映する（利用者が画面上で変えた直後は、保存と同時に反映される）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id]);
+}
 
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { profile, notice, dismissNotice } = useApp();
-  // 応募実績・当選率(/records)は抽選側の分析、対戦記録(/battles)は設定からの機能なので、現在地は最も近い項目に寄せる
-  const isActive = (href: string) =>
-    pathname.startsWith(href) || (href === "/lotteries" && pathname.startsWith("/records")) || (href === "/settings" && pathname.startsWith("/battles"));
+  const { profile, notice, dismissNotice, settings } = useApp();
+  const [more, setMore] = useState(false);
+  useFixedLayoutRefresh();
+  useProfileTheme();
+  const nav = resolveNav(settings.nav);
+  const all = availableNav();
+  const settingsActive = pathname.startsWith("/settings");
+  const slots = nav.direct.length + (nav.more.length > 0 ? 1 : 0);
+
+  const link = (n: NavItem, cls: string, activeCls: string, idleCls: string, icon: string) => {
+    const Icon = iconOf(n.id);
+    const active = isNavActive(n, pathname);
+    return (
+      <Link key={n.id} href={n.href} aria-current={active ? "page" : undefined} data-nav={n.id} className={cn(cls, active ? activeCls : idleCls)} onClick={() => setMore(false)}>
+        <Icon className={icon} aria-hidden="true" />
+        {n.label}
+      </Link>
+    );
+  };
+
   return (
     <div className="min-h-dvh md:flex">
-      {/* PC: 左ナビ（ユーザー切替・通知はヘッダーに集約） */}
+      {/* PC: 左ナビ（利用できるすべての機能。ユーザー切替・通知・設定はヘッダー） */}
       <aside className="hidden w-52 shrink-0 flex-col gap-4 border-r bg-header p-4 md:flex">
         <BrandLogo className="px-1 pt-1" />
         <nav aria-label="メイン" className="flex flex-col gap-1">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = isActive(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-10 items-center gap-2 rounded-md px-3 text-sm",
-                  active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
-                )}
-              >
-                <Icon className="size-4" aria-hidden="true" />
-                {label}
-              </Link>
-            );
-          })}
+          {all.map((n) => link(n, "flex min-h-10 items-center gap-2 rounded-md px-3 text-sm", "bg-primary text-primary-foreground", "hover:bg-muted", "size-4"))}
         </nav>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザーのみ。ノッチ/ステータスバー分は Safe Area で確保 */}
+        {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザー・設定（歯車）。ステータスバー/Dynamic Island分は Safe Area で確保 */}
         <header className="sticky top-0 z-30 border-b border-t-2 border-t-primary bg-header pt-safe px-safe shadow-card">
           <div className="flex h-10 items-center justify-between px-3">
             <BrandLogo className="md:hidden" />
@@ -57,6 +107,15 @@ function Shell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-0.5">
               <NotificationBell />
               <ProfileChip />
+              <Link
+                href="/settings"
+                aria-label="設定"
+                aria-current={settingsActive ? "page" : undefined}
+                data-testid="header-settings"
+                className={cn("flex size-10 items-center justify-center rounded-md hover:bg-muted", settingsActive && "text-primary")}
+              >
+                <Settings className="size-[18px]" aria-hidden="true" />
+              </Link>
             </div>
           </div>
         </header>
@@ -74,31 +133,47 @@ function Shell({ children }: { children: React.ReactNode }) {
           )}
           {children}
         </main>
-        {/* モバイル: 下部メイン4項目。操作部分はホームインジケーターの上に収め、背景だけが下端まで伸びる */}
-        <nav
-          aria-label="メイン"
-          className="fixed inset-x-0 bottom-0 z-30 border-t bg-header pb-safe px-safe md:hidden"
-        >
-          <div className="grid h-[3.25rem] grid-cols-4">
-            {NAV.map(({ href, label, icon: Icon }) => {
-              const active = isActive(href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-0.5 text-[11px]",
-                    active ? "font-bold text-primary" : "text-muted-foreground",
-                  )}
-                >
-                  <Icon className="size-5" aria-hidden="true" />
-                  {label}
-                </Link>
-              );
-            })}
+        {/* モバイル: 下部メニュー（プロフィール別・最大5枠。隠れた機能があれば「その他」）。背景は下端まで伸び、操作部分はホームインジケーターの少し上 */}
+        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-0 z-30 border-t bg-header pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
+          <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
+            {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary", "text-muted-foreground", "size-5"))}
+            {nav.more.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMore(true)}
+                aria-haspopup="dialog"
+                data-testid="nav-more"
+                className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", nav.more.some((n) => isNavActive(n, pathname)) ? "font-bold text-primary" : "text-muted-foreground")}
+              >
+                <Ellipsis className="size-5" aria-hidden="true" />
+                その他
+              </button>
+            )}
           </div>
         </nav>
+        <Sheet open={more} onOpenChange={setMore}>
+          <SheetContent data-testid="more-sheet" aria-describedby="more-desc">
+            <div className="px-4 pb-2">
+              <SheetTitle>その他</SheetTitle>
+              <SheetDescription id="more-desc">下部メニューに表示していない機能です。</SheetDescription>
+            </div>
+            <SheetBody className="border-t pt-2">
+              <ul className="divide-y">
+                {nav.more.map((n) => {
+                  const Icon = iconOf(n.id);
+                  return (
+                    <li key={n.id}>
+                      <Link href={n.href} onClick={() => setMore(false)} data-more={n.id} className="flex min-h-12 items-center gap-3 px-1 text-sm">
+                        <Icon className="size-5 text-muted-foreground" aria-hidden="true" />
+                        {n.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </SheetBody>
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );

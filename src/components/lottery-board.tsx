@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ChartColumn, CircleHelp, LayoutList, PencilLine, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
+import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
 import { StatusLegend } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
-import { listDraftKeys } from "@/lib/lottery-draft";
 import {
   DEFAULT_FILTERS,
   selectLotteries,
@@ -32,7 +31,6 @@ const TABS: { value: Tab; label: string }[] = [
   { value: "won", label: "当選" },
 ];
 
-const DENSITY = ["compact", "detail"] as const;
 const VIEW = ["list", "matrix"] as const;
 
 const chip = "h-9 shrink-0 rounded-full border bg-input px-3 text-xs";
@@ -80,14 +78,14 @@ function validateSession(v: unknown): SessionState | null {
 }
 
 export function LotteryBoard() {
-  const { data, now, persistent, profile } = useApp();
+  const { data, now, persistent, profile, settings, saveSettings } = useApp();
   const params = useSearchParams();
   const focusId = params.get("focus");
   const [registering, setRegistering] = useState(false);
-  const [hasDraft, setHasDraft] = useState(false);
   const [tab, setTab] = useState<Tab>("managed");
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
-  const [density, setDensity] = useState<(typeof DENSITY)[number]>("compact");
+  // シンプル／詳細はプロフィール別の設定（既定は詳細＝従来の情報量）
+  const cardView = settings.cardView ?? "detail";
   const [view, setView] = useState<(typeof VIEW)[number]>("list");
   const [actionOnly, setActionOnly] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -98,7 +96,6 @@ export function LotteryBoard() {
   // 端末別の表示設定と、このタブでの前回のタブ・フィルターを復元（Providerがマウント後に描画するのでSSR差異なし）
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- 端末ローカル設定の復元 */
-    setDensity(readPref("density", DENSITY, "compact"));
     setView(readPref("view", VIEW, "list"));
     const saved = readSession("board", validateSession);
     if (saved && !focusId) {
@@ -114,12 +111,6 @@ export function LotteryBoard() {
     // 通知から開いたとき（focus）は、その抽選を見せるための一時的な表示なので保存しない
     if (restored && !focusId) writeSession("board", { tab, filters });
   }, [restored, focusId, tab, filters]);
-
-  // 入力途中の下書きがあれば「再開」を出す（登録画面を閉じたときにも再確認）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末内の下書きの有無
-    setHasDraft(listDraftKeys().includes("new"));
-  }, [registering]);
 
   // 通知から開いた抽選を表示する: 含まれる最初のタブを選び、絞り込みを解除して、カードまでスクロールする
   useEffect(() => {
@@ -180,12 +171,6 @@ export function LotteryBoard() {
             </button>
             {persistent ? (
               <>
-                {hasDraft && !registering && (
-                  <Button size="sm" variant="outline" onClick={() => setRegistering(true)} data-testid="draft-resume">
-                    <PencilLine className="size-3.5" aria-hidden="true" />
-                    下書き
-                  </Button>
-                )}
                 <Button size="sm" onClick={() => setRegistering(true)}>
                   ＋抽選を登録
                 </Button>
@@ -251,15 +236,12 @@ export function LotteryBoard() {
             variant="outline"
             size="icon"
             className="size-10"
-            aria-pressed={density === "detail"}
-            aria-label={density === "detail" ? "シンプル表示にする" : "詳細表示にする"}
-            onClick={() => {
-              const next = density === "detail" ? "compact" : "detail";
-              setDensity(next);
-              writePref("density", next);
-            }}
+            aria-pressed={cardView === "detail"}
+            aria-label={cardView === "detail" ? "シンプル表示にする" : "詳細表示にする"}
+            data-testid="view-toggle"
+            onClick={() => void saveSettings({ cardView: cardView === "detail" ? "simple" : "detail" })}
           >
-            {density === "detail" ? <Rows3 className="size-4" /> : <LayoutList className="size-4" />}
+            {cardView === "detail" ? <Rows3 className="size-4" /> : <LayoutList className="size-4" />}
           </Button>
           <Button
             variant="outline"
@@ -353,7 +335,7 @@ export function LotteryBoard() {
           <ul className="space-y-2.5" aria-label="抽選一覧">
             {lotteries.map((l) => (
               <li key={l.id}>
-                <LotteryCard lottery={l} tab={tab} detailMode={density === "detail"} highlighted={highlight === l.id} />
+                <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
               </li>
             ))}
           </ul>

@@ -30,12 +30,27 @@ const PURCHASE_WORDS = /(販売|購入|予約|定価|お支払い|決済)/;
 
 const FIELD_OF_EVIDENCE: Partial<Record<EvidenceKey, FieldKey>> = {
   chain: "chain", store: "store", items: "items", multiMode: "multiMode", applyStart: "applyStart", applyDeadline: "applyDeadline",
-  resultDate: "resultDate", procedureDeadline: "procedureDeadline", announcement: "announcement", applyMethod: "applyMethod",
+  resultDate: "resultDate", procedureStart: "procedureStart", procedureDeadline: "procedureDeadline", announcement: "announcement", applyMethod: "applyMethod",
   receiveMethod: "receiveMethod", limit: "limit", conditions: "conditions",
 };
 
-const DATE_LABEL = { applyStart: "応募開始", applyDeadline: "応募締切", resultDate: "当選発表", procedureDeadline: "購入・受取期限" } as const;
+const DATE_LABEL = { applyStart: "応募開始", applyDeadline: "応募締切", resultDate: "当選発表", procedureStart: "購入・受取開始", procedureDeadline: "購入・受取終了" } as const;
 type DateKey = keyof typeof DATE_LABEL;
+
+/** 「読み取れませんでした」「記載がありません」「不明」など、抽選の内容ではなく解析結果についての説明か */
+const ANALYSIS_NOTE = new RegExp(
+  [
+    "(読み取れ|読み取り|判別|判断|確認|抽出|特定|把握)(でき)?(ませんでした|ません|なかった|不能|できず|できない)",
+    "記載(が|は)?(ありません|ない|なし|見当たりません|されていません)",
+    "(本文|投稿|告知|画像|文章|ページ)[^。\n]{0,15}(途中で切れ|切れて|欠けて|不足|見えない)",
+    "^(不明|なし|特になし|未記載|—|-|－|n/a|null|none)[。.]?$",
+  ].join("|"),
+  "i",
+);
+export function isAnalysisNote(text: string): boolean {
+  const t = text.trim();
+  return t.length > 0 && t.length <= 150 && ANALYSIS_NOTE.test(t);
+}
 
 const stamp = (f: ExtractedFlex) => `${f.date}T${f.time || "00:00"}`;
 const known = (f: ExtractedFlex) => f.precision !== "unknown";
@@ -50,6 +65,22 @@ export function validateExtraction(input: ExtractedLottery, sourceText: string |
     if (!issues.some((i) => i.field === field && i.message === message)) issues.push({ field, message });
     if (lower) ex.confidence[lower] = "low";
   };
+
+  // 0. 解析上の説明文（「応募条件を読み取れませんでした」など）が、抽選情報の欄に入っていないか。入力値には使わず、要確認の詳細に移す
+  const TEXT_FIELDS: { key: "conditionsText" | "verificationText" | "announcementMethod" | "notes" | "purchaseLimitText"; field: ExtractionIssue["field"]; label: string }[] = [
+    { key: "conditionsText", field: "conditions", label: "応募条件" },
+    { key: "verificationText", field: "general", label: "本人確認・必要書類" },
+    { key: "announcementMethod", field: "announcement", label: "発表方法" },
+    { key: "notes", field: "general", label: "注意事項" },
+    { key: "purchaseLimitText", field: "limit", label: "購入数量・上限" },
+  ];
+  for (const t of TEXT_FIELDS) {
+    const text = ex[t.key];
+    if (text && isAnalysisNote(text)) {
+      ex[t.key] = "";
+      flag(t.field, `${t.label}は告知から読み取れませんでした（AIの説明: ${text.slice(0, 120)}）`, t.field === "general" ? undefined : (t.field as FieldKey));
+    }
+  }
 
   // 1. 根拠の抜粋が原文にあるか（AIが作った根拠を信用しない）
   for (const [k, ev] of Object.entries(ex.evidence) as [EvidenceKey, NonNullable<ExtractedLottery["evidence"][EvidenceKey]>][]) {
@@ -71,14 +102,19 @@ export function validateExtraction(input: ExtractedLottery, sourceText: string |
   }
 
   // 3. 日付の前後関係（矛盾は値を直さず、要確認にする）
-  const { applyStart: s, applyDeadline: d, resultDate: r, procedureDeadline: p } = ex;
+  const { applyStart: s, applyDeadline: d, resultDate: r, procedureStart: ps, procedureDeadline: p } = ex;
   if (known(s) && known(d) && stamp(s) > stamp(d)) {
     flag("applyStart", "応募開始が応募締切より後になっています", "applyStart");
     flag("applyDeadline", "応募開始が応募締切より後になっています", "applyDeadline");
   }
   if (known(d) && known(r) && r.date < d.date) flag("resultDate", "当選発表が応募締切より前になっています", "resultDate");
-  if (known(r) && known(p) && p.date < r.date) flag("procedureDeadline", "購入・受取期限が当選発表より前になっています", "procedureDeadline");
-  if (known(d) && known(p) && p.date < d.date) flag("procedureDeadline", "購入・受取期限が応募締切より前になっています", "procedureDeadline");
+  if (known(r) && known(ps) && ps.date < r.date) flag("procedureStart", "購入・受取開始が当選発表より前になっています", "procedureStart");
+  if (known(ps) && known(p) && stamp(ps) > stamp(p)) {
+    flag("procedureStart", "購入・受取開始が終了より後になっています", "procedureStart");
+    flag("procedureDeadline", "購入・受取開始が終了より後になっています", "procedureDeadline");
+  }
+  if (known(r) && known(p) && p.date < r.date) flag("procedureDeadline", "購入・受取終了が当選発表より前になっています", "procedureDeadline");
+  if (known(d) && known(p) && p.date < d.date) flag("procedureDeadline", "購入・受取終了が応募締切より前になっています", "procedureDeadline");
 
   // 4. 商品名に数量・入数が混ざっていないか
   if (ex.items.some((i) => QTY_IN_NAME.test(i.name))) flag("items", "商品名に数量や入数の表記が含まれている可能性があります", "items");

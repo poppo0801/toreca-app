@@ -17,6 +17,7 @@ export const FIELD_KEYS = [
   "applyStart",
   "applyDeadline",
   "resultDate",
+  "procedureStart",
   "procedureDeadline",
   "announcement",
   "applyMethod",
@@ -73,6 +74,7 @@ export interface ExtractedLottery {
   applyStart: ExtractedFlex;
   applyDeadline: ExtractedFlex;
   resultDate: ExtractedFlex;
+  procedureStart: ExtractedFlex;
   procedureDeadline: ExtractedFlex;
   announcementMethod: string;
   announcementUrl: string;
@@ -126,6 +128,7 @@ export const rawExtractionSchema = z.object({
   apply_start: rawDate,
   apply_deadline: rawDate,
   result_date: rawDate,
+  procedure_start: rawDate,
   procedure_deadline: rawDate,
   announcement_method: str(200),
   announcement_url: str(2000),
@@ -147,6 +150,7 @@ export const rawExtractionSchema = z.object({
       apply_start: conf,
       apply_deadline: conf,
       result_date: conf,
+      procedure_start: conf,
       procedure_deadline: conf,
       announcement: conf,
       apply_method: conf,
@@ -156,11 +160,11 @@ export const rawExtractionSchema = z.object({
     })
     .catch({
       chain: "low", store: "low", products: "low", multi_mode: "low", apply_start: "low", apply_deadline: "low", result_date: "low",
-      procedure_deadline: "low", announcement: "low", apply_method: "low", receive_method: "low", limit: "low", conditions: "low",
+      procedure_start: "low", procedure_deadline: "low", announcement: "low", apply_method: "low", receive_method: "low", limit: "low", conditions: "low",
     })
     .default({
       chain: "low", store: "low", products: "low", multi_mode: "low", apply_start: "low", apply_deadline: "low", result_date: "low",
-      procedure_deadline: "low", announcement: "low", apply_method: "low", receive_method: "low", limit: "low", conditions: "low",
+      procedure_start: "low", procedure_deadline: "low", announcement: "low", apply_method: "low", receive_method: "low", limit: "low", conditions: "low",
     }),
   warnings: z.array(z.string().trim().max(300)).max(20).catch([]).default([]),
   /** 項目ごとの原文の抜粋（キーは evidence_keys）。余計なキー・長すぎる値は捨てる */
@@ -181,6 +185,7 @@ const EVIDENCE_RAW_KEYS: Record<string, EvidenceKey> = {
   apply_start: "applyStart",
   apply_deadline: "applyDeadline",
   result_date: "resultDate",
+  procedure_start: "procedureStart",
   procedure_deadline: "procedureDeadline",
   announcement: "announcement",
   apply_method: "applyMethod",
@@ -301,7 +306,8 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     [r.apply_start, "応募開始"],
     [r.apply_deadline, "応募締切"],
     [r.result_date, "当選発表"],
-    [r.procedure_deadline, "購入・受取期限"],
+    [r.procedure_start, "購入・受取開始"],
+    [r.procedure_deadline, "購入・受取終了"],
   ] as const) {
     const f = normalizeFlex(rawDate_, now, warnings, label, yctx, prevMs);
     dates.push(f);
@@ -318,7 +324,8 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     applyStart: dates[0],
     applyDeadline: dates[1],
     resultDate: dates[2],
-    procedureDeadline: dates[3],
+    procedureStart: dates[3],
+    procedureDeadline: dates[4],
     announcementMethod: r.announcement_method,
     announcementUrl: httpUrl(r.announcement_url),
     applyUrl: httpUrl(r.apply_url),
@@ -338,6 +345,7 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
       applyStart: c.apply_start,
       applyDeadline: c.apply_deadline,
       resultDate: c.result_date,
+      procedureStart: c.procedure_start,
       procedureDeadline: c.procedure_deadline,
       announcement: c.announcement,
       applyMethod: c.apply_method,
@@ -358,7 +366,7 @@ export function hasAnyContent(e: ExtractedLottery): boolean {
     e.chainName !== "" ||
     e.storeName !== "" ||
     e.items.length > 0 ||
-    [e.applyStart, e.applyDeadline, e.resultDate, e.procedureDeadline].some((f) => f.precision !== "unknown") ||
+    [e.applyStart, e.applyDeadline, e.resultDate, e.procedureStart, e.procedureDeadline].some((f) => f.precision !== "unknown") ||
     e.conditionsText !== "" ||
     e.applyUrl !== ""
   );

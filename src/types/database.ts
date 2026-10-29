@@ -1292,6 +1292,9 @@ export type Database = {
           procedure_deadline_at: string | null
           procedure_deadline_date: string | null
           procedure_deadline_precision: string
+          procedure_start_at: string | null
+          procedure_start_date: string | null
+          procedure_start_precision: string
           receive_method: string
           result_at: string | null
           result_date: string | null
@@ -1330,6 +1333,9 @@ export type Database = {
           procedure_deadline_at?: string | null
           procedure_deadline_date?: string | null
           procedure_deadline_precision?: string
+          procedure_start_at?: string | null
+          procedure_start_date?: string | null
+          procedure_start_precision?: string
           receive_method?: string
           result_at?: string | null
           result_date?: string | null
@@ -1368,6 +1374,9 @@ export type Database = {
           procedure_deadline_at?: string | null
           procedure_deadline_date?: string | null
           procedure_deadline_precision?: string
+          procedure_start_at?: string | null
+          procedure_start_date?: string | null
+          procedure_start_precision?: string
           receive_method?: string
           result_at?: string | null
           result_date?: string | null
@@ -2190,6 +2199,55 @@ export type Database = {
           },
           {
             foreignKeyName: "products_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      profile_settings: {
+        Row: {
+          created_at: string
+          household_id: string
+          profile_id: string
+          settings: Json
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          household_id: string
+          profile_id: string
+          settings?: Json
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          household_id?: string
+          profile_id?: string
+          settings?: Json
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_settings_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "profile_settings_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -3061,6 +3119,15 @@ export type Database = {
         Returns: Json
       }
       bootstrap_household: { Args: never; Returns: string }
+      copy_profile_settings: {
+        Args: {
+          p_actor: string
+          p_from: string
+          p_keys: string[]
+          p_to: string
+        }
+        Returns: undefined
+      }
       current_household_id: { Args: never; Returns: string }
       ensure_profile_accounts: { Args: never; Returns: number }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }

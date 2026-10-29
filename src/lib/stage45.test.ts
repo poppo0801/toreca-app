@@ -2,28 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CARD_DISPLAY, normalizeCardDisplay } from "@/lib/card-display";
 import { formatShort } from "@/lib/datetime";
 import { DEFAULT_DISTANCE_BANDS_KM, distanceBand, formatKm, haversineKm, isValidLatLng, prefectureOf, validBands } from "@/lib/geo";
-import { DRAFT_TTL_MS, clearDraft, fingerprint, listDraftKeys, loadDraft, saveDraft, type DraftStorage } from "@/lib/lottery-draft";
+import { fingerprint, purgeLegacyDrafts } from "@/lib/lottery-draft";
 import { EMPTY_FLEX, flexFromParts, flexInputSchema, flexInputToDb } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
 
-class MemStorage implements DraftStorage {
-  private m = new Map<string, string>();
-  get length() {
-    return this.m.size;
-  }
-  key(i: number) {
-    return [...this.m.keys()][i] ?? null;
-  }
-  getItem(k: string) {
-    return this.m.get(k) ?? null;
-  }
-  setItem(k: string, v: string) {
-    this.m.set(k, v);
-  }
-  removeItem(k: string) {
-    this.m.delete(k);
-  }
-}
 
 describe("日時入力: 空欄=不明 / 日付のみ / 日付+時刻（時刻未設定と0:00は別）", () => {
   it("空欄は不明、日付だけは日付のみ、日付+時刻は日時", () => {
@@ -128,36 +110,17 @@ describe("カード表示設定", () => {
   });
 });
 
-describe("下書き（端末内保存）", () => {
-  const input = { chain: { id: null, name: "サンプル電機" } } as never;
-  const draft = { input, urlsText: "", sources: { applyMethod: "default" as const }, base: null };
-
-  it("保存・復元・削除ができ、期限（14日）を過ぎた下書きは破棄される", () => {
-    const st = new MemStorage();
-    const t0 = 1_000_000;
-    expect(saveDraft("new", draft, t0, st)).toBe(true);
-    expect(loadDraft("new", t0 + 1000, st)?.urlsText).toBe("");
-    expect(listDraftKeys(t0 + 1000, st)).toEqual(["new"]);
-    expect(loadDraft("new", t0 + DRAFT_TTL_MS + 1, st)).toBeNull();
-    expect(st.getItem("tcg.draft.lottery.new")).toBeNull(); // 期限切れは読み込み時に消える
-    saveDraft("new", draft, t0, st);
-    clearDraft("new", st);
-    expect(loadDraft("new", t0, st)).toBeNull();
-  });
-
-  it("壊れた下書きは無視して削除し、例外を出さない。保存先がなくても動く", () => {
-    const st = new MemStorage();
-    st.setItem("tcg.draft.lottery.x", "{broken");
-    expect(loadDraft("x", 0, st)).toBeNull();
-    st.setItem("tcg.draft.lottery.y", JSON.stringify({ v: 2 }));
-    expect(loadDraft("y", 0, st)).toBeNull();
-    expect(saveDraft("z", draft, 0, null)).toBe(false);
-    expect(loadDraft("z", 0, null)).toBeNull();
-  });
-
-  it("保存先が書き込み不可でも例外にしない", () => {
-    const st: DraftStorage = { ...new MemStorage(), getItem: () => null, setItem: () => { throw new Error("quota"); }, removeItem: () => {}, key: () => null, length: 0 };
-    expect(saveDraft("new", draft, 0, st)).toBe(false);
+describe("入力途中の内容は長期保存しない", () => {
+  it("以前の版が残した下書きだけを消す（他のキーには触れない）", () => {
+    const store = new Map<string, string>([
+      ["tcg.draft.lottery.new", "{}"],
+      ["tcg.draft.lottery.abc", "{}"],
+      ["tcg.pref.view", "list"],
+    ]);
+    const st = { get length() { return store.size; }, key: (i: number) => [...store.keys()][i] ?? null, removeItem: (k: string) => void store.delete(k) };
+    expect(purgeLegacyDrafts(st)).toBe(2);
+    expect([...store.keys()]).toEqual(["tcg.pref.view"]);
+    expect(purgeLegacyDrafts(null)).toBe(0);
   });
 
   it("指紋は同じ内容で同じ、違う内容で異なる", () => {

@@ -9,6 +9,8 @@ import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import { createRepository } from "@/services";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { rebindPushSubscription } from "@/app/(app)/settings/notifications/actions";
+import { copyProfileSettings, saveProfileSettings } from "@/app/(app)/settings/profile-settings-actions";
+import { normalizeProfileSettings, type ProfileSettingKey, type ProfileSettings } from "@/lib/profile-settings";
 import { currentSubscription, pushSupported, registerServiceWorker } from "@/lib/push-client";
 import { SplashScreen } from "@/components/splash-screen";
 import { localDeviceStore } from "@/services/local-device-store";
@@ -25,6 +27,13 @@ interface AppContextValue {
   persistent: boolean;
   /** 最新のデータを取得して画面に反映し、そのデータを返す（失敗時は null） */
   reload: () => Promise<AppData | null>;
+  /** 現在のプロフィールの設定（下部メニュー・カード表示・テーマ） */
+  settings: ProfileSettings;
+  settingsOf: (profileId: string) => ProfileSettings;
+  /** 現在のプロフィールの設定を更新する（指定した項目だけ。null で既定に戻す） */
+  saveSettings: (patch: Partial<Record<ProfileSettingKey, unknown>>) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** 選んだ項目を、あるプロフィールから別のプロフィールへコピーする */
+  copySettings: (fromId: string, toId: string, keys: string[]) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 操作失敗の通知（画面全体は止めない） */
   notice: string | null;
   dismissNotice: () => void;
@@ -81,6 +90,8 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   const [profileId, setProfileId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // プロフィール別の設定の「変更直後」の値。保存・再取得が終わるまで画面に反映し続ける（モックでは端末内に保存）
+  const [overrides, setOverrides] = useState<Record<string, ProfileSettings>>({});
   const firstLoad = useRef(true);
   // 一度でも読み込めたあとの更新失敗では、画面全体をエラーにせず通知にとどめる（全面ローディング/エラーは起動時だけ）
   const hasData = useRef(false);
@@ -103,9 +114,13 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   }, [repo]);
 
   // 初回ロード。以降はページ遷移のたびに再取得（マスター管理での変更を反映するため）
+  // 設定の中のページ同士の移動（一覧 ⇄ 下のページ）は、データを取り直さない（画面のちらつき・無駄な通信を避ける）
+  const prevPath = useRef<string | null>(null);
   useEffect(() => {
+    const prev = prevPath.current;
+    prevPath.current = pathname;
     if (firstLoad.current) firstLoad.current = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部データの取得
+    else if (prev?.startsWith("/settings") && pathname.startsWith("/settings") && hasData.current) return;
     void load();
   }, [load, pathname]);
 
@@ -140,17 +155,77 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
     [profileId, data],
   );
 
+  // モック（DB保存なし）では、設定を端末内に残す（画面の動作確認用）
+  useEffect(() => {
+    if (repo.persistent) return;
+    try {
+      const raw = window.localStorage.getItem("tcg.mock.profileSettings");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末内の保存値の復元
+      if (raw) setOverrides(Object.fromEntries(Object.entries(JSON.parse(raw) as Record<string, unknown>).map(([k, v]) => [k, normalizeProfileSettings(v)])));
+    } catch {
+      /* noop */
+    }
+  }, [repo.persistent]);
+
   const value = useMemo<AppContextValue | null>(() => {
     if (!data || !now) return null;
     const active = data.profiles.filter((p) => p.active !== false);
     if (active.length === 0) return null;
     const saved = profileId ?? localDeviceStore.getProfileId();
     const profile = active.find((p) => p.id === saved) ?? active[0];
+    const settingsOf = (id: string): ProfileSettings => ({ ...(data.profileSettings?.[id] ?? {}), ...(overrides[id] ?? {}) });
+    const persist = (next: Record<string, ProfileSettings>) => {
+      if (repo.persistent) return;
+      try {
+        window.localStorage.setItem("tcg.mock.profileSettings", JSON.stringify(next));
+      } catch {
+        /* noop */
+      }
+    };
+    const apply = (id: string, patch: Partial<Record<ProfileSettingKey, unknown>>) => {
+      const cur = settingsOf(id) as Record<string, unknown>;
+      const merged: Record<string, unknown> = { ...cur };
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null) delete merged[k];
+        else merged[k] = v;
+      }
+      return normalizeProfileSettings(merged);
+    };
     return {
       data,
       now,
       profile,
       selectProfile,
+      settings: settingsOf(profile.id),
+      settingsOf,
+      saveSettings: async (patch) => {
+        const next = { ...overrides, [profile.id]: apply(profile.id, patch) };
+        setOverrides(next);
+        persist(next);
+        if (!repo.persistent) return { ok: true };
+        const res = await saveProfileSettings(profile.id, patch, profile.id);
+        if (!res.ok) {
+          setOverrides(overrides);
+          setNotice(res.error);
+        } else void load().then(() => setOverrides((o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== profile.id))));
+        return res;
+      },
+      copySettings: async (fromId, toId, keys) => {
+        if (!repo.persistent) {
+          const src = settingsOf(fromId) as Record<string, unknown>;
+          const patch = Object.fromEntries(keys.map((k) => [k, k in src ? src[k] : null]));
+          const next = { ...overrides, [toId]: apply(toId, patch as Partial<Record<ProfileSettingKey, unknown>>) };
+          setOverrides(next);
+          persist(next);
+          return { ok: true };
+        }
+        const res = await copyProfileSettings(fromId, toId, keys, profile.id);
+        if (res.ok) {
+          const d = await load();
+          if (d) setOverrides({});
+        }
+        return res;
+      },
       persistent: repo.persistent,
       reload: load,
       notice,
@@ -174,7 +249,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         addManualPurchase: (input) => run((a) => repo.addManualPurchase(a, input)),
       },
     };
-  }, [data, now, profileId, repo, run, selectProfile, load, notice]);
+  }, [data, now, profileId, repo, run, selectProfile, load, notice, overrides]);
 
   // PWA: Service Worker を登録し、通知を許可済みの端末は選択プロフィールに通知先を付け替える
   // （プロフィール切替時に旧プロフィールへの紐付けを解除。通知は担当プロフィールの端末へのみ届く）

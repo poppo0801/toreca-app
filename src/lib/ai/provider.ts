@@ -14,7 +14,7 @@ export type InputKind = "text" | "image" | "url" | "x_url";
  * 解析仕様（プロンプト・ツール定義・検証ルール）のバージョン。精度をバージョンごとに比べられるよう、解析ログに記録する。
  * プロンプトやツール定義、検証ロジックを変えたら更新する。
  */
-export const PROMPT_VERSION = "2026-10-29.2";
+export const PROMPT_VERSION = "2026-10-30.1";
 
 export interface ExtractRequest {
   kind: InputKind;
@@ -77,6 +77,8 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - プレゼント企画・懸賞（購入を伴わない「抽選で当たる」）は抽選販売ではないので、is_lottery_announcement を false にする。
 - 告知の公開日・投稿日が書かれていれば published_on に入れる（年が書かれているときだけ）。
 - 告知が途中で切れている・一部しか見えないときは、見えている範囲だけを記録し、足りない項目は不明にして、warnings に「告知が途中で切れている」と書く。
+- 読み取れなかった項目の理由や説明（「〜が読み取れませんでした」「記載がありません」など）を、conditions_text・verification_text・announcement_method・notes に書かない。読み取れなければ空文字にする。理由は warnings だけに書く。
+- 購入・受取の期間は、始まりを procedure_start、終わり（期限）を procedure_deadline に入れる。終わりだけ書かれていれば procedure_start は null。
 
 例（要点だけ。実際の告知の表記どおりに返す）:
 - 「1人1BOXまで」「お一人様1点まで」→ 購入数量の上限。purchase_limit_text に書き、limit_basis は unknown（応募回数の記載があるときだけ設定）。
@@ -85,6 +87,7 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - 「2商品のうち、当選はどちらか1点まで」→ multi_mode=one_win。「どちらか1つを選んで応募」→ choose_one。「各商品に応募でき、それぞれ抽選」→ all。商品が複数で方式の記載がなければ unknown。
 - 「店頭でのお渡しのみ」→ receive_method=store。「配送（送料別）」→ shipping。「店頭受取か配送を選べる」→ either。
 - 「拡張パック「ひかりの森」 1BOX（30パック入り）」→ name=拡張パック「ひかりの森」, quantity=1, unit=box（「1BOX」「30パック入り」は商品名に含めない）。
+- 「購入・お渡し期間は11月14日〜11月20日」→ procedure_start=11/14, procedure_deadline=11/20（時刻の記載がなければ hour/minute は null）。「11月20日までにご購入」→ procedure_deadline のみ。
 - 「11月5日（木）10:00〜11月10日（火）23:59」で年の記載なし → year=null, month/day/hour/minute を返す（年は補わない）。「11月13日にメールで発表」→ 時刻の記載がないので hour=null, minute=null。
 
 必ず record_lottery ツールを1回呼び出して結果を返してください。`;
@@ -104,7 +107,7 @@ const dateSchema = {
 };
 const confSchema = { type: "string", enum: ["high", "medium", "low"] };
 const confKeys = [
-  "chain", "store", "products", "multi_mode", "apply_start", "apply_deadline", "result_date", "procedure_deadline",
+  "chain", "store", "products", "multi_mode", "apply_start", "apply_deadline", "result_date", "procedure_start", "procedure_deadline",
   "announcement", "apply_method", "receive_method", "limit", "conditions",
 ] as const;
 
@@ -136,7 +139,8 @@ export const RECORD_LOTTERY_TOOL = {
       apply_start: dateSchema,
       apply_deadline: dateSchema,
       result_date: dateSchema,
-      procedure_deadline: { ...dateSchema, description: "購入・受取の期限。無ければ null" },
+      procedure_start: { ...dateSchema, description: "購入・受取の開始日時（購入期間・受取期間の始まり）。無ければ null" },
+      procedure_deadline: { ...dateSchema, description: "購入・受取の終了日時（期限）。無ければ null" },
       announcement_method: { type: "string", description: "当選発表の方法（メール、マイページ等）" },
       announcement_url: { type: "string" },
       apply_url: { type: "string" },
@@ -160,7 +164,7 @@ export const RECORD_LOTTERY_TOOL = {
         type: "object",
         description: "項目ごとの原文の短い抜粋（原文のまま）。根拠が無い項目は空文字",
         properties: Object.fromEntries(
-          ["chain", "store", "products", "multi_mode", "apply_start", "apply_deadline", "result_date", "procedure_deadline", "announcement", "apply_method", "receive_method", "limit", "conditions", "apply_url", "announcement_url"].map((k) => [k, { type: "string" }]),
+          ["chain", "store", "products", "multi_mode", "apply_start", "apply_deadline", "result_date", "procedure_start", "procedure_deadline", "announcement", "apply_method", "receive_method", "limit", "conditions", "apply_url", "announcement_url"].map((k) => [k, { type: "string" }]),
         ),
         required: [],
         additionalProperties: false,
@@ -168,7 +172,7 @@ export const RECORD_LOTTERY_TOOL = {
     },
     required: [
       "is_lottery_announcement", "chain_name", "store_name", "prefecture", "products", "multi_mode", "apply_start", "apply_deadline",
-      "result_date", "procedure_deadline", "announcement_method", "announcement_url", "apply_url", "apply_method", "receive_method",
+      "result_date", "procedure_start", "procedure_deadline", "announcement_method", "announcement_url", "apply_url", "apply_method", "receive_method",
       "limit_basis", "limit_max_count", "purchase_limit_text", "conditions_text", "verification_text", "notes", "confidence", "warnings",
       "published_on", "evidence",
     ],
@@ -280,6 +284,7 @@ class MockExtractor implements LotteryExtractor {
         apply_start: d(1, 10, 10, 0),
         apply_deadline: d(1, 20, 23, 59),
         result_date: d(1, 25),
+        procedure_start: null,
         procedure_deadline: null,
         announcement_method: "メール",
         announcement_url: "",
@@ -294,7 +299,7 @@ class MockExtractor implements LotteryExtractor {
         notes: "これはモックのサンプルです",
         confidence: {
           chain: high, store: high, products: high, multi_mode: "low", apply_start: high, apply_deadline: high, result_date: "medium",
-          procedure_deadline: "low", announcement: high, apply_method: high, receive_method: "medium", limit: high, conditions: "medium",
+          procedure_start: "low", procedure_deadline: "low", announcement: high, apply_method: high, receive_method: "medium", limit: high, conditions: "medium",
         },
         warnings: [],
       },

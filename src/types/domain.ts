@@ -205,6 +205,8 @@ export interface Lottery {
   applyDeadline: FlexibleDate;
   resultDate: FlexibleDate;
   /** 購入手続き／受取期限 */
+  /** 購入・受取の開始（不明なら unknown）。終了は procedureDeadline */
+  procedureStart: FlexibleDate;
   procedureDeadline: FlexibleDate;
   receiveMethod: ReceiveMethod;
   applyMethod: ApplyMethod;
@@ -405,6 +407,8 @@ export interface AppData {
   requirements: ChainRequirement[];
   eligibilities: AccountEligibility[];
   audit: AuditEntry[];
+  /** プロフィール別の設定（下部メニュー・カード表示など）。プロフィールID → 設定。未設定は省略 */
+  profileSettings?: Record<string, import("@/lib/profile-settings").ProfileSettings>;
   /** 世帯設定（カード表示項目・自宅の位置など）。未設定のデータ・モックでは省略 */
   settings?: HouseholdSettings;
   /** 対戦記録（Stage 5A）。モックでは省略 */

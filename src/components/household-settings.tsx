@@ -8,7 +8,7 @@ import { ackTravelReview, geocodeAddress, getHomeAddress, loadAiQuality, loadAiU
 import { budgetThresholds } from "@/lib/ai-cost";
 import { FIELD_LABEL, type QualitySummary } from "@/lib/ai/quality";
 import { FEEDBACK_FIELDS } from "@/lib/ai/feedback";
-import { CARD_FIELD_LABEL, CARD_FIELDS, DEFAULT_CARD_DISPLAY, type CardDisplay } from "@/lib/card-display";
+import { DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { BAND_CLASS, DEFAULT_DISTANCE_BANDS_KM, bandLabel, validBands, type DistanceBand } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import type { HouseholdSettings } from "@/types/domain";
@@ -55,7 +55,8 @@ export function HomeLocationSection() {
     setMsg(null);
     if (!loadedAddr) {
       const r = await getHomeAddress();
-      if (r.ok) setAddress(r.address);
+      // 取得が終わる前に利用者が入力を始めていたら、入力を上書きしない
+      if (r.ok) setAddress((cur) => (cur === "" ? r.address : cur));
       setLoadedAddr(true);
     }
   };
@@ -208,7 +209,6 @@ export function HomeLocationSection() {
 export function CardDisplaySection() {
   const { data, profile, reload } = useApp();
   const s = currentSettings(data.settings);
-  const [display, setDisplay] = useState<CardDisplay>(s.cardDisplay);
   const [bands, setBands] = useState<string[]>(s.distanceBandsKm.map(String));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -218,27 +218,16 @@ export function CardDisplaySection() {
   const save = async () => {
     if (!bandsOk) return setMsg({ ok: false, text: "距離の区分は、小さい順に4つの正の数で入力してください" });
     setBusy(true);
-    const r = await saveHouseholdSettings({ ...s, cardDisplay: display, distanceBandsKm: nums, actor: profile.id });
+    const r = await saveHouseholdSettings({ ...s, cardDisplay: s.cardDisplay, distanceBandsKm: nums, actor: profile.id });
     setBusy(false);
     if (r.ok) {
-      setMsg({ ok: true, text: "表示設定を保存しました" });
+      setMsg({ ok: true, text: "距離の区分を保存しました" });
       await reload();
     } else setMsg({ ok: false, text: r.error });
   };
 
   return (
-    <div className="space-y-3 text-sm" data-testid="card-display">
-      <p className="text-xs text-muted-foreground">抽選カードに表示する項目を選びます（家族共通）。応募締切が近い警告・未対応の通知・★・ユーザー別の応募状況の操作は、この設定に関係なく常に表示されます。</p>
-      <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {CARD_FIELDS.map((k) => (
-          <li key={k}>
-            <label className="flex min-h-10 items-center gap-2 rounded-md border px-2">
-              <input type="checkbox" className="size-4" checked={display[k]} onChange={(e) => setDisplay({ ...display, [k]: e.target.checked })} />
-              {CARD_FIELD_LABEL[k]}
-            </label>
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-3 text-sm" data-testid="distance-bands">
       <div>
         <p className="text-[13px] font-medium">距離の区分（直線距離・km）</p>
         <div className="mt-1 grid grid-cols-4 gap-1.5">
@@ -258,7 +247,7 @@ export function CardDisplaySection() {
         </ul>
       </div>
       <Button size="sm" onClick={save} disabled={busy}>
-        表示設定を保存
+        距離の区分を保存
       </Button>
       {msg && (
         <p role={msg.ok ? "status" : "alert"} className={cn("text-xs", msg.ok ? "text-muted-foreground" : "text-danger")}>

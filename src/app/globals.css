@@ -152,3 +152,20 @@
     }
   }
 }
+
+/* 設定の下のページへ移るときの、右からのスライド */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 下部固定の要素の位置を再計算させるための、見た目に影響しない変数（app-shell の useFixedLayoutRefresh） */
+html {
+  padding-top: var(--layout-nudge, 0px);
+}

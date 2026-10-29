@@ -3,13 +3,12 @@
  * 応募締切が近い警告・未対応の通知・★・ユーザー別の応募状況の操作は、この設定とは別に常に表示する。
  */
 
-export const CARD_FIELDS = ["prefecture", "distance", "travelCost", "deadline", "announce", "receive", "applyMethod", "quantity", "accounts"] as const;
+export const CARD_FIELDS = ["prefecture", "travelCost", "deadline", "announce", "receive", "applyMethod", "quantity", "accounts"] as const;
 export type CardField = (typeof CARD_FIELDS)[number];
 export type CardDisplay = Record<CardField, boolean>;
 
 export const CARD_FIELD_LABEL: Record<CardField, string> = {
-  prefecture: "都道府県",
-  distance: "自宅からの直線距離",
+  prefecture: "受取場所（都道府県／通販）",
   travelCost: "往復交通費",
   deadline: "応募締切",
   announce: "当選発表日時",
@@ -22,7 +21,6 @@ export const CARD_FIELD_LABEL: Record<CardField, string> = {
 /** 既定は重要な項目だけ（交通費・応募方法は非表示） */
 export const DEFAULT_CARD_DISPLAY: CardDisplay = {
   prefecture: true,
-  distance: true,
   travelCost: false,
   deadline: true,
   announce: true,
