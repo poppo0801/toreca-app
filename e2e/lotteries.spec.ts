@@ -631,3 +631,36 @@ test.describe("設定とナビゲーション", () => {
     await expect(card.getByRole("button", { name: /管理対象（★）をOFF/ })).toBeVisible();
   });
 });
+
+test.describe("表示診断（下部メニューの位置ずれの調査用）", () => {
+  test("通常は表示されない。?diag=1 で診断モードになり、寸法・Safe Area・最初のタッチ前後が記録されてコピーできる。?diag=off で解除", async ({ page, isMobile, context }) => {
+    test.skip(!isMobile, "下部メニューはスマホ幅のみ");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
+    await expect(page.getByTestId("layout-diag")).toHaveCount(0); // 通常の画面には出ない
+    await page.goto("/lotteries?diag=1");
+    const diag = page.getByTestId("layout-diag");
+    await expect(diag).toBeVisible();
+    const text = diag.getByLabel("診断結果");
+    await expect(text).toHaveValue(/\[mount\]/);
+    await expect(text).toHaveValue(/safe\(t\/r\/b\/l\)=/);
+    await expect(text).toHaveValue(/gapBottom=/);
+    await expect(text).toHaveValue(/unit\(vh\/dvh\/svh\/lvh\)=/);
+    // 診断パネルが下部メニューの位置を変えない
+    const nav = (await page.getByTestId("bottom-nav").boundingBox())!;
+    const vp = page.viewportSize()!;
+    expect(Math.abs(nav.y + nav.height - vp.height)).toBeLessThan(2);
+    // 最初のタッチの前後が残る
+    await page.touchscreen.tap(vp.width / 2, 1); // ヘッダーの上端（何も開かない場所）
+    await expect(text).toHaveValue(/touchstart\(1回目・直前\)/);
+    await expect(text).toHaveValue(/touchstart\+1frame/);
+    await diag.getByTestId("diag-copy").click();
+    await expect(diag).toContainText(/コピーしました|コピーできませんでした/);
+    // 状態は端末に保存され、ページ移動後も続く。個人情報・URLのクエリは含まない
+    await page.goto("/finance");
+    await expect(page.getByTestId("layout-diag")).toBeVisible();
+    const report = await page.getByTestId("layout-diag").getByLabel("診断結果").inputValue();
+    expect(report).not.toContain("diag=1");
+    await page.goto("/lotteries?diag=off");
+    await expect(page.getByTestId("layout-diag")).toHaveCount(0);
+  });
+});

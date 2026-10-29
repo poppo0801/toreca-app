@@ -7,6 +7,7 @@ import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { AiQualitySection, AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
 import { Accordion, MenuGroup, MenuLink } from "@/components/settings-parts";
+import { setDiagEnabled } from "@/components/layout-diagnostics";
 
 const SUPABASE = IS_SUPABASE_MODE;
 
@@ -96,6 +97,17 @@ export function SettingsView() {
             <p>{SUPABASE ? "Supabase（ログイン・プロフィール・マスター・抽選は実データ）。" : "ローカルモック（架空データ・リロードで初期化）。"}</p>
             <p className="text-xs text-muted-foreground">現在の操作プロフィール: {profile.label}</p>
             <p className="text-xs text-muted-foreground">操作中のユーザーはヘッダー右上のアイコンからも切り替えられます（この端末にのみ保存され、本人認証ではありません）。</p>
+            <button
+              type="button"
+              data-testid="diag-start"
+              onClick={() => {
+                setDiagEnabled(true);
+                window.location.reload();
+              }}
+              className="min-h-10 rounded-md border px-3 text-xs"
+            >
+              表示診断を開始（下部メニューの位置の確認用）
+            </button>
             {SUPABASE && (
               <form action={signOut}>
                 <Button type="submit" variant="outline">

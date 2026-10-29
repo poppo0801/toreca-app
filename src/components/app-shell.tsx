@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import { Banknote, Ellipsis, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
+import { LayoutDiagnostics, useDiagEnabled } from "@/components/layout-diagnostics";
 import { NotificationBell } from "@/components/notification-bell";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -71,6 +72,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const { profile, notice, dismissNotice, settings } = useApp();
   const [more, setMore] = useState(false);
   useFixedLayoutRefresh();
+  const diag = useDiagEnabled(); // 明示的な診断モードでだけ true（通常は常に false）
   useProfileTheme();
   const nav = resolveNav(settings.nav);
   const all = availableNav();
@@ -151,6 +153,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </nav>
+        {diag && <LayoutDiagnostics />}
         <Sheet open={more} onOpenChange={setMore}>
           <SheetContent data-testid="more-sheet" aria-describedby="more-desc">
             <div className="px-4 pb-2">
