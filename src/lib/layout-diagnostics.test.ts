@@ -18,6 +18,7 @@ const base = (over: Partial<Snap> = {}): Snap => ({
   unitH: { vh: 844, dvh: 844, svh: 844, lvh: 844 },
   safe: { top: 59, right: 0, bottom: 34, left: 0 },
   standalone: true,
+  vpGap: 0,
   nav: { top: 782, bottom: 844, height: 62, padBottom: 10, cssBottom: "0px", cssHeight: "62px", cssPaddingBottom: "10px", position: "fixed" },
   gridBottom: 834,
   fixedBreakers: [],

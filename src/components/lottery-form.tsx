@@ -232,7 +232,7 @@ function MinimizedBar({
   return (
     <div
       data-testid="form-minimized"
-      className="fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom)+0.5rem)] z-40 rounded-xl border border-primary bg-card shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
+      className="fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom)+0.5rem-var(--vp-gap,0px))] z-40 rounded-xl border border-primary bg-card shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
     >
       {confirming ? (
         <div role="alert" className="flex items-center gap-2 p-2 text-sm">

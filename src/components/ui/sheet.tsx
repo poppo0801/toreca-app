@@ -66,7 +66,7 @@ export function SheetContent({
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100dvh-env(safe-area-inset-top)-0.5rem)] flex-col rounded-t-2xl border border-b-0 bg-card text-card-foreground shadow-[var(--shadow-sheet)] outline-none",
+          "fixed inset-x-0 bottom-[calc(var(--vp-gap,0px)*-1)] z-50 flex max-h-[calc(100dvh-env(safe-area-inset-top)-0.5rem)] flex-col rounded-t-2xl border border-b-0 bg-card text-card-foreground shadow-[var(--shadow-sheet)] outline-none",
           "data-[state=open]:animate-[sheet-in_0.22s_ease-out] data-[state=closed]:animate-[sheet-out_0.18s_ease-in]",
           "md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:max-h-[90dvh] md:w-[calc(100%-2rem)] md:max-w-xl md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:data-[state=open]:animate-none md:data-[state=closed]:animate-none",
           className,

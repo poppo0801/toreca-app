@@ -11,6 +11,7 @@ import { LayoutDiagnostics, useDiagEnabled } from "@/components/layout-diagnosti
 import { NotificationBell } from "@/components/notification-bell";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { viewportGap } from "@/lib/viewport-gap";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
@@ -24,33 +25,50 @@ const NAV_ICON: Record<string, LucideIcon> = {
 const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
 
 /**
- * iOS（特にホーム画面追加のPWA）で、起動直後に下部固定の要素が本来より上に出て、操作すると戻ることがある。
- * 起動・復帰・向き変更のあとに（resize では行わない: 固定要素の再計算が連鎖しないようにする）、固定要素の位置を再計算させる（1フレームだけ無害な変更を入れて戻す）。
- * 実機でしか再現しないため、効果は実機で確認が必要。
+ * iOS のホーム画面アプリで、起動直後だけ表示領域(innerHeight)が実際の画面より低く、固定要素の下に空白ができる問題の補正。
+ * 100vh と innerHeight の差（standalone のときだけ）を CSS 変数 --vp-gap に入れ、下部の固定要素の bottom をその分下げる（src/lib/viewport-gap.ts）。
+ * 測るのは起動・復帰・向き変更・表示領域の変化・最初の操作のときだけ（タイマーや無条件の再描画はしない）。値が変わらなければ何もしない。
  */
-function useFixedLayoutRefresh() {
+function useViewportGap() {
   useEffect(() => {
     const root = document.documentElement;
-    let raf = 0;
-    const refresh = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        root.style.setProperty("--layout-nudge", "0.01px");
-        raf = requestAnimationFrame(() => root.style.removeProperty("--layout-nudge"));
-      });
+    const mq = window.matchMedia("(display-mode: standalone)");
+    const measure = () => {
+      const probe = document.createElement("div");
+      probe.setAttribute("aria-hidden", "true");
+      probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;left:0;top:0;width:0;height:100vh";
+      document.body.appendChild(probe);
+      const vh100 = probe.getBoundingClientRect().height;
+      probe.remove();
+      const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+      const gap = viewportGap(vh100, window.innerHeight, standalone);
+      const prev = root.style.getPropertyValue("--vp-gap");
+      const next = gap > 0 ? `${gap}px` : "";
+      if (prev !== next) {
+        if (next) root.style.setProperty("--vp-gap", next);
+        else root.style.removeProperty("--vp-gap");
+      }
     };
-    refresh();
-    const timers = [120, 600].map((ms) => window.setTimeout(refresh, ms));
-    const onShow = () => refresh();
-    window.addEventListener("pageshow", onShow);
-    window.addEventListener("orientationchange", onShow);
-    document.addEventListener("visibilitychange", onShow);
+    measure();
+    const once = { once: true, passive: true, capture: true } as const;
+    const vv = window.visualViewport;
+    window.addEventListener("pageshow", measure);
+    window.addEventListener("orientationchange", measure);
+    window.addEventListener("resize", measure);
+    document.addEventListener("visibilitychange", measure);
+    vv?.addEventListener("resize", measure);
+    // 最初の操作で表示領域が更新される端末向け（1回だけ）
+    window.addEventListener("touchstart", measure, once);
+    window.addEventListener("scroll", measure, once);
     return () => {
-      cancelAnimationFrame(raf);
-      timers.forEach(window.clearTimeout);
-      window.removeEventListener("pageshow", onShow);
-      window.removeEventListener("orientationchange", onShow);
-      document.removeEventListener("visibilitychange", onShow);
+      window.removeEventListener("pageshow", measure);
+      window.removeEventListener("orientationchange", measure);
+      window.removeEventListener("resize", measure);
+      document.removeEventListener("visibilitychange", measure);
+      vv?.removeEventListener("resize", measure);
+      window.removeEventListener("touchstart", measure, once);
+      window.removeEventListener("scroll", measure, once);
+      root.style.removeProperty("--vp-gap");
     };
   }, []);
 }
@@ -71,7 +89,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, notice, dismissNotice, settings } = useApp();
   const [more, setMore] = useState(false);
-  useFixedLayoutRefresh();
+  useViewportGap();
   const diag = useDiagEnabled(); // 明示的な診断モードでだけ true（通常は常に false）
   useProfileTheme();
   const nav = resolveNav(settings.nav);
@@ -136,7 +154,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         {/* モバイル: 下部メニュー（プロフィール別・最大5枠。隠れた機能があれば「その他」）。背景は下端まで伸び、操作部分はホームインジケーターの少し上 */}
-        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-0 z-30 border-t bg-header pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
+        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(var(--vp-gap,0px)*-1)] z-30 border-t bg-header pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
           <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
             {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary", "text-muted-foreground", "size-5"))}
             {nav.more.length > 0 && (

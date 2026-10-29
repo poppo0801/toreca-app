@@ -83,6 +83,7 @@ function take(label: string): Snap {
     scrollY: window.scrollY,
     unitH: { vh: unit("vh"), dvh: unit("dvh"), svh: unit("svh"), lvh: unit("lvh") },
     safe,
+    vpGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--vp-gap")) || 0,
     standalone: window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
     nav: navInfo,
     gridBottom: grid ? grid.getBoundingClientRect().bottom : null,

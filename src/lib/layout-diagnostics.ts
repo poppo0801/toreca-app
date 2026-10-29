@@ -25,6 +25,8 @@ export interface Snap {
   /** env(safe-area-inset-*) の実効値(px) */
   safe: { top: number; right: number; bottom: number; left: number };
   standalone: boolean;
+  /** 補正値 --vp-gap(px)。0 は補正なし */
+  vpGap: number;
   nav: null | { top: number; bottom: number; height: number; padBottom: number; cssBottom: string; cssHeight: string; cssPaddingBottom: string; position: string };
   /** 内側(grid)の下端。nav.bottom との差が padBottom と合うか見る */
   gridBottom: number | null;
@@ -69,7 +71,7 @@ export function formatSnap(s: Snap): string {
     `[${s.label}] t=${f(s.t, 0)}ms standalone=${s.standalone}`,
     `  inner=${s.innerW}x${s.innerH} outerH=${s.outerH} screenH=${s.screenH} vv=${f(s.vvH)}(top ${f(s.vvTop)}, scale ${f(s.vvScale, 2)}) doc=${s.docClientH} body=${s.bodyClientH} scrollY=${f(s.scrollY)}`,
     `  unit(vh/dvh/svh/lvh)=${s.unitH.vh}/${s.unitH.dvh}/${s.unitH.svh}/${s.unitH.lvh}`,
-    `  safe(t/r/b/l)=${f(s.safe.top)}/${f(s.safe.right)}/${f(s.safe.bottom)}/${f(s.safe.left)}`,
+    `  safe(t/r/b/l)=${f(s.safe.top)}/${f(s.safe.right)}/${f(s.safe.bottom)}/${f(s.safe.left)} vpGap=${s.vpGap} (100vh-innerH=${s.unitH.vh - s.innerH})`,
   ];
   if (s.nav) {
     lines.push(
