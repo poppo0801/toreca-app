@@ -36,7 +36,7 @@ describe("AI利用料金の推定（公式単価 × トークン数 × 概算レ
     const [oct, sep] = summarizeUsage(logs);
     expect(oct.month).toBe("2026-10");
     expect(oct.calls).toBe(5); // 実AI: 4件 + 月境界の1件
-    expect(oct.byKind).toEqual({ text: 3, image: 1, url: 1, x_url: 0 });
+    expect(oct.byKind).toEqual({ text: 3, image: 1, url: 1, x_url: 0, card_image: 0 });
     expect(oct.mockCalls).toBe(1);
     expect(oct.unestimated).toBe(1);
     expect(oct.inputTokens).toBe(2000 * 4 + 3000);
