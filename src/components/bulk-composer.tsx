@@ -4,8 +4,8 @@ import { FileImage, Loader2, Plus, RotateCcw, TextCursorInput } from "lucide-rea
 import { useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
-import { MAX_ITEM_IMAGES, MAX_JOB_ITEMS, urlsToItems, type JobItemInput } from "@/lib/ai-job";
-import { runLimited, sha256Hex, shrinkToJpeg } from "@/lib/client-image";
+import { MAX_JOB_ITEMS, urlsToItems, type JobItemInput } from "@/lib/ai-job";
+import { prepareAiImages, runLimited, sha256Hex } from "@/lib/client-image";
 import { cn } from "@/lib/utils";
 
 /** 1セット＝1件の抽選。URL・画像（複数可）・文章のどれか1つだけを入力する（入力した方法以外は無効になる） */
@@ -55,20 +55,30 @@ export function BulkComposer({ onStarted }: { onStarted: (jobId: string) => void
   const [rows, setRows] = useState<Row[]>(() => Array.from({ length: INITIAL_ROWS }, (_, i) => blank(i + 1)));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState<number | null>(null);
+  const [notes, setNotes] = useState<Record<number, string[]>>({});
   const fileRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const patch = (id: number, p: Partial<Row>) => setRows((cur) => cur.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const filled = rows.filter(rowFilled);
 
   const pickImages = async (id: number, list: FileList | null) => {
-    const files = [...(list ?? [])].slice(0, MAX_ITEM_IMAGES);
+    const picked = [...(list ?? [])];
     const input = fileRefs.current[id];
     if (input) input.value = "";
-    if (files.length === 0) return;
-    const small = await Promise.all(files.map((f) => shrinkToJpeg(f)));
-    const shas = await Promise.all(small.map((f) => sha256Hex(f)));
-    patch(id, { files: small, shas });
-    if ((list?.length ?? 0) > MAX_ITEM_IMAGES) setMsg(`1件に使える画像は${MAX_ITEM_IMAGES}枚までです`);
+    if (picked.length === 0) return;
+    setMsg(null);
+    setPreparing(id);
+    try {
+      // 縦長の画像は文字が読めるよう、幅を保って上から順に分割する（分割後も1件の抽選として扱う）
+      const prepared = await prepareAiImages(picked);
+      if (prepared.error) return setMsg(prepared.error);
+      const shas = await Promise.all(prepared.files.map((f) => sha256Hex(f)));
+      patch(id, { files: prepared.files, shas });
+      setNotes((cur) => ({ ...cur, [id]: prepared.notices }));
+    } finally {
+      setPreparing(null);
+    }
   };
 
   /** 複数行のURLを貼り付けたら、空いているセットへ1行ずつ振り分ける */
@@ -158,8 +168,8 @@ export function BulkComposer({ onStarted }: { onStarted: (jobId: string) => void
                 />
               )}
               <input ref={(el) => void (fileRefs.current[r.id] = el)} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" aria-label={`${i + 1}件目の画像を選択`} data-testid="bulk-files" onChange={(e) => void pickImages(r.id, e.target.files)} />
-              <Button type="button" variant="outline" size="icon" className="relative size-11 shrink-0" disabled={hasUrl || hasText} aria-label={`${i + 1}件目に画像を登録`} onClick={() => fileRefs.current[r.id]?.click()} data-testid="row-image">
-                <FileImage className="size-4" aria-hidden="true" />
+              <Button type="button" variant="outline" size="icon" className="relative size-11 shrink-0" disabled={hasUrl || hasText || preparing !== null} aria-label={`${i + 1}件目に画像を登録`} onClick={() => fileRefs.current[r.id]?.click()} data-testid="row-image">
+                {preparing === r.id ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileImage className="size-4" aria-hidden="true" />}
                 {hasFiles && <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">{r.files.length}</span>}
               </Button>
               <Button
@@ -175,13 +185,18 @@ export function BulkComposer({ onStarted }: { onStarted: (jobId: string) => void
               >
                 <TextCursorInput className="size-4" aria-hidden="true" />
               </Button>
-              <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label={`${i + 1}件目をリセット`} disabled={!rowFilled(r) && !r.textMode} onClick={() => patch(r.id, { url: "", text: "", files: [], shas: [], textMode: false })} data-testid="row-reset">
+              <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label={`${i + 1}件目をリセット`} disabled={!rowFilled(r) && !r.textMode} onClick={() => (patch(r.id, { url: "", text: "", files: [], shas: [], textMode: false }), setNotes((cur) => ({ ...cur, [r.id]: [] })))} data-testid="row-reset">
                 <RotateCcw className="size-4" aria-hidden="true" />
               </Button>
             </li>
           );
         })}
       </ol>
+      {rows.some((r) => r.files.length > 0 && (notes[r.id]?.length ?? 0) > 0) && (
+        <ul className="space-y-0.5 text-xs text-muted-foreground" data-testid="prep-notes">
+          {rows.flatMap((r, i) => (r.files.length > 0 ? (notes[r.id] ?? []).map((n) => <li key={`${r.id}${n}`}>{i + 1}件目: {n}</li>) : []))}
+        </ul>
+      )}
       <div className="flex items-center gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" disabled={rows.length >= MAX_JOB_ITEMS} onClick={() => setRows((cur) => [...cur, blank(nextId.current++)])} data-testid="row-add">
           <Plus className="size-4" aria-hidden="true" /> 入力欄を追加

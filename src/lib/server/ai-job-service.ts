@@ -115,7 +115,7 @@ async function toInput(db: Db, it: Record<string, unknown>): Promise<ExtractInpu
     if (error || !data) return { error: "入力画像が見つかりません（もう一度画像を追加してください）" };
     const buf = Buffer.from(await data.arrayBuffer());
     total += buf.length;
-    if (total > 4_500_000) return { error: "画像の合計サイズが大きすぎます" };
+    if (total > 9_000_000) return { error: "画像の合計サイズが大きすぎます" };
     const mediaType = sniffImage(buf);
     if (!mediaType) return { error: "対応していない画像形式です" };
     images.push({ mediaType, base64: buf.toString("base64") });

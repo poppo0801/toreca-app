@@ -227,3 +227,33 @@ run("ui1")("ui1: 画面から文章を読み取り→登録フォームへ反映
   await page.getByRole("tab", { name: /全情報/ }).click();
   await expect(page.getByTestId("lottery-card").filter({ hasText: "三宮店" })).toHaveCount(1);
 });
+
+// ------------------------------------------------------------------ 縦長画像（幅786×高さ10,810px）
+/** 重要な項目を、分割の境目（1,040〜1,200px付近）・中ほど・下端に置いた長いスクリーンショット。間は注意書きで埋める */
+function tallHtml(): string {
+  const note = (y: number, t: string) => `<div style="position:absolute;left:32px;right:32px;top:${y}px;font-size:17px;color:#777">${t}</div>`;
+  const key = (y: number, t: string) => `<div style="position:absolute;left:32px;right:32px;top:${y}px;font-size:24px;font-weight:700;border:2px solid #333;padding:10px;background:#fff">${t}</div>`;
+  const fillers = Array.from({ length: 70 }, (_, i) => note(200 + i * 148, `※ご案内${i + 1}: 混雑時は入店制限を行う場合があります。お客様のご協力をお願いいたします。駐車場には限りがございます。`)).join("");
+  return `<body style="${FONT};margin:0;background:#fff;width:786px;height:10810px;position:relative;overflow:hidden">
+<div style="position:absolute;top:0;left:0;right:0;height:80px;background:#c8102e;color:#fff;font-size:26px;font-weight:700;padding:22px 32px;box-sizing:border-box">モデル家電 梅田店　抽選販売のご案内</div>
+${key(110, "対象商品：強化拡張パック「テストの海」 1BOX")}
+${fillers}
+${key(1090, "応募受付：11月8日(日) 12:00 ～ 11月12日(木) 18:00")}
+${key(5000, "当選発表：11月15日(日)以降、順次メールにてご連絡")}
+${key(10560, "購入・受取期限：当選発表から3日以内（店頭受取のみ・お一人様1点まで）")}
+</body>`;
+}
+
+run("tall")("tall: 画像（幅786×高さ10,810pxの縦長スクリーンショット。分割して1件として読み取れるか）", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  const ctx = await page.context().browser()!.newContext({ viewport: { width: 786, height: 900 }, deviceScaleFactor: 1 });
+  const p = await ctx.newPage();
+  await p.setContent(tallHtml());
+  const png = await p.screenshot({ fullPage: true });
+  await ctx.close();
+  const meta = await sharp(png).metadata();
+  expect([meta.width, meta.height]).toEqual([786, 10810]);
+  const r = await call(page, "tall", { kind: "image", images: { name: "long.png", mimeType: "image/png", buffer: png } });
+  expect(r.ok).toBe(true);
+});

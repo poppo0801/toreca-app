@@ -22,7 +22,7 @@ describe("一括解析: 入力の検証と整形", () => {
     expect(xPostId("https://x.com/u")).toBeNull();
   });
 
-  it("ジョブの入力: 項目数の上限・文章の長さ・画像の枚数（1抽選に最大5枚）・画像パスの形式", () => {
+  it("ジョブの入力: 項目数の上限・文章の長さ・画像の枚数（1抽選に最大12枚）・画像パスの形式", () => {
     const ok = (items: unknown[]) => createJobSchema.safeParse({ items }).success;
     expect(ok([{ source: "text", text: "x".repeat(10) }])).toBe(true);
     expect(ok([{ source: "text", text: "短い" }])).toBe(false);
@@ -30,8 +30,8 @@ describe("一括解析: 入力の検証と整形", () => {
     expect(ok([{ source: "url", url: "javascript:alert(1)" }])).toBe(false);
     const hid = "11111111-1111-1111-1111-111111111111";
     const path = (n: number) => `${hid}/${n}.png`;
-    expect(ok([{ source: "images", paths: [1, 2, 3, 4, 5].map(path), shas: Array(5).fill("a".repeat(64)) }])).toBe(true);
-    expect(ok([{ source: "images", paths: [1, 2, 3, 4, 5, 6].map(path), shas: Array(6).fill("a".repeat(64)) }])).toBe(false);
+    expect(ok([{ source: "images", paths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(path), shas: Array(12).fill("a".repeat(64)) }])).toBe(true);
+    expect(ok([{ source: "images", paths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map(path), shas: Array(13).fill("a".repeat(64)) }])).toBe(false);
     expect(ok([{ source: "images", paths: ["../x.png"], shas: ["a".repeat(64)] }])).toBe(false);
     expect(ok([])).toBe(false);
   });

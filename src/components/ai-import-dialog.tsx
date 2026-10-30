@@ -9,6 +9,8 @@ import { AiBudgetNote } from "@/components/household-settings";
 import type { ExtractResult } from "@/lib/server/lottery-extract-service";
 import { AiResultList } from "@/components/ai-result-list";
 import { buildDraft, type LotteryDraft } from "@/lib/lottery-match";
+import { prepareAiImages } from "@/lib/client-image";
+import { MAX_TILES } from "@/lib/image-tiles";
 import { cn } from "@/lib/utils";
 
 type Tab = "text" | "image" | "url" | "x_url";
@@ -20,32 +22,7 @@ const TABS: { key: Tab; label: string; icon: typeof FileText }[] = [
   { key: "x_url", label: "X投稿", icon: Link2 },
 ];
 
-const MAX_IMAGES = 5;
-const MAX_SIDE = 1800;
-
-/** スクリーンショットを縮小・JPEG化して送信サイズを抑える（本番の関数は4.5MBまで）。元の画像は保存しない */
-async function shrinkImage(file: File): Promise<File> {
-  try {
-    const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return file;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    for (const q of [0.85, 0.7, 0.55]) {
-      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", q));
-      if (blob && blob.size <= 900_000) return new File([blob], "capture.jpg", { type: "image/jpeg" });
-      if (blob && q === 0.55) return new File([blob], "capture.jpg", { type: "image/jpeg" });
-    }
-  } catch {
-    // 縮小できない形式はそのまま送る（サーバー側で形式・サイズを検証）
-  }
-  return file;
-}
+const MAX_IMAGES = MAX_TILES;
 
 /**
  * 「AIで読み取る」: 入力方法を選ぶ → 解析 → 結果を確認 → 抽選登録フォームへ反映。
@@ -68,6 +45,8 @@ export function AiImportDialog({
   const [xUrl, setXUrl] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<"prep" | "ai">("ai");
+  const [prepNotes, setPrepNotes] = useState<string[]>([]);
   const [fail, setFail] = useState<{ message: string; code: string; suggest?: "text" | "image" } | null>(null);
   const [done, setDone] = useState<{ result: Extract<ExtractResult, { ok: true }>; draft: LotteryDraft; runId: string | null } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -79,13 +58,22 @@ export function AiImportDialog({
     setBusy(true);
     setFail(null);
     setDone(null);
+    setPrepNotes([]);
     try {
       const fd = new FormData();
       fd.set("kind", tab);
       if (tab === "text") fd.set("text", text);
       if (tab === "url") fd.set("url", url);
       if (tab === "x_url") fd.set("url", xUrl);
-      if (tab === "image") for (const f of files) fd.append("images", await shrinkImage(f));
+      if (tab === "image") {
+        // 縦長の画像は、文字が読めるよう幅を保って分割する（縮小だけだと読めなくなる）
+        setPhase("prep");
+        const prepared = await prepareAiImages(files);
+        setPrepNotes(prepared.notices);
+        if (prepared.error) return setFail({ code: "image", message: prepared.error });
+        for (const f of prepared.files) fd.append("images", f);
+        setPhase("ai");
+      }
       const res = await fetch("/api/lottery-extract", { method: "POST", body: fd });
       const json = (await res.json().catch(() => null)) as ExtractResult | { ok: false; code: string; message: string } | null;
       if (!json) setFail({ code: "network", message: "サーバーから想定外の応答が返りました。時間をおいて再度お試しください" });
@@ -196,7 +184,14 @@ export function AiImportDialog({
             )}
             {tab === "image" && (
               <div className="space-y-2 text-sm">
-                <p>告知のスクリーンショットや画像を選択（{MAX_IMAGES}枚まで）。複数枚は<strong>まとめて1件の抽選</strong>として読み取ります（別々の抽選は「まとめて読み取り」画面で）。送信前に縮小され、画像自体は保存されません。</p>
+                <p>告知のスクリーンショットや画像を選択（{MAX_IMAGES}枚まで）。複数枚は<strong>まとめて1件の抽選</strong>として読み取ります（別々の抽選は「まとめて登録」で）。縦に長い画像は自動で分割して読み取ります。画像自体は保存されません。</p>
+                {prepNotes.length > 0 && (
+                  <ul className="space-y-0.5 text-xs text-muted-foreground" data-testid="prep-notes">
+                    {prepNotes.map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                )}
                 <input
                   ref={fileRef}
                   type="file"
@@ -287,7 +282,7 @@ export function AiImportDialog({
               <Button type="button" onClick={run} disabled={!canSubmit}>
                 {busy ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" aria-hidden="true" /> 読み取り中…
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" /> {phase === "prep" ? "画像を準備中…" : "読み取り中…"}
                   </>
                 ) : (
                   "読み取る"

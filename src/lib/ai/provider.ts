@@ -14,7 +14,7 @@ export type InputKind = "text" | "image" | "url" | "x_url";
  * 解析仕様（プロンプト・ツール定義・検証ルール）のバージョン。精度をバージョンごとに比べられるよう、解析ログに記録する。
  * プロンプトやツール定義、検証ロジックを変えたら更新する。
  */
-export const PROMPT_VERSION = "2026-10-30.2";
+export const PROMPT_VERSION = "2026-10-31.1";
 
 export interface ExtractRequest {
   kind: InputKind;
@@ -188,7 +188,13 @@ export function buildUserText(req: ExtractRequest): string {
   }`;
   const src = (req.sourceUrl ? `\n出典URL: ${req.sourceUrl}` : "") + (req.postedOn ? `\n告知の公開日・投稿日: ${req.postedOn}` : "");
   const body = req.text ? `\n\n<入力>\n${req.text}\n</入力>` : "";
-  const tail = req.images?.length ? "\n\n添付画像に写っている告知を読み取ってください。" : "";
+  const n = req.images?.length ?? 0;
+  const tail =
+    n > 1
+      ? `\n\n添付画像は${n}枚で、すべて同じ1件の告知です（長い画像を上から順に分割したものを含みます）。画像は上から下、前から後ろの順に並んでいます。隣り合う画像は上下の端が少し重なっていることがあるので、重なって2回写っている同じ内容は1回だけ数え、境目で切れた文字・表は前後の画像をつなげて読み取ってください。`
+      : n === 1
+        ? "\n\n添付画像に写っている告知を読み取ってください。"
+        : "";
   return `${head}${src}${body}${tail}\n\nrecord_lottery ツールで結果を記録してください。`;
 }
 
@@ -231,9 +237,12 @@ class AnthropicExtractor implements LotteryExtractor {
 
   async extract(req: ExtractRequest): Promise<ExtractOutput> {
     const content: Anthropic.ContentBlockParam[] = [];
-    for (const img of req.images ?? []) {
+    const imgs = req.images ?? [];
+    imgs.forEach((img, i) => {
+      // 複数枚のときは何枚目かを添えて、順序と境目の重なりをAIが把握できるようにする
+      if (imgs.length > 1) content.push({ type: "text", text: `画像${i + 1}/${imgs.length}` });
       content.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } });
-    }
+    });
     content.push({ type: "text", text: buildUserText(req) });
 
     let res: Anthropic.Message;

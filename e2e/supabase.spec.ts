@@ -1350,3 +1350,69 @@ test("まとめてAI読み取り: 文章・画像（A=1件に複数枚/B=1枚ず
   await page.reload();
   await expect(page.getByTestId("job-detail").locator('[data-testid="job-item"][data-status="saved"]')).toHaveCount(savedCount);
 });
+
+/** 幅w×高さhの単色PNG。縦長画像用に、1行ずつ複製して高速に作る */
+function makeTallPng(w: number, h: number): Buffer {
+  const row = Buffer.alloc(w * 3 + 1, 235);
+  row[0] = 0;
+  const raw = Buffer.alloc(row.length * h);
+  for (let y = 0; y < h; y++) row.copy(raw, y * row.length);
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+test("縦長画像(786×10,810px): ブラウザで幅を保って11枚に分割し、1件の抽選として解析する（単体のAI読み取り・まとめて登録の両方。AIはモック）", async ({ page }) => {
+  test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証で確認する。費用を発生させない");
+  test.setTimeout(150_000);
+  await login(page);
+  const tall = { name: "long.png", mimeType: "image/png", buffer: makeTallPng(786, 10810) };
+
+  // 単体: 送信される画像は11枚（長辺を縮小して幅116pxになる従来方式ではない）
+  await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByRole("dialog").first().getByTestId("ai-open").click();
+  const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
+  await ai.getByRole("tab", { name: "画像" }).click();
+  await ai.getByLabel("告知画像を選択").setInputFiles(tall);
+  // 送信される画像を記録する（fetchのFormDataを見る）
+  await page.evaluate(() => {
+    const w = window as unknown as { __sent: string[]; fetch: typeof fetch };
+    w.__sent = [];
+    const orig = w.fetch.bind(window);
+    w.fetch = (input, init) => {
+      if (String(input).includes("/api/lottery-extract") && init?.body instanceof FormData) w.__sent = init.body.getAll("images").map((f) => (f as File).name + ":" + (f as File).size);
+      return orig(input, init);
+    };
+  });
+  await ai.getByRole("button", { name: "読み取る" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __sent: string[] }).__sent.length)).toBe(11);
+  const sent = await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent);
+  expect(sent.map((x) => x.split(":")[0])).toEqual(Array.from({ length: 11 }, (_, i) => `part-${String(i + 1).padStart(2, "0")}.jpg`)); // 上から順の番号つき
+  expect(Math.max(...sent.map((x) => Number(x.split(":")[1])))).toBeLessThan(400_000); // 1枚ずつは小さい（合計4MBの上限に収まる）
+  await expect(ai.getByTestId("prep-notes")).toContainText("11枚に分割");
+  await expect(ai.getByTestId("ai-result").or(ai.getByTestId("ai-fail"))).toBeVisible({ timeout: 30000 });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  // まとめて登録: 1行に縦長1枚 → 11枚で1件。ジョブは1件として解析される
+  await page.goto("/lotteries/bulk");
+  const bulk = page.getByTestId("bulk-ai");
+  await bulk.getByLabel("1件目の画像を選択").setInputFiles(tall);
+  await expect(bulk.getByTestId("prep-notes")).toContainText("1件目: 縦長の画像（786×10810px）を11枚に分割");
+  await expect(bulk.getByTestId("bulk-row").first().getByTestId("row-image")).toContainText("11");
+  await bulk.getByTestId("bulk-start").click();
+  await expect(page).toHaveURL(/\/lotteries\/bulk\?job=/);
+  const detail = page.getByTestId("job-detail");
+  await expect(detail.getByTestId("job-item")).toHaveCount(1);
+  await expect(detail.locator('[data-testid="job-item"][data-status="done"], [data-testid="job-item"][data-status="failed"]')).toHaveCount(1, { timeout: 60000 });
+});

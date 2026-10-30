@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_TILES } from "@/lib/image-tiles";
 
 /**
  * AI一括解析のジョブ（Stage 5G）の純粋な部分: 入力の検証・重複判定のキー・状態の表示。
@@ -7,7 +8,8 @@ import { z } from "zod";
  * 将来の定期収集（Stage 4C）も、同じジョブ・項目の仕組みに「情報源の差分」を項目として積む形で再利用できる。
  */
 export const MAX_JOB_ITEMS = 20;
-export const MAX_ITEM_IMAGES = 5;
+/** 1件の抽選に使える画像の枚数（縦長画像の分割後の枚数を含む。値は image-tiles の MAX_TILES と同じ） */
+export const MAX_ITEM_IMAGES = MAX_TILES;
 export const MAX_ACTIVE_JOBS = 5;
 export const MAX_TEXT_CHARS = 20_000;
 

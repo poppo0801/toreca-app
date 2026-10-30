@@ -3,6 +3,8 @@ import { hasAnyContent, normalizeExtraction, type ExtractedLottery } from "@/lib
 import { extractPageText, pageToPrompt } from "@/lib/ai/page-text";
 import { validateExtraction } from "@/lib/ai/validate";
 import { ExtractorError, PROMPT_VERSION, type ExtractRequest, type InputKind, type LotteryExtractor } from "@/lib/ai/provider";
+import { splitTallImages } from "@/lib/server/image-split";
+import { MAX_TILES } from "@/lib/image-tiles";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXPost, isXHost, type XFetchResult } from "@/lib/server/x-source";
 
@@ -54,7 +56,8 @@ export interface ExtractDeps {
 }
 
 export const MAX_TEXT_CHARS = 20_000;
-export const MAX_IMAGES = 5;
+/** 1件の抽選に使える画像の枚数（縦長画像の分割後の枚数を含む） */
+export const MAX_IMAGES = MAX_TILES;
 
 export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Promise<ExtractResult> {
   const fetchPage = deps.fetchPage ?? ((u: string) => fetchRespectingRobots(u));
@@ -84,7 +87,12 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
     case "image": {
       if (input.images.length === 0) return { ok: false, kind, code: "empty_input", message: "画像を選択してください" };
       if (input.images.length > MAX_IMAGES) return { ok: false, kind, code: "empty_input", message: `画像は${MAX_IMAGES}枚までです` };
-      req = { kind, images: input.images, now: deps.now };
+      // 縦長の画像が分割されないまま届いた場合の安全網（通常はブラウザ側で分割済み）
+      const split = await splitTallImages(input.images);
+      if (!split.ok) return { ok: false, kind, code: "empty_input", message: split.message };
+      if (split.images.length > MAX_IMAGES) return { ok: false, kind, code: "empty_input", message: `画像は${MAX_IMAGES}枚までです` };
+      notices.push(...split.notices);
+      req = { kind, images: split.images, now: deps.now };
       break;
     }
     case "url":
