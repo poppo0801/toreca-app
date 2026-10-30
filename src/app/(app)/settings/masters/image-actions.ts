@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { computeContentBox } from "@/lib/image-trim";
+import { makeThumb } from "@/lib/server/image-thumb";
 import { createClient } from "@/lib/supabase/server";
 
 export type ImageActionResult = { ok: true } | { ok: false; error: string };
@@ -56,13 +57,26 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
     return fail("アップロードに失敗しました。時間をおいて再度お試しください");
   }
 
-  const { data: old } = await supabase.from("product_images").select("id,storage_path").eq("product_id", productId.data).eq("kind", kind.data).maybeSingle();
-  const row = { storage_path: path, sha256: sha, width: info.width, height: info.height, source: "manual" as const, updated_by_profile_id: actor.data };
+  // 一覧用の軽量サムネイル（失敗しても元画像の登録は成功のまま。元画像を表示する）
+  let thumbPath: string | null = null;
+  try {
+    const t = await makeThumb(buf);
+    if (t) {
+      const tp = `${hh.id}/${productId.data}/thumb-${kind.data}-${sha.slice(0, 12)}.webp`;
+      const tu = await supabase.storage.from("product-images").upload(tp, t.buf, { contentType: "image/webp", upsert: true });
+      if (!tu.error) thumbPath = tp;
+    }
+  } catch {
+    /* サムネイルなしで表示される */
+  }
+
+  const { data: old } = await supabase.from("product_images").select("id,storage_path,thumb_path").eq("product_id", productId.data).eq("kind", kind.data).maybeSingle();
+  const row = { storage_path: path, thumb_path: thumbPath, sha256: sha, width: info.width, height: info.height, source: "manual" as const, updated_by_profile_id: actor.data };
   const { error } = old
     ? await supabase.from("product_images").update(row).eq("id", old.id)
     : await supabase.from("product_images").insert({ ...row, household_id: hh.id, product_id: productId.data, kind: kind.data });
   if (error) {
-    await supabase.storage.from("product-images").remove([path]);
+    await supabase.storage.from("product-images").remove(thumbPath ? [path, thumbPath] : [path]);
     return fail("画像の登録に失敗しました");
   }
   // 透明な余白を除いた表示範囲（表示時だけ使う。計算や保存に失敗しても画像の登録自体は成功のまま）
@@ -76,7 +90,7 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
   const field = `${kind.data}_image`;
   const fields = new Set<string>((product.manual_override_fields as string[] | null) ?? []);
   if (!fields.has(field)) await supabase.from("products").update({ manual_override_fields: [...fields, field], updated_by_profile_id: actor.data }).eq("id", productId.data);
-  if (old && old.storage_path !== path) await supabase.storage.from("product-images").remove([old.storage_path]);
+  if (old && old.storage_path !== path) await supabase.storage.from("product-images").remove(old.thumb_path && old.thumb_path !== thumbPath ? [old.storage_path, old.thumb_path] : [old.storage_path]);
 
   revalidatePath("/settings/masters");
   return { ok: true };

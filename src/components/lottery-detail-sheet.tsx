@@ -11,11 +11,13 @@ import { STATUS_META, StatusIcon } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { formatFlexible, remainingBadge } from "@/lib/datetime";
+import { deadlineBadge, formatFlexible, formatMonthDay, hasResultPeriod, isResultFinished } from "@/lib/datetime";
+import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
+import { resultNotice } from "@/lib/lottery-summary";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
-import { APPLY_LABEL, EVENT_LABEL, LEVEL_CLASS, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
-import { formatItem, formatQuantity, isManaged, isResultOverdue } from "@/lib/lottery-view";
+import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
+import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { storeDistance } from "@/lib/store-distance";
 import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
@@ -63,8 +65,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const store = data.stores.find((s) => s.id === lottery.storeId);
   const managed = isManaged(data, lottery.id);
   const event = effectiveEventState(lottery, now);
-  const remaining = remainingBadge(lottery.applyDeadline, now);
-  const overdue = isResultOverdue(data, lottery, now);
+  const remaining = event === "closed" ? null : deadlineBadge(lottery.applyDeadline, now);
+  const notice = resultNotice(data, lottery, now);
   const accounts = accountsForLottery(data, lottery);
   const apps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied");
   const skipSource = skipSourceFor(data, profile.id, lottery);
@@ -133,7 +135,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 {MODE_LABEL[lottery.multiMode] && <Chip className="border-info text-info">{MODE_LABEL[lottery.multiMode]}</Chip>}
                 {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}
                 {EVENT_LABEL[event] && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
-                {overdue && <Chip className="border-danger font-bold text-danger">結果未登録（発表日超過）</Chip>}
+                {notice === "unconfirmed" && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
+                {notice === "in_period" && <Chip className="text-info">発表期間中</Chip>}
                 {!managed && <Chip className="text-muted-foreground">管理対象外</Chip>}
               </div>
             </section>
@@ -145,9 +148,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 <span className={cn(lottery.applyDeadline.precision === "unknown" && "text-muted-foreground")}>
                   {lottery.applyDeadline.precision === "unknown" ? "—" : formatFlexible(lottery.applyDeadline)}
                 </span>
-                {remaining && event !== "closed" && <Chip className={cn("ml-1 font-bold", LEVEL_CLASS[remaining.level])}>{remaining.label}</Chip>}
+                <DeadlineBadgeView badge={remaining} className="ml-1 px-1 py-0.5" />
               </Field>
-              <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : formatFlexible(lottery.resultDate)}</Field>
+              <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatFlexible(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatFlexible(lottery.resultDate)}</Field>
               <Field label="購入・受取期間">
                 {lottery.procedureStart.precision === "unknown" && lottery.procedureDeadline.precision === "unknown"
                   ? DASH
@@ -208,6 +211,10 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
             <details open className="rounded-lg border" data-testid="user-section">
               <summary className="flex min-h-10 cursor-pointer items-center px-3 text-sm font-bold">ユーザー別の応募状況・当落</summary>
               <div className="space-y-3 border-t px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <ApplyStatusRow lottery={lottery} />
+                  <MyApplyButton lottery={lottery} />
+                </div>
                 <ul className="space-y-1.5 text-xs" data-testid="judge-list">
                   {accounts.map((acc) => {
                     const owner = data.profiles.find((p) => p.id === acc.profileId)!;
@@ -376,8 +383,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
 /** 商品名の下に、ユーザーごとの当落を小さく添える（複数商品） */
 export function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; itemId: string; apps: Application[] }) {
-  const { data } = useApp();
+  const { data, now } = useApp();
   if (lottery.multiMode === "single") return null;
+  const finished = isResultFinished(lottery, now) === true;
   return (
     <span className="mt-0.5 flex flex-wrap gap-1.5">
       {apps.map((a) => {
@@ -388,7 +396,7 @@ export function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; it
         return (
           <span key={a.id} className="inline-flex items-center gap-0.5 text-xs" data-testid="item-result-tag">
             <ProfileAvatar profile={owner} size="xs" />
-            <span className={cn(r === "won" && "font-bold text-success")}>{RESULT_LABEL[r]}</span>
+            <span className={cn(r === "won" && "font-bold text-success")}>{r === "pending" && finished ? "結果未確認" : RESULT_LABEL[r]}</span>
           </span>
         );
       })}

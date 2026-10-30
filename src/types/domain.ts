@@ -120,8 +120,10 @@ export interface Product {
 export type ProductImageKind = "box" | "pack" | "unit";
 
 export interface ProductImage {
-  /** サーバーが発行した期限付きURL（Storageは非公開） */
+  /** 元画像の表示用URL。Storageは非公開のため、ログイン中の本人だけが取得できるアプリのURL（内容ハッシュ入りで長期キャッシュされる） */
   url: string;
+  /** 一覧・カード用の軽量サムネイル（WebP）のURL。未作成なら省略（urlを使う） */
+  thumbUrl?: string;
   width: number | null;
   height: number | null;
   /** import=Excel/画像の一括取り込み / manual=アプリで手動アップロード（再取り込みで上書きしない） */
@@ -203,7 +205,10 @@ export interface Lottery {
   multiMode: MultiMode;
   applyStart: FlexibleDate;
   applyDeadline: FlexibleDate;
+  /** 当選発表の開始（単一日の発表はこれだけ）。時刻つきの場合も保持する */
   resultDate: FlexibleDate;
+  /** 当選発表の最終日（YYYY-MM-DD、JST）。期間指定でなければ未設定。開始日以降 */
+  resultEndDate?: string;
   /** 購入手続き／受取期限 */
   /** 購入・受取の開始（不明なら unknown）。終了は procedureDeadline */
   procedureStart: FlexibleDate;

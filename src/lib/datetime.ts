@@ -127,3 +127,104 @@ export function remainingBadge(value: FlexibleDate, now: Date): Remaining | null
   if (diffMin < 1440) return { label: `あと${Math.floor(diffMin / 60)}時間`, level };
   return { label: `あと${Math.floor(diffMin / 1440)}日`, level };
 }
+
+// ------------------------------------------------------------------ 応募締切の残り時間（カード・シンプル表示・詳細で共通）
+export type DeadlineTone = "normal" | "warn" | "danger" | "ended";
+
+export interface DeadlineBadge {
+  label: string;
+  tone: DeadlineTone;
+  /** 日付のみ（時刻が未確認）で、日数だけで見積もった表示 */
+  dateOnly: boolean;
+}
+
+const DAY_MS = 86_400_000;
+const dayNumber = (ymd: string) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / DAY_MS;
+};
+
+/**
+ * 応募締切までの残り時間バッジ。段階: 3日以上=normal / 3日未満=warn / 24時間未満=danger / 終了=ended。
+ * 時刻まで分かる(date_time)場合は分・時間・日で正確に出す。日付のみ(date_only)は時刻を補わず、
+ * 「本日まで」「あとN日」と日付の差だけで示す（dateOnly=true）。不明は null。
+ */
+export function deadlineBadge(value: FlexibleDate, now: Date): DeadlineBadge | null {
+  if (value.precision === "unknown") return null;
+  if (value.precision === "date_only") {
+    const diff = dayNumber(value.date) - dayNumber(jstDateString(now));
+    if (diff < 0) return { label: "締切済み", tone: "ended", dateOnly: true };
+    if (diff === 0) return { label: "本日まで", tone: "danger", dateOnly: true };
+    return { label: `あと${diff}日`, tone: diff < 3 ? "warn" : "normal", dateOnly: true };
+  }
+  const diffMin = Math.floor((new Date(value.at).getTime() - now.getTime()) / 60000);
+  if (diffMin < 0) return { label: "締切済み", tone: "ended", dateOnly: false };
+  if (diffMin < 60) return { label: `あと${diffMin}分`, tone: "danger", dateOnly: false };
+  if (diffMin < 1440) return { label: `あと${Math.floor(diffMin / 60)}時間`, tone: "danger", dateOnly: false };
+  return { label: `あと${Math.floor(diffMin / 1440)}日`, tone: diffMin < 3 * 1440 ? "warn" : "normal", dateOnly: false };
+}
+
+// ------------------------------------------------------------------ 当落発表の期間（開始 = resultDate、最終日 = resultEndDate）
+interface ResultPeriod {
+  resultDate: FlexibleDate;
+  resultEndDate?: string;
+}
+
+/** 発表開始の暦日(JST)。不明は null */
+export function resultStartDay(l: ResultPeriod): string | null {
+  const v = l.resultDate;
+  if (v.precision === "date_only") return v.date;
+  if (v.precision === "date_time") return jstDateString(new Date(v.at));
+  return null;
+}
+
+/** 発表最終日(JST)。期間指定がなければ開始日（単一日の発表）。不明は null */
+export function resultEndDay(l: ResultPeriod): string | null {
+  const s = resultStartDay(l);
+  if (!s) return null;
+  return l.resultEndDate && l.resultEndDate > s ? l.resultEndDate : s;
+}
+
+export function hasResultPeriod(l: ResultPeriod): boolean {
+  const s = resultStartDay(l);
+  return !!s && !!l.resultEndDate && l.resultEndDate > s;
+}
+
+/**
+ * 発表がすべて終わったか（期間なら最終日の翌日になってから）。判定不能は null。
+ * 単一の発表日は従来どおり（日時なら時刻を過ぎたら、日付のみなら当日が終わったら）。
+ */
+export function isResultFinished(l: ResultPeriod, now: Date): boolean | null {
+  if (!hasResultPeriod(l)) return isPast(l.resultDate, now);
+  return jstDateString(now) > resultEndDay(l)!;
+}
+
+/** 発表期間の途中か（開始済みで最終日を過ぎていない） */
+export function isResultInPeriod(l: ResultPeriod, now: Date): boolean {
+  if (!hasResultPeriod(l)) return false;
+  const today = jstDateString(now);
+  const s = l.resultDate.precision === "date_time" ? new Date(l.resultDate.at).getTime() <= now.getTime() : today >= resultStartDay(l)!;
+  return s && today <= resultEndDay(l)!;
+}
+
+/** 発表開始の並び替えキー（期間でも開始日基準）。不明は末尾 */
+export function resultSortKey(l: ResultPeriod): number {
+  return sortKey(l.resultDate);
+}
+
+/** 「11/7」「2027/1/10」（今年以外は年つき）。日付 YYYY-MM-DD から */
+export function formatMonthDay(ymd: string, now: Date): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const thisYear = Number(jstDateString(now).slice(0, 4));
+  return y === thisYear ? `${m}/${d}` : `${y}/${m}/${d}`;
+}
+
+/** 発表日の短い表記。単一「11/7」「11/7 12:00」、期間「11/7〜11/10」、不明「—」。今年以外は年つき */
+export function formatResultShort(l: ResultPeriod, now: Date): string {
+  const s = resultStartDay(l);
+  if (!s) return "—";
+  const v = l.resultDate;
+  const time = v.precision === "date_time" ? ` ${formatShort(v).split(" ")[1]}` : "";
+  const start = `${formatMonthDay(s, now)}${time}`;
+  return hasResultPeriod(l) ? `${start}〜${formatMonthDay(resultEndDay(l)!, now)}` : start;
+}

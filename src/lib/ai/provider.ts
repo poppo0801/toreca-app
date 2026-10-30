@@ -14,7 +14,7 @@ export type InputKind = "text" | "image" | "url" | "x_url";
  * 解析仕様（プロンプト・ツール定義・検証ルール）のバージョン。精度をバージョンごとに比べられるよう、解析ログに記録する。
  * プロンプトやツール定義、検証ロジックを変えたら更新する。
  */
-export const PROMPT_VERSION = "2026-10-31.1";
+export const PROMPT_VERSION = "2026-11-01.1";
 
 export interface ExtractRequest {
   kind: InputKind;
@@ -65,6 +65,7 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - 応募制限(limit_basis / limit_max_count)は「応募（エントリー）の回数」の制限だけ。「1人1回まで応募可」「1家族1口」などの記載を反映する。
   「お一人様1点まで」「1人1BOXまで」のような購入数量の上限は応募回数の制限ではないので、purchase_limit_text に書き、応募回数の記載が別になければ limit_basis は unknown にする。
 - 系列名と店舗名は分けて返す。「サンプル電機 三宮店」のように続けて書かれていれば、系列=サンプル電機、店舗=三宮店。オンライン販売（○○オンライン等）はサービス名を系列名にし、店舗は空にする。判断できなければ chain_name を空にして理由を warnings に書く。
+- 当選発表が期間で示されているとき（例: 「11月7日〜11月10日に順次発表」）は、開始日を result_date、最終日を result_end_date に入れる。単一の日の発表、または期間の終わりが明確でないときは result_end_date を null にする（推測で補わない）。
 - 告知内のURL（応募ページ・当選発表ページ）は apply_url / announcement_url にそのまま記録する。画像の中の小さな文字のURLも読み取る。
 - 文章・画像内の語句は原文のまま写す。誤記も含めて勝手に直さず、原文にない誤記を指摘しない。
 - 信頼度(confidence)は、告知に明確に書かれていれば high、読み取りに自信がなければ low。書かれていない項目は low。
@@ -140,6 +141,7 @@ export const RECORD_LOTTERY_TOOL = {
       apply_start: dateSchema,
       apply_deadline: dateSchema,
       result_date: dateSchema,
+      result_end_date: { ...dateSchema, description: "当選発表が期間のときの最終日（年・月・日だけでよい）。単一の日の発表・期間の終わりが不明なら null" },
       procedure_start: { ...dateSchema, description: "購入・受取の開始日時（購入期間・受取期間の始まり）。無ければ null" },
       procedure_deadline: { ...dateSchema, description: "購入・受取の終了日時（期限）。無ければ null" },
       announcement_method: { type: "string", description: "当選発表の方法（メール、マイページ等）" },
@@ -173,7 +175,7 @@ export const RECORD_LOTTERY_TOOL = {
     },
     required: [
       "is_lottery_announcement", "chain_name", "store_name", "prefecture", "products", "multi_mode", "apply_start", "apply_deadline",
-      "result_date", "procedure_start", "procedure_deadline", "announcement_method", "announcement_url", "apply_url", "apply_method", "receive_method",
+      "result_date", "result_end_date", "procedure_start", "procedure_deadline", "announcement_method", "announcement_url", "apply_url", "apply_method", "receive_method",
       "limit_basis", "limit_max_count", "purchase_limit_text", "conditions_text", "verification_text", "notes", "confidence", "warnings",
       "published_on", "evidence",
     ],
@@ -294,6 +296,7 @@ class MockExtractor implements LotteryExtractor {
         apply_start: d(1, 10, 10, 0),
         apply_deadline: d(1, 20, 23, 59),
         result_date: d(1, 25),
+        result_end_date: null,
         procedure_start: null,
         procedure_deadline: null,
         announcement_method: "メール",

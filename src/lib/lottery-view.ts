@@ -1,4 +1,4 @@
-import { isPast, sortKey } from "@/lib/datetime";
+import { isResultFinished, resultSortKey, sortKey } from "@/lib/datetime";
 import { effectiveEventState, isSkippedBy } from "@/lib/eligibility";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
@@ -51,7 +51,7 @@ export function hasWon(data: AppData, lotteryId: string): boolean {
 
 /** 発表予定を過ぎたのに結果が未登録 */
 export function isResultOverdue(data: AppData, lottery: Lottery, now: Date): boolean {
-  return hasPendingResult(data, lottery.id) && isPast(lottery.resultDate, now) === true;
+  return hasPendingResult(data, lottery.id) && isResultFinished(lottery, now) === true;
 }
 
 export function isSkippedByAnyone(data: AppData, lotteryId: string): boolean {
@@ -154,7 +154,7 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, 
   );
 
   const byDeadline = (a: Lottery, b: Lottery) => sortKey(a.applyDeadline) - sortKey(b.applyDeadline);
-  const byResult = (a: Lottery, b: Lottery) => sortKey(a.resultDate) - sortKey(b.resultDate);
+  const byResult = (a: Lottery, b: Lottery) => resultSortKey(a) - resultSortKey(b);
   const safe = (n: number) => (Number.isNaN(n) ? 0 : n);
 
   return [...list].sort((a, b) => {

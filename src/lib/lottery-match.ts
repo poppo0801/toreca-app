@@ -311,6 +311,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     applyStart: toFlex(ex.applyStart),
     applyDeadline: toFlex(ex.applyDeadline),
     resultDate: toFlex(ex.resultDate),
+    resultEndDate: ex.resultEndDate ?? "",
     procedureStart: toFlex(ex.procedureStart),
     procedureDeadline: toFlex(ex.procedureDeadline),
     receiveMethod: ex.receiveMethod,

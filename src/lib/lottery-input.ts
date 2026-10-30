@@ -85,6 +85,8 @@ export const lotteryInputSchema = z.object({
   applyStart: flexInputSchema,
   applyDeadline: flexInputSchema,
   resultDate: flexInputSchema,
+  /** 当選発表の最終日（期間指定のときだけ。空 = 単一の発表日） */
+  resultEndDate: z.union([z.literal(""), dateStr]).default(""),
   procedureStart: flexInputSchema.default({ precision: "unknown", date: "", time: "" }),
   procedureDeadline: flexInputSchema,
   receiveMethod: z.enum(["store", "shipping", "either", "unknown"]),
@@ -128,6 +130,14 @@ export const lotteryInputSchema = z.object({
     const a = both ? `${s.date}T${s.time}` : s.date;
     const b = both ? `${e.date}T${e.time}` : e.date;
     if (a > b) ctx.addIssue({ code: "custom", message: "購入・受取の開始が終了より後になっています", path: ["procedureStart"] });
+  }
+  // 当選発表の期間: 開始日が必要で、最終日は開始日以降
+  if (v.resultEndDate) {
+    if (v.resultDate.precision === "unknown" || !v.resultDate.date) {
+      ctx.addIssue({ code: "custom", message: "発表の終了日を入れるときは、開始日も入力してください", path: ["resultEndDate"] });
+    } else if (v.resultEndDate < v.resultDate.date) {
+      ctx.addIssue({ code: "custom", message: "発表の終了日が開始日より前になっています", path: ["resultEndDate"] });
+    }
   }
 });
 export type LotteryInput = z.input<typeof lotteryInputSchema>;

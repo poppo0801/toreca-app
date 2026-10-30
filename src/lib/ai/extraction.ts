@@ -74,6 +74,8 @@ export interface ExtractedLottery {
   applyStart: ExtractedFlex;
   applyDeadline: ExtractedFlex;
   resultDate: ExtractedFlex;
+  /** 当選発表の最終日（YYYY-MM-DD）。期間でない・不明・開始より前のときは空 */
+  resultEndDate: string;
   procedureStart: ExtractedFlex;
   procedureDeadline: ExtractedFlex;
   announcementMethod: string;
@@ -128,6 +130,7 @@ export const rawExtractionSchema = z.object({
   apply_start: rawDate,
   apply_deadline: rawDate,
   result_date: rawDate,
+  result_end_date: rawDate,
   procedure_start: rawDate,
   procedure_deadline: rawDate,
   announcement_method: str(200),
@@ -313,6 +316,16 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     dates.push(f);
     if (f.precision !== "unknown") prevMs = dayMs(Number(f.date.slice(0, 4)), Number(f.date.slice(5, 7)), Number(f.date.slice(8, 10)));
   }
+  // 発表期間の最終日: 開始日があり、最終日が開始日より後のときだけ採用（推測で補わない）
+  let resultEndDate = "";
+  if (dates[2].precision !== "unknown" && r.result_end_date) {
+    const ew: string[] = [];
+    const e = normalizeFlex(r.result_end_date, now, ew, "当選発表の最終日", yctx, dayMs(Number(dates[2].date.slice(0, 4)), Number(dates[2].date.slice(5, 7)), Number(dates[2].date.slice(8, 10))));
+    if (e.precision !== "unknown" && e.date > dates[2].date) {
+      resultEndDate = e.date;
+      warnings.push(...ew);
+    } else if (e.precision !== "unknown") warnings.push("当選発表の最終日が開始日以前のため、期間として扱いませんでした。確認してください");
+  }
   const c = r.confidence;
   return {
     isLotteryAnnouncement: r.is_lottery_announcement,
@@ -324,6 +337,7 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     applyStart: dates[0],
     applyDeadline: dates[1],
     resultDate: dates[2],
+    resultEndDate,
     procedureStart: dates[3],
     procedureDeadline: dates[4],
     announcementMethod: r.announcement_method,

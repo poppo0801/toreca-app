@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Excel入出力(exceljs)はサーバーで動かす。バンドルせず外部パッケージとして読む
   serverExternalPackages: ["exceljs"],
+  // 商品画像のアップロード(Server Action)は最大3MBまで受け付ける。既定の1MBでは、写真を選ぶと本文超過になる
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
@@ -26,8 +28,8 @@ const nextConfig: NextConfig = {
           { key: "Service-Worker-Allowed", value: "/" },
         ],
       },
-      // APIの応答はキャッシュさせない
-      { source: "/api/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
+      // APIの応答はキャッシュさせない（商品画像の配信だけは、内容ハッシュ入りURLで長期キャッシュさせるため除く。認証は配信側で行う）
+      { source: "/api/:path((?!product-image/).*)", headers: [{ key: "Cache-Control", value: "no-store" }] },
     ];
   },
 };

@@ -1,4 +1,4 @@
-import { Cat, Crown, Flame, Gem, Ghost, Heart, Leaf, Moon, Star, Sun, Zap, type LucideIcon } from "lucide-react";
+import { Bird, Cat, Clover, Crown, Dog, Fish, Flame, Flower2, Gamepad2, Gem, Ghost, Heart, Leaf, Moon, Music, Rabbit, Rocket, Snowflake, Star, Sun, Trophy, Turtle, Umbrella, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Profile, ProfileColor } from "@/types/domain";
 
@@ -24,6 +24,20 @@ export const ICON_MARKS: Record<string, { label: string; icon: LucideIcon | null
   gem: { label: "ほうせき", icon: Gem },
   ghost: { label: "おばけ", icon: Ghost },
   cat: { label: "ねこ", icon: Cat },
+  // Stage 5I で追加（既存のキーは変えない）
+  bird: { label: "とり", icon: Bird },
+  dog: { label: "いぬ", icon: Dog },
+  fish: { label: "さかな", icon: Fish },
+  rabbit: { label: "うさぎ", icon: Rabbit },
+  turtle: { label: "かめ", icon: Turtle },
+  flower: { label: "はな", icon: Flower2 },
+  clover: { label: "クローバー", icon: Clover },
+  music: { label: "おんぷ", icon: Music },
+  game: { label: "ゲーム", icon: Gamepad2 },
+  rocket: { label: "ロケット", icon: Rocket },
+  trophy: { label: "トロフィー", icon: Trophy },
+  snow: { label: "ゆき", icon: Snowflake },
+  umbrella: { label: "かさ", icon: Umbrella },
 };
 
 /** 自由色の背景に対して読みやすい文字色（白/黒）を選ぶ */

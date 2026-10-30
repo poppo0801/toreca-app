@@ -24,7 +24,7 @@
 | 商品 | `products` | id, household_id, official_name, product_code, category, release_date, pack_per_box?, price_per_pack?, box_image_ref?, pack_image_ref? |
 | 商品別名 | `product_aliases` | id, product_id, alias, normalized_alias。商品ごと複数登録、略称一致だけで自動確定しない |
 | キャンペーン | `campaigns` | id, household_id, chain_id, name, default_rule, campaign_start?, campaign_end? |
-| 抽選 | `lotteries` | id, household_id, campaign_id?, store_id?, title, apply_start?, apply_deadline?, result_date?, result_time_precision, announcement_method, announcement_url?, apply_url?, collection_mode, collection_start?, collection_deadline?, procedure_deadline?, conditions_text, verification_requirements, event_state, source_kind, created_at |
+| 抽選 | `lotteries` | id, household_id, campaign_id?, store_id?, title, apply_start?, apply_deadline?, result_date?, result_time_precision, announcement_method, announcement_url?, apply_url?, result_end_date?（Stage 5I: 発表の最終日。NULL=単一日）, collection_mode, collection_start?, collection_deadline?, procedure_deadline?, conditions_text, verification_requirements, event_state, source_kind, created_at |
 | 抽選商品 | `lottery_items` | id, lottery_id, product_id, quantity, unit (box/pack/set), pack_equivalent?。数量換算値は商品設定変更時の履歴整合性に注意 |
 | 情報元 | `lottery_sources` | id, lottery_id, source_url?, source_text?, fetched_at?, source_type, verification_state |
 | ★管理 | `lottery_management` | lottery_id(PK), household_id, is_managed, managed_source(manual/ai), managed_at?, reviewed_at?, updated_by_profile_id? |

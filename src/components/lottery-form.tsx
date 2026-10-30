@@ -142,6 +142,7 @@ function emptyInput(data: AppData): LotteryInput {
     applyStart: EMPTY_FLEX,
     applyDeadline: EMPTY_FLEX,
     resultDate: EMPTY_FLEX,
+    resultEndDate: "",
     procedureStart: EMPTY_FLEX,
     procedureDeadline: EMPTY_FLEX,
     receiveMethod: d.receiveMethod,
@@ -179,6 +180,7 @@ function fromLottery(l: Lottery, data: AppData): LotteryInput {
     applyStart: flexToInput(l.applyStart),
     applyDeadline: flexToInput(l.applyDeadline),
     resultDate: flexToInput(l.resultDate),
+    resultEndDate: l.resultEndDate ?? "",
     procedureStart: flexToInput(l.procedureStart),
     procedureDeadline: flexToInput(l.procedureDeadline),
     receiveMethod: l.receiveMethod,
@@ -321,6 +323,8 @@ export function LotteryFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const showPeriod = periodOpen || !!v.resultEndDate;
   const [detailsOpen, setDetailsOpen] = useState(() => initial.input.multiMode !== "single");
   const [flags, setFlags] = useState<Partial<Record<FieldKey, string>>>({});
   const [evidence, setEvidence] = useState<Partial<Record<FieldKey, FlagEvidence>>>({});
@@ -752,8 +756,34 @@ export function LotteryFormDialog({
                 <div>
                   <FlexField label="当選発表" value={v.resultDate} onChange={(x) => set("resultDate", x)} chip={flagChip("resultDate", "当選発表")} />
                   {flagPanel("resultDate")}
+                  <label className="mt-1 flex min-h-7 items-center gap-1.5 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={showPeriod}
+                      onChange={(e) => {
+                        setPeriodOpen(e.target.checked);
+                        if (!e.target.checked) set("resultEndDate", "");
+                      }}
+                    />
+                    期間で指定
+                  </label>
                 </div>
-                <span aria-hidden="true" />
+                {showPeriod ? (
+                  <div className="min-w-0 text-sm">
+                    <span className="flex items-center gap-1 text-[13px] font-medium">当選発表の終了日</span>
+                    <input
+                      type="date"
+                      aria-label="当選発表の終了日"
+                      value={v.resultEndDate ?? ""}
+                      min={v.resultDate.date || undefined}
+                      onChange={(e) => set("resultEndDate", e.target.value)}
+                      className="mt-1 min-h-11 w-full min-w-0 rounded-md border bg-input px-1.5 text-[13px]"
+                    />
+                    {v.resultDate.precision === "unknown" && <p className="mt-0.5 text-[11px] text-warn">開始日も入力してください</p>}
+                  </div>
+                ) : (
+                  <span aria-hidden="true" />
+                )}
                 <div>
                   <FlexField label="購入・受取開始" value={v.procedureStart ?? EMPTY_FLEX} onChange={(x) => set("procedureStart", x)} chip={flagChip("procedureStart", "購入・受取開始")} />
                   {flagPanel("procedureStart")}

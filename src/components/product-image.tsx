@@ -30,6 +30,8 @@ export function ImagePlaceholder({ className, label }: { className?: string; lab
  * 透過PNGはカード/入力欄の面の色がそのまま透けるので、ライト・ダークどちらでも自然に見える。
  */
 export function ProductImageView({ image, alt, heightClass = "h-14" }: { image: ProductImage; alt: string; heightClass?: string }) {
+  // 一覧・カードの大きさ(高さ約96px)なら軽量サムネイルで十分。元画像(約370KB)の代わりに数KBで表示できる
+  const src = image.thumbUrl ?? image.url;
   const scale = image.scale ?? 1;
   const dx = image.offsetX ?? 0;
   const dy = image.offsetY ?? 0;
@@ -49,12 +51,12 @@ export function ProductImageView({ image, alt, heightClass = "h-14" }: { image: 
       <clipPath id={`cb-${uid}`}>
         <rect x={cb.x} y={cb.y} width={cb.w} height={cb.h} />
       </clipPath>
-      <image href={image.url} width={image.width!} height={image.height!} clipPath={`url(#cb-${uid})`} />
+      <image href={src} width={image.width!} height={image.height!} clipPath={`url(#cb-${uid})`} />
     </svg>
   ) : (
     // eslint-disable-next-line @next/next/no-img-element -- 期限付きの署名URL（next/image の最適化対象外）。幅・高さ属性で表示領域を先に確保
     <img
-      src={image.url}
+      src={src}
       alt={alt}
       width={image.width ?? undefined}
       height={image.height ?? undefined}

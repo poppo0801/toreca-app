@@ -290,9 +290,10 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
   await expect(sheet).toHaveCount(0);
 
   // 応募すると未対応が減り、ベルのバッジが消える
-  await card.getByRole("button", { name: /^A: 未応募/ }).click();
+  await card.getByTestId("my-apply").click(); // 現在のプロフィール(A)だけを応募済みにする
   await expect(page.getByTestId("notification-badge")).toHaveCount(0);
-  await card.getByRole("button", { name: /^A: 応募済み/ }).click(); // 取消して未応募に戻す
+  await card.getByTestId("my-apply").click(); // 取消して未応募に戻す（確認つき）
+  await page.getByRole("button", { name: "解除する" }).click();
   await expect(page.getByTestId("notification-badge")).toHaveText("1");
 
   // スルー: 店舗単位で追加 → ベルから消え、★管理対象の通常表示からも外れる。★自体は変わらない
@@ -359,10 +360,10 @@ test("複数商品の抽選（B方式）: 商品ごとの当落→当選した�
   await expect(dialog).toHaveCount(0);
 
   const card = page.getByTestId("lottery-card").filter({ hasText: "E2E複数商品1" });
-  // 既定の詳細表示は全商品を並べる。シンプル表示は代表商品＋「＋他N商品」（表示はユーザーごとの設定）
-  await expect(card).not.toContainText("＋他1商品");
+  // 詳細表示・シンプル表示とも、先頭の1種類＋「＋他N種」に集約（全商品は詳細パネル。表示はユーザーごとの設定）
+  await expect(card.getByTestId("extra-kinds")).toHaveText("＋他1種");
   await page.getByRole("button", { name: "シンプル表示にする" }).click();
-  await expect(card).toContainText("＋他1商品");
+  await expect(card.getByTestId("extra-kinds")).toHaveText("＋他1種");
   await page.getByRole("button", { name: "詳細表示にする" }).click();
   const msheet = await openDetail(page, card);
   await expect(msheet).toContainText("商品ごとに当落"); // 方式は詳細パネルで確認
@@ -391,6 +392,10 @@ test("ユーザー設定: 表示名・色・マーク・通知先を変更でき
   await page.getByRole("button", { name: "Cの設定を編集" }).click();
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel("表示名").fill("サブ");
+  // アイコンは20種類以上のコンパクトなグリッド。鳥も選べる（選び直しても保存前の状態は変わらない）
+  expect(await dlg.getByRole("group", { name: "アイコンのマーク" }).or(dlg.locator("fieldset").filter({ hasText: "アイコンのマーク" })).getByRole("button").count()).toBeGreaterThanOrEqual(20);
+  await dlg.getByRole("button", { name: "とり" }).click();
+  await expect(dlg.getByRole("button", { name: "とり" })).toHaveAttribute("aria-pressed", "true");
   await dlg.getByRole("button", { name: "星" }).click();
   await dlg.getByLabel("自由な色").fill("#ff8800");
   await dlg.getByLabel("指定したユーザー（例: A・B 両方）").check();
@@ -953,7 +958,7 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   const card2 = page.getByTestId("lottery-card").filter({ hasText: "E2E位置店" });
   await expect(card2.getByTestId("card-place")).not.toContainText("大阪府");
   await expect(card2.getByTestId("card-place")).toContainText("¥1,280");
-  await expect(card2.getByLabel("応募アカウントの状態")).toBeVisible(); // ★・ユーザー別状態の操作は設定に関係なく表示
+  await expect(card2.getByTestId("apply-status")).toBeVisible(); // ★・ユーザー別状態の操作は設定に関係なく表示
 
   // 距離の区分は後から変更できる（昇順4つの正の数）。不正な値は保存されない
   await page.goto("/settings");
@@ -1448,4 +1453,130 @@ test("iPhone共有: 未ログインで共有を開くとログイン後に共有
   await page.getByTestId("acc-share").getByRole("button", { name: /iPhoneの共有から登録/ }).click();
   await expect(page.getByTestId("share-prefix")).toHaveText(/^http.*\/share\?url=$/);
   await expect(page.getByTestId("share-setup")).toContainText("URLエンコード");
+});
+
+test("Stage 5I: 当落発表を期間で指定でき（チェックした時だけ終了日欄）、一覧に『開始〜終了』で出る。解除すると単一日に戻る", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "＋登録" }).click();
+  const dialog = page.getByRole("dialog");
+  await fillMasters(dialog, "E2E期間電機", "E2E期間店", "E2E期間商品");
+  await dialog.getByLabel("応募締切の日付").fill("2099-02-01");
+  await dialog.getByLabel("応募締切の時刻").fill("23:59");
+  // 通常は日付欄1つだけ。入力欄を常時2つ出さない
+  await expect(dialog.getByLabel("当選発表の終了日")).toHaveCount(0);
+  await dialog.getByLabel("当選発表の日付").fill("2099-02-07");
+  // 終了日が開始日より前のときは保存できない
+  await dialog.getByLabel("期間で指定").check();
+  await dialog.getByLabel("当選発表の終了日").fill("2099-02-05");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog.getByRole("alert").filter({ hasText: "終了日が開始日より前" })).toBeVisible();
+  await dialog.getByLabel("当選発表の終了日").fill("2099-02-10");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card = page.getByTestId("lottery-card").filter({ hasText: "E2E期間商品" });
+  await expect(card).toContainText("2099/2/7〜2099/2/10");
+  // 再読込しても保持される。詳細にも期間で出る
+  await page.reload();
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card2 = page.getByTestId("lottery-card").filter({ hasText: "E2E期間商品" });
+  await expect(card2).toContainText("2099/2/7〜2099/2/10");
+  const sheet = await openDetail(page, card2);
+  await expect(sheet.getByLabel("日時")).toContainText("〜2099/2/10");
+
+  // 編集: チェックを外すと終了日を消して単一日に戻る。開始日はそのまま
+  await sheet.getByRole("button", { name: "編集" }).click();
+  const edit = page.getByRole("dialog").filter({ has: page.getByLabel("当選発表の日付") });
+  await expect(edit.getByLabel("当選発表の終了日")).toHaveValue("2099-02-10"); // 期間のある抽選は最初から開いている
+  await edit.getByLabel("期間で指定").uncheck();
+  await expect(edit.getByLabel("当選発表の終了日")).toHaveCount(0);
+  await edit.getByRole("button", { name: "保存" }).click();
+  await expect(edit).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card3 = page.getByTestId("lottery-card").filter({ hasText: "E2E期間商品" });
+  await expect(card3).toContainText("2099/2/7");
+  await expect(card3).not.toContainText("2099/2/10");
+});
+
+test("Stage 5I: プロフィール別の応募状況は表示専用、応募操作は現在のプロフィールだけ。他のプロフィールの記録はサーバーが拒否する", async ({ page }) => {
+  await login(page);
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card = page.getByTestId("lottery-card").filter({ hasText: "E2E期間商品" });
+  const status = card.getByTestId("apply-status");
+  await expect(status).toBeVisible();
+  await expect(status.getByRole("button")).toHaveCount(0); // 表示専用
+  const mine = card.getByTestId("my-apply");
+  const myAccount = await mine.getAttribute("data-account");
+  expect(myAccount).toBeTruthy();
+  await mine.click();
+  await expect(mine).toHaveAttribute("data-state", "applied");
+  await expect(status.locator(`[data-account="${myAccount}"]`)).toHaveAttribute("data-status", "applied");
+  // 他のプロフィールは応募済みにならない
+  await expect(status.locator('[data-status="applied"]')).toHaveCount(1);
+  // 発表前の応募済みに「未確認」は出さない
+  await expect(card).not.toContainText("未確認");
+  // 解除は確認つき
+  await mine.click();
+  await page.getByRole("button", { name: "解除する" }).click();
+  await expect(mine).toHaveAttribute("data-state", "unapplied");
+});
+
+test("Stage 5I: 商品画像は軽量サムネイルを内容ハッシュ入りURLで配信し、長期キャッシュされる。未ログインは取得できない", async ({ page, playwright, baseURL }) => {
+  test.setTimeout(120_000);
+  const sharp = (await import("sharp")).default;
+  const noise = await sharp((await import("node:crypto")).randomBytes(700 * 900 * 3), { raw: { width: 700, height: 900, channels: 3 } }).png().toBuffer();
+  await login(page);
+  await page.getByRole("button", { name: "＋登録" }).click();
+  const dialog = page.getByRole("dialog");
+  await fillMasters(dialog, "E2E速度電機", "E2E速度店", "E2E速度商品");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.goto("/settings/masters");
+  await page.getByRole("tab", { name: "商品", exact: true }).click();
+  await page.getByTestId("master-row").filter({ hasText: "E2E速度商品" }).getByRole("button", { name: /の画像を管理/ }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByLabel("BOX画像を選択").setInputFiles({ name: "noise.png", mimeType: "image/png", buffer: noise });
+  await expect(dlg.getByTestId("image-slot-box")).toContainText("手動で登録");
+  await page.keyboard.press("Escape");
+
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const img = page.getByTestId("lottery-card").filter({ hasText: "E2E速度商品" }).getByRole("img", { name: /E2E速度商品 BOX/ });
+  await expect(img).toBeVisible();
+  const src = (await img.getAttribute("src"))!;
+  expect(src).toMatch(/^\/api\/product-image\/[0-9a-f-]{36}\?v=[0-9a-f]{12}&s=thumb$/);
+
+  // 配信: サムネイル(WebP)は元画像より大幅に軽く、内容ハッシュ入りURLなので長期キャッシュ（再訪問で再取得しない）
+  const thumb = await page.request.get(src);
+  expect(thumb.status()).toBe(200);
+  expect(thumb.headers()["content-type"]).toBe("image/webp");
+  expect(thumb.headers()["cache-control"]).toContain("immutable");
+  expect(thumb.headers()["cache-control"]).toContain("private");
+  const full = await page.request.get(src.replace("s=thumb", "s=full"));
+  expect(full.status()).toBe(200);
+  expect(full.headers()["content-type"]).toBe("image/png");
+  const thumbBytes = (await thumb.body()).length;
+  const fullBytes = (await full.body()).length;
+  expect(fullBytes).toBeGreaterThan(500_000);
+  expect(thumbBytes).toBeLessThan(fullBytes / 5);
+  // 条件つき再取得は本体を返さない
+  const again = await page.request.get(src, { headers: { "If-None-Match": thumb.headers()["etag"] } });
+  expect(again.status()).toBe(304);
+  // 再読込してもURLは変わらない（読み込みのたびに変わる署名URLではない）
+  await page.reload();
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  await expect(page.getByTestId("lottery-card").filter({ hasText: "E2E速度商品" }).getByRole("img", { name: /E2E速度商品 BOX/ })).toHaveAttribute("src", src);
+
+  // 未ログイン・存在しないIDでは画像を返さない
+  const anon = await playwright.request.newContext({ baseURL });
+  const denied = await anon.get(src, { maxRedirects: 0 });
+  expect(denied.status()).not.toBe(200);
+  expect(denied.headers()["content-type"] ?? "").not.toContain("image/");
+  await anon.dispose();
+  const missing = await page.request.get("/api/product-image/00000000-0000-4000-8000-000000000000?s=thumb");
+  expect(missing.status()).toBe(404);
+  const bad = await page.request.get("/api/product-image/not-a-uuid");
+  expect(bad.status()).toBe(400);
 });

@@ -1037,7 +1037,6 @@ export type Database = {
           rarity: string
           set_code: string
           source_url: string | null
-          thumb_path: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
@@ -1057,7 +1056,6 @@ export type Database = {
           rarity?: string
           set_code?: string
           source_url?: string | null
-          thumb_path?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1077,7 +1075,6 @@ export type Database = {
           rarity?: string
           set_code?: string
           source_url?: string | null
-          thumb_path?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1738,6 +1735,7 @@ export type Database = {
           receive_method: string
           result_at: string | null
           result_date: string | null
+          result_end_date: string | null
           result_precision: string
           source_kind: string
           source_urls: string[]
@@ -1779,6 +1777,7 @@ export type Database = {
           receive_method?: string
           result_at?: string | null
           result_date?: string | null
+          result_end_date?: string | null
           result_precision?: string
           source_kind?: string
           source_urls?: string[]
@@ -1820,6 +1819,7 @@ export type Database = {
           receive_method?: string
           result_at?: string | null
           result_date?: string | null
+          result_end_date?: string | null
           result_precision?: string
           source_kind?: string
           source_urls?: string[]
@@ -2360,6 +2360,7 @@ export type Database = {
           sha256: string
           source: string
           storage_path: string
+          thumb_path: string | null
           updated_at: string
           updated_by_profile_id: string | null
           width: number | null
@@ -2378,6 +2379,7 @@ export type Database = {
           sha256: string
           source?: string
           storage_path: string
+          thumb_path?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
           width?: number | null
@@ -2396,6 +2398,7 @@ export type Database = {
           sha256?: string
           source?: string
           storage_path?: string
+          thumb_path?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
           width?: number | null

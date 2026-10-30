@@ -151,7 +151,7 @@ test("ヘッダーを増高させない: 通知・ユーザー表示を含めて
 
 test("タブ・詳細・マトリクスを切り替えられる", async ({ page }) => {
   await page.getByRole("tab", { name: /応募済み/ }).click();
-  await expect(page.getByTestId("lottery-card").first()).toContainText("結果未登録");
+  await expect(page.getByTestId("lottery-card").first()).toContainText("結果未確認");
   await page.getByRole("tab", { name: /当選/ }).click();
   await expect(page.getByRole("button", { name: "購入済み" }).first()).toBeVisible();
   await page.getByRole("tab", { name: /★管理対象/ }).click();
@@ -238,20 +238,21 @@ test("名称はトレマネ。ヘッダー・ページタイトル・PWAの表�
   }
 });
 
-test("複数商品の抽選は、詳細表示では全商品、シンプル表示では「＋他N商品」。詳細パネルでも全商品と方式を確認できる", async ({ page }) => {
+test("複数商品の抽選は、一覧では先頭1種類＋「＋他N種」に集約し、詳細パネルで全商品と方式を確認できる", async ({ page }) => {
   const card = page.locator('[data-lottery-id="L3"]');
-  // 既定の詳細表示: カード上に全商品が並ぶ
-  await expect(card).not.toContainText("＋他1商品");
-  await expect(card.getByTestId("lottery-items")).toContainText("ほしぞら");
+  // 既定の詳細表示でも、カード上は先頭の商品だけ。残りは「＋他1種」
+  await expect(card.getByTestId("extra-kinds")).toHaveText("＋他1種");
+  await expect(card.getByTestId("lottery-items")).not.toContainText("ほしぞら");
+  await expect(card.getByTestId("product-name")).toHaveCount(1);
   await card.getByRole("button", { name: /の詳細を開く/ }).click();
   const detail = page.getByTestId("lottery-detail");
   await expect(detail.getByTestId("lottery-items").getByRole("listitem")).toHaveCount(2);
   await expect(detail.getByTestId("lottery-items")).toContainText("ほしぞら");
   await expect(detail).toContainText("商品ごとに当落");
   await page.keyboard.press("Escape");
-  // シンプル表示に切り替えると、代表商品と「＋他N商品」だけになる
+  // シンプル表示でも同じ（先頭1種類＋「＋他N種」）
   await page.getByRole("button", { name: "シンプル表示にする" }).click();
-  await expect(card).toContainText("＋他1商品");
+  await expect(card.getByTestId("extra-kinds")).toHaveText("＋他1種");
   await expect(card).not.toContainText("ほしぞら");
 });
 
@@ -259,9 +260,12 @@ test("応募済み・当選タブの赤丸は、未対応がある場合に表�
   await expect(page.getByTestId("tab-dot-won")).toBeVisible(); // Aは当選済みで購入未完了（L7）
 });
 
-test("日付のみの締切には残り時間バッジを出さない", async ({ page }) => {
+test("日付のみの締切は、23:59などの時刻を補わず、日付の差だけでバッジを出す", async ({ page }) => {
   const card = page.locator('[data-lottery-id="L3"]');
-  await expect(card).not.toContainText("あと");
+  await expect(card.getByTestId("deadline-badge")).toHaveText("あと2日");
+  await expect(card.getByTestId("deadline-badge")).toHaveAttribute("data-tone", "warn"); // 3日未満はオレンジ
+  await expect(card.getByTestId("deadline-badge")).toHaveAttribute("title", /時刻は未確認/);
+  await expect(card).not.toContainText("23:59");
   // 一覧では時刻を出さず日付だけ（「—」でも0:00でもない）。詳細では「時刻未確認」と明示する
   await expect(card.getByLabel(/応募締切 .*時刻未確認/)).toBeVisible();
   await card.getByRole("button", { name: /の詳細を開く/ }).click();
@@ -395,15 +399,15 @@ test("抽選カード右上は受取方法で決まる（店頭=受取店舗の�
   await page.getByRole("tab", { name: /全情報/ }).click();
   // 店頭受取（三宮店・自宅の近く）: 都道府県。距離はカードに出さない
   const near = page.getByTestId("lottery-card").filter({ hasText: "三宮店" }).first();
-  await expect(near.getByTestId("card-place")).toContainText("兵庫県");
-  await expect(near.getByTestId("card-place")).not.toContainText("通販");
+  await expect(near.getByTestId("place-chip")).toContainText("兵庫県");
+  await expect(near.getByTestId("place-chip")).not.toContainText("通販");
   await expect(page.getByTestId("card-distance")).toHaveCount(0);
   // 受取方法が発送の抽選（L4）は、店舗が登録されていても「通販」
   const ship = page.locator('[data-lottery-id="L4"]');
-  await expect(ship.getByTestId("card-place")).toHaveText("通販");
+  await expect(ship.getByTestId("place-chip")).toHaveText("通販");
   // 東京の店舗（店頭受取）は都道府県
   const tokyo = page.getByTestId("lottery-card").filter({ hasText: "本店" }).first();
-  await expect(tokyo.getByTestId("card-place")).toContainText("東京都");
+  await expect(tokyo.getByTestId("place-chip")).toContainText("東京都");
   // 詳細パネルでは位置情報（直線距離・交通費）を引き続き確認できる（道路距離と混同しない表記）
   await tokyo.getByRole("button", { name: /の詳細を開く/ }).click();
   await expect(page.getByTestId("lottery-detail")).toContainText("直線");
@@ -659,8 +663,9 @@ test.describe("設定とナビゲーション", () => {
     expect(h).toBeLessThan(90);
     const img = (await card.getByTestId("card-image").boundingBox())!;
     expect(img.height).toBeLessThanOrEqual(65);
-    await expect(card.getByLabel("応募アカウントの状態")).toHaveCount(0); // 全員分の状態は出さない
-    await expect(card.locator("[data-status]")).toHaveCount(1); // 現在のユーザーのみ
+    await expect(card.getByLabel("ユーザー別の応募状況")).toHaveCount(0); // 全員分の状態は出さない
+    await expect(card.getByTestId("my-apply")).toHaveCount(1); // 現在のユーザーの応募操作だけ
+    await expect(card.getByTestId("card-deadline")).toBeVisible(); // 締切は一覧でも出す
     await expect(card.getByRole("button", { name: /管理対象（★）をOFF/ })).toBeVisible();
   });
 });
@@ -696,4 +701,116 @@ test.describe("表示診断（下部メニューの位置ずれの調査用）",
     await page.goto("/lotteries?diag=off");
     await expect(page.getByTestId("layout-diag")).toHaveCount(0);
   });
+});
+
+test.describe("Stage 5I: 抽選カードの整理（締切バッジ・応募状況・応募操作）", () => {
+  test("締切までの残り時間はカード右上のバッジ。段階（3日未満=オレンジ／24時間未満=赤）が色と文言で分かる。商品名は最大2行", async ({ page }) => {
+    const card = page.locator('[data-lottery-id="L1"]'); // 締切まで約5時間
+    const badge = card.getByTestId("deadline-badge");
+    await expect(badge).toHaveText(/^あと\d+時間$/);
+    await expect(badge).toHaveAttribute("data-tone", "danger");
+    // 右上: カードの右半分にあり、商品名の領域を狭めすぎない
+    const cb = (await card.boundingBox())!;
+    const bb = (await badge.boundingBox())!;
+    expect(bb.x + bb.width / 2).toBeGreaterThan(cb.x + cb.width / 2);
+    expect(bb.y - cb.y).toBeLessThan(40);
+    // 商品名は最大2行（line-clamp）
+    const name = (await card.getByTestId("product-name").boundingBox())!;
+    expect(name.height).toBeLessThanOrEqual(2 * 22);
+    // 3日未満・3日以上
+    await expect(page.locator('[data-lottery-id="L3"]').getByTestId("deadline-badge")).toHaveAttribute("data-tone", "warn");
+  });
+
+  test("プロフィール別の応募状況は表示専用（押しても変わらない）。応募操作は現在のプロフィール専用で、解除は確認つき", async ({ page }) => {
+    const card = page.locator('[data-lottery-id="L4"]'); // A・Bとも未応募
+    const status = card.getByTestId("apply-status");
+    await expect(status).toBeVisible();
+    // 表示専用: ボタンではない
+    await expect(status.getByRole("button")).toHaveCount(0);
+    const aMark = status.locator('[data-account="a-c3"]');
+    const bMark = status.locator('[data-account="b-c3"]');
+    await expect(aMark).toHaveAttribute("data-status", "eligible_unapplied");
+    await expect(bMark).toHaveAttribute("data-status", "eligible_unapplied");
+    await bMark.click(); // カードの一部なので詳細が開くだけ。応募状態は変わらない
+    await expect(page.getByTestId("lottery-detail")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("lottery-detail")).toHaveCount(0);
+    await expect(bMark).toHaveAttribute("data-status", "eligible_unapplied");
+
+    // 現在のプロフィール(A)だけが応募済みになる
+    const mine = card.getByTestId("my-apply");
+    await expect(mine).toHaveAttribute("data-account", "a-c3");
+    await mine.click();
+    await expect(aMark).toHaveAttribute("data-status", "applied");
+    await expect(bMark).toHaveAttribute("data-status", "eligible_unapplied");
+    await expect(mine).toHaveAttribute("data-state", "applied");
+
+    // 解除は確認つき。キャンセルでは変わらない
+    await mine.click();
+    await expect(page.getByRole("dialog")).toContainText("応募済みを解除しますか");
+    await page.getByRole("button", { name: "キャンセル" }).click();
+    await expect(aMark).toHaveAttribute("data-status", "applied");
+    await mine.click();
+    await page.getByRole("button", { name: "解除する" }).click();
+    await expect(aMark).toHaveAttribute("data-status", "eligible_unapplied");
+
+    // Bに切り替えると、操作対象はBのアカウントだけ
+    await switchProfile(page, "B");
+    await expect(card.getByTestId("my-apply")).toHaveAttribute("data-account", "b-c3");
+    await card.getByTestId("my-apply").click();
+    await expect(card.getByTestId("apply-status").locator('[data-account="b-c3"]')).toHaveAttribute("data-status", "applied");
+    await expect(card.getByTestId("apply-status").locator('[data-account="a-c3"]')).toHaveAttribute("data-status", "eligible_unapplied");
+  });
+
+  test("発表前の応募済みに『未確認』は出さない。商品ごとのプロフィール・未確認の表示を一覧に繰り返さない", async ({ page }) => {
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    const card = page.locator('[data-lottery-id="L3"]'); // 複数商品（発表前）
+    await expect(card).not.toContainText("未確認");
+    await expect(card.getByTestId("item-result-tag")).toHaveCount(0);
+    await expect(card.getByTestId("apply-status")).toHaveCount(1); // 抽選単位に1行
+  });
+
+  test("シンプル表示にも締切と残り時間を出し、商品名は2行まで。高さは詳細表示より低い", async ({ page }) => {
+    const detailH = (await page.locator('[data-lottery-id="L1"]').boundingBox())!.height;
+    await page.getByRole("button", { name: "シンプル表示にする" }).click();
+    const card = page.locator('[data-lottery-id="L1"]');
+    await expect(card.getByTestId("card-deadline")).toContainText(/\d+\/\d+/);
+    await expect(card.getByTestId("deadline-badge")).toHaveText(/^あと/);
+    const simpleH = (await card.boundingBox())!.height;
+    expect(simpleH).toBeLessThan(detailH);
+    expect(simpleH).toBeLessThan(100);
+    const name = (await card.getByTestId("product-name").boundingBox())!;
+    expect(name.height).toBeLessThanOrEqual(2 * 22);
+  });
+});
+
+test("Stage 5I: 詳細カードの応募状況の行と右下の応募ボタンは重ならず、カードの外にはみ出さない", async ({ page }) => {
+  for (const id of ["L1", "L3", "L4"]) {
+    const card = page.locator(`[data-lottery-id="${id}"]`);
+    const c = (await card.boundingBox())!;
+    // 行の枠は右の余白(応募ボタンの場所)を含むので、実際に並ぶ丸いマークの範囲で比べる
+    const marks = await card.getByTestId("apply-status").locator("[data-account]").evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
+    const s = { x: Math.min(...marks.map((m) => m.x)), y: Math.min(...marks.map((m) => m.y)), width: Math.max(...marks.map((m) => m.x + m.width)) - Math.min(...marks.map((m) => m.x)), height: Math.max(...marks.map((m) => m.y + m.height)) - Math.min(...marks.map((m) => m.y)) };
+    const b = (await card.getByTestId("my-apply").boundingBox())!;
+    // 横に重ならない（同じ高さの帯にあるときは左右に分かれている）
+    const sameBand = s.y < b.y + b.height && b.y < s.y + s.height;
+    if (sameBand) expect(s.x + s.width).toBeLessThanOrEqual(b.x + 1);
+    // カードの中に収まる
+    expect(b.x + b.width).toBeLessThanOrEqual(c.x + c.width);
+    expect(b.y + b.height).toBeLessThanOrEqual(c.y + c.height + 1);
+  }
+  await page.evaluate(() => { const n = document.querySelector('[data-testid="bottom-nav"]') as HTMLElement | null; if (n) n.style.display = "none"; }); // 撮影のときだけ下部メニューを隠す
+  await page.locator('[data-lottery-id="L3"]').screenshot({ path: "e2e/.results/stage5i-card-detail.png" });
+  await page.getByRole("button", { name: "シンプル表示にする" }).click();
+  await page.locator('[data-lottery-id="L3"]').screenshot({ path: "e2e/.results/stage5i-card-simple.png" });
+});
+
+test("Stage 5I: 当選タブでも、右下の応募ボタンが購入手続き・購入済みボタンに重ならない", async ({ page }) => {
+  await page.getByRole("tab", { name: /当選/ }).click();
+  const card = page.getByTestId("lottery-card").first();
+  const mine = (await card.getByTestId("my-apply").boundingBox())!;
+  const buy = (await card.getByRole("button", { name: "購入済み" }).first().boundingBox())!;
+  const overlap = mine.x < buy.x + buy.width && buy.x < mine.x + mine.width && mine.y < buy.y + buy.height && buy.y < mine.y + mine.height;
+  expect(overlap).toBe(false);
+  await card.getByRole("button", { name: "購入済み" }).first().click({ trial: true }); // 他の要素に遮られていない
 });

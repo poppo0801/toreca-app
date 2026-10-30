@@ -28,6 +28,9 @@ export class InMemoryRepository implements LotteryRepository {
     return this.apply((d) => m.setManaged(d, actorId, lotteryId, isManaged, new Date()));
   }
   async setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean) {
+    // 応募状態を変えられるのは、操作中のプロフィール自身のアカウントだけ（他のプロフィールは閲覧のみ）
+    const acc = this.data?.accounts.find((a) => a.id === accountId);
+    if (acc && acc.profileId !== actorId) return { ok: false as const, error: "他のユーザーの応募状況は変更できません" };
     return this.apply((d) => m.setApplied(d, actorId, lotteryId, accountId, applied, new Date()));
   }
   async setResult(actorId: string, applicationId: string, result: Parameters<typeof m.setResult>[3]) {

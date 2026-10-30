@@ -104,7 +104,7 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
 
       <fieldset>
         <legend className="text-xs text-muted-foreground">アイコンのマーク</legend>
-        <div className="mt-1 grid grid-cols-6 gap-1.5">
+        <div className="mt-1 grid grid-cols-7 gap-1.5">
           {Object.entries(ICON_MARKS).map(([key, m]) => (
             <button
               key={key}
@@ -112,7 +112,7 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
               aria-label={m.label}
               aria-pressed={mark === key}
               onClick={() => setMark(key)}
-              className={cn("flex h-11 items-center justify-center rounded-md border", mark === key ? "border-primary bg-muted" : "hover:bg-muted")}
+              className={cn("flex h-10 items-center justify-center rounded-md border", mark === key ? "border-primary bg-muted" : "hover:bg-muted")}
             >
               <ProfileAvatar profile={{ ...preview, iconMark: key }} size="sm" />
             </button>

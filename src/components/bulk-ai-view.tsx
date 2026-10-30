@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
-import { formatDraftDate } from "@/components/ai-result-list";
+import { formatDraftDate, formatDraftResult } from "@/components/ai-result-list";
 import { useAiJobs } from "@/components/ai-jobs-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
@@ -229,7 +229,7 @@ function JobDetail({ jobId, data, actions, onChange }: { jobId: string; data: Re
                       <p className="truncate font-medium">{[d.input.chain.name, d.input.store.name].filter(Boolean).join(" ") || "（系列・店舗 未読取）"}</p>
                       <p className="truncate text-xs">{d.input.items.map((x) => x.product.name).filter(Boolean).join(" / ") || "（商品 未読取）"}</p>
                       <p className="text-xs text-muted-foreground">
-                        応募締切 {formatDraftDate(d.input.applyDeadline) ?? "—"} ・ 当選発表 {formatDraftDate(d.input.resultDate) ?? "—"} ・ 購入期間 {formatDraftDate(d.input.procedureStart) ?? "—"}〜{formatDraftDate(d.input.procedureDeadline) ?? "—"}
+                        応募締切 {formatDraftDate(d.input.applyDeadline) ?? "—"} ・ 当選発表 {formatDraftResult(d.input) ?? "—"} ・ 購入期間 {formatDraftDate(d.input.procedureStart) ?? "—"}〜{formatDraftDate(d.input.procedureDeadline) ?? "—"}
                       </p>
                       <p className="flex flex-wrap gap-1 pt-0.5 text-[11px]">
                         {flags > 0 && <span className="rounded-full border border-warn px-1.5 text-warn">要確認 {flags}件</span>}

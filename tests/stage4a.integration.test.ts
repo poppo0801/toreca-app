@@ -107,7 +107,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 4A: 商品マスター・セット・画
     expect(res.headers.get("content-type")).toContain("image/png");
     const img = (await loadAppData(u1)).products.find((p) => p.id === prod.m6)!.images?.box;
     expect(img).toMatchObject({ width: 1, height: 1, source: "import" });
-    expect(img!.url).toContain("token=");
+    // 画像はアプリのURL（内容ハッシュ入り）で配信する。取得にはログインが必要で、期限付きURLは発行しない
+    expect(img!.url).toMatch(/^\/api\/product-image\/[0-9a-f-]{36}\?v=[0-9a-f]{12}&s=full$/);
+    expect(img!.url).not.toContain("token=");
 
     // 他世帯: 読めない・署名URLも作れない・自世帯でないフォルダへ書けない・画像記録も見えない
     expect((await u2.storage.from("product-images").createSignedUrl(path, 60)).error).not.toBeNull();

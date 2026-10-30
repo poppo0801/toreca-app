@@ -217,12 +217,9 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       Database["public"]["Tables"]["product_images"]["Row"][],
       Database["public"]["Tables"]["product_set_items"]["Row"][],
     ];
-  // Storage は非公開。表示用に期限付きURLをまとめて発行する（秘密鍵は使わず、ログイン中の本人の権限で）
-  const signed = new Map<string, string>();
-  if (productImages.length > 0) {
-    const { data } = await db.storage.from("product-images").createSignedUrls(productImages.map((i) => i.storage_path), 60 * 60);
-    for (const s of data ?? []) if (s.path && s.signedUrl) signed.set(s.path, s.signedUrl);
-  }
+  // Storage は非公開。画像は /api/product-image/<id> 経由（ログイン本人の権限で取得）。URLは画像の内容ハッシュで決まり、
+  // 読み込みのたびに変わる期限付きURLと違って、ブラウザが長期間キャッシュできる（差し替えるとハッシュが変わり自動で更新される）
+  const imageUrl = (i: { id: string; sha256: string }, size: "full" | "thumb") => `/api/product-image/${i.id}?v=${i.sha256.slice(0, 12)}&s=${size}`;
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
   const { battles, settings, chainAliases, storeAliases, profileSettings } = await loadOptional(db, householdId);
@@ -263,8 +260,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       salesForm: p.sales_form as "pack_box" | "single_set" | null,
       images: Object.fromEntries(
         productImages
-          .filter((i) => i.product_id === p.id && signed.has(i.storage_path))
-          .map((i) => [i.kind, { url: signed.get(i.storage_path)!, width: i.width, height: i.height, source: i.source as "import" | "manual", scale: i.display_scale != null ? Number(i.display_scale) : 1, offsetX: i.offset_x ?? 0, offsetY: i.offset_y ?? 0, contentBox: parseContentBox(i.content_box) }]),
+          .filter((i) => i.product_id === p.id)
+          .map((i) => [i.kind, { url: imageUrl(i, "full"), thumbUrl: i.thumb_path ? imageUrl(i, "thumb") : undefined, width: i.width, height: i.height, source: i.source as "import" | "manual", scale: i.display_scale != null ? Number(i.display_scale) : 1, offsetX: i.offset_x ?? 0, offsetY: i.offset_y ?? 0, contentBox: parseContentBox(i.content_box) }]),
       ),
       codeKind: p.product_code_kind as "official" | "custom" | null,
       archived: p.archived_at != null,
@@ -300,6 +297,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       applyStart: dbToFlex(l.apply_start_precision, l.apply_start_date, l.apply_start_at),
       applyDeadline: dbToFlex(l.apply_deadline_precision, l.apply_deadline_date, l.apply_deadline_at),
       resultDate: dbToFlex(l.result_precision, l.result_date, l.result_at),
+      resultEndDate: l.result_end_date ?? undefined,
       procedureStart: dbToFlex(l.procedure_start_precision, l.procedure_start_date, l.procedure_start_at),
       procedureDeadline: dbToFlex(l.procedure_deadline_precision, l.procedure_deadline_date, l.procedure_deadline_at),
       receiveMethod: l.receive_method as "store" | "shipping" | "either" | "unknown",
@@ -433,6 +431,8 @@ function lotteryRow(input: z.output<typeof lotteryInputSchema>, actor: string | 
     apply_start_precision: s.precision, apply_start_date: s.date, apply_start_at: s.at,
     apply_deadline_precision: d.precision, apply_deadline_date: d.date, apply_deadline_at: d.at,
     result_precision: r.precision, result_date: r.date, result_at: r.at,
+    // 発表の最終日。開始が不明なら期間にならないので保存しない
+    result_end_date: r.precision === "unknown" || !input.resultEndDate ? null : input.resultEndDate,
     procedure_start_precision: ps.precision, procedure_start_date: ps.date, procedure_start_at: ps.at,
     procedure_deadline_precision: p.precision, procedure_deadline_date: p.date, procedure_deadline_at: p.at,
     receive_method: input.receiveMethod,
@@ -556,7 +556,7 @@ export async function duplicateLottery(
         store_id: storeId,
         apply_start_precision: src.apply_start_precision, apply_start_date: src.apply_start_date, apply_start_at: src.apply_start_at,
         apply_deadline_precision: src.apply_deadline_precision, apply_deadline_date: src.apply_deadline_date, apply_deadline_at: src.apply_deadline_at,
-        result_precision: src.result_precision, result_date: src.result_date, result_at: src.result_at,
+        result_precision: src.result_precision, result_date: src.result_date, result_at: src.result_at, result_end_date: src.result_end_date,
         procedure_start_precision: src.procedure_start_precision, procedure_start_date: src.procedure_start_date, procedure_start_at: src.procedure_start_at,
         procedure_deadline_precision: src.procedure_deadline_precision, procedure_deadline_date: src.procedure_deadline_date, procedure_deadline_at: src.procedure_deadline_at,
         receive_method: src.receive_method,
@@ -635,6 +635,12 @@ export async function setApplied(
   if (selectedItemId !== null && !uuid.safeParse(selectedItemId).success) return fail("リクエストが不正です");
   const { data: mode } = await db.from("lotteries").select("multi_mode").eq("id", lotteryId).maybeSingle();
   if (!mode) return fail("対象のデータが見つかりません");
+  // 応募状態を変えられるのは、操作中のプロフィール自身のアカウントだけ（他のプロフィールの応募状況は閲覧のみ）
+  if (actor !== null) {
+    const { data: own } = await db.from("service_accounts").select("managed_by_profile_id").eq("id", accountId).maybeSingle();
+    if (!own) return fail("対象のデータが見つかりません");
+    if (own.managed_by_profile_id !== actor) return fail("他のユーザーの応募状況は変更できません");
+  }
   if (applied && mode.multi_mode === "choose_one") {
     if (!selectedItemId) return fail("応募する商品を選択してください");
     const { data: it } = await db.from("lottery_items").select("id").eq("id", selectedItemId).eq("lottery_id", lotteryId).maybeSingle();

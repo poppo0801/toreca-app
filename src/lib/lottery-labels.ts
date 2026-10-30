@@ -38,7 +38,7 @@ export const APPLY_LABEL: Record<ApplyMethod, string> = {
 };
 
 export const RESULT_LABEL: Record<ResultStatus, string> = {
-  pending: "未確認",
+  pending: "結果待ち",
   won: "当選",
   lost: "落選",
   unknown: "不明",
@@ -65,3 +65,18 @@ export function placeLabel(receive: "store" | "shipping" | "either" | "unknown",
   if ((receive === "store" || receive === "either") && prefecture) return prefecture;
   return null;
 }
+
+/** 応募締切の残り時間バッジの色（3日以上=通常 / 3日未満=オレンジ / 24時間未満=赤 / 終了=グレー）。色だけでなく文言でも区別される */
+export const DEADLINE_TONE_CLASS = {
+  normal: "border-info/50 bg-info/10 text-info",
+  warn: "border-warn bg-warn/15 text-warn",
+  danger: "border-danger bg-danger/15 text-danger",
+  ended: "border-border bg-muted text-muted-foreground",
+} as const;
+
+export const DEADLINE_BAR_CLASS = {
+  normal: "border-l-primary/70",
+  warn: "border-l-warn",
+  danger: "border-l-danger",
+  ended: "border-l-border",
+} as const;

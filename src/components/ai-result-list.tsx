@@ -25,6 +25,14 @@ export function formatDraftDate(f: FlexInput | undefined, thisYear = new Date().
   return f.precision === "date_time" && f.time ? `${head} ${f.time}` : head;
 }
 
+/** 当選発表。期間指定なら 11/7〜11/10 */
+export function formatDraftResult(i: { resultDate?: FlexInput; resultEndDate?: string }, thisYear = new Date().getFullYear()): string | null {
+  const s = formatDraftDate(i.resultDate, thisYear);
+  if (!s || !i.resultEndDate) return s;
+  const [y, m, d] = i.resultEndDate.split("-").map(Number);
+  return `${s}〜${y !== thisYear ? `${y}/` : ""}${m}/${d}`;
+}
+
 export interface ResultRow {
   id: string;
   label: string;
@@ -52,7 +60,7 @@ export function buildResultRows(draft: LotteryDraft, extra: { applyUrl: string; 
   rows.push(
     { id: "applyStart", label: "応募開始", value: formatDraftDate(i.applyStart), field: "applyStart" },
     { id: "applyDeadline", label: "応募締切", value: formatDraftDate(i.applyDeadline), field: "applyDeadline" },
-    { id: "resultDate", label: "当選発表", value: formatDraftDate(i.resultDate), field: "resultDate" },
+    { id: "resultDate", label: "当選発表", value: formatDraftResult(i), field: "resultDate" },
     {
       id: "procedure",
       label: "購入期間",

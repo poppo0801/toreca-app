@@ -10,6 +10,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 import { KIND_LABEL, normName, parseProducts, planImport, scanImages } from "./lib/product-import.mjs";
 import { readXlsx } from "./lib/xlsx-read.mjs";
 
@@ -130,9 +131,22 @@ const upload = async (img, replace) => {
   const path = `${hid}/${productId}/${img.kind}.png`;
   const up = await db.storage.from("product-images").upload(path, readFileSync(img.path), { contentType: "image/png", upsert: true });
   if (up.error) return result.failed.push(`画像 ${img.file}: ${up.error.message}`);
-  const row = { household_id: hid, product_id: productId, kind: img.kind, storage_path: path, sha256: img.sha256, width: img.width, height: img.height, source: "import" };
+  // 一覧用の軽量サムネイル（高さ288pxのWebP）。元画像より小さくならなければ作らない
+  let thumbPath = null;
+  try {
+    const orig = readFileSync(img.path);
+    const t = await sharp(orig).resize({ height: 288, withoutEnlargement: true }).webp({ quality: 82, alphaQuality: 90 }).toBuffer();
+    if (t.length < orig.length) {
+      const tp = `${hid}/${productId}/thumb-${img.kind}-${img.sha256.slice(0, 12)}.webp`;
+      const tu = await db.storage.from("product-images").upload(tp, t, { contentType: "image/webp", upsert: true });
+      if (!tu.error) thumbPath = tp;
+    }
+  } catch {
+    /* サムネイルなしで表示される */
+  }
+  const row = { household_id: hid, product_id: productId, kind: img.kind, storage_path: path, thumb_path: thumbPath, sha256: img.sha256, width: img.width, height: img.height, source: "import" };
   const { error } = replace
-    ? await db.from("product_images").update({ storage_path: path, sha256: img.sha256, width: img.width, height: img.height }).eq("product_id", productId).eq("kind", img.kind)
+    ? await db.from("product_images").update({ storage_path: path, thumb_path: thumbPath, sha256: img.sha256, width: img.width, height: img.height }).eq("product_id", productId).eq("kind", img.kind)
     : await db.from("product_images").insert(row);
   if (error) result.failed.push(`画像記録 ${img.file}: ${error.message}`);
   else if (replace) result.imagesReplaced++;

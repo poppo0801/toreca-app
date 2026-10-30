@@ -1,4 +1,4 @@
-import { formatFlexible, isPast, jstDateString } from "@/lib/datetime";
+import { formatFlexible, formatResultShort, hasResultPeriod, isResultFinished, jstDateString, resultEndDay } from "@/lib/datetime";
 import { effectiveEventState, judgeAccount } from "@/lib/eligibility";
 import { formatItem, isManaged } from "@/lib/lottery-view";
 import type { AppData, FlexibleDate, Lottery, Profile } from "@/types/domain";
@@ -216,7 +216,8 @@ export function planNotifications(
       if (s.resultEnabled && pending.length > 0 && l.eventState !== "cancelled") {
         const baseline = new Date(Math.max(...pending.map((a) => new Date(a.createdAt).getTime())));
         const rd = l.resultDate;
-        const rKey = flexKey(rd);
+        const period = hasResultPeriod(l);
+        const rKey = period ? `${flexKey(rd)}~${l.resultEndDate}` : flexKey(rd);
         const who = [...new Set(pending.map((a) => ownerName(a.accountId)).filter(Boolean))].join("、");
         const mk = (type: NotificationType, tier: string, dueAt: Date, title: string, body: string, group?: string): Candidate => ({
           ...base,
@@ -229,7 +230,17 @@ export function planNotifications(
           group,
           baseline,
         });
-        if (rd.precision === "date_time") {
+        if (period) {
+          // 発表期間: 開始日に「期間が始まった」と知らせ、結果の未確認は最終日が過ぎてから促す（期間中は強く警告しない）
+          const range = formatResultShort(l, now);
+          if (rd.precision === "date_time") candidates.push(mk("result_day", "at", new Date(rd.at), "当落の発表期間が始まりました", `発表 ${range}。結果を確認して登録してください`));
+          else if (rd.precision === "date_only" && s.dateOnlyPolicy === "morning_of") candidates.push(mk("result_day", "morning", jstAt(rd.date, s.morningTime), "本日から当落の発表期間です（時刻未確認）", `発表 ${range}。発表後に結果を登録してください`));
+          if (rd.precision === "date_time" || s.dateOnlyPolicy === "morning_of") {
+            candidates.push(
+              mk("result_unconfirmed", "after-end", jstAt(addDaysJst(resultEndDay(l)!, 1), s.morningTime), "当落の結果が未確認です", "発表期間を過ぎています。結果を確認して登録してください", `result:${l.id}`),
+            );
+          }
+        } else if (rd.precision === "date_time") {
           const at = new Date(rd.at);
           candidates.push(mk("result_day", "at", at, "当落が発表されました", "結果を確認して登録してください"));
           for (const h of s.resultReminderHours) {
@@ -376,8 +387,8 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
     const pending = data.applications.some(
       (a) => a.lotteryId === l.id && a.state === "applied" && a.result === "pending" && accs.some((x) => x.id === a.accountId),
     );
-    if (pending && isPast(l.resultDate, now) === true && l.eventState !== "cancelled") {
-      alerts.push({ key: `result:${l.id}:${flexKey(l.resultDate)}`, kind: "result_overdue", lotteryId: l.id, title: `結果が未登録: ${label}`, detail: `発表 ${formatFlexible(l.resultDate)} を過ぎています`, urgent: true });
+    if (pending && isResultFinished(l, now) === true && l.eventState !== "cancelled") {
+      alerts.push({ key: `result:${l.id}:${flexKey(l.resultDate)}`, kind: "result_overdue", lotteryId: l.id, title: `結果が未登録: ${label}`, detail: `発表 ${formatResultShort(l, now)} を過ぎています`, urgent: true });
     }
 
     const won = data.applications.some(
@@ -419,7 +430,7 @@ export function tabDots(data: AppData, profileId: string, now: Date): { appliedD
   for (const l of data.lotteries) {
     if (l.eventState === "cancelled") continue;
     const apps = data.applications.filter((a) => a.lotteryId === l.id && a.state === "applied" && mine.has(a.accountId));
-    if (!appliedDot && isPast(l.resultDate, now) === true && apps.some((a) => a.result === "pending")) appliedDot = true;
+    if (!appliedDot && isResultFinished(l, now) === true && apps.some((a) => a.result === "pending")) appliedDot = true;
     if (!wonDot && apps.some((a) => a.result === "won" && a.fulfillment !== "purchased")) wonDot = true;
   }
   return { appliedDot, wonDot };
