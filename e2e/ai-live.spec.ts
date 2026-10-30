@@ -99,6 +99,7 @@ test.describe.configure({ mode: "serial" });
 test("connect: 本番のAI設定（APIキー設定済みか・使用モデル・モックでないか）。AIは呼ばない", async ({ page }) => {
   await login(page);
   await page.goto("/settings");
+  await page.getByTestId("acc-ai").getByRole("button", { name: /AI利用状況/ }).click();
   const ai = page.getByTestId("ai-usage");
   await expect(ai).toBeVisible();
   const text = (await ai.innerText()).replace(/\s+/g, " ");
@@ -173,6 +174,7 @@ run("usage")("usage: 実際の利用がアプリ内の「AI利用状況」に反
   expect(r.usage?.input).toBeGreaterThan(0);
   expect(r.usage?.output).toBeGreaterThan(0);
   await page.goto("/settings");
+  await page.getByTestId("acc-ai").getByRole("button", { name: /AI利用状況/ }).click();
   const ai = page.getByTestId("ai-usage");
   await expect(ai.getByTestId("ai-calls")).toHaveText("1回");
   const text = (await ai.innerText()).replace(/s+/g, " ");
@@ -250,8 +252,11 @@ run("tall")("tall: 画像（幅786×高さ10,810pxの縦長スクリーンショ
   const ctx = await page.context().browser()!.newContext({ viewport: { width: 786, height: 900 }, deviceScaleFactor: 1 });
   const p = await ctx.newPage();
   await p.setContent(tallHtml());
-  const png = await p.screenshot({ fullPage: true });
+  const shot = await p.screenshot({ fullPage: true, clip: { x: 0, y: 0, width: 786, height: 10810 } });
   await ctx.close();
+  // 撮影の高さが少し足りないことがあるので、下端を白で足して幅786×高さ10,810pxにそろえる
+  const h0 = (await sharp(shot).metadata()).height!;
+  const png = h0 < 10810 ? await sharp(shot).extend({ bottom: 10810 - h0, background: "#ffffff" }).png().toBuffer() : shot;
   const meta = await sharp(png).metadata();
   expect([meta.width, meta.height]).toEqual([786, 10810]);
   const r = await call(page, "tall", { kind: "image", images: { name: "long.png", mimeType: "image/png", buffer: png } });
