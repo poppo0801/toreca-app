@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { hardenCookie } from "@/lib/supabase/cookies";
+import { safeNext } from "@/lib/share-intake";
 
 /**
  * 認証ガード（Supabaseモード時のみ）。未ログインは /login へ。セッションCookieもここで更新する。
@@ -31,15 +32,17 @@ export async function proxy(request: NextRequest) {
   const isLogin = request.nextUrl.pathname === "/login";
 
   if (!loggedIn && !isLogin) {
+    // iPhoneの共有（/share）だけは、ログイン後に元の共有へ戻れるよう行き先を渡す
+    const back = request.nextUrl.pathname === "/share" ? safeNext(request.nextUrl.pathname + request.nextUrl.search) : null;
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.search = "";
+    url.search = back && back !== "/lotteries" ? `?next=${encodeURIComponent(back)}` : "";
     return NextResponse.redirect(url);
   }
   if (loggedIn && isLogin) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/lotteries";
-    return NextResponse.redirect(url);
+    // ログイン済みで /login?next=/share... を開いた場合は共有へ進む
+    const to = safeNext(request.nextUrl.searchParams.get("next"));
+    return NextResponse.redirect(new URL(to, request.nextUrl.origin));
   }
   return response;
 }

@@ -1416,3 +1416,36 @@ test("縦長画像(786×10,810px): ブラウザで幅を保って11枚に分割�
   await expect(detail.getByTestId("job-item")).toHaveCount(1);
   await expect(detail.locator('[data-testid="job-item"][data-status="done"], [data-testid="job-item"][data-status="failed"]')).toHaveCount(1, { timeout: 60000 });
 });
+
+test("iPhone共有: 未ログインで共有を開くとログイン後に共有へ戻り、X投稿のURLを確認して解析（確認待ち）に渡せる。設定に手順がある", async ({ page }) => {
+  test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証で確認する。費用を発生させない");
+  test.setTimeout(90_000);
+  const shared = "https://twitter.com/e2e_shop/status/1234567890123456?s=20&t=abc";
+  // 未ログイン: ログインへ。共有の行き先は引き継がれる
+  await page.goto(`/share?url=${encodeURIComponent(shared)}`);
+  await expect(page).toHaveURL(/\/login\?next=%2Fshare/);
+  await page.getByLabel("メールアドレス").fill(email);
+  await page.getByLabel("パスワード").fill(password);
+  await page.getByRole("button", { name: "ログイン" }).click();
+  // ログイン後は共有へ戻る。URLは標準の形にそろう（追跡用のクエリは捨てる）
+  await expect(page).toHaveURL(/\/share\?url=/);
+  await expect(page.getByTestId("share-url")).toHaveText("https://x.com/e2e_shop/status/1234567890123456");
+  // 開いただけでは解析を始めない（ジョブは増えていない）
+  const before = await page.evaluate(async () => ((await (await fetch("/api/ai-jobs")).json()) as { jobs: unknown[] }).jobs.length);
+  await page.getByTestId("share-start").click();
+  await expect(page).toHaveURL(/\/lotteries\/bulk\?job=/);
+  await expect(page.getByTestId("job-detail").getByTestId("job-item")).toHaveCount(1);
+  const after = await page.evaluate(async () => ((await (await fetch("/api/ai-jobs")).json()) as { jobs: unknown[] }).jobs.length);
+  expect(after).toBe(before + 1);
+
+  // 不正なURL・X以外は理由を表示し、解析は始められない
+  await page.goto(`/share?url=${encodeURIComponent("https://example.com/a/status/1234567890")}`);
+  await expect(page.getByTestId("share-invalid")).toContainText("投稿のURLではありません");
+  await expect(page.getByTestId("share-start")).toHaveCount(0);
+
+  // 設定: ショートカットの手順と、開くURLの前半（このアプリのアドレス）
+  await page.goto("/settings");
+  await page.getByTestId("acc-share").getByRole("button", { name: /iPhoneの共有から登録/ }).click();
+  await expect(page.getByTestId("share-prefix")).toHaveText(/^http.*\/share\?url=$/);
+  await expect(page.getByTestId("share-setup")).toContainText("URLエンコード");
+});

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { AiQualitySection, AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
 import { Accordion, MenuGroup, MenuLink } from "@/components/settings-parts";
 import { setDiagEnabled } from "@/components/layout-diagnostics";
+import { ShareSetupSection } from "@/components/share-setup";
 
 const SUPABASE = IS_SUPABASE_MODE;
 
@@ -57,6 +58,9 @@ export function SettingsView() {
               </div>
             </Accordion>
             <MenuLink href="/settings/notifications" title="通知設定" testId="menu-notifications" />
+            <Accordion title="iPhoneの共有から登録" testId="acc-share">
+              <ShareSetupSection />
+            </Accordion>
             <Accordion title="AI利用状況・フィードバック" testId="acc-ai">
               <div className="space-y-5">
                 <AiUsageSection />

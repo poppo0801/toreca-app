@@ -484,6 +484,20 @@ test.describe("起動時のロード画面", () => {
 });
 
 // ------------------------------------------------------------------ Stage 5D/5E: ヘッダーの設定・下部メニューのカスタマイズ・設定の一覧・設定のコピー
+test("共有から登録: X投稿のURLだけ受け付け、標準の形にそろえて表示する。不正なURLは理由を出して解析を始められない", async ({ page }) => {
+  await page.goto("/share?url=" + encodeURIComponent("https://twitter.com/shop_e2e/status/1234567890123?s=20&t=abc"));
+  await expect(page.getByTestId("share-url")).toHaveText("https://x.com/shop_e2e/status/1234567890123");
+  await expect(page.getByTestId("share-start")).toBeEnabled();
+  // 文章付きの共有（本文＋URL）からもURLを取り出す
+  await page.goto("/share?text=" + encodeURIComponent("【抽選】応募は明日まで https://x.com/shop_e2e/status/9876543210?s=46"));
+  await expect(page.getByTestId("share-url")).toHaveText("https://x.com/shop_e2e/status/9876543210");
+  for (const bad of ["https://example.com/a/status/1234567890", "javascript:alert(1)", "https://x.com/home", ""]) {
+    await page.goto("/share?url=" + encodeURIComponent(bad));
+    await expect(page.getByTestId("share-invalid")).toBeVisible();
+    await expect(page.getByTestId("share-start")).toHaveCount(0);
+  }
+});
+
 test.describe("設定とナビゲーション", () => {
   test("設定はヘッダーの歯車から開く。下部メニューには設定が無く、重ならずに押せる", async ({ page }) => {
     const gear = page.getByTestId("header-settings");

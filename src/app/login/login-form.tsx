@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 
 const initial: LoginState = { error: null };
 
-export function LoginForm() {
+export function LoginForm({ next = "/lotteries" }: { next?: string }) {
   const [state, action, pending] = useActionState(signIn, initial);
   return (
     <form action={action} className="space-y-3">
+      <input type="hidden" name="next" value={next} />
       <label className="block text-sm">
         メールアドレス
         <input

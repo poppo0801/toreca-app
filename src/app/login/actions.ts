@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { safeNext } from "@/lib/share-intake";
 
 const schema = z.object({
   email: z.email("メールアドレスの形式が正しくありません").max(254),
@@ -36,7 +37,8 @@ export async function signIn(_prev: LoginState, formData: FormData): Promise<Log
   // 初回ログインで世帯と既定プロフィール(A/B/C)を作成（冪等）
   const boot = await supabase.rpc("bootstrap_household");
   if (boot.error) return { error: "初期設定に失敗しました。時間をおいて再度お試しください" };
-  redirect("/lotteries");
+  // 共有（/share）から来たときは、ログイン後にその共有へ戻る。それ以外は抽選管理
+  redirect(safeNext(formData.get("next")));
 }
 
 export async function signOut() {
