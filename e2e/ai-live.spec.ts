@@ -187,7 +187,7 @@ run("usage")("usage: 実際の利用がアプリ内の「AI利用状況」に反
 run("ui1")("ui1: 画面から文章を読み取り→登録フォームへ反映→保存→一覧に表示（実AI）", async ({ page }) => {
   test.setTimeout(120_000);
   await login(page);
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const form = page.getByTestId("lottery-form");
   await form.getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();

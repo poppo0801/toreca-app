@@ -173,16 +173,9 @@ export function LotteryBoard() {
             </button>
             {persistent ? (
               <>
-                <Button asChild size="sm" variant="outline" className="relative">
-                  <Link href="/lotteries/bulk" data-testid="bulk-link">
-                    まとめて読み取り
-                    {unseenJobs > 0 && (
-                      <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-primary" data-testid="bulk-badge" aria-label={`確認待ちの結果 ${unseenJobs}件`} />
-                    )}
-                  </Link>
-                </Button>
-                <Button size="sm" onClick={() => setRegistering(true)}>
-                  ＋抽選を登録
+                <Button size="sm" className="relative" onClick={() => setRegistering(true)} data-testid="register">
+                  ＋登録
+                  {unseenJobs > 0 && <span className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-card bg-info" data-testid="bulk-badge" aria-label={`まとめて登録の確認待ち ${unseenJobs}件`} />}
                 </Button>
               </>
             ) : (

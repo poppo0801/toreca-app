@@ -2,27 +2,20 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { FileImage, Link2, Loader2, NotebookPen, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { formatDraftDate } from "@/components/ai-result-list";
 import { useAiJobs } from "@/components/ai-jobs-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
-import { ITEM_STATUS_LABEL, JOB_STATUS_LABEL, MAX_ITEM_IMAGES, MAX_JOB_ITEMS, isActive, urlsToItems, type ItemStatus, type JobItemInput, type JobSummary } from "@/lib/ai-job";
+import { BulkComposer } from "@/components/bulk-composer";
+import { ITEM_STATUS_LABEL, JOB_STATUS_LABEL, isActive, type ItemStatus, type JobSummary } from "@/lib/ai-job";
 import type { ExtractedLottery } from "@/lib/ai/extraction";
-import { runLimited, sha256Hex, shrinkToJpeg } from "@/lib/client-image";
 import { lotteryInputSchema } from "@/lib/lottery-input";
 import { buildDraft, type LotteryDraft } from "@/lib/lottery-match";
 import type { JobItemView } from "@/lib/server/ai-job-service";
 import { cn } from "@/lib/utils";
-
-type Pending =
-  | { id: number; kind: "text"; text: string }
-  | { id: number; kind: "url"; url: string; x: boolean }
-  | { id: number; kind: "images"; files: File[]; shas: string[]; names: string[] };
-
-type NewPending = Pending extends infer P ? (P extends unknown ? Omit<P, "id"> : never) : never;
 
 const STATUS_CLASS: Record<ItemStatus, string> = {
   queued: "text-muted-foreground",
@@ -44,189 +37,36 @@ async function api<T>(url: string, init?: RequestInit): Promise<({ ok: true } & 
 }
 
 /**
- * まとめてAI読み取り: 複数の抽選情報（文章・URL・画像）を一括で解析する専用画面。
- *  A: 複数の画像を「1件の抽選」として解析 / B: 画像1枚ずつを「別々の抽選」として解析（利用者が選ぶ。画像を複数選んだだけで別々にはしない）。
- * 解析はサーバー側のジョブとして進み、他の画面を操作していても・再読み込みしても状態と結果が残る。
- * 結果は「確認待ち」で、確認・修正してから正式な抽選として保存する（自動では登録しない）。
+ * まとめてAI読み取り: 1セット＝1件の抽選（URL・画像（複数可）・文章のどれか1つ）。入力済みのセットだけを解析する。
+ * 解析はサーバー側のジョブとして進み、他の画面を操作していても・再読み込みしても状態と結果が残る。結果は「確認待ち」で、確認・修正してから登録する。
  */
 export function BulkAiView() {
-  const { data, actions, profile } = useApp();
+  const { data, actions } = useApp();
   const { jobs, blocked, refresh } = useAiJobs();
   const router = useRouter();
   const params = useSearchParams();
   const jobId = params.get("job");
-  const [pending, setPending] = useState<Pending[]>([]);
-  const [text, setText] = useState("");
-  const [urls, setUrls] = useState("");
-  const [imageMode, setImageMode] = useState<"one" | "each">("one");
-  const [label, setLabel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const nextId = useRef(1);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const add = (p: NewPending[]) => setPending((cur) => [...cur, ...p.map((x) => ({ ...x, id: nextId.current++ }) as Pending)].slice(0, MAX_JOB_ITEMS));
-
-  const addUrls = () => {
-    const r = urlsToItems(urls);
-    add(r.items.map((i) => ({ kind: "url" as const, url: i.url, x: i.source === "x_url" })));
-    setUrls("");
-    setMsg(r.invalid.length > 0 ? { ok: false, text: `URLとして読み取れない行を除きました（${r.invalid.length}行）` } : null);
-  };
-
-  const onFiles = async (list: FileList | null) => {
-    const files = [...(list ?? [])];
-    if (fileRef.current) fileRef.current.value = "";
-    if (files.length === 0) return;
-    const small = await Promise.all(files.map((f) => shrinkToJpeg(f)));
-    const shas = await Promise.all(small.map((f) => sha256Hex(f)));
-    if (imageMode === "one") {
-      add([{ kind: "images", files: small.slice(0, MAX_ITEM_IMAGES), shas: shas.slice(0, MAX_ITEM_IMAGES), names: files.slice(0, MAX_ITEM_IMAGES).map((f) => f.name) }]);
-      if (files.length > MAX_ITEM_IMAGES) setMsg({ ok: false, text: `1件の抽選に使える画像は${MAX_ITEM_IMAGES}枚までです（先頭の${MAX_ITEM_IMAGES}枚を追加しました）` });
-    } else add(small.map((f, i) => ({ kind: "images" as const, files: [f], shas: [shas[i]], names: [files[i].name] })));
-  };
-
-  const start = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const items: JobItemInput[] = [];
-      const imageItems = pending.filter((p): p is Extract<Pending, { kind: "images" }> => p.kind === "images");
-      const uploaded = new Map<number, string[]>();
-      let failed: string | null = null;
-      await runLimited(imageItems, 3, async (it) => {
-        const paths: string[] = [];
-        for (const f of it.files) {
-          const fd = new FormData();
-          fd.set("image", f);
-          const r = await api<{ path: string }>("/api/ai-jobs/upload", { method: "POST", body: fd });
-          if (!r.ok) {
-            failed = r.error;
-            return;
-          }
-          paths.push(r.path);
-        }
-        uploaded.set(it.id, paths);
-      });
-      if (failed) return setMsg({ ok: false, text: failed });
-      for (const p of pending) {
-        if (p.kind === "text") items.push({ source: "text", text: p.text });
-        else if (p.kind === "url") items.push({ source: p.x ? "x_url" : "url", url: p.url });
-        else items.push({ source: "images", paths: uploaded.get(p.id) ?? [], shas: p.shas });
-      }
-      const r = await api<{ jobId: string; created: number; skipped: { index: number; reason: string }[] }>("/api/ai-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: profile.id, label, items }) });
-      if (!r.ok) return setMsg({ ok: false, text: r.error });
-      setPending([]);
-      setLabel("");
-      setMsg({ ok: true, text: `${r.created}件の解析を開始しました。他の画面を操作していても続き、完了すると通知します。${r.skipped.length > 0 ? `（${r.skipped.length}件は重複のため追加していません）` : ""}` });
-      await refresh();
-      router.replace(`/lotteries/bulk?job=${r.jobId}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const field = "mt-1 w-full rounded-md border bg-input px-3 py-2 text-sm";
   return (
-    <div className="space-y-4" data-testid="bulk-ai">
-      <div>
-        <p className="mb-1 text-sm">
-          <Link href="/lotteries" className="underline">
-            ← 抽選管理
-          </Link>
-        </p>
-        <h1 className="text-lg font-bold">まとめてAI読み取り</h1>
-        <p className="text-xs text-muted-foreground">複数の告知をまとめて読み取ります。解析は裏で進み、完了すると通知します（結果は確認・修正してから登録します）。</p>
-      </div>
-
+    <div className="space-y-3" data-testid="bulk-ai">
+      <h1 className="flex items-center gap-2 text-lg font-bold">
+        <Link href="/lotteries" aria-label="抽選管理へ戻る" className="text-base text-muted-foreground">
+          ←
+        </Link>
+        まとめて登録
+      </h1>
       {blocked && (
         <p role="alert" className="rounded-md border border-warn p-2 text-xs text-warn" data-testid="bulk-blocked">
-          今月のAI予算に達したため、待機中の解析を停止しています（設定の「AI利用状況」で予算を確認してください）。
+          今月のAI予算に達したため、待機中の解析を停止しています。
         </p>
       )}
-
       {!jobId && (
-        <section className="space-y-3 rounded-xl border bg-card p-3" aria-label="解析する項目の追加">
-          <h2 className="text-sm font-bold">1. 解析する項目を追加</h2>
-          <label className="block text-sm">
-            <span className="flex items-center gap-1 text-[13px] font-medium">
-              <NotebookPen className="size-3.5" aria-hidden="true" /> 文章（1件の抽選）
-            </span>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={20000} placeholder="告知の文章を貼り付け" className={field} aria-label="告知の文章" />
-            <Button type="button" size="sm" variant="outline" className="mt-1" disabled={text.trim().length < 10} onClick={() => (add([{ kind: "text", text: text.trim() }]), setText(""))}>
-              追加
-            </Button>
-          </label>
-          <label className="block text-sm">
-            <span className="flex items-center gap-1 text-[13px] font-medium">
-              <Link2 className="size-3.5" aria-hidden="true" /> URL（1行に1つ。それぞれ別の抽選）
-            </span>
-            <textarea value={urls} onChange={(e) => setUrls(e.target.value)} rows={3} placeholder={"https://…\nhttps://x.com/…/status/…"} className={field} aria-label="URL（改行区切り）" />
-            <Button type="button" size="sm" variant="outline" className="mt-1" disabled={urls.trim() === ""} onClick={addUrls} data-testid="add-urls">
-              追加
-            </Button>
-          </label>
-          <div className="space-y-1.5 text-sm">
-            <span className="flex items-center gap-1 text-[13px] font-medium">
-              <FileImage className="size-3.5" aria-hidden="true" /> 画像
-            </span>
-            <div role="radiogroup" aria-label="画像の扱い" className="space-y-1">
-              <label className="flex min-h-9 items-start gap-2 text-xs">
-                <input type="radio" name="imgmode" checked={imageMode === "one"} onChange={() => setImageMode("one")} className="mt-0.5 size-4" />
-                <span>
-                  <strong>A. 選んだ画像をまとめて1件の抽選</strong>として解析（最大{MAX_ITEM_IMAGES}枚。商品・応募条件・当選発表などが別々の画像に載っているとき）
-                </span>
-              </label>
-              <label className="flex min-h-9 items-start gap-2 text-xs">
-                <input type="radio" name="imgmode" checked={imageMode === "each"} onChange={() => setImageMode("each")} className="mt-0.5 size-4" />
-                <span>
-                  <strong>B. 画像1枚ずつを別々の抽選</strong>として解析
-                </span>
-              </label>
-            </div>
-            <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" aria-label="告知画像を選択" data-testid="bulk-files" onChange={(e) => void onFiles(e.target.files)} />
-            <Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
-              画像を選ぶ
-            </Button>
-          </div>
-
-          {pending.length > 0 && (
-            <div className="space-y-2 border-t pt-2">
-              <h3 className="text-[13px] font-medium">解析する項目（{pending.length}件・最大{MAX_JOB_ITEMS}件）</h3>
-              <ul className="space-y-1" data-testid="pending-list">
-                {pending.map((p) => (
-                  <li key={p.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs" data-testid="pending-item">
-                    <span className="shrink-0 rounded border px-1 text-[10px]">{p.kind === "text" ? "文章" : p.kind === "url" ? (p.x ? "X投稿" : "URL") : `画像${p.files.length}枚`}</span>
-                    <span className="min-w-0 flex-1 truncate">{p.kind === "text" ? p.text : p.kind === "url" ? p.url : p.names.join("、")}</span>
-                    <button type="button" aria-label="この項目を外す" onClick={() => setPending(pending.filter((x) => x.id !== p.id))} className="p-1.5">
-                      <X className="size-3.5" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <label className="block text-xs">
-                名前（任意）
-                <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} className="mt-0.5 min-h-10 w-full rounded-md border bg-input px-2 text-sm" aria-label="ジョブの名前" />
-              </label>
-              <Button onClick={start} disabled={busy} data-testid="bulk-start" className="w-full">
-                {busy ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" aria-hidden="true" /> 準備中…
-                  </>
-                ) : (
-                  `${pending.length}件の読み取りを開始`
-                )}
-              </Button>
-            </div>
-          )}
-          {msg && (
-            <p role={msg.ok ? "status" : "alert"} className={cn("text-xs", msg.ok ? "text-muted-foreground" : "text-danger")} data-testid="bulk-msg">
-              {msg.text}
-            </p>
-          )}
-        </section>
+        <BulkComposer
+          onStarted={async (id) => {
+            await refresh();
+            router.replace(`/lotteries/bulk?job=${id}`);
+          }}
+        />
       )}
-
       {jobId ? <JobDetail jobId={jobId} data={data} actions={actions} onChange={refresh} /> : <JobList jobs={jobs} />}
     </div>
   );
@@ -235,10 +75,8 @@ export function BulkAiView() {
 function JobList({ jobs }: { jobs: JobSummary[] }) {
   return (
     <section className="space-y-2" aria-label="解析ジョブ">
-      <h2 className="text-sm font-bold">解析の状況・結果</h2>
-      {jobs.length === 0 ? (
-        <p className="text-xs text-muted-foreground">まだ解析はありません。</p>
-      ) : (
+      {jobs.length > 0 && <h2 className="text-sm font-bold">解析の状況・結果</h2>}
+      {jobs.length === 0 ? null : (
         <ul className="space-y-1.5" data-testid="job-list">
           {jobs.map((j) => (
             <li key={j.id}>

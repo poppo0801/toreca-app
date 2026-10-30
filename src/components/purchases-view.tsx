@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useApp } from "@/components/app-provider";
 import { ExpenseDialog } from "@/components/expense-dialog";
 import { ProductThumb } from "@/components/product-image";
@@ -76,6 +77,17 @@ export function PurchasesView() {
     return data.stores.filter((s) => ids.has(s.id));
   }, [data]);
   const hasFilter = productId !== "" || storeId !== "";
+  const [picker, setPicker] = useState(false);
+  const [showFilter, setShowFilter] = useState(false);
+  // 選べる年: 購入データのある年と今年（新しい順）
+  const dataYears = useMemo(() => {
+    const ys = new Set<number>([Number(jstDateString(new Date()).slice(0, 4))]);
+    for (const pu of data.purchases) {
+      const d = flexToJstDate(pu.purchasedOn);
+      if (d) ys.add(Number(d.slice(0, 4)));
+    }
+    return [...ys].sort((x, y) => y - x);
+  }, [data.purchases]);
 
   return (
     <div className="space-y-2">
@@ -88,65 +100,35 @@ export function PurchasesView() {
         )}
       </div>
 
-      {/* 期間 */}
-      <div className="flex items-center gap-1.5">
-        <div role="tablist" aria-label="期間の単位" className="grid shrink-0 grid-cols-3 rounded-lg bg-muted p-0.5">
-          {KINDS.map((k) => (
-            <button
-              key={k.value}
-              role="tab"
-              type="button"
-              aria-selected={period.kind === k.value}
-              onClick={() =>
-                setPeriod(
-                  k.value === "month" ? { kind: "month", value: jstDateString(new Date()).slice(0, 7) } : k.value === "year" ? { kind: "year", value: jstDateString(new Date()).slice(0, 4) } : { kind: "all", value: "" },
-                )
-              }
-              className={cn("min-h-9 rounded-md px-3 text-xs font-medium", period.kind === k.value ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        {period.kind !== "all" && (
-          <div className="flex min-w-0 flex-1 items-center justify-between rounded-lg bg-card px-0.5">
-            <Button variant="ghost" size="icon" className="size-9" aria-label="前の期間" onClick={() => setPeriod(shiftPeriod(period, -1))}>
-              <ChevronLeft className="size-5" />
-            </Button>
-            <span className="text-sm font-semibold" data-testid="period-label">
-              {periodLabel(period)}
-            </span>
-            <Button variant="ghost" size="icon" className="size-9" aria-label="次の期間" onClick={() => setPeriod(shiftPeriod(period, 1))}>
-              <ChevronRight className="size-5" />
-            </Button>
-          </div>
-        )}
+      {/* 1. 期間選択: 〈 2026年10月 〉。年月をタップで月・年・全期間を選ぶ */}
+      <div className="flex items-center justify-between rounded-lg bg-card px-0.5">
+        <Button variant="ghost" size="icon" className="size-10" aria-label="前の期間" disabled={period.kind === "all"} onClick={() => setPeriod(shiftPeriod(period, -1))}>
+          <ChevronLeft className="size-5" />
+        </Button>
+        <button type="button" onClick={() => setPicker(true)} aria-haspopup="dialog" className="min-h-10 flex-1 rounded-md text-sm font-semibold hover:bg-muted" data-testid="period-label">
+          {periodLabel(period)}
+        </button>
+        <Button variant="ghost" size="icon" className="size-10" aria-label="次の期間" disabled={period.kind === "all"} onClick={() => setPeriod(shiftPeriod(period, 1))}>
+          <ChevronRight className="size-5" />
+        </Button>
       </div>
+      <PeriodPicker open={picker} onOpenChange={setPicker} period={period} onPick={(p) => (setPeriod(p), setPicker(false))} years={dataYears} />
 
-      <div className="flex gap-1.5">
-        <select aria-label="商品で絞り込み" value={productId} onChange={(e) => setProductId(e.target.value)} className={cn(chip, "flex-1")}>
-          <option value="">商品: すべて</option>
-          {boughtProducts.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.officialName}
-            </option>
-          ))}
-        </select>
-        <select aria-label="店舗で絞り込み" value={storeId} onChange={(e) => setStoreId(e.target.value)} className={cn(chip, "flex-1")}>
-          <option value="">店舗: すべて</option>
-          {boughtStores.map((s) => (
-            <option key={s.id} value={s.id}>
-              {data.chains.find((c) => c.id === s.chainId)?.name} {s.name}
-            </option>
-          ))}
-        </select>
-        {hasFilter && (
-          <button type="button" className={cn(chip, "shrink-0 text-primary")} onClick={() => (setProductId(""), setStoreId(""))}>
-            解除
+      {/* 2. 購入履歴／商品別の切替 */}
+      <div role="tablist" aria-label="表示の切替" className="grid grid-cols-2 rounded-lg bg-muted p-0.5">
+        {(
+          [
+            ["history", "購入履歴"],
+            ["products", "商品別の累計"],
+          ] as const
+        ).map(([v, label]) => (
+          <button key={v} role="tab" type="button" aria-selected={tab === v} onClick={() => setTab(v)} className={cn("min-h-9 rounded-md text-[13px] font-medium", tab === v ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}>
+            {label}
           </button>
-        )}
+        ))}
       </div>
 
+      {/* 3. 購入件数・購入金額 */}
       <dl className="grid grid-cols-2 gap-1.5 text-center" data-testid="purchase-summary">
         <div className="rounded-lg border bg-card p-2 shadow-card">
           <dt className="text-[11px] text-muted-foreground">購入</dt>
@@ -163,19 +145,39 @@ export function PurchasesView() {
       </dl>
       {summary.amountUnknown > 0 && <p className="text-xs text-muted-foreground">金額が未入力の購入が{summary.amountUnknown}件あります（購入金額には含まれていません。0円とは扱いません）。</p>}
 
-      <div role="tablist" aria-label="表示の切替" className="grid grid-cols-2 rounded-lg bg-muted p-0.5">
-        {(
-          [
-            ["history", "購入履歴"],
-            ["products", "商品別の累計"],
-          ] as const
-        ).map(([v, label]) => (
-          <button key={v} role="tab" type="button" aria-selected={tab === v} onClick={() => setTab(v)} className={cn("min-h-9 rounded-md text-[13px] font-medium", tab === v ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}>
-            {label}
-          </button>
-        ))}
+      {/* 4. 商品・店舗の絞り込み（折りたたみ） */}
+      <div>
+        <button type="button" aria-expanded={showFilter || hasFilter} onClick={() => setShowFilter((v) => !v)} className={cn("flex min-h-9 items-center gap-1 rounded-full border bg-input px-3 text-xs", hasFilter && "border-primary text-primary")} data-testid="filter-toggle">
+          <SlidersHorizontal className="size-3.5" aria-hidden="true" /> 絞り込み{hasFilter && "（設定中）"}
+        </button>
+        {(showFilter || hasFilter) && (
+          <div className="mt-1.5 flex gap-1.5" data-testid="purchase-filters">
+            <select aria-label="商品で絞り込み" value={productId} onChange={(e) => setProductId(e.target.value)} className={cn(chip, "flex-1")}>
+              <option value="">商品: すべて</option>
+              {boughtProducts.map((pr) => (
+                <option key={pr.id} value={pr.id}>
+                  {pr.officialName}
+                </option>
+              ))}
+            </select>
+            <select aria-label="店舗で絞り込み" value={storeId} onChange={(e) => setStoreId(e.target.value)} className={cn(chip, "flex-1")}>
+              <option value="">店舗: すべて</option>
+              {boughtStores.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {data.chains.find((c) => c.id === st.chainId)?.name} {st.name}
+                </option>
+              ))}
+            </select>
+            {hasFilter && (
+              <button type="button" className={cn(chip, "shrink-0 text-primary")} onClick={() => (setProductId(""), setStoreId(""))}>
+                解除
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
+      {/* 5. 購入データ一覧 */}
       {tab === "history" ? (
         <ul className="space-y-2" data-testid="purchase-list" aria-label="購入履歴">
           {groups.map(([date, list]) => (
@@ -250,5 +252,59 @@ export function PurchasesView() {
 
       {edit && <ExpenseDialog key={edit.id ?? "new"} open onOpenChange={(v) => !v && setEdit(null)} purchase={edit.id ? (data.purchases.find((p) => p.id === edit.id) ?? null) : null} />}
     </div>
+  );
+}
+
+/** 期間選択: 月単位（年を移動して月を選ぶ）・年単位・全期間 */
+function PeriodPicker({ open, onOpenChange, period, onPick, years }: { open: boolean; onOpenChange: (v: boolean) => void; period: Period; onPick: (p: Period) => void; years: number[] }) {
+  const thisYear = Number(jstDateString(new Date()).slice(0, 4));
+  const [kind, setKind] = useState<PeriodKind>(period.kind);
+  const [year, setYear] = useState(period.kind === "all" ? thisYear : Number(period.value.slice(0, 4)));
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="period-picker">
+        <DialogTitle>期間を選択</DialogTitle>
+        <DialogDescription className="sr-only">月・年・全期間から選びます</DialogDescription>
+        <div role="tablist" aria-label="期間の単位" className="mt-3 grid grid-cols-3 rounded-lg bg-muted p-0.5">
+          {KINDS.map((k) => (
+            <button key={k.value} role="tab" type="button" aria-selected={kind === k.value} onClick={() => (k.value === "all" ? onPick({ kind: "all", value: "" }) : setKind(k.value))} className={cn("min-h-9 rounded-md text-xs font-medium", kind === k.value ? "bg-primary text-primary-foreground" : "hover:bg-card")}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+        {kind === "month" && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <Button variant="ghost" size="icon" className="size-9" aria-label="前の年" onClick={() => setYear(year - 1)}>
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="text-sm font-semibold">{year}年</span>
+              <Button variant="ghost" size="icon" className="size-9" aria-label="次の年" onClick={() => setYear(year + 1)}>
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+                const v = `${year}-${String(m).padStart(2, "0")}`;
+                return (
+                  <button key={m} type="button" onClick={() => onPick({ kind: "month", value: v })} className={cn("min-h-10 rounded-md border text-sm", period.kind === "month" && period.value === v ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}>
+                    {m}月
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {kind === "year" && (
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
+            {years.map((y) => (
+              <button key={y} type="button" onClick={() => onPick({ kind: "year", value: String(y) })} className={cn("min-h-10 rounded-md border text-sm", period.kind === "year" && period.value === String(y) ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}>
+                {y}年
+              </button>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

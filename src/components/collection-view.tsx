@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChartColumn, LayoutGrid, List, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { loadCollectionAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
@@ -43,12 +43,13 @@ export function CollectionView() {
   const [sort, setSort] = useState<SortKey>("default");
   const [showFilters, setShowFilters] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [form, setForm] = useState<CardFormMode | null>(null);
   const [bulk, setBulk] = useState<File[] | null>(null);
   const [reorder, setReorder] = useState(false);
   const [limit, setLimit] = useState(PAGE);
-  const fileRef = useRef<HTMLInputElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -89,6 +90,7 @@ export function CollectionView() {
   const rarities = useMemo(() => [...new Set(rows.map((r) => r.rarity).filter(Boolean))].sort(), [rows]);
   const products = useMemo(() => [...new Set(rows.map((r) => r.productName).filter(Boolean))].sort(), [rows]);
   const visible = shown.slice(0, limit);
+  const activeFilters = [filters.rarity, filters.product, filters.qty !== "all", filters.priced !== "all", filters.image !== "all"].filter(Boolean).length;
 
   // 続きを読み込む（一覧の末尾が見えたら60件ずつ増やす）
   useEffect(() => {
@@ -108,14 +110,6 @@ export function CollectionView() {
     const r = await setFavoriteAction(profile.id, id, on);
     if (!r.ok) setError(r.error);
     void load();
-  };
-
-  const onPick = (list: FileList | null) => {
-    const files = [...(list ?? [])];
-    if (fileRef.current) fileRef.current.value = "";
-    if (files.length === 0) return;
-    if (files.length === 1) setForm({ kind: "new", file: files[0] });
-    else setBulk(files.slice(0, BULK_MAX_IMAGES));
   };
 
   const opened = rows.find((r) => r.id === openId) ?? null;
@@ -138,46 +132,30 @@ export function CollectionView() {
     <div className="space-y-3" data-testid="collection">
       <div className="flex items-center gap-2">
         <h1 className="mr-auto text-lg font-bold">コレクション</h1>
-        <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="カード画像を選択（複数選択で一括登録）" data-testid="collection-file" onChange={(e) => onPick(e.target.files)} />
-        <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} data-testid="add-by-image">
-          <Sparkles className="size-4 text-primary" aria-hidden="true" /> 画像から追加
-        </Button>
         <Button size="sm" onClick={() => setForm({ kind: "new" })} data-testid="add-card">
-          ＋手入力
+          ＋カード登録
         </Button>
       </div>
 
       {data && (
-        <section aria-label="保有状況" className="rounded-xl border bg-card p-2.5 text-xs" data-testid="collection-summary">
-          <dl className="grid grid-cols-3 gap-2 text-center">
-            <div>
-              <dt className="text-[10px] text-muted-foreground">カード</dt>
-              <dd className="text-sm font-bold tabular-nums">
-                {totals.kinds}種・{totals.qty}枚
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[10px] text-muted-foreground">購入額</dt>
-              <dd className="text-sm font-bold tabular-nums">{totals.qty === 0 ? "—" : yen(totals.costTotal)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] text-muted-foreground">参考価値（販売）</dt>
-              <dd className="text-sm font-bold tabular-nums">{totals.saleTotal > 0 || totals.saleMissingKinds < totals.kinds ? yen(totals.saleTotal) : "—"}</dd>
-            </div>
-          </dl>
-          <button type="button" onClick={() => setShowStats((v) => !v)} aria-expanded={showStats} className="mt-1.5 flex min-h-8 w-full items-center justify-center gap-1 text-muted-foreground">
-            <ChartColumn className="size-3.5" aria-hidden="true" /> {showStats ? "詳細を閉じる" : "詳細な集計"}
+        <section aria-label="保有状況" className="rounded-xl border bg-card px-2.5 text-xs" data-testid="collection-summary">
+          <button type="button" onClick={() => setShowStats((v) => !v)} aria-expanded={showStats} className="flex min-h-9 w-full items-center gap-x-2 text-left" data-testid="summary-line">
+            <span className="min-w-0 flex-1 truncate font-medium tabular-nums">
+              {totals.kinds}種・{totals.qty}枚｜購入額 {totals.qty === 0 ? "—" : yen(totals.costTotal)}｜参考買取 {totals.buybackTotal > 0 || totals.buybackMissingKinds < totals.kinds ? yen(totals.buybackTotal) : "—"}
+            </span>
+            {(totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && totals.kinds > 0 && <span className="shrink-0 rounded-full border border-warn px-1.5 text-[10px] text-warn">一部のみ</span>}
+            <ChartColumn className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           </button>
           {showStats && (
-            <div className="space-y-2 border-t pt-2" data-testid="collection-stats">
+            <div className="space-y-2 border-t py-2" data-testid="collection-stats">
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
-                <Row k="参考価値（買取）" v={totals.buybackTotal > 0 || totals.buybackMissingKinds < totals.kinds ? yen(totals.buybackTotal) : "—"} />
+                <Row k="参考価値（販売）" v={totals.saleTotal > 0 || totals.saleMissingKinds < totals.kinds ? yen(totals.saleTotal) : "—"} />
                 <Row k="販売参考との差額" v={totals.saleDiffKinds > 0 ? signed(totals.saleDiff) : "—"} />
                 <Row k="買取参考との差額" v={totals.buybackDiffKinds > 0 ? signed(totals.buybackDiff) : "—"} />
               </dl>
-              {(totals.saleMissingKinds > 0 || totals.costUnknownQty > 0) && (
+              {(totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && (
                 <p className="text-[11px] text-warn" data-testid="stats-partial">
-                  一部のカードだけの集計です: 販売参考相場が未設定 {totals.saleMissingKinds}種、購入金額が未入力 {totals.costUnknownQty}枚（未設定は0円とせず、計算に含めていません）。
+                  一部のカードだけの集計です: 販売参考が未設定 {totals.saleMissingKinds}種・買取参考が未設定 {totals.buybackMissingKinds}種・購入金額が未入力 {totals.costUnknownQty}枚（未設定は0円とせず、計算に含めていません）。
                 </p>
               )}
               <Breakdown title="レアリティ別" items={breakdown(rows, "rarity")} />
@@ -187,48 +165,58 @@ export function CollectionView() {
         </section>
       )}
 
-      <div className="flex items-center gap-1.5">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <input type="search" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="カード名・番号・商品・レアリティ" aria-label="コレクションを検索" className="h-10 w-full rounded-md border bg-input pl-8 pr-2 text-sm" />
-        </div>
-        <Button variant="outline" size="icon" className="size-10" aria-pressed={showFilters} aria-label="絞り込みを開く" onClick={() => setShowFilters((v) => !v)}>
+      {/* 操作は1行: 検索・絞り込み・並び順・列数・お気に入り・その他（表示形式・演出・並び替え） */}
+      <div className="flex items-center gap-1" data-testid="collection-toolbar">
+        <Button variant="outline" size="icon" className="size-10 shrink-0" aria-pressed={showSearch || filters.q !== ""} aria-label="検索" onClick={() => setShowSearch((v) => !v)} data-testid="search-toggle">
+          <Search className="size-4" />
+        </Button>
+        <Button variant="outline" size="icon" className="relative size-10 shrink-0" aria-pressed={showFilters} aria-label="絞り込み" onClick={() => setShowFilters((v) => !v)} data-testid="filter-toggle">
           <SlidersHorizontal className="size-4" />
+          {activeFilters > 0 && <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">{activeFilters}</span>}
         </Button>
-        <Button variant="outline" size="icon" className="size-10" aria-label={prefs.view === "grid" ? "テキスト一覧にする" : "画像一覧にする"} data-testid="view-toggle" onClick={() => void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), view: prefs.view === "grid" ? "list" : "grid" } })}>
-          {prefs.view === "grid" ? <List className="size-4" /> : <LayoutGrid className="size-4" />}
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        <select aria-label="並び替え" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className={sel}>
-          {SORTS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
+        <select aria-label="並び順" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-10 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs">
+          {SORTS.map((x) => (
+            <option key={x.value} value={x.value}>
+              {x.label}
             </option>
           ))}
         </select>
         {prefs.view === "grid" && (
-          <div role="radiogroup" aria-label="列数" className="inline-flex rounded-md border p-0.5" data-testid="cols">
-            {([3, 4, 5] as const).map((n) => (
-              <button key={n} type="button" role="radio" aria-checked={prefs.cols === n} onClick={() => void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), cols: n } })} className={cn("min-h-8 rounded px-2.5 text-xs", prefs.cols === n ? "bg-primary text-primary-foreground" : "hover:bg-muted")}>
-                {n}列
+          <Button variant="outline" className="h-10 shrink-0 px-2.5 text-xs" aria-label={`${prefs.cols}列表示（タップで切替）`} data-testid="cols" data-cols-value={prefs.cols} onClick={() => void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), cols: prefs.cols === 3 ? 4 : prefs.cols === 4 ? 5 : 3 } })}>
+            {prefs.cols}列
+          </Button>
+        )}
+        <Button variant="outline" size="icon" className="size-10 shrink-0" aria-pressed={filters.favOnly} aria-label="お気に入りのみ" onClick={() => setFilters({ ...filters, favOnly: !filters.favOnly })} data-testid="fav-filter">
+          <Star className={cn("size-4", filters.favOnly && "fill-primary stroke-primary")} />
+        </Button>
+        <div className="relative shrink-0">
+          <Button variant="outline" size="icon" className="size-10" aria-haspopup="menu" aria-expanded={showMenu} aria-label="その他" onClick={() => setShowMenu((v) => !v)} data-testid="more-menu">
+            <Ellipsis className="size-4" />
+          </Button>
+          {showMenu && (
+            <div role="menu" className="absolute right-0 top-11 z-30 w-44 rounded-lg border bg-card p-1 shadow-lg" data-testid="more-menu-list">
+              <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="view-toggle" onClick={() => (setShowMenu(false), void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), view: prefs.view === "grid" ? "list" : "grid" } }))}>
+                {prefs.view === "grid" ? <List className="size-4" /> : <LayoutGrid className="size-4" />}
+                {prefs.view === "grid" ? "テキスト一覧" : "画像一覧"}
               </button>
-            ))}
-          </div>
-        )}
-        <button type="button" aria-pressed={filters.favOnly} onClick={() => setFilters({ ...filters, favOnly: !filters.favOnly })} className={cn("flex h-9 items-center gap-1 rounded-full border px-3 text-xs", filters.favOnly && "border-primary text-primary")} data-testid="fav-filter">
-          <Star className={cn("size-3.5", filters.favOnly && "fill-primary")} aria-hidden="true" /> お気に入り
-        </button>
-        {filters.favOnly && favs.length > 1 && (
-          <button type="button" aria-pressed={reorder} onClick={() => setReorder((v) => !v)} className={cn("h-9 rounded-full border px-3 text-xs", reorder && "border-primary text-primary")} data-testid="reorder-toggle">
-            並び替え
-          </button>
-        )}
-        <button type="button" aria-pressed={prefs.fx} onClick={() => void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), fx: !prefs.fx } })} className={cn("h-9 rounded-full border px-3 text-xs", prefs.fx && "border-primary text-primary")} data-testid="fx-toggle">
-          演出 {prefs.fx ? "ON" : "OFF"}
-        </button>
+              <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="fx-toggle" onClick={() => (setShowMenu(false), void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), fx: !prefs.fx } }))}>
+                <Sparkles className="size-4" /> 演出 {prefs.fx ? "ON" : "OFF"}
+              </button>
+              {filters.favOnly && favs.length > 1 && (
+                <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="reorder-toggle" onClick={() => (setShowMenu(false), setReorder((v) => !v))}>
+                  <ArrowUp className="size-4" /> {reorder ? "並び替えを終える" : "お気に入りを並び替え"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+      {(showSearch || filters.q !== "") && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <input type="search" autoFocus={showSearch} value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="カード名・番号・商品・レアリティ" aria-label="コレクションを検索" className="h-10 w-full rounded-md border bg-input pl-8 pr-2 text-sm" />
+        </div>
+      )}
 
       {showFilters && (
         <div role="group" aria-label="絞り込み" className="grid grid-cols-2 gap-1.5 rounded-lg border p-2" data-testid="collection-filters">
@@ -354,7 +342,7 @@ export function CollectionView() {
           onChanged={() => void load()}
         />
       )}
-      {form && data && <CardFormDialog open onOpenChange={(v) => !v && setForm(null)} mode={form} cards={data.cards} actor={profile.id} onSaved={() => void load()} />}
+      {form && data && <CardFormDialog open onOpenChange={(v) => !v && setForm(null)} mode={form} cards={data.cards} actor={profile.id} onSaved={() => void load()} onBulk={(files) => (setForm(null), setBulk(files.slice(0, BULK_MAX_IMAGES)))} />}
       {bulk && data && <CardBulkDialog open onOpenChange={(v) => !v && setBulk(null)} files={bulk} cards={data.cards} actor={profile.id} onSaved={() => void load()} />}
     </div>
   );

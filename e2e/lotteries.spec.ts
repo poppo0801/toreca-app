@@ -287,7 +287,7 @@ test("収支ページ: 当月表示・月移動・タブ切替・分析ページ
   await expect(page.getByTestId("annual-total")).toContainText("家族全体の合計");
   await expect(page.getByTestId("annual-seller")).toHaveCount(3);
   // メインナビには分析ページを常設しない
-  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(page.viewportSize()!.width >= 768 ? 5 : 4); // PCの左ナビは利用できる機能すべて（5）。スマホの下部メニューは直接表示の4つ＋「その他」
+  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(page.viewportSize()!.width >= 768 ? 5 : 5); // 隠れる機能が1つだけなら「その他」を出さず直接表示する（5枠）
 });
 
 test.describe("レイアウト（Safe Area・固定メニュー）", () => {
@@ -347,7 +347,8 @@ test("購入記録: 下部メニューから開け、履歴と商品別の累計
   await expect(page).toHaveURL(/\/purchases$/);
   await expect(page.getByRole("heading", { name: "購入記録" })).toBeVisible();
   // 全期間にすると、モックの購入が一覧に出る
-  await page.getByRole("tab", { name: "全期間" }).click();
+  await page.getByTestId("period-label").click();
+  await page.getByTestId("period-picker").getByRole("tab", { name: "全期間" }).click();
   const rows = page.getByTestId("purchase-row");
   await expect(rows.first()).toBeVisible();
   const n = await rows.count();
@@ -356,8 +357,11 @@ test("購入記録: 下部メニューから開け、履歴と商品別の累計
   await page.getByRole("tab", { name: "商品別の累計" }).click();
   await expect(page.getByTestId("product-total-row").first()).toBeVisible();
   // 期間（月）と前後移動
-  await page.getByRole("tab", { name: "月", exact: true }).click();
+  await page.getByTestId("period-label").click();
+  await page.getByTestId("period-picker").getByRole("tab", { name: "月", exact: true }).click();
+  await page.getByTestId("period-picker").getByRole("button", { name: "12月" }).click();
   const label = page.getByTestId("period-label");
+  await expect(label).toContainText("12月");
   const before = await label.innerText();
   await page.getByRole("button", { name: "前の期間" }).click();
   expect(await label.innerText()).not.toBe(before);
@@ -488,8 +492,9 @@ test.describe("設定とナビゲーション", () => {
     expect(g.width).toBeGreaterThanOrEqual(40);
     expect(g.height).toBeGreaterThanOrEqual(40);
     const [bell, chip] = [(await page.getByTestId("notification-bell").boundingBox())!, (await page.getByTestId("current-profile").boundingBox())!];
+    // 右側の並びは 設定 → 通知 → ユーザー名（重ならない）
+    expect(g.x + g.width).toBeLessThanOrEqual(bell.x + 1);
     expect(bell.x + bell.width).toBeLessThanOrEqual(chip.x + 1);
-    expect(g.x).toBeGreaterThanOrEqual(chip.x + chip.width - 1);
     // 下部メニュー（スマホ）/左ナビ（PC）に「設定」は無い
     await expect(page.getByRole("navigation", { name: "メイン" }).getByRole("link", { name: "設定" })).toHaveCount(0);
     await gear.click();
@@ -535,11 +540,12 @@ test.describe("設定とナビゲーション", () => {
   test("下部メニュー: 項目の非表示・並び替え・「その他」。設定はユーザーごとで、ユーザーを切り替えると変わる", async ({ page, isMobile }) => {
     await page.goto("/settings/display");
     const order = page.getByTestId("nav-order");
-    await expect(order.locator("li")).toHaveCount(4);
+    await expect(order.locator("li")).toHaveCount(5);
     await order.getByRole("button", { name: "収支を上へ" }).click();
     await expect(order.locator("li").nth(1)).toContainText("収支");
-    // 1つ非表示にすると「その他」ができる（隠れた機能へ辿れる）
+    // 2つ非表示にすると「その他」ができる（隠れた機能へ辿れる）
     await order.getByRole("button", { name: "対戦記録を表示しない" }).click();
+    await order.getByRole("button", { name: "購入記録を表示しない" }).click();
     await expect(page.getByTestId("nav-hidden")).toContainText("対戦記録");
     if (isMobile) {
       const nav = page.getByTestId("bottom-nav");
@@ -554,7 +560,7 @@ test.describe("設定とナビゲーション", () => {
     // 別のユーザーは影響を受けない
     await switchProfile(page, "B");
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
     await switchProfile(page, "A");
     await page.goto("/settings/display");
     await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(3);
@@ -565,28 +571,28 @@ test.describe("設定とナビゲーション", () => {
     await expect(page.getByTestId("nav-order").locator("li").nth(1)).toContainText("購入記録");
   });
 
-  test("コレクション: 初期は「その他」から開け、下部メニューに直接表示することもできる（メニューが壊れない）", async ({ page, isMobile }) => {
+  test("コレクション: 初期は下部メニューに直接表示され（「その他」は出ない）、下部メニューに直接表示することもできる（メニューが壊れない）", async ({ page, isMobile }) => {
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-hidden")).toContainText("コレクション");
-    if (isMobile) {
-      await page.getByTestId("nav-more").click();
-      await expect(page.getByTestId("more-sheet").getByRole("link", { name: "コレクション" })).toBeVisible();
-      await page.keyboard.press("Escape");
-    }
-    // 直接表示にすると「その他」は出なくなる（隠れた機能が無いため）
-    await page.getByRole("button", { name: "コレクションを表示する" }).click();
     await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
-    await expect(page.getByTestId("nav-hidden")).toHaveCount(0);
+    await expect(page.getByTestId("nav-order")).toContainText("コレクション");
     if (isMobile) {
+      // 隠れる機能がコレクションだけなら「その他」は出さず、直接表示する
       await expect(page.getByTestId("nav-more")).toHaveCount(0);
       await expect(page.getByTestId("bottom-nav").getByRole("link", { name: "コレクション" })).toBeVisible();
     }
+    // 外すと、隠れた機能が1つだけなので「その他」は出ずに直接表示のまま。もう1つ外すと「その他」ができる
+    await page.getByTestId("nav-order").getByRole("button", { name: "コレクションを表示しない" }).click();
+    await page.getByTestId("nav-order").getByRole("button", { name: "対戦記録を表示しない" }).click();
+    await expect(page.getByTestId("nav-hidden")).toContainText("コレクション");
+    if (isMobile) await expect(page.getByTestId("nav-more")).toBeVisible();
     await page.getByRole("button", { name: "初期の並びに戻す" }).click();
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
   });
 
   test("設定のコピー: 確認ダイアログのあと、選んだ項目だけがコピーされる（コピーしない項目の説明あり）", async ({ page, isMobile }) => {
     await page.goto("/settings/display");
     await page.getByTestId("nav-order").getByRole("button", { name: "対戦記録を表示しない" }).click();
+    await page.getByTestId("nav-order").getByRole("button", { name: "購入記録を表示しない" }).click();
     await page.getByRole("radio", { name: "シンプル", exact: true }).click();
     await page.goto("/settings/users");
     const copy = page.getByTestId("settings-copy");
@@ -604,7 +610,7 @@ test.describe("設定とナビゲーション", () => {
     // キャンセルでは何も変わらない
     await switchProfile(page, "B");
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
     await switchProfile(page, "A");
     await page.goto("/settings/users");
     await copy.getByLabel("コピー先のプロフィール").selectOption({ label: "B" });

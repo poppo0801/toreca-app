@@ -20,20 +20,20 @@ export function SettingsView() {
   return (
     <div className="space-y-4" data-testid="settings-menu">
       <MenuGroup>
-        <MenuLink href="/settings/users" title="ユーザー管理" summary="表示名・色・アイコン・通知先、設定のコピー" testId="menu-users" />
-        <MenuLink href="/settings/display" title="メニュー・表示設定" summary="下部メニュー・抽選カード・テーマ（ユーザーごと）" testId="menu-display" />
+        <MenuLink href="/settings/users" title="ユーザー管理" testId="menu-users" />
+        <MenuLink href="/settings/display" title="メニュー・表示設定" testId="menu-display" />
       </MenuGroup>
 
       <MenuGroup label="データ">
         {SUPABASE ? (
           <>
-            <MenuLink href="/settings/masters" title="マスター管理" summary="系列・店舗・商品・名義・アカウント、Excelの取り込み・出力" testId="menu-masters" />
-            <MenuLink href="/settings/rules" title="応募ルール・スルー" summary="店舗・系列単位のスルー、応募制限" testId="menu-rules" />
+            <MenuLink href="/settings/masters" title="マスター管理" testId="menu-masters" />
+            <MenuLink href="/settings/rules" title="応募ルール・スルー" testId="menu-rules" />
           </>
         ) : (
           <p className="px-3 py-3 text-sm text-muted-foreground">マスター管理・応募ルールはSupabaseモード（ログイン後）で利用できます。</p>
         )}
-        <Accordion title="記録・分析" summary="対戦記録、応募実績・当選率" testId="acc-records">
+        <Accordion title="記録・分析" testId="acc-records">
           <div className="flex flex-wrap gap-2">
             {SUPABASE && (
               <Button asChild variant="outline">
@@ -50,14 +50,14 @@ export function SettingsView() {
       <MenuGroup label="位置・通知・AI">
         {SUPABASE ? (
           <>
-            <Accordion title="自宅・位置情報" summary="自宅の位置、距離の区分" testId="acc-location">
+            <Accordion title="自宅・位置情報" testId="acc-location">
               <div className="space-y-5">
                 <HomeLocationSection />
                 <CardDisplaySection />
               </div>
             </Accordion>
-            <MenuLink href="/settings/notifications" title="通知設定" summary="この端末の通知とユーザーごとのルール" testId="menu-notifications" />
-            <Accordion title="AI利用状況・フィードバック" summary="利用料金・予算、読み取りの修正状況" testId="acc-ai">
+            <MenuLink href="/settings/notifications" title="通知設定" testId="menu-notifications" />
+            <Accordion title="AI利用状況・フィードバック" testId="acc-ai">
               <div className="space-y-5">
                 <AiUsageSection />
                 <AiQualitySection />
@@ -70,7 +70,7 @@ export function SettingsView() {
       </MenuGroup>
 
       <MenuGroup label="その他">
-        <Accordion title="データ管理・バックアップ" summary="操作履歴、バックアップの案内" testId="acc-data">
+        <Accordion title="データ管理・バックアップ" testId="acc-data">
           <div className="space-y-3 text-sm">
             <p className="text-xs text-muted-foreground">
               {SUPABASE
@@ -92,7 +92,7 @@ export function SettingsView() {
             )}
           </div>
         </Accordion>
-        <Accordion title="アプリについて・ログアウト" summary={SUPABASE ? "Supabase（実データ）" : "ローカルモック"} testId="acc-about">
+        <Accordion title="アプリについて・ログアウト" testId="acc-about">
           <div className="space-y-2 text-sm">
             <p>{SUPABASE ? "Supabase（ログイン・プロフィール・マスター・抽選は実データ）。" : "ローカルモック（架空データ・リロードで初期化）。"}</p>
             <p className="text-xs text-muted-foreground">現在の操作プロフィール: {profile.label}</p>

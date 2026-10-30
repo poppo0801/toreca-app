@@ -127,8 +127,6 @@ function Shell({ children }: { children: React.ReactNode }) {
             <BrandLogo className="md:hidden" />
             <span className="hidden md:block" />
             <div className="flex items-center gap-0.5">
-              <NotificationBell />
-              <ProfileChip />
               <Link
                 href="/settings"
                 aria-label="設定"
@@ -138,6 +136,8 @@ function Shell({ children }: { children: React.ReactNode }) {
               >
                 <Settings className="size-[18px]" aria-hidden="true" />
               </Link>
+              <NotificationBell />
+              <ProfileChip />
             </div>
           </div>
         </header>

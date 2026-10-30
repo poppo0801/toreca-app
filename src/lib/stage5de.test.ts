@@ -163,10 +163,10 @@ describe("プロフィール別の設定と下部メニュー", () => {
     expect(SETTING_KEYS).toEqual(COPY_ITEMS.map((c) => c.key));
   });
 
-  it("既定: 4項目を直接表示し、コレクションは「その他」から開ける。未実装の機能（available:false）は候補に出ない", () => {
+  it("既定: 「その他」に入る機能が1つだけなら、その他を出さず直接表示する（5枠）。未実装の機能（available:false）は候補に出ない", () => {
     const r = resolveNav(undefined);
-    expect(r.direct.map((n) => n.id)).toEqual(DEFAULT_NAV);
-    expect(r.more.map((n) => n.id)).toEqual(["collection"]);
+    expect(r.direct.map((n) => n.id)).toEqual([...DEFAULT_NAV, "collection"]);
+    expect(r.more).toEqual([]);
     expect(availableNav().some((n) => n.id === "collection")).toBe(true);
     expect(resolveNav(["collection", "lotteries"]).direct.map((n) => n.id)).toEqual(["collection", "lotteries"]); // コレクションも直接表示にできる
     NAV_ITEMS.push({ id: "future", href: "/future", label: "未実装", available: false });
@@ -206,5 +206,25 @@ describe("プロフィール別の設定と下部メニュー", () => {
     const lot = NAV_ITEMS.find((n) => n.id === "lotteries")!;
     expect(isNavActive(lot, "/records")).toBe(true);
     expect(NAV_ITEMS.filter((n) => isNavActive(n, "/settings/display"))).toEqual([]);
+  });
+});
+
+describe("「その他」の自動整理（Stage 5H）", () => {
+  it("隠れる機能が1つだけなら直接表示。2つ以上なら「その他」。枠は最大5。並び順は選んだ順を保つ", () => {
+    const one = resolveNav(["finance", "lotteries", "purchases", "battles"]);
+    expect(one.direct.map((n) => n.id)).toEqual(["finance", "lotteries", "purchases", "battles", "collection"]);
+    expect(one.more).toEqual([]);
+    const two = resolveNav(["finance", "lotteries", "purchases"]);
+    expect(two.direct.map((n) => n.id)).toEqual(["finance", "lotteries", "purchases"]);
+    expect(two.more.map((n) => n.id).sort()).toEqual(["battles", "collection"]);
+    // 5つ選んでいて1つ隠れる場合は、「その他」の枠を確保して4つ＋その他（機能へ辿れなくならない）
+    NAV_ITEMS.push({ id: "extra", href: "/extra", label: "追加", available: true });
+    try {
+      const r = resolveNav(["lotteries", "finance", "purchases", "battles", "collection"]);
+      expect(r.direct).toHaveLength(4);
+      expect(r.more.map((n) => n.id)).toEqual(["collection", "extra"]);
+    } finally {
+      NAV_ITEMS.pop();
+    }
   });
 });

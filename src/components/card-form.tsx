@@ -53,7 +53,7 @@ export async function uploadCardImage(file: File): Promise<{ ok: true; imagePath
  *  - 画像を選ぶとAIが読み取り、結果を入力欄に入れる。読み取れない項目は空欄のまま（説明文は入れず、「要確認」の詳細に出す）。
  *  - 既存のカードと照合し、同じ商品コード・番号・レアリティなら新規にせず所有記録を追加する。似ているだけのカードは候補として示し、自動では統合しない。
  */
-export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved }: { open: boolean; onOpenChange: (v: boolean) => void; mode: CardFormMode; cards: CardRow[]; actor: string; onSaved: () => void }) {
+export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved, onBulk }: { open: boolean; onOpenChange: (v: boolean) => void; mode: CardFormMode; cards: CardRow[]; actor: string; onSaved: () => void; /** 画像を複数選んだとき（画像1枚＝カード1種類の一括登録へ移る） */ onBulk?: (files: File[]) => void }) {
   const edit = mode.kind === "edit" ? mode.card : null;
   const holdingOnly = mode.kind === "holding";
   const base = mode.kind === "edit" || mode.kind === "holding" ? mode.card : null;
@@ -69,6 +69,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
     note: "",
   });
   const [file, setFile] = useState<File | null>(null);
+  const [aiOn, setAiOn] = useState(true);
   const [preview, setPreview] = useState<string | null>(null);
   const [ai, setAi] = useState<{ state: "idle" | "running" | "done" | "failed"; message?: string; runId: string | null; issues: CardExtraction["issues"] }>({ state: "idle", runId: null, issues: [] });
   const [target, setTarget] = useState<string | null>(null); // 既存のカードへ所有記録を追加する
@@ -79,14 +80,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
   const fileRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
 
-  const choose = async (picked: File) => {
-    const small = await shrinkToJpeg(picked);
-    setFile(small);
-    setPreview((old) => {
-      if (old) URL.revokeObjectURL(old);
-      return URL.createObjectURL(small);
-    });
-    if (holdingOnly) return;
+  const analyze = async (small: File) => {
     setAi({ state: "running", runId: null, issues: [] });
     const r = await analyzeCardImage(small);
     if (!r.ok) return setAi({ state: "failed", message: r.message, runId: null, issues: [] });
@@ -94,6 +88,25 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
     // 読み取れた項目だけ入力する（空欄を上書きしない）。説明文は入れない
     setF((cur) => ({ name: x.name || cur.name, cardNumber: x.cardNumber || cur.cardNumber, setCode: x.setCode || cur.setCode, rarity: x.rarity || cur.rarity, cardType: x.cardType || cur.cardType, productName: x.productName || cur.productName }));
     setAi({ state: "done", runId: r.runId, issues: x.issues });
+  };
+
+  const choose = async (picked: File) => {
+    const small = await shrinkToJpeg(picked);
+    setFile(small);
+    setPreview((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return URL.createObjectURL(small);
+    });
+    // 画像があってAI読み取りがONのときだけ解析する。OFFなら手入力（解析しない）
+    if (!holdingOnly && aiOn) await analyze(small);
+  };
+
+  const pick = (list: FileList | null) => {
+    const files = [...(list ?? [])];
+    if (fileRef.current) fileRef.current.value = "";
+    if (files.length === 0) return;
+    if (files.length > 1 && onBulk && mode.kind === "new") return onBulk(files);
+    void choose(files[0]);
   };
 
   useEffect(() => {
@@ -162,7 +175,9 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
       <SheetContent aria-describedby="card-form-desc" data-testid="card-form" onOpenAutoFocus={(e) => e.preventDefault()}>
         <div className="px-4 pb-2">
           <SheetTitle>{title}</SheetTitle>
-          <SheetDescription id="card-form-desc">{cardFields ? "画像を選ぶとAIがカード情報を読み取ります（候補です。確認してから保存してください）。" : "同じカードの取得（購入）を追加します。"}</SheetDescription>
+          <SheetDescription id="card-form-desc" className="sr-only">
+            {title}
+          </SheetDescription>
         </div>
         <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
           <SheetBody className="space-y-3 border-t pt-3">
@@ -173,10 +188,25 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
                   {preview ? <img src={preview} alt="選択した画像" className="max-h-full max-w-full object-contain" /> : <span className="px-1 text-center text-[11px] text-muted-foreground">画像なし</span>}
                 </div>
                 <div className="min-w-0 flex-1 space-y-1.5">
-                  <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="カード画像を選択" data-testid="card-file" className="sr-only" onChange={(e) => e.target.files?.[0] && void choose(e.target.files[0])} />
+                  <input ref={fileRef} type="file" multiple={mode.kind === "new" && !!onBulk} accept="image/png,image/jpeg,image/webp" aria-label="カード画像を選択" data-testid="card-file" className="sr-only" onChange={(e) => pick(e.target.files)} />
                   <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
-                    <Sparkles className="size-4 text-primary" aria-hidden="true" /> {preview ? "画像を選び直す" : "画像を選ぶ（AIで読み取り）"}
+                    <Sparkles className="size-4 text-primary" aria-hidden="true" /> {preview ? "画像を選び直す" : "画像を選ぶ"}
                   </Button>
+                  {!edit && (
+                    <label className="flex min-h-9 items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        checked={aiOn}
+                        data-testid="card-ai-toggle"
+                        onChange={(e) => {
+                          setAiOn(e.target.checked);
+                          if (e.target.checked && file && ai.state === "idle") void analyze(file);
+                        }}
+                      />
+                      AIで読み取る
+                    </label>
+                  )}
                   {ai.state === "running" && (
                     <p className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="card-ai-running">
                       <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> 読み取り中…
@@ -187,8 +217,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
                       {ai.message}（手入力で登録できます）
                     </p>
                   )}
-                  {ai.state === "done" && <p className="text-[11px] text-muted-foreground">AIの読み取り結果を入力しました。保存前に確認してください。</p>}
-                  {ai.state === "done" && <p className="text-[11px] text-muted-foreground">外部サイトとの照合は行っていません（アプリ内のカードとだけ照合します）。</p>}
+                  {ai.state === "done" && <p className="text-[11px] text-muted-foreground" data-testid="card-ai-done">AIの読み取り結果（要確認）。外部サイトとの照合は行っていません。</p>}
                 </div>
               </div>
             )}

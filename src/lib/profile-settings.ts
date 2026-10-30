@@ -117,7 +117,10 @@ export function resolveNav(selected: string[] | undefined): ResolvedNav {
   // 最大5枠。隠れる機能があるなら「その他」の枠を確保する（直接表示は4つまで）
   if (direct.length > MAX_NAV_SLOTS) direct = direct.slice(0, MAX_NAV_SLOTS);
   if (rest(direct).length > 0 && direct.length > MAX_NAV_SLOTS - 1) direct = direct.slice(0, MAX_NAV_SLOTS - 1);
-  return { direct, more: rest(direct) };
+  const more = rest(direct);
+  // 隠れる機能が1つだけで枠に余裕があれば、「その他」ではなくその機能を直接出す（並び順は選んだ順の末尾）
+  if (more.length === 1 && direct.length < MAX_NAV_SLOTS) return { direct: [...direct, more[0]], more: [] };
+  return { direct, more };
 }
 
 export const isNavActive = (item: NavItem, pathname: string) => (item.match ?? [item.href]).some((m) => pathname.startsWith(m));

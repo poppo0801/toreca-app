@@ -128,7 +128,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await login(page);
 
   // マスターは1つも作らず、名称を入力するだけで登録（保存時に仮登録される）
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E電機", "E2E店", "E2Eテスト商品");
   await expect(dialog.getByTestId("new-master-hint").first()).toContainText("仮登録");
@@ -263,7 +263,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
 
   // 2時間後に締切の未応募の抽選を登録（既存マスターは名称の一致で再利用され、重複作成されない）
   const dl = jstParts(120);
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E電機", "E2E店", "E2Eテスト商品");
   await expect(dialog.getByTestId("new-master-hint")).toHaveCount(0); // すべて既存マスター
@@ -346,7 +346,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
 
 test("複数商品の抽選（B方式）: 商品ごとの当落→当選した商品だけが購入・収支に入る", async ({ page }) => {
   await login(page);
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E電機", "E2E店", "E2E複数商品1");
   await openFormDetails(dialog);
@@ -408,7 +408,7 @@ test("ユーザー設定: 表示名・色・マーク・通知先を変更でき
 test("商品画像: 画像なしはプレースホルダー、手動アップロードで縦横比を保って表示、差し替え・商品編集もできる", async ({ page }) => {
   await login(page);
   // 画像なしの商品を（抽選登録の自動仮登録で）用意
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E画像電機", "E2E画像店", "E2E画像商品");
   await dialog.getByRole("button", { name: "保存" }).click();
@@ -488,7 +488,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   // 実AIの検証は e2e/ai-live.spec.ts（docs/ai-live-verification.md）。ここはモックエンジンまたは未設定の環境（ローカル・CI）での画面の確認。
   test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証（ai-live）で確認する。費用を発生させない");
   await login(page);
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog").first();
   await dialog.getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
@@ -543,7 +543,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   await expect(card).toHaveCount(1);
 
   // 同じ内容を再度読み取ると、登録済みとして重複の注意が出る（二重登録の防止）
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const d2 = page.getByRole("dialog").first();
   await d2.getByTestId("ai-open").click();
   const ai2 = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
@@ -562,7 +562,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
 test("商品マスター: 検索・絞り込み、セット構成の登録、画像の表示調整（倍率・位置）", async ({ page }) => {
   await login(page);
   // 抽選登録の自動仮登録で2商品を用意（セット商品と構成商品）
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2Eセット電機", "E2Eセット店", "E2Eセット商品");
   await openFormDetails(dialog);
@@ -618,7 +618,7 @@ test("商品マスター: 検索・絞り込み、セット構成の登録、画
 test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、初期値は未確認の印、スワイプで最小化・再開、下書きは再読込で破棄、購入・受取の期間、リセット、他端末の更新を保存前に検出", async ({ page, context }) => {
   test.setTimeout(120_000); // 端末2台分の操作を含む長いシナリオ
   await login(page);
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const form = page.getByTestId("lottery-form");
   await expect(form).toBeVisible();
 
@@ -630,8 +630,13 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   const body = await form.locator("form > div").first().evaluate((e) => e.scrollHeight);
   const vp = page.viewportSize()!;
   expect(body).toBeLessThan(vp.height * 1.9);
-  const [dl, an] = [(await form.getByLabel("応募開始の日付").boundingBox())!, (await form.getByLabel("応募締切の日付").boundingBox())!];
-  expect(Math.abs(dl.y - an.y)).toBeLessThan(4); // 同じ行に2つ並ぶ
+  // 同じ行に2つ並ぶ（開く動きの途中で測らないよう、安定するまで再計測する）
+  await expect
+    .poll(async () => {
+      const [dl, an] = [(await form.getByLabel("応募開始の日付").boundingBox())!, (await form.getByLabel("応募締切の日付").boundingBox())!];
+      return Math.abs(dl.y - an.y);
+    })
+    .toBeLessThan(4);
 
   await fillMasters(form, "E2Eフォーム電機", "E2Eフォーム店", "E2Eフォーム商品");
   await form.getByLabel("応募締切の日付").fill("2026-02-01"); // 時刻なし = 日付のみ
@@ -672,7 +677,7 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await page.reload();
   await expect(page.getByTestId("draft-resume")).toHaveCount(0);
   await expect(page.getByTestId("form-minimized")).toHaveCount(0);
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const form2 = page.getByTestId("lottery-form");
   await expect(form2.getByRole("combobox", { name: "店舗", exact: true })).toHaveValue("");
   await fillMasters(form2, "E2Eフォーム電機", "E2Eフォーム店", "E2Eフォーム商品");
@@ -741,7 +746,7 @@ test("購入記録: 収支・抽選の購入と同じ記録。登録・編集・
   await login(page);
 
   // 抽選で当選→購入済み → 購入記録に自動で入る（金額は未入力）
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const form = page.getByTestId("lottery-form");
   await fillMasters(form, "E2E購入電機", "E2E購入店", "E2E購入商品");
   await form.getByLabel("Aの応募状況").selectOption("won");
@@ -758,7 +763,8 @@ test("購入記録: 収支・抽選の購入と同じ記録。登録・編集・
   await expect(rows).toHaveCount(1); // 購入済みを何度押しても1件
   await expect(rows).toContainText("金額未入力");
   await expect(rows).toContainText("抽選当選");
-  // この商品だけに絞る（同じ世帯の他のテストの購入が混ざらないように）
+  // この商品だけに絞る（同じ世帯の他のテストの購入が混ざらないように）。絞り込みは折りたたまれている
+  await page.getByTestId("filter-toggle").click();
   await page.getByLabel("商品で絞り込み").selectOption({ label: "E2E購入商品" });
   await expect(page.getByTestId("purchase-count")).toHaveText("1件");
   await expect(page.getByTestId("purchase-amount")).toHaveText("0円"); // 未入力は0円の支出として数えない（件数は別）
@@ -886,7 +892,7 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   await login(page);
 
   // 店舗マスターを用意（抽選登録の自動仮登録）
-  await page.getByRole("button", { name: "＋抽選を登録" }).click();
+  await page.getByRole("button", { name: "＋登録" }).click();
   const form = page.getByTestId("lottery-form");
   await fillMasters(form, "E2E位置電機", "E2E位置店", "E2E位置商品");
   await form.getByRole("button", { name: "保存" }).click();
@@ -1159,8 +1165,10 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
   await expect(page.getByTestId("tile-qty")).toHaveText("×3");
 
   // 画像1枚: AI（モック）が読み取って入力する。読み取れた項目だけ入り、保存すると画像つきのカードになる
-  await page.getByTestId("collection-file").setInputFiles({ name: "c1.png", mimeType: "image/png", buffer: makePng(60, 84, [200, 120, 40]) });
+  await page.getByTestId("add-card").click();
   const f3 = page.getByTestId("card-form");
+  await expect(f3.getByTestId("card-ai-toggle")).toBeChecked(); // 画像があるときAI読み取りは既定でON
+  await f3.getByTestId("card-file").setInputFiles({ name: "c1.png", mimeType: "image/png", buffer: makePng(60, 84, [200, 120, 40]) });
   await expect(f3.getByLabel("カード名")).toHaveValue(/テスト/, { timeout: 20000 });
   await expect(f3.getByTestId("card-preview").locator("img")).toBeVisible();
   await expect(f3.getByText("外部サイトとの照合は行っていません")).toBeVisible(); // 実際にWeb照合していないことを明示
@@ -1176,7 +1184,8 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
 
   // 複数画像: 画像1枚＝カード1種類として一括登録。同じ画像は重複の候補（既定で除外）
   const png = (c: number) => ({ name: `b${c}.png`, mimeType: "image/png", buffer: makePng(50 + c * 7, 70, [c * 40, 90, 160]) });
-  await page.getByTestId("collection-file").setInputFiles([png(1), png(2), png(1)]);
+  await page.getByTestId("add-card").click();
+  await page.getByTestId("card-form").getByTestId("card-file").setInputFiles([png(1), png(2), png(1)]);
   const bulk = page.getByTestId("card-bulk");
   await expect(bulk.getByTestId("bulk-item")).toHaveCount(3);
   await expect(bulk.locator('[data-testid="bulk-item"][data-status="done"]')).toHaveCount(3, { timeout: 30000 });
@@ -1197,19 +1206,22 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
 
   // 表示: 既定4列。3/5列とテキスト一覧に切り替えられ、再読込後も保持（プロフィール別）
   await expect(page.getByTestId("card-grid")).toHaveAttribute("data-cols", "4");
-  await page.getByTestId("cols").getByRole("radio", { name: "5列" }).click();
+  await page.getByTestId("cols").click(); // 4→5→3 と切り替わる
   await expect(page.getByTestId("card-grid")).toHaveAttribute("data-cols", "5");
-  await page.getByTestId("cols").getByRole("radio", { name: "3列" }).click();
+  await page.getByTestId("cols").click();
   await expect(page.getByTestId("card-grid")).toHaveAttribute("data-cols", "3");
+  await page.getByTestId("more-menu").click();
   await page.getByTestId("view-toggle").click();
   await expect(page.getByTestId("card-row")).toHaveCount(4);
   await page.waitForTimeout(800);
   await page.reload();
   await expect(page.getByTestId("card-row")).toHaveCount(4);
+  await page.getByTestId("more-menu").click();
   await page.getByTestId("view-toggle").click();
-  await page.getByTestId("cols").getByRole("radio", { name: "4列" }).click();
+  await page.getByTestId("cols").click(); // 3→4
 
   // 検索・お気に入り・並び替え
+  await page.getByTestId("search-toggle").click();
   await page.getByLabel("コレクションを検索").fill("一括");
   await expect(page.getByTestId("card-tile")).toHaveCount(2);
   await page.getByLabel("コレクションを検索").fill("");
@@ -1217,11 +1229,13 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
   await page.getByTestId("card-tile").filter({ hasText: "×3" }).getByTestId("tile-fav").click();
   await page.getByTestId("fav-filter").click();
   await expect(page.getByTestId("card-tile")).toHaveCount(2);
+  await page.getByTestId("more-menu").click();
   await page.getByTestId("reorder-toggle").click();
   const order = page.getByTestId("reorder-list").locator("li");
   const first = await order.first().innerText();
   await order.nth(1).getByRole("button", { name: /を上へ/ }).click();
   await expect.poll(async () => (await order.first().innerText()) !== first).toBe(true);
+  await page.getByTestId("more-menu").click();
   await page.getByTestId("reorder-toggle").click();
   await page.getByTestId("fav-filter").click();
 
@@ -1248,10 +1262,9 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
   await expect(detail).toHaveCount(0);
   await expect(page.getByTestId("card-tile")).toHaveCount(3);
 
-  // 下部メニュー: コレクションは「その他」から開ける
+  // 下部メニュー: コレクションは直接開ける（隠れる機能が1つだけなので「その他」は出ない）
   await page.goto("/lotteries");
-  await page.getByTestId("nav-more").click();
-  await page.getByTestId("more-sheet").getByRole("link", { name: "コレクション" }).click();
+  await page.getByTestId("bottom-nav").getByRole("link", { name: "コレクション" }).click();
   await expect(page).toHaveURL(/\/collection$/);
 });
 
@@ -1263,28 +1276,25 @@ test("まとめてAI読み取り: 文章・画像（A=1件に複数枚/B=1枚ず
   const bulk = page.getByTestId("bulk-ai");
   await expect(bulk).toBeVisible();
 
-  // 項目の追加: 文章2件、画像A（2枚で1件）、画像B（2枚を別々に）。画像を複数選んだだけで別々の抽選にはならない
+  // 入力欄は初期5行（1行＝1件の抽選）。文章は「文章で入力」、画像は1行に複数枚（1件にまとめる）、URLと画像は同じ行で両立しない
+  await expect(bulk.getByTestId("bulk-row")).toHaveCount(5);
   const t = (n: number) => `【抽選販売のお知らせ${n}】サンプル電機 三宮店。応募は1月20日23:59まで。`;
   for (const n of [1, 2]) {
-    await bulk.getByLabel("告知の文章").fill(t(n));
-    await bulk.getByRole("button", { name: "追加" }).first().click();
+    await bulk.getByRole("button", { name: `${n}件目を文章で入力` }).click();
+    await bulk.getByLabel(`${n}件目の文章`).fill(t(n));
   }
   const png = (c: number) => ({ name: `j${c}.png`, mimeType: "image/png", buffer: makePng(44 + c * 5, 66, [c * 30, 100, 150]) });
-  await bulk.getByRole("radio", { name: /A\./ }).check();
-  await bulk.getByTestId("bulk-files").setInputFiles([png(1), png(2)]);
-  await expect(bulk.getByTestId("pending-item")).toHaveCount(3);
-  await expect(bulk.getByTestId("pending-list")).toContainText("画像2枚"); // A: 2枚で1件
-  await bulk.getByRole("radio", { name: /B\./ }).check();
-  await bulk.getByTestId("bulk-files").setInputFiles([png(3), png(4)]);
-  await expect(bulk.getByTestId("pending-item")).toHaveCount(5); // B: 1枚ずつ別の件
-  // URL: 改行区切りで貼り付け。重複・不正な行は除く
-  await bulk.getByLabel("URL（改行区切り）").fill("https://example.invalid/a\nhttps://example.invalid/a/\nnot a url");
-  await bulk.getByTestId("add-urls").click();
-  await expect(bulk.getByTestId("pending-item")).toHaveCount(6);
-  await expect(bulk.getByTestId("bulk-msg")).toContainText("読み取れない行");
-  // 外すこともできる
-  await bulk.getByTestId("pending-item").last().getByRole("button", { name: "この項目を外す" }).click();
-  await expect(bulk.getByTestId("pending-item")).toHaveCount(5);
+  await bulk.getByLabel("3件目の画像を選択").setInputFiles([png(1), png(2)]); // 2枚で1件
+  await expect(bulk.getByLabel("3件目のURL")).toHaveAttribute("placeholder", "画像2枚");
+  await bulk.getByLabel("4件目の画像を選択").setInputFiles(png(3));
+  await bulk.getByLabel("5件目の画像を選択").setInputFiles(png(4));
+  // 入力欄を追加できる。未入力の行は解析されない
+  await bulk.getByTestId("row-add").click();
+  await expect(bulk.getByTestId("bulk-row")).toHaveCount(6);
+  await bulk.getByLabel("6件目のURL").fill("https://example.invalid/a");
+  await expect(bulk.getByRole("button", { name: "6件目に画像を登録" })).toBeDisabled(); // URL入力中は画像不可
+  await bulk.getByRole("button", { name: "6件目をリセット" }).click();
+  await expect(bulk.getByLabel("6件目のURL")).toHaveValue("");
 
   await bulk.getByTestId("bulk-start").click();
   await expect(page).toHaveURL(/\/lotteries\/bulk\?job=/);
@@ -1298,7 +1308,9 @@ test("まとめてAI読み取り: 文章・画像（A=1件に複数枚/B=1枚ず
   await expect(toast).toContainText("AI読み取りが完了しました");
   await page.goto("/lotteries");
   await expect(page.getByTestId("bulk-badge")).toBeVisible(); // 未確認の結果がある（再読み込み後も）
-  await page.getByTestId("bulk-link").click();
+  await page.getByTestId("register").click();
+  await page.getByTestId("lottery-form").getByTestId("bulk-open").click();
+  await expect(page).toHaveURL(/\/lotteries\/bulk$/);
   await page.getByTestId("job-row").first().click();
   const d2 = page.getByTestId("job-detail");
   await expect(d2.locator('[data-testid="job-item"][data-status="done"]')).toHaveCount(5, { timeout: 30000 });

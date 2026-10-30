@@ -16,7 +16,9 @@ import { cn } from "@/lib/utils";
 export function DisplaySettings() {
   const { profile, settings, saveSettings, data } = useApp();
   const avail = availableNav();
-  const stored = resolveNav(settings.nav).direct.map((n) => n.id);
+  // 選んだ並びをそのまま出す（隠れる機能が1つだけのとき自動で直接表示される分は、選択には含めない）
+  const chosen = [...new Set((settings.nav ?? []).filter((id) => avail.some((n) => n.id === id)))].slice(0, MAX_NAV_SLOTS);
+  const stored = chosen.length > 0 ? chosen : resolveNav(settings.nav).direct.map((n) => n.id);
   const [order, setOrder] = useState<string[]>(stored);
   const [dragging, setDragging] = useState<string | null>(null);
   const orderRef = useRef(order);
@@ -116,7 +118,7 @@ export function DisplaySettings() {
         </ul>
         {hidden.length > 0 && (
           <div>
-            <p className="mb-1 text-xs text-muted-foreground">表示していない機能（「その他」に入ります）</p>
+            <p className="mb-1 text-xs text-muted-foreground">表示していない機能（「その他」に入ります{hidden.length === 1 ? "。1つだけのときは下部メニューにそのまま表示されます" : ""}）</p>
             <ul className="divide-y rounded-lg border" data-testid="nav-hidden">
               {hidden.map((n) => (
                 <li key={n.id} className="flex min-h-12 items-center gap-2 px-3">

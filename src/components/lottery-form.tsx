@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, ListPlus, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { AiImportDialog } from "@/components/ai-import-dialog";
 import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
@@ -314,7 +315,8 @@ export function LotteryFormDialog({
   const [urlsText, setUrlsText] = useState(() => initial.urlsText);
   const [sources, setSources] = useState<Record<string, FieldSource>>(() => initial.sources);
   const [minimized, setMinimized] = useState(false);
-  const [pending, setPending] = useState<null | "discard" | "reset">(null);
+  const [pending, setPending] = useState<null | "discard" | "reset" | "bulk">(null);
+  const router = useRouter();
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -540,8 +542,8 @@ export function LotteryFormDialog({
           <div className="flex items-center gap-1 px-4 pb-2">
             <div className="min-w-0 flex-1">
               <SheetTitle>{title}</SheetTitle>
-              <SheetDescription id="lottery-form-desc" className="truncate">
-                未登録の系列・店舗・商品は名称を入力するだけで仮登録されます。
+              <SheetDescription id="lottery-form-desc" className="sr-only">
+                {title}
               </SheetDescription>
             </div>
             <button type="button" onClick={() => setPending("reset")} aria-label="入力をリセット" className="flex size-10 items-center justify-center rounded-md hover:bg-muted">
@@ -557,6 +559,18 @@ export function LotteryFormDialog({
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="danger" onClick={finish}>
                       破棄して閉じる
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setPending(null)}>
+                      入力を続ける
+                    </Button>
+                  </div>
+                </>
+              ) : pending === "bulk" ? (
+                <>
+                  <p>入力中の内容は破棄されます。まとめて登録へ移動しますか？</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="danger" onClick={() => router.push("/lotteries/bulk")} data-testid="bulk-go">
+                      移動する
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setPending(null)}>
                       入力を続ける
@@ -583,9 +597,14 @@ export function LotteryFormDialog({
             <SheetBody className="space-y-3 border-t pt-3">
               {!isEdit && (
                 <div className="space-y-1">
-                  <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => setAiOpen(true)} data-testid="ai-open">
-                    <Sparkles className="size-4 text-primary" aria-hidden="true" /> AIで読み取る（文章・画像・URL）
-                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button type="button" variant="outline" size="sm" className="min-h-10" onClick={() => (dirty ? setPending("bulk") : router.push("/lotteries/bulk"))} data-testid="bulk-open">
+                      <ListPlus className="size-4 text-primary" aria-hidden="true" /> まとめて登録
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" className="min-h-10" onClick={() => setAiOpen(true)} data-testid="ai-open">
+                      <Sparkles className="size-4 text-primary" aria-hidden="true" /> AIで読み取る
+                    </Button>
+                  </div>
                   {aiFilled && (
                     <p className="text-[11px] text-muted-foreground" data-testid="ai-filled-note">
                       AIの読み取り結果を入力しました{flagCount > 0 ? `（要確認 ${flagCount}件）` : ""}。保存前に確認してください。
