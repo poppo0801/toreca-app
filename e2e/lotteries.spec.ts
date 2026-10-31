@@ -160,8 +160,10 @@ test("タブ・詳細・マトリクスを切り替えられる", async ({ page 
   await page.getByRole("button", { name: "シンプル表示にする" }).click();
   await expect(page.getByRole("button", { name: "詳細表示にする" })).toBeVisible();
   await expect(page.getByTestId("card-simple").first()).toBeVisible();
+  await page.waitForTimeout(350); // 表示切替は誤った連続発火を300msだけ無視する（人の操作の間隔では影響しない）
   await page.getByRole("button", { name: "詳細表示にする" }).click();
   await expect(page.getByTestId("card-simple")).toHaveCount(0);
+  await page.waitForTimeout(350);
   await page.getByRole("button", { name: "応募マトリクスにする" }).click();
   await expect(page.getByTestId("matrix")).toBeVisible();
 });
@@ -813,4 +815,103 @@ test("Stage 5I: 当選タブでも、右下の応募ボタンが購入手続き�
   const overlap = mine.x < buy.x + buy.width && buy.x < mine.x + mine.width && mine.y < buy.y + buy.height && buy.y < mine.y + mine.height;
   expect(overlap).toBe(false);
   await card.getByRole("button", { name: "購入済み" }).first().click({ trial: true }); // 他の要素に遮られていない
+});
+
+test.describe("表示領域・固定配置・多重反応（iPhone不具合の修正の回帰）", () => {
+  const vpBottom = (page: Page) => page.evaluate(() => (window.visualViewport ? window.visualViewport.offsetTop + window.visualViewport.height : window.innerHeight));
+
+  test("下部メニューは表示領域の下端に接し、下側の点を別の要素が覆っていない（ライト・ダーク）", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "下部メニューはスマホ幅のみ");
+    for (const theme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.reload();
+      await expect(page.getByTestId("bottom-nav")).toBeVisible();
+      const nav = (await page.getByTestId("bottom-nav").boundingBox())!;
+      expect(Math.abs(nav.y + nav.height - (await vpBottom(page)))).toBeLessThan(1.5);
+      // 下側（下端の6px上）をいちばん手前で受けるのはメニュー自身
+      const covered = await page.evaluate(() => {
+        const n = document.querySelector('[data-testid="bottom-nav"]')!;
+        const r = n.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, Math.min(r.bottom, window.innerHeight) - 6);
+        return hit ? !n.contains(hit) : true;
+      });
+      expect(covered).toBe(false);
+    }
+  });
+
+  test("補正値が古いまま残らない: 表示領域が変わったあとに測り直し、通常のブラウザ(standaloneでない)では補正が外れる", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "下部メニューはスマホ幅のみ");
+    await page.waitForTimeout(4500); // 起動直後の測り直しの期間(4秒)が終わるまで待つ
+    await page.evaluate(() => document.documentElement.style.setProperty("--vp-gap", "59px")); // 古い補正が残った状態を再現
+    const hidden = (await page.getByTestId("bottom-nav").boundingBox())!;
+    expect(hidden.y + hidden.height).toBeGreaterThan((await vpBottom(page)) + 50); // 補正が残ると下へはみ出す
+    await page.evaluate(() => window.dispatchEvent(new Event("resize"))); // 表示領域の変化
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--vp-gap"))).toBe("");
+    const nav = (await page.getByTestId("bottom-nav").boundingBox())!;
+    expect(Math.abs(nav.y + nav.height - (await vpBottom(page)))).toBeLessThan(1.5);
+  });
+
+  test("ボトムシート: 最下部までスクロールしても最後の操作が表示領域内にあり、覆われない。キーボードが隠す分(--kb-inset)だけ上がり、閉じて開き直しても同じ", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "ボトムシートはスマホ幅");
+    const card = page.locator('[data-lottery-id="L1"]');
+    for (let round = 0; round < 2; round++) {
+      await card.getByRole("button", { name: /の詳細を開く/ }).click();
+      const sheet = page.getByTestId("lottery-detail-sheet");
+      await expect(sheet).toBeVisible();
+      await page.getByTestId("lottery-detail").evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+      // 下端: シートは表示領域の下端に接する
+      await expect
+        .poll(async () => {
+          const b = (await sheet.boundingBox())!; // 開くアニメーションが終わるまで待つ
+          return Math.abs(b.y + b.height - (await vpBottom(page)));
+        })
+        .toBeLessThan(1.5);
+      // 最後のボタンが表示領域内にあり、そこをタップすると、そのボタン自身が受ける
+      const last = page.getByTestId("lottery-detail").getByRole("button").last();
+      const lb = (await last.boundingBox())!;
+      expect(lb.y + lb.height).toBeLessThanOrEqual((await vpBottom(page)) + 0.5);
+      const ok = await last.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!hit && el.contains(hit);
+      });
+      expect(ok).toBe(true);
+      // キーボードが300px隠している状態: シートの下端が300px上がり、最後のボタンはその上に出る
+      await page.waitForTimeout(4500); // 測り直しの期間が終わってから（測り直し中は実測値で上書きされる）
+      await page.evaluate(() => document.documentElement.style.setProperty("--kb-inset", "300px"));
+      await expect
+        .poll(async () => {
+          const b = (await sheet.boundingBox())!;
+          return Math.round((await vpBottom(page)) - (b.y + b.height));
+        })
+        .toBe(300);
+      await page.getByTestId("lottery-detail").evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+      const lb2 = (await last.boundingBox())!;
+      expect(lb2.y + lb2.height).toBeLessThanOrEqual((await vpBottom(page)) - 300 + 0.5);
+      await page.evaluate(() => document.documentElement.style.removeProperty("--kb-inset"));
+      await page.keyboard.press("Escape");
+      await expect(sheet).toHaveCount(0);
+    }
+  });
+
+  test("表示切替は1回のタップで1回だけ切り替わる。素早い二重タップでも二重に切り替わらない（300ms）", async ({ page }) => {
+    const toggle = page.getByTestId("view-toggle");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await toggle.dblclick({ delay: 30 }); // 2回のタップが約30ms間隔
+    await expect(toggle).toHaveAttribute("aria-pressed", "false"); // 1回分だけ切り替わる
+    await page.waitForTimeout(400);
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    // 300ms以上あけたタップは通常どおり戻る
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("応募済みの二重タップで、意図せず解除されない（解除は確認ダイアログを経由する）", async ({ page }) => {
+    const card = page.locator('[data-lottery-id="L4"]');
+    const mine = card.getByTestId("my-apply");
+    await mine.dblclick({ delay: 20 });
+    await expect(mine).toHaveAttribute("data-state", "applied");
+    await page.keyboard.press("Escape"); // 2回目のタップが開いた確認を閉じる
+    await expect(mine).toHaveAttribute("data-state", "applied");
+  });
 });

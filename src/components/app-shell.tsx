@@ -13,6 +13,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { viewportGap } from "@/lib/viewport-gap";
+import { keyboardInset, SETTLE_MS } from "@/lib/viewport-insets";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
@@ -27,50 +28,72 @@ const NAV_ICON: Record<string, LucideIcon> = {
 const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
 
 /**
- * iOS のホーム画面アプリで、起動直後だけ表示領域(innerHeight)が実際の画面より低く、固定要素の下に空白ができる問題の補正。
- * 100vh と innerHeight の差（standalone のときだけ）を CSS 変数 --vp-gap に入れ、下部の固定要素の bottom をその分下げる（src/lib/viewport-gap.ts）。
- * 測るのは起動・復帰・向き変更・表示領域の変化・最初の操作のときだけ（タイマーや無条件の再描画はしない）。値が変わらなければ何もしない。
+ * iOS のホーム画面アプリの表示領域まわりを CSS 変数に反映する。
+ *  --vp-gap  : 起動直後だけ表示領域(innerHeight)が実際の画面より低いとき、100vh との差（standalone のときだけ）。下部の固定要素の bottom をその分下げる。
+ *  --kb-inset: キーボードが隠している下側の高さ。ボトムシートの bottom をその分上げる。
+ * 表示領域は起動・復帰・最初の操作のあとに、イベントなしで変わることがある（実機の診断）。以前は特定のイベントの瞬間に1回だけ測っていたため、
+ * 測った後に表示領域が直ると補正値だけが残り、下部メニューが画面の下へはみ出す（下半分が隠れる）危険があった。
+ * そこで、これらのきっかけの後は SETTLE_MS の間フレームごとに測り直す（値が変わったときだけ書き換える。無条件の再描画はしない）。
  */
 function useViewportGap() {
   useEffect(() => {
     const root = document.documentElement;
     const mq = window.matchMedia("(display-mode: standalone)");
-    const measure = () => {
-      const probe = document.createElement("div");
-      probe.setAttribute("aria-hidden", "true");
-      probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;left:0;top:0;width:0;height:100vh";
-      document.body.appendChild(probe);
-      const vh100 = probe.getBoundingClientRect().height;
-      probe.remove();
-      const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-      const gap = viewportGap(vh100, window.innerHeight, standalone);
-      const prev = root.style.getPropertyValue("--vp-gap");
-      const next = gap > 0 ? `${gap}px` : "";
-      if (prev !== next) {
-        if (next) root.style.setProperty("--vp-gap", next);
-        else root.style.removeProperty("--vp-gap");
-      }
+    const probe = document.createElement("div");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;left:0;top:0;width:0;height:100vh";
+    document.body.appendChild(probe);
+    const set = (name: string, px: number) => {
+      const prev = root.style.getPropertyValue(name);
+      const next = px > 0 ? `${px}px` : "";
+      if (prev === next) return;
+      if (next) root.style.setProperty(name, next);
+      else root.style.removeProperty(name);
     };
-    measure();
-    const once = { once: true, passive: true, capture: true } as const;
+    const measure = () => {
+      const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+      set("--vp-gap", viewportGap(probe.getBoundingClientRect().height, window.innerHeight, standalone));
+      set("--kb-inset", keyboardInset(window.innerHeight, window.visualViewport));
+    };
+    let until = 0;
+    let raf = 0;
+    const tick = () => {
+      measure();
+      raf = performance.now() < until ? requestAnimationFrame(tick) : 0;
+    };
+    const settle = () => {
+      until = performance.now() + SETTLE_MS;
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    settle();
+    const opts = { passive: true, capture: true } as const;
     const vv = window.visualViewport;
-    window.addEventListener("pageshow", measure);
-    window.addEventListener("orientationchange", measure);
-    window.addEventListener("resize", measure);
-    document.addEventListener("visibilitychange", measure);
-    vv?.addEventListener("resize", measure);
-    // 最初の操作で表示領域が更新される端末向け（1回だけ）
-    window.addEventListener("touchstart", measure, once);
-    window.addEventListener("scroll", measure, once);
+    const onVisible = () => document.visibilityState === "visible" && settle();
+    window.addEventListener("pageshow", settle);
+    window.addEventListener("orientationchange", settle);
+    window.addEventListener("resize", settle);
+    document.addEventListener("visibilitychange", onVisible);
+    vv?.addEventListener("resize", settle);
+    vv?.addEventListener("scroll", measure);
+    window.addEventListener("touchstart", settle, opts);
+    window.addEventListener("touchend", settle, opts);
+    window.addEventListener("focusin", settle);
+    window.addEventListener("focusout", settle);
     return () => {
-      window.removeEventListener("pageshow", measure);
-      window.removeEventListener("orientationchange", measure);
-      window.removeEventListener("resize", measure);
-      document.removeEventListener("visibilitychange", measure);
-      vv?.removeEventListener("resize", measure);
-      window.removeEventListener("touchstart", measure, once);
-      window.removeEventListener("scroll", measure, once);
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pageshow", settle);
+      window.removeEventListener("orientationchange", settle);
+      window.removeEventListener("resize", settle);
+      document.removeEventListener("visibilitychange", onVisible);
+      vv?.removeEventListener("resize", settle);
+      vv?.removeEventListener("scroll", measure);
+      window.removeEventListener("touchstart", settle, opts);
+      window.removeEventListener("touchend", settle, opts);
+      window.removeEventListener("focusin", settle);
+      window.removeEventListener("focusout", settle);
+      probe.remove();
       root.style.removeProperty("--vp-gap");
+      root.style.removeProperty("--kb-inset");
     };
   }, []);
 }
@@ -156,7 +179,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         {/* モバイル: 下部メニュー（プロフィール別・最大5枠。隠れた機能があれば「その他」）。背景は下端まで伸び、操作部分はホームインジケーターの少し上 */}
-        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(var(--vp-gap,0px)*-1)] z-30 border-t bg-header pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
+        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(var(--vp-gap,0px)*-1)] z-30 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
           <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
             {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary", "text-muted-foreground", "size-5"))}
             {nav.more.length > 0 && (

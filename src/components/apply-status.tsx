@@ -11,6 +11,7 @@ import { deadlineBadge, type DeadlineBadge } from "@/lib/datetime";
 import { DEADLINE_TONE_CLASS } from "@/lib/lottery-labels";
 import { applyControlFor, markLabel, profileMarks } from "@/lib/lottery-summary";
 import { formatItem } from "@/lib/lottery-view";
+import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { FlexibleDate, Lottery } from "@/types/domain";
 
@@ -83,18 +84,17 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
   const { data, now, profile, actions } = useApp();
   const [choosing, setChoosing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, runBusy] = useBusy();
   const [error, setError] = useState<string | null>(null);
   const control = applyControlFor(data, lottery, profile.id, now);
   if (control.kind === "none") return null;
 
-  const run = async (applied: boolean, itemId?: string) => {
-    setBusy(true);
-    setError(null);
-    const res = await actions.setApplied(lottery.id, control.accountId, applied, itemId);
-    setBusy(false);
-    if (res && !res.ok) setError(res.error);
-  };
+  const run = (applied: boolean, itemId?: string) =>
+    runBusy(async () => {
+      setError(null);
+      const res = await actions.setApplied(lottery.id, control.accountId, applied, itemId);
+      if (res && !res.ok) setError(res.error);
+    });
 
   if (control.kind === "blocked") {
     return (

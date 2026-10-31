@@ -5,6 +5,8 @@
  * 切り分け:
  *  A. 要素そのものが上にずれている … nav.bottom が表示領域の下端(visualViewport.bottom / innerHeight)より上にある（gapBottom > 1）
  *  B. 要素は下端にあるが、余白で中身だけ上に寄っている … gapBottom ≈ 0 で、nav.bottom と内側(grid)の下端の差（padBottom）が大きい
+ *  C. 要素が表示領域の下端より下にはみ出している … gapBottom < -1（--vp-gap の補正が残ったまま表示領域が直った、など。下半分が隠れる）
+ *  D. 位置は正常だが、メニューの下側を別の要素が覆っている … navHit が nav の外（描画だけ隠れる場合は DOM 上は正常に見える）
  */
 export interface Snap {
   label: string;
@@ -32,6 +34,12 @@ export interface Snap {
   gridBottom: number | null;
   /** fixed の基準を変える祖先（transform / filter / will-change / contain / perspective を持つもの） */
   fixedBreakers: string[];
+  /** キーボードが隠している高さ --kb-inset(px)。0 は無し */
+  kbInset?: number;
+  /** メニューの下側(下端より6px上)の点にいちばん手前にある要素。nav の中なら null、別の要素が覆っていればその説明 */
+  navCoveredBy?: string | null;
+  /** 開いているボトムシートの下端と、表示領域の下端との差(px)。シートが無ければ null。正の値=シートが下端より上、負=はみ出し */
+  sheetGap?: number | null;
 }
 
 /** 表示領域の下端(px)。visualViewport があればそれ、なければ innerHeight */
@@ -44,13 +52,15 @@ export function gapBottom(s: Snap): number | null {
   return s.nav ? Math.round((viewportBottom(s) - s.nav.bottom) * 10) / 10 : null;
 }
 
-export type Verdict = "no-nav" | "ok" | "A-element-raised" | "B-padding-only" | "fixed-ancestor";
+export type Verdict = "no-nav" | "ok" | "A-element-raised" | "B-padding-only" | "fixed-ancestor" | "C-element-below" | "D-covered";
 
 export function verdict(s: Snap): Verdict {
   if (!s.nav) return "no-nav";
   if (s.fixedBreakers.length > 0) return "fixed-ancestor";
   const gap = gapBottom(s) ?? 0;
   if (gap > 1) return "A-element-raised";
+  if (gap < -1) return "C-element-below";
+  if (s.navCoveredBy) return "D-covered";
   const pad = s.nav.padBottom;
   return pad > 14 ? "B-padding-only" : "ok";
 }
@@ -60,6 +70,8 @@ const VERDICT_TEXT: Record<Verdict, string> = {
   ok: "問題なし（下端に接していて、余白も小さい）",
   "A-element-raised": "A: 要素そのものが表示領域の下端より上にある",
   "B-padding-only": "B: 要素は下端にあるが、下の余白が大きく中身が上に寄っている",
+  "C-element-below": "C: 要素が表示領域の下端より下にはみ出している（下側が画面の外）",
+  "D-covered": "D: 位置は正常だが、メニューの下側を別の要素が覆っている",
   "fixed-ancestor": "祖先の transform/filter などで fixed の基準が変わっている可能性",
 };
 
@@ -79,6 +91,7 @@ export function formatSnap(s: Snap): string {
       `  gridBottom=${f(s.gridBottom)} gapBottom=${f(g)} → ${VERDICT_TEXT[verdict(s)]}`,
     );
   } else lines.push("  nav なし");
+  if (s.kbInset || s.navCoveredBy || s.sheetGap !== undefined && s.sheetGap !== null) lines.push(`  kbInset=${s.kbInset ?? 0} navCoveredBy=${s.navCoveredBy ?? "-"} sheetGap=${s.sheetGap ?? "-"}`);
   if (s.fixedBreakers.length > 0) lines.push(`  fixed基準を変える祖先: ${s.fixedBreakers.join(" | ")}`);
   return lines.join("\n");
 }

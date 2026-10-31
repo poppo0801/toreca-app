@@ -21,6 +21,7 @@ import {
   type Tab,
 } from "@/lib/lottery-view";
 import { tabDots } from "@/lib/notifications";
+import { useTapGate } from "@/lib/tap-guard";
 import { readPref, readSession, writePref, writeSession } from "@/services/local-device-store";
 import { cn } from "@/lib/utils";
 
@@ -88,6 +89,7 @@ export function LotteryBoard() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   // シンプル／詳細はプロフィール別の設定（既定は詳細＝従来の情報量）
   const cardView = settings.cardView ?? "detail";
+  const gate = useTapGate(); // 表示切替・フィルターの誤った連続発火を300msだけ無視する
   const [view, setView] = useState<(typeof VIEW)[number]>("list");
   const [actionOnly, setActionOnly] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -166,7 +168,7 @@ export function LotteryBoard() {
               type="button"
               aria-label="アイコンの意味を表示"
               aria-pressed={legend}
-              onClick={() => setLegend((v) => !v)}
+              onClick={() => gate() && setLegend((v) => !v)}
               className="flex size-9 items-center justify-center rounded-md hover:bg-muted"
             >
               <CircleHelp className="size-[18px]" aria-hidden="true" />
@@ -227,7 +229,7 @@ export function LotteryBoard() {
               className="h-10 w-full rounded-md border bg-input pl-9 pr-3 text-sm"
             />
           </label>
-          <Button variant="outline" size="icon" className="relative size-10" aria-pressed={advanced} aria-label="詳細フィルターを開く" onClick={() => setAdvanced((v) => !v)}>
+          <Button variant="outline" size="icon" className="relative size-10" aria-pressed={advanced} aria-label="詳細フィルターを開く" onClick={() => gate() && setAdvanced((v) => !v)}>
             <SlidersHorizontal className="size-4" />
             {activeCount > 0 && (
               <span data-testid="filter-count" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -242,7 +244,7 @@ export function LotteryBoard() {
             aria-pressed={cardView === "detail"}
             aria-label={cardView === "detail" ? "シンプル表示にする" : "詳細表示にする"}
             data-testid="view-toggle"
-            onClick={() => void saveSettings({ cardView: cardView === "detail" ? "simple" : "detail" })}
+            onClick={() => gate() && void saveSettings({ cardView: cardView === "detail" ? "simple" : "detail" })}
           >
             {cardView === "detail" ? <Rows3 className="size-4" /> : <LayoutList className="size-4" />}
           </Button>
@@ -253,6 +255,7 @@ export function LotteryBoard() {
             aria-pressed={view === "matrix"}
             aria-label={view === "matrix" ? "リスト表示にする" : "応募マトリクスにする"}
             onClick={() => {
+              if (!gate()) return;
               const next = view === "matrix" ? "list" : "matrix";
               setView(next);
               writePref("view", next);

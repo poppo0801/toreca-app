@@ -9,6 +9,11 @@ let pathname = "/lotteries";
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => createElement("a", { href, ...p }, children) }));
 vi.mock("@/app/(app)/settings/notifications/actions", () => ({ rebindPushSubscription: vi.fn() }));
+const saveCalls: { patch: Record<string, unknown>; resolve: (v: { ok: true }) => void }[] = [];
+vi.mock("@/app/(app)/settings/profile-settings-actions", () => ({
+  saveProfileSettings: (_id: string, patch: Record<string, unknown>) => new Promise((resolve) => saveCalls.push({ patch, resolve: resolve as (v: { ok: true }) => void })),
+  copyProfileSettings: vi.fn(),
+}));
 
 import { AppProvider, useApp } from "@/components/app-provider";
 
@@ -147,5 +152,37 @@ describe("起動後は全面ローディングを出さない", () => {
     expect(splash()).toBeNull();
     expect(app()).not.toBeNull();
     expect(ctx!.notice).toContain("最新のデータを取得できませんでした");
+  });
+});
+
+describe("設定の連続操作（表示切替を続けて押したとき）", () => {
+  it("保存中に続けて押しても、押した順に積み重なり、前の保存の完了で画面が巻き戻らない。保存は1件ずつ順に行う", async () => {
+    saveCalls.length = 0;
+    const server: Record<string, Record<string, unknown>> = {};
+    const base = data();
+    const repo = { persistent: true, load: async () => ({ ...base, profileSettings: JSON.parse(JSON.stringify(server)) }) } as unknown as LotteryRepository;
+    await render(repo);
+    await flush();
+    const view = () => ctx!.settings.cardView ?? "detail";
+    expect(view()).toBe("detail");
+
+    await act(async () => void ctx!.saveSettings({ cardView: "simple" })); // 1回目の押下（保存はまだ終わらない）
+    expect(view()).toBe("simple"); // すぐ画面に反映
+    await act(async () => void ctx!.saveSettings({ cardView: "detail" })); // 2回目の押下
+    expect(view()).toBe("detail");
+    expect(saveCalls).toHaveLength(1); // 2件目は1件目の完了を待つ（順序が入れ替わらない）
+
+    // 1回目の保存が完了 → サーバーの値は "simple"。しかし2回目が保存中なので、画面は "detail" のまま（巻き戻らない）
+    server[ctx!.profile.id] = { cardView: "simple" };
+    await act(async () => saveCalls[0].resolve({ ok: true }));
+    await flush();
+    expect(view()).toBe("detail");
+    expect(saveCalls).toHaveLength(2);
+
+    // 2回目が完了 → サーバーも "detail" になり、最終的に一致する
+    server[ctx!.profile.id] = { cardView: "detail" };
+    await act(async () => saveCalls[1].resolve({ ok: true }));
+    await flush();
+    expect(view()).toBe("detail");
   });
 });

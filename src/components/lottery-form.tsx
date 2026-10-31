@@ -322,6 +322,7 @@ export function LotteryFormDialog({
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false); // 状態の更新より前に続けて送信されても、保存を1回だけにする
   const [aiOpen, setAiOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
   const showPeriod = periodOpen || !!v.resultEndDate;
@@ -459,6 +460,7 @@ export function LotteryFormDialog({
 
   const submit = async (e: React.FormEvent, overwrite = false) => {
     e.preventDefault();
+    if (savingRef.current) return;
     setError(null);
     if (modePending) {
       setError("複数商品の応募方式を選択してください（告知から判断できませんでした）");
@@ -475,6 +477,7 @@ export function LotteryFormDialog({
       setError(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     // 編集: 開いてから他の端末で更新されていないか、保存の直前に最新の状態で確認する
     if (lottery && !overwrite && baseVersion) {
@@ -482,6 +485,7 @@ export function LotteryFormDialog({
       const cur = fresh?.lotteries.find((l) => l.id === lottery.id);
       if (fresh && cur && cur.updatedAt && cur.updatedAt !== baseVersion) {
         freshRef.current = { data: fresh, lottery: cur };
+        savingRef.current = false;
         setSaving(false);
         setConflict(true);
         setError("この抽選は、編集を始めたあとに別の端末などで更新されました。");
@@ -489,6 +493,7 @@ export function LotteryFormDialog({
       }
     }
     const res = await actions.saveLottery(lottery?.id ?? null, input);
+    savingRef.current = false;
     setSaving(false);
     if (res.ok) {
       onSaved?.(res.createdIds?.[0] ?? null);

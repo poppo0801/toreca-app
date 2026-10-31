@@ -16,6 +16,7 @@ import { effectiveEventState, hasSkipException, skipSourceFor } from "@/lib/elig
 import { DEADLINE_BAR_CLASS, EVENT_LABEL, RECEIVE_SHORT, APPLY_LABEL, placeLabel } from "@/lib/lottery-labels";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
+import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
 
@@ -275,6 +276,7 @@ export function LotteryCard({
 /** 当選タブ: 購入手続き／購入済みをワンアクションで。購入記録は応募ごとに1件のみ作成される。 */
 function WonActions({ lottery }: { lottery: Lottery }) {
   const { data, actions } = useApp();
+  const [busy, run] = useBusy();
   const wonApps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won");
   return (
     <ul className="space-y-1 border-t px-2.5 py-1.5">
@@ -298,10 +300,10 @@ function WonActions({ lottery }: { lottery: Lottery }) {
               <Chip className="border-success text-success">購入・受取済み</Chip>
             ) : (
               <>
-                <Button size="sm" variant="outline" aria-pressed={a.fulfillment === "procedure_done"} disabled={a.fulfillment === "procedure_done"} onClick={() => actions.setFulfillment(a.id, "procedure_done")}>
+                <Button size="sm" variant="outline" aria-pressed={a.fulfillment === "procedure_done"} disabled={busy || a.fulfillment === "procedure_done"} onClick={() => void run(() => actions.setFulfillment(a.id, "procedure_done"))}>
                   {a.fulfillment === "procedure_done" ? "手続き済み" : "購入手続き済み"}
                 </Button>
-                <Button size="sm" onClick={() => actions.setFulfillment(a.id, "purchased")}>
+                <Button size="sm" disabled={busy} onClick={() => void run(() => actions.setFulfillment(a.id, "purchased"))}>
                   購入済み
                 </Button>
               </>

@@ -364,6 +364,7 @@ test("複数商品の抽選（B方式）: 商品ごとの当落→当選した�
   await expect(card.getByTestId("extra-kinds")).toHaveText("＋他1種");
   await page.getByRole("button", { name: "シンプル表示にする" }).click();
   await expect(card.getByTestId("extra-kinds")).toHaveText("＋他1種");
+  await page.waitForTimeout(350); // 表示切替の連続発火ゲート(300ms)
   await page.getByRole("button", { name: "詳細表示にする" }).click();
   const msheet = await openDetail(page, card);
   await expect(msheet).toContainText("商品ごとに当落"); // 方式は詳細パネルで確認
@@ -1404,7 +1405,9 @@ test("縦長画像(786×10,810px): ブラウザで幅を保って11枚に分割�
   const sent = await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent);
   expect(sent.map((x) => x.split(":")[0])).toEqual(Array.from({ length: 11 }, (_, i) => `part-${String(i + 1).padStart(2, "0")}.jpg`)); // 上から順の番号つき
   expect(Math.max(...sent.map((x) => Number(x.split(":")[1])))).toBeLessThan(400_000); // 1枚ずつは小さい（合計4MBの上限に収まる）
-  await expect(ai.getByTestId("prep-notes")).toContainText("11枚に分割");
+  // 分割の案内は解析中だけ表示される（モックのAIは即答するため、見えるのは一瞬）。結果が出ていれば案内は役目を終えている
+  const notes = ai.getByTestId("prep-notes");
+  if (await notes.count()) await expect(notes).toContainText("11枚に分割");
   await expect(ai.getByTestId("ai-result").or(ai.getByTestId("ai-fail"))).toBeVisible({ timeout: 30000 });
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
@@ -1579,4 +1582,56 @@ test("Stage 5I: 商品画像は軽量サムネイルを内容ハッシュ入りU
   expect(missing.status()).toBe(404);
   const bad = await page.request.get("/api/product-image/not-a-uuid");
   expect(bad.status()).toBe(400);
+});
+
+test("表示領域: 抽選登録のボトムシートは、開いた直後・最下部・入力中・閉じて開き直した後も、保存ボタンが表示領域内で覆われない（ライト・ダーク）", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "ボトムシートはスマホ幅");
+  test.setTimeout(240_000);
+  await login(page);
+  const vpBottom = () => page.evaluate(() => (window.visualViewport ? window.visualViewport.offsetTop + window.visualViewport.height : window.innerHeight));
+  const check = async (dialog: ReturnType<Page["getByRole"]>) => {
+    const save = dialog.getByRole("button", { name: "保存" });
+    await expect(save).toBeVisible();
+    await expect
+      .poll(async () => {
+        const b = (await dialog.boundingBox())!;
+        return Math.abs(b.y + b.height - (await vpBottom()));
+      })
+      .toBeLessThan(1.5); // シートは表示領域の下端に接している
+    const sb = (await save.boundingBox())!;
+    expect(sb.y + sb.height).toBeLessThanOrEqual((await vpBottom()) + 0.5);
+    const hit = await save.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!top && el.contains(top);
+    });
+    expect(hit).toBe(true); // 保存ボタンのいちばん手前は、保存ボタン自身
+  };
+  for (const theme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    for (let round = 0; round < 2; round++) {
+      await page.getByRole("button", { name: "＋登録" }).click();
+      const dialog = page.getByRole("dialog");
+      await check(dialog); // 開いた直後
+      await dialog.getByRole("combobox", { name: "系列", exact: true }).focus(); // 入力欄にフォーカス
+      await check(dialog);
+      await dialog.locator("form").evaluate((f) => f.querySelectorAll("*").forEach((el) => { if ((el as HTMLElement).scrollHeight > (el as HTMLElement).clientHeight + 4) (el as HTMLElement).scrollTo?.({ top: 99999 }); })); // 最下部までスクロール
+      await check(dialog);
+      await page.waitForTimeout(4500); // 測り直しの期間が終わってから、キーボードが隠す分を再現（測り直し中は実測値で上書きされるため）
+      await page.evaluate(() => document.documentElement.style.setProperty("--kb-inset", "300px"));
+      await expect
+        .poll(async () => {
+          const b = (await dialog.boundingBox())!;
+          return Math.round((await vpBottom()) - (b.y + b.height));
+        })
+        .toBe(300);
+      const sb = (await dialog.getByRole("button", { name: "保存" }).boundingBox())!;
+      const db = (await dialog.boundingBox())!;
+      expect(sb.y + sb.height, `dialog=${JSON.stringify(db)} save=${JSON.stringify(sb)} vp=${await vpBottom()}`).toBeLessThanOrEqual((await vpBottom()) - 300 + 0.5); // キーボードの上に出る
+      await page.evaluate(() => document.documentElement.style.removeProperty("--kb-inset"));
+      await check(dialog); // キーボードを閉じた直後
+      // 最小化→再開、閉じて開き直し
+      await page.reload(); // 入力途中の下書きは再読込で破棄される。開き直しても同じ表示になる
+    }
+  }
 });

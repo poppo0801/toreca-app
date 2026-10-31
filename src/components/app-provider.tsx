@@ -92,6 +92,10 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   const [notice, setNotice] = useState<string | null>(null);
   // プロフィール別の設定の「変更直後」の値。保存・再取得が終わるまで画面に反映し続ける（モックでは端末内に保存）
   const [overrides, setOverrides] = useState<Record<string, ProfileSettings>>({});
+  const overridesRef = useRef<Record<string, ProfileSettings>>({});
+  // 設定の保存を1件ずつ順に行い、保存中の件数を数える（連続して押しても、前の操作の結果で後の操作を巻き戻さないため）
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingSaves = useRef<Record<string, number>>({});
   const firstLoad = useRef(true);
   // 一度でも読み込めたあとの更新失敗では、画面全体をエラーにせず通知にとどめる（全面ローディング/エラーは起動時だけ）
   const hasData = useRef(false);
@@ -160,8 +164,12 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
     if (repo.persistent) return;
     try {
       const raw = window.localStorage.getItem("tcg.mock.profileSettings");
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末内の保存値の復元
-      if (raw) setOverrides(Object.fromEntries(Object.entries(JSON.parse(raw) as Record<string, unknown>).map(([k, v]) => [k, normalizeProfileSettings(v)])));
+
+      if (raw) {
+        const restored = Object.fromEntries(Object.entries(JSON.parse(raw) as Record<string, unknown>).map(([k, v]) => [k, normalizeProfileSettings(v)]));
+        overridesRef.current = restored;
+        setOverrides(restored);
+      }
     } catch {
       /* noop */
     }
@@ -199,15 +207,40 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
       settings: settingsOf(profile.id),
       settingsOf,
       saveSettings: async (patch) => {
-        const next = { ...overrides, [profile.id]: apply(profile.id, patch) };
+        const pid = profile.id;
+        // 画面には即反映する。直前の操作の結果（まだ保存中でも）の上に積むので、連続して押しても順に積み重なる
+        const cur = { ...(data.profileSettings?.[pid] ?? {}), ...(overridesRef.current[pid] ?? {}) } as Record<string, unknown>;
+        const merged: Record<string, unknown> = { ...cur };
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === null) delete merged[k];
+          else merged[k] = v;
+        }
+        const next = { ...overridesRef.current, [pid]: normalizeProfileSettings(merged) };
+        overridesRef.current = next;
         setOverrides(next);
         persist(next);
         if (!repo.persistent) return { ok: true };
-        const res = await saveProfileSettings(profile.id, patch, profile.id);
-        if (!res.ok) {
-          setOverrides(overrides);
-          setNotice(res.error);
-        } else void load().then(() => setOverrides((o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== profile.id))));
+        pendingSaves.current[pid] = (pendingSaves.current[pid] ?? 0) + 1;
+        const job = saveQueue.current.then(() => saveProfileSettings(pid, patch, pid));
+        saveQueue.current = job.catch(() => undefined);
+        let res: { ok: true } | { ok: false; error: string };
+        try {
+          res = await job;
+        } catch {
+          res = { ok: false, error: "通信に失敗しました。接続を確認して再度お試しください" };
+        }
+        pendingSaves.current[pid] -= 1;
+        if (!res.ok) setNotice(res.error);
+        // 最後の保存が終わったときだけ、サーバーの値を取り直して画面の一時的な値を外す（途中で外すと、押した結果が一瞬戻って見える）
+        if (pendingSaves.current[pid] === 0) {
+          await load();
+          if (pendingSaves.current[pid] === 0) {
+            const { [pid]: _removed, ...rest } = overridesRef.current;
+            void _removed;
+            overridesRef.current = rest;
+            setOverrides(rest);
+          }
+        }
         return res;
       },
       copySettings: async (fromId, toId, keys) => {
@@ -215,6 +248,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
           const src = settingsOf(fromId) as Record<string, unknown>;
           const patch = Object.fromEntries(keys.map((k) => [k, k in src ? src[k] : null]));
           const next = { ...overrides, [toId]: apply(toId, patch as Partial<Record<ProfileSettingKey, unknown>>) };
+          overridesRef.current = next;
           setOverrides(next);
           persist(next);
           return { ok: true };
@@ -222,7 +256,10 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         const res = await copyProfileSettings(fromId, toId, keys, profile.id);
         if (res.ok) {
           const d = await load();
-          if (d) setOverrides({});
+          if (d) {
+            overridesRef.current = {};
+            setOverrides({});
+          }
         }
         return res;
       },
