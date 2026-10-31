@@ -165,50 +165,46 @@ export function LotteryCard({
         </div>
       )}
       {detailMode && (
-        // 応募ボタンや★はこの枠の中（当選タブの購入ボタンの行とは重ならない）に重ねる
-        <div className="relative">
-          <button
-            type="button"
-            onClick={openDetail}
-            aria-label={`${storeLine} ${sum.name}の詳細を開く`}
-            className="flex w-full items-start gap-2.5 rounded-xl p-2.5 text-left active:bg-muted/60"
-          >
-            <span className="flex h-24 w-20 shrink-0 items-center justify-center" data-testid="card-image">
+        <div data-testid="card-detail">
+          {/* 上段: 店舗・系列／地域（通販）／締切までの残り時間。バッジは折り返さず右に固定、店舗名は縮む */}
+          <div className="flex items-start justify-between gap-2 px-2.5 pt-2" data-testid="card-top">
+            <button type="button" onClick={openDetail} aria-label={`${storeLine} ${sum.name}の詳細を開く`} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left text-xs text-muted-foreground" data-testid="card-place">
+              <span className="min-w-0 truncate">{storeLine}</span>
+              {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
+              {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
+            </button>
+            {event === "before" ? (
+              <Chip className="shrink-0 text-info">受付前</Chip>
+            ) : finished ? (
+              <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>
+            ) : (
+              <DeadlineBadgeView badge={badge} />
+            )}
+          </div>
+
+          {/* 中段: 画像｜商品名・数量・日時・受取方法（画像の列は固定幅、本文は残りの幅で折り返す） */}
+          <div className="relative grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2.5 px-2.5 py-1.5">
+            <span className="flex h-24 w-20 items-center justify-center" data-testid="card-image">
               <ProductThumb product={firstProduct} heightClass="h-24" />
             </span>
-            <span className="min-w-0 flex-1 space-y-1">
-              {/* 上段: 店舗（と受取場所）＋ 右上に締切までの残り時間 */}
-              <span className="flex items-start justify-between gap-2">
-                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="card-place">
-                  <span className="truncate">{storeLine}</span>
-                  {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
-                  {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
-                </span>
-                {event === "before" ? (
-                  <Chip className="shrink-0 text-info">受付前</Chip>
-                ) : finished ? (
-                  <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>
-                ) : (
-                  <DeadlineBadgeView badge={badge} />
-                )}
-              </span>
+            <div onClick={openDetail} className="min-w-0 cursor-pointer space-y-1.5">
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} />
-              <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+              <span className="grid gap-x-3 gap-y-1 text-xs [grid-template-columns:repeat(auto-fit,minmax(6.5rem,max-content))]">
                 {display.deadline && (
                   <span className="inline-flex items-center gap-1" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                    <Clock className="size-3.5 text-primary" aria-hidden="true" />
+                    <Clock className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
                     <span className="font-medium">{deadlineText ?? "—"}</span>
                   </span>
                 )}
                 {display.announce && (
                   <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}${period ? `〜${lottery.resultEndDate}` : ""}`}>
-                    <CalendarCheck className="size-3.5" aria-hidden="true" />
+                    <CalendarCheck className="size-3.5 shrink-0" aria-hidden="true" />
                     {formatResultShort(lottery, now)}
                   </span>
                 )}
                 {display.receive && (
                   <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
-                    {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5" aria-hidden="true" /> : <Truck className="size-3.5" aria-hidden="true" />}
+                    {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}
                     {RECEIVE_SHORT[lottery.receiveMethod]}
                   </span>
                 )}
@@ -225,25 +221,32 @@ export function LotteryCard({
                   {!skipSource && skipException && <Chip className="text-muted-foreground">スルー例外</Chip>}
                 </span>
               )}
-              {/* 下段: プロフィール別の応募状況（表示専用）。右下の応募ボタンと重ならないよう右に余白を取る */}
-              {display.accounts && <ApplyStatusRow lottery={lottery} className="min-h-6 pr-28" />}
-            </span>
-          </button>
+            </div>
+            {/* ★ は画像の左上（本文とは別の列なので重ならない） */}
+            <button
+              type="button"
+              onClick={toggleStar}
+              aria-pressed={managed}
+              aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
+              className="absolute left-0 top-0 flex size-9 items-center justify-center rounded-full"
+            >
+              <span className="flex size-6 items-center justify-center rounded-full bg-card/90 shadow-sm">
+                <Star className={cn("size-4", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+              </span>
+            </button>
+          </div>
 
-          {/* ★ は画像の左上に重ねる（カードの他の部分はタップで詳細を開く） */}
-          <button
-            type="button"
-            onClick={toggleStar}
-            aria-pressed={managed}
-            aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
-            className="absolute left-0.5 top-0.5 flex size-9 items-center justify-center rounded-full"
-          >
-            <span className="flex size-6 items-center justify-center rounded-full bg-card/90 shadow-sm">
-              <Star className={cn("size-4", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
-            </span>
-          </button>
-          {/* 現在のプロフィール専用の応募操作（カード右下） */}
-          <MyApplyButton lottery={lottery} className="absolute bottom-2 right-2.5" />
+          {/* 下段: プロフィール別の応募状況（表示専用）｜現在のプロフィールの応募操作。同じ行に並べ、重ならない */}
+          <div className="flex items-center justify-between gap-2 border-t px-2.5 py-1.5" data-testid="card-bottom">
+            {display.accounts ? (
+              <div onClick={openDetail} className="min-w-0 flex-1 cursor-pointer">
+                <ApplyStatusRow lottery={lottery} />
+              </div>
+            ) : (
+              <span className="flex-1" />
+            )}
+            <MyApplyButton lottery={lottery} />
+          </div>
         </div>
       )}
       {tab === "won" && <WonActions lottery={lottery} />}
@@ -277,7 +280,8 @@ export function LotteryCard({
 function WonActions({ lottery }: { lottery: Lottery }) {
   const { data, actions } = useApp();
   const [busy, run] = useBusy();
-  const wonApps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won");
+  const idx = (accountId: string) => data.profiles.findIndex((p) => p.id === data.accounts.find((x) => x.id === accountId)?.profileId);
+  const wonApps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won").sort((a, b) => idx(a.accountId) - idx(b.accountId));
   return (
     <ul className="space-y-1 border-t px-2.5 py-1.5">
       {wonApps.map((a) => {

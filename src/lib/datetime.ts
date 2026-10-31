@@ -228,3 +228,8 @@ export function formatResultShort(l: ResultPeriod, now: Date): string {
   const start = `${formatMonthDay(s, now)}${time}`;
   return hasResultPeriod(l) ? `${start}〜${formatMonthDay(resultEndDay(l)!, now)}` : start;
 }
+
+/** 画面表示用。formatFlexible と同じだが、日付のみは「(時刻未確認)」を付けない（時刻不明は内部の精度として保持し、補完もしない） */
+export function formatPlain(value: FlexibleDate): string {
+  return value.precision === "date_only" ? formatShort(value) : formatFlexible(value);
+}

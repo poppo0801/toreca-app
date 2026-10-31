@@ -17,6 +17,7 @@ import {
   setResult,
   setItemResults,
   updateProfileSettings,
+  reorderProfiles,
   type ProfileSettingsInput,
   type Db,
   type ServiceResult,
@@ -112,6 +113,9 @@ export async function saveSaleAction(id: string | null, input: SaleInput, actor:
 }
 export async function deleteSaleAction(id: string, actor: string | null): Promise<MutationResult> {
   return mutate((c) => deleteSale(c.db, id, actor));
+}
+export async function reorderProfilesAction(ids: string[], actor: string | null): Promise<MutationResult> {
+  return mutate((c) => reorderProfiles(c.db, ids, actor));
 }
 export async function updateProfileAction(profileId: string, input: ProfileSettingsInput, actor: string | null): Promise<MutationResult> {
   return mutate((c) => updateProfileSettings(c.db, profileId, input, actor));

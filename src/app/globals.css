@@ -13,9 +13,9 @@
   --muted: #ececef;
   --muted-foreground: #5b5b63;
   --border: #dcdce0;
-  --ring: #c2410c;
+  --ring: #ea580c;
   /* オレンジは主要操作・現在選択のみ */
-  --primary: #c2410c;
+  --primary: #ea580c;
   --primary-foreground: #ffffff;
   /* 情報区別用 */
   --info: #0f766e;

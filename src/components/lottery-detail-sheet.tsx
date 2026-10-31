@@ -11,7 +11,7 @@ import { STATUS_META, StatusIcon } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { deadlineBadge, formatFlexible, formatMonthDay, hasResultPeriod, isResultFinished } from "@/lib/datetime";
+import { deadlineBadge, formatMonthDay, formatPlain, hasResultPeriod, isResultFinished } from "@/lib/datetime";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { resultNotice } from "@/lib/lottery-summary";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
@@ -59,6 +59,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const [duplicating, setDuplicating] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [ruleMsg, setRuleMsg] = useState<string | null>(null);
 
   const chain = data.chains.find((c) => c.id === lottery.chainId);
@@ -68,13 +69,16 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const remaining = event === "closed" ? null : deadlineBadge(lottery.applyDeadline, now);
   const notice = resultNotice(data, lottery, now);
   const accounts = accountsForLottery(data, lottery);
-  const apps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied");
+  const profileIdx = (accountId: string) => data.profiles.findIndex((p) => p.id === data.accounts.find((x) => x.id === accountId)?.profileId);
+  const apps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied").sort((a, b) => profileIdx(a.accountId) - profileIdx(b.accountId));
   const skipSource = skipSourceFor(data, profile.id, lottery);
   const skipException = hasSkipException(data, profile.id, lottery);
   const rules = effectiveRules(data, lottery);
   const hasMyScopeSkip = data.skipRules.some((r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id);
   const dist = storeDistance(data, store);
   const unconfirmed = lottery.unconfirmedFields ?? [];
+  // 要確認の理由は全ユーザー分を繰り返さず、同じ内容を1つにまとめて出す
+  const reviewReasons = [...new Set(accounts.map((acc) => judgeAccount(data, lottery, acc, now)).filter((j) => j.status === "needs_review").map((j) => j.reason))];
 
   const runRule = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
     const res = await fn();
@@ -143,18 +147,18 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
             {/* 2. 日時（2カラム） */}
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border p-3" aria-label="日時">
-              <Field label="応募開始">{lottery.applyStart.precision === "unknown" ? DASH : formatFlexible(lottery.applyStart)}</Field>
+              <Field label="応募開始">{lottery.applyStart.precision === "unknown" ? DASH : formatPlain(lottery.applyStart)}</Field>
               <Field label="応募締切">
                 <span className={cn(lottery.applyDeadline.precision === "unknown" && "text-muted-foreground")}>
-                  {lottery.applyDeadline.precision === "unknown" ? "—" : formatFlexible(lottery.applyDeadline)}
+                  {lottery.applyDeadline.precision === "unknown" ? "—" : formatPlain(lottery.applyDeadline)}
                 </span>
                 <DeadlineBadgeView badge={remaining} className="ml-1 px-1 py-0.5" />
               </Field>
-              <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatFlexible(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatFlexible(lottery.resultDate)}</Field>
+              <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatPlain(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatPlain(lottery.resultDate)}</Field>
               <Field label="購入・受取期間">
                 {lottery.procedureStart.precision === "unknown" && lottery.procedureDeadline.precision === "unknown"
                   ? DASH
-                  : `${lottery.procedureStart.precision === "unknown" ? "" : formatFlexible(lottery.procedureStart)}〜${lottery.procedureDeadline.precision === "unknown" ? "" : formatFlexible(lottery.procedureDeadline)}`}
+                  : `${lottery.procedureStart.precision === "unknown" ? "" : formatPlain(lottery.procedureStart)}〜${lottery.procedureDeadline.precision === "unknown" ? "" : formatPlain(lottery.procedureDeadline)}`}
               </Field>
             </dl>
 
@@ -207,15 +211,22 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               </p>
             </dl>
 
-            {/* 6. ユーザー別の応募状況・当落（折りたたみ） */}
-            <details open className="rounded-lg border" data-testid="user-section">
-              <summary className="flex min-h-10 cursor-pointer items-center px-3 text-sm font-bold">ユーザー別の応募状況・当落</summary>
-              <div className="space-y-3 border-t px-3 py-2">
+            {/* 6. 応募状況: 通常はアイコン＋状態マークの1行と、現在のユーザーの応募操作。理由の詳細は展開 */}
+            <section aria-label="応募状況" className="rounded-lg border" data-testid="user-section">
+              <div className="space-y-2 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <ApplyStatusRow lottery={lottery} />
                   <MyApplyButton lottery={lottery} />
                 </div>
-                <ul className="space-y-1.5 text-xs" data-testid="judge-list">
+                {reviewReasons.length > 0 && (
+                  <p className="flex items-start gap-1 text-xs text-warn" data-testid="review-summary">
+                    <StatusIcon status="needs_review" className="mt-px size-3.5" />
+                    <span>要確認: {reviewReasons.join(" ／ ")}</span>
+                  </p>
+                )}
+                <details data-testid="user-details" className="text-xs">
+                  <summary className="flex min-h-8 cursor-pointer items-center text-muted-foreground">状態の詳細</summary>
+                <ul className="space-y-1.5 pt-1" data-testid="judge-list">
                   {accounts.map((acc) => {
                     const owner = data.profiles.find((p) => p.id === acc.profileId)!;
                     const j = judgeAccount(data, lottery, acc, now);
@@ -239,6 +250,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                     );
                   })}
                 </ul>
+                </details>
                 {persistent && (skipSource === "store" || skipSource === "chain" || skipException) && (
                   <Button size="sm" variant="outline" onClick={() => runRule(() => setSkipExceptionAction(profile.id, lottery.id, !skipException, profile.id))}>
                     {skipException ? "今回だけの解除を取り消す" : `${profile.label}のスルーをこの抽選だけ解除`}
@@ -284,7 +296,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   </div>
                 )}
               </div>
-            </details>
+            </section>
 
             {/* 7. 備考・操作 */}
             {lottery.memo && (
@@ -294,42 +306,49 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 </Field>
               </dl>
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2" data-testid="main-ops">
+              {persistent && (
+                <Button size="sm" onClick={() => setEditing(true)}>
+                  編集
+                </Button>
+              )}
               <Button size="sm" variant="outline" aria-pressed={hasMyScopeSkip} onClick={() => actions.setLotterySkip(lottery.id, !hasMyScopeSkip)}>
                 {hasMyScopeSkip ? `${profile.label}のスルーを解除` : `${profile.label}は今回スルー`}
               </Button>
-              {lottery.eventState !== "cancelled" ? (
-                <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "cancelled")}>
-                  中止にする
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "open")}>
-                  中止を取り消す
-                </Button>
-              )}
-              {lottery.eventState !== "postponed" ? (
-                <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "postponed")}>
-                  発表延期にする
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "open")}>
-                  延期を解除
-                </Button>
-              )}
-              {persistent && (
-                <>
-                  <Button size="sm" onClick={() => setEditing(true)}>
-                    編集
-                  </Button>
+            </div>
+            <details className="text-sm" data-testid="more-ops">
+              <summary className="flex min-h-9 cursor-pointer items-center text-muted-foreground">その他の操作</summary>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {persistent && (
                   <Button size="sm" variant="outline" onClick={() => setDuplicating(true)}>
                     他店舗に複製
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setConfirmArchive(true)}>
+                )}
+                {lottery.eventState !== "postponed" ? (
+                  <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "postponed")}>
+                    発表延期にする
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "open")}>
+                    延期を解除
+                  </Button>
+                )}
+                {lottery.eventState !== "cancelled" ? (
+                  <Button size="sm" variant="outline" onClick={() => setConfirmCancel(true)}>
+                    中止にする
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "open")}>
+                    中止を取り消す
+                  </Button>
+                )}
+                {persistent && (
+                  <Button size="sm" variant="danger" onClick={() => setConfirmArchive(true)}>
                     登録を取り下げる
                   </Button>
-                </>
-              )}
-            </div>
+                )}
+              </div>
+            </details>
           </SheetBody>
         </SheetContent>
       </Sheet>
@@ -353,6 +372,26 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               }}
             >
               取り下げる
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+        <DialogContent>
+          <DialogTitle>この抽選を中止にしますか？</DialogTitle>
+          <DialogDescription>応募できない状態として扱われます。あとから「中止を取り消す」で戻せます。応募・当落の記録は変わりません。</DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">キャンセル</Button>
+            </DialogClose>
+            <Button
+              variant="danger"
+              onClick={() => {
+                actions.setEventState(lottery.id, "cancelled");
+                setConfirmCancel(false);
+              }}
+            >
+              中止にする
             </Button>
           </div>
         </DialogContent>

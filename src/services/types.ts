@@ -23,6 +23,8 @@ export interface LotteryRepository {
   saveSale(actorId: string, id: string | null, input: SaleInput): Promise<Outcome>;
   deleteSale(actorId: string, id: string): Promise<Outcome>;
   updateProfile(actorId: string, profileId: string, input: ProfileSettingsInput): Promise<Outcome>;
+  /** ユーザーの表示順（有効なユーザー全員をこの順に並べる）。応募・当落のデータには触れない */
+  reorderProfiles(actorId: string, ids: string[]): Promise<Outcome>;
   setResult(actorId: string, applicationId: string, result: ResultStatus): Promise<Outcome>;
   setFulfillment(actorId: string, applicationId: string, fulfillment: FulfillmentStatus): Promise<Outcome>;
   setLotterySkip(profileId: string, lotteryId: string, skip: boolean): Promise<Outcome>;

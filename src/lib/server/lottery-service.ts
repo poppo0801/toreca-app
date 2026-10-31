@@ -475,6 +475,25 @@ export async function saveLottery(
     return fail("希望商品を1つ選んで応募する方式では、登録後に応募するユーザーごとに希望商品を選択してください");
   }
 
+  if (id !== null) {
+    // 応募・当落の記録がある商品の削除・抽選方式の変更で、商品別の当落などを壊さない（画面でも止めるが、サーバーでも確認する）
+    const [{ data: cur }, { data: existing }, { data: apps }] = await Promise.all([
+      db.from("lotteries").select("multi_mode").eq("id", id).maybeSingle(),
+      db.from("lottery_items").select("id").eq("lottery_id", id),
+      db.from("applications").select("id,state,selected_item_id").eq("lottery_id", id),
+    ]);
+    const live = (apps ?? []).filter((a) => a.state === "applied");
+    if (cur && cur.multi_mode !== input.multiMode && live.length > 0) return fail("応募の記録があるため、抽選方式は変更できません");
+    const keep = new Set(input.items.map((i) => i.id).filter((x): x is string => !!x));
+    const removed = (existing ?? []).map((e) => e.id).filter((x) => !keep.has(x));
+    if (removed.length > 0 && (apps ?? []).length > 0) {
+      const appIds = (apps ?? []).map((a) => a.id);
+      const { data: results } = await db.from("application_item_results").select("lottery_item_id").in("application_id", appIds).in("lottery_item_id", removed);
+      const referenced = (results ?? []).length > 0 || (apps ?? []).some((a) => a.selected_item_id && removed.includes(a.selected_item_id));
+      if (referenced) return fail("応募・当落の記録がある商品は削除できません");
+    }
+  }
+
   const payload = {
     id,
     chain: { id: input.chain.id, name: input.chain.name },
@@ -795,6 +814,22 @@ export const profileSettingsSchema = z.object({
   notifyRecipientIds: z.array(z.uuid()).max(10).nullable(),
 });
 export type ProfileSettingsInput = z.input<typeof profileSettingsSchema>;
+
+/**
+ * ユーザーの表示順を保存する（profiles.sort_order。プロフィールID・応募・当落には触れない）。
+ * ids は有効なユーザー全員を並べた順。足りない・余計・重複があれば保存しない。無効なユーザーは末尾の番号に回す。
+ */
+export async function reorderProfiles(db: Db, ids: string[], actor: string | null): Promise<ServiceResult> {
+  if (!Array.isArray(ids) || ids.some((i) => !uuid.safeParse(i).success) || new Set(ids).size !== ids.length) return fail("リクエストが不正です");
+  const { data: all } = await db.from("profiles").select("id,active");
+  const active = (all ?? []).filter((p) => p.active).map((p) => p.id);
+  if (active.length !== ids.length || !active.every((i) => ids.includes(i))) return fail("ユーザーの一覧が最新ではありません。画面を開き直してください");
+  for (const [i, id] of ids.entries()) {
+    const { error } = await db.from("profiles").update({ sort_order: i + 1, updated_by_profile_id: actor }).eq("id", id);
+    if (error) return fail(mapDbError(error));
+  }
+  return ok(undefined);
+}
 
 export async function updateProfileSettings(db: Db, profileId: string, raw: ProfileSettingsInput, actor: string | null): Promise<ServiceResult> {
   const p = profileSettingsSchema.safeParse(raw);

@@ -224,5 +224,10 @@ export function judgeAccount(data: AppData, lottery: Lottery, account: ServiceAc
 
 /** 抽選に関係するアカウント(系列一致・有効)を全プロフィール分返す */
 export function accountsForLottery(data: AppData, lottery: Lottery): ServiceAccount[] {
-  return data.accounts.filter((a) => a.chainId === lottery.chainId && a.active);
+  const order = (a: ServiceAccount) => {
+    const i = data.profiles.findIndex((p) => p.id === a.profileId);
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  // ユーザーの表示順（data.profiles の並び＝設定した順）に統一する。画面ごとに別の並べ方をしない
+  return data.accounts.filter((a) => a.chainId === lottery.chainId && a.active).sort((a, b) => order(a) - order(b));
 }

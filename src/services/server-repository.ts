@@ -16,6 +16,7 @@ import {
   saveSaleAction,
   deleteSaleAction,
   updateProfileAction,
+  reorderProfilesAction,
 } from "@/app/(app)/lotteries/actions";
 import type { LotteryRepository } from "@/services/types";
 
@@ -35,6 +36,7 @@ export class ServerActionRepository implements LotteryRepository {
   deleteExpense = (actor: string, id: string) => deleteExpenseAction(id, actor);
   saveSale = (actor: string, id: string | null, input: Parameters<typeof saveSaleAction>[1]) => saveSaleAction(id, input, actor);
   deleteSale = (actor: string, id: string) => deleteSaleAction(id, actor);
+  reorderProfiles = (actor: string, ids: string[]) => reorderProfilesAction(ids, actor);
   updateProfile = (actor: string, profileId: string, input: Parameters<typeof updateProfileAction>[1]) => updateProfileAction(profileId, input, actor);
   setResult = (actor: string, appId: string, r: Parameters<typeof setResultAction>[1]) => setResultAction(appId, r, actor);
   setFulfillment = (actor: string, appId: string, f: Parameters<typeof setFulfillmentAction>[1]) => setFulfillmentAction(appId, f, actor);

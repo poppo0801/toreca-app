@@ -46,6 +46,7 @@ interface AppContextValue {
     saveSale: (id: string | null, input: SaleInput) => Promise<Outcome>;
     deleteSale: (id: string) => Promise<Outcome>;
     updateProfile: (profileId: string, input: ProfileSettingsInput) => Promise<Outcome>;
+    reorderProfiles: (ids: string[]) => Promise<Outcome>;
     setResult: (applicationId: string, r: ResultStatus) => Promise<Outcome>;
     setFulfillment: (applicationId: string, f: FulfillmentStatus) => Promise<Outcome>;
     setLotterySkip: (lotteryId: string, v: boolean) => Promise<Outcome>;
@@ -276,6 +277,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         saveSale: (id, input) => run((a) => repo.saveSale(a, id, input)),
         deleteSale: (id) => run((a) => repo.deleteSale(a, id)),
         updateProfile: (pid, input) => run((a) => repo.updateProfile(a, pid, input)),
+        reorderProfiles: (ids) => run((a) => repo.reorderProfiles(a, ids)),
         setResult: (id, r) => run((a) => repo.setResult(a, id, r)),
         setFulfillment: (id, f) => run((a) => repo.setFulfillment(a, id, f)),
         setLotterySkip: (id, v) => run((a) => repo.setLotterySkip(a, id, v)),

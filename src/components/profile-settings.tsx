@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useBusy } from "@/lib/use-busy";
 import { useApp } from "@/components/app-provider";
 import { ICON_MARKS, ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
@@ -176,23 +178,44 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
 
 /** 設定: ユーザーごとの表示名・色・マーク・通知先 */
 export function ProfileSettings() {
-  const { data, persistent } = useApp();
+  const { data, persistent, actions } = useApp();
   const [editing, setEditing] = useState<Profile | null>(null);
+  const [busy, run] = useBusy();
+  const activeIds = data.profiles.filter((p) => p.active !== false).map((p) => p.id);
+  // 表示順: 全画面で共通（応募状況・詳細・フォーム・集計）。応募・当落のデータは変わらない
+  const move = (id: string, delta: -1 | 1) => {
+    const i = activeIds.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= activeIds.length) return;
+    const next = [...activeIds];
+    [next[i], next[j]] = [next[j], next[i]];
+    void run(() => actions.reorderProfiles(next));
+  };
   const name = (id: string) => data.profiles.find((p) => p.id === id)?.label ?? "?";
   return (
     <>
       <ul className="space-y-1.5">
         {data.profiles
           .filter((p) => p.active !== false)
-          .map((p) => {
+          .map((p, idx, arr) => {
             const r = recipientsOf(p);
             return (
-              <li key={p.id} className="flex items-center gap-3 rounded-md border p-2">
+              <li key={p.id} className="flex items-center gap-3 rounded-md border p-2" data-testid="profile-row">
                 <ProfileAvatar profile={p} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm">{p.label}</p>
                   <p className="truncate text-xs text-muted-foreground">通知先: {r.length === 0 ? "なし" : r.map(name).join("・")}</p>
                 </div>
+                {persistent && (
+                  <span className="flex shrink-0 flex-col" role="group" aria-label={`${p.label}の表示順`}>
+                    <button type="button" aria-label={`${p.label}を上へ`} disabled={busy || idx === 0} onClick={() => move(p.id, -1)} className="flex h-5 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30">
+                      <ChevronUp className="size-4" aria-hidden="true" />
+                    </button>
+                    <button type="button" aria-label={`${p.label}を下へ`} disabled={busy || idx === arr.length - 1} onClick={() => move(p.id, 1)} className="flex h-5 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30">
+                      <ChevronDown className="size-4" aria-hidden="true" />
+                    </button>
+                  </span>
+                )}
                 {persistent && (
                   <Button size="sm" variant="outline" onClick={() => setEditing(p)} aria-label={`${p.label}の設定を編集`}>
                     編集

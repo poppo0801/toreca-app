@@ -7,7 +7,7 @@ import { AiImportDialog } from "@/components/ai-import-dialog";
 import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
-import { MasterCombobox } from "@/components/master-combobox";
+import { MasterCombobox, NewMasterBadge } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { fingerprint, purgeLegacyDrafts, type FieldSource } from "@/lib/lottery-draft";
@@ -110,7 +110,6 @@ function FlexField({ label, value, onChange, chip }: { label: string; value: Fle
         />
       </div>
       {timeOnly && <p className="mt-0.5 text-[11px] text-warn">日付も入力してください</p>}
-      {value.precision === "date_only" && <p className="mt-0.5 text-[11px] text-muted-foreground">時刻は未設定</p>}
     </div>
   );
 }
@@ -429,6 +428,31 @@ export function LotteryFormDialog({
       return { ...s, multiMode: mode, items, applications: [] };
     });
   };
+  // 応募・当落の記録がある商品・方式は、編集で壊さない（商品の削除・方式の変更を止める）
+  const lotteryApps = isEdit && lottery ? data.applications.filter((x) => x.lotteryId === lottery.id) : [];
+  const modeLocked = lotteryApps.some((x) => x.state === "applied");
+  const lockedItemIds = new Set(lotteryApps.flatMap((x) => [...(x.selectedItemId ? [x.selectedItemId] : []), ...Object.keys(x.itemResults)]));
+  const addItem = () => {
+    if (v.multiMode === "single") {
+      if (modeLocked) return;
+      setModePending(true); // 1商品→2商品: 抽選方式は自動で確定せず、選んでもらう
+      setV((st) => ({ ...st, items: [...st.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" as const }], multiMode: "all", applications: [] }));
+    } else set("items", [...v.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" as const }]);
+  };
+  const removeItem = (i: number) => {
+    const items = v.items.filter((_, j) => j !== i);
+    if (items.length < 2) {
+      // 1商品に戻したら単一商品の表示へ（方式の選択は不要）
+      setModePending(false);
+      setV((st) => ({ ...st, items, multiMode: "single", applications: [] }));
+    } else set("items", items);
+  };
+  const jumpToFirstFlag = () => {
+    const k = (Object.keys(flags) as FieldKey[]).find((x) => flags[x]);
+    if (!k) return;
+    setOpenFlag(k);
+    requestAnimationFrame(() => document.getElementById(`flag-${k}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  };
   const chooseChain = (chain: LotteryInput["chain"]) => {
     const same = chain.id === v.chain.id;
     setV((s) => {
@@ -615,9 +639,23 @@ export function LotteryFormDialog({
                     </Button>
                   </div>
                   {aiFilled && (
-                    <p className="text-[11px] text-muted-foreground" data-testid="ai-filled-note">
-                      AIの読み取り結果を入力しました{flagCount > 0 ? `（要確認 ${flagCount}件）` : ""}。保存前に確認してください。
-                    </p>
+                    <div className="flex items-center gap-1.5" data-testid="ai-filled-note">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Sparkles className="size-3 text-primary" aria-hidden="true" />
+                        AI入力
+                      </span>
+                      {flagCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={jumpToFirstFlag}
+                          aria-label={`要確認 ${flagCount}件（タップで最初の項目へ）`}
+                          className="inline-flex min-h-6 items-center gap-0.5 rounded-full border border-warn px-1.5 text-[10px] font-medium leading-none text-warn"
+                        >
+                          <AlertTriangle className="size-3" aria-hidden="true" />
+                          要確認 {flagCount}件
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -651,6 +689,7 @@ export function LotteryFormDialog({
                 <div className="min-w-0 text-sm">
                   <span className="flex items-center gap-1 text-[13px] font-medium">
                     系列
+                    <NewMasterBadge show={!v.chain.id && v.chain.name.trim().length > 0} />
                     {flagChip("chain", "系列")}
                   </span>
                   <MasterCombobox label="系列" value={v.chain} disabled={isEdit} options={chainOptions} onChange={chooseChain} />
@@ -658,6 +697,7 @@ export function LotteryFormDialog({
                 <div className="min-w-0 text-sm">
                   <span className="flex items-center gap-1 text-[13px] font-medium">
                     店舗
+                    <NewMasterBadge show={!v.store.id && v.store.name.trim().length > 0} />
                     {flagChip("store", "店舗")}
                   </span>
                   <MasterCombobox label="店舗" value={v.store} options={storeOptions} onChange={(store) => set("store", { ...store, prefecture: store.id ? "" : (v.store.prefecture ?? "") })} />
@@ -679,7 +719,8 @@ export function LotteryFormDialog({
               {/* 2. 対象商品・数量 */}
               <fieldset className="space-y-1.5">
                 <legend className="flex items-center gap-1 text-[13px] font-medium">
-                  対象商品・数量{multi && "（2商品以上）"}
+                  対象商品・数量
+                  <NewMasterBadge show={v.items.some((it) => !it.product.id && it.product.name.trim().length > 0)} />
                   {flagChip("items", "商品")}
                 </legend>
                 {v.items.map((it, i) => (
@@ -710,8 +751,17 @@ export function LotteryFormDialog({
                         { value: "set", label: "セット" },
                       ]}
                     />
-                    {multi && v.items.length > 2 ? (
-                      <Button type="button" variant="ghost" size="icon" className="mt-0 size-11" aria-label={`商品${i + 1}を削除`} onClick={() => set("items", v.items.filter((_, j) => j !== i))}>
+                    {v.items.length > 1 ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="mt-0 size-11"
+                        aria-label={`商品${i + 1}を削除`}
+                        disabled={(!!it.id && lockedItemIds.has(it.id)) || (modeLocked && v.items.length <= 2)}
+                        title={it.id && lockedItemIds.has(it.id) ? "応募・当落の記録がある商品は削除できません" : undefined}
+                        onClick={() => removeItem(i)}
+                      >
                         <Trash2 className="size-4" />
                       </Button>
                     ) : (
@@ -730,21 +780,36 @@ export function LotteryFormDialog({
                     />
                   ) : null,
                 )}
-                {multi ? (
-                  <Button type="button" size="sm" variant="outline" onClick={() => set("items", [...v.items, { product: { id: null, name: "" }, quantity: 1, unit: "box" }])}>
+                {v.items.length < 10 && (
+                  <Button type="button" size="sm" variant="outline" onClick={addItem} disabled={modeLocked && v.multiMode === "single"} title={modeLocked && v.multiMode === "single" ? "応募・当落の記録があるため、商品は追加できません" : undefined} data-testid="add-item">
                     <Plus className="size-4" /> 商品を追加
                   </Button>
-                ) : (
-                  <button
-                    type="button"
-                    className="text-xs text-info underline"
-                    onClick={() => {
-                      setDetailsOpen(true);
-                      requestAnimationFrame(() => modeRef.current?.focus());
-                    }}
-                  >
-                    複数商品の抽選にする（詳細設定で方式を選択）
-                  </button>
+                )}
+                {/* 2商品以上のときだけ、商品の近くに抽選方式を出す（自動では確定しない。AIが読み取れていれば初期値） */}
+                {(multi || modePending) && (
+                  <label className="block text-sm" data-testid="mode-field">
+                    <span className="flex items-center gap-1 text-[13px] font-medium">
+                      抽選方式
+                      {flagChip("multiMode", "抽選の方式")}
+                    </span>
+                    <select
+                      ref={modeRef}
+                      aria-label="抽選の方式"
+                      value={modePending ? "" : (v.multiMode ?? "all")}
+                      disabled={modeLocked}
+                      title={modeLocked ? "応募・当落の記録があるため、方式は変更できません" : undefined}
+                      onChange={(e) => setMode(e.target.value as NonNullable<LotteryInput["multiMode"]>)}
+                      className={field}
+                    >
+                      {modePending && <option value="">方式を選択</option>}
+                      {MODE_OPTIONS.filter((m) => m.value !== "single").map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                    {flagPanel("multiMode")}
+                  </label>
                 )}
               </fieldset>
 
@@ -840,9 +905,6 @@ export function LotteryFormDialog({
                   />
                 </div>
               </div>
-              {(sources.applyMethod === "default" || sources.receiveMethod === "default") && (
-                <p className="text-[11px] text-muted-foreground">点線の欄は初期値（未確認）です。内容を確認して選び直すと確認済みになります。</p>
-              )}
               {(openFlag === "applyMethod" || openFlag === "receiveMethod") && (
                 <div>
                   {flagPanel("applyMethod")}
@@ -908,34 +970,10 @@ export function LotteryFormDialog({
               {/* 8-9. 詳細設定（抽選方式・キャンペーン・状態・本人確認・メモ） */}
               <details open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded-lg border" data-testid="form-details">
                 <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-medium">
-                  詳細設定（抽選方式・キャンペーン・備考など）
-                  {(multi || modePending || v.newCampaign || v.campaignId) && <span className="ml-2 text-xs text-primary">設定あり</span>}
+                  詳細設定（キャンペーン・備考など）
+                  {(v.newCampaign || v.campaignId) && <span className="ml-2 text-xs text-primary">設定あり</span>}
                 </summary>
                 <div className="space-y-3 border-t p-3">
-                  <div className="text-sm">
-                    <label className="block">
-                      <span className="flex items-center gap-1 text-[13px] font-medium">
-                        抽選の方式
-                        {flagChip("multiMode", "抽選の方式")}
-                      </span>
-                      <select
-                        ref={modeRef}
-                        aria-label="抽選の方式"
-                        value={modePending ? "" : (v.multiMode ?? "single")}
-                        onChange={(e) => setMode(e.target.value as NonNullable<LotteryInput["multiMode"]>)}
-                        className={field}
-                      >
-                        {modePending && <option value="">未確認（方式を選んでください）</option>}
-                        {MODE_OPTIONS.map((m) => (
-                          <option key={m.value} value={m.value}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {flagPanel("multiMode")}
-                    <p className="mt-0.5 text-xs text-muted-foreground">商品ごとに独立して応募する告知（方式E）は、商品ごとに別の抽選として登録してください。</p>
-                  </div>
                   <label className="block text-sm">
                     <span className="text-[13px] font-medium">同時開催キャンペーン（任意）</span>
                     <select
@@ -1003,7 +1041,6 @@ export function LotteryFormDialog({
                     <input type="checkbox" checked={v.isManaged ?? true} onChange={(e) => set("isManaged", e.target.checked)} className="size-4" />
                     管理対象（★）にする
                   </label>
-                  {multi && v.multiMode !== "choose_one" && <p className="text-xs text-muted-foreground">複数商品の当落は、登録後に商品ごとに入力します。</p>}
                   {v.multiMode === "choose_one" ? (
                     <p className="text-xs text-muted-foreground">希望商品を選んで応募する方式では、登録後にカード上でユーザーごとに希望商品を選択して応募を記録します。</p>
                   ) : (
@@ -1052,7 +1089,7 @@ export function LotteryFormDialog({
                         </option>
                       ))}
                     </select>
-                    <p className="text-[11px] text-muted-foreground">AIの結果を修正して保存したときだけ、理由として記録します。選ばなくても保存できます。</p>
+                    <p className="text-[11px] text-muted-foreground">任意（AIの結果を修正したときの理由として記録）</p>
                   </div>
                 </details>
               )}

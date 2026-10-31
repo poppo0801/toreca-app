@@ -24,6 +24,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // 入力欄(文字サイズ16px未満)をタップしたときの iOS の自動拡大を抑える。ピンチ拡大も効かなくなる（アクセシビリティ上の制約: docs/stage5j.md）
+  maximumScale: 1,
+  userScalable: false,
   // Safe Area(env(safe-area-inset-*))を有効にする。ヘッダー・下部ナビが各自で余白を取る
   viewportFit: "cover",
   themeColor: [

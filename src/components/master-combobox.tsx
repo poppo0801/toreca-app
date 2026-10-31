@@ -17,6 +17,31 @@ export interface MasterOption {
   thumb?: ReactNode;
 }
 
+/** 項目名の横に出す小さな「仮登録」バッジ（未登録の名称を入力したとき）。タップで短い説明を出す。常時の説明文は出さない */
+export function NewMasterBadge({ show }: { show: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!show) return null;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        data-testid="new-master-hint"
+        aria-expanded={open}
+        aria-label="仮登録（タップで詳細）"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex min-h-6 items-center rounded-full border border-info px-1.5 text-[10px] font-medium leading-none text-info"
+      >
+        仮登録
+      </button>
+      {open && (
+        <span role="status" className="text-[11px] font-normal text-muted-foreground">
+          保存時にマスターへ仮登録されます
+        </span>
+      )}
+    </span>
+  );
+}
+
 /**
  * マスターの検索選択 + 自由入力。既存マスターを選ぶと id を持ち、未登録の名称を入力すると id=null（保存時に仮登録）。
  * 入力した名称が既存マスターと（全半角・空白の差を無視して）一致する場合は、自動的にその既存マスターを選んだ扱いにする。
@@ -45,8 +70,6 @@ export function MasterCombobox({
     () => (key ? options.filter((o) => normName(o.name).includes(key)) : options).slice(0, 8),
     [options, key],
   );
-  const exact = key ? options.find((o) => normName(o.name) === key) : undefined;
-  const isNew = value.id === null && value.name.trim().length > 0 && !exact;
 
   return (
     <div className={cn("relative text-sm", className)}>
@@ -70,11 +93,6 @@ export function MasterCombobox({
         className="min-h-11 w-full rounded-md border bg-input px-3 text-sm"
       />
       {value.id !== null && <span className="sr-only">既存のマスターを選択中</span>}
-      {isNew && (
-        <p className="mt-0.5 text-xs text-info" data-testid="new-master-hint">
-          未登録: 保存時に仮登録します
-        </p>
-      )}
       {focused && matches.length > 0 && !disabled && (
         <ul
           id={listId}

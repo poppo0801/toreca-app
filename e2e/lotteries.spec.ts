@@ -183,7 +183,7 @@ test("カードは商品画像を左に大きく表示し、タップで詳細�
   const sheet = page.getByTestId("lottery-detail-sheet");
   await expect(sheet).toBeVisible();
   await expect(page.getByTestId("lottery-detail")).toContainText("応募締切");
-  await expect(page.getByTestId("lottery-detail")).toContainText("ユーザー別の応募状況・当落");
+  await expect(page.getByTestId("user-section")).toBeVisible(); // 応募状況（アイコン＋状態マーク、応募操作）
   const vp = page.viewportSize()!;
   if (vp.width < 768) {
     // スマホでは画面下から開く（下端が画面の下端に揃う）
@@ -268,10 +268,11 @@ test("日付のみの締切は、23:59などの時刻を補わず、日付の差
   await expect(card.getByTestId("deadline-badge")).toHaveAttribute("data-tone", "warn"); // 3日未満はオレンジ
   await expect(card.getByTestId("deadline-badge")).toHaveAttribute("title", /時刻は未確認/);
   await expect(card).not.toContainText("23:59");
-  // 一覧では時刻を出さず日付だけ（「—」でも0:00でもない）。詳細では「時刻未確認」と明示する
+  // 一覧では時刻を出さず日付だけ（「—」でも0:00でもない）。詳細にも「時刻未確認」は出さない（内部では時刻不明のまま保持）
   await expect(card.getByLabel(/応募締切 .*時刻未確認/)).toBeVisible();
   await card.getByRole("button", { name: /の詳細を開く/ }).click();
-  await expect(page.getByTestId("lottery-detail")).toContainText("時刻未確認");
+  await expect(page.getByTestId("lottery-detail")).not.toContainText("時刻未確認");
+  await expect(page.getByTestId("lottery-detail")).toContainText(/\d+\/\d+/);
 });
 
 test("収支ページ: 当月表示・月移動・タブ切替・分析ページへのリンク", async ({ page }) => {
@@ -416,8 +417,9 @@ test("抽選カード右上は受取方法で決まる（店頭=受取店舗の�
   await expect(page.getByTestId("lottery-detail")).toContainText("往復交通費");
   await page.keyboard.press("Escape");
   // 受取場所ラベルは商品画像と重ならない
-  const [img, pl] = [(await tokyo.getByTestId("card-image").boundingBox())!, (await tokyo.getByTestId("card-place").boundingBox())!];
-  expect(pl.x).toBeGreaterThan(img.x + img.width);
+  const [img, pl] = [(await tokyo.getByTestId("card-image").boundingBox())!, (await tokyo.getByTestId("place-chip").boundingBox())!];
+  const overlap = pl.x < img.x + img.width && img.x < pl.x + pl.width && pl.y < img.y + img.height && img.y < pl.y + pl.height;
+  expect(overlap).toBe(false);
 });
 
 test.describe("起動時のロード画面", () => {
@@ -913,5 +915,125 @@ test.describe("表示領域・固定配置・多重反応（iPhone不具合の�
     await expect(mine).toHaveAttribute("data-state", "applied");
     await page.keyboard.press("Escape"); // 2回目のタップが開いた確認を閉じる
     await expect(mine).toHaveAttribute("data-state", "applied");
+  });
+});
+
+test.describe("Stage 5J: カードの重なり・詳細の整理・ブランドカラー・入力時の拡大抑制", () => {
+  type Box = { x: number; y: number; width: number; height: number };
+  const overlap = (a: Box, b: Box) => a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
+
+  test("狭い画面(幅320)・長い店舗名/商品名でも、詳細カード内の要素は重ならず、横にはみ出さない", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    // 店舗名・商品名を極端に長くして確認する（表示だけを書き換える）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-testid="card-place"] > span:first-child').forEach((e) => (e.textContent = "とても長い系列名のサンプル電機株式会社 超大型旗艦店 梅田本館"));
+      document.querySelectorAll('[data-testid="product-name"]').forEach((e) => (e.textContent = "30th CELEBRATION カードセット フシギダネ・ヒトカゲ・ゼニガメ・ピカチュウ・イーブイ・ミュウ特別限定版"));
+    });
+    const cards = page.getByTestId("lottery-card");
+    const n = await cards.count();
+    expect(n).toBeGreaterThan(3);
+    for (let i = 0; i < n; i++) {
+      const c = cards.nth(i);
+      const cb = (await c.boundingBox())!;
+      const box = async (id: string) => ((await c.getByTestId(id).count()) > 0 ? c.getByTestId(id).first().boundingBox() : null);
+      const parts: Record<string, Box | null> = {
+        place: await box("card-place"),
+        badge: await box("deadline-badge"),
+        image: await box("card-image"),
+        product: await box("lottery-items"),
+        status: await box("apply-status"),
+        mine: await box("my-apply"),
+      };
+      const entries = Object.entries(parts).filter(([, b]) => !!b) as [string, Box][];
+      for (let a = 0; a < entries.length; a++) {
+        for (let b = a + 1; b < entries.length; b++) {
+          expect(overlap(entries[a][1], entries[b][1]), `カード${i}: ${entries[a][0]} と ${entries[b][0]} が重なっている`).toBe(false);
+        }
+        expect(entries[a][1].x + entries[a][1].width, `カード${i}: ${entries[a][0]} が右にはみ出している`).toBeLessThanOrEqual(cb.x + cb.width + 0.5);
+        expect(entries[a][1].x, `カード${i}: ${entries[a][0]} が左にはみ出している`).toBeGreaterThanOrEqual(cb.x - 0.5);
+      }
+      expect(await c.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true); // ページ全体も横スクロールしない
+  });
+
+  test("プロフィール3人の応募状況は表示順どおりに並び、応募ボタンと同じ行に収まる", async ({ page }) => {
+    const card = page.locator('[data-lottery-id="L3"]');
+    const marks = card.getByTestId("apply-status").locator("[data-account]");
+    expect(await marks.count()).toBe(3);
+    const xs = await marks.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().x));
+    expect([...xs].sort((a, b) => a - b)).toEqual(xs); // 左から A, B, C
+    const labels = await marks.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")?.slice(0, 1)));
+    expect(labels).toEqual(["A", "B", "C"]);
+    const bottom = (await card.getByTestId("card-bottom").boundingBox())!;
+    const mine = (await card.getByTestId("my-apply").boundingBox())!;
+    expect(mine.y).toBeGreaterThanOrEqual(bottom.y - 0.5);
+    expect(mine.y + mine.height).toBeLessThanOrEqual(bottom.y + bottom.height + 0.5);
+  });
+
+  test("詳細: 常時の操作は［スルー］（と編集）だけ。その他は折りたたみで、中止は確認を挟む。応募状況は1行＋展開で、要確認は1つにまとめる", async ({ page }) => {
+    const card = page.locator('[data-lottery-id="L1"]');
+    await card.getByRole("button", { name: /の詳細を開く/ }).click();
+    const sheet = page.getByTestId("lottery-detail");
+    const main = sheet.getByTestId("main-ops");
+    await expect(main.getByRole("button", { name: /スルー/ })).toBeVisible();
+    const more = sheet.getByTestId("more-ops");
+    await expect(more.getByRole("button", { name: "中止にする" })).toBeHidden(); // 折りたたみ
+    await expect(more.getByRole("button", { name: "発表延期にする" })).toBeHidden();
+    await more.locator("summary").click();
+    await expect(more.getByRole("button", { name: "発表延期にする" })).toBeVisible();
+    await more.getByRole("button", { name: "中止にする" }).click();
+    await expect(page.getByRole("dialog").filter({ hasText: "中止にしますか" })).toBeVisible(); // 確認ダイアログ
+    await page.getByRole("button", { name: "キャンセル" }).click();
+    await expect(page.locator('[data-lottery-id="L1"]')).not.toContainText("中止");
+    // 応募状況: 通常は1行。理由の一覧は展開
+    const user = sheet.getByTestId("user-section");
+    await expect(user.getByTestId("apply-status")).toBeVisible();
+    await expect(user.getByTestId("judge-list")).toBeHidden();
+    await user.getByTestId("user-details").locator("summary").click();
+    await expect(user.getByTestId("judge-list")).toBeVisible();
+    // 同じ要確認の理由を全ユーザー分繰り返さない
+    const review = user.getByTestId("review-summary");
+    if (await review.count()) {
+      const text = (await review.innerText()).replace("要確認:", "");
+      const parts = text.split("／").map((x) => x.trim()).filter(Boolean);
+      expect(new Set(parts).size).toBe(parts.length);
+    }
+  });
+
+  test("ブランドカラーはライト・ダークとも同じオレンジ系。警告の赤・成功の緑は別の色のまま", async ({ page }) => {
+    const hue = async () =>
+      page.evaluate(() => {
+        const c = getComputedStyle(document.documentElement);
+        const to = (v: string) => {
+          const el = document.createElement("div");
+          el.style.color = v;
+          document.body.appendChild(el);
+          const rgb = getComputedStyle(el).color.match(/\d+/g)!.map(Number);
+          el.remove();
+          const [r, g, b] = rgb;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+          const h = d === 0 ? 0 : max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+          return Math.round(((h * 60 + 360) % 360));
+        };
+        return { primary: to(c.getPropertyValue("--primary")), danger: to(c.getPropertyValue("--danger")), success: to(c.getPropertyValue("--success")) };
+      });
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.reload();
+      const h = await hue();
+      expect(h.primary, `${scheme}のプライマリ色相`).toBeGreaterThanOrEqual(15); // 赤茶(≈14°)ではなくオレンジ(≈20〜30°)
+      expect(h.primary).toBeLessThanOrEqual(35);
+      expect(Math.abs(h.primary - h.danger)).toBeGreaterThan(8); // 危険操作の赤とは区別できる
+      expect(h.success).toBeGreaterThan(100);
+    }
+  });
+
+  test("入力欄をタップしても自動で拡大されないよう、viewport で最大倍率を1に固定している", async ({ page }) => {
+    const content = await page.locator('meta[name="viewport"]').getAttribute("content");
+    expect(content).toContain("maximum-scale=1");
+    expect(content).toContain("user-scalable=no");
+    expect(content).toContain("viewport-fit=cover"); // Safe Areaの指定は変えていない
   });
 });

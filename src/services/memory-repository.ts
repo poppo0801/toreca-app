@@ -60,6 +60,9 @@ export class InMemoryRepository implements LotteryRepository {
   async deleteSale() {
     return UNSUPPORTED;
   }
+  async reorderProfiles(_actorId: string, ids: string[]) {
+    return this.apply((d) => ({ ...d, profiles: [...d.profiles].sort((a, b) => (ids.indexOf(a.id) + 1 || 999) - (ids.indexOf(b.id) + 1 || 999)) }));
+  }
   async updateProfile() {
     return UNSUPPORTED;
   }
