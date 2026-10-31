@@ -38,7 +38,7 @@ export function LotteryMatrix({ lotteries, actionOnly }: { lotteries: Lottery[];
     <div className="space-y-2" data-testid="matrix">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs" data-testid="matrix-summary">
-          応募漏れの可能性: <strong className={missedCount > 0 ? "text-primary" : ""}>{missedCount}件</strong>
+          応募漏れの可能性: <strong className={missedCount > 0 ? "text-primary-ink" : ""}>{missedCount}件</strong>
         </p>
         <button type="button" onClick={() => setLegend((v) => !v)} aria-expanded={legend} className="min-h-8 rounded-md border px-2 text-xs">
           アイコンの意味

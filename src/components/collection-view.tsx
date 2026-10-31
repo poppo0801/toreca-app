@@ -187,7 +187,7 @@ export function CollectionView() {
           </Button>
         )}
         <Button variant="outline" size="icon" className="size-10 shrink-0" aria-pressed={filters.favOnly} aria-label="お気に入りのみ" onClick={() => setFilters({ ...filters, favOnly: !filters.favOnly })} data-testid="fav-filter">
-          <Star className={cn("size-4", filters.favOnly && "fill-primary stroke-primary")} />
+          <Star className={cn("size-4", filters.favOnly && "fill-primary stroke-primary-ink")} />
         </Button>
         <div className="relative shrink-0">
           <Button variant="outline" size="icon" className="size-10" aria-haspopup="menu" aria-expanded={showMenu} aria-label="その他" onClick={() => setShowMenu((v) => !v)} data-testid="more-menu">
@@ -288,7 +288,7 @@ export function CollectionView() {
               </button>
               <button type="button" onClick={() => void toggleFav(r.id, r.favRank === null)} aria-pressed={r.favRank !== null} aria-label={r.favRank !== null ? `${r.name}のお気に入りを外す` : `${r.name}をお気に入りにする`} className="absolute left-0 top-0 flex size-8 items-center justify-center" data-testid="tile-fav">
                 <span className="flex size-5 items-center justify-center rounded-full bg-card/85 shadow-sm">
-                  <Star className={cn("size-3.5", r.favRank !== null ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+                  <Star className={cn("size-3.5", r.favRank !== null ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
                 </span>
               </button>
               {r.qty > 0 && (
@@ -315,7 +315,7 @@ export function CollectionView() {
                 </span>
               </button>
               <button type="button" onClick={() => void toggleFav(r.id, r.favRank === null)} aria-pressed={r.favRank !== null} aria-label={r.favRank !== null ? `${r.name}のお気に入りを外す` : `${r.name}をお気に入りにする`} className="absolute right-0 top-0 flex size-11 items-center justify-center">
-                <Star className={cn("size-5", r.favRank !== null ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+                <Star className={cn("size-5", r.favRank !== null ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
               </button>
             </li>
           ))}

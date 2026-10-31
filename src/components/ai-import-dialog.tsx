@@ -95,7 +95,7 @@ export function AiImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92dvh] max-w-xl overflow-y-auto">
         <DialogTitle className="flex items-center gap-2">
-          <Sparkles className="size-4 text-primary" aria-hidden="true" />
+          <Sparkles className="size-4 text-primary-ink" aria-hidden="true" />
           AIで読み取る
         </DialogTitle>
         <DialogDescription className="text-xs">告知の文章・画像・URLから抽選情報を読み取ります。</DialogDescription>

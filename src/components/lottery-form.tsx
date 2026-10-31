@@ -76,7 +76,7 @@ function CandidateButtons({ label, names, onPick }: { label: string; names: stri
 
 /** 項目名の横に付ける入力元の印（初期値・AI）。利用者が選んだ値には何も付けない */
 function SourceTag({ source }: { source?: FieldSource }) {
-  if (source === "default") return <span className="ml-1 rounded border border-dashed border-primary/60 px-1 text-[10px] text-primary" data-testid="tag-default">初期値</span>;
+  if (source === "default") return <span className="ml-1 rounded border border-dashed border-primary/60 px-1 text-[10px] text-primary-ink" data-testid="tag-default">初期値</span>;
   if (source === "ai") return <span className="ml-1 rounded border border-info px-1 text-[10px] text-info" data-testid="tag-ai">AI</span>;
   return null;
 }
@@ -270,7 +270,7 @@ function MinimizedBar({
               <span className="block text-xs text-muted-foreground">{title}（入力途中）</span>
               <span className="block truncate text-sm font-medium">{summary}</span>
             </span>
-            <span className="shrink-0 text-xs font-bold text-primary">再開</span>
+            <span className="shrink-0 text-xs font-bold text-primary-ink">再開</span>
           </button>
           <button type="button" aria-label="入力を破棄" onClick={() => (dirty ? setConfirming(true) : onDiscard())} className="flex size-11 shrink-0 items-center justify-center text-muted-foreground" data-testid="form-minimized-discard">
             <X className="size-4" aria-hidden="true" />
@@ -632,16 +632,16 @@ export function LotteryFormDialog({
                 <div className="space-y-1">
                   <div className="grid grid-cols-2 gap-2">
                     <Button type="button" variant="outline" size="sm" className="min-h-10" onClick={() => (dirty ? setPending("bulk") : router.push("/lotteries/bulk"))} data-testid="bulk-open">
-                      <ListPlus className="size-4 text-primary" aria-hidden="true" /> まとめて登録
+                      <ListPlus className="size-4 text-primary-ink" aria-hidden="true" /> まとめて登録
                     </Button>
                     <Button type="button" variant="outline" size="sm" className="min-h-10" onClick={() => setAiOpen(true)} data-testid="ai-open">
-                      <Sparkles className="size-4 text-primary" aria-hidden="true" /> AIで読み取る
+                      <Sparkles className="size-4 text-primary-ink" aria-hidden="true" /> AIで読み取る
                     </Button>
                   </div>
                   {aiFilled && (
                     <div className="flex items-center gap-1.5" data-testid="ai-filled-note">
                       <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                        <Sparkles className="size-3 text-primary" aria-hidden="true" />
+                        <Sparkles className="size-3 text-primary-ink" aria-hidden="true" />
                         AI入力
                       </span>
                       {flagCount > 0 && (
@@ -971,7 +971,7 @@ export function LotteryFormDialog({
               <details open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded-lg border" data-testid="form-details">
                 <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-medium">
                   詳細設定（キャンペーン・備考など）
-                  {(v.newCampaign || v.campaignId) && <span className="ml-2 text-xs text-primary">設定あり</span>}
+                  {(v.newCampaign || v.campaignId) && <span className="ml-2 text-xs text-primary-ink">設定あり</span>}
                 </summary>
                 <div className="space-y-3 border-t p-3">
                   <label className="block text-sm">

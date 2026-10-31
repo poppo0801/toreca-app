@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CalendarCheck, Clock, Star, Store as StoreIcon, Truck } from "lucide-react";
+import { CalendarCheck, Clock, MapPin, Star, Store as StoreIcon, Truck } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
@@ -10,6 +10,8 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { STATUS_META } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { BAND_CLASS, formatKm } from "@/lib/geo";
+import { storeDistance } from "@/lib/store-distance";
 import { DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { deadlineBadge, formatFlexible, formatResultShort, formatShort, hasResultPeriod } from "@/lib/datetime";
 import { effectiveEventState, hasSkipException, skipSourceFor } from "@/lib/eligibility";
@@ -80,6 +82,7 @@ export function LotteryCard({
   const sum = summarizeItems(lottery, data);
   const firstProduct = data.products.find((p) => p.id === sum.firstProductId);
   const storeLine = `${chain?.name ?? ""} ${store?.name ?? ""}`.trim();
+  const dist = storeDistance(data, store);
   const place = placeLabel(lottery.receiveMethod, store?.prefecture);
   // 往復交通費は、店頭で受け取る場合だけ意味がある（通販では出さない）
   const showFare = display.travelCost && store?.roundTripFare != null && lottery.receiveMethod !== "shipping";
@@ -123,7 +126,7 @@ export function LotteryCard({
             aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
             className="flex size-9 shrink-0 items-center justify-center rounded-full"
           >
-            <Star className={cn("size-[18px]", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+            <Star className={cn("size-[18px]", managed ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -148,7 +151,7 @@ export function LotteryCard({
                   <>
                     {deadlineText ? (
                       <span className="inline-flex items-center gap-0.5 font-medium" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                        <Clock className="size-3 text-primary" aria-hidden="true" />
+                        <Clock className="size-3 text-primary-ink" aria-hidden="true" />
                         {deadlineText}
                       </span>
                     ) : (
@@ -166,33 +169,29 @@ export function LotteryCard({
       )}
       {detailMode && (
         <div data-testid="card-detail">
-          {/* 上段: 店舗・系列／地域（通販）／締切までの残り時間。バッジは折り返さず右に固定、店舗名は縮む */}
-          <div className="flex items-start justify-between gap-2 px-2.5 pt-2" data-testid="card-top">
-            <button type="button" onClick={openDetail} aria-label={`${storeLine} ${sum.name}の詳細を開く`} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left text-xs text-muted-foreground" data-testid="card-place">
-              <span className="min-w-0 truncate">{storeLine}</span>
-              {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
-              {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
-            </button>
-            {event === "before" ? (
-              <Chip className="shrink-0 text-info">受付前</Chip>
-            ) : finished ? (
-              <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>
-            ) : (
-              <DeadlineBadgeView badge={badge} />
-            )}
-          </div>
-
-          {/* 中段: 画像｜商品名・数量・日時・受取方法（画像の列は固定幅、本文は残りの幅で折り返す） */}
-          <div className="relative grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2.5 px-2.5 py-1.5">
+          {/* 上段: 画像｜（店舗・都道府県・距離／商品名／日時・受取方法／残り時間）。画像の列は固定幅、本文は残りの幅で折り返す */}
+          <div className="relative grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2.5 px-2.5 pb-1.5 pt-2" data-testid="card-top">
             <span className="flex h-24 w-20 items-center justify-center" data-testid="card-image">
               <ProductThumb product={firstProduct} heightClass="h-24" />
             </span>
-            <div onClick={openDetail} className="min-w-0 cursor-pointer space-y-1.5">
-              <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} />
+            <div role="button" tabIndex={0} aria-label={`${storeLine} ${sum.name}の詳細を開く`} onClick={openDetail} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(); } }} className="min-w-0 cursor-pointer space-y-1 text-left">
+              {/* 店舗名（最大2行）→ 都道府県 → 距離。狭い幅では都道府県・距離が次の行へ折り返す */}
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="card-place">
+                <span className="line-clamp-2 min-w-0 max-w-full break-words" data-testid="store-name">{storeLine}</span>
+                {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
+                {dist && lottery.receiveMethod !== "shipping" && (
+                  <span data-testid="distance" title="自宅からの直線距離（道路距離ではありません）" className={cn("inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-[11px] font-bold", BAND_CLASS[dist.band].split(" ").filter((c) => c.startsWith("text-")).join(" "))}>
+                    <MapPin className="size-3.5" aria-hidden="true" />
+                    {formatKm(dist.km)}
+                  </span>
+                )}
+                {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
+              </div>
+              <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
               <span className="grid gap-x-3 gap-y-1 text-xs [grid-template-columns:repeat(auto-fit,minmax(6.5rem,max-content))]">
                 {display.deadline && (
                   <span className="inline-flex items-center gap-1" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                    <Clock className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                    <Clock className="size-3.5 shrink-0 text-primary-ink" aria-hidden="true" />
                     <span className="font-medium">{deadlineText ?? "—"}</span>
                   </span>
                 )}
@@ -202,14 +201,28 @@ export function LotteryCard({
                     {formatResultShort(lottery, now)}
                   </span>
                 )}
-                {display.receive && (
-                  <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
-                    {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}
-                    {RECEIVE_SHORT[lottery.receiveMethod]}
-                  </span>
-                )}
-                {display.applyMethod && <span className="text-muted-foreground">応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
               </span>
+              {/* 受取方法（左）｜残り時間（右）。残り時間は応募ボタンの列の真上に出し、ボタンとは別の行なので重ならない */}
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1" data-testid="card-meta">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  {display.receive && (
+                    <span className="inline-flex items-center gap-1" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
+                      {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}
+                      {RECEIVE_SHORT[lottery.receiveMethod]}
+                    </span>
+                  )}
+                  {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
+                </span>
+                <span className="ml-auto">
+                  {event === "before" ? (
+                    <Chip className="shrink-0 text-info">受付前</Chip>
+                  ) : finished ? (
+                    <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>
+                  ) : (
+                    <DeadlineBadgeView badge={badge} />
+                  )}
+                </span>
+              </div>
               {(event === "postponed" || notice || lottery.isNew || !managed || skipSource || skipException) && (
                 <span className="flex flex-wrap gap-1">
                   {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}
@@ -228,10 +241,10 @@ export function LotteryCard({
               onClick={toggleStar}
               aria-pressed={managed}
               aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
-              className="absolute left-0 top-0 flex size-9 items-center justify-center rounded-full"
+              className="absolute left-1.5 top-1.5 flex size-9 items-center justify-center rounded-full"
             >
               <span className="flex size-6 items-center justify-center rounded-full bg-card/90 shadow-sm">
-                <Star className={cn("size-4", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+                <Star className={cn("size-4", managed ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
               </span>
             </button>
           </div>

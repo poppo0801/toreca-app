@@ -105,7 +105,7 @@ export function AiJobsProvider({ children }: { children: React.ReactNode }) {
         <div role="status" data-testid="ai-job-toast" className="fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom)+0.5rem-var(--vp-gap,0px))] z-40 flex items-center gap-2 rounded-xl border border-primary bg-card px-3 py-2 text-sm shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96">
           <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
           <span className="min-w-0 flex-1">{completionMessage(toast)}</span>
-          <Link href={`/lotteries/bulk?job=${toast.id}`} onClick={() => setToast(null)} className="shrink-0 text-xs font-bold text-primary underline" data-testid="ai-job-toast-link">
+          <Link href={`/lotteries/bulk?job=${toast.id}`} onClick={() => setToast(null)} className="shrink-0 text-xs font-bold text-primary-ink underline" data-testid="ai-job-toast-link">
             結果を確認
           </Link>
           <button type="button" onClick={() => setToast(null)} aria-label="通知を閉じる" className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">

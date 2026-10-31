@@ -122,7 +122,7 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         className={cn(
           "inline-flex min-h-9 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full border text-xs font-bold disabled:opacity-80",
           compact ? "size-10" : "px-2.5",
-          applied && compact ? "border-success/60 bg-success/10 text-success" : !applied && compact ? "border-primary bg-card text-primary" : applied ? "border-success/60 bg-success/10 text-success" : "border-primary bg-primary text-primary-foreground",
+          applied && compact ? "border-success/60 bg-success/10 text-success" : !applied && compact ? "border-primary bg-card text-primary-ink" : applied ? "border-success/60 bg-success/10 text-success" : "border-primary bg-primary text-primary-foreground",
           className,
         )}
       >

@@ -190,7 +190,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <input ref={fileRef} type="file" multiple={mode.kind === "new" && !!onBulk} accept="image/png,image/jpeg,image/webp" aria-label="カード画像を選択" data-testid="card-file" className="sr-only" onChange={(e) => pick(e.target.files)} />
                   <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
-                    <Sparkles className="size-4 text-primary" aria-hidden="true" /> {preview ? "画像を選び直す" : "画像を選ぶ"}
+                    <Sparkles className="size-4 text-primary-ink" aria-hidden="true" /> {preview ? "画像を選び直す" : "画像を選ぶ"}
                   </Button>
                   {!edit && (
                     <label className="flex min-h-9 items-center gap-2 text-xs">

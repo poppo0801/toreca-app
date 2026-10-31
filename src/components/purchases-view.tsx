@@ -147,7 +147,7 @@ export function PurchasesView() {
 
       {/* 4. 商品・店舗の絞り込み（折りたたみ） */}
       <div>
-        <button type="button" aria-expanded={showFilter || hasFilter} onClick={() => setShowFilter((v) => !v)} className={cn("flex min-h-9 items-center gap-1 rounded-full border bg-input px-3 text-xs", hasFilter && "border-primary text-primary")} data-testid="filter-toggle">
+        <button type="button" aria-expanded={showFilter || hasFilter} onClick={() => setShowFilter((v) => !v)} className={cn("flex min-h-9 items-center gap-1 rounded-full border bg-input px-3 text-xs", hasFilter && "border-primary text-primary-ink")} data-testid="filter-toggle">
           <SlidersHorizontal className="size-3.5" aria-hidden="true" /> 絞り込み{hasFilter && "（設定中）"}
         </button>
         {(showFilter || hasFilter) && (
@@ -169,7 +169,7 @@ export function PurchasesView() {
               ))}
             </select>
             {hasFilter && (
-              <button type="button" className={cn(chip, "shrink-0 text-primary")} onClick={() => (setProductId(""), setStoreId(""))}>
+              <button type="button" className={cn(chip, "shrink-0 text-primary-ink")} onClick={() => (setProductId(""), setStoreId(""))}>
                 解除
               </button>
             )}

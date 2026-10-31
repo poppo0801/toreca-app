@@ -155,7 +155,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 aria-label="設定"
                 aria-current={settingsActive ? "page" : undefined}
                 data-testid="header-settings"
-                className={cn("flex size-10 items-center justify-center rounded-md hover:bg-muted", settingsActive && "text-primary")}
+                className={cn("flex size-10 items-center justify-center rounded-md hover:bg-muted", settingsActive && "text-primary-ink")}
               >
                 <Settings className="size-[18px]" aria-hidden="true" />
               </Link>
@@ -181,14 +181,14 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* モバイル: 下部メニュー（プロフィール別・最大5枠。隠れた機能があれば「その他」）。背景は下端まで伸び、操作部分はホームインジケーターの少し上 */}
         <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(var(--vp-gap,0px)*-1)] z-30 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
           <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
-            {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary", "text-muted-foreground", "size-5"))}
+            {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
             {nav.more.length > 0 && (
               <button
                 type="button"
                 onClick={() => setMore(true)}
                 aria-haspopup="dialog"
                 data-testid="nav-more"
-                className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", nav.more.some((n) => isNavActive(n, pathname)) ? "font-bold text-primary" : "text-muted-foreground")}
+                className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", nav.more.some((n) => isNavActive(n, pathname)) ? "font-bold text-primary-ink" : "text-muted-foreground")}
               >
                 <Ellipsis className="size-5" aria-hidden="true" />
                 その他

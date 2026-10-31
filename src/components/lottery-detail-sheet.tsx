@@ -104,7 +104,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
               className="flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"
             >
-              <Star className={cn("size-5", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+              <Star className={cn("size-5", managed ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
             </button>
           </div>
 

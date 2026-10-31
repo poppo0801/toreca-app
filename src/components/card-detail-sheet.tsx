@@ -96,7 +96,7 @@ export function CardDetailSheet({
               <SheetDescription id="card-detail-desc">{[card.rarity, card.cardNumber, card.setCode].filter(Boolean).join(" ・ ") || "カードの詳細"}</SheetDescription>
             </div>
             <button type="button" onClick={onToggleFavorite} aria-pressed={favorite} aria-label={favorite ? "お気に入りを外す" : "お気に入りにする"} className="flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted" data-testid="detail-fav">
-              <Star className={cn("size-5", favorite ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+              <Star className={cn("size-5", favorite ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
             </button>
           </div>
           <SheetBody className="space-y-4 border-t pt-3">

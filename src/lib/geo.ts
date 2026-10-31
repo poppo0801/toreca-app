@@ -41,7 +41,7 @@ export const BAND_CLASS: Record<DistanceBand, string> = {
   0: "border-success text-success",
   1: "border-p-blue text-p-blue",
   2: "border-warn text-warn",
-  3: "border-primary text-primary",
+  3: "border-primary text-primary-ink",
   4: "border-danger text-danger",
 };
 

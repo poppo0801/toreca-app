@@ -72,7 +72,7 @@ export function ShareIntakeView({ result }: { result: SharedPost }) {
   return (
     <div className="space-y-3" data-testid="share-intake">
       <h1 className="flex items-center gap-2 text-lg font-bold">
-        <Share2 className="size-4 text-primary" aria-hidden="true" /> 共有から登録
+        <Share2 className="size-4 text-primary-ink" aria-hidden="true" /> 共有から登録
       </h1>
       <section className="space-y-1 rounded-xl border bg-card p-3 shadow-card" aria-label="共有されたX投稿">
         <p className="text-xs text-muted-foreground">X投稿{result.handle ? `（@${result.handle}）` : ""}</p>

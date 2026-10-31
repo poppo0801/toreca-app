@@ -13,10 +13,12 @@
   --muted: #ececef;
   --muted-foreground: #5b5b63;
   --border: #dcdce0;
-  --ring: #ea580c;
+  --ring: #f08a1c;
   /* オレンジは主要操作・現在選択のみ */
-  --primary: #ea580c;
-  --primary-foreground: #ffffff;
+  --primary: #ff9a32;
+  /* 白背景上の文字・線・アイコン用の濃いめのオレンジ（塗りの --primary は明るいので文字には使わない） */
+  --primary-ink: #b45309;
+  --primary-foreground: #1a1206;
   /* 情報区別用 */
   --info: #0f766e;
   --success: #15803d;
@@ -45,6 +47,7 @@
   --border: #484852;
   --ring: #fb923c;
   --primary: #fb923c;
+  --primary-ink: #fb923c;
   --primary-foreground: #111111;
   --info: #2dd4bf;
   --success: #4ade80;
@@ -69,6 +72,7 @@
   --color-border: var(--border);
   --color-ring: var(--ring);
   --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
   --color-primary-foreground: var(--primary-foreground);
   --color-info: var(--info);
   --color-success: var(--success);

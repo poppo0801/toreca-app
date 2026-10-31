@@ -328,7 +328,7 @@ export function LotteryBoard() {
               </label>
             )}
             {hasFilter && (
-              <button type="button" className={cn(chip, "text-primary")} onClick={() => setFilters(DEFAULT_FILTERS)}>
+              <button type="button" className={cn(chip, "text-primary-ink")} onClick={() => setFilters(DEFAULT_FILTERS)}>
                 解除
               </button>
             )}

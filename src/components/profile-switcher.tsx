@@ -33,7 +33,7 @@ export function ProfileSwitcher({ className, onSelected }: { className?: string;
             >
               <ProfileAvatar profile={p} />
               <span className="flex-1">{p.label}</span>
-              {selected && <span className="text-xs text-primary">使用中</span>}
+              {selected && <span className="text-xs text-primary-ink">使用中</span>}
             </button>
           );
         })}

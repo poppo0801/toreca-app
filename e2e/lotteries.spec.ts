@@ -398,19 +398,25 @@ test("対戦記録: 設定から開ける。モックでは保存できない旨
   await expect(page.getByText("マイグレーション")).toBeVisible();
 });
 
-test("抽選カード右上は受取方法で決まる（店頭=受取店舗の都道府県、発送=通販）。カードに距離は出さず、詳細パネルには残る", async ({ page }) => {
+test("抽選カード右上は受取方法で決まる（店頭=受取店舗の都道府県、発送=通販）。距離は店舗名の右（通販は出さない）", async ({ page }) => {
   await page.getByRole("tab", { name: /全情報/ }).click();
   // 店頭受取（三宮店・自宅の近く）: 都道府県。距離はカードに出さない
   const near = page.getByTestId("lottery-card").filter({ hasText: "三宮店" }).first();
   await expect(near.getByTestId("place-chip")).toContainText("兵庫県");
   await expect(near.getByTestId("place-chip")).not.toContainText("通販");
-  await expect(page.getByTestId("card-distance")).toHaveCount(0);
+  // 通販（L4）は距離を出さない
+  await expect(page.locator('[data-lottery-id="L4"]').getByTestId("distance")).toHaveCount(0);
   // 受取方法が発送の抽選（L4）は、店舗が登録されていても「通販」
   const ship = page.locator('[data-lottery-id="L4"]');
   await expect(ship.getByTestId("place-chip")).toHaveText("通販");
   // 東京の店舗（店頭受取）は都道府県
   const tokyo = page.getByTestId("lottery-card").filter({ hasText: "本店" }).first();
   await expect(tokyo.getByTestId("place-chip")).toContainText("東京都");
+  // 店舗名 → 都道府県 → 距離 の順（同じ行か、狭いときは次の行）
+  await expect(tokyo.getByTestId("distance")).toContainText("km");
+  const [sn, pc, ds] = [(await tokyo.getByTestId("store-name").boundingBox())!, (await tokyo.getByTestId("place-chip").boundingBox())!, (await tokyo.getByTestId("distance").boundingBox())!];
+  expect(pc.y > sn.y + sn.height / 2 || pc.x >= sn.x + sn.width - 1).toBe(true);
+  expect(ds.y > pc.y + pc.height / 2 || ds.x >= pc.x + pc.width - 1).toBe(true);
   // 詳細パネルでは位置情報（直線距離・交通費）を引き続き確認できる（道路距離と混同しない表記）
   await tokyo.getByRole("button", { name: /の詳細を開く/ }).click();
   await expect(page.getByTestId("lottery-detail")).toContainText("直線");
@@ -708,16 +714,19 @@ test.describe("表示診断（下部メニューの位置ずれの調査用）",
 });
 
 test.describe("Stage 5I: 抽選カードの整理（締切バッジ・応募状況・応募操作）", () => {
-  test("締切までの残り時間はカード右上のバッジ。段階（3日未満=オレンジ／24時間未満=赤）が色と文言で分かる。商品名は最大2行", async ({ page }) => {
+  test("締切までの残り時間は応募ボタンの上（カード上段の右下）のバッジ。段階（3日未満=オレンジ／24時間未満=赤）が色と文言で分かる。商品名は最大2行", async ({ page }) => {
     const card = page.locator('[data-lottery-id="L1"]'); // 締切まで約5時間
     const badge = card.getByTestId("deadline-badge");
     await expect(badge).toHaveText(/^あと\d+時間$/);
     await expect(badge).toHaveAttribute("data-tone", "danger");
-    // 右上: カードの右半分にあり、商品名の領域を狭めすぎない
+    // 右側: カードの右半分で、応募ボタンの上（下段の区切り線より上）。ボタンとは重ならない
     const cb = (await card.boundingBox())!;
     const bb = (await badge.boundingBox())!;
+    const btn = (await card.getByTestId("my-apply").boundingBox())!;
     expect(bb.x + bb.width / 2).toBeGreaterThan(cb.x + cb.width / 2);
-    expect(bb.y - cb.y).toBeLessThan(40);
+    expect(bb.y + bb.height).toBeLessThanOrEqual(btn.y);
+    const sep = (await card.getByTestId("card-bottom").boundingBox())!;
+    expect(bb.y + bb.height).toBeLessThanOrEqual(sep.y);
     // 商品名は最大2行（line-clamp）
     const name = (await card.getByTestId("product-name").boundingBox())!;
     expect(name.height).toBeLessThanOrEqual(2 * 22);
@@ -1035,5 +1044,54 @@ test.describe("Stage 5J: カードの重なり・詳細の整理・ブランド�
     expect(content).toContain("maximum-scale=1");
     expect(content).toContain("user-scalable=no");
     expect(content).toContain("viewport-fit=cover"); // Safe Areaの指定は変えていない
+  });
+});
+
+test.describe("Stage 5K: カードの再配置・テーマカラー", () => {
+  test("店舗名と商品名の左端が揃い、店舗名は最大2行。残り時間・距離・応募ボタンが重ならない（320px）", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    const cards = page.getByTestId("lottery-card");
+    const n = await cards.count();
+    expect(n).toBeGreaterThan(0);
+    const overlap = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    for (let i = 0; i < n; i++) {
+      const c = cards.nth(i);
+      const box = async (id: string) => ((await c.getByTestId(id).count()) ? await c.getByTestId(id).first().boundingBox() : null);
+      const store = await box("store-name");
+      const prod = await box("product-name");
+      const badge = await box("deadline-badge");
+      const btn = await box("my-apply");
+      const dist = await box("distance");
+      const chip = await box("place-chip");
+      if (store && prod) expect(Math.abs(store.x - prod.x)).toBeLessThanOrEqual(1);
+      if (store) expect(store.height).toBeLessThanOrEqual(2 * 20);
+      if (badge && btn) expect(overlap(badge, btn)).toBe(false);
+      if (dist && chip) expect(overlap(dist, chip)).toBe(false);
+      if (dist && prod) expect(overlap(dist, prod)).toBe(false);
+      const cb = (await c.boundingBox())!;
+      for (const b of [store, prod, badge, btn, dist, chip]) if (b) expect(b.x + b.width).toBeLessThanOrEqual(cb.x + cb.width + 1);
+    }
+  });
+
+  test("ライトの主要色は黄寄りのオレンジ（塗り）＋濃い文字。文字・線用のオレンジは別変数で十分なコントラスト", async ({ page }) => {
+    const v = await page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement);
+      return { p: cs.getPropertyValue("--primary").trim(), fg: cs.getPropertyValue("--primary-foreground").trim(), ink: cs.getPropertyValue("--primary-ink").trim() };
+    });
+    const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const lum = ([r, g, b]: number[]) => {
+      const f = (x: number) => ((x /= 255) <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const cr = (a: string, b: string) => {
+      const [x, y] = [lum(rgb(a)), lum(rgb(b))];
+      return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+    };
+    const [r, g] = rgb(v.p);
+    expect(g / r).toBeGreaterThan(0.55); // 赤寄りではない（黄みが十分）
+    expect(cr(v.p, v.fg)).toBeGreaterThanOrEqual(7); // 塗りの上の文字
+    expect(cr(v.ink, "#ffffff")).toBeGreaterThanOrEqual(4.5); // 白背景の上の文字・線
   });
 });

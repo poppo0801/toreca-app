@@ -5,7 +5,7 @@ import type { AccountStatus } from "@/types/domain";
 /** 応募状態の表示定義。アイコン＋色＋文言で示し、色だけに頼らない */
 export const STATUS_META: Record<AccountStatus, { symbol: string; label: string; icon: LucideIcon; tone: string; hint: string }> = {
   applied: { symbol: "●", label: "応募済み", icon: CircleCheck, tone: "text-success", hint: "応募を記録済み" },
-  eligible_unapplied: { symbol: "○", label: "未応募", icon: Circle, tone: "text-primary", hint: "応募できる状態で、まだ応募していません" },
+  eligible_unapplied: { symbol: "○", label: "未応募", icon: Circle, tone: "text-primary-ink", hint: "応募できる状態で、まだ応募していません" },
   covered_by_limit: { symbol: "◎", label: "枠充足", icon: CircleDot, tone: "text-info", hint: "家族・住所などの応募枠が埋まっています" },
   skipped: { symbol: "⤼", label: "スルー", icon: SkipForward, tone: "text-muted-foreground", hint: "このユーザーはスルー設定中です" },
   ineligible: { symbol: "－", label: "対象外", icon: Minus, tone: "text-muted-foreground", hint: "このユーザーの対象範囲の外です" },
