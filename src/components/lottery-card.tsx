@@ -126,7 +126,7 @@ export function LotteryCard({
             aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
             className="flex size-9 shrink-0 items-center justify-center rounded-full"
           >
-            <Star className={cn("size-[18px]", managed ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
+            <Star className={cn("size-[18px]", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -243,8 +243,8 @@ export function LotteryCard({
               aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
               className="absolute left-1.5 top-1.5 flex size-9 items-center justify-center rounded-full"
             >
-              <span className="flex size-6 items-center justify-center rounded-full bg-card/90 shadow-sm">
-                <Star className={cn("size-4", managed ? "fill-primary stroke-primary-ink" : "stroke-muted-foreground")} aria-hidden="true" />
+              <span className="flex size-6 items-center justify-center rounded-full bg-card/80">
+                <Star className={cn("size-4", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
               </span>
             </button>
           </div>

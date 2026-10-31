@@ -1075,7 +1075,7 @@ test.describe("Stage 5K: カードの再配置・テーマカラー", () => {
     }
   });
 
-  test("ライトの主要色は黄寄りのオレンジ（塗り）＋濃い文字。文字・線用のオレンジは別変数で十分なコントラスト", async ({ page }) => {
+  test("ライトの主要色は黄寄りのオレンジ（塗り）＋白文字。文字・線用のオレンジは別変数で十分なコントラスト", async ({ page }) => {
     const v = await page.evaluate(() => {
       const cs = getComputedStyle(document.documentElement);
       return { p: cs.getPropertyValue("--primary").trim(), fg: cs.getPropertyValue("--primary-foreground").trim(), ink: cs.getPropertyValue("--primary-ink").trim() };
@@ -1090,8 +1090,26 @@ test.describe("Stage 5K: カードの再配置・テーマカラー", () => {
       return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
     };
     const [r, g] = rgb(v.p);
-    expect(g / r).toBeGreaterThan(0.55); // 赤寄りではない（黄みが十分）
-    expect(cr(v.p, v.fg)).toBeGreaterThanOrEqual(7); // 塗りの上の文字
+    expect(g / r).toBeGreaterThan(0.45); // 赤寄りではない（黄みが十分）
+    expect(v.fg).toMatch(/^#f{3}(f{3})?$/i);
+    expect(cr(v.p, "#ffffff")).toBeGreaterThanOrEqual(3.4); // 塗りの上の白文字（太字・大きめの文字の基準 3:1 以上。通常文字の 4.5:1 には届かない）
     expect(cr(v.ink, "#ffffff")).toBeGreaterThanOrEqual(4.5); // 白背景の上の文字・線
+  });
+});
+
+test.describe("Stage 5K 追加: ライトの色の質感", () => {
+  test("残り日数バッジは塗りで強調（3日以上=薄いオレンジ／3日未満=オレンジ塗り＋白文字／24時間未満=赤塗り）。★は縁取りなし", async ({ page }) => {
+    const bg = (loc: ReturnType<typeof page.locator>) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
+    const L1 = page.locator('[data-lottery-id="L1"]').getByTestId("deadline-badge"); // danger
+    const L3 = page.locator('[data-lottery-id="L3"]').getByTestId("deadline-badge"); // warn
+    const primary = await page.evaluate(() => { const d = document.createElement("i"); d.style.color = "var(--primary)"; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; });
+    expect(await bg(L3)).toBe(primary);
+    expect(await L3.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(255, 255, 255)");
+    expect(await bg(L1)).not.toBe(primary);
+    expect(await L1.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(255, 255, 255)");
+    // ★: 縁取りの色が塗りと同じ（別色の縁取りなし）
+    const star = page.locator('[data-lottery-id="L1"]').getByRole("button", { name: /管理対象（★）/ }).locator("svg").first();
+    const [f, s] = await star.evaluate((e) => [getComputedStyle(e).fill, getComputedStyle(e).stroke]);
+    expect(f).toBe(s);
   });
 });

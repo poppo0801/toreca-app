@@ -13,12 +13,12 @@
   --muted: #ececef;
   --muted-foreground: #5b5b63;
   --border: #dcdce0;
-  --ring: #f08a1c;
+  --ring: #d96800;
   /* オレンジは主要操作・現在選択のみ */
-  --primary: #ff9a32;
+  --primary: #d96800;
   /* 白背景上の文字・線・アイコン用の濃いめのオレンジ（塗りの --primary は明るいので文字には使わない） */
-  --primary-ink: #b45309;
-  --primary-foreground: #1a1206;
+  --primary-ink: #b05800;
+  --primary-foreground: #ffffff;
   /* 情報区別用 */
   --info: #0f766e;
   --success: #15803d;
