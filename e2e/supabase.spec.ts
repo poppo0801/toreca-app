@@ -1967,7 +1967,8 @@ test("Stage 5M 系列ロゴ: マスター管理で登録→抽選カードの店
   await expect(logo).toBeVisible();
   const box = (await logo.boundingBox())!;
   expect([Math.round(box.width), Math.round(box.height)]).toEqual([20, 20]);
-  expect(await logo.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(192); // 保存時に192px四方へ整えられている
+  // 遅延読み込みの画像なので、読み込み完了を待ってから大きさを確認する（保存時に192px四方へ整えられている）
+  await expect.poll(() => logo.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(192);
   const served = await page.context().request.get((await logo.getAttribute("src"))!);
   expect(served.status()).toBe(200);
   expect(served.headers()["content-type"]).toBe("image/png");
