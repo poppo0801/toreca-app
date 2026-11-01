@@ -249,8 +249,14 @@ describe("店舗の更新ルール", () => {
     expect(p.preview.rows[1].notes).toEqual([]);
   });
 
-  it("系列は新規のとき必須で登録済みの名前。既存店舗の系列変更・未登録の系列はエラー", () => {
-    expect(plan([{ chain: "未登録電機", name: "新店" }]).preview.rows[0].errors[0].message).toContain("登録されていません");
+  it("系列は新規のとき必須。未登録の系列は新規系列として登録できる。既存店舗の系列変更はエラー", () => {
+    const nu = plan([{ chain: "未登録電機", name: "新店" }]);
+    expect(nu.preview.counts.new).toBe(1);
+    expect(nu.preview.newChains).toEqual(["未登録電機"]);
+    expect(nu.ops!.new_chains).toEqual(["未登録電機"]);
+    expect(nu.ops!.rows[0].set).toMatchObject({ chain_name: "未登録電機", name: "新店" });
+    expect(nu.ops!.rows[0].set.chain_id).toBeUndefined();
+    expect(plan([{ management_no: "ST000001", chain: "未登録電機" }]).preview.rows[0].errors[0].message).toContain("変更できません");
     expect(plan([{ management_no: "ST000001", chain: "別系列" }]).preview.rows[0].errors[0].message).toContain("変更できません");
     expect(plan([{ management_no: "ST000001", chain: "サンプル電機", memo: "x" }]).preview.counts.update).toBe(1);
     expect(plan([{ name: "新店" }]).preview.rows[0].errors[0].column).toBe("系列");
@@ -296,5 +302,37 @@ describe("ZIPの事前確認", () => {
       expect(r.ok).toBe(false);
       expect((await readMasterWorkbook(bad, "stores")).ok).toBe(false);
     }
+  });
+});
+
+describe("店舗Excel: 未登録の系列の同時登録", () => {
+  const snapC = (): StoreSnapshot => ({
+    ...sSnap(),
+    chains: [
+      { id: "c1", name: "サンプル電機", aliases: ["Sample Denki"] },
+      { id: "c2", name: "別系列" },
+      { id: "c9", name: "古い系列", archived: true },
+    ],
+  });
+  const plan2 = (rows: Record<string, string>[]) => planStores(grid(SHEET.stores, rows), snapC());
+  it("表記揺れ（全角半角・大文字小文字・別表記）は既存の系列に当て、新規作成しない", () => {
+    const r = plan2([{ chain: "ＳＡＭＰＬＥ　ＤＥＮＫＩ", name: "A店" }, { chain: "さんぷる電機", name: "B店" }, { chain: "別系列", name: "C店" }]);
+    expect(r.preview.rows[0].status).toBe("new");
+    expect(r.ops!.rows[0].set).toMatchObject({ chain_id: "c1" });
+    expect(r.ops!.new_chains).toEqual(["さんぷる電機"]); // ひらがなは別の名前なので新規（誤って既存に寄せない）
+  });
+  it("ファイル内の同じ未登録系列は1つにまとめ、同じ系列・同じ店舗名は重複エラー", () => {
+    const r = plan2([{ chain: "新電機", name: "A店" }, { chain: "新電機", name: "B店" }, { chain: "新電機", name: "a店" }]);
+    expect(r.preview.newChains).toEqual(["新電機"]);
+    expect(r.preview.counts).toMatchObject({ new: 2, error: 1 });
+  });
+  it("アーカイブ済みの系列と同じ名前は新規作成せずエラー。長すぎる系列名もエラー", () => {
+    expect(plan2([{ chain: "古い系列", name: "A店" }]).preview.rows[0].errors[0].message).toContain("アーカイブ");
+    expect(plan2([{ chain: "あ".repeat(81), name: "A店" }]).preview.counts.error).toBe(1);
+  });
+  it("系列が空欄の新規行はエラーのまま。エラーがあれば適用内容（ops）は作らない", () => {
+    const r = plan2([{ name: "A店" }, { chain: "新電機", name: "B店" }]);
+    expect(r.preview.counts.error).toBe(1);
+    expect(r.ops).toBeNull();
   });
 });

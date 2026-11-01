@@ -33,11 +33,14 @@ export interface StoreRow {
 }
 export interface StoreSnapshot {
   stores: StoreRow[];
-  chains: { id: string; name: string }[];
+  /** 系列（アーカイブ済みも含む）。aliases は別表記（表記揺れの照合に使う） */
+  chains: { id: string; name: string; archived?: boolean; aliases?: string[] }[];
 }
 
 export interface StoreOps {
   rows: { no: string | null; expected: string | null; set: Record<string, string | number | null> }[];
+  /** 未登録の系列（新規作成する名前）。適用時に店舗より先に同じトランザクションで作成し、行の chain_name から引く */
+  new_chains: string[];
 }
 
 const LABEL = Object.fromEntries(STORE_COLUMNS.map((c) => [c.key, c.label])) as Record<string, string>;
@@ -74,8 +77,12 @@ const emptyCounts = (): PreviewCounts => ({ new: 0, update: 0, unchanged: 0, err
 
 export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<PreviewResult, "fingerprint">; ops: StoreOps | null } {
   const byNo = new Map(snap.stores.map((s) => [s.management_no, s]));
-  const chainsByKey = new Map<string, { id: string; name: string }[]>();
-  for (const c of snap.chains) chainsByKey.set(nameKey(c.name), [...(chainsByKey.get(nameKey(c.name)) ?? []), c]);
+  const chainsByKey = new Map<string, StoreSnapshot["chains"]>();
+  // 系列名と別表記（表記揺れ）で照合する。同じ系列が名前と別表記の両方で当たっても1件として数える
+  for (const c of snap.chains) {
+    for (const k of new Set([nameKey(c.name), ...(c.aliases ?? []).map(nameKey)])) chainsByKey.set(k, [...(chainsByKey.get(k) ?? []), c]);
+  }
+  const newChainNames = new Map<string, string>(); // 照合キー → 新規作成する系列名（ファイル内で最初の表記）
   const chainName = new Map(snap.chains.map((c) => [c.id, c.name]));
   const dupKey = (chainId: string, name: string) => `${chainId}|${nameKey(name)}`;
   const owner = new Map<string, string>(); // 系列+店舗名 → 管理番号
@@ -86,7 +93,7 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
   const renamed = new Map<string, string>();
   const rows: PreviewRow[] = [];
   const counts = emptyCounts();
-  const ops: StoreOps = { rows: [] };
+  const ops: StoreOps = { rows: [], new_chains: [] };
 
   for (const r of grid.rows) {
     const errors: RowIssue[] = [];
@@ -111,13 +118,22 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
 
     // 系列: 新規は必須で登録済みの名前。既存の店舗では変更できない（抽選の系列・店舗の対応が崩れるため）
     let chainId: string | null = cur?.chain_id ?? null;
+    let newChainKey: string | null = null; // 未登録の系列（新規の行だけ。取り込み時に新規作成する）
     const chainCell = (raw.chain ?? "").trim();
     if (isNew && !chainCell) bad(LABEL.chain, "新規の行では系列が必須です");
     if (isNew && !(raw.name ?? "").trim()) bad(LABEL.name, "新規の行では店舗名が必須です");
     if (chainCell) {
       const hits = chainsByKey.get(nameKey(chainCell)) ?? [];
-      if (hits.length === 0) bad(LABEL.chain, `系列「${chainCell}」は登録されていません（先にマスター管理で系列を登録してください）`);
-      else if (hits.length > 1) bad(LABEL.chain, `系列「${chainCell}」に一致する系列が複数あります`);
+      if (hits.length === 0) {
+        if (!isNew) bad(LABEL.chain, `系列は変更できません（現在: ${cur ? (chainName.get(cur.chain_id) ?? "不明") : "不明"}）。新しい系列を使う店舗は、管理番号を空欄の新規行で登録してください`);
+        else if (chainCell.length > 80) bad(LABEL.chain, "系列名は80文字以内で入力してください");
+        else {
+          // 未登録の系列は新規系列として登録する（確認画面に表示。ファイル内の表記違い・全角半角違いは同じ系列にまとめる）
+          newChainKey = nameKey(chainCell);
+          if (!newChainNames.has(newChainKey)) newChainNames.set(newChainKey, chainCell.normalize("NFKC").trim());
+        }
+      } else if (hits.length > 1) bad(LABEL.chain, `系列「${chainCell}」に一致する系列が複数あります`);
+      else if (hits[0].archived) bad(LABEL.chain, `系列「${chainCell}」はアーカイブされています（マスター管理で復元してから取り込んでください）`);
       else if (cur && hits[0].id !== cur.chain_id) bad(LABEL.chain, `系列は変更できません（現在: ${chainName.get(cur.chain_id) ?? "不明"}）`);
       else chainId = hits[0].id;
     }
@@ -154,8 +170,8 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
     }
 
     const name = ("name" in set ? (set.name as string) : (cur?.name ?? "")) || "";
-    if (isNew && chainId && name) {
-      const k = dupKey(chainId, name);
+    if (isNew && (chainId || newChainKey) && name) {
+      const k = dupKey(chainId ?? `new:${newChainKey}`, name);
       const o = owner.get(k);
       if (o) bad(LABEL.name, `同じ系列に同じ店舗名があります（管理番号 ${o}）。更新する場合は管理番号を入力してください`);
       else if (newKeys.has(k)) bad(LABEL.name, "同じ系列・店舗名の新規行がファイル内にあります");
@@ -171,6 +187,10 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
     const notes: string[] = [];
     if (cur && "address_optional" in set && cur.latitude !== null) notes.push("住所が変わるため、位置情報（緯度経度）の再確認が必要になります。位置は自動では取得し直しません");
     if (isNew && chainId) set.chain_id = chainId;
+    if (isNew && newChainKey && errors.length === 0) {
+      set.chain_name = newChainNames.get(newChainKey)!;
+      notes.push(`系列「${set.chain_name}」を新規系列として登録します`);
+    }
 
     let status: PreviewRow["status"];
     if (errors.length > 0) status = "error";
@@ -178,12 +198,13 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
     else if (changes.length === 0) status = "unchanged";
     else status = "update";
     counts[status]++;
-    rows.push({ sheet: SHEET.stores, row: r.row, no, label: `${chainCell || (cur ? (chainName.get(cur.chain_id) ?? "") : "")} ${name}`.trim() || "（名称なし）", status, changes, errors, notes });
+    rows.push({ sheet: SHEET.stores, row: r.row, no, label: `${newChainKey && chainCell ? `${newChainNames.get(newChainKey)}（新規系列）` : chainCell || (cur ? (chainName.get(cur.chain_id) ?? "") : "")} ${name}`.trim() || "（名称なし）", status, changes, errors, notes });
     if (status === "new" || status === "update") ops.rows.push({ no, expected: cur ? cur.updated_at : null, set });
   }
 
+  ops.new_chains = [...newChainNames.values()];
   return {
-    preview: { kind: "stores", counts, rows, applicable: counts.error === 0 && counts.new + counts.update > 0 },
+    preview: { kind: "stores", counts, rows, newChains: ops.new_chains, applicable: counts.error === 0 && counts.new + counts.update > 0 },
     ops: counts.error === 0 ? ops : null,
   };
 }

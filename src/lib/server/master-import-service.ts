@@ -58,7 +58,9 @@ export async function loadStoreSnapshot(db: Db): Promise<StoreSnapshot> {
       .order("management_no")
       .range(a, b) as unknown as PromiseLike<{ data: StoreRow[] | null; error: unknown }>,
   );
-  const chains = await fetchAll<{ id: string; name: string }>((a, b) => db.from("chains").select("id,name").is("archived_at", null).order("created_at").order("id").range(a, b));
+  const chainRows = await fetchAll<{ id: string; name: string; archived_at: string | null }>((a, b) => db.from("chains").select("id,name,archived_at").order("created_at").order("id").range(a, b));
+  const aliasRows = await fetchAll<{ chain_id: string; alias: string }>((a, b) => db.from("chain_aliases").select("chain_id,alias").order("created_at").order("id").range(a, b));
+  const chains = chainRows.map((c) => ({ id: c.id, name: c.name, archived: c.archived_at !== null, aliases: aliasRows.filter((x) => x.chain_id === c.id).map((x) => x.alias) }));
   return { stores, chains };
 }
 
@@ -153,16 +155,5 @@ export async function applyImport(db: Db, kind: MasterKind, file: Buffer, fileNa
     return { ok: false, code: "error", error: "適用に失敗しました。何も反映していません" };
   }
   const r = data as { created: string[]; updated: number; composition: number };
-  // 営業形態は適用RPCの対象列に無いため、適用の直後に反映する（新規行は作成順の管理番号）
-  if (kind === "stores") {
-    const rows = (p.planned.ops as { rows: { no: string | null; set: Record<string, unknown> }[] }).rows;
-    let created = 0;
-    for (const row of rows) {
-      const no = row.no ?? r.created[created++];
-      if (row.set.sales_kind === undefined || !no) continue;
-      const u = await db.from("stores").update({ sales_kind: String(row.set.sales_kind) }).eq("management_no", no);
-      if (u.error) return { ok: false, code: "error", error: "適用しましたが、営業形態を保存できませんでした。マスター管理から営業形態を確認してください" };
-    }
-  }
   return { ok: true, created: r.created, updated: r.updated, composition: r.composition };
 }

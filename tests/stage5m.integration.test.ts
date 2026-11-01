@@ -3,6 +3,9 @@
  * 商品画像のストレージ分離。
  *   npm run test:db
  */
+import ExcelJS from "exceljs";
+import { buildTemplate } from "@/lib/master-excel/workbook";
+import { applyImport, previewImport } from "@/lib/server/master-import-service";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EMPTY_FLEX } from "@/lib/lottery-input";
 import { loadAppData, type Db } from "@/lib/server/lottery-service";
@@ -115,5 +118,57 @@ describe.skipIf(!dbTestsEnabled)("Stage 5M: 発表方法の単一選択・系列
   it("他世帯の系列のロゴは変更できない", async () => {
     const r = await u2.from("chains").update({ logo_path: `${hid2}/chain-logos/q.png`, logo_sha256: "b".repeat(64) } as never).eq("id", chainId).select("id");
     expect(r.data ?? []).toHaveLength(0);
+  });
+
+  async function storeBook(rows: string[][]) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildTemplate("stores")) as unknown as ExcelJS.Buffer);
+    const ws = wb.getWorksheet("店舗")!;
+    rows.forEach((r, i) => r.forEach((v, c) => (ws.getCell(i + 2, c + 1).value = v === "" ? null : v)));
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  }
+  const row = (chain: string, name: string, kind = "") => ["", chain, name, kind, "兵庫県", "", "", "", "", "", ""];
+
+  it("店舗Excel: 未登録の系列を含むファイルを、系列を先に作成して店舗を登録できる。再取り込み・表記揺れで重複しない", async () => {
+    const fresh = `5M新系列${Date.now().toString(36)}`;
+    const file = await storeBook([row(fresh, "新系列A店"), row(fresh, "新系列B店", "オンライン専用"), row("5M電機", "既存系列の新店")]);
+    const pv = await previewImport(u1, "stores", file);
+    expect(pv.ok).toBe(true);
+    if (!pv.ok) return;
+    expect(pv.preview.newChains).toEqual([fresh]);
+    expect(pv.preview.counts).toMatchObject({ new: 3, error: 0 });
+    const chainsBefore = ((await u1.from("chains").select("id")).data ?? []).length;
+
+    const done = await applyImport(u1, "stores", file, "stores.xlsx", pv.preview.fingerprint, profs[0].id);
+    expect(done.ok, JSON.stringify(done)).toBe(true);
+    const chains = (await u1.from("chains").select("id,name,logo_path,logo_sha256").eq("name", fresh)).data!;
+    expect(chains).toHaveLength(1); // 系列は1つだけ作られ、既存の系列は増えない
+    expect(chains[0].logo_path).toBeNull();
+    expect(((await u1.from("chains").select("id")).data ?? []).length).toBe(chainsBefore + 1);
+    const stores = (await u1.from("stores").select("name,chain_id,sales_kind").in("name", ["新系列A店", "新系列B店", "既存系列の新店"])).data!;
+    expect(stores).toHaveLength(3);
+    expect(stores.find((x) => x.name === "新系列A店")).toMatchObject({ chain_id: chains[0].id, sales_kind: "physical" });
+    expect(stores.find((x) => x.name === "新系列B店")!.sales_kind).toBe("online_only"); // 営業形態も同じトランザクションで保存
+    expect(stores.find((x) => x.name === "既存系列の新店")!.chain_id).toBe(chainId);
+
+    // 同じファイルをもう一度: 系列は登録済みなので新規作成されず、店舗は重複エラーになる（二重登録されない）
+    const again = await previewImport(u1, "stores", file);
+    expect(again.ok && (again.preview.newChains ?? []).length === 0).toBe(true);
+    expect(again.ok && again.preview.counts.error).toBe(3);
+    // 表記揺れ（全角英数・前後の空白）でも同じ系列を使い、新しい系列を作らない
+    const variant = await storeBook([row(` ${fresh.replace(/5M/, "５Ｍ")} `, "表記揺れ店")]);
+    const pv2 = await previewImport(u1, "stores", variant);
+    expect(pv2.ok && (pv2.preview.newChains ?? []).length === 0).toBe(true);
+    expect(pv2.ok && pv2.preview.counts.new).toBe(1);
+  });
+
+  it("店舗Excel: 途中で失敗すると、先に作った系列も含めて何も反映しない（原子性）", async () => {
+    const name = `5M失敗系列${Date.now().toString(36)}`;
+    const file = await storeBook([row(name, "失敗店")]);
+    const pv = await previewImport(u1, "stores", file);
+    if (!pv.ok) throw new Error("preview");
+    const bad = await applyImport(u1, "stores", file, "bad.xlsx", "f".repeat(64), profs[0].id); // 確認時と指紋が違う
+    expect(bad.ok).toBe(false);
+    expect(((await u1.from("chains").select("id").eq("name", name)).data ?? []).length).toBe(0);
   });
 });

@@ -255,10 +255,11 @@ describe.skipIf(!dbTestsEnabled)("Stage 5C: 管理番号とExcel取り込み", (
     expect(after.find((s) => s.name === "採番店")).toMatchObject({ address_optional: "新住所", round_trip_fare: 1200, location_review_needed: true, latitude: 34.69 }); // 位置は消さない
     expect(after.find((s) => s.name === "取込店")).toMatchObject({ chain_id: chain, apply_method: "app", receive_method: "store", round_trip_fare: 800, location_review_needed: false });
 
-    // 系列の変更・未登録の系列はエラー。エクスポート→取り込みは変更なし
+    // 既存店舗の系列変更はエラー。未登録の系列は新規行なら新規系列として登録できる（エラーにならない）。エクスポート→取り込みは変更なし
     await u1.from("chains").insert({ household_id: hid1, name: "5C別系列" });
     const bad = await previewImport(u1, "stores", await xlsx("stores", [S({ management_no: st.management_no!, chain: "5C別系列" }), S({ chain: "存在しない系列", name: "x" })]));
-    expect(bad.ok && bad.preview.counts.error).toBe(2);
+    expect(bad.ok && bad.preview.counts).toMatchObject({ error: 1, new: 1 });
+    expect(bad.ok && bad.preview.newChains).toEqual(["存在しない系列"]);
     const round = await previewImport(u1, "stores", await exportMaster(u1, "stores"));
     expect(round.ok && round.preview.counts.new + round.preview.counts.update + round.preview.counts.error).toBe(0);
   });

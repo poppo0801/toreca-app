@@ -313,6 +313,12 @@ export function MasterImportView({ history }: { history: ImportHistoryRow[] }) {
                 </button>
               ))}
             </div>
+            {(preview.newChains?.length ?? 0) > 0 && (
+              <p className="rounded-lg border border-teal-600/50 p-2 text-xs" data-testid="new-chains">
+                新規に登録される系列（{preview.newChains!.length}件）: <span className="font-medium">{preview.newChains!.join("、")}</span>
+                <span className="block text-[11px] text-muted-foreground">適用すると系列を先に作成し、その系列に店舗を登録します。登録済みの系列名・別表記と一致するものは、新規作成せず既存の系列を使います。</span>
+              </p>
+            )}
             {preview.components && <p className="text-[11px] text-muted-foreground">セット構成の件数も含みます（追加・数量の変更のみ。既存の構成は削除しません）。</p>}
             {total === 0 && <p className="text-xs text-muted-foreground">データの行がありません。</p>}
 

@@ -1119,7 +1119,7 @@ test("Excel取り込み・出力: テンプレート→確認→適用→再取�
   await expect(page.getByTestId("import-history")).toContainText("export-edited.xlsx");
   await expect(page.getByTestId("import-history")).toContainText("new.xlsx");
 
-  // 店舗: 未登録の系列はエラー。商品用のファイルは拒否
+  // 店舗: 未登録の系列は新規系列として確認画面に出て、系列を先に作成して店舗を登録できる。商品用のファイルは拒否
   await page.getByRole("tab", { name: "店舗" }).click();
   const stpl = Buffer.from(await (await page.context().request.get("/api/master-import?kind=stores&type=template")).body());
   const swb = new ExcelJS.Workbook();
@@ -1127,7 +1127,20 @@ test("Excel取り込み・出力: テンプレート→確認→適用→再取�
   swb.getWorksheet("店舗")!.getCell(2, 2).value = `存在しない系列${stamp}`;
   swb.getWorksheet("店舗")!.getCell(2, 3).value = "E2E店";
   await upload("stores.xlsx", Buffer.from(await swb.xlsx.writeBuffer()));
-  await expect(page.getByTestId("import-rows")).toContainText("登録されていません");
+  await expect(page.getByTestId("new-chains")).toContainText(`存在しない系列${stamp}`);
+  await expect(page.getByTestId("import-rows")).toContainText("新規系列として登録します");
+  await expect(page.getByTestId("count-error")).toHaveText("0");
+  await expect(page.getByTestId("import-apply")).toBeEnabled();
+  await page.getByTestId("import-apply").click();
+  await expect(page.getByTestId("import-done")).toContainText("新規 1件");
+  // 系列マスターに作られ、店舗がその系列で登録されている。同じファイルの再取り込みは重複エラー（系列も店舗も増えない）
+  await page.goto("/settings/masters");
+  await expect(page.getByTestId("master-row").filter({ hasText: `存在しない系列${stamp}` })).toHaveCount(1);
+  await page.getByTestId("link-master-import").click();
+  await page.getByTestId("master-import").getByRole("tab", { name: "店舗" }).click();
+  await upload("stores.xlsx", Buffer.from(await swb.xlsx.writeBuffer()));
+  await expect(page.getByTestId("new-chains")).toHaveCount(0);
+  await expect(page.getByTestId("import-rows")).toContainText("同じ系列に同じ店舗名があります");
   await expect(page.getByTestId("import-apply")).toBeDisabled();
   await upload("wrong-kind.xlsx", await book([["", "", "", "x", "", "", "", "", "", "", "", ""]]));
   await expect(page.getByTestId("import-error")).toContainText("商品用");
