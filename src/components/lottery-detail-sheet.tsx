@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { markLotterySeen } from "@/app/(app)/lotteries/seen-actions";
 import { ExternalLink, Star } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { DuplicateDialog } from "@/components/duplicate-dialog";
@@ -63,6 +64,16 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const [confirmOff, setConfirmOff] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [ruleMsg, setRuleMsg] = useState<string | null>(null);
+
+  // 詳細を開いたらNEWを解除する（確認済み）。保存先のあるモードのみ。表示中はこの回のNEWの印を残す
+  const seenId = persistent && open && lottery.isNew ? lottery.id : null;
+  useEffect(() => {
+    if (!seenId) return;
+    void markLotterySeen(seenId).then((r) => {
+      if (r.ok) void reload();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 開いた時に1回だけ
+  }, [seenId]);
 
   const chain = data.chains.find((c) => c.id === lottery.chainId);
   const store = data.stores.find((s) => s.id === lottery.storeId);

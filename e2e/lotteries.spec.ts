@@ -55,7 +55,7 @@ test("ヘッダーは現在のユーザーだけを表示し、タップで切�
 test("見出しと登録ボタンは1行。説明文は無く、タブは 全情報→★管理対象→応募済み→当選 の順で初期は★管理対象", async ({ page }) => {
   await expect(page.getByText("家族共通の抽選情報です。")).toHaveCount(0);
   const tabs = page.getByRole("tab");
-  const names = (await tabs.allInnerTexts()).map((t) => t.replace(/\s*\d+\s*$/, "").trim());
+  const names = (await tabs.allInnerTexts()).map((t) => t.replace(/NEW\d+/, "").replace(/\s*\d+\s*$/, "").trim());
   expect(names).toEqual(["全情報", "★管理対象", "応募済み", "当選"]);
   await expect(page.getByRole("tab", { name: /★管理対象/ })).toHaveAttribute("aria-selected", "true");
   // モックでは登録ボタンの代わりにデモ表示。見出しと同じ行にある
@@ -1264,5 +1264,15 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(logo).toHaveCSS("background-color", "rgb(255, 255, 255)");
     expect(await logo.evaluate((el) => getComputedStyle(el).objectFit)).toBe("contain");
+  });
+});
+
+test.describe("Stage 4C: NEW表示", () => {
+  test("全情報タブに、まだ確認していない新着の件数が出る（トレマネが新規に把握した抽選が対象）", async ({ page }) => {
+    const badge = page.getByRole("tab", { name: /全情報/ }).getByTestId("tab-new");
+    await expect(badge).toHaveText("NEW1");
+    // 新着の抽選のカードにはNEW。受付開始日ではなく、把握した日時で決まる印
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    await expect(page.getByTestId("lottery-card").filter({ hasText: "NEW" }).first()).toBeVisible();
   });
 });

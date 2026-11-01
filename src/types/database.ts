@@ -1358,6 +1358,295 @@ export type Database = {
           },
         ]
       }
+      collection_candidates: {
+        Row: {
+          content_hash: string | null
+          created_at: string
+          dedupe_key: string
+          draft: Json | null
+          fetched_at: string
+          household_id: string
+          id: string
+          lottery_id: string | null
+          reasons: string[]
+          resolved_at: string | null
+          source_id: string | null
+          source_url: string | null
+          status: string
+          title: string
+          x_post_id: string | null
+        }
+        Insert: {
+          content_hash?: string | null
+          created_at?: string
+          dedupe_key: string
+          draft?: Json | null
+          fetched_at?: string
+          household_id: string
+          id?: string
+          lottery_id?: string | null
+          reasons?: string[]
+          resolved_at?: string | null
+          source_id?: string | null
+          source_url?: string | null
+          status: string
+          title?: string
+          x_post_id?: string | null
+        }
+        Update: {
+          content_hash?: string | null
+          created_at?: string
+          dedupe_key?: string
+          draft?: Json | null
+          fetched_at?: string
+          household_id?: string
+          id?: string
+          lottery_id?: string | null
+          reasons?: string[]
+          resolved_at?: string | null
+          source_id?: string | null
+          source_url?: string | null
+          status?: string
+          title?: string
+          x_post_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_candidates_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_candidates_lottery_id_household_id_fkey"
+            columns: ["lottery_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_candidates_source_id_household_id_fkey"
+            columns: ["source_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "collection_sources"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      collection_runs: {
+        Row: {
+          ai_calls: number
+          error_count: number
+          finished_at: string | null
+          household_id: string
+          id: string
+          new_count: number
+          registered_count: number
+          started_at: string
+          status: string
+          summary: Json
+          trigger: string
+          web_fetched: number
+          x_calls: number
+          x_posts: number
+        }
+        Insert: {
+          ai_calls?: number
+          error_count?: number
+          finished_at?: string | null
+          household_id: string
+          id?: string
+          new_count?: number
+          registered_count?: number
+          started_at?: string
+          status?: string
+          summary?: Json
+          trigger: string
+          web_fetched?: number
+          x_calls?: number
+          x_posts?: number
+        }
+        Update: {
+          ai_calls?: number
+          error_count?: number
+          finished_at?: string | null
+          household_id?: string
+          id?: string
+          new_count?: number
+          registered_count?: number
+          started_at?: string
+          status?: string
+          summary?: Json
+          trigger?: string
+          web_fetched?: number
+          x_calls?: number
+          x_posts?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_runs_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_settings: {
+        Row: {
+          apply_methods: string[]
+          auto_register: boolean
+          household_id: string
+          id: string
+          include_online: boolean
+          max_ai_per_run: number
+          max_distance_km: number | null
+          prefectures: string[]
+          product_ids: string[]
+          product_mode: string
+          receive_methods: string[]
+          req_exclude: string[]
+          req_include: string[]
+          schedule_enabled: boolean
+          schedule_hour_jst: number
+          set_name: string
+          status_mode: string
+          updated_at: string
+          x_enabled: boolean
+          x_max_posts_per_run: number
+          x_monthly_budget_jpy: number
+        }
+        Insert: {
+          apply_methods?: string[]
+          auto_register?: boolean
+          household_id: string
+          id?: string
+          include_online?: boolean
+          max_ai_per_run?: number
+          max_distance_km?: number | null
+          prefectures?: string[]
+          product_ids?: string[]
+          product_mode?: string
+          receive_methods?: string[]
+          req_exclude?: string[]
+          req_include?: string[]
+          schedule_enabled?: boolean
+          schedule_hour_jst?: number
+          set_name?: string
+          status_mode?: string
+          updated_at?: string
+          x_enabled?: boolean
+          x_max_posts_per_run?: number
+          x_monthly_budget_jpy?: number
+        }
+        Update: {
+          apply_methods?: string[]
+          auto_register?: boolean
+          household_id?: string
+          id?: string
+          include_online?: boolean
+          max_ai_per_run?: number
+          max_distance_km?: number | null
+          prefectures?: string[]
+          product_ids?: string[]
+          product_mode?: string
+          receive_methods?: string[]
+          req_exclude?: string[]
+          req_include?: string[]
+          schedule_enabled?: boolean
+          schedule_hour_jst?: number
+          set_name?: string
+          status_mode?: string
+          updated_at?: string
+          x_enabled?: boolean
+          x_max_posts_per_run?: number
+          x_monthly_budget_jpy?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_sources: {
+        Row: {
+          adapter: string
+          created_at: string
+          enabled: boolean
+          error_message: string | null
+          household_id: string
+          id: string
+          interval_hours: number
+          kind: string
+          last_attempt_at: string | null
+          last_item_count: number
+          last_new_count: number
+          last_success_at: string | null
+          name: string
+          status: string
+          updated_at: string
+          url: string | null
+          x_since_id: string | null
+          x_user_id: string | null
+          x_username: string | null
+        }
+        Insert: {
+          adapter?: string
+          created_at?: string
+          enabled?: boolean
+          error_message?: string | null
+          household_id: string
+          id?: string
+          interval_hours?: number
+          kind: string
+          last_attempt_at?: string | null
+          last_item_count?: number
+          last_new_count?: number
+          last_success_at?: string | null
+          name: string
+          status?: string
+          updated_at?: string
+          url?: string | null
+          x_since_id?: string | null
+          x_user_id?: string | null
+          x_username?: string | null
+        }
+        Update: {
+          adapter?: string
+          created_at?: string
+          enabled?: boolean
+          error_message?: string | null
+          household_id?: string
+          id?: string
+          interval_hours?: number
+          kind?: string
+          last_attempt_at?: string | null
+          last_item_count?: number
+          last_new_count?: number
+          last_success_at?: string | null
+          name?: string
+          status?: string
+          updated_at?: string
+          url?: string | null
+          x_since_id?: string | null
+          x_user_id?: string | null
+          x_username?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_sources_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       eligibility_purchases: {
         Row: {
           amount_yen: number | null

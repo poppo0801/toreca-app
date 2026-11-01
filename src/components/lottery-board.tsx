@@ -151,6 +151,8 @@ export function LotteryBoard() {
   // 応募直後のカードを一定時間だけ残して退場させる（★管理対象で「応募済みを含まない」のとき、一覧表示のみ）
   const exit = useApplyExitController({ enabled: tab === "managed" && filters.applied === "exclude" && view === "list", resetKey: `${profile.id}|${tab}|${filters.applied}|${view}` });
   const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds), [data, tab, filters, now, profile.id, exit.keepIds]);
+  // トレマネが新規に把握した（まだ詳細を確認していない）抽選の件数。自動収集で追加された抽選もここに含まれる
+  const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew).length, [data.lotteries]);
   const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
   const showSkip = tab === "managed";
@@ -214,6 +216,11 @@ export function LotteryBoard() {
               >
                 {t.label}
                 <span className="ml-0.5 text-[11px] opacity-80">{count}</span>
+                {t.value === "all" && newCount > 0 && (
+                  <span data-testid="tab-new" aria-label={`新着${newCount}件`} className="ml-0.5 rounded bg-info/20 px-1 text-[10px] font-bold text-info">
+                    NEW{newCount}
+                  </span>
+                )}
                 {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute right-1 top-0.5 size-2 rounded-full bg-danger ring-2 ring-muted" />}
               </button>
             );

@@ -125,6 +125,15 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
     }
   }
 
+  return extractFromRequest(req, kind, deps.extractor, deps.now, notices);
+}
+
+/**
+ * 取得済みの入力（本文・画像・出典）をAIで読み取り、検証して返す共通処理。
+ * 手動の解析・一括解析・自動収集（Stage 4C。X投稿の本文＋画像＋リンク先の統合）が同じ処理を通る。
+ */
+export async function extractFromRequest(req: ExtractRequest, kind: InputKind, extractor: LotteryExtractor, now: Date, notices: string[]): Promise<ExtractResult> {
+  const deps = { extractor, now };
   try {
     const out = await deps.extractor.extract(req);
     // 正規化（年の推定は告知の公開日があればそれを基準にする）→ プログラム側の検証（根拠の原文照合・矛盾の検出）

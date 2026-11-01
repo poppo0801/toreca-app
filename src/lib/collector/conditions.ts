@@ -1,0 +1,198 @@
+/**
+ * 自動収集の条件と、候補が条件に合うかの判定（純粋関数）。
+ * 判定は「合う（match）／除外（exclude）／要確認（review）」の3つ。分からない情報を「合う」に倒さない。
+ */
+import type { LotteryInput } from "@/lib/lottery-input";
+import { HIDDEN_REQUIREMENT_TAGS, placeInfo, type RequirementTag, type StoreKind } from "@/lib/lottery-taxonomy";
+
+export const DEFAULT_PREFECTURES = ["兵庫県", "大阪府", "京都府", "東京都", "千葉県", "神奈川県"] as const;
+
+/** 応募方法（チャネル）。Web応募＝通販とは判定しない（受取方法は別） */
+export const APPLY_CHANNELS = [
+  { code: "web", label: "Web応募" },
+  { code: "app", label: "公式アプリ応募" },
+  { code: "livepocket", label: "LivePocket" },
+  { code: "store", label: "店頭応募" },
+  { code: "x", label: "X応募" },
+  { code: "line", label: "LINE応募" },
+  { code: "other", label: "その他" },
+] as const;
+export type ApplyChannel = (typeof APPLY_CHANNELS)[number]["code"];
+
+export const RECEIVE_KINDS = [
+  { code: "store", label: "店頭受取" },
+  { code: "shipping", label: "通販・発送" },
+  { code: "either", label: "両方" },
+  { code: "unknown", label: "不明" },
+] as const;
+export type ReceiveKind = (typeof RECEIVE_KINDS)[number]["code"];
+
+export interface CollectionConditions {
+  prefectures: string[];
+  includeOnline: boolean;
+  /** 自宅からの最大直線距離(km)。null=制限なし。通販には適用しない */
+  maxDistanceKm: number | null;
+  applyMethods: ApplyChannel[];
+  receiveMethods: ReceiveKind[];
+  /** 該当条件を含む抽選だけ（どれか1つ以上） */
+  reqInclude: RequirementTag[];
+  /** 該当条件を含む抽選を除外 */
+  reqExclude: RequirementTag[];
+  productMode: "all" | "include" | "exclude";
+  productIds: string[];
+  /** open=現在応募可能のみ / open_or_before=受付前も含む */
+  statusMode: "open" | "open_or_before";
+}
+
+export const DEFAULT_CONDITIONS: CollectionConditions = {
+  prefectures: [...DEFAULT_PREFECTURES],
+  includeOnline: true,
+  maxDistanceKm: null,
+  applyMethods: [],
+  receiveMethods: [],
+  reqInclude: [],
+  reqExclude: [],
+  productMode: "all",
+  productIds: [],
+  statusMode: "open",
+};
+
+export type Verdict = "match" | "exclude" | "review";
+export interface Evaluation {
+  verdict: Verdict;
+  /** 画面に出す理由（除外・要確認の根拠、合う場合の補足） */
+  reasons: string[];
+}
+
+export interface EvalContext {
+  /** 照合できた店舗の都道府県（未照合・不明は空） */
+  prefecture: string;
+  storeKind: StoreKind;
+  /** 自宅からの直線距離(km)。位置が不明なら null（0kmにしない） */
+  distanceKm: number | null;
+  now: Date;
+}
+
+const JST = "Asia/Tokyo";
+const jstDate = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: JST, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+type Flex = LotteryInput["applyDeadline"];
+
+/** 締切が過ぎているか。日付のみの締切は、その日が終わるまで過ぎたとしない（23:59などの時刻は補わない）。不明は null */
+export function deadlinePassed(f: Flex, now: Date): boolean | null {
+  if (f.precision === "unknown" || !f.date) return null;
+  if (f.precision === "date_only") return f.date < jstDate(now);
+  const t = new Date(`${f.date}T${f.time || "00:00"}:00+09:00`);
+  return Number.isNaN(t.getTime()) ? null : t.getTime() < now.getTime();
+}
+
+/** 応募開始が未来か（受付前）。不明は null */
+export function startInFuture(f: Flex, now: Date): boolean | null {
+  if (f.precision === "unknown" || !f.date) return null;
+  if (f.precision === "date_only") return f.date > jstDate(now);
+  const t = new Date(`${f.date}T${f.time || "00:00"}:00+09:00`);
+  return Number.isNaN(t.getTime()) ? null : t.getTime() > now.getTime();
+}
+
+/** 応募方法のチャネルを、取得できた情報から判定する（判定できなければ空） */
+export function detectApplyChannels(input: Pick<LotteryInput, "applyMethod" | "requirementTags" | "sourceUrls">): ApplyChannel[] {
+  const out = new Set<ApplyChannel>();
+  if (input.applyMethod === "web") out.add("web");
+  if (input.applyMethod === "app") out.add("app");
+  if (input.applyMethod === "store") out.add("store");
+  const tags = input.requirementTags ?? [];
+  if (tags.includes("x_account") || tags.includes("x_follow") || tags.includes("x_repost")) out.add("x");
+  if (tags.includes("line_register")) out.add("line");
+  if (tags.includes("in_store_apply")) out.add("store");
+  if (tags.includes("livepocket_account") || (input.sourceUrls ?? []).some((u) => /(^|\.)livepocket\.jp(\/|$)/i.test(u.replace(/^https?:\/\//i, "")))) out.add("livepocket");
+  return [...out];
+}
+
+const receiveKind = (m: LotteryInput["receiveMethod"]): ReceiveKind => m;
+
+export function evaluateCandidate(input: LotteryInput, cond: CollectionConditions, ctx: EvalContext): Evaluation {
+  const excluded: string[] = [];
+  const review: string[] = [];
+  const notes: string[] = [];
+
+  // ---- 受付状況
+  const ended = deadlinePassed(input.applyDeadline, ctx.now);
+  if (ended === true) excluded.push("応募締切を過ぎています");
+  else if (ended === null) review.push("応募締切が不明です（受付中とは判断できません）");
+  if (cond.statusMode === "open" && startInFuture(input.applyStart, ctx.now) === true) excluded.push("まだ応募開始前です");
+
+  // ---- 地域・受取方法
+  const recv = receiveKind(input.receiveMethod);
+  const place = placeInfo({ receiveMethod: input.receiveMethod, prefecture: ctx.prefecture || null, storeKind: ctx.storeKind });
+  const onlineOnly = place.label === "通販";
+  if (cond.receiveMethods.length > 0) {
+    const kind: ReceiveKind = onlineOnly ? "shipping" : recv;
+    if (kind === "unknown") review.push("受取方法が不明です");
+    else if (!cond.receiveMethods.includes(kind)) excluded.push("受取方法が収集条件に合いません");
+  }
+  if (onlineOnly) {
+    if (!cond.includeOnline) excluded.push("通販・発送の抽選は収集しない設定です");
+    else notes.push("通販・発送（全国対象。配送先の制限がないかは告知で確認してください）");
+  } else if (recv === "unknown") {
+    review.push("受取方法（店頭・発送）が不明です");
+  } else if (place.canShip && cond.includeOnline && !cond.prefectures.includes(ctx.prefecture)) {
+    notes.push("店頭受取の地域は対象外ですが、発送で受け取れます");
+  } else if (!ctx.prefecture) {
+    review.push("対象地域（都道府県）が不明です");
+  } else if (!cond.prefectures.includes(ctx.prefecture)) {
+    excluded.push(`対象外の地域です（${ctx.prefecture}）`);
+  } else if (cond.maxDistanceKm !== null) {
+    if (ctx.distanceKm === null) review.push("店舗の位置が未設定のため、距離を判定できません");
+    else if (ctx.distanceKm > cond.maxDistanceKm) excluded.push(`自宅から直線で約${Math.round(ctx.distanceKm)}kmあり、上限（${cond.maxDistanceKm}km）を超えています`);
+  }
+
+  // ---- 応募方法
+  if (cond.applyMethods.length > 0) {
+    const ch = detectApplyChannels(input);
+    if (ch.length === 0) review.push("応募方法を判定できません");
+    else if (!ch.some((c) => cond.applyMethods.includes(c))) excluded.push("応募方法が収集条件に合いません");
+  }
+
+  // ---- 応募条件（一般的な本人確認は対象にしない）
+  const tags = ((input.requirementTags ?? []) as RequirementTag[]).filter((t) => !HIDDEN_REQUIREMENT_TAGS.includes(t));
+  const bad = cond.reqExclude.filter((t) => tags.includes(t));
+  if (bad.length > 0) excluded.push("除外する応募条件を含んでいます");
+  if (cond.reqInclude.length > 0) {
+    if (tags.length === 0) review.push("応募条件が分からないため、条件に合うか判断できません");
+    else if (!cond.reqInclude.some((t) => tags.includes(t))) excluded.push("必要な応募条件を含んでいません");
+  }
+  if (tags.includes("resident_area")) review.push("居住地域の制限があります（応募できる地域を確認してください）");
+
+  // ---- 商品
+  if (cond.productMode !== "all" && cond.productIds.length > 0) {
+    const ids = input.items.map((i) => i.product.id);
+    const hasUnknown = ids.some((x) => x === null);
+    const hit = ids.some((x) => x !== null && cond.productIds.includes(x));
+    if (cond.productMode === "include") {
+      if (!hit) (hasUnknown ? review : excluded).push(hasUnknown ? "商品を判別できず、指定商品か判断できません" : "指定した商品ではありません");
+    } else if (hit) excluded.push("除外する商品です");
+  }
+
+  if (excluded.length > 0) return { verdict: "exclude", reasons: excluded };
+  if (review.length > 0) return { verdict: "review", reasons: [...review, ...notes] };
+  return { verdict: "match", reasons: notes };
+}
+
+/** 収集条件の入力（DBの行・画面の入力）を検証して整える。不正な値は既定に戻す */
+export function normalizeConditions(raw: Partial<Record<string, unknown>>): CollectionConditions {
+  const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T[] => strs(v).filter((x): x is T => (allowed as readonly string[]).includes(x));
+  const dist = typeof raw.maxDistanceKm === "number" && Number.isFinite(raw.maxDistanceKm) && raw.maxDistanceKm >= 1 ? Math.min(3000, Math.round(raw.maxDistanceKm)) : null;
+  return {
+    prefectures: strs(raw.prefectures),
+    includeOnline: raw.includeOnline !== false,
+    maxDistanceKm: dist,
+    applyMethods: pick(raw.applyMethods, APPLY_CHANNELS.map((c) => c.code)),
+    receiveMethods: pick(raw.receiveMethods, RECEIVE_KINDS.map((c) => c.code)),
+    reqInclude: strs(raw.reqInclude) as RequirementTag[],
+    reqExclude: strs(raw.reqExclude) as RequirementTag[],
+    productMode: raw.productMode === "include" || raw.productMode === "exclude" ? raw.productMode : "all",
+    productIds: strs(raw.productIds),
+    statusMode: raw.statusMode === "open_or_before" ? "open_or_before" : "open",
+  };
+}

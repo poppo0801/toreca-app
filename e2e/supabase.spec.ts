@@ -1982,3 +1982,73 @@ test("Stage 5M 系列ロゴ: マスター管理で登録→抽選カードの店
   await page.getByRole("tab", { name: /全情報/ }).click();
   await expect(page.getByTestId("lottery-card").filter({ hasText: `E2E5M商品${stamp}` }).first().getByTestId("chain-logo")).toHaveCount(0);
 });
+
+test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・収集元の追加/無効/削除・SSRFの拒否・条件の保存と保持・X APIは設定するまで呼ばない", async ({ page }) => {
+  await login(page);
+  await page.goto("/settings");
+  await page.getByTestId("menu-collection").click();
+  await expect(page.getByRole("heading", { name: "抽選情報の自動収集" })).toBeVisible();
+
+  // 初期の収集元（Web2・X2）。まだ取得していないので「未取得」（取得できたと表示しない）
+  const rows = page.getByTestId("source-row");
+  await expect(rows).toHaveCount(4);
+  await expect(page.getByTestId("sources")).toContainText("https://pokeso.jp/chusen");
+  await expect(page.getByTestId("sources")).toContainText("https://torecabiyori.com/chusen/pokemon/");
+  await expect(page.getByTestId("sources")).toContainText("@OnchainOutlaw");
+  await expect(page.getByTestId("sources")).toContainText("@pokecachan");
+  await expect(page.getByTestId("source-status")).toHaveText(["未取得", "未取得", "未取得", "未取得"]);
+
+  // 初期条件: 6都府県・通販あり・現在応募可能・定期実行とX APIは無効・予算0円
+  await expect(page.getByTestId("pref-chips")).toContainText("兵庫県");
+  await expect(page.getByTestId("pref-chips")).toContainText("神奈川県");
+  await expect(page.getByTestId("pref-chips").getByRole("button", { pressed: true })).toHaveCount(6);
+  await expect(page.getByTestId("schedule-enabled")).not.toBeChecked();
+  await expect(page.getByTestId("x-enabled")).not.toBeChecked();
+  await expect(page.getByLabel("X APIの月額予算(円)")).toHaveValue("0");
+  await expect(page.getByTestId("x-state")).toContainText("APIキー（X_BEARER_TOKEN）");
+
+  // 収集元の追加: 内部ネットワークや資格情報つきURLは拒否。公開のhttps URLは追加できる
+  await page.getByLabel("収集するURL").fill("https://localhost/admin");
+  await page.getByTestId("add-source-submit").click();
+  await expect(page.getByTestId("collect-msg")).toBeVisible();
+  await expect(rows).toHaveCount(4);
+  await page.getByLabel("収集するURL").fill("http://example.invalid/list");
+  await page.getByTestId("add-source-submit").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("https");
+  await page.getByLabel("収集するURL").fill("https://user:pw@example.invalid/list");
+  await page.getByTestId("add-source-submit").click();
+  await expect(rows).toHaveCount(4);
+  await page.getByLabel("収集の名称").or(page.getByLabel("収集元の名称")).fill("E2Eテスト元");
+  await page.getByLabel("収集するURL").fill("https://example.invalid/chusen-e2e");
+  await page.getByTestId("add-source-submit").click();
+  await expect(rows).toHaveCount(5);
+  // 無効にする / 削除する
+  const mine = rows.filter({ hasText: "E2Eテスト元" });
+  await mine.getByRole("checkbox", { name: /有効にする/ }).click(); // サーバーに保存してから画面が更新される
+  await expect(mine.getByTestId("source-status")).toHaveText("無効");
+  page.once("dialog", (d) => void d.accept());
+  await mine.getByRole("button", { name: "削除" }).click();
+  await expect(rows).toHaveCount(4);
+
+  // 条件の変更 → 保存 → 再読込でも保持される
+  await page.getByTestId("pref-toggle").click();
+  await page.getByTestId("pref-chips").getByRole("button", { name: "北海道" }).click();
+  await page.getByLabel("最大距離(km)").fill("80");
+  await page.getByRole("button", { name: "Web応募" }).click();
+  await page.getByTestId("save-conditions").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("完了");
+  await page.reload();
+  await expect(page.getByTestId("pref-chips").getByRole("button", { pressed: true })).toHaveCount(7);
+  await expect(page.getByLabel("最大距離(km)")).toHaveValue("80");
+  await expect(page.getByRole("button", { name: "Web応募" })).toHaveAttribute("aria-pressed", "true");
+
+  // 手動実行（すべて無効にして、外部サイトに接続せずに実行できることだけ確認）。X APIは未設定・無効なので呼ばれない
+  for (const name of ["pokeso", "トレカ日和", "OnchainOutlaw", "pokecachan"]) {
+    const r = page.getByTestId("source-row").filter({ hasText: name });
+    await r.getByRole("checkbox", { name: /を有効にする/ }).click();
+    await expect(r.getByTestId("source-status")).toHaveText("無効");
+  }
+  await page.getByTestId("collect-now").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("収集しました");
+  await expect(page.getByTestId("runs")).toContainText("手動");
+});
