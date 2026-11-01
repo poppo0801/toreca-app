@@ -196,3 +196,21 @@ export function normalizeConditions(raw: Partial<Record<string, unknown>>): Coll
     statusMode: raw.statusMode === "open_or_before" ? "open_or_before" : "open",
   };
 }
+
+const jstLabel = (iso: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: JST, month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", hour12: false }).format(new Date(iso));
+
+/**
+ * AI読み取りの前に、一覧の表示だけで除外できるものを判定する(費用がかからない)。
+ * 一覧に書かれている締切が過ぎていれば除外。一覧に表示された都道府県が対象外なら除外
+ * （通販・発送の表示があるものは除外しない。店頭・発送の両方に対応するかは一覧では分からないため、理由に明記し、確認待ちに戻して解析できる）。
+ * 読み取れない項目は何も判断しない（nullを返し、AIの解析に回す）。
+ */
+export function preScreenFromList(h: { deadlineIso: string | null; deadlineDate?: string | null; prefecture: string; online: boolean }, cond: CollectionConditions, now: Date): string | null {
+  if (h.deadlineIso && new Date(h.deadlineIso).getTime() < now.getTime()) return `一覧の表示から、応募締切（${jstLabel(h.deadlineIso)}）を過ぎていると判断しました`;
+  // 時刻の表示が無い締切は、その日が終わるまでは過ぎたとしない
+  if (h.deadlineDate && h.deadlineDate < jstDate(now)) return `一覧の表示から、応募締切（${Number(h.deadlineDate.slice(5, 7))}/${Number(h.deadlineDate.slice(8, 10))}）を過ぎていると判断しました`;
+  if (h.prefecture && !h.online && !cond.prefectures.includes(h.prefecture)) {
+    return `一覧の表示から、対象外の地域（${h.prefecture}）と判断しました。通販・発送にも対応する場合は「確認待ちに戻す」で解析できます`;
+  }
+  return null;
+}

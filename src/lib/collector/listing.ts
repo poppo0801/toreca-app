@@ -149,3 +149,61 @@ export function judgeRelevance(text: string, opts: { fromPokemonList?: boolean }
 }
 
 export const looksLikeLottery = (text: string) => LOTTERY.test(text.normalize("NFKC"));
+
+// ---------------------------------------------------------------- 一覧の表示から読み取れる情報（AIを呼ぶ前の絞り込み用）
+export interface ListHints {
+  /** 一覧に表示された応募締切（日本時間のISO。年は現在に最も近いものを採用）。読み取れなければ null */
+  deadlineIso: string | null;
+  /** 時刻の表示が無い締切（「11/6(金)まで」）の日付 YYYY-MM-DD。時刻は補わない */
+  deadlineDate: string | null;
+  /** 一覧に表示された都道府県（「千葉県・LivePocket」のような表示）。無ければ空 */
+  prefecture: string;
+  /** 通販・オンライン・発送の表示がある */
+  online: boolean;
+}
+
+const PREF_RE = /(北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県)・/;
+const DEADLINE_RES = [
+  /(\d{1,2})\/(\d{1,2})(?:\s*[(（][^)）]*[)）])?\s*(\d{1,2}):(\d{2})\s*まで/,
+  /締切\s*(\d{1,2})\/(\d{1,2})(?:\s*[(（][^)）]*[)）])?\s*(\d{1,2}):(\d{2})/,
+];
+
+/** 月日だけの表示に年を補う: 現在から見て「過去200日〜未来165日」の範囲に入る年を選ぶ */
+function inferDate(month: number, day: number, hour: number, minute: number, now: Date): Date | null {
+  const y = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric" }).format(now));
+  for (const year of [y, y + 1, y - 1]) {
+    const d = new Date(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+09:00`);
+    if (Number.isNaN(d.getTime())) continue;
+    const diffDays = (d.getTime() - now.getTime()) / 86400_000;
+    if (diffDays >= -200 && diffDays <= 165) return d;
+  }
+  return null;
+}
+
+/** 一覧の見出し・周辺の文章から、締切・都道府県・通販の表示を読み取る。読み取れない項目は推測せず空にする */
+export function parseListHints(text: string, now: Date): ListHints {
+  const t = text.normalize("NFKC");
+  let deadline: Date | null = null;
+  let deadlineDate: string | null = null;
+  for (const re of DEADLINE_RES) {
+    const m = re.exec(t);
+    if (m) {
+      deadline = inferDate(Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), now);
+      if (deadline) break;
+    }
+  }
+  if (!deadline) {
+    // 時刻の表示が無い「11/6(金)まで」は日付だけを使う（23:59などの時刻は補わない）
+    const d = /(\d{1,2})\/(\d{1,2})(?:\s*[(（][^)）]*[)）])?\s*まで/.exec(t);
+    if (d) {
+      const dt = inferDate(Number(d[1]), Number(d[2]), 12, 0, now);
+      if (dt) deadlineDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(dt);
+    }
+  }
+  return {
+    deadlineIso: deadline ? deadline.toISOString() : null,
+    deadlineDate,
+    prefecture: PREF_RE.exec(t)?.[1] ?? "",
+    online: /通販|オンライン|配送|発送/.test(t),
+  };
+}

@@ -84,6 +84,7 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
 };
 const CAND_TABS = [
   { value: "pending", label: "確認待ち" },
+  { value: "queued", label: "解析待ち" },
   { value: "auto_registered", label: "登録済み" },
   { value: "excluded", label: "除外" },
   { value: "duplicate", label: "重複" },
@@ -114,6 +115,7 @@ export function AutoCollectView({
   settings,
   sources,
   candidates,
+  counts,
   runs,
   products,
   xConfigured,
@@ -123,6 +125,8 @@ export function AutoCollectView({
   settings: SettingsView;
   sources: SourceView[];
   candidates: CandidateView[];
+  /** 全件の数（一覧に表示している件数ではない） */
+  counts: Record<(typeof CAND_TABS)[number]["value"], number>;
   runs: RunView[];
   products: { id: string; name: string }[];
   xConfigured: boolean;
@@ -152,7 +156,7 @@ export function AutoCollectView({
   const run = async (sourceId?: string) => {
     const r = await act(sourceId ? `run-${sourceId}` : "run", { action: "run", actor: profile.id, sourceId }, (x) => {
       const n = (x.notices as string[] | undefined) ?? [];
-      return `収集しました: 新しい候補${x.newCount}件・自動登録${x.registered}件・AI解析${x.aiCalls}回・X取得${x.xPosts}件・確認待ち${x.pending}件${n.length ? `（${n.join(" / ")}）` : ""}`;
+      return `収集しました: 新しい候補${x.newCount}件・解析前に除外${x.screened}件・AI解析${x.aiCalls}回・自動登録${x.registered}件・X取得${x.xPosts}件・解析待ち残り${x.queued}件${n.length ? `（${n.join(" / ")}）` : ""}`;
     });
     return r;
   };
@@ -177,9 +181,10 @@ export function AutoCollectView({
     if (r.ok) setAdd({ ...add, name: "", value: "" });
   };
 
-  const list = candidates.filter((c) => c.status === tab);
+  const isQueued = (c: CandidateView) => c.status === "pending" && Boolean(c.draft?.queued) && !c.draft?.input;
+  const list = candidates.filter((c) => (tab === "queued" ? isQueued(c) : tab === "pending" ? c.status === "pending" && !isQueued(c) : c.status === tab));
   const readyCount = candidates.filter((c) => c.status === "pending" && c.draft?.ready && c.draft.verdict === "match").length;
-  const queued = candidates.filter((c) => c.status === "pending" && c.draft?.queued).length;
+  const queued = counts.queued;
   const prefShown = showAllPref ? PREFECTURE_LIST : PREFECTURE_LIST.filter((p) => s.prefectures.includes(p));
   const reqTags = REQUIREMENT_TAGS.filter((t) => !HIDDEN_REQUIREMENT_TAGS.includes(t.code) && t.code !== "unknown");
   const productList = products.filter((p) => !productQ || p.name.includes(productQ)).slice(0, 60);
@@ -201,7 +206,11 @@ export function AutoCollectView({
           </span>
         </div>
         {!aiConfigured && <p className="text-xs text-warn">AIが未設定のため、解析は行われません（候補の取得のみ）。</p>}
-        {queued > 0 && <p className="text-xs text-muted-foreground">解析待ちが{queued}件あります。AIの利用上限の範囲で、収集のたびに続きを解析します。</p>}
+        {queued > 0 && (
+          <p className="text-xs text-muted-foreground" data-testid="queued-note">
+            解析待ちが{queued}件あります。一覧の表示で締切済み・対象外の地域と分かるものは解析せずに除外し、残りは締切が近いものから、1回{settings.max_ai_per_run}件までAIで読み取ります（収集のたびに減ります）。
+          </p>
+        )}
         {msg && (
           <p role={msg.ok ? "status" : "alert"} className={cn("text-xs", msg.ok ? "text-teal-700 dark:text-teal-300" : "text-danger")} data-testid="collect-msg">
             {msg.text}
@@ -425,11 +434,11 @@ export function AutoCollectView({
 
       <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="candidates">
         <h2 className="font-semibold">収集候補</h2>
-        <div role="tablist" aria-label="候補の種類" className="grid grid-cols-5 gap-0.5 rounded-lg bg-muted p-0.5">
+        <div role="tablist" aria-label="候補の種類" className="grid grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5 sm:grid-cols-6">
           {CAND_TABS.map((t) => (
             <button key={t.value} role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)} className={cn("min-h-9 rounded-md px-0 text-[11px] font-medium leading-tight", tab === t.value ? "bg-primary text-primary-foreground" : "hover:bg-card")} data-testid={`cand-tab-${t.value}`}>
               {t.label}
-              <span className="ml-0.5 opacity-80">{candidates.filter((c) => c.status === t.value).length}</span>
+              <span className="ml-0.5 opacity-80" data-testid={`cand-count-${t.value}`}>{counts[t.value]}</span>
             </button>
           ))}
         </div>

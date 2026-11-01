@@ -175,3 +175,41 @@ describe("X公式APIの応答の解析と費用管理", () => {
     expect(compareId("99", "100")).toBeLessThan(0);
   });
 });
+
+import { parseListHints } from "@/lib/collector/listing";
+import { preScreenFromList } from "@/lib/collector/conditions";
+
+describe("一覧の表示だけでの事前判定（AI読み取りの前・費用なし）", () => {
+  const NOW2 = new Date("2026-11-02T12:00:00+09:00");
+  it("実サイトの表示形式から、締切・都道府県・通販を読み取る（pokeso・トレカ日和）", () => {
+    expect(parseListHints("¥5,500 11/3(火) 20:30まで 千葉県・LivePocket 応募する", NOW2)).toEqual({ deadlineIso: "2026-11-03T11:30:00.000Z", deadlineDate: null, prefecture: "千葉県", online: false });
+    const t = parseListHints("以内に締切 11/1(日) 22:00 まで 10/30(金) 10:00 から 応募する （古本市場 南茨木店・新しいタブで開きます）", NOW2);
+    expect(t.deadlineIso).toBe("2026-11-01T13:00:00.000Z");
+    expect(t.prefecture).toBe("");
+    expect(parseListHints("締切 11/5(木) 23:59 10/30(金) 10:00 受付開始 応募ページへ", NOW2).deadlineIso).toBe("2026-11-05T14:59:00.000Z");
+    expect(parseListHints("通販・LivePocket 応募する", NOW2).online).toBe(true);
+  });
+  it("時刻の表示が無い締切（11/6(金)まで）は日付だけで判定し、当日中は除外しない。『から』（開始）は締切にしない", () => {
+    expect(parseListHints("¥10,800 11/6(金)まで 石川県・応募", NOW2)).toMatchObject({ deadlineIso: null, deadlineDate: "2026-11-06" });
+    expect(parseListHints("11/2(月) 09:30から 東京都・申込", NOW2)).toMatchObject({ deadlineIso: null, deadlineDate: null });
+    expect(preScreenFromList(parseListHints("11/2(月)まで 東京都・申込", NOW2), DEFAULT_CONDITIONS, NOW2)).toBeNull(); // 当日中
+    expect(preScreenFromList(parseListHints("11/1(日)まで 東京都・申込", NOW2), DEFAULT_CONDITIONS, NOW2)).toContain("締切");
+  });
+  it("読み取れない項目は推測しない（締切なし・地域なし）", () => {
+    expect(parseListHints("応募する", NOW2)).toEqual({ deadlineIso: null, deadlineDate: null, prefecture: "", online: false });
+  });
+  it("年をまたぐ表示（12月に見る1月の締切）は翌年にする", () => {
+    expect(parseListHints("1/5(火) 20:00まで", new Date("2026-12-28T12:00:00+09:00")).deadlineIso).toBe("2027-01-05T11:00:00.000Z");
+  });
+  it("締切済み・対象外の地域は解析前に除外。通販表示・不明・受付中は除外しない", () => {
+    const c = DEFAULT_CONDITIONS;
+    const ended = parseListHints("11/1(日) 22:00 まで", NOW2);
+    expect(preScreenFromList(ended, c, NOW2)).toContain("締切");
+    expect(preScreenFromList(parseListHints("11/3(火) 20:30まで 愛知県・LivePocket", NOW2), c, NOW2)).toContain("愛知県");
+    expect(preScreenFromList(parseListHints("11/3(火) 20:30まで 千葉県・LivePocket", NOW2), c, NOW2)).toBeNull();
+    expect(preScreenFromList(parseListHints("11/3(火) 20:30まで 愛知県・通販・LivePocket", NOW2), c, NOW2)).toBeNull();
+    expect(preScreenFromList(parseListHints("応募する", NOW2), c, NOW2)).toBeNull();
+    // 対象の都道府県を変えれば判定も変わる
+    expect(preScreenFromList(parseListHints("11/3(火) 20:30まで 愛知県・LivePocket", NOW2), { ...c, prefectures: ["愛知県"] }, NOW2)).toBeNull();
+  });
+});

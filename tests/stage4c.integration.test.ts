@@ -246,6 +246,56 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
     expect((await lotteries()).length).toBeLessThanOrEqual(lotsBefore);
   });
 
+  it("解析待ちは、AI読み取りの前に一覧の表示で絞り込み、締切が近い順に上限まで解析し、収集のたびに減る。済んだものは再解析しない", async () => {
+    const pokeso = await sourceOf("pokeso");
+    await u1.from("collection_sources").update({ enabled: true }).eq("id", pokeso.id);
+    await setSettings({ max_ai_per_run: 2 });
+    const a = (u: string, t: string) => `<a href="https://shop-q.example.invalid/lottery/${u}">ポケモンカード 抽選 ${t}</a>`;
+    const listHtml = html(
+      [
+        a("end1", "1/10(日) 20:00まで 兵庫県・LivePocket"), // 締切済み
+        a("end2", "1/14(木) 23:00まで 大阪府・LivePocket"), // 締切済み
+        a("pref", "1/22(金) 20:00まで 愛知県・LivePocket"), // 対象外の地域
+        a("late", "1/25(月) 20:00まで 兵庫県・LivePocket"),
+        a("mid", "1/20(水) 20:00まで 兵庫県・LivePocket"),
+        a("soon", "1/18(月) 20:00まで 兵庫県・LivePocket"),
+      ].join("<div></div>"),
+    );
+    // 過去の版で溜まった解析待ち（一覧の読み取り結果を持たない）も、次の収集で見直される
+    await u1.from("collection_candidates").insert({ household_id: hid, source_id: pokeso.id, dedupe_key: "https://shop-q.example.invalid/lottery/old", source_url: "https://shop-q.example.invalid/lottery/old", title: "old", status: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: "https://shop-q.example.invalid/lottery/old", title: "応募する", context: "1/9(土) 20:00まで 兵庫県・LivePocket", sourceName: "pokeso", attempts: 0 } } } as never);
+
+    pagesFetched = [];
+    const r1 = await runCollection(deps({ list: () => ok("https://pokeso.jp/chusen", listHtml), onlySourceIds: [pokeso.id] }));
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    expect(r1.screened).toBe(4); // 締切済み3件（過去の版の分を含む）＋対象外の地域1件。AIは使っていない
+    expect(r1.aiCalls).toBe(2); // 上限(2件)まで
+    expect(pagesFetched.map((u) => u.split("/").pop()).sort()).toEqual(["mid", "soon"]); // 締切が近い順（1/18, 1/20）
+    expect(r1.queued).toBe(1);
+    let c = await cands();
+    const by = (k: string) => c.find((x) => x.dedupe_key.endsWith("/" + k))!;
+    for (const k of ["end1", "end2", "pref", "old"]) expect(by(k).status, k).toBe("excluded");
+    expect(by("end1").reasons[0]).toContain("締切");
+    expect(by("pref").reasons[0]).toContain("愛知県");
+    expect((by("late").draft as { queued?: unknown }).queued).toBeTruthy(); // 締切が遠いものは次回
+
+    // 次の収集: 残りの1件だけを解析する（解析済み・除外済みは再取得も再解析もしない）
+    pagesFetched = [];
+    const r2 = await runCollection(deps({ list: () => ok("https://pokeso.jp/chusen", listHtml), onlySourceIds: [pokeso.id] }));
+    expect(r2.ok && r2.newCount).toBe(0);
+    expect(r2.ok && r2.aiCalls).toBe(1);
+    expect(r2.ok && r2.queued).toBe(0);
+    expect(pagesFetched.map((u) => u.split("/").pop())).toEqual(["late"]);
+    // さらに収集しても何も起きない
+    pagesFetched = [];
+    const r3 = await runCollection(deps({ list: () => ok("https://pokeso.jp/chusen", listHtml), onlySourceIds: [pokeso.id] }));
+    expect(r3.ok && r3.aiCalls).toBe(0);
+    expect(pagesFetched).toHaveLength(0);
+    c = await cands();
+    expect(c.filter((x) => (x.draft as { queued?: unknown } | null)?.queued && x.status === "pending")).toHaveLength(0);
+    await setSettings({ max_ai_per_run: 8 });
+  });
+
   it("世帯の分離: 他の世帯のユーザーは収集元・候補・履歴を読めず、変更できない", async () => {
     expect(((await u2.from("collection_sources").select("id")).data ?? []).length).toBe(0);
     expect(((await u2.from("collection_candidates").select("id")).data ?? []).length).toBe(0);

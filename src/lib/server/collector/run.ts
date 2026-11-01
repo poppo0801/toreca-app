@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { normalizeConditions, evaluateCandidate, type CollectionConditions } from "@/lib/collector/conditions";
-import { judgeRelevance, normalizeUrl, parseListing, looksLikeLottery, type AdapterId, type ListingEntry } from "@/lib/collector/listing";
+import { normalizeConditions, evaluateCandidate, preScreenFromList, type CollectionConditions } from "@/lib/collector/conditions";
+import { judgeRelevance, normalizeUrl, parseListHints, parseListing, looksLikeLottery, type AdapterId, type ListHints, type ListingEntry } from "@/lib/collector/listing";
 import { remainingPosts, X_COST_PER_POST_JPY, type XPost } from "@/lib/collector/x-posts";
 import { extractPageText } from "@/lib/ai/page-text";
 import { PROMPT_VERSION, type ExtractRequest, type LotteryExtractor } from "@/lib/ai/provider";
@@ -30,6 +30,8 @@ export const WEB_LIST_MAX_BYTES = 4_500_000;
 const MAX_NEW_PER_SOURCE = 60;
 const STALE_RUN_MS = 15 * 60_000;
 const MAX_ATTEMPTS = 3;
+/** AI読み取りを並行して行う件数(60秒の実行時間の中で、より多く解析するため) */
+const AI_CONCURRENCY = 4;
 
 export interface CollectDeps {
   db: Db;
@@ -68,6 +70,10 @@ export type CollectOutcome =
       xCalls: number;
       xPosts: number;
       newCount: number;
+      /** 一覧の表示だけで、AI読み取りの前に除外した件数 */
+      screened: number;
+      /** 解析待ちの残り */
+      queued: number;
       registered: number;
       errors: number;
       pending: number;
@@ -99,6 +105,8 @@ interface QueuedPayload {
     sourceName: string;
     post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string };
     attempts: number;
+    /** 一覧の表示から読み取れた締切・地域（AI解析の優先順位と、解析前の再確認に使う） */
+    hints?: ListHints;
   };
 }
 
@@ -220,18 +228,8 @@ interface CandidateRow {
 }
 
 /** 候補を1件処理する(関連判定は済み)。AIを呼んだら true */
-async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"]): Promise<{ usedAi: boolean; registered: boolean }> {
-  const { db } = deps;
-  const resolve = (patch: Record<string, unknown>) => db.from("collection_candidates").update({ ...patch, resolved_at: deps.now.toISOString() }).eq("id", c.id);
-  const retry = async (message: string) => {
-    const attempts = q.attempts + 1;
-    // 一時的な失敗は上限回数まで再試行する(失敗した理由を保持)。上限を超えたら失敗として確定
-    await db
-      .from("collection_candidates")
-      .update({ status: "failed", reasons: [message, attempts >= MAX_ATTEMPTS ? "再試行の上限に達しました" : "次回の収集で再試行します"], draft: { queued: { ...q, attempts } } as unknown as Json })
-      .eq("id", c.id);
-  };
-
+/** 取得とAI読み取り(通信が中心の処理)。複数の候補を並行して実行できる。判定・登録は processCandidate が順番に行う */
+async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promise<ExtractResult> {
   let result: ExtractResult;
   const extractor = deps.extractor!;
   if (q.kind === "x_post" && q.post) {
@@ -261,6 +259,22 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   } else {
     result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed });
   }
+  return result;
+}
+
+async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult): Promise<{ usedAi: boolean; registered: boolean }> {
+  const { db } = deps;
+  const resolve = (patch: Record<string, unknown>) => db.from("collection_candidates").update({ ...patch, resolved_at: deps.now.toISOString() }).eq("id", c.id);
+  const retry = async (message: string) => {
+    // サイトがロボットによる取得を許可していない場合は、再試行しても同じなので最初から確定にする
+    const attempts = /ロボット|許可していません/.test(message) ? MAX_ATTEMPTS : q.attempts + 1;
+    // 一時的な失敗は上限回数まで再試行する(失敗した理由を保持)。上限を超えたら失敗として確定
+    await db
+      .from("collection_candidates")
+      .update({ status: "failed", reasons: [message, attempts >= MAX_ATTEMPTS ? "再試行の上限に達しました" : "次回の収集で再試行します"], draft: { queued: { ...q, attempts } } as unknown as Json })
+      .eq("id", c.id);
+  };
+
   await logAi(deps, result, q.url).catch(() => undefined);
 
   if (!result.ok) {
@@ -308,10 +322,15 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   return { usedAi: true, registered: false };
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  let t: ReturnType<typeof setTimeout>;
+  return Promise.race([p, new Promise<T>((resolve) => (t = setTimeout(() => resolve(onTimeout()), ms)))]).finally(() => clearTimeout(t));
+}
+
 export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> {
   const { db, householdId, now } = deps;
   const started = Date.now();
-  const budgetMs = deps.budgetMs ?? 48_000;
+  const budgetMs = deps.budgetMs ?? 54_000;
   const timeLeft = () => budgetMs - (Date.now() - started);
 
   await ensureCollectionDefaults(db, householdId);
@@ -332,6 +351,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
   let registered = 0;
   let errors = 0;
   let webFetched = 0;
+  let screened = 0;
   try {
     const [setRes, srcRes] = await Promise.all([
       db.from("collection_settings").select("*").eq("household_id", householdId).limit(1).maybeSingle(),
@@ -383,8 +403,15 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           const rel = judgeRelevance(`${e.title} ${e.context}`, { fromPokemonList: true });
           if (!rel.relevant || (!looksLikeLottery(`${e.title} ${e.context}`) && e.kind !== "x_post" && rel.uncertain && !/chusen|lottery|entry|campaign|news|blog|event/i.test(e.url))) continue;
           const key = e.kind === "x_post" ? `x:${/(\d{5,25})$/.exec(e.url)![1]}` : e.url;
-          const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, sourceName: s.name, attempts: 0 } };
-          rows.push({ household_id: householdId, source_id: s.id, dedupe_key: key.slice(0, 500), source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), status: "pending", reasons: ["解析待ち"], draft: payload });
+          const hints = parseListHints(`${e.title} ${e.context}`, now);
+          const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, sourceName: s.name, attempts: 0, hints } };
+          const base = { household_id: householdId, source_id: s.id, dedupe_key: key.slice(0, 500), source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), content_hash: sha(`${e.title}|${e.context}`) };
+          // 一覧の表示だけで除外できるもの(締切済み・対象外の地域)は、AI読み取りの前に除外する。候補としては保存し、次回以降は再判定しない
+          const why = preScreenFromList(hints, cond, now);
+          if (why) {
+            rows.push({ ...base, status: "excluded", reasons: [why], resolved_at: now.toISOString(), draft: null });
+            screened++;
+          } else rows.push({ ...base, status: "pending", reasons: ["解析待ち"], draft: payload });
           if (rows.length >= MAX_NEW_PER_SOURCE * 3) break;
         }
         const ins2 = await db.from("collection_candidates").upsert(rows as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true }).select("id");
@@ -458,48 +485,73 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
       }
     }
 
-    // ------------------------------------------------ 解析(キューを順に。上限・時間の範囲で)
+    // ------------------------------------------------ 解析(キュー)
+    // 1) 解析前の絞り込み(費用なし): 一覧の表示から、締切済み・対象外の地域のものを除外する(過去に溜まった解析待ちも毎回見直す)
+    // 2) 締切が近いものから順に、上限と時間の範囲でAI読み取りを行う。残りは次回の収集に回す
     const queue = await db
       .from("collection_candidates")
       .select("id,dedupe_key,source_url,title,draft,status,fetched_at,source_id")
       .eq("household_id", householdId)
       .in("status", ["pending", "failed"])
       .order("created_at")
-      .limit(200);
-    const items = ((queue.data ?? []) as unknown as CandidateRow[]).filter((c) => {
+      .limit(1000);
+    const items = ((queue.data ?? []) as unknown as CandidateRow[]).flatMap((c) => {
       const q = (c.draft as unknown as Partial<QueuedPayload> | null)?.queued;
-      if (!q) return false;
-      if (c.status === "failed") return q.attempts < MAX_ATTEMPTS && now.getTime() - new Date(c.fetched_at).getTime() > 3600_000;
-      return true;
+      if (!q) return [];
+      if (c.status === "failed" && !(q.attempts < MAX_ATTEMPTS && now.getTime() - new Date(c.fetched_at).getTime() > 3600_000)) return [];
+      return [{ c, q: q as QueuedPayload["queued"] }];
     });
-    let leftover = 0;
-    for (const c of items) {
-      const q = (c.draft as unknown as QueuedPayload).queued;
-      if (aiLeft <= 0 || timeLeft() < 12_000) {
-        leftover++;
-        continue;
-      }
-      // 参照の欠けた候補(収集元が削除された等)も処理する
-      aiLeft--;
-      const out = await processCandidate(deps, data, cond, settings.auto_register, c, q).catch(async () => {
-        await db.from("collection_candidates").update({ status: "failed", reasons: ["解析中にエラーが発生しました"] }).eq("id", c.id);
-        return { usedAi: true, registered: false };
-      });
-      if (out.usedAi) aiCalls++;
-      if (out.registered) {
-        registered++;
-        // 登録した抽選を、以降の重複検出に反映する(同じ回の中で同じ抽選を二重に登録しない)
-        data = await loadAppData(db, householdId);
+    const survivors: { c: CandidateRow; q: QueuedPayload["queued"]; due: string }[] = [];
+    const drops: PromiseLike<unknown>[] = [];
+    for (const it of items) {
+      const hints = it.q.hints ?? parseListHints(`${it.q.title} ${it.q.context}`, now);
+      const why = it.q.kind === "x_post" ? null : preScreenFromList(hints, cond, now);
+      if (why) {
+        drops.push(db.from("collection_candidates").update({ status: "excluded", reasons: [why], draft: null, resolved_at: now.toISOString() }).eq("id", it.c.id).then(() => undefined));
+        screened++;
+      } else survivors.push({ ...it, q: { ...it.q, hints }, due: hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59` : "9999") });
+    }
+    for (let i = 0; i < drops.length; i += 25) await Promise.all(drops.slice(i, i + 25));
+    survivors.sort((x, y) => x.due.localeCompare(y.due));
+
+    let processed = 0;
+    while (processed < survivors.length && aiLeft > 0 && timeLeft() >= 20_000) {
+      // 通信が中心の取得・読み取りは並行して行い、判定・登録は1件ずつ順番に行う(同じ回の重複登録を防ぐ)
+      const batch = survivors.slice(processed, processed + Math.min(AI_CONCURRENCY, aiLeft));
+      processed += batch.length;
+      aiLeft -= batch.length;
+      // 実行時間の上限(60秒)を超えて実行が打ち切られないよう、バッチごとに残り時間で打ち切る
+      const limit = Math.max(5_000, timeLeft() - 6_000);
+      const timedOut = (): ExtractResult => ({ ok: false, kind: "url", code: "ai_failed", message: "時間切れのため解析できませんでした" });
+      const results = await Promise.all(
+        batch.map((it) =>
+          withTimeout(extractFor(deps, it.q).catch((): ExtractResult => ({ ok: false, kind: "url", code: "ai_failed", message: "解析中にエラーが発生しました" })), limit, timedOut),
+        ),
+      );
+      for (let i = 0; i < batch.length; i++) {
+        const it = batch[i];
+        const out = await processCandidate(deps, data, cond, settings.auto_register, it.c, it.q, results[i]).catch(async () => {
+          await db.from("collection_candidates").update({ status: "failed", reasons: ["解析中にエラーが発生しました"] }).eq("id", it.c.id);
+          return { usedAi: true, registered: false };
+        });
+        if (out.usedAi) aiCalls++;
+        if (out.registered) {
+          registered++;
+          // 登録した抽選を、以降の重複検出に反映する
+          data = await loadAppData(db, householdId);
+        }
       }
     }
-    if (leftover > 0) notices.push(`解析待ちが${leftover}件残っています（AI利用上限・時間の都合。次回の収集で続きを解析します）`);
+    const leftover = survivors.length - processed;
+    if (screened > 0) notices.push(`一覧の表示から${screened}件を、AI読み取りの前に除外しました（締切済み・対象外の地域）`);
+    if (leftover > 0) notices.push(`解析待ちが${leftover}件残っています（1回のAI読み取りの上限・時間の都合。締切が近いものから順に、次回の収集で続きを解析します）`);
 
     const pendingRes = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).eq("status", "pending");
     await db
       .from("collection_runs")
       .update({ status: "done", finished_at: new Date().toISOString(), web_fetched: webFetched, x_posts: xBilled, x_calls: xCalls, ai_calls: aiCalls, new_count: newCount, registered_count: registered, error_count: errors, summary: reports as unknown as Json })
       .eq("id", runId);
-    return { ok: true, runId, aiCalls, xCalls, xPosts: xBilled, newCount, registered, errors, pending: pendingRes.count ?? 0, sources: reports, notices };
+    return { ok: true, runId, aiCalls, xCalls, xPosts: xBilled, newCount, screened, queued: leftover, registered, errors, pending: pendingRes.count ?? 0, sources: reports, notices };
   } catch {
     await db.from("collection_runs").update({ status: "failed", finished_at: new Date().toISOString(), error_count: errors + 1, summary: reports as unknown as Json }).eq("id", runId);
     return { ok: false, code: "error", message: "収集中にエラーが発生しました" };
