@@ -68,14 +68,15 @@ export function placeLabel(receive: "store" | "shipping" | "either" | "unknown",
 
 /** 応募締切の残り時間バッジの色（3日以上=通常 / 3日未満=オレンジ / 24時間未満=赤 / 終了=グレー）。色だけでなく文言でも区別される */
 export const DEADLINE_TONE_CLASS = {
-  normal: "border-primary/50 bg-primary/15 text-primary-ink",
-  warn: "border-primary bg-primary text-primary-foreground shadow-sm",
+  /* 残り日数: 3日以上=ティール（余裕）／3日未満=オレンジの枠＋文字（塗りは応募ボタン専用）／24時間未満=赤の塗り */
+  normal: "border-info/60 bg-info/10 text-info",
+  warn: "border-primary bg-primary/10 text-primary-ink",
   danger: "border-danger bg-danger text-white shadow-sm",
   ended: "border-border bg-muted text-muted-foreground",
 } as const;
 
 export const DEADLINE_BAR_CLASS = {
-  normal: "border-l-primary/60",
+  normal: "border-l-info/70",
   warn: "border-l-primary",
   danger: "border-l-danger",
   ended: "border-l-border",

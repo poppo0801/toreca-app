@@ -13,9 +13,9 @@
   --muted: #ececef;
   --muted-foreground: #5b5b63;
   --border: #dcdce0;
-  --ring: #d96800;
+  --ring: #dd7400;
   /* オレンジは主要操作・現在選択のみ */
-  --primary: #d96800;
+  --primary: #dd7400;
   /* 白背景上の文字・線・アイコン用の濃いめのオレンジ（塗りの --primary は明るいので文字には使わない） */
   --primary-ink: #b05800;
   --primary-foreground: #ffffff;
