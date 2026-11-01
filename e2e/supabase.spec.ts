@@ -1720,3 +1720,124 @@ test("Stage 5J ユーザーの表示順: 設定で並べ替えると、抽選カ
   await page.getByRole("button", { name: `${first}を上へ`, exact: true }).click();
   expect(await orderOnCard()).toEqual(before);
 });
+
+test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類のタグ。複数選択でき、詳細に分類ラベルで表示される。AND/ORは複数のときだけ", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "＋登録" }).click();
+  const dialog = page.getByRole("dialog");
+  await fillMasters(dialog, "E2E5L電機", "E2E5L店", "E2E5L商品");
+  await dialog.getByLabel("応募締切の日付").fill("2099-04-01");
+  // 発表方法: 選択式（複数）。通知対象は経路とは別に選べる
+  await expect(dialog.getByTestId("announce-picker")).toBeVisible();
+  await dialog.getByTestId("announce-toggle").click();
+  await dialog.getByTestId("announce-opt-result_mail").click();
+  await dialog.getByTestId("announce-opt-result_page").click();
+  await expect(dialog.getByTestId("announce-chip")).toHaveCount(2);
+  await dialog.getByLabel("通知対象").selectOption("both");
+  await dialog.getByLabel("発表方法の補足").fill("マイページでも確認できます");
+  // 応募条件: 1つのときは結合方法を出さない。2つ以上で「すべて必要／いずれか」
+  await dialog.getByTestId("requirement-toggle").click();
+  await dialog.getByTestId("req-opt-member_registration").click();
+  await expect(dialog.getByTestId("req-logic-or")).toHaveCount(0);
+  await dialog.getByTestId("req-opt-purchase_amount").click();
+  await dialog.getByTestId("req-logic-or").click();
+  await dialog.getByLabel("購入金額（円以上）").fill("3000");
+  await expect(dialog.getByTestId("requirement-logic-label")).toContainText("いずれか");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const sheet = await openDetail(page, page.getByTestId("lottery-card").filter({ hasText: "E2E5L商品" }).first());
+  await expect(sheet.getByTestId("announce-label")).toHaveText(["当落メール", "結果確認ページ"]);
+  await expect(sheet.getByTestId("announce-view")).toContainText("マイページでも確認できます");
+  await expect(sheet.getByTestId("requirement-label")).toHaveText(["会員登録", "一定金額以上の購入"]);
+  await expect(sheet.getByTestId("requirement-view")).toContainText("いずれか");
+  await expect(sheet.getByTestId("requirement-view")).toContainText("3,000円以上の購入");
+  // 編集で、保存した分類がそのまま戻る
+  await sheet.getByRole("button", { name: "編集" }).click();
+  const edit = page.getByRole("dialog").filter({ has: page.getByTestId("announce-picker") });
+  await expect(edit.getByTestId("announce-chip")).toHaveCount(2);
+  await expect(edit.getByTestId("requirement-chip")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+});
+
+test("Stage 5L 抽選データ管理: 設定から開き、テンプレート・出力→新規取込（過去の日付・A当選）→再取り込みで重複しない。選ぶまで未登録の商品は適用しない", async ({ page }) => {
+  const ExcelJS = (await import("exceljs")).default;
+  const stamp = Date.now().toString(36);
+  await login(page);
+  await page.goto("/settings");
+  await page.getByTestId("menu-lottery-data").click();
+  await expect(page.getByRole("heading", { name: "抽選データ管理" })).toBeVisible();
+  await expect(page.getByTestId("export-condition")).toContainText("すべて");
+  // 絞り込み条件はダウンロード画面に明示される
+  await page.getByTestId("export-filters").locator("summary").click();
+  await page.getByTestId("export-filters").locator("select").first().selectOption("closed"); // 受付状況
+  await expect(page.getByTestId("export-condition")).toContainText("受付状況: 受付終了");
+  await page.getByRole("button", { name: "条件をクリア" }).click();
+
+  const tpl = await page.context().request.get("/api/lottery-import?type=template");
+  expect(tpl.status()).toBe(200);
+  expect(tpl.headers()["content-type"]).toContain("spreadsheetml");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await tpl.body()) as unknown as ArrayBuffer);
+  expect(wb.worksheets.map((w) => w.name)).toEqual(expect.arrayContaining(["抽選情報", "対象商品", "応募・当落履歴"]));
+  const col = (ws: import("exceljs").Worksheet, label: string) => {
+    let c = 0;
+    ws.getRow(1).eachCell((cell, i) => {
+      if (cell.value === label) c = i;
+    });
+    return c;
+  };
+  const l = wb.getWorksheet("抽選情報")!;
+  const i = wb.getWorksheet("対象商品")!;
+  const a = wb.getWorksheet("応募・当落履歴")!;
+  const chain = `E2E5L取込系列${stamp}`;
+  l.getCell(2, col(l, "取込キー")).value = "E2E1";
+  l.getCell(2, col(l, "系列名")).value = chain;
+  l.getCell(2, col(l, "店舗名")).value = `E2E5L取込店${stamp}`;
+  l.getCell(2, col(l, "応募開始日")).value = "2024-05-01";
+  l.getCell(2, col(l, "応募締切日")).value = "2024-05-10";
+  l.getCell(2, col(l, "発表開始日")).value = "2024-05-15";
+  l.getCell(2, col(l, "発表方法")).value = "当落メール";
+  l.getCell(2, col(l, "受取方法")).value = "店頭受取";
+  i.getCell(2, col(i, "取込キー")).value = "E2E1";
+  i.getCell(2, col(i, "正式商品名")).value = `E2E5L取込商品${stamp}`;
+  i.getCell(2, col(i, "数量")).value = "1";
+  i.getCell(2, col(i, "数量単位")).value = "BOX";
+  const file = Buffer.from(await wb.xlsx.writeBuffer());
+  const upload = (name: string, buffer: Buffer) => page.getByTestId("lottery-import-file").setInputFiles({ name, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer });
+
+  // 未登録の系列・店舗・商品: 選ぶまで適用しない（新規として登録するか、既存の候補か、保留かを選ぶ）
+  await upload("new.xlsx", file);
+  await expect(page.getByTestId("lottery-import-preview")).toBeVisible();
+  await expect(page.getByTestId("lcount-review")).toHaveText("1");
+  await expect(page.getByTestId("lottery-import-apply")).toBeDisabled();
+  // 系列 → 店舗 → 商品の順に、未選択の項目を「新規として登録」にする（系列が決まってから店舗の選択が現れる）
+  for (let n = 0; n < 3; n++) {
+    const pending = page.getByTestId("decision").filter({ has: page.locator("select option[value=\"\"]:checked") });
+    await expect(pending.first()).toBeVisible();
+    await pending.first().getByRole("combobox").selectOption("create");
+    await expect(page.getByText("確認しています…")).toHaveCount(0);
+  }
+  await expect(page.getByTestId("decision")).toHaveCount(3);
+  await expect(page.getByTestId("lcount-new")).toHaveText("1");
+  await expect(page.getByTestId("lcount-error")).toHaveText("0");
+  await page.getByTestId("lottery-import-apply").click();
+  await expect(page.getByTestId("lottery-import-done")).toContainText("新規 1件");
+
+  // 過去の締切の抽選は受付中ではなく、全情報から確認できる
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card = page.getByTestId("lottery-card").filter({ hasText: `E2E5L取込商品${stamp}` }).first();
+  await expect(card).toBeVisible();
+  await expect(card.getByTestId("deadline-badge")).toHaveCount(0);
+
+  // 同じファイルをもう一度: 取込キーで同じ抽選と判定され、新規にならない（重複登録しない）
+  await page.goto("/settings/lottery-data");
+  await upload("new.xlsx", file);
+  await expect(page.getByTestId("lottery-import-preview")).toBeVisible();
+  await expect(page.getByTestId("lcount-new")).toHaveText("0");
+  // 履歴
+  await page.reload();
+  await expect(page.getByTestId("lottery-import-history")).toContainText("new.xlsx");
+});

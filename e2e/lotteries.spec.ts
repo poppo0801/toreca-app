@@ -1119,3 +1119,28 @@ test.describe("Stage 5K 追加: ライトの色の質感", () => {
     expect(f).toBe(s);
   });
 });
+
+test.describe("Stage 5L: 通販区分・標準分類の表示", () => {
+  test("店頭・発送から選べる抽選は都道府県＋「発送可」。発送のみは「通販」で距離なし。店頭受取は都道府県（Web応募でも通販にしない）", async ({ page }) => {
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    const either = page.locator('[data-lottery-id="L3"]'); // 受取方法=店頭・発送から選択
+    await expect(either.getByTestId("place-chip")).not.toHaveText("通販");
+    await expect(either.getByTestId("ship-chip")).toHaveText("発送可");
+    const ship = page.locator('[data-lottery-id="L4"]'); // 発送のみ
+    await expect(ship.getByTestId("place-chip")).toHaveText("通販");
+    await expect(ship.getByTestId("distance")).toHaveCount(0);
+    await expect(ship.getByTestId("ship-chip")).toHaveCount(0);
+    const store = page.locator('[data-lottery-id="L1"]'); // 店頭受取（応募方法=Web）
+    await expect(store.getByTestId("place-chip")).not.toHaveText("通販");
+    await expect(store.getByTestId("ship-chip")).toHaveCount(0);
+  });
+
+  test("詳細: 分類が無い既存データは、発表方法・応募条件の文章をそのまま表示（元の文章を失わない）", async ({ page }) => {
+    const card = page.locator('[data-lottery-id="L1"]');
+    await card.getByRole("button", { name: /の詳細を開く/ }).click();
+    const sheet = page.getByTestId("lottery-detail");
+    await expect(sheet).toContainText("会員登録済みであること");
+    await expect(sheet.getByTestId("requirement-label")).toHaveCount(0);
+    await expect(sheet.getByTestId("announce-label")).toHaveCount(0);
+  });
+});

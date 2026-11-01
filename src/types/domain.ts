@@ -3,6 +3,7 @@
  * Stage 1 で Supabase に接続する際も、この型を境界（services/）の入出力として使う。
  */
 import type { CardDisplay } from "@/lib/card-display";
+import type { AnnounceMethod, AnnounceTarget, RequirementDetails, RequirementLogic, RequirementTag, StoreKind } from "@/lib/lottery-taxonomy";
 
 /** 日時の精度。「日付だけ判明」を0時のtimestampに偽変換しないために分離する。 */
 export type DatePrecision = "unknown" | "date_only" | "date_time";
@@ -75,6 +76,8 @@ export interface Store {
   /** 往復交通費（円）。手動登録のみ。未設定は null（0円とはみなさない） */
   roundTripFare?: number | null;
   memo?: string | null;
+  /** 営業形態。未設定は実店舗。オンライン専用店舗には都道府県・距離を出さない */
+  salesKind?: StoreKind;
 }
 
 /** 世帯共通の設定。自宅の位置は内部情報（住所の文字列はこの型に含めず、設定画面でだけ読む） */
@@ -217,8 +220,18 @@ export interface Lottery {
   applyMethod: ApplyMethod;
   conditionsText: string;
   verificationText: string;
+  /** 当落発表方法の補足・原文（標準分類は announcementMethods） */
   announcementMethod: string;
+  /** 当落発表方法（標準分類・複数）。未設定の既存データは空 */
+  announcementMethods?: AnnounceMethod[];
+  announcementTarget?: AnnounceTarget;
+  /** サービス標準ルール（LivePocketなど）による推定。告知に明記された内容ではない */
+  announcementInferred?: boolean;
   announcementUrl?: string;
+  /** 応募条件の標準分類（複数）。補足・原文は conditionsText */
+  requirementTags?: RequirementTag[];
+  requirementLogic?: RequirementLogic;
+  requirementDetails?: RequirementDetails;
   sourceUrls: string[];
   eventState: EventState;
   limit: ApplicationLimit;

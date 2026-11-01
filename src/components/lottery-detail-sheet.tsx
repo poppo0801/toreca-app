@@ -19,6 +19,8 @@ import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { storeDistance } from "@/lib/store-distance";
+import { placeInfo } from "@/lib/lottery-taxonomy";
+import { AnnounceView, RequirementView } from "@/components/taxonomy-view";
 import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 import type { Application, Lottery } from "@/types/domain";
@@ -76,6 +78,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const rules = effectiveRules(data, lottery);
   const hasMyScopeSkip = data.skipRules.some((r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id);
   const dist = storeDistance(data, store);
+  const place = placeInfo({ receiveMethod: lottery.receiveMethod, prefecture: store?.prefecture, storeKind: store?.salesKind });
   const unconfirmed = lottery.unconfirmedFields ?? [];
   // 要確認の理由は全ユーザー分を繰り返さず、同じ内容を1つにまとめて出す
   const reviewReasons = [...new Set(accounts.map((acc) => judgeAccount(data, lottery, acc, now)).filter((j) => j.status === "needs_review").map((j) => j.reason))];
@@ -129,8 +132,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 })}
               </ul>
               <div className="flex flex-wrap items-center gap-1.5">
-                {store?.prefecture && <Chip className="rounded-full">{store.prefecture}</Chip>}
-                {dist && (
+                {place.label && <Chip className="rounded-full" data-testid="detail-place">{place.label}</Chip>}
+                {place.canShip && <Chip className="rounded-full border-info text-info">発送可</Chip>}
+                {dist && place.showLocation && (
                   <Chip className={cn("rounded-full", BAND_CLASS[dist.band])} title="自宅からの直線距離（道路距離ではありません）">
                     直線 {formatKm(dist.km)}
                   </Chip>
@@ -172,7 +176,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 {lottery.receiveMethod === "unknown" ? DASH : RECEIVE_LABEL[lottery.receiveMethod]}
                 <Unconfirmed show={unconfirmed.includes("receiveMethod")} />
               </Field>
-              <Field label="発表方法">{lottery.announcementMethod || DASH}</Field>
+              <Field label="発表方法" className="col-span-2">
+                <AnnounceView lottery={lottery} />
+              </Field>
               <Field label="登録元">{{ manual: "手動", x_parse: "X解析（未確認）", auto: "自動取得", import: "インポート" }[lottery.sourceKind]}</Field>
             </dl>
 
@@ -198,7 +204,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
             {/* 5. 条件・制限 */}
             <dl className="space-y-2 rounded-lg border p-3" aria-label="応募条件・制限">
-              <Field label="応募条件">{lottery.conditionsText || DASH}</Field>
+              <Field label="応募条件">
+                <RequirementView lottery={lottery} />
+              </Field>
               <div className="grid grid-cols-2 gap-x-3">
                 <Field label="応募制限">
                   {lottery.limit.basis === "unknown" ? "未確認（要確認）" : `${LIMIT_BASIS_LABEL[lottery.limit.basis]}${lottery.limit.maxCount}回`}

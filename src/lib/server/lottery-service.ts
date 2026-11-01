@@ -5,7 +5,9 @@ import { normalizeProfileSettings } from "@/lib/profile-settings";
 import { recordAiFeedback } from "@/lib/server/ai-feedback-service";
 import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
-import { dbToFlex, flexInputToDb, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
+import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
+import { buildLotteryPayload } from "@/lib/lottery-payload";
+import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
 import type { Database } from "@/types/database";
 import type {
   AppData,
@@ -244,7 +246,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       };
     }),
     chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
-    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null })),
+    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null, salesKind: isStoreKind(s.sales_kind) ? s.sales_kind : "physical" })),
     products: products.map((p) => ({
       id: p.id,
       officialName: p.official_name,
@@ -305,6 +307,12 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       conditionsText: l.conditions_text,
       verificationText: l.verification_text,
       announcementMethod: l.announcement_method,
+      announcementMethods: normalizeAnnounceMethods(l.announcement_methods ?? []),
+      announcementTarget: isAnnounceTarget(l.announcement_target) ? l.announcement_target : "unknown",
+      announcementInferred: l.announcement_inferred ?? false,
+      requirementTags: normalizeRequirementTags(l.requirement_tags ?? []),
+      requirementLogic: isRequirementLogic(l.requirement_logic) ? l.requirement_logic : "and",
+      requirementDetails: sanitizeRequirementDetails(l.requirement_details),
       announcementUrl: l.announcement_url ?? undefined,
       sourceUrls: l.source_urls,
       eventState: l.event_state as EventState,
@@ -419,36 +427,6 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
 }
 
 // ------------------------------------------------------------------ 抽選の登録・編集
-type LotteryInsert = Database["public"]["Tables"]["lotteries"]["Insert"];
-
-function lotteryRow(input: z.output<typeof lotteryInputSchema>, actor: string | null) {
-  const s = flexInputToDb(input.applyStart);
-  const d = flexInputToDb(input.applyDeadline);
-  const r = flexInputToDb(input.resultDate);
-  const ps = flexInputToDb(input.procedureStart);
-  const p = flexInputToDb(input.procedureDeadline);
-  return {
-    apply_start_precision: s.precision, apply_start_date: s.date, apply_start_at: s.at,
-    apply_deadline_precision: d.precision, apply_deadline_date: d.date, apply_deadline_at: d.at,
-    result_precision: r.precision, result_date: r.date, result_at: r.at,
-    // 発表の最終日。開始が不明なら期間にならないので保存しない
-    result_end_date: r.precision === "unknown" || !input.resultEndDate ? null : input.resultEndDate,
-    procedure_start_precision: ps.precision, procedure_start_date: ps.date, procedure_start_at: ps.at,
-    procedure_deadline_precision: p.precision, procedure_deadline_date: p.date, procedure_deadline_at: p.at,
-    receive_method: input.receiveMethod,
-    apply_method: input.applyMethod,
-    conditions_text: input.conditionsText,
-    verification_text: input.verificationText,
-    announcement_method: input.announcementMethod,
-    announcement_url: input.announcementUrl === "" ? null : input.announcementUrl,
-    source_urls: input.sourceUrls,
-    event_state: input.eventState,
-    limit_basis: input.limitBasis,
-    limit_max_count: input.limitMaxCount,
-    memo: input.memo,
-    updated_by_profile_id: actor,
-  } satisfies Partial<LotteryInsert>;
-}
 
 /**
  * 抽選の新規登録(id=null)／編集。系列・店舗・商品は既存マスターの選択でも未登録名の自由入力でもよく、
@@ -494,31 +472,26 @@ export async function saveLottery(
     }
   }
 
-  const payload = {
-    id,
-    chain: { id: input.chain.id, name: input.chain.name },
-    store: { id: input.store.id, name: input.store.name, prefecture: input.store.prefecture },
-    campaign: {
-      id: input.campaignId,
-      new: input.newCampaign ? { name: input.newCampaign.name, store_rule: input.newCampaign.storeRule } : null,
-    },
-    lottery: { ...lotteryRow(input, actor), multi_mode: input.multiMode },
-    items: input.items.map((i) => ({
-      id: i.id ?? null,
-      product: { id: i.product.id, name: i.product.name },
-      quantity: i.quantity,
-      unit: i.unit,
-    })),
-    is_managed: input.isManaged ?? true,
-    applications: input.applications.map((a) => ({ profile_id: a.profileId, status: a.status })),
-    applied_at: input.appliedAt ? new Date(`${input.appliedAt}:00+09:00`).toISOString() : "",
-  };
+  const payload = buildLotteryPayload(input, id, actor);
   void householdId;
   const { data, error } = await db.rpc("save_lottery_tx", { p: payload as never, p_actor: actor as string });
   if (error) return fail(mapDbError(error));
   // 初期値のまま（利用者が確認していない）項目を記録する。確認済みの項目は外す（応募方法・受取方法の「初期値」表示用）。
   // 保存は主処理とは別の更新だが、失敗しても抽選自体は保存済み（表示上の印が付かないだけ）なのでエラーにはしない。
   await db.from("lotteries").update({ unconfirmed_fields: input.unconfirmedFields }).eq("id", data as string);
+  // 発表方法・応募条件の標準分類（save_lottery_tx は分類列を持たないため、同じ操作の直後に保存する。失敗は利用者に伝える）
+  const tax = await db
+    .from("lotteries")
+    .update({
+      announcement_methods: normalizeAnnounceMethods(input.announcementMethods),
+      announcement_target: input.announcementTarget,
+      announcement_inferred: input.announcementInferred,
+      requirement_tags: normalizeRequirementTags(input.requirementTags),
+      requirement_logic: input.requirementLogic,
+      requirement_details: sanitizeRequirementDetails(input.requirementDetails) as unknown as Database["public"]["Tables"]["lotteries"]["Update"]["requirement_details"],
+    })
+    .eq("id", data as string);
+  if (tax.error) return fail("抽選は保存しましたが、発表方法・応募条件の分類を保存できませんでした。もう一度保存してください");
   // AI読み取りから新規登録した場合: AIの抽出結果と最終内容の比較を1回だけ記録する（失敗しても登録自体は成功のまま）
   if (id === null && input.aiFeedback) {
     try {
@@ -583,6 +556,12 @@ export async function duplicateLottery(
         conditions_text: src.conditions_text,
         verification_text: src.verification_text,
         announcement_method: src.announcement_method,
+        announcement_methods: src.announcement_methods,
+        announcement_target: src.announcement_target,
+        announcement_inferred: src.announcement_inferred,
+        requirement_tags: src.requirement_tags,
+        requirement_logic: src.requirement_logic,
+        requirement_details: src.requirement_details,
         announcement_url: src.announcement_url,
         source_urls: src.source_urls,
         event_state: ["cancelled", "closed"].includes(src.event_state) ? "open" : src.event_state,

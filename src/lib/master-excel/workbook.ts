@@ -9,6 +9,7 @@ import {
   MAX_FILE_BYTES,
   PRODUCT_COLUMNS,
   RECEIVE_METHOD_LABEL,
+  SALES_KIND_LABEL,
   SHEET,
   STORE_COLUMNS,
   TEMPLATE_VERSION,
@@ -75,7 +76,7 @@ export function inspectXlsxZip(buf: Buffer): ReadResult<null> {
 
 // ---------------------------------------------------------------- 読み取り
 /** セルの値を文字列にする。数式・エラー値は読み取らない（nullを返す）。日付はYYYY-MM-DD */
-function cellText(v: ExcelJS.CellValue): { text: string } | { rejected: string } {
+export function cellText(v: ExcelJS.CellValue): { text: string } | { rejected: string } {
   if (v === null || v === undefined) return { text: "" };
   if (typeof v === "string") return { text: v };
   if (typeof v === "number") return { text: Number.isInteger(v) ? String(v) : String(v) };
@@ -253,6 +254,7 @@ const storeValues = (s: StoreRow, chainName: string): string[] => [
   s.management_no,
   chainName,
   s.name,
+  SALES_KIND_LABEL[s.sales_kind ?? "physical"],
   s.prefecture ?? "",
   s.address_optional ?? "",
   s.store_url ?? "",
@@ -268,8 +270,8 @@ const EXAMPLES = {
     ["PR000001", "", "", "", "", "#CLEAR", "", "", "", "5500", "", ""],
   ],
   stores: [
-    ["", "サンプル電機", "三宮店", "兵庫県", "兵庫県神戸市（架空の住所）", "https://example.invalid/store/sannomiya", "800", "アプリ", "店頭", "記入例（架空の店舗）"],
-    ["ST000001", "", "", "", "#CLEAR", "", "900", "", "", ""],
+    ["", "サンプル電機", "三宮店", "実店舗", "兵庫県", "兵庫県神戸市（架空の住所）", "https://example.invalid/store/sannomiya", "800", "アプリ", "店頭", "記入例（架空の店舗）"],
+    ["ST000001", "", "", "", "", "#CLEAR", "", "900", "", "", ""],
   ],
 } as const;
 
@@ -281,8 +283,9 @@ export async function buildTemplate(kind: MasterKind): Promise<Buffer> {
     addList(ws, 3, Object.values(CODE_KIND_LABEL));
     addDataSheet(wb, SHEET.components, COMPONENT_COLUMNS, []);
   } else {
-    addList(ws, 8, Object.values(APPLY_METHOD_LABEL));
-    addList(ws, 9, Object.values(RECEIVE_METHOD_LABEL));
+    addList(ws, 4, Object.values(SALES_KIND_LABEL));
+    addList(ws, 9, Object.values(APPLY_METHOD_LABEL));
+    addList(ws, 10, Object.values(RECEIVE_METHOD_LABEL));
   }
   const ex = addDataSheet(wb, SHEET.examples, columnsOf(kind), EXAMPLES[kind].map((r) => [...r]));
   ex.insertRow(1, ["この表は記入例です。取り込みには使われません（データは「" + dataSheetName(kind) + "」シートに入力してください）"]);
@@ -311,7 +314,8 @@ export async function buildStoreExport(snap: StoreSnapshot): Promise<Buffer> {
   const chainName = new Map(snap.chains.map((c) => [c.id, c.name]));
   const active = snap.stores.filter((s) => !s.archived_at).sort((a, b) => a.management_no.localeCompare(b.management_no));
   const ws = addDataSheet(wb, SHEET.stores, STORE_COLUMNS, active.map((s) => storeValues(s, chainName.get(s.chain_id) ?? "")));
-  addList(ws, 8, Object.values(APPLY_METHOD_LABEL));
-  addList(ws, 9, Object.values(RECEIVE_METHOD_LABEL));
+  addList(ws, 4, Object.values(SALES_KIND_LABEL));
+  addList(ws, 9, Object.values(APPLY_METHOD_LABEL));
+  addList(ws, 10, Object.values(RECEIVE_METHOD_LABEL));
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

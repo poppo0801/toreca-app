@@ -25,7 +25,7 @@ async function xlsx(kind: MasterKind, rows: string[][], components: string[][] =
 // 商品の列: 管理番号,コード,種別,正式名称,略称,グループ,発売日,カテゴリ,BOX入数,BOX定価,パック定価,メモ
 const P = (o: Partial<Record<string, string>>) => ["management_no", "code", "kind", "name", "aliases", "group", "release", "category", "packs", "box", "pack", "memo"].map((k) => o[k] ?? "");
 // 店舗の列: 管理番号,系列,店舗名,都道府県,住所,URL,交通費,応募方法,受取方法,メモ
-const S = (o: Partial<Record<string, string>>) => ["management_no", "chain", "name", "pref", "address", "url", "fare", "apply", "receive", "memo"].map((k) => o[k] ?? "");
+const S = (o: Partial<Record<string, string>>) => ["management_no", "chain", "name", "kind", "pref", "address", "url", "fare", "apply", "receive", "memo"].map((k) => o[k] ?? "");
 
 describe.skipIf(!dbTestsEnabled)("Stage 5C: 管理番号とExcel取り込み", () => {
   const admin = adminClient();

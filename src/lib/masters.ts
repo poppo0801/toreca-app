@@ -97,6 +97,18 @@ export const ENTITIES: Record<EntityKey, Entity> = {
     fields: [
       { name: "chain_id", label: "系列", type: "select", required: true, ref: "chains" },
       { name: "name", label: "店舗名", type: "text", required: true, max: 80 },
+      {
+        name: "sales_kind",
+        label: "営業形態",
+        type: "select",
+        required: true,
+        default: "physical",
+        options: [
+          { value: "physical", label: "実店舗" },
+          { value: "online_only", label: "オンライン専用" },
+          { value: "both", label: "実店舗・オンライン兼用" },
+        ],
+      },
       { name: "prefecture", label: "都道府県（例: 兵庫県）", type: "text", max: 10 },
       { name: "address_optional", label: "店舗の住所（任意。不明でも登録できます）", type: "text", max: 200 },
       { name: "latitude", label: "緯度（内部情報・任意。住所から取得できます）", type: "number", min: -90, max: 90, step: 0.000001 },
@@ -327,7 +339,7 @@ export function buildSchema(entity: Entity) {
           ? f.optionalRef
             ? z.preprocess(emptyToNull, z.uuid("選択してください").nullable())
             : z.uuid("選択してください")
-          : z.enum(f.options!.map((o) => o.value) as [string, ...string[]], "選択してください");
+          : z.preprocess((v) => (v === undefined && f.default !== undefined ? f.default : v), z.enum(f.options!.map((o) => o.value) as [string, ...string[]], "選択してください"));
         break;
       default: {
         const t = z.string().trim().max(f.max ?? 200, `${f.label}は${f.max ?? 200}文字以内で入力してください`);

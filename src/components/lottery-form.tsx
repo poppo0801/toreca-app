@@ -17,6 +17,8 @@ import type { FieldKey } from "@/lib/ai/extraction";
 import { flexToJstDate } from "@/lib/finance";
 import { FEEDBACK_REASONS, REASON_LABEL, type FeedbackReason } from "@/lib/ai/feedback";
 import type { Product, Chain, Store } from "@/types/domain";
+import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker";
+import { classifyAnnouncement, classifyRequirements, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -149,6 +151,12 @@ function emptyInput(data: AppData): LotteryInput {
     conditionsText: "",
     verificationText: "",
     announcementMethod: "",
+    announcementMethods: [],
+    announcementTarget: "unknown",
+    announcementInferred: false,
+    requirementTags: [],
+    requirementLogic: "and",
+    requirementDetails: {},
     announcementUrl: "",
     sourceUrls: [],
     eventState: "open",
@@ -187,6 +195,12 @@ function fromLottery(l: Lottery, data: AppData): LotteryInput {
     conditionsText: l.conditionsText,
     verificationText: l.verificationText,
     announcementMethod: l.announcementMethod,
+    announcementMethods: l.announcementMethods ?? [],
+    announcementTarget: l.announcementTarget ?? "unknown",
+    announcementInferred: l.announcementInferred ?? false,
+    requirementTags: l.requirementTags ?? [],
+    requirementLogic: l.requirementLogic ?? "and",
+    requirementDetails: l.requirementDetails ?? {},
     announcementUrl: l.announcementUrl ?? "",
     sourceUrls: l.sourceUrls,
     eventState: l.eventState === "closed" ? "open" : l.eventState,
@@ -913,16 +927,34 @@ export function LotteryFormDialog({
               )}
 
               {/* 6. URL */}
-              <div className="grid grid-cols-2 gap-2">
-                <label className="min-w-0 text-sm">
-                  <span className="flex items-center gap-1 text-[13px] font-medium">
-                    発表方法
-                    {flagChip("announcement", "発表方法")}
-                  </span>
-                  <input value={v.announcementMethod} onChange={(e) => set("announcementMethod", e.target.value)} className={field} placeholder="メール等" />
-                </label>
-                <label className="min-w-0 text-sm">
-                  <span className="text-[13px] font-medium">発表URL</span>
+              <div className="space-y-1 text-sm">
+                <span className="flex items-center gap-1 text-[13px] font-medium">
+                  当落発表方法
+                  {flagChip("announcement", "発表方法")}
+                  {(v.announcementMethods ?? []).length === 0 && v.announcementMethod.trim() && (
+                    <button
+                      type="button"
+                      className="ml-1 text-[11px] font-normal text-info underline"
+                      data-testid="announce-classify"
+                      onClick={() => {
+                        const c = classifyAnnouncement(v.announcementMethod);
+                        if (c.matched) setV((cur) => ({ ...cur, announcementMethods: c.methods, announcementTarget: c.target, announcementInferred: false }));
+                      }}
+                    >
+                      文章から分類
+                    </button>
+                  )}
+                </span>
+                <AnnouncePicker
+                  methods={(v.announcementMethods ?? []) as AnnounceMethod[]}
+                  target={v.announcementTarget ?? "unknown"}
+                  inferred={v.announcementInferred ?? false}
+                  note={v.announcementMethod}
+                  onChange={(n) => setV((cur) => ({ ...cur, announcementMethods: n.methods, announcementTarget: n.target, announcementInferred: n.inferred }))}
+                  onNote={(t) => set("announcementMethod", t)}
+                />
+                <label className="block">
+                  <span className="text-[13px] font-medium">結果確認URL</span>
                   <input value={v.announcementUrl} onChange={(e) => set("announcementUrl", e.target.value)} className={field} inputMode="url" placeholder="https://" />
                 </label>
               </div>
@@ -933,13 +965,32 @@ export function LotteryFormDialog({
               </label>
 
               {/* 7. 応募条件・制限 */}
-              <label className="block text-sm">
+              <div className="space-y-1 text-sm">
                 <span className="flex items-center gap-1 text-[13px] font-medium">
                   応募条件
                   {flagChip("conditions", "応募条件")}
+                  {(v.requirementTags ?? []).length === 0 && v.conditionsText.trim() && (
+                    <button
+                      type="button"
+                      className="ml-1 text-[11px] font-normal text-info underline"
+                      data-testid="requirement-classify"
+                      onClick={() => {
+                        const c = classifyRequirements(v.conditionsText);
+                        if (c.matched) setV((cur) => ({ ...cur, requirementTags: c.tags, requirementDetails: c.details }));
+                      }}
+                    >
+                      文章から分類
+                    </button>
+                  )}
                 </span>
-                <textarea value={v.conditionsText} onChange={(e) => set("conditionsText", e.target.value)} rows={2} className={cn(field, "py-2")} />
-              </label>
+                <RequirementPicker
+                  tags={(v.requirementTags ?? []) as RequirementTag[]}
+                  logic={v.requirementLogic ?? "and"}
+                  details={(v.requirementDetails ?? {}) as RequirementDetails}
+                  onChange={(n) => setV((cur) => ({ ...cur, requirementTags: n.tags, requirementLogic: n.logic, requirementDetails: n.details }))}
+                />
+                <textarea value={v.conditionsText} onChange={(e) => set("conditionsText", e.target.value)} rows={1} className={cn(field, "py-2")} placeholder="補足・原文（任意）" aria-label="応募条件の補足" />
+              </div>
               {flagPanel("conditions")}
               <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-2">
                 <label className="min-w-0 text-sm">

@@ -58,6 +58,7 @@ export const STORE_COLUMNS: readonly ColumnDef[] = [
   { key: "management_no", label: "管理番号", clearable: false, note: "既存の行は変更しない（ST000001形式）。新規の行は空欄にすると自動で付きます", width: 14 },
   { key: "chain", label: "系列", requiredForNew: true, clearable: false, note: "登録済みの系列名。既存の店舗の系列は変更できません", width: 18 },
   { key: "name", label: "店舗名", requiredForNew: true, clearable: false, note: "80文字まで。同じ系列で同じ店舗名は登録できません", width: 24 },
+  { key: "sales_kind", label: "営業形態", clearable: false, note: "実店舗 / オンライン専用 / 実店舗・オンライン兼用。空欄なら変更しません（新規の行は実店舗）。オンライン専用店舗には都道府県・住所を入れません", width: 18 },
   { key: "prefecture", label: "都道府県", clearable: true, note: "例: 兵庫県", width: 10 },
   { key: "address", label: "住所", clearable: true, note: "店舗の住所（200文字まで）。変更すると位置情報の再確認が必要になります", width: 36 },
   { key: "store_url", label: "店舗URL", clearable: true, note: "http:// または https:// で始まるURL", width: 30 },
@@ -69,6 +70,7 @@ export const STORE_COLUMNS: readonly ColumnDef[] = [
 
 export const CODE_KIND_LABEL: Record<string, string> = { official: "公式", custom: "独自" };
 export const APPLY_METHOD_LABEL: Record<string, string> = { web: "Web", store: "店頭", app: "アプリ" };
+export const SALES_KIND_LABEL: Record<string, string> = { physical: "実店舗", online_only: "オンライン専用", both: "実店舗・オンライン兼用" };
 export const RECEIVE_METHOD_LABEL: Record<string, string> = { store: "店頭", shipping: "配送", either: "どちらでも" };
 
 export const columnsOf = (kind: MasterKind) => (kind === "products" ? PRODUCT_COLUMNS : STORE_COLUMNS);

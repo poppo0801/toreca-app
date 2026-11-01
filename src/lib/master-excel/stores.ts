@@ -3,6 +3,7 @@ import { PREFECTURE_LIST } from "@/lib/geo";
 import {
   APPLY_METHOD_LABEL,
   RECEIVE_METHOD_LABEL,
+  SALES_KIND_LABEL,
   SHEET,
   STORE_COLUMNS,
   type FieldChange,
@@ -24,6 +25,7 @@ export interface StoreRow {
   round_trip_fare: number | null;
   apply_method: "web" | "store" | "app" | null;
   receive_method: "store" | "shipping" | "either" | null;
+  sales_kind?: "physical" | "online_only" | "both";
   memo: string | null;
   latitude: number | null;
   updated_at: string;
@@ -55,6 +57,7 @@ const prefecture = (raw: string): Parsed<string> => {
 const labelOf = (m: Record<string, string>) => (v: string | number | null) => (v === null ? "" : (m[String(v)] ?? String(v)));
 const SPECS: Spec[] = [
   { key: "name", db: "name", parse: (r) => parseText(r, LABEL.name, 1, 80) },
+  { key: "sales_kind", db: "sales_kind", parse: (r) => parseChoice(r, LABEL.sales_kind, SALES_KIND_LABEL), display: labelOf(SALES_KIND_LABEL) },
   { key: "prefecture", db: "prefecture", parse: prefecture },
   { key: "address", db: "address_optional", parse: (r) => parseText(r, LABEL.address, 1, 200) },
   { key: "store_url", db: "store_url", parse: (r) => parseUrl(r, LABEL.store_url) },
@@ -140,7 +143,7 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
         target = v.value;
       }
       const dbName = s.db as string;
-      const beforeRaw = cur ? (cur[s.db] as string | number | null) : null;
+      const beforeRaw = cur ? ((cur[s.db] as string | number | null | undefined) ?? (s.key === "sales_kind" ? "physical" : null)) : null;
       const before = TEXT_NOT_NULL.has(dbName) && beforeRaw === null ? "" : beforeRaw;
       const after = TEXT_NOT_NULL.has(dbName) && target === null ? "" : target;
       if (before === after) continue;

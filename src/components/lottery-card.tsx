@@ -15,7 +15,8 @@ import { storeDistance } from "@/lib/store-distance";
 import { DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { deadlineBadge, formatFlexible, formatResultShort, formatShort, hasResultPeriod } from "@/lib/datetime";
 import { effectiveEventState, hasSkipException, skipSourceFor } from "@/lib/eligibility";
-import { DEADLINE_BAR_CLASS, EVENT_LABEL, RECEIVE_SHORT, APPLY_LABEL, placeLabel } from "@/lib/lottery-labels";
+import { DEADLINE_BAR_CLASS, EVENT_LABEL, RECEIVE_SHORT, APPLY_LABEL } from "@/lib/lottery-labels";
+import { placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { useBusy } from "@/lib/use-busy";
@@ -83,7 +84,8 @@ export function LotteryCard({
   const firstProduct = data.products.find((p) => p.id === sum.firstProductId);
   const storeLine = `${chain?.name ?? ""} ${store?.name ?? ""}`.trim();
   const dist = storeDistance(data, store);
-  const place = placeLabel(lottery.receiveMethod, store?.prefecture);
+  const placeI = placeInfo({ receiveMethod: lottery.receiveMethod, prefecture: store?.prefecture, storeKind: store?.salesKind });
+  const place = placeI.label;
   // 往復交通費は、店頭で受け取る場合だけ意味がある（通販では出さない）
   const showFare = display.travelCost && store?.roundTripFare != null && lottery.receiveMethod !== "shipping";
   const barClass = event === "before" ? "border-l-info" : DEADLINE_BAR_CLASS[badge?.tone ?? "ended"];
@@ -179,7 +181,8 @@ export function LotteryCard({
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="card-place">
                 <span className="line-clamp-2 min-w-0 max-w-full break-words" data-testid="store-name">{storeLine}</span>
                 {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
-                {dist && lottery.receiveMethod !== "shipping" && (
+                {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 rounded-full border border-info px-1.5 py-px text-[11px] leading-none text-info">発送可</span>}
+                {dist && placeI.showLocation && (
                   <span data-testid="distance" title="自宅からの直線距離（道路距離ではありません）" className={cn("inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-[11px] font-bold", BAND_CLASS[dist.band].split(" ").filter((c) => c.startsWith("text-")).join(" "))}>
                     <MapPin className="size-3.5" aria-hidden="true" />
                     {formatKm(dist.km)}

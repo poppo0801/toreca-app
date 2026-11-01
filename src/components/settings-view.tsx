@@ -29,6 +29,7 @@ export function SettingsView() {
         {SUPABASE ? (
           <>
             <MenuLink href="/settings/masters" title="マスター管理" testId="menu-masters" />
+            <MenuLink href="/settings/lottery-data" title="抽選データ管理" testId="menu-lottery-data" />
             <MenuLink href="/settings/rules" title="応募ルール・スルー" testId="menu-rules" />
           </>
         ) : (

@@ -1,5 +1,11 @@
 import { z } from "zod";
 import type { FlexibleDate } from "@/types/domain";
+import { ANNOUNCE_METHODS, REQUIREMENT_TAGS, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
+
+const ANNOUNCE_CODES = ANNOUNCE_METHODS.map((m) => m.code) as [string, ...string[]];
+const REQUIREMENT_CODES = REQUIREMENT_TAGS.map((t) => t.code) as [string, ...string[]];
+/** 未知のキー・不正な値は落とす（不明な数値は保存しない） */
+const requirementDetailsSchema = z.unknown().transform((v) => sanitizeRequirementDetails(v));
 
 /**
  * 抽選登録フォームの入力定義（クライアントの事前検証とサーバーの検証で共用）。
@@ -93,7 +99,16 @@ export const lotteryInputSchema = z.object({
   applyMethod: z.enum(["web", "store", "app", "unknown"]),
   conditionsText: z.string().trim().max(2000),
   verificationText: z.string().trim().max(1000),
+  /** 当落発表方法の補足・原文（標準分類は announcementMethods） */
   announcementMethod: z.string().trim().max(200),
+  announcementMethods: z.array(z.enum(ANNOUNCE_CODES)).max(12).default([]),
+  announcementTarget: z.enum(["unknown", "both", "winners_only"]).default("unknown"),
+  /** ルールによる推定（告知に明記が無い）。利用者が方法を選び直すと外れる */
+  announcementInferred: z.boolean().default(false),
+  /** 応募条件の標準分類。補足・原文は conditionsText */
+  requirementTags: z.array(z.enum(REQUIREMENT_CODES)).max(28).default([]),
+  requirementLogic: z.enum(["and", "or"]).default("and"),
+  requirementDetails: requirementDetailsSchema.default({}),
   announcementUrl: z.union([z.literal(""), httpUrl]),
   sourceUrls: z.array(httpUrl).max(10),
   eventState: z.enum(["before", "open", "cancelled", "postponed"]),

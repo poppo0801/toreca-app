@@ -1037,6 +1037,7 @@ export type Database = {
           rarity: string
           set_code: string
           source_url: string | null
+          thumb_path: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
@@ -1056,6 +1057,7 @@ export type Database = {
           rarity?: string
           set_code?: string
           source_url?: string | null
+          thumb_path?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1075,6 +1077,7 @@ export type Database = {
           rarity?: string
           set_code?: string
           source_url?: string | null
+          thumb_path?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1704,7 +1707,10 @@ export type Database = {
       }
       lotteries: {
         Row: {
+          announcement_inferred: boolean
           announcement_method: string
+          announcement_methods: string[]
+          announcement_target: string
           announcement_url: string | null
           apply_deadline_at: string | null
           apply_deadline_date: string | null
@@ -1721,6 +1727,7 @@ export type Database = {
           event_state: string
           household_id: string
           id: string
+          import_key: string | null
           is_new: boolean
           limit_basis: string
           limit_max_count: number
@@ -1733,6 +1740,9 @@ export type Database = {
           procedure_start_date: string | null
           procedure_start_precision: string
           receive_method: string
+          requirement_details: Json
+          requirement_logic: string
+          requirement_tags: string[]
           result_at: string | null
           result_date: string | null
           result_end_date: string | null
@@ -1746,7 +1756,10 @@ export type Database = {
           verification_text: string
         }
         Insert: {
+          announcement_inferred?: boolean
           announcement_method?: string
+          announcement_methods?: string[]
+          announcement_target?: string
           announcement_url?: string | null
           apply_deadline_at?: string | null
           apply_deadline_date?: string | null
@@ -1763,6 +1776,7 @@ export type Database = {
           event_state?: string
           household_id: string
           id?: string
+          import_key?: string | null
           is_new?: boolean
           limit_basis?: string
           limit_max_count?: number
@@ -1775,6 +1789,9 @@ export type Database = {
           procedure_start_date?: string | null
           procedure_start_precision?: string
           receive_method?: string
+          requirement_details?: Json
+          requirement_logic?: string
+          requirement_tags?: string[]
           result_at?: string | null
           result_date?: string | null
           result_end_date?: string | null
@@ -1788,7 +1805,10 @@ export type Database = {
           verification_text?: string
         }
         Update: {
+          announcement_inferred?: boolean
           announcement_method?: string
+          announcement_methods?: string[]
+          announcement_target?: string
           announcement_url?: string | null
           apply_deadline_at?: string | null
           apply_deadline_date?: string | null
@@ -1805,6 +1825,7 @@ export type Database = {
           event_state?: string
           household_id?: string
           id?: string
+          import_key?: string | null
           is_new?: boolean
           limit_basis?: string
           limit_max_count?: number
@@ -1817,6 +1838,9 @@ export type Database = {
           procedure_start_date?: string | null
           procedure_start_precision?: string
           receive_method?: string
+          requirement_details?: Json
+          requirement_logic?: string
+          requirement_tags?: string[]
           result_at?: string | null
           result_date?: string | null
           result_end_date?: string | null
@@ -1861,6 +1885,66 @@ export type Database = {
           {
             foreignKeyName: "lotteries_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      lottery_import_history: {
+        Row: {
+          application_count: number
+          created_at: string
+          created_count: number
+          details: Json
+          file_name: string
+          file_sha256: string
+          fingerprint: string
+          household_id: string
+          id: string
+          imported_by_profile_id: string | null
+          unchanged_count: number
+          updated_count: number
+        }
+        Insert: {
+          application_count?: number
+          created_at?: string
+          created_count?: number
+          details?: Json
+          file_name: string
+          file_sha256: string
+          fingerprint: string
+          household_id: string
+          id?: string
+          imported_by_profile_id?: string | null
+          unchanged_count?: number
+          updated_count?: number
+        }
+        Update: {
+          application_count?: number
+          created_at?: string
+          created_count?: number
+          details?: Json
+          file_name?: string
+          file_sha256?: string
+          fingerprint?: string
+          household_id?: string
+          id?: string
+          imported_by_profile_id?: string | null
+          unchanged_count?: number
+          updated_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lottery_import_history_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lottery_import_history_imported_by_profile_id_household_id_fkey"
+            columns: ["imported_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id", "household_id"]
@@ -3467,6 +3551,7 @@ export type Database = {
           prefecture: string
           receive_method: string | null
           round_trip_fare: number | null
+          sales_kind: string
           store_url: string | null
           updated_at: string
           updated_by_profile_id: string | null
@@ -3491,6 +3576,7 @@ export type Database = {
           prefecture?: string
           receive_method?: string | null
           round_trip_fare?: number | null
+          sales_kind?: string
           store_url?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -3515,6 +3601,7 @@ export type Database = {
           prefecture?: string
           receive_method?: string | null
           round_trip_fare?: number | null
+          sales_kind?: string
           store_url?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -3549,6 +3636,17 @@ export type Database = {
     }
     Functions: {
       ack_travel_review: { Args: { p_actor: string }; Returns: undefined }
+      apply_lottery_import: {
+        Args: {
+          p_actor: string
+          p_file_name: string
+          p_file_sha: string
+          p_fingerprint: string
+          p_ops: Json
+          p_unchanged: number
+        }
+        Returns: Json
+      }
       apply_master_import: {
         Args: {
           p_actor: string

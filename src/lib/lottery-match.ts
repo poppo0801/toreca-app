@@ -3,6 +3,7 @@ import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-inp
 import { normName } from "@/lib/norm";
 import { flexToJstDate } from "@/lib/finance";
 import type { AppData, Chain, Lottery, Product, Store } from "@/types/domain";
+import { classifyRequirements, resolveAnnouncement } from "@/lib/lottery-taxonomy";
 
 /**
  * AIの読み取り結果 → 抽選登録フォームの下書き。
@@ -301,6 +302,15 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   ].filter(Boolean) as string[];
   const sourceUrls = [...new Set([opts.sourceUrl, ex.applyUrl].filter((u): u is string => !!u && /^https?:\/\/\S+$/i.test(u)))].slice(0, 10);
 
+  // 標準分類（ルールベース）。告知に明記された内容を優先し、明記が無く抽選サービスが明確なときだけ推定で補う（推定は印を付ける）。
+  // 原文（announcementMethod / conditionsText）はそのまま補足として残す。分類できない場合は空のまま（推測で埋めない）
+  const announce = resolveAnnouncement({
+    text: ex.announcementMethod,
+    urls: [...sourceUrls, ex.announcementUrl ?? ""].filter(Boolean),
+    body: [ex.conditionsText, ex.notes].filter(Boolean).join("\n"),
+  });
+  const requirement = classifyRequirements([ex.conditionsText, ex.verificationText].filter(Boolean).join("\n"));
+
   const input: LotteryInput = {
     chain: chainRef,
     store: storeRef,
@@ -319,6 +329,12 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     conditionsText: ex.conditionsText,
     verificationText: ex.verificationText,
     announcementMethod: ex.announcementMethod,
+    announcementMethods: announce.methods,
+    announcementTarget: announce.target,
+    announcementInferred: announce.inferred,
+    requirementTags: requirement.matched ? requirement.tags : [],
+    requirementLogic: "and",
+    requirementDetails: requirement.matched ? requirement.details : {},
     announcementUrl: ex.announcementUrl,
     sourceUrls,
     eventState: "open",

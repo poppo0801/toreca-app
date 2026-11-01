@@ -50,7 +50,7 @@ export async function loadStoreSnapshot(db: Db): Promise<StoreSnapshot> {
   const stores = await fetchAll<StoreRow>((a, b) =>
     db
       .from("stores")
-      .select("id,management_no,chain_id,name,prefecture,address_optional,store_url,round_trip_fare,apply_method,receive_method,memo,latitude,updated_at,archived_at")
+      .select("id,management_no,chain_id,name,prefecture,address_optional,store_url,round_trip_fare,apply_method,receive_method,sales_kind,memo,latitude,updated_at,archived_at")
       .order("management_no")
       .range(a, b) as unknown as PromiseLike<{ data: StoreRow[] | null; error: unknown }>,
   );
@@ -149,5 +149,16 @@ export async function applyImport(db: Db, kind: MasterKind, file: Buffer, fileNa
     return { ok: false, code: "error", error: "適用に失敗しました。何も反映していません" };
   }
   const r = data as { created: string[]; updated: number; composition: number };
+  // 営業形態は適用RPCの対象列に無いため、適用の直後に反映する（新規行は作成順の管理番号）
+  if (kind === "stores") {
+    const rows = (p.planned.ops as { rows: { no: string | null; set: Record<string, unknown> }[] }).rows;
+    let created = 0;
+    for (const row of rows) {
+      const no = row.no ?? r.created[created++];
+      if (row.set.sales_kind === undefined || !no) continue;
+      const u = await db.from("stores").update({ sales_kind: String(row.set.sales_kind) }).eq("management_no", no);
+      if (u.error) return { ok: false, code: "error", error: "適用しましたが、営業形態を保存できませんでした。マスター管理から営業形態を確認してください" };
+    }
+  }
   return { ok: true, created: r.created, updated: r.updated, composition: r.composition };
 }
