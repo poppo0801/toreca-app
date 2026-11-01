@@ -91,7 +91,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 5L: 標準分類・抽選Excel", () => {
         u1, hid, null,
         base({
           announcementMethod: "当選者のみにメール",
-          announcementMethods: ["winner_mail", "result_page"], announcementTarget: "winners_only", announcementInferred: true,
+          announcementMethods: ["winner_mail"], announcementTarget: "winners_only", announcementInferred: true,
           requirementTags: ["member_card", "purchase_amount"], requirementLogic: "or", requirementDetails: { minAmountYen: 3000 },
           conditionsText: "3,000円以上の購入",
         }),
@@ -100,7 +100,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 5L: 標準分類・抽選Excel", () => {
     ).id;
     const d = await loadAppData(u1);
     const l = d.lotteries.find((x) => x.id === id)!;
-    expect(l.announcementMethods).toEqual(["winner_mail", "result_page"]);
+    expect(l.announcementMethods).toEqual(["winner_mail"]);
     expect(l.announcementTarget).toBe("winners_only");
     expect(l.announcementInferred).toBe(true);
     expect(l.requirementTags).toEqual(["member_card", "purchase_amount"]);

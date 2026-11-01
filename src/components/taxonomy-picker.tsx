@@ -9,7 +9,6 @@ import {
   REQUIREMENT_GROUPS,
   REQUIREMENT_LABEL,
   REQUIREMENT_TAGS,
-  normalizeAnnounceMethods,
   normalizeRequirementTags,
   type AnnounceMethod,
   type AnnounceTarget,
@@ -31,7 +30,7 @@ function Chip({ on, onClick, children, testId }: { on: boolean; onClick: () => v
 
 const inputCls = "h-9 w-full min-w-0 rounded-md border bg-input px-2 text-sm";
 
-/** 当落発表方法: 標準分類（複数）＋通知対象＋短い補足。推定（サービス標準ルール）は印を付けて区別する */
+/** 当落発表方法: 標準分類（単一選択）＋通知対象＋短い補足。推定（サービス標準ルール）は印を付けて区別する */
 export function AnnouncePicker({
   methods,
   target,
@@ -49,9 +48,8 @@ export function AnnouncePicker({
 }) {
   const [open, setOpen] = useState(false);
   const toggle = (m: AnnounceMethod) => {
-    const next = methods.includes(m) ? methods.filter((x) => x !== m) : [...methods, m];
-    // 利用者が選び直したので、推定ではなくなる
-    onChange({ methods: normalizeAnnounceMethods(next), target, inferred: false });
+    // 単一選択。同じものをもう一度押すと未選択に戻す。利用者が選び直したので、推定ではなくなる
+    onChange({ methods: methods.includes(m) ? [] : [m], target, inferred: false });
   };
   const winnersMail = methods.includes("winner_mail");
   return (
@@ -76,7 +74,7 @@ export function AnnouncePicker({
       </div>
       {open && (
         <div className="space-y-2 rounded-lg border p-2">
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="当落発表方法">
             {ANNOUNCE_METHODS.map((m) => (
               <Chip key={m.code} on={methods.includes(m.code)} onClick={() => toggle(m.code)} testId={`announce-opt-${m.code}`}>
                 {m.label}

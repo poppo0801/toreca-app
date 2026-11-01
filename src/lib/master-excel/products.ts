@@ -13,7 +13,9 @@ import {
   type PreviewRow,
   type RowIssue,
 } from "@/lib/master-excel/schema";
+import { IMAGE_KIND_LABELS, validateImageFileName, type ImageSpec } from "@/lib/master-excel/images";
 import { normalizeAlias } from "@/lib/masters";
+import type { ProductImageKind } from "@/types/domain";
 
 export interface ProductRow {
   id: string;
@@ -37,6 +39,8 @@ export interface ProductSnapshot {
   aliases: Record<string, string[]>;
   /** セット構成（管理番号で表す） */
   components: { set_no: string; component_no: string; quantity: number }[];
+  /** 商品ID → 種類ごとの登録済み画像のハッシュ（画像の維持・更新・重複の判定に使う） */
+  images?: Record<string, Partial<Record<ProductImageKind, string>>>;
 }
 
 export interface ProductOps {
@@ -211,6 +215,33 @@ export function planProducts(grid: Grid, componentsGrid: Grid | null, snap: Prod
       }
     }
 
+    // 画像の指定（登録はブラウザ側でZIPと照合してから行う。ここでは指定の形式だけを検査する）
+    let image: ImageSpec | undefined;
+    const imageCell = (raw.image_file ?? "").trim();
+    const imageKindCell = (raw.image_kind ?? "").trim();
+    const imageUpdateCell = (raw.image_update ?? "").trim();
+    if (imageCell) {
+      if (isClear(imageCell)) bad(LABEL.image_file, "画像はExcelでは削除できません（マスター管理の商品画像から削除してください）");
+      else {
+        const f = validateImageFileName(imageCell);
+        let kind: ProductImageKind = "box";
+        if (!f.ok) bad(LABEL.image_file, f.message);
+        if (imageKindCell) {
+          const k = parseChoice(imageKindCell, LABEL.image_kind, IMAGE_KIND_LABELS);
+          if (!k.ok) bad(LABEL.image_kind, k.message);
+          else kind = k.value as ProductImageKind;
+        }
+        let replace = false;
+        if (imageUpdateCell) {
+          if (/^(○|〇|はい|更新|yes|true)$/i.test(imageUpdateCell)) replace = true;
+          else if (!/^(×|いいえ|no|false)$/i.test(imageUpdateCell)) bad(LABEL.image_update, "画像の更新は ○ か空欄で入力してください");
+        }
+        if (f.ok) image = { file: f.value, kind, replace, existingSha: cur ? (snap.images?.[cur.id]?.[kind] ?? null) : null };
+      }
+    } else if (imageKindCell || imageUpdateCell) {
+      bad(LABEL.image_file, "画像種別・画像の更新を指定する行では、画像ファイル名も入力してください");
+    }
+
     const notes: string[] = [];
     const label = name || "（名称なし）";
     let status: PreviewRow["status"];
@@ -219,7 +250,7 @@ export function planProducts(grid: Grid, componentsGrid: Grid | null, snap: Prod
     else if (changes.length === 0) status = "unchanged";
     else status = "update";
     counts[status]++;
-    rows.push({ sheet: SHEET.products, row: r.row, no, label, status, changes: status === "new" ? changes : changes, errors, notes });
+    rows.push({ sheet: SHEET.products, row: r.row, no, label, status, changes, errors, notes, ...(image && status !== "error" ? { image } : {}) });
     if (status === "new" || status === "update") ops.rows.push({ no, expected: cur ? cur.updated_at : null, set, aliases });
   }
 

@@ -32,12 +32,16 @@ export async function loadProductSnapshot(db: Db): Promise<ProductSnapshot> {
   const compRows = await fetchAll<{ set_product_id: string; component_product_id: string; quantity: number }>((a, b) =>
     db.from("product_set_items").select("set_product_id,component_product_id,quantity").order("id").range(a, b),
   );
+  const imageRows = await fetchAll<{ product_id: string; kind: string; sha256: string }>((a, b) => db.from("product_images").select("product_id,kind,sha256").order("id").range(a, b));
+  const images: Record<string, Partial<Record<"box" | "pack" | "unit", string>>> = {};
+  for (const r of imageRows) (images[r.product_id] ??= {})[r.kind as "box" | "pack" | "unit"] = r.sha256;
   const noById = new Map(products.map((p) => [p.id, p.management_no]));
   const aliases: Record<string, string[]> = {};
   for (const r of aliasRows) (aliases[r.product_id] ??= []).push(r.alias);
   return {
     products,
     aliases,
+    images,
     components: compRows.flatMap((c) => {
       const s = noById.get(c.set_product_id);
       const k = noById.get(c.component_product_id);

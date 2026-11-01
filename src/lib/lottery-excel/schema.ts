@@ -52,7 +52,7 @@ export const LOTTERY_COLUMNS: readonly ColumnDef[] = [
   L("result_start", "発表開始日", "当落発表の日（期間のときは開始日）", 12, { clearable: true }),
   L("result_start_time", "発表開始時刻", "HH:MM。不明なら空欄", 10, { clearable: true }),
   L("result_end", "発表終了日", "期間のときだけ。開始日以降の日付", 12, { clearable: true }),
-  L("announce_methods", "発表方法", `標準の選択肢（${ANNOUNCE_METHODS.map((m) => m.label).join("／")}）。複数は ${LIST_SEPARATOR} で区切る`, 26, { clearable: true }),
+  L("announce_methods", "発表方法", `標準の選択肢から1つ（${ANNOUNCE_METHODS.map((m) => m.label).join("／")}）。ほかの確認方法は補足へ`, 26, { clearable: true }),
   L("announce_target", "通知対象", `${ANNOUNCE_TARGETS.map((t) => t.label).join("／")}。経路とは別に指定します`, 14),
   L("announce_note", "発表方法の補足", "短い補足・原文（200文字まで）", 28, { clearable: true }),
   L("announce_url", "結果確認URL", "http(s):// で始まるURL", 28, { clearable: true }),

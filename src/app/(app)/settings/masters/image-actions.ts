@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { computeContentBox } from "@/lib/image-trim";
+import { sniffImage as sniff } from "@/lib/image-sniff";
 import { makeThumb } from "@/lib/server/image-thumb";
 import { createClient } from "@/lib/supabase/server";
 
@@ -11,17 +12,7 @@ export type ImageActionResult = { ok: true } | { ok: false; error: string };
 
 const MAX_BYTES = 3 * 1024 * 1024;
 const kindSchema = z.enum(["box", "pack", "unit"]);
-const fail = (error: string): ImageActionResult => ({ ok: false, error });
-
-/** 中身（先頭バイト）から画像形式を判定する。拡張子・ブラウザ申告の Content-Type は信用しない。 */
-function sniff(buf: Buffer): { ext: "png" | "jpg" | "webp"; mime: string; width: number | null; height: number | null } | null {
-  if (buf.length > 33 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return { ext: "png", mime: "image/png", width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
-  }
-  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { ext: "jpg", mime: "image/jpeg", width: null, height: null };
-  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return { ext: "webp", mime: "image/webp", width: null, height: null };
-  return null;
-}
+const fail = (error: string) => ({ ok: false as const, error });
 
 /**
  * 商品画像の手動アップロード・差し替え（BOX / パック / 単品・セット）。
@@ -47,10 +38,26 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
   if (!hh) return fail("世帯が見つかりません");
   const { data: product } = await supabase.from("products").select("id,manual_override_fields").eq("id", productId.data).maybeSingle();
   if (!product) return fail("商品が見つかりません");
+  const res = await storeProductImage(supabase, { householdId: hh.id, product, kind: kind.data, buf, info, actor: actor.data });
+  if (res.ok) revalidatePath("/settings/masters");
+  return res;
+}
 
+interface StoreArgs {
+  householdId: string;
+  product: { id: string; manual_override_fields: unknown };
+  kind: z.infer<typeof kindSchema>;
+  buf: Buffer;
+  info: NonNullable<ReturnType<typeof sniff>>;
+  actor: string | null;
+}
+
+/** 画像を保存して商品に紐付ける（手動アップロード・ZIP一括登録で共通）。失敗時は保存したファイルを片付け、他の商品には触れない */
+async function storeProductImage(supabase: Awaited<ReturnType<typeof createClient>>, a: StoreArgs): Promise<ImageActionResult> {
+  const { householdId, product, kind, buf, info, actor } = a;
   const sha = createHash("sha256").update(buf).digest("hex");
   // 差し替え時にキャッシュされた古い画像が出ないよう、内容ハッシュ入りの新しいパスに保存する
-  const path = `${hh.id}/${productId.data}/${kind.data}-${sha.slice(0, 12)}.${info.ext}`;
+  const path = `${householdId}/${product.id}/${kind}-${sha.slice(0, 12)}.${info.ext}`;
   const up = await supabase.storage.from("product-images").upload(path, buf, { contentType: info.mime, upsert: true });
   if (up.error) {
     console.error("image upload failed", up.error.message);
@@ -62,7 +69,7 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
   try {
     const t = await makeThumb(buf);
     if (t) {
-      const tp = `${hh.id}/${productId.data}/thumb-${kind.data}-${sha.slice(0, 12)}.webp`;
+      const tp = `${householdId}/${product.id}/thumb-${kind}-${sha.slice(0, 12)}.webp`;
       const tu = await supabase.storage.from("product-images").upload(tp, t.buf, { contentType: "image/webp", upsert: true });
       if (!tu.error) thumbPath = tp;
     }
@@ -70,11 +77,11 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
     /* サムネイルなしで表示される */
   }
 
-  const { data: old } = await supabase.from("product_images").select("id,storage_path,thumb_path").eq("product_id", productId.data).eq("kind", kind.data).maybeSingle();
-  const row = { storage_path: path, thumb_path: thumbPath, sha256: sha, width: info.width, height: info.height, source: "manual" as const, updated_by_profile_id: actor.data };
+  const { data: old } = await supabase.from("product_images").select("id,storage_path,thumb_path").eq("product_id", product.id).eq("kind", kind).maybeSingle();
+  const row = { storage_path: path, thumb_path: thumbPath, sha256: sha, width: info.width, height: info.height, source: "manual" as const, updated_by_profile_id: actor };
   const { error } = old
     ? await supabase.from("product_images").update(row).eq("id", old.id)
-    : await supabase.from("product_images").insert({ ...row, household_id: hh.id, product_id: productId.data, kind: kind.data });
+    : await supabase.from("product_images").insert({ ...row, household_id: householdId, product_id: product.id, kind });
   if (error) {
     await supabase.storage.from("product-images").remove(thumbPath ? [path, thumbPath] : [path]);
     return fail("画像の登録に失敗しました");
@@ -82,18 +89,55 @@ export async function uploadProductImage(formData: FormData): Promise<ImageActio
   // 透明な余白を除いた表示範囲（表示時だけ使う。計算や保存に失敗しても画像の登録自体は成功のまま）
   try {
     const box = await computeContentBox(buf);
-    await supabase.from("product_images").update({ content_box: box }).eq("product_id", productId.data).eq("kind", kind.data);
+    await supabase.from("product_images").update({ content_box: box }).eq("product_id", product.id).eq("kind", kind);
   } catch {
     /* 補正なしで表示される */
   }
   // 手動で差し替えた項目として記録（自動更新・再取り込みで上書きしない）
-  const field = `${kind.data}_image`;
+  const field = `${kind}_image`;
   const fields = new Set<string>((product.manual_override_fields as string[] | null) ?? []);
-  if (!fields.has(field)) await supabase.from("products").update({ manual_override_fields: [...fields, field], updated_by_profile_id: actor.data }).eq("id", productId.data);
+  if (!fields.has(field)) await supabase.from("products").update({ manual_override_fields: [...fields, field], updated_by_profile_id: actor }).eq("id", product.id);
   if (old && old.storage_path !== path) await supabase.storage.from("product-images").remove(old.thumb_path && old.thumb_path !== thumbPath ? [old.storage_path, old.thumb_path] : [old.storage_path]);
-
-  revalidatePath("/settings/masters");
   return { ok: true };
+}
+
+export type ImportImageResult = { ok: true; result: "added" | "updated" | "kept" | "same" } | { ok: false; error: string };
+
+/**
+ * 商品マスターExcel＋ZIPの一括登録で、1商品ぶんの画像を保存する。商品は管理番号で特定する（ファイル名から推測しない）。
+ *  - 既存の画像があり、置き換えの指定（replace）がなければ変更しない（kept）
+ *  - 同じ内容の画像が既にあれば何もしない（same。重複登録の抑制）
+ * 形式・容量はここでも検査する（ブラウザ側の確認は信用しない）。
+ */
+export async function importProductImage(formData: FormData): Promise<ImportImageResult> {
+  const no = z.string().regex(/^PR\d{6}$/).safeParse(formData.get("managementNo"));
+  const kind = kindSchema.safeParse(formData.get("kind"));
+  const actor = z.uuid().nullable().safeParse(formData.get("actor") || null);
+  const replace = formData.get("replace") === "1";
+  const file = formData.get("file");
+  if (!no.success || !kind.success || !actor.success || !(file instanceof File)) return fail("リクエストが不正です");
+  if (file.size === 0) return fail("ファイルが空です");
+  if (file.size > MAX_BYTES) return fail("画像は3MB以下にしてください");
+  const buf = Buffer.from(await file.arrayBuffer());
+  const info = sniff(buf);
+  if (!info) return fail("PNG・JPEG・WebPの画像のみ登録できます");
+
+  const supabase = await createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return fail("ログインが必要です");
+  const { data: hh } = await supabase.from("households").select("id").maybeSingle();
+  if (!hh) return fail("世帯が見つかりません");
+  const { data: product } = await supabase.from("products").select("id,manual_override_fields,archived_at").eq("management_no", no.data).maybeSingle();
+  if (!product || product.archived_at) return fail(`管理番号 ${no.data} の商品が見つかりません`);
+
+  const { data: existing } = await supabase.from("product_images").select("sha256").eq("product_id", product.id).eq("kind", kind.data).maybeSingle();
+  const sha = createHash("sha256").update(buf).digest("hex");
+  if (existing && existing.sha256 === sha) return { ok: true, result: "same" };
+  if (existing && !replace) return { ok: true, result: "kept" };
+  const res = await storeProductImage(supabase, { householdId: hh.id, product, kind: kind.data, buf, info, actor: actor.data });
+  if (!res.ok) return res;
+  revalidatePath("/settings/masters");
+  return { ok: true, result: existing ? "updated" : "added" };
 }
 
 const displaySchema = z.object({

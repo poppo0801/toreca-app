@@ -57,6 +57,12 @@ export function createMockData(now: Date): AppData {
       applyDeadline: h(5),
       resultDate: d(3),
       procedureDeadline: d(10),
+      // 本人確認は通常の条件なので表示しない。特殊な本人確認（学生証など）と会員証は表示する
+      conditionsText: "顔写真付き身分証が必要。学生証と在学証明書の両方が必要。会員証の提示。",
+      requirementTags: ["id_check", "photo_id", "other_verification", "member_card"] as const,
+      announcementMethod: "LivePocketのマイページでも確認可能",
+      announcementMethods: ["result_mail" as const],
+      memo: ["応募は1人1回まで", "当選後のキャンセル不可", "購入時に会員証を提示"].join("\n"),
     },
     {
       ...base,
@@ -189,7 +195,8 @@ export function createMockData(now: Date): AppData {
       { id: "pC", label: "C", color: "purple", initial: "C", allowedChainIds: ["c1"], allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
     ],
     chains: [
-      { id: "c1", name: "サンプル電機" },
+      // 架空のロゴ（横長の画像。表示時に正方形のタイルへ収まることの確認用）
+      { id: "c1", name: "サンプル電機", logoSrc: "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 20'%3E%3Crect width='40' height='20' rx='3' fill='%23003d7a'/%3E%3Ctext x='20' y='14' font-size='11' text-anchor='middle' fill='white' font-family='sans-serif'%3EDEMO%3C/text%3E%3C/svg%3E" },
       { id: "c2", name: "モデル家電" },
       { id: "c3", name: "テスト玩具" },
       { id: "c4", name: "ダミー書店" },

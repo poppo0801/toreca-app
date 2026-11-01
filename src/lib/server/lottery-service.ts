@@ -5,6 +5,7 @@ import { normalizeProfileSettings } from "@/lib/profile-settings";
 import { recordAiFeedback } from "@/lib/server/ai-feedback-service";
 import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
+import { chainLogoUrl } from "@/lib/chain-logo";
 import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
@@ -245,7 +246,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         blockedStoreIds: mine.filter((r) => r.mode === "block" && r.store_id !== null).map((r) => r.store_id as string),
       };
     }),
-    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
+    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, logoSrc: c.logo_path && c.logo_sha256 ? chainLogoUrl(c.id, c.logo_sha256) : null, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
     stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null, salesKind: isStoreKind(s.sales_kind) ? s.sales_kind : "physical" })),
     products: products.map((p) => ({
       id: p.id,

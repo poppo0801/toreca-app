@@ -20,6 +20,11 @@ function makePng(w: number, h: number, rgb: [number, number, number]): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
 
+// 既存のテストは応募済みのカードも一覧で確認するため「応募済みを含む」にしておく（Stage 5Mのテストは既定のまま）
+test.beforeEach(async ({ page }, testInfo) => {
+  if (!testInfo.title.includes("Stage 5M")) await page.addInitScript(() => window.localStorage.setItem("tcg.pref.appliedView", "include"));
+});
+
 const email = process.env.E2E_EMAIL!;
 const password = process.env.E2E_PASSWORD!;
 
@@ -1721,18 +1726,22 @@ test("Stage 5J ユーザーの表示順: 設定で並べ替えると、抽選カ
   expect(await orderOnCard()).toEqual(before);
 });
 
-test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類のタグ。複数選択でき、詳細に分類ラベルで表示される。AND/ORは複数のときだけ", async ({ page }) => {
+test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類のタグ。発表方法は単一選択、応募条件は複数選択で、詳細に分類ラベルで表示される。AND/ORは複数のときだけ", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E5L電機", "E2E5L店", "E2E5L商品");
   await dialog.getByLabel("応募締切の日付").fill("2099-04-01");
-  // 発表方法: 選択式（複数）。通知対象は経路とは別に選べる
+  // 発表方法: 選択式（単一）。通知対象は経路とは別に選べる
   await expect(dialog.getByTestId("announce-picker")).toBeVisible();
   await dialog.getByTestId("announce-toggle").click();
   await dialog.getByTestId("announce-opt-result_mail").click();
+  // 別の方法を選ぶと置き換わる（常に1つだけ）
   await dialog.getByTestId("announce-opt-result_page").click();
-  await expect(dialog.getByTestId("announce-chip")).toHaveCount(2);
+  await expect(dialog.getByTestId("announce-chip")).toHaveCount(1);
+  await dialog.getByTestId("announce-opt-result_mail").click();
+  await expect(dialog.getByTestId("announce-chip")).toHaveCount(1);
+  await expect(dialog.getByTestId("announce-chip")).toHaveText("当落メール");
   await dialog.getByLabel("通知対象").selectOption("both");
   await dialog.getByLabel("発表方法の補足").fill("マイページでも確認できます");
   // 応募条件: 1つのときは結合方法を出さない。2つ以上で「すべて必要／いずれか」
@@ -1748,7 +1757,7 @@ test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類の
 
   await page.getByRole("tab", { name: /全情報/ }).click();
   const sheet = await openDetail(page, page.getByTestId("lottery-card").filter({ hasText: "E2E5L商品" }).first());
-  await expect(sheet.getByTestId("announce-label")).toHaveText(["当落メール", "結果確認ページ"]);
+  await expect(sheet.getByTestId("announce-label")).toHaveText(["当落メール"]);
   await expect(sheet.getByTestId("announce-view")).toContainText("マイページでも確認できます");
   await expect(sheet.getByTestId("requirement-label")).toHaveText(["会員登録", "一定金額以上の購入"]);
   await expect(sheet.getByTestId("requirement-view")).toContainText("いずれか");
@@ -1756,7 +1765,7 @@ test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類の
   // 編集で、保存した分類がそのまま戻る
   await sheet.getByRole("button", { name: "編集" }).click();
   const edit = page.getByRole("dialog").filter({ has: page.getByTestId("announce-picker") });
-  await expect(edit.getByTestId("announce-chip")).toHaveCount(2);
+  await expect(edit.getByTestId("announce-chip")).toHaveCount(1);
   await expect(edit.getByTestId("requirement-chip")).toHaveCount(2);
   await page.keyboard.press("Escape");
 });
@@ -1840,4 +1849,123 @@ test("Stage 5L 抽選データ管理: 設定から開き、テンプレート・
   // 履歴
   await page.reload();
   await expect(page.getByTestId("lottery-import-history")).toContainText("new.xlsx");
+});
+
+test("Stage 5M 商品画像のExcel＋ZIP一括登録: 新規登録・ファイル不一致・既存画像の維持・明示的な更新・同じ画像の重複抑制", async ({ page }) => {
+  const ExcelJS = (await import("exceljs")).default;
+  const JSZip = (await import("jszip")).default;
+  const stamp = Date.now().toString(36);
+  await login(page);
+  await page.goto("/settings/masters");
+  await page.getByTestId("link-master-import").click();
+  await expect(page.getByRole("heading", { name: "Excel取り込み・出力" })).toBeVisible();
+  const tpl = await page.context().request.get("/api/master-import?kind=products&type=template");
+  const tplBuf = Buffer.from(await tpl.body());
+  const book = async (rows: string[][]) => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(tplBuf as unknown as ArrayBuffer);
+    const ws = wb.getWorksheet("商品")!;
+    expect(ws.getRow(1).getCell(13).value).toBe("画像ファイル名");
+    rows.forEach((r, i) => r.forEach((v, c) => (ws.getCell(i + 2, c + 1).value = v === "" ? null : v)));
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  };
+  const zipOf = async (files: Record<string, Buffer | string>) => {
+    const z = new JSZip();
+    for (const [n, c] of Object.entries(files)) z.file(n, c);
+    return Buffer.from(await z.generateAsync({ type: "nodebuffer" }));
+  };
+  const upload = (buffer: Buffer) => page.getByTestId("import-file").setInputFiles({ name: "p.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer });
+  const uploadZip = (buffer: Buffer) => page.getByTestId("import-zip").setInputFiles({ name: "images.zip", mimeType: "application/zip", buffer });
+  const nameA = `E2E5M画像商品A${stamp}`;
+  const nameB = `E2E5M画像商品B${stamp}`;
+  const fileA = `A-${stamp}.png`;
+  const png1 = makePng(40, 56, [200, 40, 40]);
+  const png2 = makePng(44, 60, [40, 40, 200]);
+  const empty = (n: number) => Array(n).fill("");
+
+  // 新規2件: Aは画像あり、Bは指定したファイルがZIPに無い（ファイル不一致）
+  await upload(await book([["", "", "", nameA, ...empty(8), fileA, "BOX", ""], ["", "", "", nameB, ...empty(8), `ZZ-${stamp}.png`, "", ""]]));
+  await expect(page.getByTestId("import-preview")).toBeVisible();
+  await uploadZip(await zipOf({ [`images/${fileA}`]: png1, "readme.txt": "画像ではない", [`B-${stamp}.png`]: png2 }));
+  await expect(page.getByTestId("zip-summary")).toContainText("画像 2枚を確認");
+  const rowA = page.getByTestId("import-rows").locator("li").filter({ hasText: nameA });
+  const rowB = page.getByTestId("import-rows").locator("li").filter({ hasText: nameB });
+  await expect(rowA.getByTestId("image-row")).toHaveAttribute("data-outcome", "add");
+  await expect(rowA.getByTestId("zip-thumb")).toBeVisible();
+  await expect(rowB.getByTestId("image-row")).toHaveAttribute("data-outcome", "missing"); // 似た名前（B-…）の画像を勝手に割り当てない
+  await expect(page.getByTestId("image-issues")).toContainText("1件");
+  await page.getByTestId("import-apply").click();
+  const done = page.getByTestId("import-done");
+  await expect(done).toContainText("新規 2件");
+  await expect(done.getByTestId("image-result")).toContainText("新規 1件");
+  const noA = (await done.innerText()).match(/PR\d{6}/g)![0];
+  // 既存商品Aに別の画像: 更新指定なし → 維持 / 同じ画像 → 変更なし / ○ → 更新
+  await page.goto("/settings/masters");
+  await page.getByTestId("link-master-import").click();
+  const row = (img: string, upd: string) => [[noA, ...empty(11), img, "BOX", upd]];
+  await upload(await book(row(fileA, "")));
+  await uploadZip(await zipOf({ [fileA]: png2 }));
+  await expect(page.getByTestId("image-row")).toHaveAttribute("data-outcome", "keep");
+  await upload(await book(row(fileA, "")));
+  await uploadZip(await zipOf({ [fileA]: png1 }));
+  await expect(page.getByTestId("image-row")).toHaveAttribute("data-outcome", "same"); // 重複登録しない
+  await upload(await book(row(fileA, "○")));
+  await uploadZip(await zipOf({ [fileA]: png2 }));
+  await expect(page.getByTestId("image-row")).toHaveAttribute("data-outcome", "update");
+  await expect(page.getByTestId("import-apply")).toContainText("画像を登録する");
+  await page.getByTestId("import-apply").click();
+  await expect(page.getByTestId("import-done")).toContainText("商品情報の変更はありません");
+  await expect(page.getByTestId("image-result")).toContainText("更新 1件");
+  // 不正なファイル（画像でない中身）はエラーになり、登録されない
+  await upload(await book(row("fake.png", "○")));
+  await uploadZip(await zipOf({ "fake.png": "これは画像ではありません" }));
+  await expect(page.getByTestId("image-row")).toHaveAttribute("data-outcome", "invalid");
+});
+
+test("Stage 5M 系列ロゴ: マスター管理で登録→抽選カードの店舗名の左に表示（横長でも正方形のタイル）→削除で従来表示に戻る", async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const chain = `E2E5M系列${stamp}`;
+  await login(page);
+  await page.getByRole("button", { name: "＋登録" }).click();
+  const dialog = page.getByRole("dialog");
+  await fillMasters(dialog, chain, `E2E5M店${stamp}`, `E2E5M商品${stamp}`);
+  await dialog.getByLabel("応募締切の日付").fill("2099-04-01");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.goto("/settings/masters");
+  const master = page.getByTestId("master-row").filter({ hasText: chain });
+  await master.getByTestId("chain-logo-button").click();
+  await expect(page.getByTestId("logo-current")).toContainText("未登録");
+  // 画像でないファイル・大きすぎるファイルは登録前に断られる
+  await page.getByTestId("logo-file").setInputFiles({ name: "x.txt", mimeType: "text/plain", buffer: Buffer.from("x") });
+  await expect(page.getByTestId("logo-error")).toBeVisible();
+  // 横長の透過PNG（縦横比は保ったまま正方形に整えられる）
+  await page.getByTestId("logo-file").setInputFiles({ name: "wide.png", mimeType: "image/png", buffer: makePng(120, 30, [0, 90, 160]) });
+  await expect(page.getByTestId("logo-preview")).toBeVisible();
+  await page.getByTestId("logo-save").click();
+  await expect(page.getByTestId("logo-current").locator("img")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  const card = page.getByTestId("lottery-card").filter({ hasText: `E2E5M商品${stamp}` }).first();
+  const logo = card.getByTestId("chain-logo");
+  await expect(logo).toBeVisible();
+  const box = (await logo.boundingBox())!;
+  expect([Math.round(box.width), Math.round(box.height)]).toEqual([20, 20]);
+  expect(await logo.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(192); // 保存時に192px四方へ整えられている
+  const served = await page.context().request.get((await logo.getAttribute("src"))!);
+  expect(served.status()).toBe(200);
+  expect(served.headers()["content-type"]).toBe("image/png");
+
+  // 削除（明示操作）すると、ロゴなしの従来表示に戻る
+  await page.goto("/settings/masters");
+  await page.getByTestId("master-row").filter({ hasText: chain }).getByTestId("chain-logo-button").click();
+  await page.getByTestId("logo-delete").click();
+  await page.getByTestId("logo-delete-confirm").click();
+  await expect(page.getByTestId("logo-current")).toContainText("未登録");
+  await page.goto("/lotteries");
+  await page.getByRole("tab", { name: /全情報/ }).click();
+  await expect(page.getByTestId("lottery-card").filter({ hasText: `E2E5M商品${stamp}` }).first().getByTestId("chain-logo")).toHaveCount(0);
 });

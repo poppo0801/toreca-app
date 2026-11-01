@@ -3,7 +3,8 @@ import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-inp
 import { normName } from "@/lib/norm";
 import { flexToJstDate } from "@/lib/finance";
 import type { AppData, Chain, Lottery, Product, Store } from "@/types/domain";
-import { classifyRequirements, resolveAnnouncement } from "@/lib/lottery-taxonomy";
+import { splitNotes } from "@/lib/notes";
+import { classifyRequirements, foldAnnounceNote, resolveAnnouncement } from "@/lib/lottery-taxonomy";
 
 /**
  * AIの読み取り結果 → 抽選登録フォームの下書き。
@@ -298,7 +299,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   const memoLines = [
     ex.applyUrl && `応募URL: ${ex.applyUrl}`,
     ex.purchaseLimitText && `購入数量・上限: ${ex.purchaseLimitText}`,
-    ex.notes && `注意事項: ${ex.notes}`,
+    ...splitNotes(ex.notes ?? ""),
   ].filter(Boolean) as string[];
   const sourceUrls = [...new Set([opts.sourceUrl, ex.applyUrl].filter((u): u is string => !!u && /^https?:\/\/\S+$/i.test(u)))].slice(0, 10);
 
@@ -328,7 +329,8 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     applyMethod: ex.applyMethod,
     conditionsText: ex.conditionsText,
     verificationText: ex.verificationText,
-    announcementMethod: ex.announcementMethod,
+    // 主な方法は標準分類へ。ほかに検出した確認方法は補足へ（原文は消さない）
+    announcementMethod: foldAnnounceNote(ex.announcementMethod, announce.extra),
     announcementMethods: announce.methods,
     announcementTarget: announce.target,
     announcementInferred: announce.inferred,

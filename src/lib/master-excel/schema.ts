@@ -2,6 +2,8 @@
  * 商品・店舗マスターのExcel入出力の列定義。テンプレート・エクスポート・取り込みで同じ定義を使う。
  * 更新の規則: 空欄=変更しない / 値あり=その値に変更 / `#CLEAR`=削除（clearable の項目だけ）。
  */
+import type { ImageSpec } from "@/lib/master-excel/images";
+
 export type MasterKind = "products" | "stores";
 
 export const TEMPLATE_VERSION = 1;
@@ -46,6 +48,9 @@ export const PRODUCT_COLUMNS: readonly ColumnDef[] = [
   { key: "list_price_box", label: "BOX定価", clearable: true, note: "円。0以上の整数", width: 10 },
   { key: "list_price_pack", label: "パック定価", clearable: true, note: "円。0以上の整数", width: 10 },
   { key: "memo", label: "メモ", clearable: true, note: "2000文字まで", width: 30 },
+  { key: "image_file", label: "画像ファイル名", clearable: false, note: "画像ZIP内のファイル名（例: PR000001.jpg）。空欄なら画像は変更しません。画像の削除はExcelではできません", width: 22 },
+  { key: "image_kind", label: "画像種別", clearable: false, note: "BOX / パック / 単品・セット。空欄ならBOX", width: 12 },
+  { key: "image_update", label: "画像の更新", clearable: false, note: "既に画像がある商品を置き換えるときだけ ○ を入力。空欄なら既存の画像を維持します", width: 12 },
 ];
 
 export const COMPONENT_COLUMNS: readonly ColumnDef[] = [
@@ -94,6 +99,8 @@ export interface FieldChange {
 }
 
 export interface PreviewRow {
+  /** 商品シートの画像指定（画像ファイル名の列に入力があった行） */
+  image?: ImageSpec;
   sheet: string;
   row: number;
   /** 管理番号（新規は空） */

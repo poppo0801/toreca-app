@@ -1306,6 +1306,8 @@ export type Database = {
           household_id: string
           id: string
           is_provisional: boolean
+          logo_path: string | null
+          logo_sha256: string | null
           memo: string
           name: string
           updated_at: string
@@ -1318,6 +1320,8 @@ export type Database = {
           household_id: string
           id?: string
           is_provisional?: boolean
+          logo_path?: string | null
+          logo_sha256?: string | null
           memo?: string
           name: string
           updated_at?: string
@@ -1330,6 +1334,8 @@ export type Database = {
           household_id?: string
           id?: string
           is_provisional?: boolean
+          logo_path?: string | null
+          logo_sha256?: string | null
           memo?: string
           name?: string
           updated_at?: string

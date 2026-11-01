@@ -20,7 +20,7 @@ import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL,
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
-import { AnnounceView, RequirementView } from "@/components/taxonomy-view";
+import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
 import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 import type { Application, Lottery } from "@/types/domain";
@@ -310,7 +310,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
             {lottery.memo && (
               <dl>
                 <Field label="備考">
-                  <span className="whitespace-pre-wrap">{lottery.memo}</span>
+                  <NotesView text={lottery.memo} />
                 </Field>
               </dl>
             )}

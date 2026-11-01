@@ -1,5 +1,6 @@
 import { isResultFinished, resultSortKey, sortKey } from "@/lib/datetime";
 import { effectiveEventState, isSkippedBy } from "@/lib/eligibility";
+import { applyControlFor } from "@/lib/lottery-summary";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
 export type Tab = "managed" | "applied" | "won" | "all";
@@ -9,12 +10,16 @@ export type SortMode = "deadline" | "result";
 /** ★管理対象タブのスルー表示: normal=自分がスルーしていないもの / include=すべて / only=自分がスルーしたもの */
 export type SkipView = "normal" | "include" | "only";
 
+/** ★管理対象タブの応募済み表示: exclude=現在のプロフィールが応募済みの抽選を隠す（既定）/ include=含める */
+export type AppliedView = "exclude" | "include";
+
 export interface Filters {
   query: string;
   chainId: string;
   /** 商品で絞り込み（複数商品の抽選も、いずれかの明細に含まれていれば対象） */
   productId: string;
   skip: SkipView;
+  applied: AppliedView;
   prefecture: string;
   receiveMethod: string;
   allFilter: AllFilter;
@@ -26,6 +31,7 @@ export const DEFAULT_FILTERS: Filters = {
   chainId: "",
   productId: "",
   skip: "normal",
+  applied: "exclude",
   prefecture: "",
   receiveMethod: "",
   allFilter: "any",
@@ -144,12 +150,24 @@ function matchSkipView(data: AppData, lottery: Lottery, f: Filters, tab: Tab, pr
   return f.skip === "only" ? skipped : !skipped;
 }
 
-export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string): Lottery[] {
+/**
+ * ★管理対象タブで、現在のプロフィールが応募済みの抽選を隠す。判定は現在のプロフィールだけ（他のプロフィールの応募は無関係）。
+ * 応募は抽選単位（複数商品も1つの応募に含まれる）なので、応募済みなら未応募の商品は残らない。
+ * keepIds は退場アニメーション中のカード（応募直後に一定時間だけ残す）。
+ */
+function matchAppliedView(data: AppData, lottery: Lottery, f: Filters, tab: Tab, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): boolean {
+  if (tab !== "managed" || !profileId || f.applied === "include") return true;
+  if (keepIds?.has(lottery.id)) return true;
+  return applyControlFor(data, lottery, profileId, now).kind !== "applied";
+}
+
+export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): Lottery[] {
   const list = data.lotteries.filter(
     (l) =>
       inTab(data, l, tab, now) &&
       matchFilters(data, l, f) &&
       matchSkipView(data, l, f, tab, profileId) &&
+      matchAppliedView(data, l, f, tab, now, profileId, keepIds) &&
       (tab !== "all" || matchAllFilter(data, l, f.allFilter, now)),
   );
 

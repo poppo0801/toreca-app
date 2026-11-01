@@ -35,13 +35,32 @@ export const ANNOUNCE_TARGET_LABEL = Object.fromEntries(ANNOUNCE_TARGETS.map((t)
 export const isAnnounceMethod = (v: unknown): v is AnnounceMethod => typeof v === "string" && ANNOUNCE_CODES.has(v);
 export const isAnnounceTarget = (v: unknown): v is AnnounceTarget => v === "unknown" || v === "both" || v === "winners_only";
 
-/** 重複を除き、定義順に並べる。「不明」は他の方法があるときは外す */
+/** 主な発表方法を選ぶときの優先順（複数検出したとき・旧データの複数選択を1つにまとめる） */
+const ANNOUNCE_PRIORITY: AnnounceMethod[] = ["winner_mail", "result_mail", "result_page", "app", "x_dm", "line", "sms", "in_store", "sns_post", "phone", "other", "unknown"];
+
+/** 発表方法は単一選択（Stage 5M）。複数渡されたら優先順で主な1つだけ残す */
 export function normalizeAnnounceMethods(input: readonly unknown[]): AnnounceMethod[] {
+  const { primary } = splitAnnounce(input);
+  return primary ? [primary] : [];
+}
+
+/** 複数の発表方法を、主な1つ（primary）と補足に回す残り（rest）に分ける。「不明」は他の方法があるときは外す */
+export function splitAnnounce(input: readonly unknown[]): { primary: AnnounceMethod | null; rest: AnnounceMethod[] } {
   const set = new Set(input.filter(isAnnounceMethod));
-  // 当落メールと当選者のみメールは同時に持たない（より限定的な方を残す）
-  if (set.has("winner_mail") && set.has("result_mail")) set.delete("result_mail");
   if (set.size > 1) set.delete("unknown");
-  return ANNOUNCE_METHODS.map((m) => m.code).filter((c) => set.has(c));
+  const ordered = ANNOUNCE_PRIORITY.filter((c) => set.has(c));
+  const primary = ordered[0] ?? null;
+  // 当落メールと当選者のみメールは同じ経路なので、補足には回さない
+  const rest = ordered.slice(1).filter((c) => !(primary === "winner_mail" && c === "result_mail") && c !== "other");
+  return { primary, rest };
+}
+
+/** 補足文に「他の確認方法」を追記する（既存の補足は消さない。同じ内容があれば重複させない） */
+export function foldAnnounceNote(note: string, rest: readonly AnnounceMethod[]): string {
+  if (rest.length === 0) return note;
+  const line = `他の確認方法: ${rest.map((m) => ANNOUNCE_LABEL[m]).join("、")}`;
+  if (note.includes(line)) return note;
+  return note.trim() ? `${note.trim()}\n${line}` : line;
 }
 
 /** 発表方法のラベル（複数は「＋」でつなぐ）。当選者のみ通知は、メール以外の経路にも「（当選者のみ）」を付ける */
@@ -71,6 +90,8 @@ const BOTH_RE = /当落(結果)?[^。\n]{0,8}(メール|通知|連絡)|当選・
 
 export interface AnnounceClassification {
   methods: AnnounceMethod[];
+  /** 主な方法以外に検出した方法（補足へ回す） */
+  extra: AnnounceMethod[];
   target: AnnounceTarget;
   /** 文章から分類できたか（できなければ methods は ["unknown"] もしくは空） */
   matched: boolean;
@@ -79,16 +100,16 @@ export interface AnnounceClassification {
 /** 発表方法の自由記述を標準分類にする（ルールベース）。確実でない場合は「不明/その他」にし、推測で断定しない */
 export function classifyAnnouncement(text: string): AnnounceClassification {
   const t = text.normalize("NFKC").trim();
-  if (!t) return { methods: [], target: "unknown", matched: false };
+  if (!t) return { methods: [], extra: [], target: "unknown", matched: false };
   const found: AnnounceMethod[] = [];
   for (const r of ANNOUNCE_RULES) if (r.re.test(t) && !found.includes(r.method)) found.push(r.method);
   let target: AnnounceTarget = "unknown";
   if (WINNERS_ONLY_RE.test(t)) target = "winners_only";
   else if (BOTH_RE.test(t)) target = "both";
   if (target === "winners_only" && found.includes("result_mail") && !found.includes("winner_mail")) found.push("winner_mail");
-  const methods = normalizeAnnounceMethods(found);
-  if (methods.length === 0) return { methods: ["other"], target, matched: false };
-  return { methods, target, matched: true };
+  const { primary, rest } = splitAnnounce(found);
+  if (!primary) return { methods: ["other"], extra: [], target, matched: false };
+  return { methods: [primary], extra: rest, target, matched: true };
 }
 
 // ---------------------------------------------------------------- LivePocket など抽選サービスの標準ルール
@@ -122,6 +143,8 @@ export const SERVICE_RULES: ServiceRule[] = [
 
 export interface AnnounceResolved {
   methods: AnnounceMethod[];
+  /** 主な方法以外（補足へ回す） */
+  extra: AnnounceMethod[];
   target: AnnounceTarget;
   /** ルールによる推定（告知に明記が無い）。確認済みとは区別して表示する */
   inferred: boolean;
@@ -134,17 +157,20 @@ export interface AnnounceResolved {
  * 告知に明記された方法があれば、それだけを使う。明記が無く、サービスが明確なときだけ推定で補う。
  */
 export function resolveAnnouncement(args: { text: string; methods?: readonly AnnounceMethod[]; target?: AnnounceTarget; urls: readonly string[]; body?: string }): AnnounceResolved {
-  const explicit = normalizeAnnounceMethods(args.methods ?? []).filter((m) => m !== "unknown");
+  const given = splitAnnounce(args.methods ?? []);
   const cls = classifyAnnouncement(args.text);
-  const textMethods = cls.matched ? cls.methods : [];
-  const methods = explicit.length > 0 ? explicit : textMethods;
   const target = args.target && args.target !== "unknown" ? args.target : cls.target;
-  if (methods.length > 0) return { methods, target, inferred: false };
+  // 告知（明示指定 → 文章の分類）を優先する。指定が「不明」だけのときは文章・サービスルールで補う
+  if (given.primary && given.primary !== "unknown") return { methods: [given.primary], extra: given.rest, target, inferred: false };
+  if (cls.matched) return { methods: cls.methods, extra: cls.extra, target, inferred: false };
   const ctxText = `${args.text}\n${args.body ?? ""}`;
   for (const rule of SERVICE_RULES) {
-    if (rule.detect({ urls: args.urls, text: ctxText })) return { methods: rule.announce.methods, target: rule.announce.target, inferred: true, service: rule.id };
+    if (rule.detect({ urls: args.urls, text: ctxText })) {
+      const sp = splitAnnounce(rule.announce.methods);
+      return { methods: sp.primary ? [sp.primary] : [], extra: sp.rest, target: rule.announce.target, inferred: true, service: rule.id };
+    }
   }
-  return { methods: args.methods && args.methods.length > 0 ? normalizeAnnounceMethods(args.methods) : [], target, inferred: false };
+  return { methods: given.primary ? [given.primary] : [], extra: [], target, inferred: false };
 }
 
 // ---------------------------------------------------------------- 応募条件
@@ -193,6 +219,14 @@ export type RequirementTag = (typeof REQUIREMENT_TAGS)[number]["code"];
 export const REQUIREMENT_LABEL = Object.fromEntries(REQUIREMENT_TAGS.map((t) => [t.code, t.label])) as Record<RequirementTag, string>;
 const REQ_CODES = new Set<string>(REQUIREMENT_TAGS.map((t) => t.code));
 export const isRequirementTag = (v: unknown): v is RequirementTag => typeof v === "string" && REQ_CODES.has(v);
+
+/**
+ * 一般的な本人確認（身分証提示・顔写真付き身分証）は、いまのポケカ抽選では通常条件。
+ * 条件タグの表示対象から外す（データ・原文は保持。資格判定には内部データを使える）。
+ * 特殊な書類・手続き（other_verification）は重要な条件として表示する。
+ */
+export const HIDDEN_REQUIREMENT_TAGS: readonly RequirementTag[] = ["id_check", "photo_id"];
+export const visibleRequirementTags = (tags: readonly RequirementTag[]): RequirementTag[] => tags.filter((t) => !HIDDEN_REQUIREMENT_TAGS.includes(t));
 
 export type RequirementLogic = "and" | "or";
 export const isRequirementLogic = (v: unknown): v is RequirementLogic => v === "and" || v === "or";
@@ -255,8 +289,9 @@ const REQ_RULES: { re: RegExp; tag: RequirementTag }[] = [
   { re: /[0-9,]+円\s*(以上|から).{0,8}(購入|お買い上げ|買い物)|(購入|お買い上げ).{0,10}[0-9,]+円\s*以上/, tag: "purchase_amount" },
   { re: /(\d+月\d+日|\d{4}[\/年]\d+).{0,10}(まで|以降|から).{0,12}(購入|お買い上げ)/, tag: "purchase_period" },
   { re: /顔写真付き|写真付き(の)?(身分証|本人確認)|運転免許|マイナンバーカード|パスポート/, tag: "photo_id" },
-  { re: /身分証|本人確認書類/, tag: "id_check" },
-  { re: /本人確認/, tag: "other_verification" },
+  { re: /身分証|本人確認/, tag: "id_check" },
+  // 一般的な身分証以外の特殊な書類・手続きだけを「その他本人確認」（表示対象）にする
+  { re: /学生証|在学証明|在籍証明|住民票|健康保険証|保険証|本人認証|事前(の)?(本人)?(登録|認証)|(店舗|当店)独自の?(本人)?確認|専用の?(本人)?確認/, tag: "other_verification" },
   { re: /(X|Twitter|ツイッター)[^。\n]{0,6}(アカウント)/i, tag: "x_account" },
   { re: /(X|Twitter|ツイッター)[^。\n]{0,10}フォロー|フォロー(して|が必要|必須)/i, tag: "x_follow" },
   { re: /リポスト|リツイート|RT/, tag: "x_repost" },

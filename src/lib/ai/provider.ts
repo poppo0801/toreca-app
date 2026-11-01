@@ -154,7 +154,7 @@ export const RECORD_LOTTERY_TOOL = {
       purchase_limit_text: { type: "string", description: "購入数量・上限に関する記載（原文に近い形）" },
       conditions_text: { type: "string", description: "応募条件（会員登録、購入履歴など）" },
       verification_text: { type: "string", description: "本人確認・必要書類の種類（番号や画像は記録しない）" },
-      notes: { type: "string", description: "その他の注意事項" },
+      notes: { type: "string", description: "その他の注意事項。複数ある場合は1項目ずつ改行で区切る（項目の先頭に記号は付けない）" },
       confidence: {
         type: "object",
         properties: Object.fromEntries(confKeys.map((k) => [k, confSchema])),

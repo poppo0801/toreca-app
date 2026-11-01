@@ -92,6 +92,7 @@ export function parseCell(key: string, raw: string): Parsed<string> {
       return parseTime(v, label);
     case "announce_methods": {
       const r = parseCodeList(v, label, ANNOUNCE_LABEL_DEFS);
+      if (r.ok && r.value.length > 1) return err(`${label}は1つだけ指定してください（ほかの確認方法は「発表方法の補足」に書いてください）`);
       return r.ok ? ok(normalizeAnnounceMethods(r.value).join(LIST_SEPARATOR)) : r;
     }
     case "req_tags": {

@@ -19,6 +19,7 @@ import { DEADLINE_BAR_CLASS, EVENT_LABEL, RECEIVE_SHORT, APPLY_LABEL } from "@/l
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
+import { ChainLogo } from "@/components/chain-logo";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -140,9 +141,10 @@ export function LotteryCard({
               <ProductThumb product={firstProduct} heightClass="h-14" />
             </span>
             <span className="min-w-0 flex-1 space-y-0.5">
-              <span className="block truncate text-[11px] text-muted-foreground">
-                {storeLine}
-                {display.prefecture && place && <span className="ml-1.5 rounded-full border px-1.5 py-px text-[10px]">{place}</span>}
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <ChainLogo src={chain?.logoSrc} name={chain?.name ?? ""} className="size-4 my-0 rounded-[4px]" />
+                <span className="min-w-0 truncate">{storeLine}</span>
+                {display.prefecture && place && <span className="ml-0.5 shrink-0 rounded-full border px-1.5 py-px text-[10px]">{place}</span>}
               </span>
               <ProductLine name={sum.name} extra={sum.extraKinds} />
               {/* 応募漏れ防止: 締切と残り時間は一覧でも必ず出す */}
@@ -179,6 +181,7 @@ export function LotteryCard({
             <div role="button" tabIndex={0} aria-label={`${storeLine} ${sum.name}の詳細を開く`} onClick={openDetail} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(); } }} className="min-w-0 cursor-pointer space-y-1 text-left">
               {/* 店舗名（最大2行）→ 都道府県 → 距離。狭い幅では都道府県・距離が次の行へ折り返す */}
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="card-place">
+                <ChainLogo src={chain?.logoSrc} name={chain?.name ?? ""} />
                 <span className="line-clamp-2 min-w-0 max-w-full break-words" data-testid="store-name">{storeLine}</span>
                 {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
                 {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 rounded-full border border-info px-1.5 py-px text-[11px] leading-none text-info">発送可</span>}

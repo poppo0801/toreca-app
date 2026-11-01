@@ -20,6 +20,7 @@ import {
   type Grid,
   type MasterKind,
 } from "@/lib/master-excel/schema";
+import { IMAGE_KIND_LABELS } from "@/lib/master-excel/images";
 import type { ProductRow, ProductSnapshot } from "@/lib/master-excel/products";
 import type { StoreRow, StoreSnapshot } from "@/lib/master-excel/stores";
 
@@ -249,6 +250,9 @@ const productValues = (p: ProductRow, aliases: string[]): string[] => [
   p.list_price_box === null ? "" : String(p.list_price_box),
   p.list_price_pack === null ? "" : String(p.list_price_pack),
   p.memo ?? "",
+  "", // 画像ファイル名・画像種別・画像の更新は取り込み専用（出力では空欄）
+  "",
+  "",
 ];
 const storeValues = (s: StoreRow, chainName: string): string[] => [
   s.management_no,
@@ -266,8 +270,8 @@ const storeValues = (s: StoreRow, chainName: string): string[] => [
 
 const EXAMPLES = {
   products: [
-    ["", "SAMPLE-001", "独自", "サンプル拡張パック「ひかりの森」", "ひかりの森|ひかり", "サンプルシリーズ", "2026-12-05", "pokemon_card", "30", "5400", "180", "記入例（架空の商品）"],
-    ["PR000001", "", "", "", "", "#CLEAR", "", "", "", "5500", "", ""],
+    ["", "SAMPLE-001", "独自", "サンプル拡張パック「ひかりの森」", "ひかりの森|ひかり", "サンプルシリーズ", "2026-12-05", "pokemon_card", "30", "5400", "180", "記入例（架空の商品）", "SAMPLE-001.jpg", "BOX", ""],
+    ["PR000001", "", "", "", "", "#CLEAR", "", "", "", "5500", "", "", "", "", ""],
   ],
   stores: [
     ["", "サンプル電機", "三宮店", "実店舗", "兵庫県", "兵庫県神戸市（架空の住所）", "https://example.invalid/store/sannomiya", "800", "アプリ", "店頭", "記入例（架空の店舗）"],
@@ -281,6 +285,8 @@ export async function buildTemplate(kind: MasterKind): Promise<Buffer> {
   const ws = addDataSheet(wb, dataSheetName(kind), columnsOf(kind), []);
   if (kind === "products") {
     addList(ws, 3, Object.values(CODE_KIND_LABEL));
+    addList(ws, 14, Object.values(IMAGE_KIND_LABELS));
+    addList(ws, 15, ["○"]);
     addDataSheet(wb, SHEET.components, COMPONENT_COLUMNS, []);
   } else {
     addList(ws, 4, Object.values(SALES_KIND_LABEL));
@@ -298,6 +304,8 @@ export async function buildProductExport(snap: ProductSnapshot): Promise<Buffer>
   const active = snap.products.filter((p) => !p.archived_at).sort((a, b) => a.management_no.localeCompare(b.management_no));
   const ws = addDataSheet(wb, SHEET.products, PRODUCT_COLUMNS, active.map((p) => productValues(p, snap.aliases[p.id] ?? [])));
   addList(ws, 3, Object.values(CODE_KIND_LABEL));
+  addList(ws, 14, Object.values(IMAGE_KIND_LABELS));
+  addList(ws, 15, ["○"]);
   const activeNos = new Set(active.map((p) => p.management_no));
   addDataSheet(
     wb,

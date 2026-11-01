@@ -18,7 +18,7 @@ import { flexToJstDate } from "@/lib/finance";
 import { FEEDBACK_REASONS, REASON_LABEL, type FeedbackReason } from "@/lib/ai/feedback";
 import type { Product, Chain, Store } from "@/types/domain";
 import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker";
-import { classifyAnnouncement, classifyRequirements, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
+import { classifyAnnouncement, classifyRequirements, foldAnnounceNote, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -938,7 +938,7 @@ export function LotteryFormDialog({
                       data-testid="announce-classify"
                       onClick={() => {
                         const c = classifyAnnouncement(v.announcementMethod);
-                        if (c.matched) setV((cur) => ({ ...cur, announcementMethods: c.methods, announcementTarget: c.target, announcementInferred: false }));
+                        if (c.matched) setV((cur) => ({ ...cur, announcementMethods: c.methods, announcementMethod: foldAnnounceNote(cur.announcementMethod, c.extra), announcementTarget: c.target, announcementInferred: false }));
                       }}
                     >
                       文章から分類

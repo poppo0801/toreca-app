@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { ApplyExitProvider, useApplyExitController } from "@/components/apply-exit";
 import { useSearchParams } from "next/navigation";
 import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
@@ -15,6 +16,7 @@ import {
   DEFAULT_FILTERS,
   selectLotteries,
   type AllFilter,
+  type AppliedView,
   type Filters,
   type SkipView,
   type SortMode,
@@ -34,6 +36,7 @@ const TABS: { value: Tab; label: string }[] = [
 ];
 
 const VIEW = ["list", "matrix"] as const;
+const APPLIED_VIEWS = ["exclude", "include"] as const;
 
 const chip = "h-9 shrink-0 rounded-full border bg-input px-3 text-xs";
 
@@ -101,10 +104,13 @@ export function LotteryBoard() {
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- 端末ローカル設定の復元 */
     setView(readPref("view", VIEW, "list"));
+    const appliedPref = readPref("appliedView", APPLIED_VIEWS, "exclude");
     const saved = readSession("board", validateSession);
     if (saved && !focusId) {
       setTab(saved.tab);
-      setFilters(saved.filters);
+      setFilters({ ...saved.filters, applied: appliedPref });
+    } else if (!focusId) {
+      setFilters((f) => ({ ...f, applied: appliedPref }));
     }
     setRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -115,6 +121,10 @@ export function LotteryBoard() {
     // 通知から開いたとき（focus）は、その抽選を見せるための一時的な表示なので保存しない
     if (restored && !focusId) writeSession("board", { tab, filters });
   }, [restored, focusId, tab, filters]);
+  // 応募済みの表示設定は端末に保存する（★管理対象タブの設定。他のタブには影響しない）
+  useEffect(() => {
+    if (restored && !focusId) writePref("appliedView", filters.applied);
+  }, [restored, focusId, filters.applied]);
 
   // 通知から開いた抽選を表示する: 含まれる最初のタブを選び、絞り込みを解除して、カードまでスクロールする
   useEffect(() => {
@@ -122,10 +132,10 @@ export function LotteryBoard() {
     const target = data.lotteries.find((l) => l.id === focusId);
     if (!target) return;
     const order: Tab[] = ["managed", "applied", "won", "all"];
-    const found = order.find((t) => selectLotteries(data, t, { ...DEFAULT_FILTERS, skip: "include" }, now, profile.id).some((l) => l.id === focusId)) ?? "all";
+    const found = order.find((t) => selectLotteries(data, t, { ...DEFAULT_FILTERS, skip: "include", applied: "include" }, now, profile.id).some((l) => l.id === focusId)) ?? "all";
     // eslint-disable-next-line react-hooks/set-state-in-effect -- URLパラメータに応じた表示状態の同期
     setTab(found);
-    setFilters({ ...DEFAULT_FILTERS, skip: "include" });
+    setFilters({ ...DEFAULT_FILTERS, skip: "include", applied: "include" });
     setView("list");
     setHighlight(focusId);
     const timer = window.setTimeout(() => {
@@ -138,7 +148,9 @@ export function LotteryBoard() {
 
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
 
-  const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id), [data, tab, filters, now, profile.id]);
+  // 応募直後のカードを一定時間だけ残して退場させる（★管理対象で「応募済みを含まない」のとき、一覧表示のみ）
+  const exit = useApplyExitController({ enabled: tab === "managed" && filters.applied === "exclude" && view === "list", resetKey: `${profile.id}|${tab}|${filters.applied}|${view}` });
+  const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds), [data, tab, filters, now, profile.id, exit.keepIds]);
   const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
   const showSkip = tab === "managed";
@@ -150,6 +162,7 @@ export function LotteryBoard() {
     filters.receiveMethod,
     tab === "all" && filters.allFilter !== "any",
     showSkip && filters.skip !== "normal",
+    showSkip && filters.applied !== "exclude",
     filters.sort !== "deadline",
   ].filter(Boolean).length;
   const hasFilter = activeCount > 0 || filters.query.trim() !== "";
@@ -298,6 +311,17 @@ export function LotteryBoard() {
             />
             {showSkip && (
               <Select
+                label="応募済み表示"
+                value={filters.applied}
+                onChange={(v) => set("applied", v as AppliedView)}
+                options={[
+                  { value: "exclude", label: "応募済み: 含まない" },
+                  { value: "include", label: "応募済み: 含む" },
+                ]}
+              />
+            )}
+            {showSkip && (
+              <Select
                 label="スルー表示"
                 value={filters.skip}
                 onChange={(v) => set("skip", v as SkipView)}
@@ -338,13 +362,25 @@ export function LotteryBoard() {
         {view === "matrix" ? (
           <LotteryMatrix lotteries={lotteries} actionOnly={actionOnly} />
         ) : (
-          <ul className="space-y-2.5" aria-label="抽選一覧">
-            {lotteries.map((l) => (
-              <li key={l.id}>
-                <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
-              </li>
-            ))}
-          </ul>
+          <ApplyExitProvider value={exit.api}>
+            <ul className="space-y-2.5" aria-label="抽選一覧">
+              {lotteries.map((l) => {
+                const phase = exit.phases[l.id];
+                return (
+                  <li
+                    key={l.id}
+                    data-exit={phase}
+                    className={cn("grid transition-[grid-template-rows,opacity,transform,margin] duration-300 ease-out motion-reduce:transition-none", phase === "leaving" && "translate-x-full opacity-0 motion-reduce:translate-x-0")}
+                    style={phase === "leaving" ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
+                  >
+                    <div className={cn("min-h-0", phase === "leaving" && "overflow-hidden")}>
+                      <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </ApplyExitProvider>
         )}
 
         {lotteries.length === 0 && (

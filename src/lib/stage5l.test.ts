@@ -20,7 +20,9 @@ describe("当落発表方法の分類", () => {
     expect(classifyAnnouncement("当選者のみにメールでご連絡します")).toMatchObject({ methods: ["winner_mail"], target: "winners_only", matched: true });
     expect(classifyAnnouncement("結果は応募サイトのマイページにて確認")).toMatchObject({ methods: ["result_page"], matched: true });
     const both = classifyAnnouncement("当落結果をメールでお知らせし、マイページでも確認できます");
-    expect(both.methods).toEqual(expect.arrayContaining(["result_mail", "result_page"]));
+    // 単一選択: 主な方法は当落メール、結果ページは補足へ回す
+    expect(both.methods).toEqual(["result_mail"]);
+    expect(both.extra).toEqual(["result_page"]);
     expect(both.target).toBe("both");
   });
   it("LINE・SMS・店頭などメール以外の経路にも「当選者のみ」を付けられる（経路と対象は別）", () => {
@@ -33,7 +35,7 @@ describe("当落発表方法の分類", () => {
     expect(classifyAnnouncement("")).toMatchObject({ methods: [], matched: false });
   });
   it("正規化: 重複を除き、不明は他があれば外し、当落メールと当選者のみメールは同時に持たない", () => {
-    expect(normalizeAnnounceMethods(["unknown", "app", "app", "result_mail", "winner_mail"])).toEqual(["winner_mail", "app"]);
+    expect(normalizeAnnounceMethods(["unknown", "app", "app", "result_mail", "winner_mail"])).toEqual(["winner_mail"]);
     expect(normalizeAnnounceMethods(["unknown"])).toEqual(["unknown"]);
     expect(normalizeAnnounceMethods(["bogus", 3])).toEqual([]);
   });
@@ -42,7 +44,8 @@ describe("当落発表方法の分類", () => {
 describe("LivePocketの標準ルール（ルールベースの補完）", () => {
   it("LivePocketが明確で、告知に発表方法が無いときだけ、当落メール＋結果確認ページを推定で補う", () => {
     const r = resolveAnnouncement({ text: "", urls: ["https://t.livepocket.jp/e/abcd"] });
-    expect(r.methods).toEqual(["result_mail", "result_page"]);
+    expect(r.methods).toEqual(["result_mail"]);
+    expect(r.extra).toEqual(["result_page"]); // 結果確認ページは補足（他の確認方法）へ
     expect(r.inferred).toBe(true);
     expect(r.service).toBe("livepocket");
     expect(r.target).toBe("unknown"); // 通知対象まで確定しない（当選メールが来ないことだけで落選とは判定しない）
@@ -254,15 +257,18 @@ describe("抽選Excel: 出力と再取り込み", () => {
     const snap = snapshot();
     const bad = await plan(snap, await roundTrip(snap, (wb) => { const ws = wb.getWorksheet(LSHEET.lotteries)!; ws.getCell(2, colOf(ws, "発表方法")).value = "伝書鳩"; }));
     expect(bad.preview.rows.find((r) => r.status === "error")!.errors[0].message).toContain("選択肢にない値");
+    // 発表方法は1つだけ。複数指定はエラー（ほかの確認方法は補足へ）
+    const multi = await plan(snap, await roundTrip(snap, (wb) => { const ws = wb.getWorksheet(LSHEET.lotteries)!; ws.getCell(2, colOf(ws, "発表方法")).value = "当落メール|結果確認ページ"; }));
+    expect(multi.preview.rows.find((r) => r.status === "error")!.errors[0].message).toContain("1つだけ");
     const good = await plan(snap, await roundTrip(snap, (wb) => {
       const ws = wb.getWorksheet(LSHEET.lotteries)!;
-      ws.getCell(2, colOf(ws, "発表方法")).value = "当落メール|結果確認ページ";
+      ws.getCell(2, colOf(ws, "発表方法")).value = "当落メール";
       ws.getCell(2, colOf(ws, "応募条件")).value = "会員証・ポイントカード|購入履歴";
       ws.getCell(2, colOf(ws, "条件の結合")).value = "いずれか";
       ws.getCell(2, colOf(ws, "購入金額(円以上)")).value = "3000";
     }));
     const tax = good.ops!.lotteries[0].tax as Record<string, unknown>;
-    expect(tax.announcement_methods).toEqual(["result_mail", "result_page"]);
+    expect(tax.announcement_methods).toEqual(["result_mail"]);
     expect(tax.requirement_tags).toEqual(["member_card", "purchase_history"]);
     expect(tax.requirement_logic).toBe("or");
     expect(tax.requirement_details).toEqual({ minAmountYen: 3000 });

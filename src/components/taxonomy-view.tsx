@@ -1,5 +1,6 @@
 import { Sparkles } from "lucide-react";
-import { ANNOUNCE_TARGET_LABEL, REQUIREMENT_LABEL, announceLabels, type RequirementDetails } from "@/lib/lottery-taxonomy";
+import { ANNOUNCE_TARGET_LABEL, REQUIREMENT_LABEL, announceLabels, visibleRequirementTags, type RequirementDetails } from "@/lib/lottery-taxonomy";
+import { splitNotes } from "@/lib/notes";
 import type { Lottery } from "@/types/domain";
 
 const tagCls = "inline-flex items-center rounded-full border bg-input px-2 py-0.5 text-xs leading-tight";
@@ -44,10 +45,13 @@ function detailLines(d: RequirementDetails): string[] {
 
 /** 応募条件の表示。タグ＋（複数のときだけ）結合方法＋具体的な数値。原文・補足は展開して確認する */
 export function RequirementView({ lottery }: { lottery: Lottery }) {
-  const tags = lottery.requirementTags ?? [];
+  const all = lottery.requirementTags ?? [];
+  // 一般的な本人確認（身分証・顔写真付き）は毎回あるため表示しない。データは保持する
+  const tags = visibleRequirementTags(all);
   const text = lottery.conditionsText.trim();
-  if (tags.length === 0) return text ? <>{text}</> : <span className="text-muted-foreground">—</span>;
+  if (all.length === 0) return text ? <>{text}</> : <span className="text-muted-foreground">—</span>;
   const lines = detailLines(lottery.requirementDetails ?? {});
+  if (tags.length === 0 && lines.length === 0 && !text) return <span className="text-muted-foreground">—</span>;
   return (
     <div className="space-y-1" data-testid="requirement-view">
       <div className="flex flex-wrap items-center gap-1">
@@ -66,5 +70,18 @@ export function RequirementView({ lottery }: { lottery: Lottery }) {
         </details>
       )}
     </div>
+  );
+}
+
+/** 備考。複数事項は箇条書き、1項目だけなら通常の文章 */
+export function NotesView({ text }: { text: string }) {
+  const items = splitNotes(text);
+  if (items.length <= 1) return <span className="whitespace-pre-wrap">{text}</span>;
+  return (
+    <ul className="list-disc space-y-0.5 pl-4" data-testid="notes-list">
+      {items.map((t, i) => (
+        <li key={i}>{t}</li>
+      ))}
+    </ul>
   );
 }

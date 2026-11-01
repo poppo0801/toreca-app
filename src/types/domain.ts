@@ -59,6 +59,8 @@ export interface Chain {
   provisional?: boolean;
   /** アーカイブ済み（新規登録の選択肢から外す。履歴表示には残す） */
   archived?: boolean;
+  /** 系列ロゴの表示URL（正方形の画像。未登録は null/未設定）。所属する全店舗で共通に使う */
+  logoSrc?: string | null;
 }
 
 export interface Store {

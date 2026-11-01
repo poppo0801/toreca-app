@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Circle } from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { useApplyExit } from "@/components/apply-exit";
 import { StatusIcon } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -36,7 +37,7 @@ export function useDeadlineBadge(deadline: FlexibleDate): DeadlineBadge | null {
 }
 
 /**
- * プロフィール別の応募状況（表示専用）。A ✓　B ○　C ✓ のように小さく横並びにする。
+ * プロフィール別の応募状況（表示専用）。A ✓　B －　C ✓ のように小さく横並びにする。
  * タップしても状態は変わらない。操作は現在のプロフィール専用の MyApplyButton だけで行う。
  */
 export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; className?: string }) {
@@ -80,20 +81,32 @@ export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; class
  * 現在のプロフィール専用の応募操作。押すと、現在のプロフィールの応募状態だけが変わる（他のプロフィールは変えられない）。
  * 応募済みの解除は確認つき。希望商品を1つ選んで応募する抽選は、商品を選んでから応募済みにする。
  */
-export function MyApplyButton({ lottery, compact = false, className }: { lottery: Lottery; /** シンプル表示用: 文字なしの丸いボタン（✓=応募済み／○=未応募） */ compact?: boolean; className?: string }) {
+export function MyApplyButton({ lottery, compact = false, className }: { lottery: Lottery; /** シンプル表示用: 文字なしの丸いボタン（✓=応募済み／－=未応募） */ compact?: boolean; className?: string }) {
   const { data, now, profile, actions } = useApp();
   const [choosing, setChoosing] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [busy, runBusy] = useBusy();
   const [error, setError] = useState<string | null>(null);
+  const exit = useApplyExit();
   const control = applyControlFor(data, lottery, profile.id, now);
   if (control.kind === "none") return null;
 
   const run = (applied: boolean, itemId?: string) =>
     runBusy(async () => {
       setError(null);
-      const res = await actions.setApplied(lottery.id, control.accountId, applied, itemId);
-      if (res && !res.ok) setError(res.error);
+      if (applied) exit?.hold(lottery.id);
+      let res: Awaited<ReturnType<typeof actions.setApplied>>;
+      try {
+        res = await actions.setApplied(lottery.id, control.accountId, applied, itemId);
+      } catch (e) {
+        if (applied) exit?.release(lottery.id); // 通信エラーなどでカードを残したままにしない
+        throw e;
+      }
+      if (res && !res.ok) {
+        setError(res.error);
+        if (applied) exit?.release(lottery.id);
+      } else if (applied) exit?.onApplied(lottery.id, profile.id);
+      else exit?.onUnapplied(lottery.id);
     });
 
   if (control.kind === "blocked") {
@@ -126,7 +139,7 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
           className,
         )}
       >
-        {applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <Circle className="size-5" strokeWidth={2.6} aria-hidden="true" /> : null}
+        {applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <Minus className="size-5" strokeWidth={2.6} aria-hidden="true" /> : null}
         {!compact && (applied ? "応募済み" : "応募済みにする")}
       </button>
       {error && (

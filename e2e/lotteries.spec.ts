@@ -1,6 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  // 既存のテストは応募済みのカードも一覧で確認するため「応募済みを含む」にしておく（Stage 5Mのテストは既定のまま）
+  if (!testInfo.title.includes("検索は1行") && !testInfo.title.includes("Stage 5M") && !testInfo.titlePath.some((t) => t.includes("Stage 5M"))) {
+    await page.addInitScript(() => window.localStorage.setItem("tcg.pref.appliedView", "include"));
+  }
   await page.goto("/lotteries");
   await expect(page.getByTestId("lottery-card").first()).toBeVisible();
 });
@@ -1065,7 +1069,9 @@ test.describe("Stage 5K: カードの再配置・テーマカラー", () => {
       const btn = await box("my-apply");
       const dist = await box("distance");
       const chip = await box("place-chip");
-      if (store && prod) expect(Math.abs(store.x - prod.x)).toBeLessThanOrEqual(1);
+      // 系列ロゴがあるときは、ロゴの左端が商品名の左端と揃う（店舗名はその右）
+      const logo = await box("chain-logo");
+      if (store && prod) expect(Math.abs((logo ?? store).x - prod.x)).toBeLessThanOrEqual(1);
       if (store) expect(store.height).toBeLessThanOrEqual(2 * 20);
       if (badge && btn) expect(overlap(badge, btn)).toBe(false);
       if (dist && chip) expect(overlap(dist, chip)).toBe(false);
@@ -1142,5 +1148,121 @@ test.describe("Stage 5L: 通販区分・標準分類の表示", () => {
     await expect(sheet).toContainText("会員登録済みであること");
     await expect(sheet.getByTestId("requirement-label")).toHaveCount(0);
     await expect(sheet.getByTestId("announce-label")).toHaveCount(0);
+  });
+});
+
+test.describe("Stage 5M: 抽選UI改善", () => {
+  const card = (page: Page, id: string) => page.locator(`[data-lottery-id="${id}"]`);
+
+  test("詳細: 発表方法は1つ（補足つき）、通常の本人確認は表示せず特殊な本人確認と会員証は表示、備考は箇条書き", async ({ page }) => {
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    await card(page, "L2").getByRole("button", { name: /の詳細を開く/ }).click();
+    const sheet = page.getByTestId("lottery-detail");
+    await expect(sheet.getByTestId("announce-label")).toHaveCount(1);
+    await expect(sheet.getByTestId("announce-label")).toHaveText("当落メール");
+    await expect(sheet).toContainText("LivePocketのマイページでも確認可能");
+    const labels = await sheet.getByTestId("requirement-label").allInnerTexts();
+    expect(labels).toContain("会員証・ポイントカード");
+    expect(labels).toContain("その他本人確認");
+    expect(labels).not.toContain("身分証提示");
+    expect(labels).not.toContain("顔写真付き身分証");
+    // 元の文章（原文）は残っている
+    await sheet.getByText("補足・原文").click();
+    await expect(sheet).toContainText("顔写真付き身分証が必要");
+    const items = sheet.getByTestId("notes-list").getByRole("listitem");
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(1)).toHaveText("当選後のキャンセル不可");
+  });
+
+  test("未応募は「－」、応募済みはチェック。プロフィールの色（アバター）は維持される", async ({ page }) => {
+    const row = card(page, "L4").getByTestId("apply-status");
+    const mine = row.locator('[data-status="eligible_unapplied"]').first();
+    await expect(mine.locator("svg.lucide-minus")).toBeVisible();
+    await expect(row.locator("svg.lucide-circle")).toHaveCount(0);
+    await expect(mine.locator("span").first()).toBeVisible(); // プロフィールのアバター
+  });
+
+  test("★管理対象は既定で「応募済みを含まない」。応募直後は2.5秒そのまま表示し、右へ退場して一覧から消える", async ({ page }) => {
+    const c = card(page, "L4");
+    await expect(c).toBeVisible();
+    // 退場の段階（wait → leaving）を記録する。右へのスライドは約0.3秒なので、変化を監視して確認する
+    await page.evaluate(() => {
+      const w = window as unknown as { __exits: string[] };
+      w.__exits = [];
+      new MutationObserver((ms) => ms.forEach((m) => w.__exits.push(`${(m.target as HTMLElement).dataset.exit ?? ""}`))).observe(document.body, { attributes: true, subtree: true, attributeFilter: ["data-exit"] });
+    });
+    const t0 = Date.now();
+    await c.getByTestId("my-apply").click();
+    await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "applied");
+    await page.waitForTimeout(1500);
+    await expect(c).toBeVisible();
+    await expect(c.locator("xpath=ancestor::li[1]")).toHaveAttribute("data-exit", "wait");
+    await expect(c).toHaveCount(0, { timeout: 4000 });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(2500); // 応募完了から2.5秒は表示されている
+    expect(await page.evaluate(() => (window as unknown as { __exits: string[] }).__exits)).toEqual(expect.arrayContaining(["hold", "wait", "leaving"]));
+    // 応募済みタブには表示される（他のタブの表示は変わらない）
+    await page.getByRole("tab", { name: /応募済み/ }).click();
+    await expect(card(page, "L4")).toBeVisible();
+  });
+
+  test("待機中に応募を解除すると退場せず、未応募のまま残る", async ({ page }) => {
+    const c = card(page, "L4");
+    await c.getByTestId("my-apply").click();
+    await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "applied");
+    await c.getByTestId("my-apply").click();
+    await page.getByRole("button", { name: "解除する" }).click();
+    await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "unapplied");
+    await page.waitForTimeout(3300);
+    await expect(c).toBeVisible();
+    await expect(c.locator("xpath=ancestor::li[1]")).not.toHaveAttribute("data-exit", /.+/);
+  });
+
+  test("待機中にプロフィールを切り替えると、古いタイマーで別プロフィールのカードが消えない", async ({ page }) => {
+    const c = card(page, "L4");
+    await c.getByTestId("my-apply").click();
+    await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "applied");
+    await switchProfile(page, "B");
+    await expect(page.locator("header").getByTestId("current-profile")).toHaveText("B");
+    await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "unapplied");
+    await page.waitForTimeout(3300);
+    await expect(c).toBeVisible();
+  });
+
+  test("「応募済みを含む」に切り替えると、応募済みのカードが退場せずに残る。設定は保持され、「含まない」に戻せる", async ({ page }) => {
+    await openFilters(page);
+    await page.getByLabel("応募済み表示").selectOption("include");
+    const c = card(page, "L4");
+    await c.getByTestId("my-apply").click();
+    await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "applied");
+    await page.waitForTimeout(3300);
+    await expect(c).toBeVisible();
+    // 「含まない」に戻すと、応募済みのカードは（待たずに）隠れる
+    await page.getByLabel("応募済み表示").selectOption("exclude");
+    await expect(card(page, "L4")).toHaveCount(0);
+    // 再読み込みしても設定（含まない）は保持される
+    await page.getByLabel("応募済み表示").selectOption("include");
+    await page.reload();
+    await openFilters(page);
+    await expect(page.getByLabel("応募済み表示")).toHaveValue("include");
+  });
+
+  test("系列ロゴ: 店舗名の左に20px四方で表示し、カードの高さを増やさない。未登録の系列は従来表示。ダークでも白いタイルで識別できる", async ({ page }) => {
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    const withLogo = card(page, "L1");
+    const logo = withLogo.getByTestId("chain-logo");
+    await expect(logo).toBeVisible();
+    const box = (await logo.boundingBox())!;
+    expect(Math.round(box.width)).toBe(20);
+    expect(Math.round(box.height)).toBe(20);
+    const nameBox = (await withLogo.getByTestId("store-name").boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(nameBox.x + 1); // 店舗名の左
+    await expect(card(page, "L3").getByTestId("chain-logo")).toHaveCount(0);
+    // 場所の行の高さ（ロゴなしの行と同じ程度）
+    const rowH = (await withLogo.getByTestId("card-place").boundingBox())!.height;
+    const noLogoH = (await card(page, "L3").getByTestId("card-place").boundingBox())!.height;
+    expect(rowH - noLogoH).toBeLessThanOrEqual(2);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(logo).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    expect(await logo.evaluate((el) => getComputedStyle(el).objectFit)).toBe("contain");
   });
 });

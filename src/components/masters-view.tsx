@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { useApp } from "@/components/app-provider";
+import { ChainLogoButton } from "@/components/chain-logo-manager";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
 import { SetCompositionButton } from "@/components/product-set-dialog";
 import { normName } from "@/lib/norm";
@@ -204,6 +205,7 @@ function MasterItem({
           )}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {entity.key === "chains" && <ChainLogoButton chainId={row.id} name={String(row.name)} sha={typeof row.logo_sha256 === "string" ? row.logo_sha256 : null} />}
           {entity.key === "products" && <ProductImagesButton productId={row.id} name={String(row.official_name)} />}
           {entity.key === "products" && <SetCompositionButton productId={row.id} name={String(row.official_name)} />}
           {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} stores={rows.stores} rules={rules} />}
