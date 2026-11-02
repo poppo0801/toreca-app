@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * AI読み取り結果の「要確認」「仮登録」表示。項目名の横に小さな印だけを出し、
  * タップすると理由・原文の抜粋（解析の根拠）・マスター照合の結果を展開する（常時の長い警告文は出さない）。
  */
-export type FlagEvidence = { quote: string; verified: boolean | null } | undefined;
+export type FlagEvidence = { quote: string; verified: boolean | null; source?: string } | undefined;
 
 /** 「マスターに無い…仮登録されます」だけの注意は「仮登録」、それ以外は「要確認」 */
 export function flagKind(text: string): "仮登録" | "要確認" {
@@ -45,7 +45,7 @@ export function FlagPanel({ id, text, evidence, open }: { id: string; text?: str
       <p>{text}</p>
       {evidence?.quote && (
         <p className="text-muted-foreground">
-          原文: 「{evidence.quote}」{evidence.verified === false && <span className="text-warn">（原文に見当たりません）</span>}
+          {evidence.source ? `出所: ${evidence.source} ／ ` : ""}原文: 「{evidence.quote}」{evidence.verified === false && <span className="text-warn">（原文に見当たりません）</span>}
         </p>
       )}
     </div>

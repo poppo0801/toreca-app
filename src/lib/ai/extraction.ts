@@ -47,6 +47,8 @@ export type EvidenceKey = (typeof EVIDENCE_KEYS)[number];
 export interface EvidenceItem {
   quote: string;
   verified: boolean | null;
+  /** 情報の出所（本文・画像N枚目・リンク先）。AIの申告。不明は空 */
+  source?: string;
 }
 
 /** プログラム側の検証で見つかった注意（矛盾・原文に無い値など）。値を創作せず、該当項目を「要確認」にする */
@@ -172,6 +174,7 @@ export const rawExtractionSchema = z.object({
   warnings: z.array(z.string().trim().max(300)).max(20).catch([]).default([]),
   /** 項目ごとの原文の抜粋（キーは evidence_keys）。余計なキー・長すぎる値は捨てる */
   evidence: z.record(z.string(), z.unknown()).catch({}).default({}),
+  evidence_source: z.record(z.string(), z.unknown()).catch({}).default({}),
   /** 告知の公開日・投稿日（書かれていれば）。年があるときだけ年の推定に使う */
   published_on: rawDate,
 });
@@ -300,7 +303,8 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
   const evidence: ExtractedLottery["evidence"] = {};
   for (const [k, v] of Object.entries(r.evidence)) {
     const key = EVIDENCE_RAW_KEYS[k];
-    if (key && typeof v === "string" && v.trim()) evidence[key] = { quote: v.trim().slice(0, 200), verified: null };
+    const src = (r.evidence_source ?? {})[k];
+    if (key && typeof v === "string" && v.trim()) evidence[key] = { quote: v.trim().slice(0, 200), verified: null, source: typeof src === "string" ? src.trim().slice(0, 20) : "" };
   }
   // 日付は 応募開始 → 締切 → 発表 → 購入期限 の順に、直前の日付との前後関係も使って年を決める
   const dates: ExtractedFlex[] = [];

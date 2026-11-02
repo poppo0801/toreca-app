@@ -74,6 +74,7 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - 本人確認書類の番号、住所、電話番号などの個人情報は記録しない。
 - 判断に迷った点・注意すべき点は warnings に、利用者向けの短い日本語で書く。内部の項目名（year, null, multi_mode など）は使わない。年が書かれていない件は、システム側で別に注意を出すので warnings に書かなくてよい。
 
+- 本文・複数の画像・リンク先の案内が同時に与えられたときは、すべてをまとめて1件の抽選として読み取る。本文に書かれていない応募期間・受取方法・条件が画像にあれば、画像から読み取る。本文と画像で内容が食い違うときは、どちらかに決めず warnings に書く。evidence_source に各項目の出所（本文・画像N枚目・リンク先）を入れる。
 - 主要な項目には evidence に原文の短い抜粋（80文字以内）を入れる。原文にある文言をそのまま写し、要約・言い換えをしない。原文に根拠が無い項目は空文字にする。
 - プレゼント企画・懸賞（購入を伴わない「抽選で当たる」）は抽選販売ではないので、is_lottery_announcement を false にする。
 - 告知の公開日・投稿日が書かれていれば published_on に入れる（年が書かれているときだけ）。
@@ -163,6 +164,15 @@ export const RECORD_LOTTERY_TOOL = {
       },
       warnings: { type: "array", items: { type: "string" } },
       published_on: { ...dateSchema, description: "告知の公開日・投稿日。書かれていなければ null。年が書かれているときだけ入れる" },
+      evidence_source: {
+        type: "object",
+        description: "evidence の各項目の出所。「本文」「画像1枚目」「画像2枚目」「リンク先」のいずれか（根拠が無い項目は空文字）",
+        properties: Object.fromEntries(
+          ["chain", "store", "products", "multi_mode", "apply_start", "apply_deadline", "result_date", "procedure_start", "procedure_deadline", "announcement", "apply_method", "receive_method", "limit", "conditions", "apply_url", "announcement_url"].map((k) => [k, { type: "string" }]),
+        ),
+        required: [],
+        additionalProperties: false,
+      },
       evidence: {
         type: "object",
         description: "項目ごとの原文の短い抜粋（原文のまま）。根拠が無い項目は空文字",

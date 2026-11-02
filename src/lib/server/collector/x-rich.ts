@@ -31,6 +31,8 @@ export interface XRichOk {
   imagesFound: number;
   imagesUsed: number;
   linkedPage: boolean;
+  /** none=画像なし / not_fetched=画像あり・未取得（本文のみ） / partial=一部のみ取得 / fetched=すべて取得 */
+  imageStatus: "none" | "not_fetched" | "partial" | "fetched";
 }
 export type XRichResult = XRichOk | { ok: false; message: string };
 
@@ -112,9 +114,11 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
         await o.db.rpc("bump_collection_stats", { p_household: o.householdId, p_day: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(o.now ?? new Date()), p_delta: { x_posts_manual: 1 } }).then(() => undefined, () => undefined);
         const p = r.post;
         const rich = await enrichXPost(p, o.enrich ?? {});
-        if (p.images.length > rich.imagesUsed) notices.push(`添付画像${p.images.length}枚のうち${rich.imagesUsed}枚を取得できました`);
+        const imageStatus = p.images.length === 0 ? "none" : rich.imagesUsed === 0 ? "not_fetched" : rich.imagesUsed < p.images.length ? "partial" : "fetched";
+        if (imageStatus === "not_fetched") notices.push(`画像未取得: 添付画像${p.images.length}枚を取得できませんでした（本文のみで解析します）`);
+        else if (imageStatus === "partial") notices.push(`添付画像${p.images.length}枚のうち${rich.imagesUsed}枚を取得できました`);
         if (rich.linkUrl && !rich.linkedPage) notices.push("リンク先の本文は取得できませんでした（本文と画像のみで解析します）");
-        return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: p.images.length, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage };
+        return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: p.images.length, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage, imageStatus };
       }
       notices.push(`X APIで取得できませんでした（${r.message}）。本文のみを取得します`);
     } else notices.push(gate.reason);
@@ -122,8 +126,14 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
     const x = await (o.oembed ?? fetchXPost)(url);
     if (!x.ok) return x;
     notices.push(...x.notice);
-    notices.push("添付画像とリンク先は解析できていません（本文のみ）");
-    return { ok: true, text: x.text, author: x.author, postedOn: x.postedOn, images: [], via: "oembed", notices, imagesFound: 0, imagesUsed: 0, linkedPage: false };
+    // 公開oEmbedでは画像そのものは取得できない。投稿に画像があるかは、本文末尾の画像リンク（pic.x.com 等）で分かる範囲だけ判定する
+    const hasPic = /pic\.(x|twitter)\.com\//i.test(x.text);
+    notices.push(hasPic ? "画像未取得: この投稿には画像があります。応募期間・受取方法などが画像にある場合は読み取れていません（本文のみ）" : "添付画像とリンク先は解析できていません（本文のみ）");
+    // 本文のみの取得でも、投稿内の外部リンク（応募ページなど）の本文は統合する
+    const links = [...(x.text.split("【投稿内のリンク】")[1] ?? "").matchAll(/https:\/\/\S+/g)].map((m) => m[0]);
+    const withLink = links.length > 0 ? await enrichXPost({ text: x.text, links, images: [] }, o.enrich ?? {}) : null;
+    if (withLink && !withLink.linkedPage) notices.push("リンク先の本文は取得できませんでした");
+    return { ok: true, text: withLink?.text ?? x.text, author: x.author, postedOn: x.postedOn, images: [], via: "oembed", notices, imagesFound: 0, imagesUsed: 0, linkedPage: Boolean(withLink?.linkedPage), imageStatus: hasPic ? "not_fetched" : "none" };
   };
 }
 

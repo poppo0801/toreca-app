@@ -152,7 +152,7 @@ export async function extractFromRequest(req: ExtractRequest, kind: InputKind, e
   try {
     const out = await deps.extractor.extract(req);
     // 正規化（年の推定は告知の公開日があればそれを基準にする）→ プログラム側の検証（根拠の原文照合・矛盾の検出）
-    const extraction = validateExtraction(normalizeExtraction(out.raw, deps.now, { postedOn: req.postedOn }), req.text ?? null);
+    const extraction = validateExtraction(normalizeExtraction(out.raw, deps.now, { postedOn: req.postedOn }), req.text ?? null, { hasImages: (req.images?.length ?? 0) > 0 });
     if (!extraction.isLotteryAnnouncement) {
       return { ok: false, kind, code: "not_lottery", engine: out.engine, model: out.model, usage: out.usage, message: "抽選販売の告知とは判断できませんでした。内容を確認してください" };
     }

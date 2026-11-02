@@ -396,7 +396,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
   const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
   const { ready, missing, provisional } = isReady(draft, input);
-  const stored = { input, flags: draft.flags, summary: draft.summary, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine } as unknown as Json;
+  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）

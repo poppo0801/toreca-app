@@ -5,6 +5,7 @@ import { lotteryInputSchema } from "@/lib/lottery-input";
 import { isXHost } from "@/lib/server/x-source";
 import { applyCandidateUpdate, ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
+import { learnAliases, planAliasLearning, type LearnInput } from "@/lib/server/collector/learn";
 import { checkUrl } from "@/lib/server/safe-fetch";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -164,7 +165,25 @@ export async function POST(request: NextRequest) {
     }
     case "markRegistered": {
       // 画面で内容を直して登録した抽選を、候補に紐付ける
-      await db.rpc("bump_collection_stats", { p_household: householdId, p_day: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()), p_delta: { registered_new: 1 } });
+      // 利用者が直した名称とマスターの対応を別名として記録する（以後の照合で再利用。自動登録の件数には数えない）
+      const { data: cand } = await db.from("collection_candidates").select("draft").eq("id", b.id).maybeSingle();
+      const [lot, its] = await Promise.all([
+        db.from("lotteries").select("chain_id,store_id").eq("id", b.lotteryId).maybeSingle(),
+        db.from("lottery_items").select("product_id").eq("lottery_id", b.lotteryId),
+      ]);
+      const draftInput = (cand?.draft as { input?: LearnInput["draft"] } | null)?.input;
+      if (draftInput && lot.data) {
+        const [ch, st, pr] = await Promise.all([
+          db.from("chains").select("id,name").eq("id", lot.data.chain_id).maybeSingle(),
+          db.from("stores").select("id,name").eq("id", lot.data.store_id).maybeSingle(),
+          db.from("products").select("id,official_name").in("id", (its.data ?? []).map((x) => x.product_id)),
+        ]);
+        const plans = planAliasLearning({
+          draft: draftInput,
+          final: { chain: { id: ch.data?.id, name: ch.data?.name }, store: { id: st.data?.id, name: st.data?.name }, products: (pr.data ?? []).map((x) => ({ id: x.id, name: x.official_name })) },
+        });
+        await learnAliases(db, householdId, plans);
+      }
       await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: b.lotteryId, reasons: ["内容を確認・修正して登録しました"], resolved_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq("id", b.id);
       return json({ ok: true });
     }

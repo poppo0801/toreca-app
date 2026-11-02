@@ -58,7 +58,10 @@ const known = (f: ExtractedFlex) => f.precision !== "unknown";
 /**
  * @param sourceText 原文（貼り付けた文章、または取得したページ・投稿の本文）。画像など原文が無い入力は null（根拠は照合できない）
  */
-export function validateExtraction(input: ExtractedLottery, sourceText: string | null): ExtractedLottery {
+/**
+ * hasImages: 本文に加えて画像も解析した場合。画像だけに書かれた文言は本文と照合できないため、「原文に見当たらない」とは扱わない（未照合のまま）。
+ */
+export function validateExtraction(input: ExtractedLottery, sourceText: string | null, opts: { hasImages?: boolean } = {}): ExtractedLottery {
   const ex: ExtractedLottery = JSON.parse(JSON.stringify(input));
   const issues: ExtractionIssue[] = [...ex.issues];
   const flag = (field: ExtractionIssue["field"], message: string, lower?: FieldKey) => {
@@ -84,7 +87,9 @@ export function validateExtraction(input: ExtractedLottery, sourceText: string |
 
   // 1. 根拠の抜粋が原文にあるか（AIが作った根拠を信用しない）
   for (const [k, ev] of Object.entries(ex.evidence) as [EvidenceKey, NonNullable<ExtractedLottery["evidence"][EvidenceKey]>][]) {
-    ev.verified = sourceText === null ? null : quoteInSource(ev.quote, sourceText);
+    const found = sourceText === null ? null : quoteInSource(ev.quote, sourceText);
+    // 画像・リンク先が出所の根拠は、本文との照合ができない（見つからなくても誤りとは言えない）
+    ev.verified = found === false && (opts.hasImages || /^(画像|リンク)/.test(ev.source ?? "")) ? null : found;
     if (ev.verified === false) {
       const f = FIELD_OF_EVIDENCE[k];
       flag(k, "根拠として示された文章が原文に見当たりません", f);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
@@ -62,7 +63,7 @@ export interface CandidateView {
   source_url: string | null;
   status: "auto_registered" | "pending" | "excluded" | "duplicate" | "failed";
   reasons: string[];
-  draft: { update?: { changes: { label: string; before: string; after: string }[] } | null; provisional?: string[]; secondary?: string[]; flags?: Record<string, string>; summary?: unknown; modePending?: boolean; warnings?: string[]; ready?: boolean; verdict?: string; input?: { chain?: { name: string }; store?: { name: string }; items?: { product: { name: string } }[]; applyDeadline?: { precision: string; date?: string; time?: string } }; queued?: unknown } | null;
+  draft: { update?: { changes: { label: string; before: string; after: string }[] } | null; provisional?: string[]; secondary?: string[]; notices?: string[]; evidence?: Record<string, unknown>; flags?: Record<string, string>; summary?: unknown; modePending?: boolean; warnings?: string[]; ready?: boolean; verdict?: string; input?: { chain?: { name: string }; store?: { name: string }; items?: { product: { name: string } }[]; applyDeadline?: { precision: string; date?: string; time?: string } }; queued?: unknown } | null;
   lottery_id: string | null;
   fetched_at: string;
   job_state?: string;
@@ -180,6 +181,27 @@ async function call(body: Record<string, unknown>): Promise<{ ok: boolean; error
   }
 }
 
+/** 確認待ちの理由を、同じ意味の重複をまとめた短い項目名にする（詳細は展開して確認） */
+const TOPIC_ORDER = ["締切", "地域", "系列", "店舗", "商品", "応募方式", "応募方法", "受取方法", "応募開始", "当選発表", "購入期間", "応募制限", "条件", "その他"] as const;
+type Topic = (typeof TOPIC_ORDER)[number];
+const FLAG_TOPIC: Record<string, Topic> = {
+  chain: "系列", store: "店舗", items: "商品", multiMode: "応募方式", applyStart: "応募開始", applyDeadline: "締切", resultDate: "当選発表",
+  procedureStart: "購入期間", procedureDeadline: "購入期間", applyMethod: "応募方法", receiveMethod: "受取方法", limit: "応募制限", conditions: "条件",
+};
+const REASON_TOPIC: [RegExp, Topic][] = [
+  [/締切/, "締切"], [/地域|都道府県/, "地域"], [/系列/, "系列"], [/店舗/, "店舗"], [/商品/, "商品"], [/受取|受け取り/, "受取方法"], [/応募方法|応募URL|URL/, "応募方法"],
+];
+export function reviewTopics(c: { reasons: string[]; draft: { flags?: Record<string, string> } | null }): string[] {
+  const set = new Set<string>();
+  for (const r of c.reasons) for (const [re, t] of REASON_TOPIC) if (re.test(r)) set.add(t);
+  for (const [k, v] of Object.entries(c.draft?.flags ?? {})) {
+    // 保存すると仮登録されるだけの案内は、確認が必要な項目としては数えない
+    if (FLAG_TOPIC[k] && v && !/仮登録されます/.test(v)) set.add(FLAG_TOPIC[k]);
+  }
+  if (set.size === 0 && c.reasons.length > 0) set.add("その他");
+  return TOPIC_ORDER.filter((t) => set.has(t));
+}
+
 export function AutoCollectView({
   settings,
   sources,
@@ -218,6 +240,8 @@ export function AutoCollectView({
   const [productQ, setProductQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CandidateView | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleOpen = (id: string) => setExpanded((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [budgetInput, setBudgetInput] = useState({ budget: String(ops.budgetJpy), rate: String(ops.rate) });
 
   const act = async (key: string, body: Record<string, unknown>, okText?: (r: { ok: boolean; [k: string]: unknown }) => string) => {
@@ -743,6 +767,8 @@ export function AutoCollectView({
           {list.map((c) => {
             const d = c.draft?.input;
             const queuedOnly = ["pending", "retry", "processing"].includes(c.job_state ?? "");
+            const topics = reviewTopics(c);
+            const uniqueReasons = [...new Set(c.reasons)];
             return (
               <li key={c.id} className="space-y-1 py-2 text-xs" data-testid="candidate-row">
                 <p className="flex items-start gap-1.5 font-medium">
@@ -751,55 +777,61 @@ export function AutoCollectView({
                   )}
                   <span>{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</span>
                 </p>
-                {(c.draft?.provisional?.length ?? 0) > 0 && (
-                  <p className="text-[11px] text-info" data-testid="cand-provisional">
-                    登録すると、未登録の{c.draft!.provisional!.join("・")}を仮登録します（マスター管理で確認・編集できます）
-                  </p>
-                )}
-                {(c.draft?.secondary?.length ?? 0) > 0 && <p className="text-[11px] text-warn">二次情報（まとめサイトの一覧）から補った項目: {c.draft!.secondary!.join("・")}</p>}
-                {d?.applyDeadline && (
-                  <p className="text-muted-foreground">締切: {d.applyDeadline.precision === "unknown" ? "不明" : `${d.applyDeadline.date ?? ""}${d.applyDeadline.time ? ` ${d.applyDeadline.time}` : ""}`}</p>
-                )}
-                {queuedOnly && (
-                  <p className="text-muted-foreground">
-                    {c.job_state === "processing" ? "解析中" : c.job_state === "retry" ? `再試行待ち（${c.attempts ?? 0}回失敗）` : "解析待ち"}
-                    {c.due_at && `／一覧の締切 ${fmt(c.due_at)}`}
-                  </p>
-                )}
-                {c.kind === "update" && c.draft?.update && (
-                  <p className="font-medium text-info">更新の提案（既存の抽選）</p>
-                )}
-                {c.reasons.length > 0 && <ul className="list-disc pl-4 text-muted-foreground">{c.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-                <div className="flex flex-wrap gap-1.5">
-                  {c.source_url && (
-                    <a href={c.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center text-info underline">
-                      元の情報を開く
-                    </a>
+                <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
+                  {d?.applyDeadline && <span>締切: {d.applyDeadline.precision === "unknown" ? "不明" : `${d.applyDeadline.date ?? ""}${d.applyDeadline.time ? ` ${d.applyDeadline.time}` : ""}`}</span>}
+                  {topics.length > 0 && (
+                    <span className="font-medium text-warn" data-testid="cand-topics">
+                      要確認：{topics.slice(0, 5).join("・")}
+                      {topics.length > 5 && "ほか"}
+                    </span>
                   )}
+                  {queuedOnly && (
+                    <span>
+                      {c.job_state === "processing" ? "解析中" : c.job_state === "retry" ? `再試行待ち（${c.attempts ?? 0}回失敗）` : "解析待ち"}
+                      {c.due_at && `／一覧の締切 ${fmt(c.due_at)}`}
+                    </span>
+                  )}
+                  {c.kind === "update" && c.draft?.update && <span className="font-medium text-info">更新の提案（既存の抽選）</span>}
+                  {(c.reasons.length > 0 || d) && (
+                    <button type="button" className="inline-flex min-h-6 items-center gap-0.5 text-info underline" aria-expanded={expanded.has(c.id)} onClick={() => toggleOpen(c.id)} data-testid="cand-detail-toggle">
+                      詳細
+                    </button>
+                  )}
+                </p>
+                {expanded.has(c.id) && (
+                  <div className="space-y-1 rounded-md border bg-muted/50 p-2 text-[11px] leading-relaxed" data-testid="cand-detail">
+                    {uniqueReasons.length > 0 && <ul className="list-disc pl-4">{uniqueReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+                    {d && (
+                      <p className="text-muted-foreground">
+                        AI解析: 系列「{d.chain?.name || "不明"}」／店舗「{d.store?.name || "不明"}」／商品「{(d.items ?? []).map((x) => x.product.name).filter(Boolean).join("、") || "不明"}」
+                      </p>
+                    )}
+                    {(c.draft?.provisional?.length ?? 0) > 0 && (
+                      <p className="text-info" data-testid="cand-provisional">
+                        登録すると、未登録の{c.draft!.provisional!.join("・")}を仮登録します（マスター管理で確認・編集できます）
+                      </p>
+                    )}
+                    {(c.draft?.secondary?.length ?? 0) > 0 && <p className="text-warn">二次情報（まとめサイトの一覧）から補った項目: {c.draft!.secondary!.join("・")}</p>}
+                    {(c.draft?.notices ?? []).map((n, i) => (
+                      <p key={i} className={/未取得|解析できていません/.test(n) ? "text-warn" : "text-muted-foreground"}>{n}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5">
                   {c.kind === "update" && c.draft?.update && (
                     <Button size="sm" disabled={busy !== null} data-testid="cand-apply-update" onClick={() => void act("a" + c.id, { action: "applyUpdate", id: c.id }, (x) => `反映しました（${x.applied}項目）`)}>
                       更新を反映
                     </Button>
                   )}
                   {c.job_state === "review" && c.kind !== "update" && d && (
-                    <Button size="sm" disabled={busy !== null} onClick={() => void act("r" + c.id, { action: "register", id: c.id, actor: profile.id }, () => "登録しました（全情報に追加。★管理対象ではありません）")} data-testid="cand-register">
-                      登録
-                    </Button>
-                  )}
-                  {c.job_state === "review" && c.kind !== "update" && d && (
-                    <Button size="sm" variant="outline" disabled={busy !== null} data-testid="cand-edit" onClick={() => setEditing(c)}>
+                    <Button size="sm" disabled={busy !== null} data-testid="cand-edit" onClick={() => setEditing(c)}>
                       編集して登録
                     </Button>
                   )}
-                  {(c.job_state === "review" || c.job_state === "failed") && c.source_url && !/ロボット|許可していません/.test(c.last_error ?? "") && (
-                    <Button size="sm" variant="outline" disabled={busy !== null} data-testid="cand-reanalyze" onClick={() => void act("re" + c.id, { action: "reanalyze", id: c.id }, () => "再解析待ちに戻しました（ワーカーが解析します）")}>
-                      再解析
-                    </Button>
-                  )}
-                  {(c.status === "pending" || c.status === "failed" || c.status === "duplicate") && (
-                    <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("x" + c.id, { action: "exclude", id: c.id })}>
-                      除外
-                    </Button>
+                  {c.source_url && (
+                    <a href={c.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center text-info underline" data-testid="cand-source">
+                      元の情報
+                    </a>
                   )}
                   {c.status === "excluded" && (
                     <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("u" + c.id, { action: "restore", id: c.id })}>
@@ -810,6 +842,30 @@ export function AutoCollectView({
                     <a href={`/lotteries?focus=${c.lottery_id}`} className="inline-flex min-h-8 items-center underline">
                       抽選を開く
                     </a>
+                  )}
+                  {(c.job_state === "review" || c.job_state === "failed" || c.status === "pending" || c.status === "failed" || c.status === "duplicate") && c.kind !== "update" && (
+                    <details className="relative ml-auto" data-testid="cand-menu">
+                      <summary className="inline-flex min-h-8 min-w-8 cursor-pointer list-none items-center justify-center rounded-md border px-2" aria-label="その他の操作">
+                        <MoreHorizontal className="size-4" aria-hidden="true" />
+                      </summary>
+                      <div className="absolute right-0 z-10 mt-1 flex w-40 flex-col gap-1 rounded-md border bg-card p-1.5 shadow-md">
+                        {c.job_state === "review" && d && (
+                          <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("r" + c.id, { action: "register", id: c.id, actor: profile.id }, () => "登録しました（全情報に追加。★管理対象ではありません）")} data-testid="cand-register">
+                            そのまま登録
+                          </Button>
+                        )}
+                        {(c.job_state === "review" || c.job_state === "failed") && c.source_url && !/ロボット|許可していません/.test(c.last_error ?? "") && (
+                          <Button size="sm" variant="outline" disabled={busy !== null} data-testid="cand-reanalyze" onClick={() => void act("re" + c.id, { action: "reanalyze", id: c.id }, () => "再解析待ちに戻しました（ワーカーが解析します）")}>
+                            再解析
+                          </Button>
+                        )}
+                        {(c.status === "pending" || c.status === "failed" || c.status === "duplicate") && (
+                          <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("x" + c.id, { action: "exclude", id: c.id })} data-testid="cand-exclude">
+                            除外
+                          </Button>
+                        )}
+                      </div>
+                    </details>
                   )}
                 </div>
               </li>
@@ -825,7 +881,7 @@ export function AutoCollectView({
           lottery={null}
           onOpenChange={(v) => !v && setEditing(null)}
           prefill={{
-            draft: { input: editing.draft.input, flags: (editing.draft.flags ?? {}) as never, modePending: Boolean(editing.draft.modePending), duplicates: [], warnings: editing.draft.warnings ?? [], evidence: {}, generalNotes: [], candidates: { chain: [], store: [], items: [] }, summary: (editing.draft.summary ?? { chain: "none", store: "none", items: [] }) as never } as unknown as LotteryDraft,
+            draft: { input: editing.draft.input, flags: (editing.draft.flags ?? {}) as never, modePending: Boolean(editing.draft.modePending), duplicates: [], warnings: editing.draft.warnings ?? [], evidence: (editing.draft.evidence ?? {}) as never, generalNotes: [], candidates: { chain: [], store: [], items: [] }, summary: (editing.draft.summary ?? { chain: "none", store: "none", items: [] }) as never } as unknown as LotteryDraft,
             runId: null,
           }}
           onSaved={(lotteryId) => {

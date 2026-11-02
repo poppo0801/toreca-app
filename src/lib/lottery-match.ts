@@ -29,7 +29,11 @@ const CHAIN_SYNONYMS: [RegExp, string][] = [
   [/^(ビックカメラ|biccamera)/, "biccamera"],
   [/^(ヨドバシ|ヨドバシカメラ|yodobashi)/, "yodobashi"],
   [/^(イオン|aeon)(?!九州)/, "aeon"],
+  // 古本市場は「ふるいち」の旧称・別表記
+  [/^(古本市場|ふるいち)/, "furuichi"],
 ];
+/** 系列名のあとに付く、系列を変えない語（「TSUTAYA Trading Card」「ブックオフプラス」など）。これだけが付いた場合は同じ系列とみなす */
+const CHAIN_SUFFIX = /^(tradingcard|trading|カード|トレカ|トレーディングカード|プラス|plus|ショップ|shop|書店|公式|オンライン|オンラインストア|通販|通販部|ストア|store|スーパーバザー)+$/;
 const cleanName = (s: string) => {
   const n = normName(s).replace(STRIP, "");
   for (const [re, canon] of CHAIN_SYNONYMS) if (re.test(n)) return n.replace(re, canon);
@@ -54,8 +58,12 @@ export function productKey(s: string): string {
     .replace(/^mega/, "")
     .replace(/[#＃「」『』【】\[\]()（）・,、。:：!！?？~〜-]/g, "")
     .replace(/(強化拡張パック|ハイクラスパック|拡張パック)/g, "")
-    .replace(/セレブレーション|cerebration/g, "celebration");
+    .replace(/セレブレーション|cerebration/g, "celebration")
+    .replace(/(未開封|シュリンク付き?|新品|未使用|予約|定価)/g, "");
 }
+
+/** さらに緩い照合キー（商品名の途中のシリーズ名 mega を除く）。一意に決まるときだけ使う */
+const looseKey = (s: string) => productKey(s).replace(/mega/g, "");
 
 function bigrams(s: string): Set<string> {
   const out = new Set<string>();
@@ -139,15 +147,25 @@ function decide<T>(ranked: Ranked<T>[]): MatchResult<T> {
   return { kind: best.kind, item: null, candidates: ranked.slice(0, 3).map((r) => r.item) };
 }
 
-export function matchChain(name: string, chains: Chain[]): MatchResult<Chain> {
-  return decide(
-    rankByName(
-      name,
-      chains.filter((c) => !c.archived),
-      (c) => [c.name, ...(c.aliases ?? [])],
-      cleanName,
-    ),
-  );
+export function matchChain(name: string, chains: Chain[], hint: { stores?: Store[]; storeName?: string } = {}): MatchResult<Chain> {
+  const active = chains.filter((c) => !c.archived);
+  const ranked = rankByName(name, active, (c) => [c.name, ...(c.aliases ?? [])], cleanName);
+  // 同じ系列の別名として複数の系列が登録されている（古本市場／ふるいち等）とき: その店舗が登録されている系列、なければ店舗数の多い系列
+  const sure = ranked.filter((r) => r.kind === "exact" || r.kind === "alias");
+  if (sure.length > 1) {
+    const count = (id: string) => (hint.stores ?? []).filter((s) => s.chainId === id && !s.archived).length;
+    const hasStore = (id: string) => (hint.storeName ? (hint.stores ?? []).some((s) => s.chainId === id && cleanName(s.name) === cleanName(hint.storeName as string)) : false);
+    const best = [...sure].sort((a, b) => Number(hasStore(b.item.id)) - Number(hasStore(a.item.id)) || count(b.item.id) - count(a.item.id))[0];
+    return { kind: best.kind, item: best.item, candidates: [] };
+  }
+  const best = ranked[0];
+  if (best && best.kind === "partial") {
+    // 系列名に「Trading Card」「プラス」などの付帯語だけが付いた表記は同じ系列
+    const n = cleanName(name);
+    const c = cleanName(best.item.name);
+    if (c.length >= 3 && n.startsWith(c) && CHAIN_SUFFIX.test(n.slice(c.length))) return { kind: "alias", item: best.item, candidates: [] };
+  }
+  return decide(ranked);
 }
 
 export function matchStore(name: string, chainId: string | null, stores: Store[], chainName = ""): MatchResult<Store> {
@@ -173,7 +191,28 @@ export function matchProduct(name: string, code: string, products: Product[]): M
     const byCode = active.find((p) => p.code && p.code.toLowerCase() === c);
     if (byCode) return { kind: "code", item: byCode, candidates: [] };
   }
-  return decide(rankByName(name, active, (p) => [p.officialName, ...p.aliases, ...(p.code ? [p.code] : [])], productKey));
+  const names = (p: Product) => [p.officialName, ...p.aliases, ...(p.code ? [p.code] : [])];
+  const strict = decide(rankByName(name, active, names, productKey));
+  if (strict.kind === "exact" || strict.kind === "alias") return strict;
+
+  // 同一とみなせる根拠が一意にあるときだけ、確実な一致（別名扱い）にする。曖昧なら従来どおり候補にとどめる
+  const q = productKey(name);
+  const lq = looseKey(name);
+  if (lq.length >= 4) {
+    const loose = active.filter((p) => names(p).some((n) => looseKey(n) === lq));
+    if (loose.length === 1) return { kind: "alias", item: loose[0], candidates: [] };
+  }
+  // 「プレミアムデッキセット エーフィ・ブラッキー」のように、シリーズ名（30th CELEBRATION等＝別の商品名として存在する語）を省いた表記
+  if (q.length >= 10) {
+    const keys = new Set(active.flatMap((p) => names(p).map(productKey)));
+    const tails = active.filter((p) => {
+      const k = productKey(p.officialName);
+      return k.length > q.length && k.endsWith(q) && keys.has(k.slice(0, k.length - q.length));
+    });
+    const anyContaining = active.filter((p) => productKey(p.officialName).includes(q));
+    if (tails.length === 1 && anyContaining.length === 1) return { kind: "alias", item: tails[0], candidates: [] };
+  }
+  return strict;
 }
 
 // ------------------------------------------------------------------ 下書き
@@ -192,7 +231,7 @@ export interface LotteryDraft {
   duplicates: DraftDuplicate[];
   warnings: string[];
   /** 項目ごとの原文の抜粋（解析の根拠）。「要確認」の詳細で見せる。入力値には使わない */
-  evidence: Partial<Record<FieldKey, { quote: string; verified: boolean | null }>>;
+  evidence: Partial<Record<FieldKey, { quote: string; verified: boolean | null; source?: string }>>;
   /** 特定の項目に結びつかない注意（検証で見つかったもの）。「要確認」の詳細で見せる */
   generalNotes: string[];
   /** 一致が不確実な系列・店舗・商品の候補（近い順）。利用者が選ぶ */
@@ -238,7 +277,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
       storeName = storeName.trim().startsWith(hit.nm) ? storeName.trim().slice(hit.nm.length).trim() : sn.slice(hit.n.length);
     }
   }
-  const chainM = matchChain(chainName, data.chains);
+  const chainM = matchChain(chainName, data.chains, { stores: data.stores, storeName });
   const chainRef = chainM.item ? { id: chainM.item.id, name: chainM.item.name } : { id: null, name: chainName };
   if (derivedChain) flags.chain = `店舗名の先頭から系列「${derivedChain}」と推定しました。違う場合は修正してください`;
   else if (!chainName) flags.chain = "系列名が読み取れませんでした";
@@ -380,7 +419,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   for (const [k, ev] of Object.entries(ex.evidence ?? {})) {
     if (!ev || !ev.quote) continue;
     const key = (k === "applyUrl" || k === "announcementUrl" ? "announcement" : k) as FieldKey;
-    if (!evidence[key]) evidence[key] = { quote: ev.quote, verified: ev.verified };
+    if (!evidence[key]) evidence[key] = { quote: ev.quote, verified: ev.verified, source: ev.source };
   }
   const generalNotes = (ex.issues ?? []).filter((i) => i.field === "general").map((i) => i.message);
   return {
