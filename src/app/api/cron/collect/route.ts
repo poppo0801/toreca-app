@@ -1,8 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { getExtractor } from "@/lib/ai/provider";
+import { collectDue } from "@/lib/collector/queue";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
-import { runCollection } from "@/lib/server/collector/run";
+import { runCollection, runWorker } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -10,9 +11,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * 抽選情報の定期収集。Supabase Cron などから `Authorization: Bearer $CRON_SECRET` 付きで呼ぶ。
- * 収集条件で「定期実行」を有効にし、指定した時刻(日本時間)の世帯だけを実行する。無効なら何もしない(AI・X APIは呼ばない)。
- * 定期実行では利用者のログインが無いため、候補の作成までを行う(登録は候補画面または手動実行)。
+ * 自動収集の定期実行の入口。Supabase Cron(pg_cron + pg_net)が数分おきに `Authorization: Bearer $CRON_SECRET` 付きで呼ぶ。
+ *  1) 定期収集が有効で、指定時刻(日本時間。既定6:00)を過ぎていて今日まだ収集していなければ、収集元を確認して新規・変更をキューに追加する
+ *  2) 定期ワーカーが有効なら、解析待ちを優先順位順に小分けで解析する（解析待ちが無ければ何もせずすぐ終了する）
+ * 1回の呼び出しは約60秒以内に終わる。残りは次の呼び出しが引き継ぐ（HTTPレスポンス後の処理には依存しない）。
+ * 定期実行ではログインが無いため、候補の作成まで。抽選の自動登録は手動実行か候補画面で行う。
  */
 async function handle(req: NextRequest) {
   if (!isAuthorizedCron(req.headers.get("authorization"), process.env.CRON_SECRET)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -22,20 +25,31 @@ async function handle(req: NextRequest) {
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as Db;
 
   const now = new Date();
-  const jstHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).format(now));
-  const manual = req.nextUrl.searchParams.get("manual") === "1";
-  const { data: targets } = await db.from("collection_settings").select("household_id,schedule_hour_jst").eq("schedule_enabled", true);
-  const done: { households: number; ran: number; skipped: number } = { households: targets?.length ?? 0, ran: 0, skipped: 0 };
+  const { data: targets } = await db.from("collection_settings").select("household_id,schedule_enabled,schedule_hour_jst,worker_enabled").or("schedule_enabled.eq.true,worker_enabled.eq.true");
+  const summary: { household: number; collected: number; worked: number; idle: number }[] = [];
+  let collected = 0;
+  let worked = 0;
+  let idle = 0;
   for (const t of targets ?? []) {
-    if (!manual && t.schedule_hour_jst !== jstHour) {
-      done.skipped++;
-      continue;
+    const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, extractor: getExtractor(), xClient: createXClient() };
+    if (t.schedule_enabled) {
+      const last = await db.from("collection_runs").select("started_at").eq("household_id", t.household_id).eq("phase", "collect").eq("status", "done").order("started_at", { ascending: false }).limit(1).maybeSingle();
+      if (collectDue(now, t.schedule_hour_jst, last.data ? new Date(last.data.started_at) : null)) {
+        const out = await runCollection(base);
+        if (out.ok) {
+          collected++;
+          continue; // 収集と最初のバッチでこの呼び出しの時間を使う。続きは次の呼び出しのワーカーが引き継ぐ
+        }
+      }
     }
-    const out = await runCollection({ db, householdId: t.household_id, trigger: "cron", now, actor: null, canRegister: false, extractor: getExtractor(), xClient: createXClient() });
-    if (out.ok) done.ran++;
-    else done.skipped++;
+    if (t.worker_enabled) {
+      const out = await runWorker(base);
+      if (out.ok && "runId" in out) worked++;
+      else idle++;
+    }
   }
-  return NextResponse.json({ ok: true, ...done });
+  summary.push({ household: targets?.length ?? 0, collected, worked, idle });
+  return NextResponse.json({ ok: true, ...summary[0] });
 }
 
 export const GET = handle;

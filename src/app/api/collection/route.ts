@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getExtractor } from "@/lib/ai/provider";
 import { lotteryInputSchema } from "@/lib/lottery-input";
 import { isXHost } from "@/lib/server/x-source";
-import { ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
+import { applyCandidateUpdate, ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
 import { checkUrl } from "@/lib/server/safe-fetch";
 import { isSupabaseMode } from "@/lib/supabase/env";
@@ -40,12 +40,18 @@ const settingsInput = z.object({
   xMonthlyBudgetJpy: z.number().int().min(0).max(1_000_000),
   xMaxPostsPerRun: z.number().int().min(1).max(100),
   maxAiPerRun: z.number().int().min(1).max(50),
+  workerEnabled: z.boolean(),
+  workerBatch: z.number().int().min(1).max(20),
+  workerDailyAiLimit: z.number().int().min(0).max(500),
+  recheckHours: z.number().int().min(1).max(168),
 });
 
 const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("run"), actor: z.uuid().nullable().optional(), sourceId: uuid.optional() }),
   z.object({ action: z.literal("register"), id: uuid, actor: z.uuid().nullable().optional(), input: z.unknown().optional() }),
   z.object({ action: z.literal("registerReady"), actor: z.uuid().nullable().optional() }),
+  z.object({ action: z.literal("applyUpdate"), id: uuid }),
+  z.object({ action: z.literal("resume") }),
   z.object({ action: z.literal("exclude"), id: uuid }),
   z.object({ action: z.literal("restore"), id: uuid }),
   z.object({ action: z.literal("addSource"), source: sourceInput }),
@@ -117,13 +123,43 @@ export async function POST(request: NextRequest) {
       }
       return json({ ok: true, registered: ok, failed });
     }
-    case "exclude":
-    case "restore": {
+    case "applyUpdate": {
+      const r = await applyCandidateUpdate(db, b.id);
+      return r.ok ? json({ ok: true, applied: r.applied }) : json({ ok: false, error: r.message }, 422);
+    }
+    case "resume": {
+      // 自動停止（連続失敗など）の解除
+      const { error } = await db.from("collection_settings").update({ paused_until: null, paused_reason: null, consecutive_failures: 0 }).eq("household_id", householdId);
+      return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
+    }
+    case "exclude": {
       const { error } = await db
         .from("collection_candidates")
-        .update(b.action === "exclude" ? { status: "excluded", reasons: ["利用者が除外しました"], resolved_at: new Date().toISOString() } : { status: "pending", reasons: ["除外を取り消しました"], resolved_at: null })
+        .update({ status: "excluded", job_state: "skipped", reasons: ["利用者が除外しました"], resolved_at: new Date().toISOString(), lease_until: null, locked_by: null })
         .eq("id", b.id)
         .neq("status", "auto_registered");
+      return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
+    }
+    case "restore": {
+      // 除外を取り消す: 解析済みの内容があれば確認待ちに、無ければ（一覧の表示だけで除外したもの）解析待ちに戻す。解析前の絞り込みは通さず、解析する
+      const { data: c } = await db.from("collection_candidates").select("id,draft,status,source_url,dedupe_key,title").eq("id", b.id).maybeSingle();
+      if (!c || c.status === "auto_registered") return json({ ok: false, error: "対象の候補がありません" }, 422);
+      const analyzed = Boolean((c.draft as { input?: unknown } | null)?.input);
+      const patch = analyzed
+        ? { status: "pending", job_state: "review", reasons: ["除外を取り消しました"], resolved_at: null }
+        : c.source_url
+          ? {
+              status: "pending",
+              job_state: "pending",
+              attempts: 0,
+              next_run_at: null,
+              reasons: ["除外を取り消しました（解析待ち）"],
+              resolved_at: null,
+              draft: { queued: { kind: c.dedupe_key.startsWith("x:") ? "x_oembed" : "web_page", url: c.source_url, title: c.title, context: "", sourceName: "復元", attempts: 0, changed: true } },
+            }
+          : null;
+      if (!patch) return json({ ok: false, error: "解析できる情報がありません" }, 422);
+      const { error } = await db.from("collection_candidates").update(patch as never).eq("id", b.id);
       return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
     }
     case "addSource":
@@ -155,7 +191,7 @@ export async function POST(request: NextRequest) {
           prefectures: s.prefectures, include_online: s.includeOnline, max_distance_km: s.maxDistanceKm, apply_methods: s.applyMethods, receive_methods: s.receiveMethods,
           req_include: s.reqInclude, req_exclude: s.reqExclude, product_mode: s.productMode, product_ids: s.productIds, status_mode: s.statusMode, auto_register: s.autoRegister,
           schedule_enabled: s.scheduleEnabled, schedule_hour_jst: s.scheduleHourJst, x_enabled: s.xEnabled, x_monthly_budget_jpy: s.xMonthlyBudgetJpy, x_max_posts_per_run: s.xMaxPostsPerRun,
-          max_ai_per_run: s.maxAiPerRun, updated_at: new Date().toISOString(),
+          max_ai_per_run: s.maxAiPerRun, worker_enabled: s.workerEnabled, worker_batch: s.workerBatch, worker_daily_ai_limit: s.workerDailyAiLimit, recheck_hours: s.recheckHours, updated_at: new Date().toISOString(),
         })
         .eq("household_id", householdId);
       return error ? json({ ok: false, error: "保存に失敗しました" }, 500) : json({ ok: true });

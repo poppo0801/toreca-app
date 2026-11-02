@@ -1360,52 +1360,100 @@ export type Database = {
       }
       collection_candidates: {
         Row: {
+          analyzed_version: string | null
+          attempts: number
+          change_count: number
+          completed_at: string | null
           content_hash: string | null
           created_at: string
           dedupe_key: string
           draft: Json | null
+          due_at: string | null
           fetched_at: string
           household_id: string
           id: string
+          job_state: string
+          kind: string
+          last_changed_at: string | null
+          last_checked_at: string | null
+          last_error: string | null
+          lease_until: string | null
+          list_hash: string | null
+          locked_by: string | null
           lottery_id: string | null
+          next_run_at: string | null
+          page_hash: string | null
           reasons: string[]
           resolved_at: string | null
           source_id: string | null
           source_url: string | null
+          started_at: string | null
           status: string
           title: string
           x_post_id: string | null
         }
         Insert: {
+          analyzed_version?: string | null
+          attempts?: number
+          change_count?: number
+          completed_at?: string | null
           content_hash?: string | null
           created_at?: string
           dedupe_key: string
           draft?: Json | null
+          due_at?: string | null
           fetched_at?: string
           household_id: string
           id?: string
+          job_state?: string
+          kind?: string
+          last_changed_at?: string | null
+          last_checked_at?: string | null
+          last_error?: string | null
+          lease_until?: string | null
+          list_hash?: string | null
+          locked_by?: string | null
           lottery_id?: string | null
+          next_run_at?: string | null
+          page_hash?: string | null
           reasons?: string[]
           resolved_at?: string | null
           source_id?: string | null
           source_url?: string | null
+          started_at?: string | null
           status: string
           title?: string
           x_post_id?: string | null
         }
         Update: {
+          analyzed_version?: string | null
+          attempts?: number
+          change_count?: number
+          completed_at?: string | null
           content_hash?: string | null
           created_at?: string
           dedupe_key?: string
           draft?: Json | null
+          due_at?: string | null
           fetched_at?: string
           household_id?: string
           id?: string
+          job_state?: string
+          kind?: string
+          last_changed_at?: string | null
+          last_checked_at?: string | null
+          last_error?: string | null
+          lease_until?: string | null
+          list_hash?: string | null
+          locked_by?: string | null
           lottery_id?: string | null
+          next_run_at?: string | null
+          page_hash?: string | null
           reasons?: string[]
           resolved_at?: string | null
           source_id?: string | null
           source_url?: string | null
+          started_at?: string | null
           status?: string
           title?: string
           x_post_id?: string | null
@@ -1437,14 +1485,19 @@ export type Database = {
       collection_runs: {
         Row: {
           ai_calls: number
+          changed_count: number
           error_count: number
           finished_at: string | null
           household_id: string
           id: string
           new_count: number
+          phase: string
+          processed_count: number
           registered_count: number
+          skipped_count: number
           started_at: string
           status: string
+          stop_reason: string | null
           summary: Json
           trigger: string
           web_fetched: number
@@ -1453,14 +1506,19 @@ export type Database = {
         }
         Insert: {
           ai_calls?: number
+          changed_count?: number
           error_count?: number
           finished_at?: string | null
           household_id: string
           id?: string
           new_count?: number
+          phase?: string
+          processed_count?: number
           registered_count?: number
+          skipped_count?: number
           started_at?: string
           status?: string
+          stop_reason?: string | null
           summary?: Json
           trigger: string
           web_fetched?: number
@@ -1469,14 +1527,19 @@ export type Database = {
         }
         Update: {
           ai_calls?: number
+          changed_count?: number
           error_count?: number
           finished_at?: string | null
           household_id?: string
           id?: string
           new_count?: number
+          phase?: string
+          processed_count?: number
           registered_count?: number
+          skipped_count?: number
           started_at?: string
           status?: string
+          stop_reason?: string | null
           summary?: Json
           trigger?: string
           web_fetched?: number
@@ -1497,15 +1560,19 @@ export type Database = {
         Row: {
           apply_methods: string[]
           auto_register: boolean
+          consecutive_failures: number
           household_id: string
           id: string
           include_online: boolean
           max_ai_per_run: number
           max_distance_km: number | null
+          paused_reason: string | null
+          paused_until: string | null
           prefectures: string[]
           product_ids: string[]
           product_mode: string
           receive_methods: string[]
+          recheck_hours: number
           req_exclude: string[]
           req_include: string[]
           schedule_enabled: boolean
@@ -1513,6 +1580,9 @@ export type Database = {
           set_name: string
           status_mode: string
           updated_at: string
+          worker_batch: number
+          worker_daily_ai_limit: number
+          worker_enabled: boolean
           x_enabled: boolean
           x_max_posts_per_run: number
           x_monthly_budget_jpy: number
@@ -1520,15 +1590,19 @@ export type Database = {
         Insert: {
           apply_methods?: string[]
           auto_register?: boolean
+          consecutive_failures?: number
           household_id: string
           id?: string
           include_online?: boolean
           max_ai_per_run?: number
           max_distance_km?: number | null
+          paused_reason?: string | null
+          paused_until?: string | null
           prefectures?: string[]
           product_ids?: string[]
           product_mode?: string
           receive_methods?: string[]
+          recheck_hours?: number
           req_exclude?: string[]
           req_include?: string[]
           schedule_enabled?: boolean
@@ -1536,6 +1610,9 @@ export type Database = {
           set_name?: string
           status_mode?: string
           updated_at?: string
+          worker_batch?: number
+          worker_daily_ai_limit?: number
+          worker_enabled?: boolean
           x_enabled?: boolean
           x_max_posts_per_run?: number
           x_monthly_budget_jpy?: number
@@ -1543,15 +1620,19 @@ export type Database = {
         Update: {
           apply_methods?: string[]
           auto_register?: boolean
+          consecutive_failures?: number
           household_id?: string
           id?: string
           include_online?: boolean
           max_ai_per_run?: number
           max_distance_km?: number | null
+          paused_reason?: string | null
+          paused_until?: string | null
           prefectures?: string[]
           product_ids?: string[]
           product_mode?: string
           receive_methods?: string[]
+          recheck_hours?: number
           req_exclude?: string[]
           req_include?: string[]
           schedule_enabled?: boolean
@@ -1559,6 +1640,9 @@ export type Database = {
           set_name?: string
           status_mode?: string
           updated_at?: string
+          worker_batch?: number
+          worker_daily_ai_limit?: number
+          worker_enabled?: boolean
           x_enabled?: boolean
           x_max_posts_per_run?: number
           x_monthly_budget_jpy?: number
@@ -1576,6 +1660,7 @@ export type Database = {
       collection_sources: {
         Row: {
           adapter: string
+          consecutive_failures: number
           created_at: string
           enabled: boolean
           error_message: string | null
@@ -1584,8 +1669,10 @@ export type Database = {
           interval_hours: number
           kind: string
           last_attempt_at: string | null
+          last_changed_at: string | null
           last_item_count: number
           last_new_count: number
+          last_result: string | null
           last_success_at: string | null
           name: string
           status: string
@@ -1597,6 +1684,7 @@ export type Database = {
         }
         Insert: {
           adapter?: string
+          consecutive_failures?: number
           created_at?: string
           enabled?: boolean
           error_message?: string | null
@@ -1605,8 +1693,10 @@ export type Database = {
           interval_hours?: number
           kind: string
           last_attempt_at?: string | null
+          last_changed_at?: string | null
           last_item_count?: number
           last_new_count?: number
+          last_result?: string | null
           last_success_at?: string | null
           name: string
           status?: string
@@ -1618,6 +1708,7 @@ export type Database = {
         }
         Update: {
           adapter?: string
+          consecutive_failures?: number
           created_at?: string
           enabled?: boolean
           error_message?: string | null
@@ -1626,8 +1717,10 @@ export type Database = {
           interval_hours?: number
           kind?: string
           last_attempt_at?: string | null
+          last_changed_at?: string | null
           last_item_count?: number
           last_new_count?: number
+          last_result?: string | null
           last_success_at?: string | null
           name?: string
           status?: string
@@ -2464,6 +2557,7 @@ export type Database = {
           error_msg: string | null
           harvested_at: string | null
           id: number
+          job: string
           request_id: number | null
           status_code: number | null
         }
@@ -2472,6 +2566,7 @@ export type Database = {
           error_msg?: string | null
           harvested_at?: string | null
           id?: never
+          job?: string
           request_id?: number | null
           status_code?: number | null
         }
@@ -2480,6 +2575,7 @@ export type Database = {
           error_msg?: string | null
           harvested_at?: string | null
           id?: never
+          job?: string
           request_id?: number | null
           status_code?: number | null
         }
@@ -3987,6 +4083,56 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      claim_collection_jobs: {
+        Args: {
+          p_household: string
+          p_lease_seconds?: number
+          p_limit: number
+          p_now?: string
+          p_worker: string
+        }
+        Returns: {
+          analyzed_version: string | null
+          attempts: number
+          change_count: number
+          completed_at: string | null
+          content_hash: string | null
+          created_at: string
+          dedupe_key: string
+          draft: Json | null
+          due_at: string | null
+          fetched_at: string
+          household_id: string
+          id: string
+          job_state: string
+          kind: string
+          last_changed_at: string | null
+          last_checked_at: string | null
+          last_error: string | null
+          lease_until: string | null
+          list_hash: string | null
+          locked_by: string | null
+          lottery_id: string | null
+          next_run_at: string | null
+          page_hash: string | null
+          reasons: string[]
+          resolved_at: string | null
+          source_id: string | null
+          source_url: string | null
+          started_at: string | null
+          status: string
+          title: string
+          x_post_id: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "collection_candidates"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      collect_cron_disable: { Args: never; Returns: boolean }
+      collect_cron_enable: { Args: { p_schedule?: string }; Returns: number }
       copy_profile_settings: {
         Args: {
           p_actor: string
@@ -4000,6 +4146,10 @@ export type Database = {
       ensure_profile_accounts: { Args: never; Returns: number }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }
       get_home_address: { Args: never; Returns: string }
+      invoke_collect_worker: {
+        Args: { p_secret?: string; p_url?: string }
+        Returns: number
+      }
       invoke_notify_job: {
         Args: { p_secret?: string; p_url?: string }
         Returns: number

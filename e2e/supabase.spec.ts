@@ -2043,6 +2043,23 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await expect(page.getByLabel("最大距離(km)")).toHaveValue("80");
   await expect(page.getByRole("button", { name: "Web応募" })).toHaveAttribute("aria-pressed", "true");
 
+  // 処理状況の表示（解析待ち・確認待ち・失敗・除外が分かる）と、ワーカー（バックグラウンド継続）の設定。初期は無効
+  await expect(page.getByTestId("health")).toContainText("解析待ち 0");
+  await expect(page.getByTestId("health-state")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("cand-tab-queued")).toBeVisible();
+  await expect(page.getByTestId("worker-enabled")).not.toBeChecked();
+  await page.getByTestId("worker-enabled").check();
+  await page.getByLabel("ワーカーの1日のAI解析上限").fill("12");
+  await page.getByTestId("save-conditions").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("完了");
+  await page.reload();
+  await expect(page.getByTestId("worker-enabled")).toBeChecked();
+  await expect(page.getByLabel("ワーカーの1日のAI解析上限")).toHaveValue("12");
+  await expect(page.getByTestId("health")).toContainText("今日のAI 0/12");
+  await page.getByTestId("worker-enabled").uncheck();
+  await page.getByTestId("save-conditions").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("完了");
+
   // 手動実行（すべて無効にして、外部サイトに接続せずに実行できることだけ確認）。X APIは未設定・無効なので呼ばれない
   for (const name of ["pokeso", "トレカ日和", "OnchainOutlaw", "pokecachan"]) {
     const r = page.getByTestId("source-row").filter({ hasText: name });

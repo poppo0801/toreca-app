@@ -262,7 +262,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
       ].join("<div></div>"),
     );
     // 過去の版で溜まった解析待ち（一覧の読み取り結果を持たない）も、次の収集で見直される
-    await u1.from("collection_candidates").insert({ household_id: hid, source_id: pokeso.id, dedupe_key: "https://shop-q.example.invalid/lottery/old", source_url: "https://shop-q.example.invalid/lottery/old", title: "old", status: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: "https://shop-q.example.invalid/lottery/old", title: "応募する", context: "1/9(土) 20:00まで 兵庫県・LivePocket", sourceName: "pokeso", attempts: 0 } } } as never);
+    await u1.from("collection_candidates").insert({ household_id: hid, source_id: pokeso.id, dedupe_key: "https://shop-q.example.invalid/lottery/old", source_url: "https://shop-q.example.invalid/lottery/old", title: "old", status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: "https://shop-q.example.invalid/lottery/old", title: "応募する", context: "1/9(土) 20:00まで 兵庫県・LivePocket", sourceName: "pokeso", attempts: 0 } } } as never);
 
     pagesFetched = [];
     const r1 = await runCollection(deps({ list: () => ok("https://pokeso.jp/chusen", listHtml), onlySourceIds: [pokeso.id] }));

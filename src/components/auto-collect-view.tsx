@@ -25,6 +25,8 @@ export interface SourceView {
   last_success_at: string | null;
   last_item_count: number;
   last_new_count: number;
+  last_result?: "new" | "changed" | "no_new" | "failed" | null;
+  consecutive_failures?: number;
 }
 export interface SettingsView {
   prefectures: string[];
@@ -44,6 +46,10 @@ export interface SettingsView {
   x_monthly_budget_jpy: number;
   x_max_posts_per_run: number;
   max_ai_per_run: number;
+  worker_enabled: boolean;
+  worker_batch: number;
+  worker_daily_ai_limit: number;
+  recheck_hours: number;
 }
 export interface CandidateView {
   id: string;
@@ -52,13 +58,35 @@ export interface CandidateView {
   source_url: string | null;
   status: "auto_registered" | "pending" | "excluded" | "duplicate" | "failed";
   reasons: string[];
-  draft: { ready?: boolean; verdict?: string; input?: { chain?: { name: string }; store?: { name: string }; items?: { product: { name: string } }[]; applyDeadline?: { precision: string; date?: string; time?: string } }; queued?: unknown } | null;
+  draft: { update?: { changes: { label: string; before: string; after: string }[] } | null; ready?: boolean; verdict?: string; input?: { chain?: { name: string }; store?: { name: string }; items?: { product: { name: string } }[]; applyDeadline?: { precision: string; date?: string; time?: string } }; queued?: unknown } | null;
   lottery_id: string | null;
   fetched_at: string;
+  job_state?: string;
+  kind?: string;
+  attempts?: number;
+  next_run_at?: string | null;
+  last_error?: string | null;
+  due_at?: string | null;
+  last_changed_at?: string | null;
+}
+export interface HealthView {
+  state: "running" | "waiting" | "ok" | "paused" | "budget";
+  warnings: string[];
+  lastCollectAt: string | null;
+  lastWorkerAt: string | null;
+  nextCollectAt: string | null;
+  processing: number;
+  pausedReason: string | null;
+  workerDayUsed: number;
 }
 export interface RunView {
   id: string;
   trigger: string;
+  phase?: string;
+  processed_count?: number;
+  changed_count?: number;
+  skipped_count?: number;
+  stop_reason?: string | null;
   status: string;
   started_at: string;
   finished_at: string | null;
@@ -116,6 +144,7 @@ export function AutoCollectView({
   sources,
   candidates,
   counts,
+  health,
   runs,
   products,
   xConfigured,
@@ -127,6 +156,7 @@ export function AutoCollectView({
   candidates: CandidateView[];
   /** 全件の数（一覧に表示している件数ではない） */
   counts: Record<(typeof CAND_TABS)[number]["value"], number>;
+  health: HealthView;
   runs: RunView[];
   products: { id: string; name: string }[];
   xConfigured: boolean;
@@ -170,7 +200,7 @@ export function AutoCollectView({
       settings: {
         prefectures: s.prefectures, includeOnline: s.include_online, maxDistanceKm: s.max_distance_km, applyMethods: s.apply_methods, receiveMethods: s.receive_methods,
         reqInclude: s.req_include, reqExclude: s.req_exclude, productMode: s.product_mode, productIds: s.product_ids, statusMode: s.status_mode, autoRegister: s.auto_register,
-        scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run,
+        scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, workerDailyAiLimit: s.worker_daily_ai_limit, recheckHours: s.recheck_hours,
       },
     });
 
@@ -181,9 +211,12 @@ export function AutoCollectView({
     if (r.ok) setAdd({ ...add, name: "", value: "" });
   };
 
-  const isQueued = (c: CandidateView) => c.status === "pending" && Boolean(c.draft?.queued) && !c.draft?.input;
-  const list = candidates.filter((c) => (tab === "queued" ? isQueued(c) : tab === "pending" ? c.status === "pending" && !isQueued(c) : c.status === tab));
-  const readyCount = candidates.filter((c) => c.status === "pending" && c.draft?.ready && c.draft.verdict === "match").length;
+  const js = (c: CandidateView) => c.job_state ?? "";
+  const js2 = (c: CandidateView) => c.job_state ?? "";
+  const list = candidates.filter((c) =>
+    tab === "queued" ? ["pending", "retry", "processing"].includes(js(c)) : tab === "pending" ? js(c) === "review" : tab === "excluded" ? js(c) === "skipped" : tab === "failed" ? js(c) === "failed" : c.status === tab,
+  );
+  const readyCount = candidates.filter((c) => js2(c) === "review" && c.draft?.ready && c.draft.verdict === "match" && c.kind !== "update").length;
   const queued = counts.queued;
   const prefShown = showAllPref ? PREFECTURE_LIST : PREFECTURE_LIST.filter((p) => s.prefectures.includes(p));
   const reqTags = REQUIREMENT_TAGS.filter((t) => !HIDDEN_REQUIREMENT_TAGS.includes(t.code) && t.code !== "unknown");
@@ -208,9 +241,36 @@ export function AutoCollectView({
         {!aiConfigured && <p className="text-xs text-warn">AIが未設定のため、解析は行われません（候補の取得のみ）。</p>}
         {queued > 0 && (
           <p className="text-xs text-muted-foreground" data-testid="queued-note">
-            解析待ちが{queued}件あります。一覧の表示で締切済み・対象外の地域と分かるものは解析せずに除外し、残りは締切が近いものから、1回{settings.max_ai_per_run}件までAIで読み取ります（収集のたびに減ります）。
+            解析待ちが{queued}件あります。締切が近いものから、AI読み取りの上限の範囲で順に解析します（ワーカーが自動で続けます）。
           </p>
         )}
+        <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs" data-testid="health">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span className="font-medium" data-testid="health-state" data-state={health.state}>
+              {{ running: "処理中", waiting: "待機中（解析待ちあり）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "上限で停止中" }[health.state]}
+            </span>
+            <span className="text-muted-foreground">解析待ち {counts.queued}（処理中 {health.processing}）／確認待ち {counts.pending}／失敗 {counts.failed}／除外 {counts.excluded}</span>
+            <details className="inline">
+              <summary className="inline cursor-pointer text-info" aria-label="処理状態の説明">ⓘ</summary>
+              <span className="block pt-1 text-[11px] text-muted-foreground">
+                解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。
+              </span>
+            </details>
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            最終収集 {fmt(health.lastCollectAt)}／ワーカー最終実行 {fmt(health.lastWorkerAt)}／次回の定期収集 {health.nextCollectAt ? fmt(health.nextCollectAt) : "（定期収集は無効）"}／ワーカー今日のAI {health.workerDayUsed}/{settings.worker_daily_ai_limit}
+          </p>
+          {health.warnings.map((w, i) => (
+            <p key={i} className="text-warn" role="alert" data-testid="health-warning">
+              ⚠ {w}
+            </p>
+          ))}
+          {health.state === "paused" && (
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("resume", { action: "resume" }, () => "自動停止を解除しました")}>
+              自動停止を解除
+            </Button>
+          )}
+        </div>
         {msg && (
           <p role={msg.ok ? "status" : "alert"} className={cn("text-xs", msg.ok ? "text-teal-700 dark:text-teal-300" : "text-danger")} data-testid="collect-msg">
             {msg.text}
@@ -237,8 +297,10 @@ export function AutoCollectView({
                   </label>
                 </div>
                 <p className="break-all text-[11px] text-muted-foreground">{src.kind === "web" ? src.url : `@${src.x_username}${src.x_user_id ? `（ID ${src.x_user_id}）` : ""}`}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  最終取得 {fmt(src.last_attempt_at)}／最終成功 {fmt(src.last_success_at)}／取得{src.last_item_count}件・新規候補{src.last_new_count}件
+                <p className="text-[11px] text-muted-foreground" data-testid="source-fresh">
+                  最終確認 {fmt(src.last_attempt_at)}／最終成功 {fmt(src.last_success_at)}／取得{src.last_item_count}件・新規候補{src.last_new_count}件
+                  {src.last_result && ` ／${{ new: "新規情報あり", changed: "内容変更あり", no_new: "新規情報なし", failed: "収集失敗" }[src.last_result]}`}
+                  {(src.consecutive_failures ?? 0) >= 3 && ` ／${src.consecutive_failures}回連続で失敗`}
                 </p>
                 {src.error_message && src.status !== "ok" && (
                   <p className="text-[11px] text-danger" data-testid="source-error">
@@ -412,6 +474,19 @@ export function AutoCollectView({
             <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.max_ai_per_run} aria-label="1回のAI解析の上限" onChange={(e) => setS({ ...s, max_ai_per_run: Math.min(50, Math.max(1, Number(e.target.value) || 1)) })} />
             件
           </label>
+          <label className="flex flex-wrap items-center gap-2 text-xs">
+            <input type="checkbox" className="size-4" checked={s.worker_enabled} onChange={(e) => setS({ ...s, worker_enabled: e.target.checked })} data-testid="worker-enabled" />
+            解析待ちを自動で解析し続ける（アプリを閉じていても継続）
+          </label>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            1回
+            <input className="h-8 w-14 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.worker_batch} aria-label="ワーカー1回の解析件数" onChange={(e) => setS({ ...s, worker_batch: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })} />
+            件／1日の上限
+            <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.worker_daily_ai_limit} aria-label="ワーカーの1日のAI解析上限" onChange={(e) => setS({ ...s, worker_daily_ai_limit: Math.min(500, Math.max(0, Number(e.target.value.replace(/\D/g, "")) || 0)) })} />
+            件／告知ページの再確認
+            <input className="h-8 w-14 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.recheck_hours} aria-label="告知ページを再確認する間隔(時間)" onChange={(e) => setS({ ...s, recheck_hours: Math.min(168, Math.max(1, Number(e.target.value) || 1)) })} />
+            時間ごと
+          </div>
           <label className="flex items-center gap-2 text-xs">
             <input type="checkbox" className="size-4" checked={s.x_enabled} onChange={(e) => setS({ ...s, x_enabled: e.target.checked })} data-testid="x-enabled" />
             X公式APIを使う（従量課金）
@@ -445,14 +520,22 @@ export function AutoCollectView({
         <ul className="divide-y">
           {list.map((c) => {
             const d = c.draft?.input;
-            const queuedOnly = !d && Boolean(c.draft?.queued);
+            const queuedOnly = ["pending", "retry", "processing"].includes(c.job_state ?? "");
             return (
               <li key={c.id} className="space-y-1 py-2 text-xs" data-testid="candidate-row">
                 <p className="font-medium">{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</p>
                 {d?.applyDeadline && (
                   <p className="text-muted-foreground">締切: {d.applyDeadline.precision === "unknown" ? "不明" : `${d.applyDeadline.date ?? ""}${d.applyDeadline.time ? ` ${d.applyDeadline.time}` : ""}`}</p>
                 )}
-                {queuedOnly && <p className="text-muted-foreground">解析待ち</p>}
+                {queuedOnly && (
+                  <p className="text-muted-foreground">
+                    {c.job_state === "processing" ? "解析中" : c.job_state === "retry" ? `再試行待ち（${c.attempts ?? 0}回失敗）` : "解析待ち"}
+                    {c.due_at && `／一覧の締切 ${fmt(c.due_at)}`}
+                  </p>
+                )}
+                {c.kind === "update" && c.draft?.update && (
+                  <p className="font-medium text-info">更新の提案（既存の抽選）</p>
+                )}
                 {c.reasons.length > 0 && <ul className="list-disc pl-4 text-muted-foreground">{c.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
                 <div className="flex flex-wrap gap-1.5">
                   {c.source_url && (
@@ -460,7 +543,12 @@ export function AutoCollectView({
                       元の情報を開く
                     </a>
                   )}
-                  {c.status === "pending" && d && (
+                  {c.kind === "update" && c.draft?.update && (
+                    <Button size="sm" disabled={busy !== null} data-testid="cand-apply-update" onClick={() => void act("a" + c.id, { action: "applyUpdate", id: c.id }, (x) => `反映しました（${x.applied}項目）`)}>
+                      更新を反映
+                    </Button>
+                  )}
+                  {c.job_state === "review" && c.kind !== "update" && d && (
                     <Button size="sm" disabled={busy !== null} onClick={() => void act("r" + c.id, { action: "register", id: c.id, actor: profile.id }, () => "登録しました（全情報に追加。★管理対象ではありません）")} data-testid="cand-register">
                       登録
                     </Button>
