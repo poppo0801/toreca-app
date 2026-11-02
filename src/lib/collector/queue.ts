@@ -205,3 +205,9 @@ export function healthWarnings(h: HealthInput): HealthWarning[] {
   if (h.scheduleEnabled && mins(h.lastCollectAt) > 36 * 60) out.push({ code: "collect_stale", message: "定期収集が36時間以上実行されていません" });
   return out;
 }
+
+/** ISO時刻 → 入力と同じ形（日本時間の日付・時刻）。日時を補完で作らない用途（一覧に表示された日時の取り込み）で使う */
+export function isoToFlex(iso: string): { precision: "date_time"; date: string; time: string } {
+  const p = jstParts(iso);
+  return { precision: "date_time", date: p.date, time: p.time };
+}

@@ -51,6 +51,10 @@ const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("register"), id: uuid, actor: z.uuid().nullable().optional(), input: z.unknown().optional() }),
   z.object({ action: z.literal("registerReady"), actor: z.uuid().nullable().optional() }),
   z.object({ action: z.literal("applyUpdate"), id: uuid }),
+  z.object({ action: z.literal("bulkRegister"), ids: z.array(uuid).min(1).max(50), actor: z.uuid().nullable().optional() }),
+  z.object({ action: z.literal("bulkExclude"), ids: z.array(uuid).min(1).max(100) }),
+  z.object({ action: z.literal("reanalyze"), id: uuid }),
+  z.object({ action: z.literal("markRegistered"), id: uuid, lotteryId: uuid }),
   z.object({ action: z.literal("resume") }),
   z.object({ action: z.literal("setAiBudget"), budgetJpy: z.number().int().min(0).max(1_000_000), rate: z.number().min(50).max(500), actor: z.uuid().nullable().optional() }),
   // 本日(日本時間)だけの日次上限の一時変更。null で解除。翌日は通常の設定に戻る
@@ -129,6 +133,40 @@ export async function POST(request: NextRequest) {
     case "applyUpdate": {
       const r = await applyCandidateUpdate(db, b.id);
       return r.ok ? json({ ok: true, applied: r.applied }) : json({ ok: false, error: r.message }, 422);
+    }
+    case "bulkRegister": {
+      // 選んだ確認待ちの候補をまとめて登録する（1件ずつ登録し、失敗した件数を返す。★管理対象にせず、応募記録は作らない）
+      let ok = 0;
+      const failed: string[] = [];
+      for (const id of b.ids) {
+        const r = await registerCandidate(db, householdId, b.actor ?? null, id);
+        if (r.ok) ok++;
+        else failed.push(r.message);
+      }
+      return json({ ok: true, registered: ok, failed: failed.length, firstError: failed[0] ?? null });
+    }
+    case "bulkExclude": {
+      const { error } = await db
+        .from("collection_candidates")
+        .update({ status: "excluded", job_state: "skipped", reasons: ["利用者が除外しました"], resolved_at: new Date().toISOString(), lease_until: null, locked_by: null })
+        .in("id", b.ids)
+        .neq("status", "auto_registered");
+      return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true, excluded: b.ids.length });
+    }
+    case "reanalyze": {
+      // 再解析: 取得済みの内容は削除せず、同じ候補をキューに戻す（AIの利用上限・予算の範囲で、ワーカーが解析する）
+      const { data: c } = await db.from("collection_candidates").select("id,draft,status,source_url,dedupe_key,title").eq("id", b.id).maybeSingle();
+      if (!c || c.status === "auto_registered" || !c.source_url) return json({ ok: false, error: "再解析できる候補ではありません" }, 422);
+      const prior = (c.draft as object | null) ?? {};
+      const queued = { kind: c.dedupe_key.startsWith("x:") ? "x_oembed" : "web_page", url: c.source_url, title: c.title, context: "", sourceName: "再解析", attempts: 0, changed: true };
+      const { error } = await db.from("collection_candidates").update({ job_state: "pending", status: "pending", attempts: 0, next_run_at: null, reasons: ["再解析待ち"], draft: { ...prior, queued } as never, lease_until: null, locked_by: null }).eq("id", b.id);
+      return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
+    }
+    case "markRegistered": {
+      // 画面で内容を直して登録した抽選を、候補に紐付ける
+      await db.rpc("bump_collection_stats", { p_household: householdId, p_day: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()), p_delta: { registered_new: 1 } });
+      await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: b.lotteryId, reasons: ["内容を確認・修正して登録しました"], resolved_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq("id", b.id);
+      return json({ ok: true });
     }
     case "setAiBudget": {
       // アプリ内の停止条件（月額予算と円換算レート）の変更のみ。外部サービス（Anthropic）の契約・課金上限は変更しない

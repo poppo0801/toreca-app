@@ -18,16 +18,43 @@ export interface MatchResult<T> {
   item: T | null;
 }
 
-const STRIP = /(株式会社|有限会社|\(株\)|（株）|店$|支店$)/g;
-const cleanName = (s: string) => normName(s).replace(STRIP, "");
+const STRIP = /(株式会社|有限会社|(株)|（株）|店$|支店$)/g;
 
-/** 商品名の照合用の整形: ブランド名の接頭辞（ポケモンカードゲーム等）と、数量・入数の表記（1BOX・30パック入り）を除く */
+/** 系列名の表記ゆれ（カナ表記・英字表記）。照合のときだけ同一視する */
+const CHAIN_SYNONYMS: [RegExp, string][] = [
+  [/^(ブックオフ|bookoff)(スーパーバザー|オンライン)?/, "bookoff"],
+  [/^(ツタヤ|tsutaya)/, "tsutaya"],
+  [/^(ゲオ|geo)/, "geo"],
+  [/^(ヤマダ電機|ヤマダデンキ|yamada)/, "yamada"],
+  [/^(ビックカメラ|biccamera)/, "biccamera"],
+  [/^(ヨドバシ|ヨドバシカメラ|yodobashi)/, "yodobashi"],
+  [/^(イオン|aeon)(?!九州)/, "aeon"],
+];
+const cleanName = (s: string) => {
+  const n = normName(s).replace(STRIP, "");
+  for (const [re, canon] of CHAIN_SYNONYMS) if (re.test(n)) return n.replace(re, canon);
+  return n;
+};
+
+/** 商品名の整形（表示・保存用）: ブランド名の接頭辞（ポケモンカードゲーム等）と、数量・入数の表記（1BOX・30パック入り）を除く */
 export function cleanProductName(s: string): string {
   return normName(s)
     .replace(/^(ポケモンカードゲーム|ポケモンカード|ポケカ)/, "")
     .replace(/[（(]\d+(パック|枚)入り?[）)]/g, "")
     .replace(/\d+(box|ボックス|パック|セット|個|点)(入り?)?$/i, "")
     .replace(STRIP, "");
+}
+
+/**
+ * 商品の照合キー（照合する双方に同じ整形を適用する）。cleanProductName に加えて、シリーズ名（MEGA）、商品区分の語（拡張パック等）、
+ * 記号を除き、カナ表記（セレブレーション）と綴りの揺れ（CEREBRATION）を英字にそろえる。
+ */
+export function productKey(s: string): string {
+  return cleanProductName(s)
+    .replace(/^mega/, "")
+    .replace(/[#＃「」『』【】\[\]()（）・,、。:：!！?？~〜-]/g, "")
+    .replace(/(強化拡張パック|ハイクラスパック|拡張パック)/g, "")
+    .replace(/セレブレーション|cerebration/g, "celebration");
 }
 
 function bigrams(s: string): Set<string> {
@@ -146,7 +173,7 @@ export function matchProduct(name: string, code: string, products: Product[]): M
     const byCode = active.find((p) => p.code && p.code.toLowerCase() === c);
     if (byCode) return { kind: "code", item: byCode, candidates: [] };
   }
-  return decide(rankByName(name, active, (p) => [p.officialName, ...p.aliases, ...(p.code ? [p.code] : [])], cleanProductName));
+  return decide(rankByName(name, active, (p) => [p.officialName, ...p.aliases, ...(p.code ? [p.code] : [])], productKey));
 }
 
 // ------------------------------------------------------------------ 下書き

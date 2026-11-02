@@ -4,19 +4,19 @@ import { normalizeConditions, evaluateCandidate, preScreenFromList, type Collect
 import { judgeRelevance, normalizeUrl, parseListHints, parseListing, looksLikeLottery, type AdapterId, type ListHints, type ListingEntry } from "@/lib/collector/listing";
 import { remainingPosts, X_COST_PER_POST_JPY, type XPost } from "@/lib/collector/x-posts";
 import { extractPageText } from "@/lib/ai/page-text";
-import { PROMPT_VERSION, type ExtractRequest, type LotteryExtractor } from "@/lib/ai/provider";
+import { PROMPT_VERSION, type LotteryExtractor } from "@/lib/ai/provider";
 import { buildDraft, type LotteryDraft } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
-import { extractFromRequest, runExtraction, MAX_IMAGES, type ExtractResult } from "@/lib/server/lottery-extract-service";
+import { extractFromRequest, runExtraction, type ExtractResult } from "@/lib/server/lottery-extract-service";
 import { estimateCostJpy as estimateAiCostJpy, USD_JPY_ESTIMATE } from "@/lib/ai-cost";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service";
-import { splitTallImages } from "@/lib/server/image-split";
 import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
-import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, isPermanentError, type FieldChange } from "@/lib/collector/queue";
+import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
+import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, isPermanentError, type FieldChange } from "@/lib/collector/queue";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -166,7 +166,7 @@ export function conditionsFromRow(row: Record<string, unknown>): CollectionCondi
   });
 }
 
-type StatKey = "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining";
+type StatKey = "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "provisional_registered" | "failed_jobs" | "x_posts_manual" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining";
 export type StatDelta = Partial<Record<StatKey, number>>;
 
 /** 日別統計(日本時間の日付)への原子的な加算。統計の失敗で本処理を止めない */
@@ -243,17 +243,37 @@ async function aiAllowance(deps: CollectDeps, perRun: number, daily: { limit: nu
 }
 
 /** 登録に十分な情報があるか（マスター照合が確実・締切が分かる・方式が確定・出典あり） */
-export function isReady(draft: LotteryDraft): { ready: boolean; missing: string[] } {
+export function isReady(draft: LotteryDraft, input: LotteryInput = draft.input): { ready: boolean; missing: string[]; provisional: string[] } {
   const sure = (k: string) => k === "exact" || k === "alias" || k === "code";
+  // 名称が明確に取得できていて、既存のどのマスターにも近い候補が無い場合だけ、仮登録として扱える（曖昧なものは確認待ち）
+  const clearName = (n: string) => {
+    const t = n.trim();
+    return t.length >= 2 && t.length <= 40 && !/https?:|www\.|\.(com|jp|net|co)\b/i.test(t);
+  };
   const missing: string[] = [];
-  if (!sure(draft.summary.chain)) missing.push("系列を確実に特定できません");
-  const online = draft.input.receiveMethod === "shipping";
-  if (!sure(draft.summary.store) && !online) missing.push("店舗を確実に特定できません");
-  if (draft.summary.items.length === 0 || draft.summary.items.some((i) => !sure(i.kind))) missing.push("商品を確実に判別できません");
-  if (draft.input.applyDeadline.precision === "unknown") missing.push("応募締切が不明です");
+  const provisional: string[] = [];
+  const online = input.receiveMethod === "shipping";
+  if (sure(draft.summary.chain)) {
+    /* 既存の系列 */
+  } else if (draft.summary.chain === "none" && draft.candidates.chain.length === 0 && clearName(input.chain.name)) provisional.push(`系列「${input.chain.name.trim()}」`);
+  else missing.push("系列を確実に特定できません");
+  // オンライン販売で店舗名が無い場合は、既存の運用に合わせて店舗名「オンライン」を使う
+  const storeName = input.store.name.trim() || (online ? "オンライン" : "");
+  if (sure(draft.summary.store) && input.store.id) {
+    /* 既存の店舗 */
+  } else if (!input.store.id && storeName && (draft.summary.store === "none" || !input.store.name.trim()) && draft.candidates.store.length === 0 && clearName(storeName)) provisional.push(`店舗「${storeName}」`);
+  else missing.push("店舗を確実に特定できません");
+  if (draft.summary.items.length === 0) missing.push("商品を確実に判別できません");
+  draft.summary.items.forEach((it, i) => {
+    if (sure(it.kind)) return;
+    const name = input.items[i]?.product.name ?? "";
+    if (it.kind === "none" && (draft.candidates.items[i]?.length ?? 0) === 0 && clearName(name) && !input.items[i]?.product.id) provisional.push(`商品「${name.trim()}」`);
+    else missing.push(`商品「${name.trim() || "不明"}」を確実に判別できません`);
+  });
+  if (input.applyDeadline.precision === "unknown") missing.push("応募締切が不明です");
   if (draft.modePending) missing.push("複数商品の応募方式が不明です");
-  if ((draft.input.sourceUrls ?? []).length === 0) missing.push("情報源URLがありません");
-  return { ready: missing.length === 0, missing };
+  if ((input.sourceUrls ?? []).length === 0) missing.push("情報源URLがありません");
+  return { ready: missing.length === 0, missing, provisional };
 }
 
 async function appendSourceUrl(db: Db, lotteryId: string, url: string): Promise<boolean> {
@@ -288,30 +308,12 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
   const extractor = deps.extractor!;
   if (q.kind === "x_post" && q.post) {
     const p = q.post;
-    let text = p.text;
-    // リンク先(抽選案内)があれば、アクセスできる範囲で本文を統合する(1件まで)
-    const ext = p.links.find((l) => !/^https:\/\/(x|twitter)\.com\//.test(l));
-    if (ext) {
-      const pg = await (deps.fetchPage ?? ((u: string) => fetchRespectingRobots(u)))(ext);
-      if (pg.ok) {
-        const t = extractPageText(pg.body, pg.finalUrl);
-        if (t.text.length >= 30) text += `\n\n【リンク先の案内（${ext}）】\n${t.text.slice(0, 6000)}`;
-      }
-    }
-    const images: NonNullable<ExtractRequest["images"]> = [];
-    for (const u of p.images.slice(0, MAX_IMAGES)) {
-      const img = await (deps.fetchImage ?? fetchXImage)(u);
-      if (img) images.push({ mediaType: img.mediaType, base64: img.base64 });
-    }
-    let used = images;
-    if (images.length > 0) {
-      const split = await splitTallImages(images);
-      if (split.ok) used = split.images.slice(0, MAX_IMAGES);
-    }
-    const kind = used.length > 0 ? "image" : "x_url";
-    result = await extractFromRequest({ kind, text: text.slice(0, 20_000), images: used.length ? used : undefined, sourceUrl: q.url, postedOn: p.createdAt.slice(0, 10) || undefined, now: deps.now }, kind, extractor, deps.now, []);
+    // 本文＋添付画像（複数・縦長は分割）＋リンク先の本文を統合（単件・一括・共有と共通の処理）
+    const rich = await enrichXPost(p, { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage });
+    const kind = rich.images.length > 0 ? "image" : "x_url";
+    result = await extractFromRequest({ kind, text: rich.text, images: rich.images.length ? rich.images : undefined, sourceUrl: q.url, postedOn: p.createdAt.slice(0, 10) || undefined, now: deps.now }, kind, extractor, deps.now, []);
   } else {
-    result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed });
+    result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed, fetchXRich: makeXRichFetcher({ db: deps.db, householdId: deps.householdId, client: deps.xClient, enrich: { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage }, oembed: deps.fetchOembed, now: deps.now }) });
   }
   return result;
 }
@@ -341,6 +343,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     const delay = isPermanentError(message) ? null : backoffMs(c.attempts);
     if (delay === null) {
       await db.from("collection_candidates").update({ status: "failed", job_state: "failed", reasons: [message, "再試行しません（上限に達したか、再試行しても変わらない失敗です）"], last_error: message.slice(0, 300), completed_at: nowIso, ...clear }).eq("id", c.id);
+      await bumpStats(db, deps.householdId, deps.now, { failed_jobs: 1 });
     } else {
       await db
         .from("collection_candidates")
@@ -362,11 +365,38 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const draft = buildDraft(result.extraction, data, { sourceUrl: q.url });
   // 自動収集は★管理対象にせず、応募記録も作らない
   const input: LotteryInput = { ...draft.input, isManaged: false, applications: [], sourceUrls: [...new Set([...(draft.input.sourceUrls ?? []), q.url])].slice(0, 10) };
+  // ---- 読み取れなかった項目を、まとめサイトの一覧の表示（二次情報）で補う。補った項目は根拠として明示し、確定情報とは区別する
+  const secondary: string[] = [];
+  const lh = q.hints;
+  if (input.applyDeadline.precision === "unknown" && lh?.deadlineIso) {
+    input.applyDeadline = { ...isoToFlex(lh.deadlineIso) };
+    secondary.push("応募締切");
+  } else if (input.applyDeadline.precision === "unknown" && lh?.deadlineDate) {
+    input.applyDeadline = { precision: "date_only", date: lh.deadlineDate, time: "" };
+    secondary.push("応募締切（日付のみ）");
+  }
+  if (input.receiveMethod === "unknown" && lh?.online) {
+    input.receiveMethod = "shipping";
+    secondary.push("受取方法（通販）");
+  }
+  // オンライン販売で店舗名が無い場合は、既存の運用に合わせて店舗名「オンライン」を使う（既存の店舗があればそれに紐付ける）
+  if (!input.store.name.trim() && input.receiveMethod === "shipping" && input.chain.id) {
+    const online = data.stores.find((s) => s.chainId === input.chain.id && !s.archived && (s.name === "オンライン" || s.salesKind === "online_only"));
+    input.store = online ? { id: online.id, name: online.name, prefecture: "" } : { id: null, name: "オンライン", prefecture: "" };
+    draft.summary.store = online ? "exact" : "none";
+  } else if (!input.store.name.trim() && input.receiveMethod === "shipping") {
+    input.store = { id: null, name: "オンライン", prefecture: "" };
+  }
+  if (secondary.length > 0) {
+    const note = "まとめサイトの一覧の表示（二次情報）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
+    input.memo = [input.memo, note].filter(Boolean).join("\n").slice(0, 2000);
+  }
   const store = data.stores.find((s) => s.id === input.store.id);
   const dist = store ? storeDistance(data, store) : null;
-  const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
-  const { ready, missing } = isReady(draft);
-  const stored = { input, flags: draft.flags, summary: draft.summary, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, confirmedAt: nowIso, engine: result.engine } as unknown as Json;
+  // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
+  const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
+  const { ready, missing, provisional } = isReady(draft, input);
+  const stored = { input, flags: draft.flags, summary: draft.summary, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）
@@ -416,7 +446,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする
         await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
-        await finish("completed", { status: "auto_registered", lottery_id: saved.value.id, reasons: ["条件に一致し、情報が十分なため自動登録しました"], draft: stored, ...due }, { registered_new: 1 });
+        await finish("completed", { status: "auto_registered", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: stored, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
         return { usedAi: true, registered: true, aiFailed: false };
       }
       await finish("review", { status: "pending", reasons: [`自動登録できませんでした: ${saved.error}`], draft: stored, ...due }, { review_added: 1 });

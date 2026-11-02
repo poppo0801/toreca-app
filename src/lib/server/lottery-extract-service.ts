@@ -8,6 +8,11 @@ import { MAX_TILES } from "@/lib/image-tiles";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXPost, isXHost, type XFetchResult } from "@/lib/server/x-source";
 
+/** X投稿の統合取得の結果（collector/x-rich.ts の XRichResult と同じ形） */
+export type XRichInput =
+  | { ok: true; text: string; postedOn: string; images: NonNullable<ExtractRequest["images"]>; notices: string[] }
+  | { ok: false; message: string };
+
 /**
  * 入力（文章・画像・店舗URL・X投稿URL）→ 本文の取得 → AI読み取り → 検証済みの抽選情報、までの共通処理。
  * 取得（URL）と解析（AI）は分離してあり、Stage 4C の定期収集も `extractFromText` 相当をそのまま呼べる。
@@ -53,6 +58,8 @@ export interface ExtractDeps {
   now: Date;
   fetchPage?: (url: string) => Promise<SafeFetchResult>;
   fetchX?: (url: string) => Promise<XFetchResult>;
+  /** X投稿を本文・画像・リンク先まで統合して取得する（Stage 4C。指定すると fetchX より優先） */
+  fetchXRich?: (url: string) => Promise<XRichInput>;
 }
 
 export const MAX_TEXT_CHARS = 20_000;
@@ -99,7 +106,15 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
     case "x_url": {
       // 入力欄と種類が食い違っても、URLを見て取得方法を選ぶ（Xの投稿URLは公式の埋め込み取得、それ以外は通常のページ取得）
       kind = isXHost(input.url) ? "x_url" : "url";
-      if (kind === "x_url") {
+      if (kind === "x_url" && deps.fetchXRich) {
+        const x = await deps.fetchXRich(input.url);
+        if (!x.ok) return { ok: false, kind, code: "fetch_failed", message: x.message, suggest: "text" };
+        notices.push(...x.notices);
+        // 本文＋添付画像（複数）＋リンク先の本文を、1つの入力として解析する
+        const hasImg = x.images.length > 0;
+        if (hasImg) kind = "image";
+        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), images: hasImg ? x.images : undefined, sourceUrl: input.url.trim(), postedOn: x.postedOn || undefined, now: deps.now };
+      } else if (kind === "x_url") {
         const x = await fetchX(input.url);
         if (!x.ok) return { ok: false, kind, code: "fetch_failed", message: x.message, suggest: "text" };
         notices.push(...x.notice);

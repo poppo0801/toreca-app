@@ -2,6 +2,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { MAX_ACTIVE_JOBS, createJobSchema, normalizeUrl, xPostId, type CreateJobInput, type ItemSource, type JobStatus, type JobSummary, type ItemStatus } from "@/lib/ai-job";
 import { getExtractor, PROMPT_VERSION } from "@/lib/ai/provider";
+import { createXClient } from "@/lib/server/collector/x-client";
+import { makeXRichFetcher } from "@/lib/server/collector/x-rich";
 import { runExtraction, type ExtractInput, type ExtractResult } from "@/lib/server/lottery-extract-service";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { sniffImage } from "@/lib/server/image-sniff";
@@ -182,7 +184,8 @@ async function runItem(db: Db, householdId: string, it: Record<string, unknown>)
   }
   let result: ExtractResult;
   try {
-    result = await runExtraction(input, { extractor: getExtractor(), now: new Date() });
+    // 一括解析・iPhone共有のX投稿も、単件と同じ共通処理（本文・画像・リンク先の統合。APIが使えない場合は本文のみ）で取得する
+    result = await runExtraction(input, { extractor: getExtractor(), now: new Date(), fetchXRich: makeXRichFetcher({ db, householdId, client: createXClient() }) });
   } catch {
     result = { ok: false, kind: input.kind, code: "ai_failed", message: "解析中にエラーが発生しました" };
   }

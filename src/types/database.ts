@@ -1494,14 +1494,17 @@ export type Database = {
           discovered_new: number
           duplicates: number
           excluded: number
+          failed_jobs: number
           household_id: string
           input_tokens: number
           output_tokens: number
+          provisional_registered: number
           queue_remaining: number | null
           registered_new: number
           review_added: number
           updated_at: string
           updated_existing: number
+          x_posts_manual: number
         }
         Insert: {
           ai_calls?: number
@@ -1514,14 +1517,17 @@ export type Database = {
           discovered_new?: number
           duplicates?: number
           excluded?: number
+          failed_jobs?: number
           household_id: string
           input_tokens?: number
           output_tokens?: number
+          provisional_registered?: number
           queue_remaining?: number | null
           registered_new?: number
           review_added?: number
           updated_at?: string
           updated_existing?: number
+          x_posts_manual?: number
         }
         Update: {
           ai_calls?: number
@@ -1534,14 +1540,17 @@ export type Database = {
           discovered_new?: number
           duplicates?: number
           excluded?: number
+          failed_jobs?: number
           household_id?: string
           input_tokens?: number
           output_tokens?: number
+          provisional_registered?: number
           queue_remaining?: number | null
           registered_new?: number
           review_added?: number
           updated_at?: string
           updated_existing?: number
+          x_posts_manual?: number
         }
         Relationships: [
           {

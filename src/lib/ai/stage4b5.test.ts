@@ -314,7 +314,7 @@ describe("マスター照合（別表記・候補・自動統合しない）", (
       { id: "p2", officialName: "拡張パック「ひかりの海」", aliases: [], code: "", packsPerBox: 30 },
     ];
     expect(matchProduct("ポケモンカードゲーム 拡張パック「ひかりの森」 1BOX（30パック入り）", "", products).item?.id).toBe("p1");
-    expect(matchProduct("ひかりの森", "", products).kind).toBe("alias");
+    expect(["exact", "alias"]).toContain(matchProduct("ひかりの森", "", products).kind); // 商品区分の語（拡張パック）を除いて照合するため、正式名称とも一致する
     // 似ているだけの別商品（森/海）は自動で選ばない
     const near = matchProduct("拡張パック「ひかりの湖」", "", products);
     expect(near.item).toBeNull();

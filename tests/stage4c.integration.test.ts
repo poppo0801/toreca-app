@@ -35,6 +35,10 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
       xCalls++;
       return { ok: true, id: "1234567890", username };
     },
+    async getPost(id, username) {
+      xCalls++;
+      return { ok: true, post: { id, text: "", createdAt: "2027-01-12T00:00:00.000Z", authorId: "1234567890", url: `https://x.com/${username}/status/${id}`, images: [], links: [], refs: [] } };
+    },
     async userPosts(_id, username, opts) {
       xCalls++;
       void opts;

@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useApp } from "@/components/app-provider";
+import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
+import type { LotteryDraft } from "@/lib/lottery-match";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import { HIDDEN_REQUIREMENT_TAGS, REQUIREMENT_TAGS } from "@/lib/lottery-taxonomy";
@@ -60,7 +62,7 @@ export interface CandidateView {
   source_url: string | null;
   status: "auto_registered" | "pending" | "excluded" | "duplicate" | "failed";
   reasons: string[];
-  draft: { update?: { changes: { label: string; before: string; after: string }[] } | null; ready?: boolean; verdict?: string; input?: { chain?: { name: string }; store?: { name: string }; items?: { product: { name: string } }[]; applyDeadline?: { precision: string; date?: string; time?: string } }; queued?: unknown } | null;
+  draft: { update?: { changes: { label: string; before: string; after: string }[] } | null; provisional?: string[]; secondary?: string[]; flags?: Record<string, string>; summary?: unknown; modePending?: boolean; warnings?: string[]; ready?: boolean; verdict?: string; input?: { chain?: { name: string }; store?: { name: string }; items?: { product: { name: string } }[]; applyDeadline?: { precision: string; date?: string; time?: string } }; queued?: unknown } | null;
   lottery_id: string | null;
   fetched_at: string;
   job_state?: string;
@@ -85,6 +87,8 @@ export interface StatRow {
   updated_existing: number;
   review_added: number;
   queue_remaining: number | null;
+  provisional_registered?: number;
+  failed_jobs?: number;
   input_tokens: number;
   output_tokens: number;
   cost_jpy: number;
@@ -212,6 +216,8 @@ export function AutoCollectView({
   const [s, setS] = useState(settings);
   const [showAllPref, setShowAllPref] = useState(false);
   const [productQ, setProductQ] = useState("");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<CandidateView | null>(null);
   const [budgetInput, setBudgetInput] = useState({ budget: String(ops.budgetJpy), rate: String(ops.rate) });
 
   const act = async (key: string, body: Record<string, unknown>, okText?: (r: { ok: boolean; [k: string]: unknown }) => string) => {
@@ -255,6 +261,11 @@ export function AutoCollectView({
 
   const js = (c: CandidateView) => c.job_state ?? "";
   const js2 = (c: CandidateView) => c.job_state ?? "";
+  const rate = stats.reduce(
+    (a, r) => ({ total: a.total + r.ai_success, reg: a.reg + r.registered_new, prov: a.prov + (r.provisional_registered ?? 0), review: a.review + r.review_added, dup: a.dup + r.duplicates, excl: a.excl + r.excluded, failed: a.failed + (r.failed_jobs ?? 0) }),
+    { total: 0, reg: 0, prov: 0, review: 0, dup: 0, excl: 0, failed: 0 },
+  );
+  const toggleSel = (id: string) => setSel((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const list = candidates.filter((c) =>
     tab === "queued" ? ["pending", "retry", "processing"].includes(js(c)) : tab === "pending" ? js(c) === "review" : tab === "excluded" ? js(c) === "skipped" : tab === "failed" ? js(c) === "failed" : c.status === tab,
   );
@@ -317,6 +328,15 @@ export function AutoCollectView({
           <div>
             <div className="text-[11px] text-muted-foreground">最終収集成功</div>
             <div className="font-semibold">{fmt(health.lastCollectAt)}</div>
+          </div>
+          <div className="col-span-2 sm:col-span-4" data-testid="ops-rate">
+            <div className="text-[11px] text-muted-foreground">自動登録率（AI解析が完了した候補のうち、自動登録できた割合）</div>
+            <div className="font-semibold">
+              {rate.total > 0 ? `${Math.round((rate.reg / rate.total) * 100)}%` : "—"}
+              <span className="text-[11px] font-normal text-muted-foreground">
+                　過去30日: 解析成功{rate.total}件 → 自動登録{rate.reg}件（うち仮登録を伴う{rate.prov}件）／確認待ち追加{rate.review}件／重複{rate.dup}件／解析対象外{rate.excl}件／取得失敗{rate.failed}件
+              </span>
+            </div>
           </div>
           <div>
             <div className="text-[11px] text-muted-foreground">最終ワーカー／処理が進んだ時刻</div>
@@ -423,9 +443,10 @@ export function AutoCollectView({
                     <th className="p-1">重複</th>
                     <th className="p-1">除外</th>
                     <th className="p-1">AI(成功/失敗)</th>
-                    <th className="p-1">登録</th>
+                    <th className="p-1">登録(仮)</th>
                     <th className="p-1">更新反映</th>
                     <th className="p-1">確認待ち+</th>
+                    <th className="p-1">失敗</th>
                     <th className="p-1">解析待ち残</th>
                     <th className="p-1">トークン(入/出)</th>
                     <th className="p-1">費用</th>
@@ -440,9 +461,10 @@ export function AutoCollectView({
                       <td className="p-1">{r.duplicates}</td>
                       <td className="p-1">{r.excluded}</td>
                       <td className="p-1">{r.ai_calls}（{r.ai_success}/{r.ai_failed}）</td>
-                      <td className="p-1">{r.registered_new}</td>
+                      <td className="p-1">{r.registered_new}{(r.provisional_registered ?? 0) > 0 && <span className="text-muted-foreground">（{r.provisional_registered}）</span>}</td>
                       <td className="p-1">{r.updated_existing}</td>
                       <td className="p-1">{r.review_added}</td>
+                      <td className="p-1">{r.failed_jobs ?? 0}</td>
                       <td className="p-1">{r.queue_remaining ?? "—"}</td>
                       <td className="p-1">{r.input_tokens.toLocaleString("ja-JP")}/{r.output_tokens.toLocaleString("ja-JP")}</td>
                       <td className="p-1">{Number(r.cost_jpy).toFixed(2)}円</td>
@@ -450,7 +472,7 @@ export function AutoCollectView({
                   ))}
                   {stats.length === 0 && (
                     <tr>
-                      <td colSpan={12} className="p-2 text-muted-foreground">
+                      <td colSpan={13} className="p-2 text-muted-foreground">
                         まだ統計がありません。
                       </td>
                     </tr>
@@ -701,13 +723,40 @@ export function AutoCollectView({
             </button>
           ))}
         </div>
+        {tab === "pending" && list.some((c) => c.job_state === "review" && c.kind !== "update") && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="bulk-bar">
+            <Button size="sm" variant="outline" onClick={() => setSel(new Set(list.filter((c) => c.job_state === "review" && c.kind !== "update").map((c) => c.id)))} data-testid="bulk-all">
+              すべて選択
+            </Button>
+            <Button size="sm" variant="outline" disabled={sel.size === 0} onClick={() => setSel(new Set())}>
+              解除
+            </Button>
+            <Button size="sm" disabled={busy !== null || sel.size === 0} data-testid="bulk-register" onClick={() => void act("br", { action: "bulkRegister", ids: [...sel].slice(0, 50), actor: profile.id }, (x) => `登録しました: ${x.registered}件${Number(x.failed) > 0 ? `（失敗${x.failed}件）` : ""}`).then(() => setSel(new Set()))}>
+              選択を登録（{sel.size}）
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy !== null || sel.size === 0} data-testid="bulk-exclude" onClick={() => void act("bx", { action: "bulkExclude", ids: [...sel].slice(0, 100) }, (x) => `除外しました: ${x.excluded}件`).then(() => setSel(new Set()))}>
+              選択を除外
+            </Button>
+          </div>
+        )}
         <ul className="divide-y">
           {list.map((c) => {
             const d = c.draft?.input;
             const queuedOnly = ["pending", "retry", "processing"].includes(c.job_state ?? "");
             return (
               <li key={c.id} className="space-y-1 py-2 text-xs" data-testid="candidate-row">
-                <p className="font-medium">{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</p>
+                <p className="flex items-start gap-1.5 font-medium">
+                  {c.job_state === "review" && c.kind !== "update" && (
+                    <input type="checkbox" className="mt-0.5 size-4 shrink-0" checked={sel.has(c.id)} onChange={() => toggleSel(c.id)} aria-label="選択" data-testid="cand-select" />
+                  )}
+                  <span>{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</span>
+                </p>
+                {(c.draft?.provisional?.length ?? 0) > 0 && (
+                  <p className="text-[11px] text-info" data-testid="cand-provisional">
+                    登録すると、未登録の{c.draft!.provisional!.join("・")}を仮登録します（マスター管理で確認・編集できます）
+                  </p>
+                )}
+                {(c.draft?.secondary?.length ?? 0) > 0 && <p className="text-[11px] text-warn">二次情報（まとめサイトの一覧）から補った項目: {c.draft!.secondary!.join("・")}</p>}
                 {d?.applyDeadline && (
                   <p className="text-muted-foreground">締切: {d.applyDeadline.precision === "unknown" ? "不明" : `${d.applyDeadline.date ?? ""}${d.applyDeadline.time ? ` ${d.applyDeadline.time}` : ""}`}</p>
                 )}
@@ -737,6 +786,16 @@ export function AutoCollectView({
                       登録
                     </Button>
                   )}
+                  {c.job_state === "review" && c.kind !== "update" && d && (
+                    <Button size="sm" variant="outline" disabled={busy !== null} data-testid="cand-edit" onClick={() => setEditing(c)}>
+                      編集して登録
+                    </Button>
+                  )}
+                  {(c.job_state === "review" || c.job_state === "failed") && c.source_url && !/ロボット|許可していません/.test(c.last_error ?? "") && (
+                    <Button size="sm" variant="outline" disabled={busy !== null} data-testid="cand-reanalyze" onClick={() => void act("re" + c.id, { action: "reanalyze", id: c.id }, () => "再解析待ちに戻しました（ワーカーが解析します）")}>
+                      再解析
+                    </Button>
+                  )}
                   {(c.status === "pending" || c.status === "failed" || c.status === "duplicate") && (
                     <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("x" + c.id, { action: "exclude", id: c.id })}>
                       除外
@@ -759,6 +818,23 @@ export function AutoCollectView({
           {list.length === 0 && <li className="py-2 text-xs text-muted-foreground">該当する候補はありません。</li>}
         </ul>
       </section>
+
+      {editing?.draft?.input && (
+        <LotteryFormDialog
+          open
+          lottery={null}
+          onOpenChange={(v) => !v && setEditing(null)}
+          prefill={{
+            draft: { input: editing.draft.input, flags: (editing.draft.flags ?? {}) as never, modePending: Boolean(editing.draft.modePending), duplicates: [], warnings: editing.draft.warnings ?? [], evidence: {}, generalNotes: [], candidates: { chain: [], store: [], items: [] }, summary: (editing.draft.summary ?? { chain: "none", store: "none", items: [] }) as never } as unknown as LotteryDraft,
+            runId: null,
+          }}
+          onSaved={(lotteryId) => {
+            const id = editing.id;
+            setEditing(null);
+            if (lotteryId) void act("mr" + id, { action: "markRegistered", id, lotteryId }, () => "登録しました");
+          }}
+        />
+      )}
 
       <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="runs">
         <h2 className="font-semibold">収集履歴</h2>

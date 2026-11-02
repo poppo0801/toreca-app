@@ -15,6 +15,8 @@ export type XResult<T> = ({ ok: true } & T) | { ok: false; code: XApiErrorCode; 
 export interface XClient {
   lookupUser(username: string): Promise<XResult<{ id: string; username: string }>>;
   userPosts(userId: string, username: string, opts: { sinceId?: string | null; max: number }): Promise<XResult<{ posts: XPost[]; newestId: string | null }>>;
+  /** 投稿URLから投稿を1件取得する（単件・一括・共有の解析用。取得した投稿1件ぶんの従量課金） */
+  getPost(id: string, username: string): Promise<XResult<{ post: XPost }>>;
 }
 
 export function createXClient(token: string | undefined = process.env.X_BEARER_TOKEN): XClient | null {
@@ -49,6 +51,17 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
       if (typeof d.data?.id === "string" && /^\d{1,25}$/.test(d.data.id)) return { ok: true, id: d.data.id, username: typeof d.data.username === "string" ? d.data.username : username };
       const why = String(d.errors?.[0]?.detail ?? "").slice(0, 120);
       return { ok: false, code: /suspended/i.test(why) ? "suspended" : "not_found", message: `アカウントを取得できませんでした${why ? `（${why}）` : ""}` };
+    },
+    async getPost(id, username) {
+      const r = await get(`/tweets/${encodeURIComponent(id)}`, {
+        "tweet.fields": "created_at,entities,attachments,referenced_tweets,author_id",
+        expansions: "attachments.media_keys",
+        "media.fields": "type,url",
+      });
+      if (!r.ok) return r;
+      const j = r.json as { data?: unknown; includes?: unknown };
+      const posts = parseXPosts({ data: j.data ? [j.data] : [], includes: j.includes }, username);
+      return posts[0] ? { ok: true, post: posts[0] } : { ok: false, code: "not_found", message: "投稿を取得できませんでした（削除・非公開の可能性）" };
     },
     async userPosts(userId, username, opts) {
       const params: Record<string, string> = {

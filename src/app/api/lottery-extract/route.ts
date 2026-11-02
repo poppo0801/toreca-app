@@ -4,6 +4,8 @@ import type { Json } from "@/types/database";
 import { sniffImage } from "@/lib/server/image-sniff";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { createXClient } from "@/lib/server/collector/x-client";
+import { makeXRichFetcher } from "@/lib/server/collector/x-rich";
 import { MAX_IMAGES, runExtraction, type ExtractInput, type ExtractResult } from "@/lib/server/lottery-extract-service";
 
 export const dynamic = "force-dynamic";
@@ -76,7 +78,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const result: ExtractResult = await runExtraction(input, { extractor, now: new Date() });
+  // X投稿は、本文・画像・リンク先を統合して取得する共通処理（APIが使えない場合は本文のみで、その旨を表示）
+  const fetchXRich = supabase && householdId ? makeXRichFetcher({ db: supabase as never, householdId, client: createXClient() }) : undefined;
+  const result: ExtractResult = await runExtraction(input, { extractor, now: new Date(), fetchXRich });
   let runId: string | null = null;
 
   if (supabase && householdId) {
