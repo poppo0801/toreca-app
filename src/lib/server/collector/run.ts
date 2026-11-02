@@ -822,6 +822,12 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
   if (settings.paused_until && new Date(settings.paused_until).getTime() > Date.now()) return { ok: true, skipped: "paused" };
   if (settings.paused_until) await db.from("collection_settings").update({ paused_until: null, paused_reason: null, consecutive_failures: 0 }).eq("household_id", householdId);
 
+  // 本日の上限に達している間は、実行記録を毎回は増やさない(最初の1回だけ記録する)
+  const usedToday = await db.from("collection_runs").select("ai_calls").eq("household_id", householdId).eq("trigger", "cron").gte("started_at", jstDayStart(now));
+  if ((usedToday.data ?? []).reduce((x, r) => x + r.ai_calls, 0) >= settings.worker_daily_ai_limit) {
+    const last = await db.from("collection_runs").select("stop_reason,started_at").eq("household_id", householdId).eq("phase", "worker").order("started_at", { ascending: false }).limit(1).maybeSingle();
+    if (last.data?.stop_reason?.startsWith("本日のワーカー") && last.data.started_at >= jstDayStart(now)) return { ok: true, skipped: "daily_limit" };
+  }
   const ready = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).or(`and(job_state.in.(pending,retry),or(next_run_at.is.null,next_run_at.lte.${new Date().toISOString()})),and(job_state.eq.processing,lease_until.lt.${new Date().toISOString()})`);
   const hasWork = (ready.count ?? 0) > 0;
   const recheckDue = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["completed", "review"]).in("status", ["auto_registered", "pending", "duplicate"]).or(`last_checked_at.is.null,last_checked_at.lt.${new Date(now.getTime() - settings.recheck_hours * 3600_000).toISOString()}`).not("source_url", "is", null).limit(1);
