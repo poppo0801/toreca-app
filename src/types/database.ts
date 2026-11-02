@@ -1482,6 +1482,77 @@ export type Database = {
           },
         ]
       }
+      collection_daily_stats: {
+        Row: {
+          ai_calls: number
+          ai_failed: number
+          ai_success: number
+          changed: number
+          cost_jpy: number
+          day: string
+          discovered_initial: number
+          discovered_new: number
+          duplicates: number
+          excluded: number
+          household_id: string
+          input_tokens: number
+          output_tokens: number
+          queue_remaining: number | null
+          registered_new: number
+          review_added: number
+          updated_at: string
+          updated_existing: number
+        }
+        Insert: {
+          ai_calls?: number
+          ai_failed?: number
+          ai_success?: number
+          changed?: number
+          cost_jpy?: number
+          day: string
+          discovered_initial?: number
+          discovered_new?: number
+          duplicates?: number
+          excluded?: number
+          household_id: string
+          input_tokens?: number
+          output_tokens?: number
+          queue_remaining?: number | null
+          registered_new?: number
+          review_added?: number
+          updated_at?: string
+          updated_existing?: number
+        }
+        Update: {
+          ai_calls?: number
+          ai_failed?: number
+          ai_success?: number
+          changed?: number
+          cost_jpy?: number
+          day?: string
+          discovered_initial?: number
+          discovered_new?: number
+          duplicates?: number
+          excluded?: number
+          household_id?: string
+          input_tokens?: number
+          output_tokens?: number
+          queue_remaining?: number | null
+          registered_new?: number
+          review_added?: number
+          updated_at?: string
+          updated_existing?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_daily_stats_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       collection_runs: {
         Row: {
           ai_calls: number
@@ -1583,6 +1654,8 @@ export type Database = {
           worker_batch: number
           worker_daily_ai_limit: number
           worker_enabled: boolean
+          worker_limit_override: number | null
+          worker_limit_override_date: string | null
           x_enabled: boolean
           x_max_posts_per_run: number
           x_monthly_budget_jpy: number
@@ -1613,6 +1686,8 @@ export type Database = {
           worker_batch?: number
           worker_daily_ai_limit?: number
           worker_enabled?: boolean
+          worker_limit_override?: number | null
+          worker_limit_override_date?: string | null
           x_enabled?: boolean
           x_max_posts_per_run?: number
           x_monthly_budget_jpy?: number
@@ -1643,6 +1718,8 @@ export type Database = {
           worker_batch?: number
           worker_daily_ai_limit?: number
           worker_enabled?: boolean
+          worker_limit_override?: number | null
+          worker_limit_override_date?: string | null
           x_enabled?: boolean
           x_max_posts_per_run?: number
           x_monthly_budget_jpy?: number
@@ -1891,6 +1968,7 @@ export type Database = {
       household_settings: {
         Row: {
           ai_monthly_budget_jpy: number
+          ai_usd_jpy_rate: number
           auto_ai_enabled: boolean
           card_display: Json
           distance_bands_km: Json
@@ -1904,6 +1982,7 @@ export type Database = {
         }
         Insert: {
           ai_monthly_budget_jpy?: number
+          ai_usd_jpy_rate?: number
           auto_ai_enabled?: boolean
           card_display?: Json
           distance_bands_km?: Json
@@ -1917,6 +1996,7 @@ export type Database = {
         }
         Update: {
           ai_monthly_budget_jpy?: number
+          ai_usd_jpy_rate?: number
           auto_ai_enabled?: boolean
           card_display?: Json
           distance_bands_km?: Json
@@ -4051,6 +4131,10 @@ export type Database = {
         Returns: Json
       }
       bootstrap_household: { Args: never; Returns: string }
+      bump_collection_stats: {
+        Args: { p_day: string; p_delta: Json; p_household: string }
+        Returns: undefined
+      }
       claim_ai_job_items: {
         Args: { p_lease_secs?: number; p_limit: number }
         Returns: {
@@ -4218,6 +4302,10 @@ export type Database = {
       }
       remove_push_subscription: {
         Args: { p_endpoint: string }
+        Returns: undefined
+      }
+      save_ai_budget: {
+        Args: { p_actor: string; p_budget: number; p_rate: number }
         Returns: undefined
       }
       save_card_with_holding: {

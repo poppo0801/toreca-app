@@ -9,13 +9,14 @@ import { buildDraft, type LotteryDraft } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
 import { extractFromRequest, runExtraction, MAX_IMAGES, type ExtractResult } from "@/lib/server/lottery-extract-service";
+import { estimateCostJpy as estimateAiCostJpy, USD_JPY_ESTIMATE } from "@/lib/ai-cost";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service";
 import { splitTallImages } from "@/lib/server/image-split";
 import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
-import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, isPermanentError, type FieldChange } from "@/lib/collector/queue";
+import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, isPermanentError, type FieldChange } from "@/lib/collector/queue";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -53,6 +54,8 @@ export interface CollectDeps {
   xClient: XClient | null;
   fetchImage?: typeof fetchXImage;
   budgetMs?: number;
+  /** 円換算の為替レート(世帯の設定)。実行の最初に読み込む */
+  usdJpy?: number;
   /** 指定した収集元だけ実行する */
   onlySourceIds?: string[];
 }
@@ -97,6 +100,7 @@ type SourceRow = {
   enabled: boolean;
   interval_hours: number;
   last_attempt_at: string | null;
+  last_success_at: string | null;
   x_since_id: string | null;
   consecutive_failures: number;
 };
@@ -162,8 +166,32 @@ export function conditionsFromRow(row: Record<string, unknown>): CollectionCondi
   });
 }
 
-/** AI読み取りの利用記録（既存の費用管理と同じテーブル）。入力した本文・画像そのものは保存しない */
+type StatKey = "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining";
+export type StatDelta = Partial<Record<StatKey, number>>;
+
+/** 日別統計(日本時間の日付)への原子的な加算。統計の失敗で本処理を止めない */
+export async function bumpStats(db: Db, householdId: string, now: Date, delta: StatDelta): Promise<void> {
+  const clean = Object.fromEntries(Object.entries(delta).filter(([k, v]) => typeof v === "number" && (v !== 0 || k === "queue_remaining")));
+  if (Object.keys(clean).length === 0) return;
+  await db.rpc("bump_collection_stats", { p_household: householdId, p_day: jstDayString(now), p_delta: clean as unknown as Json }).then(() => undefined, () => undefined);
+}
+
+/** 本日(日本時間)の自動収集のAI解析数。手動実行・定期実行の合計 */
+async function aiUsedToday(db: Db, householdId: string, now: Date): Promise<number> {
+  const { data } = await db.from("collection_daily_stats").select("ai_calls").eq("household_id", householdId).eq("day", jstDayString(now)).maybeSingle();
+  return data?.ai_calls ?? 0;
+}
+
+/** AI読み取りの利用記録（既存の費用管理と同じテーブル）と、日別統計（回数・成功/失敗・トークン・費用）。入力した本文・画像そのものは保存しない */
 async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string): Promise<void> {
+  const usedAi = result.ok || result.code !== "fetch_failed";
+  if (usedAi) {
+    const input = result.usage?.input ?? 0;
+    const output = result.usage?.output ?? 0;
+    const cost = result.engine === "anthropic" ? (estimateAiCostJpy(result.model, input, output, deps.usdJpy ?? USD_JPY_ESTIMATE) ?? 0) : 0;
+    const valid = result.ok || result.code === "not_lottery" || result.code === "nothing_found";
+    await bumpStats(deps.db, deps.householdId, deps.now, { ai_calls: 1, ai_success: valid ? 1 : 0, ai_failed: valid ? 0 : 1, input_tokens: input, output_tokens: output, cost_jpy: Math.round(cost * 10000) / 10000 });
+  }
   const status = result.ok ? (result.extraction.applyDeadline.precision === "unknown" || result.extraction.items.length === 0 ? "partial" : "ok") : result.code === "rate_limited" ? "rate_limited" : result.code === "fetch_failed" ? "fetch_failed" : "failed";
   await deps.db.from("ai_extraction_logs").insert({
     household_id: deps.householdId,
@@ -179,26 +207,39 @@ async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string
   });
 }
 
-/** 今回のAI読み取りの上限（1回あたり・既存の時間/日の上限・月額予算）。0なら読み取らない */
-async function aiAllowance(deps: CollectDeps, perRun: number): Promise<{ allowed: number; note: string }> {
-  if (!deps.extractor) return { allowed: 0, note: "AIが未設定のため、読み取りは行いません" };
-  if (deps.extractor.engine !== "anthropic") return { allowed: perRun, note: "" };
+/**
+ * 今回のAI読み取りの上限。次の全てを満たす範囲だけ、新しい読み取りを始める（0なら読み取らない）。
+ *  - 自動AI解析がONで、月額予算が残っている（残額が「1回の見込み×件数」に満たない分は始めない。並列処理や利用額の反映遅れがあっても予算を超えないよう、安全側に止める）
+ *  - 既存の時間/日の利用回数の上限
+ *  - 本日の自動収集の日次上限（一時変更があれば当日のみ有効）
+ */
+async function aiAllowance(deps: CollectDeps, perRun: number, daily: { limit: number }): Promise<{ allowed: number; note: string; stop: "daily" | "budget" | "auto_off" | "hourly" | "none_ai" | null }> {
+  if (!deps.extractor) return { allowed: 0, note: "AIが未設定のため、読み取りは行いません", stop: "none_ai" };
+  const used = await aiUsedToday(deps.db, deps.householdId, deps.now);
+  const dailyLeft = Math.max(0, daily.limit - used);
+  if (dailyLeft <= 0) return { allowed: 0, note: `本日のAI解析上限${daily.limit}件に達しました`, stop: "daily" };
+  if (deps.extractor.engine !== "anthropic") return { allowed: Math.min(perRun, dailyLeft), note: "", stop: null };
   const hourly = Number(process.env.AI_HOURLY_LIMIT) > 0 ? Number(process.env.AI_HOURLY_LIMIT) : 20;
-  const daily = Number(process.env.AI_DAILY_LIMIT) > 0 ? Number(process.env.AI_DAILY_LIMIT) : 60;
+  const dailyGlobal = Number(process.env.AI_DAILY_LIMIT) > 0 ? Number(process.env.AI_DAILY_LIMIT) : 60;
   const since = (ms: number) => new Date(deps.now.getTime() - ms).toISOString();
+  let budgetLeft = Number.POSITIVE_INFINITY;
+  try {
+    const b = await monthBudget(deps.db, deps.householdId);
+    deps.usdJpy = b.rate;
+    if (!b.autoAiEnabled) return { allowed: 0, note: "自動AI解析がOFFに設定されているため、読み取りは行いません", stop: "auto_off" };
+    budgetLeft = budgetCallsLeft(b.budgetJpy, b.costJpy);
+    if (b.blocked || budgetLeft <= 0) return { allowed: 0, note: "今月のAI予算に達したため、新しい解析を停止しています", stop: "budget" };
+  } catch {
+    /* 予算の取得に失敗したときは、回数の上限だけで安全側に動く */
+    budgetLeft = 1;
+  }
   const [h, d] = await Promise.all([
     deps.db.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", deps.householdId).gte("created_at", since(3600_000)).neq("status", "not_configured"),
     deps.db.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", deps.householdId).gte("created_at", since(86400_000)).neq("status", "not_configured"),
   ]);
-  const left = Math.min(hourly - (h.count ?? 0), daily - (d.count ?? 0));
-  if (left <= 0) return { allowed: 0, note: "AI読み取りの利用回数の上限に達しているため、続きは次回に回します" };
-  try {
-    const b = await monthBudget(deps.db);
-    if (b.blocked) return { allowed: 0, note: "AIの月間予算を超えているため、読み取りは行いません" };
-  } catch {
-    /* 予算の取得に失敗しても、回数の上限は守る */
-  }
-  return { allowed: Math.min(perRun, left), note: left < perRun ? "AI読み取りの利用上限に近いため、続きは次回に回します" : "" };
+  const left = Math.min(hourly - (h.count ?? 0), dailyGlobal - (d.count ?? 0));
+  if (left <= 0) return { allowed: 0, note: "AI読み取りの利用回数の上限（時間・日）に達しているため、続きは次回に回します", stop: "hourly" };
+  return { allowed: Math.max(0, Math.min(perRun, dailyLeft, left, budgetLeft)), note: left < perRun ? "AI読み取りの利用上限に近いため、続きは次回に回します" : "", stop: null };
 }
 
 /** 登録に十分な情報があるか（マスター照合が確実・締切が分かる・方式が確定・出典あり） */
@@ -288,11 +329,13 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const nowIso = deps.now.toISOString();
   const clear = { lease_until: null, locked_by: null };
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
-  const finish = (jobState: "completed" | "skipped" | "review", patch: Record<string, unknown>) =>
-    db
+  const finish = async (jobState: "completed" | "skipped" | "review", patch: Record<string, unknown>, stat?: StatDelta) => {
+    await db
       .from("collection_candidates")
       .update({ ...patch, job_state: jobState, completed_at: nowIso, resolved_at: nowIso, last_error: null, analyzed_version: PROMPT_VERSION, last_checked_at: nowIso, ...clear })
       .eq("id", c.id);
+    if (stat) await bumpStats(db, deps.householdId, deps.now, stat);
+  };
   // 失敗: 一時的なものは指数バックオフで再試行(15分→1時間→4時間)。上限・永続エラーは隔離する(無限に再解析しない)
   const fail = async (message: string) => {
     const delay = isPermanentError(message) ? null : backoffMs(c.attempts);
@@ -309,7 +352,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   await logAi(deps, result, q.url).catch(() => undefined);
   if (!result.ok) {
     if (result.code === "not_lottery" || result.code === "nothing_found") {
-      await finish("skipped", { status: "excluded", reasons: ["抽選の告知とは判断できませんでした"], draft: null });
+      await finish("skipped", { status: "excluded", reasons: ["抽選の告知とは判断できませんでした"], draft: null }, { excluded: 1 });
       return { usedAi: true, registered: false, aiFailed: false };
     }
     await fail(result.message);
@@ -337,7 +380,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
         { household_id: deps.householdId, source_id: c.source_id, dedupe_key: key, source_url: c.source_url, title: c.title, status: "pending", job_state: "pending", reasons: ["新しい抽選回（解析待ち）"], draft: { queued: { ...q, changed: false, newRound: true, attempts: 0 } } as unknown as Json } as never,
         { onConflict: "household_id,dedupe_key", ignoreDuplicates: true },
       );
-      await finish("completed", { reasons: ["再確認: 新しい抽選回が始まったため、別の抽選として扱います"], draft: c.draft, kind: "new" });
+      await finish("completed", { reasons: ["再確認: 新しい抽選回が始まったため、別の抽選として扱います"], draft: c.draft, kind: "new" }, { discovered_new: 1 });
       return { usedAi: true, registered: false, aiFailed: false };
     }
     const changes = diffAgainstLottery(input, lot);
@@ -351,7 +394,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       kind: "update",
       reasons: changes.map((x) => `${x.label}: ${x.before} → ${x.after}`),
       draft: { ...(c.draft as object), update: { changes, baseUpdatedAt: base, input } } as unknown as Json,
-    });
+    }, { review_added: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
 
@@ -359,11 +402,11 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const high = dups.find((d) => d.level === "high");
   if (high) {
     const added = await appendSourceUrl(db, high.lotteryId, q.url);
-    await finish("completed", { status: "duplicate", lottery_id: high.lotteryId, reasons: [high.reason, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due });
+    await finish("completed", { status: "duplicate", lottery_id: high.lotteryId, reasons: [high.reason, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due }, { duplicates: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   if (ev.verdict === "exclude") {
-    await finish("skipped", { status: "excluded", reasons: ev.reasons, draft: stored, ...due });
+    await finish("skipped", { status: "excluded", reasons: ev.reasons, draft: stored, ...due }, { excluded: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   const reasons = [...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
@@ -373,16 +416,16 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする
         await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
-        await finish("completed", { status: "auto_registered", lottery_id: saved.value.id, reasons: ["条件に一致し、情報が十分なため自動登録しました"], draft: stored, ...due });
+        await finish("completed", { status: "auto_registered", lottery_id: saved.value.id, reasons: ["条件に一致し、情報が十分なため自動登録しました"], draft: stored, ...due }, { registered_new: 1 });
         return { usedAi: true, registered: true, aiFailed: false };
       }
-      await finish("review", { status: "pending", reasons: [`自動登録できませんでした: ${saved.error}`], draft: stored, ...due });
+      await finish("review", { status: "pending", reasons: [`自動登録できませんでした: ${saved.error}`], draft: stored, ...due }, { review_added: 1 });
       return { usedAi: true, registered: false, aiFailed: false };
     }
-    await finish("review", { status: "pending", reasons: ["登録可能です（定期実行ではログインが必要なため、候補として保留しています）"], draft: stored, ...due });
+    await finish("review", { status: "pending", reasons: ["登録可能です（定期実行ではログインが必要なため、候補として保留しています）"], draft: stored, ...due }, { review_added: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
-  await finish("review", { status: "pending", reasons: reasons.length ? reasons : ["内容を確認してください"], draft: stored, ...due });
+  await finish("review", { status: "pending", reasons: reasons.length ? reasons : ["内容を確認してください"], draft: stored, ...due }, { review_added: 1 });
   return { usedAi: true, registered: false, aiFailed: false };
 }
 
@@ -430,13 +473,9 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
       sources = sources.filter((s) => !s.last_attempt_at || now.getTime() - new Date(s.last_attempt_at).getTime() >= s.interval_hours * 3600_000 - 5 * 60_000);
     }
     const data = await loadAppData(db, householdId);
-    // 定期実行(cron)の収集は、ワーカーの1日の上限も守る。手動実行は1回の上限と既存のAI利用上限のみ
-    let perRun = settings.max_ai_per_run;
-    if (deps.trigger === "cron") {
-      const usedToday = await db.from("collection_runs").select("ai_calls").eq("household_id", householdId).gte("started_at", jstDayStart(now)).eq("trigger", "cron");
-      perRun = Math.min(perRun, Math.max(0, settings.worker_daily_ai_limit - (usedToday.data ?? []).reduce((a, r) => a + r.ai_calls, 0)));
-    }
-    const allow = await aiAllowance(deps, perRun);
+    // AI読み取りは、1回の上限・本日の日次上限・月額予算・既存の時間/日の上限のすべてを守る
+    const daily = effectiveDailyLimit(settings as never, now);
+    const allow = await aiAllowance(deps, settings.max_ai_per_run, daily);
     if (allow.note) notices.push(allow.note);
     const aiLeft = allow.allowed;
 
@@ -520,6 +559,9 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
         const ins2 = rows.length ? await db.from("collection_candidates").upsert(rows as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true }).select("id") : { data: [] as { id: string }[] };
         const added = ins2.data?.length ?? 0;
         newCount += added;
+        // 新規発見は「候補を初めて保存した件数」。同じ候補を何度取得しても加算されない。初回の取り込みは通常の新着と区別する
+        const initial = s.last_success_at === null;
+        await bumpStats(db, householdId, now, { [initial ? "discovered_initial" : "discovered_new"]: added, excluded: rows.filter((r) => r.status === "excluded").length, changed: changed - changedBefore });
         await touch(s, { status: "ok", error_message: null, last_success_at: now.toISOString(), last_item_count: entries.length, last_new_count: added, last_result: added > 0 ? "new" : changed > changedBefore ? "changed" : "no_new", consecutive_failures: 0, ...(changed > changedBefore ? { last_changed_at: now.toISOString() } : {}) });
         reports.push({ sourceId: s.id, name: s.name, status: "ok", message: `リンク${entries.length}件を確認、新しい候補${added}件${changed > changedBefore ? `・内容の変更${changed - changedBefore}件` : ""}`, items: entries.length, newCount: added });
       } else {
@@ -582,6 +624,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
         const ins3 = rows.length ? await db.from("collection_candidates").upsert(rows as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true }).select("id") : { data: [] as { id: string }[] };
         const added = ins3.data?.length ?? 0;
         newCount += added;
+        await bumpStats(db, householdId, now, { [s.last_success_at === null ? "discovered_initial" : "discovered_new"]: added });
         // 取得した投稿はすべて候補として保存済みなので、次回は続きから取得する
         await touch(s, { status: "ok", error_message: null, last_success_at: now.toISOString(), last_item_count: r.posts.length, last_new_count: added, ...(r.newestId ? { x_since_id: r.newestId } : {}) });
         reports.push({ sourceId: s.id, name: s.name, status: "ok", message: `投稿${r.posts.length}件を取得、新しい候補${added}件`, items: r.posts.length, newCount: added });
@@ -668,7 +711,9 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   const workerId = `w-${Math.random().toString(36).slice(2, 10)}`;
   let fails = ctx.settings.consecutive_failures ?? 0;
   const lease = 150;
-  out.screened += await triageQueue(deps, ctx.cond);
+  const triaged = await triageQueue(deps, ctx.cond);
+  out.screened += triaged;
+  await bumpStats(db, householdId, now, { excluded: triaged });
 
   while (ctx.timeLeft() >= 20_000) {
     const want = Math.min(ctx.perBatch, Math.max(aiLeft, 0) + 8); // 解析前に除外されるものは費用がかからないので、少し多めに取得する
@@ -693,6 +738,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
       if (why) {
         await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", reasons: [why], draft: null, resolved_at: now.toISOString(), completed_at: now.toISOString(), lease_until: null, locked_by: null }).eq("id", c.id);
         out.screened++;
+        await bumpStats(db, householdId, now, { excluded: 1 });
         continue;
       }
       if (aiLeft <= 0) {
@@ -744,6 +790,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   if (!out.stopReason) await db.from("collection_settings").update({ consecutive_failures: fails }).eq("household_id", householdId);
   const left = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["pending", "retry", "processing"]);
   out.queued = left.count ?? 0;
+  await bumpStats(db, householdId, now, { queue_remaining: out.queued });
   if (aiLeft <= 0 && out.queued > 0 && !out.stopReason) out.stopReason = null;
   return out;
 }
@@ -823,8 +870,8 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
   if (settings.paused_until) await db.from("collection_settings").update({ paused_until: null, paused_reason: null, consecutive_failures: 0 }).eq("household_id", householdId);
 
   // 本日の上限に達している間は、実行記録を毎回は増やさない(最初の1回だけ記録する)
-  const usedToday = await db.from("collection_runs").select("ai_calls").eq("household_id", householdId).eq("trigger", "cron").gte("started_at", jstDayStart(now));
-  if ((usedToday.data ?? []).reduce((x, r) => x + r.ai_calls, 0) >= settings.worker_daily_ai_limit) {
+  const dailyLimit = effectiveDailyLimit(settings as never, now);
+  if ((await aiUsedToday(db, householdId, now)) >= dailyLimit.limit) {
     const last = await db.from("collection_runs").select("stop_reason,started_at").eq("household_id", householdId).eq("phase", "worker").order("started_at", { ascending: false }).limit(1).maybeSingle();
     if (last.data?.stop_reason?.startsWith("本日のワーカー") && last.data.started_at >= jstDayStart(now)) return { ok: true, skipped: "daily_limit" };
   }
@@ -841,10 +888,8 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
     const cond = conditionsFromRow(settings as unknown as Record<string, unknown>);
     const data = await loadAppData(db, householdId);
     // ワーカーの1日の上限(日本時間)と、既存のAI利用上限・月額予算
-    const used = await db.from("collection_runs").select("ai_calls").eq("household_id", householdId).eq("trigger", "cron").gte("started_at", jstDayStart(now));
-    const dayLeft = Math.max(0, settings.worker_daily_ai_limit - (used.data ?? []).reduce((a, r) => a + r.ai_calls, 0));
-    const allow = await aiAllowance(deps, Math.min(settings.worker_batch, dayLeft));
-    let stopReason: string | null = dayLeft <= 0 ? "本日のワーカーのAI読み取り上限に達しました" : allow.note || null;
+    const allow = await aiAllowance(deps, settings.worker_batch, dailyLimit);
+    let stopReason: string | null = allow.stop === "daily" ? "本日のワーカーのAI読み取り上限に達しました" : allow.stop === "budget" ? "今月のAI予算に達したため停止しています" : allow.note || null;
     const q = await processQueue(deps, { settings, cond, data, aiLeft: allow.allowed, timeLeft, perBatch: AI_CONCURRENCY });
     stopReason = q.stopReason ?? stopReason;
     const rc = timeLeft() > 12_000 ? await recheckPages(deps, { max: 8, recheckHours: settings.recheck_hours, timeLeft }) : { checked: 0, changed: 0 };
@@ -896,6 +941,8 @@ export async function applyCandidateUpdate(db: Db, candidateId: string): Promise
   const { error } = await db.from("lotteries").update(patch as never).eq("id", lot.id).eq("updated_at", lot.updated_at);
   if (error) return { ok: false, message: "反映に失敗しました" };
   const after = (await db.from("lotteries").select("updated_at").eq("id", lot.id).maybeSingle()).data?.updated_at ?? null;
+  const hh = (await db.from("collection_candidates").select("household_id").eq("id", candidateId).maybeSingle()).data?.household_id;
+  if (hh) await bumpStats(db, hh, new Date(), { updated_existing: 1 });
   await db
     .from("collection_candidates")
     .update({ job_state: "completed", kind: "new", status: "auto_registered", reasons: ["更新の提案を反映しました"], resolved_at: new Date().toISOString(), draft: { ...(c.draft as object), update: null, lotteryUpdatedAt: after } as unknown as Json })
@@ -913,6 +960,7 @@ export async function registerCandidate(db: Db, householdId: string, actor: stri
   const saved = await saveLottery(db, householdId, null, { ...input, isManaged: false, applications: [] }, actor);
   if (!saved.ok) return { ok: false, message: saved.error };
   await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
+  await bumpStats(db, householdId, new Date(), { registered_new: 1 });
   await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: ["確認のうえ登録しました"], resolved_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq("id", candidateId);
   return { ok: true, lotteryId: saved.value.id };
 }

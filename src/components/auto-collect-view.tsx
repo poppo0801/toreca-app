@@ -49,6 +49,8 @@ export interface SettingsView {
   worker_enabled: boolean;
   worker_batch: number;
   worker_daily_ai_limit: number;
+  worker_limit_override?: number | null;
+  worker_limit_override_date?: string | null;
   recheck_hours: number;
 }
 export interface CandidateView {
@@ -69,8 +71,43 @@ export interface CandidateView {
   due_at?: string | null;
   last_changed_at?: string | null;
 }
+export interface StatRow {
+  day: string;
+  discovered_new: number;
+  discovered_initial: number;
+  changed: number;
+  duplicates: number;
+  excluded: number;
+  ai_calls: number;
+  ai_success: number;
+  ai_failed: number;
+  registered_new: number;
+  updated_existing: number;
+  review_added: number;
+  queue_remaining: number | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_jpy: number;
+}
+export interface OpsView {
+  todayDiscovered: number;
+  todayDiscoveredInitial: number;
+  todayAi: number;
+  dailyLimit: number;
+  baseLimit: number;
+  overridden: boolean;
+  todayRegistered: number;
+  monthCostJpy: number;
+  budgetJpy: number;
+  rate: number;
+  avgPerCallJpy: number | null;
+  monthCalls: number;
+  budgetBlocked: boolean;
+  lastProgressAt: string | null;
+  dueTodayQueued: number;
+}
 export interface HealthView {
-  state: "running" | "waiting" | "ok" | "paused" | "budget";
+  state: "running" | "waiting" | "ok" | "paused" | "budget" | "limit";
   warnings: string[];
   lastCollectAt: string | null;
   lastWorkerAt: string | null;
@@ -145,6 +182,8 @@ export function AutoCollectView({
   candidates,
   counts,
   health,
+  ops,
+  stats,
   runs,
   products,
   xConfigured,
@@ -157,6 +196,8 @@ export function AutoCollectView({
   /** 全件の数（一覧に表示している件数ではない） */
   counts: Record<(typeof CAND_TABS)[number]["value"], number>;
   health: HealthView;
+  ops: OpsView;
+  stats: StatRow[];
   runs: RunView[];
   products: { id: string; name: string }[];
   xConfigured: boolean;
@@ -171,6 +212,7 @@ export function AutoCollectView({
   const [s, setS] = useState(settings);
   const [showAllPref, setShowAllPref] = useState(false);
   const [productQ, setProductQ] = useState("");
+  const [budgetInput, setBudgetInput] = useState({ budget: String(ops.budgetJpy), rate: String(ops.rate) });
 
   const act = async (key: string, body: Record<string, unknown>, okText?: (r: { ok: boolean; [k: string]: unknown }) => string) => {
     setBusy(key);
@@ -235,7 +277,7 @@ export function AutoCollectView({
             </Button>
           )}
           <span className="text-xs text-muted-foreground" data-testid="collect-usage">
-            今月: AI解析{usage.aiCalls}回・X取得{usage.xPosts}件（約{usage.xCostJpy}円）／自動収集のNEW {usage.newAuto}件
+            今月のX取得 {usage.xPosts}件（約{usage.xCostJpy}円・AIとは別集計）／自動収集のNEW {usage.newAuto}件
           </span>
         </div>
         {!aiConfigured && <p className="text-xs text-warn">AIが未設定のため、解析は行われません（候補の取得のみ）。</p>}
@@ -244,10 +286,47 @@ export function AutoCollectView({
             解析待ちが{queued}件あります。締切が近いものから、AI読み取りの上限の範囲で順に解析します（ワーカーが自動で続けます）。
           </p>
         )}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md border p-2 text-xs sm:grid-cols-4" data-testid="ops">
+          <div>
+            <div className="text-[11px] text-muted-foreground">本日の新規発見</div>
+            <div className="font-semibold" data-testid="ops-discovered">
+              {ops.todayDiscovered}件{ops.todayDiscoveredInitial > 0 && <span className="text-[11px] font-normal text-muted-foreground">（初回取込{ops.todayDiscoveredInitial}）</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-muted-foreground">本日のAI解析／上限</div>
+            <div className="font-semibold" data-testid="ops-ai">
+              {ops.todayAi}／{ops.dailyLimit}件{ops.overridden && <span className="text-[11px] font-normal text-info">（今日だけ変更）</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-muted-foreground">解析待ち</div>
+            <div className="font-semibold" data-testid="ops-queued">{counts.queued}件</div>
+          </div>
+          <div>
+            <div className="text-[11px] text-muted-foreground">本日の新規登録</div>
+            <div className="font-semibold" data-testid="ops-registered">{ops.todayRegistered}件</div>
+          </div>
+          <div className="col-span-2">
+            <div className="text-[11px] text-muted-foreground">今月のAI料金（推定）／予算</div>
+            <div className="font-semibold" data-testid="ops-cost">
+              {Math.round(ops.monthCostJpy).toLocaleString("ja-JP")}円／{ops.budgetJpy.toLocaleString("ja-JP")}円
+              <span className="text-[11px] font-normal text-muted-foreground">（残り{Math.max(0, Math.round(ops.budgetJpy - ops.monthCostJpy)).toLocaleString("ja-JP")}円）</span>
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-muted-foreground">最終収集成功</div>
+            <div className="font-semibold">{fmt(health.lastCollectAt)}</div>
+          </div>
+          <div>
+            <div className="text-[11px] text-muted-foreground">最終ワーカー／処理が進んだ時刻</div>
+            <div className="font-semibold">{fmt(health.lastWorkerAt)}／{fmt(ops.lastProgressAt)}</div>
+          </div>
+        </div>
         <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs" data-testid="health">
           <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
             <span className="font-medium" data-testid="health-state" data-state={health.state}>
-              {{ running: "処理中", waiting: "待機中（解析待ちあり）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "上限で停止中" }[health.state]}
+              {{ running: "処理中", waiting: "稼働中（解析待ちを順次処理）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "月額予算で停止中", limit: "本日の上限で停止中" }[health.state]}
             </span>
             <span className="text-muted-foreground">解析待ち {counts.queued}（処理中 {health.processing}）／確認待ち {counts.pending}／失敗 {counts.failed}／除外 {counts.excluded}</span>
             <details className="inline">
@@ -265,6 +344,22 @@ export function AutoCollectView({
               ⚠ {w}
             </p>
           ))}
+          {(health.state === "limit" || ops.overridden) && (
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="override">
+              <span className="text-[11px] text-muted-foreground">今日だけ上限を変更:</span>
+              {[ops.baseLimit, 150, 200].filter((v, i, a) => a.indexOf(v) === i && (v > ops.dailyLimit || v === ops.baseLimit)).map((v) => (
+                <Button key={v} size="sm" variant="outline" disabled={busy !== null || ops.budgetBlocked} data-testid={`override-${v}`} onClick={() => void act("ov", { action: "setDailyOverride", limit: v === ops.baseLimit ? null : v }, () => (v === ops.baseLimit ? "通常の上限に戻しました" : `今日だけ上限を${v}件にしました（明日は通常に戻ります）`))}>
+                  {v === ops.baseLimit ? `${v}件のまま` : `${v}件に引き上げ`}
+                </Button>
+              ))}
+              {ops.overridden && (
+                <Button size="sm" variant="outline" disabled={busy !== null} data-testid="override-clear" onClick={() => void act("ov", { action: "setDailyOverride", limit: null }, () => "通常の上限に戻しました")}>
+                  通常に戻す
+                </Button>
+              )}
+              {ops.budgetBlocked && <span className="text-[11px] text-warn">月額予算に達しているため、上限を変えても解析は再開しません</span>}
+            </div>
+          )}
           {health.state === "paused" && (
             <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("resume", { action: "resume" }, () => "自動停止を解除しました")}>
               自動停止を解除
@@ -276,6 +371,95 @@ export function AutoCollectView({
             {msg.text}
           </p>
         )}
+      </section>
+
+      <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="budget">
+        <h2 className="font-semibold">AI費用・日別の統計</h2>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          月額予算
+          <input className="h-8 w-24 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={budgetInput.budget} aria-label="AI月額予算(円)" onChange={(e) => setBudgetInput({ ...budgetInput, budget: e.target.value.replace(/\D/g, "") })} />
+          円／為替 1ドル=
+          <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="decimal" value={budgetInput.rate} aria-label="為替レート(円)" onChange={(e) => setBudgetInput({ ...budgetInput, rate: e.target.value.replace(/[^\d.]/g, "") })} />
+          円
+          <Button size="sm" variant="outline" disabled={busy !== null} data-testid="save-budget" onClick={() => void act("bud", { action: "setAiBudget", budgetJpy: Number(budgetInput.budget || 0), rate: Number(budgetInput.rate || 150), actor: profile.id }, () => "予算とレートを保存しました")}>
+            保存
+          </Button>
+          <details className="inline">
+            <summary className="inline cursor-pointer text-info" aria-label="費用の計算方法">ⓘ</summary>
+            <span className="block pt-1 text-[11px] text-muted-foreground">
+              AIの利用記録の実際の入出力トークン数に、モデル別の単価（Anthropic公式の料金ページで確認した値）と上の為替レートを掛けた推定です。画像・再試行も記録した分は含みます。月の区切りは日本時間です。X APIの料金は別に集計します。残額が「1回の見込み（約8円）×件数」に満たない分は、安全のため新しい解析を始めません。実際の請求額はAnthropic Consoleで確認してください。アプリ内の停止条件であり、外部サービスの課金上限は変更しません。
+            </span>
+          </details>
+        </div>
+        <p className="text-[11px] text-muted-foreground" data-testid="avg-cost">
+          今月の解析 {ops.monthCalls}回{ops.avgPerCallJpy !== null && `／1回あたり平均 約${ops.avgPerCallJpy.toFixed(2)}円（実測）`}
+        </p>
+        <details data-testid="stats">
+          <summary className="cursor-pointer text-xs font-medium text-info">日別の統計（過去30日）</summary>
+          <div className="mt-2 space-y-2">
+            <div className="flex h-16 items-end gap-px" role="img" aria-label="日別の新規発見・AI解析・登録の推移" data-testid="stats-chart">
+              {[...stats].reverse().map((r) => {
+                const mx = Math.max(1, ...stats.map((x) => Math.max(x.discovered_new + x.discovered_initial, x.ai_calls, x.registered_new)));
+                const bar = (v: number, cls: string, label: string) => <span key={label} title={`${r.day} ${label} ${v}`} className={cn("w-full min-w-px rounded-t", cls)} style={{ height: `${Math.max(v > 0 ? 3 : 0, (v / mx) * 60)}px` }} />;
+                return (
+                  <span key={r.day} className="flex flex-1 items-end gap-px">
+                    {bar(r.discovered_new + r.discovered_initial, "bg-info/70", "新規発見")}
+                    {bar(r.ai_calls, "bg-muted-foreground/60", "AI解析")}
+                    {bar(r.registered_new, "bg-success", "登録")}
+                  </span>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              <span className="text-info">■</span> 新規発見　<span className="text-muted-foreground">■</span> AI解析　<span className="text-success">■</span> 実際に登録（新規発見・AI解析・登録は別の数字です）
+            </p>
+            <div className="max-h-72 overflow-auto rounded border">
+              <table className="w-full text-[11px]" data-testid="stats-table">
+                <thead className="sticky top-0 bg-card text-left text-muted-foreground">
+                  <tr>
+                    <th className="p-1">日付</th>
+                    <th className="p-1">新規発見</th>
+                    <th className="p-1">更新検出</th>
+                    <th className="p-1">重複</th>
+                    <th className="p-1">除外</th>
+                    <th className="p-1">AI(成功/失敗)</th>
+                    <th className="p-1">登録</th>
+                    <th className="p-1">更新反映</th>
+                    <th className="p-1">確認待ち+</th>
+                    <th className="p-1">解析待ち残</th>
+                    <th className="p-1">トークン(入/出)</th>
+                    <th className="p-1">費用</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.map((r) => (
+                    <tr key={r.day} className="border-t" data-testid="stats-row">
+                      <td className="p-1">{r.day.slice(5)}</td>
+                      <td className="p-1">{r.discovered_new}{r.discovered_initial > 0 && <span className="text-muted-foreground">＋初回{r.discovered_initial}</span>}</td>
+                      <td className="p-1">{r.changed}</td>
+                      <td className="p-1">{r.duplicates}</td>
+                      <td className="p-1">{r.excluded}</td>
+                      <td className="p-1">{r.ai_calls}（{r.ai_success}/{r.ai_failed}）</td>
+                      <td className="p-1">{r.registered_new}</td>
+                      <td className="p-1">{r.updated_existing}</td>
+                      <td className="p-1">{r.review_added}</td>
+                      <td className="p-1">{r.queue_remaining ?? "—"}</td>
+                      <td className="p-1">{r.input_tokens.toLocaleString("ja-JP")}/{r.output_tokens.toLocaleString("ja-JP")}</td>
+                      <td className="p-1">{Number(r.cost_jpy).toFixed(2)}円</td>
+                    </tr>
+                  ))}
+                  {stats.length === 0 && (
+                    <tr>
+                      <td colSpan={12} className="p-2 text-muted-foreground">
+                        まだ統計がありません。
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="sources">

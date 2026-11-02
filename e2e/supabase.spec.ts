@@ -2047,6 +2047,24 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await expect(page.getByTestId("health")).toContainText("解析待ち 0");
   await expect(page.getByTestId("health-state")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("cand-tab-queued")).toBeVisible();
+  // 運用状況: 日次上限の既定は100件、月額予算の既定は3,000円。新規発見・AI解析・登録は別の数字
+  await expect(page.getByTestId("ops-ai")).toContainText("0／100件");
+  await expect(page.getByTestId("ops-discovered")).toContainText("0件");
+  await expect(page.getByTestId("ops-registered")).toContainText("0件");
+  await expect(page.getByTestId("ops-cost")).toContainText("／3,000円");
+  // 予算と為替レートの変更（アプリ内の停止条件のみ）
+  await page.getByLabel("AI月額予算(円)").fill("3500");
+  await page.getByTestId("save-budget").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("保存しました");
+  await page.reload();
+  await expect(page.getByTestId("ops-cost")).toContainText("／3,500円");
+  await page.getByLabel("AI月額予算(円)").fill("3000");
+  await page.getByTestId("save-budget").click();
+  await expect(page.getByTestId("collect-msg")).toContainText("保存しました");
+  // 日別の統計は折りたたみ（開くと30日の推移と日別の履歴）
+  await page.getByTestId("stats").locator("summary").click();
+  await expect(page.getByTestId("stats-chart")).toBeVisible();
+  await expect(page.getByTestId("stats-table")).toBeVisible();
   await expect(page.getByTestId("worker-enabled")).not.toBeChecked();
   await page.getByTestId("worker-enabled").check();
   await page.getByLabel("ワーカーの1日のAI解析上限").fill("12");

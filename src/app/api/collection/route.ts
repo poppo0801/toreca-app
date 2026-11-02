@@ -52,6 +52,9 @@ const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("registerReady"), actor: z.uuid().nullable().optional() }),
   z.object({ action: z.literal("applyUpdate"), id: uuid }),
   z.object({ action: z.literal("resume") }),
+  z.object({ action: z.literal("setAiBudget"), budgetJpy: z.number().int().min(0).max(1_000_000), rate: z.number().min(50).max(500), actor: z.uuid().nullable().optional() }),
+  // 本日(日本時間)だけの日次上限の一時変更。null で解除。翌日は通常の設定に戻る
+  z.object({ action: z.literal("setDailyOverride"), limit: z.number().int().min(0).max(1000).nullable() }),
   z.object({ action: z.literal("exclude"), id: uuid }),
   z.object({ action: z.literal("restore"), id: uuid }),
   z.object({ action: z.literal("addSource"), source: sourceInput }),
@@ -126,6 +129,16 @@ export async function POST(request: NextRequest) {
     case "applyUpdate": {
       const r = await applyCandidateUpdate(db, b.id);
       return r.ok ? json({ ok: true, applied: r.applied }) : json({ ok: false, error: r.message }, 422);
+    }
+    case "setAiBudget": {
+      // アプリ内の停止条件（月額予算と円換算レート）の変更のみ。外部サービス（Anthropic）の契約・課金上限は変更しない
+      const { error } = await db.rpc("save_ai_budget", { p_budget: b.budgetJpy, p_rate: b.rate, p_actor: (b.actor ?? null) as string });
+      return error ? json({ ok: false, error: "保存に失敗しました" }, 500) : json({ ok: true });
+    }
+    case "setDailyOverride": {
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const { error } = await db.from("collection_settings").update(b.limit === null ? { worker_limit_override: null, worker_limit_override_date: null } : { worker_limit_override: b.limit, worker_limit_override_date: today }).eq("household_id", householdId);
+      return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
     }
     case "resume": {
       // 自動停止（連続失敗など）の解除

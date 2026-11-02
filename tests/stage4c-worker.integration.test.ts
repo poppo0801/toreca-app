@@ -185,6 +185,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
 
   it("1日の上限: ワーカーはその日の上限を超えて解析を開始しない（既存のAI上限・予算の確認も通る）", async () => {
     await admin.from("collection_runs").delete().eq("household_id", hid);
+    await admin.from("collection_daily_stats").delete().eq("household_id", hid);
     await setSettings({ worker_batch: 5, worker_daily_ai_limit: 2 });
     await u1.from("collection_candidates").insert(Array.from({ length: 5 }, (_, i) => job(`d${i}`)) as never);
     const r1 = await runWorker(deps());
@@ -199,6 +200,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
 
   it("再試行: 一時的な失敗は指数バックオフで3回まで、上限で隔離（failed）。ロボット取得の拒否は即座に隔離。無限に再解析しない", async () => {
     await admin.from("collection_runs").delete().eq("household_id", hid);
+    await admin.from("collection_daily_stats").delete().eq("household_id", hid);
     await setSettings({ worker_batch: 1, worker_daily_ai_limit: 100 });
     await u1.from("collection_candidates").insert([job("flaky"), job("robots", { dedupe_key: "https://w.example.invalid/robots" })] as never);
     // robots: 取得が拒否される
@@ -231,6 +233,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
 
   it("AI読み取りが連続で失敗したら、自動処理を一時停止する。停止中はAIを呼ばない。解除すると再開できる", async () => {
     await admin.from("collection_runs").delete().eq("household_id", hid);
+    await admin.from("collection_daily_stats").delete().eq("household_id", hid);
     await setSettings({ worker_batch: 8, worker_daily_ai_limit: 100, paused_until: null, consecutive_failures: 0 });
     await u1.from("collection_candidates").insert(Array.from({ length: 8 }, (_, i) => job(`f${i}`)) as never);
     const r = await runWorker(deps({ extractor: failing() }));
@@ -252,6 +255,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
 
   it("差分検出: 変更なし・広告/カウントダウンの変化はAIを呼ばない。締切延長は更新の提案になり、利用者が編集した抽選は自動で上書きしない。新しい抽選回は別の抽選。中止は状態の更新を提案", async () => {
     await admin.from("collection_runs").delete().eq("household_id", hid);
+    await admin.from("collection_daily_stats").delete().eq("household_id", hid);
     await u1.from("collection_candidates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
     await setSettings({ status_mode: "open_or_before", worker_batch: 8, worker_daily_ai_limit: 100, max_ai_per_run: 8 });
     const src = (await u1.from("collection_sources").insert({ household_id: hid, kind: "web", name: "dsrc", url: "https://pokeso.jp/chusen", adapter: "pokeso" }).select("id").single()).data!.id;
