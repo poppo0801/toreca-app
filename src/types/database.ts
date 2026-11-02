@@ -4341,6 +4341,10 @@ export type Database = {
         Returns: undefined
       }
       save_lottery_tx: { Args: { p: Json; p_actor: string }; Returns: string }
+      save_lottery_tx_as: {
+        Args: { p: Json; p_actor: string; p_household: string }
+        Returns: string
+      }
       set_item_results: {
         Args: { p_actor: string; p_application_id: string; p_results: Json }
         Returns: undefined

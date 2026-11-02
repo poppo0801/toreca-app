@@ -441,6 +441,8 @@ export async function saveLottery(
   id: string | null,
   raw: LotteryInput,
   actor: string | null,
+  /** 定期実行（ログインなし・service_role）からの新規登録。世帯を引数で指定して登録する */
+  opts: { asService?: boolean } = {},
 ): Promise<ServiceResult<{ id: string }>> {
   const parsed = lotteryInputSchema.safeParse(raw);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
@@ -474,8 +476,9 @@ export async function saveLottery(
   }
 
   const payload = buildLotteryPayload(input, id, actor);
-  void householdId;
-  const { data, error } = await db.rpc("save_lottery_tx", { p: payload as never, p_actor: actor as string });
+  const { data, error } = opts.asService && id === null
+    ? await db.rpc("save_lottery_tx_as", { p: payload as never, p_actor: actor as string, p_household: householdId })
+    : await db.rpc("save_lottery_tx", { p: payload as never, p_actor: actor as string });
   if (error) return fail(mapDbError(error));
   // 初期値のまま（利用者が確認していない）項目を記録する。確認済みの項目は外す（応募方法・受取方法の「初期値」表示用）。
   // 保存は主処理とは別の更新だが、失敗しても抽選自体は保存済み（表示上の印が付かないだけ）なのでエラーにはしない。

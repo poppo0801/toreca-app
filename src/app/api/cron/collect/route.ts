@@ -31,7 +31,7 @@ async function handle(req: NextRequest) {
   let worked = 0;
   let idle = 0;
   for (const t of targets ?? []) {
-    const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, extractor: getExtractor(), xClient: createXClient() };
+    const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
     if (t.schedule_enabled) {
       const last = await db.from("collection_runs").select("started_at").eq("household_id", t.household_id).eq("phase", "collect").eq("status", "done").order("started_at", { ascending: false }).limit(1).maybeSingle();
       if (collectDue(now, t.schedule_hour_jst, last.data ? new Date(last.data.started_at) : null)) {

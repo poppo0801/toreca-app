@@ -25,7 +25,7 @@ import type { AppData } from "@/types/domain";
  * 抽選情報の自動収集（Stage 4C）。
  *   収集元 → 告知リンク/X投稿 → 関連判定(ルール) → AI読み取り(既存の共通処理) → 収集条件 → マスター照合 → 重複検出 → 候補/自動登録
  * - 自動収集は★管理対象にしない・応募記録を作らない・既存抽選の確定情報を書き換えない（重複時は情報源URLの追加のみ）
- * - 登録は利用者のログイン(auth.uid)が必要なため、定期実行(service_role)は候補の作成まで。登録は手動実行か候補画面で行う
+ * - 手動実行は利用者のログインで登録。定期実行(service_role)は、service_role専用の登録関数(save_lottery_tx_as)で、条件に一致し情報が十分な抽選だけを自動登録する
  * - AI・X APIは上限(1回あたり/月額予算/既存のAI利用上限)の範囲内でのみ呼ぶ。上限を超える分は次回に回す(キュー)
  */
 
@@ -47,6 +47,8 @@ export interface CollectDeps {
   actor: string | null;
   /** 利用者のログインで実行している（抽選の自動登録ができる） */
   canRegister: boolean;
+  /** 定期実行（ログインなし）でも、条件に一致し情報が十分な抽選を自動登録する（service_role専用の登録関数を使う） */
+  serviceRegister?: boolean;
   extractor: LotteryExtractor | null;
   fetchList?: (url: string) => Promise<SafeFetchResult>;
   fetchPage?: (url: string) => Promise<SafeFetchResult>;
@@ -441,8 +443,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   const reasons = [...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
   if (ev.verdict === "match" && ready && dups.length === 0) {
-    if (autoRegister && deps.canRegister) {
-      const saved = await saveLottery(db, deps.householdId, null, input, deps.actor);
+    if (autoRegister && (deps.canRegister || deps.serviceRegister)) {
+      const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister });
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする
         await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
@@ -452,7 +454,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       await finish("review", { status: "pending", reasons: [`自動登録できませんでした: ${saved.error}`], draft: stored, ...due }, { review_added: 1 });
       return { usedAi: true, registered: false, aiFailed: false };
     }
-    await finish("review", { status: "pending", reasons: ["登録可能です（定期実行ではログインが必要なため、候補として保留しています）"], draft: stored, ...due }, { review_added: 1 });
+    await finish("review", { status: "pending", reasons: ["登録可能です（自動登録がオフのため、候補として保留しています）"], draft: stored, ...due }, { review_added: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   await finish("review", { status: "pending", reasons: reasons.length ? reasons : ["内容を確認してください"], draft: stored, ...due }, { review_added: 1 });

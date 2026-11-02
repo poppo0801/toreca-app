@@ -250,6 +250,35 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
     expect((await lotteries()).length).toBeLessThanOrEqual(lotsBefore);
   });
 
+  it("定期実行（ログインなし）でも、サービス用の登録関数で条件に一致した抽選を自動登録する（重複作成・★管理への自動追加はしない）", async () => {
+    const pokeso = await sourceOf("pokeso");
+    await u1.from("collection_sources").update({ enabled: true, last_attempt_at: "2020-01-01T00:00:00Z" }).eq("id", pokeso.id);
+    const list = () => ok("https://pokeso.jp/chusen", html(`<a href="https://shop-d.example.invalid/lottery/d2">ポケモンカード 抽選 受付中</a>`));
+    // 既存の抽選と重複しないよう、商品名だけ別の（架空の）新商品に変えたAI結果を返す
+    const base = getExtractor({ AI_PROVIDER: "mock" })!;
+    const variant = { engine: base.engine, extract: async (req: Parameters<typeof base.extract>[0]) => { const o = await base.extract(req); const raw = JSON.parse(JSON.stringify(o.raw)) as { products: { name: string }[] }; raw.products[0].name = "架空の新商品ZZ"; return { ...o, raw }; } } as typeof base;
+    const before = (await lotteries()).length;
+    const r1 = await runCollection(deps({ db: admin as unknown as Db, trigger: "cron", actor: null, canRegister: false, serviceRegister: true, extractor: variant, list, onlySourceIds: [pokeso.id] }));
+    expect(r1.ok).toBe(true);
+    const d2 = (await cands()).find((c) => c.dedupe_key.endsWith("/d2"))!;
+    expect(d2.status, JSON.stringify({ s: d2.status, r: d2.reasons })).toBe("auto_registered");
+    {
+      expect((await lotteries()).length).toBe(before + 1);
+      const lot = await admin.from("lotteries").select("source_kind,is_new").eq("id", d2.lottery_id!).single();
+      expect(lot.data).toMatchObject({ source_kind: "auto", is_new: true });
+      const mg = await admin.from("lottery_management").select("is_managed").eq("lottery_id", d2.lottery_id!).maybeSingle();
+      expect(mg.data?.is_managed ?? false).toBe(false);
+    }
+    // 一般の利用者（ログイン中）は、サービス専用の登録関数を呼べない
+    const denied = await u1.rpc("save_lottery_tx_as", { p: {} as never, p_actor: null as never, p_household: hid });
+    expect(denied.error).not.toBeNull();
+    // 同じ一覧を再収集しても重複して登録しない
+    await u1.from("collection_sources").update({ last_attempt_at: "2020-01-01T00:00:00Z" }).eq("id", pokeso.id);
+    const after = (await lotteries()).length;
+    await runCollection(deps({ db: admin as unknown as Db, trigger: "cron", actor: null, canRegister: false, serviceRegister: true, extractor: variant, list, onlySourceIds: [pokeso.id] }));
+    expect((await lotteries()).length).toBe(after);
+  });
+
   it("解析待ちは、AI読み取りの前に一覧の表示で絞り込み、締切が近い順に上限まで解析し、収集のたびに減る。済んだものは再解析しない", async () => {
     const pokeso = await sourceOf("pokeso");
     await u1.from("collection_sources").update({ enabled: true }).eq("id", pokeso.id);
