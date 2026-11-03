@@ -7,6 +7,7 @@ import { AiImportDialog } from "@/components/ai-import-dialog";
 import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { ClearableDateInput, DateClearButton } from "@/components/ui/clearable-date";
 import { MasterCombobox, NewMasterBadge } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
@@ -19,6 +20,7 @@ import { FEEDBACK_REASONS, REASON_LABEL, type FeedbackReason } from "@/lib/ai/fe
 import type { Product, Chain, Store } from "@/types/domain";
 import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker";
 import { classifyAnnouncement, classifyRequirements, foldAnnounceNote, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
+import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -94,6 +96,7 @@ function FlexField({ label, value, onChange, chip }: { label: string; value: Fle
       <span className="flex items-center gap-1 text-[13px] font-medium">
         {label}
         {chip}
+        {(value.date !== "" || value.time !== "") && <DateClearButton label={label} onClear={() => onChange(EMPTY_FLEX)} className="ml-auto" />}
       </span>
       <div className="mt-1 grid grid-cols-[minmax(0,1fr)_4.6rem] gap-1">
         <input
@@ -146,6 +149,11 @@ function emptyInput(data: AppData): LotteryInput {
     resultEndDate: "",
     procedureStart: EMPTY_FLEX,
     procedureDeadline: EMPTY_FLEX,
+    procedureSplit: false,
+    receiveStart: EMPTY_FLEX,
+    receiveDeadline: EMPTY_FLEX,
+    lotteryKind: "normal",
+    validUntil: "",
     receiveMethod: d.receiveMethod,
     applyMethod: d.applyMethod,
     conditionsText: "",
@@ -190,6 +198,11 @@ function fromLottery(l: Lottery, data: AppData): LotteryInput {
     resultEndDate: l.resultEndDate ?? "",
     procedureStart: flexToInput(l.procedureStart),
     procedureDeadline: flexToInput(l.procedureDeadline),
+    procedureSplit: l.procedureSplit ?? false,
+    receiveStart: flexToInput(l.receiveStart ?? { precision: "unknown" }),
+    receiveDeadline: flexToInput(l.receiveDeadline ?? { precision: "unknown" }),
+    lotteryKind: l.kind ?? "normal",
+    validUntil: l.validUntil ?? "",
     receiveMethod: l.receiveMethod,
     applyMethod: l.applyMethod,
     conditionsText: l.conditionsText,
@@ -855,27 +868,37 @@ export function LotteryFormDialog({
                 {showPeriod ? (
                   <div className="min-w-0 text-sm">
                     <span className="flex items-center gap-1 text-[13px] font-medium">当選発表の終了日</span>
-                    <input
-                      type="date"
-                      aria-label="当選発表の終了日"
-                      value={v.resultEndDate ?? ""}
-                      min={v.resultDate.date || undefined}
-                      onChange={(e) => set("resultEndDate", e.target.value)}
-                      className="mt-1 min-h-11 w-full min-w-0 rounded-md border bg-input px-1.5 text-[13px]"
-                    />
+                    <div className="mt-1">
+                      <ClearableDateInput label="当選発表の終了日" value={v.resultEndDate ?? ""} min={v.resultDate.date || undefined} onChange={(x) => set("resultEndDate", x)} />
+                    </div>
                     {v.resultDate.precision === "unknown" && <p className="mt-0.5 text-[11px] text-warn">開始日も入力してください</p>}
                   </div>
                 ) : (
                   <span aria-hidden="true" />
                 )}
                 <div>
-                  <FlexField label="購入・受取開始" value={v.procedureStart ?? EMPTY_FLEX} onChange={(x) => set("procedureStart", x)} chip={flagChip("procedureStart", "購入・受取開始")} />
+                  <FlexField label={v.procedureSplit ? "購入開始" : "購入・受取開始"} value={v.procedureStart ?? EMPTY_FLEX} onChange={(x) => set("procedureStart", x)} chip={flagChip("procedureStart", "購入・受取開始")} />
                   {flagPanel("procedureStart")}
                 </div>
                 <div>
-                  <FlexField label="購入・受取終了" value={v.procedureDeadline} onChange={(x) => set("procedureDeadline", x)} chip={flagChip("procedureDeadline", "購入・受取終了")} />
+                  <FlexField label={v.procedureSplit ? "購入締切" : "購入・受取終了"} value={v.procedureDeadline} onChange={(x) => set("procedureDeadline", x)} chip={flagChip("procedureDeadline", "購入・受取終了")} />
                   {flagPanel("procedureDeadline")}
                 </div>
+                <label className="col-span-2 flex min-h-8 items-center gap-1.5 text-xs" data-testid="split-toggle">
+                  <input type="checkbox" className="size-4" checked={v.procedureSplit ?? false} onChange={(e) => set("procedureSplit", e.target.checked)} />
+                  購入期間と受取期間を分ける
+                  <InfoTip text="事前の購入手続き（支払い）と店舗での受取で期限が異なる抽選用です。通常はオフのままで、購入・受取は同じ期間として扱います。" label="購入期間と受取期間" />
+                </label>
+                {v.procedureSplit && (
+                  <>
+                    <div>
+                      <FlexField label="受取開始" value={v.receiveStart ?? EMPTY_FLEX} onChange={(x) => set("receiveStart", x)} />
+                    </div>
+                    <div>
+                      <FlexField label="受取締切" value={v.receiveDeadline ?? EMPTY_FLEX} onChange={(x) => set("receiveDeadline", x)} />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* 5. 応募方法・受取方法（初期値は未確認の仮設定） */}
@@ -1061,6 +1084,33 @@ export function LotteryFormDialog({
                     </div>
                   )}
                   <label className="block text-sm">
+                    <span className="flex items-center gap-1 text-[13px] font-medium">
+                      抽選方式
+                      <InfoTip text="継続抽選＝応募後も抽選が続く方式（ノジマオンライン等）。招待制販売＝商品ごとの招待リクエスト（Amazon等）。応募済みタブの「継続中の抽選」にまとめて表示します。" label="抽選方式" />
+                    </span>
+                    <Select
+                      label="抽選方式"
+                      value={v.lotteryKind ?? "normal"}
+                      onChange={(x) => set("lotteryKind", x)}
+                      options={[
+                        { value: "normal", label: "通常抽選" },
+                        { value: "ongoing", label: "継続抽選" },
+                        { value: "invite", label: "招待制販売" },
+                      ]}
+                    />
+                  </label>
+                  {(v.lotteryKind ?? "normal") !== "normal" && (
+                    <div className="text-sm">
+                      <span className="flex items-center gap-1 text-[13px] font-medium">
+                        有効期限
+                        <InfoTip text="告知に有効期限があるときだけ入力します。無期限とは仮定しません。" label="有効期限" />
+                      </span>
+                      <div className="mt-1">
+                        <ClearableDateInput label="有効期限" value={v.validUntil ?? ""} onChange={(x) => set("validUntil", x)} />
+                      </div>
+                    </div>
+                  )}
+                  <label className="block text-sm">
                     <span className="text-[13px] font-medium">抽選の状態</span>
                     <Select
                       label="抽選の状態"
@@ -1095,19 +1145,26 @@ export function LotteryFormDialog({
                   {v.multiMode === "choose_one" ? (
                     <p className="text-xs text-muted-foreground">希望商品を選んで応募する方式では、登録後にカード上でユーザーごとに希望商品を選択して応募を記録します。</p>
                   ) : (
-                    <div className="grid grid-cols-3 gap-2">
-                      {profiles.map((p) => (
-                        <label key={p.id} className="min-w-0 text-xs">
-                          <span className="block truncate">{p.label}</span>
-                          <select aria-label={`${p.label}の応募状況`} value={appStatus(p.id)} onChange={(e) => setAppStatus(p.id, e.target.value)} className="mt-0.5 min-h-10 w-full rounded-md border bg-input px-1 text-sm">
-                            <option value="none">未応募</option>
-                            <option value="applied">応募済み</option>
-                            {!multi && <option value="won">当選</option>}
-                            {!multi && <option value="lost">落選</option>}
-                          </select>
-                        </label>
-                      ))}
-                    </div>
+                    <ul className="space-y-1" data-testid="app-status-list">
+                      {profiles.map((p) => {
+                        const st = appStatus(p.id);
+                        return (
+                          <li key={p.id} className="flex min-h-10 items-center gap-2 text-sm">
+                            <label className="flex min-w-0 flex-1 items-center gap-2">
+                              <input type="checkbox" className="size-4 shrink-0" aria-label={`${p.label}は応募済み`} checked={st !== "none"} onChange={(e) => setAppStatus(p.id, e.target.checked ? "applied" : "none")} />
+                              <span className="truncate">{p.label}</span>
+                            </label>
+                            {st !== "none" && !multi && (
+                              <select aria-label={`${p.label}の結果`} value={st} onChange={(e) => setAppStatus(p.id, e.target.value)} className="min-h-9 rounded-md border bg-input px-1 text-xs">
+                                <option value="applied">応募済み</option>
+                                <option value="won">当選</option>
+                                <option value="lost">落選</option>
+                              </select>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
                   {(v.applications?.length ?? 0) > 0 && (
                     <label className="block text-sm">

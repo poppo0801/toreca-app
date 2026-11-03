@@ -2208,15 +2208,23 @@ export type Database = {
           is_new: boolean
           limit_basis: string
           limit_max_count: number
+          lottery_kind: string
           memo: string
           multi_mode: string
           procedure_deadline_at: string | null
           procedure_deadline_date: string | null
           procedure_deadline_precision: string
+          procedure_split: boolean
           procedure_start_at: string | null
           procedure_start_date: string | null
           procedure_start_precision: string
+          receive_deadline_at: string | null
+          receive_deadline_date: string | null
+          receive_deadline_precision: string
           receive_method: string
+          receive_start_at: string | null
+          receive_start_date: string | null
+          receive_start_precision: string
           requirement_details: Json
           requirement_logic: string
           requirement_tags: string[]
@@ -2230,6 +2238,7 @@ export type Database = {
           unconfirmed_fields: string[]
           updated_at: string
           updated_by_profile_id: string | null
+          valid_until_date: string | null
           verification_text: string
         }
         Insert: {
@@ -2257,15 +2266,23 @@ export type Database = {
           is_new?: boolean
           limit_basis?: string
           limit_max_count?: number
+          lottery_kind?: string
           memo?: string
           multi_mode?: string
           procedure_deadline_at?: string | null
           procedure_deadline_date?: string | null
           procedure_deadline_precision?: string
+          procedure_split?: boolean
           procedure_start_at?: string | null
           procedure_start_date?: string | null
           procedure_start_precision?: string
+          receive_deadline_at?: string | null
+          receive_deadline_date?: string | null
+          receive_deadline_precision?: string
           receive_method?: string
+          receive_start_at?: string | null
+          receive_start_date?: string | null
+          receive_start_precision?: string
           requirement_details?: Json
           requirement_logic?: string
           requirement_tags?: string[]
@@ -2279,6 +2296,7 @@ export type Database = {
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
+          valid_until_date?: string | null
           verification_text?: string
         }
         Update: {
@@ -2306,15 +2324,23 @@ export type Database = {
           is_new?: boolean
           limit_basis?: string
           limit_max_count?: number
+          lottery_kind?: string
           memo?: string
           multi_mode?: string
           procedure_deadline_at?: string | null
           procedure_deadline_date?: string | null
           procedure_deadline_precision?: string
+          procedure_split?: boolean
           procedure_start_at?: string | null
           procedure_start_date?: string | null
           procedure_start_precision?: string
+          receive_deadline_at?: string | null
+          receive_deadline_date?: string | null
+          receive_deadline_precision?: string
           receive_method?: string
+          receive_start_at?: string | null
+          receive_start_date?: string | null
+          receive_start_precision?: string
           requirement_details?: Json
           requirement_logic?: string
           requirement_tags?: string[]
@@ -2328,6 +2354,7 @@ export type Database = {
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
+          valid_until_date?: string | null
           verification_text?: string
         }
         Relationships: [
@@ -2634,6 +2661,61 @@ export type Database = {
           {
             foreignKeyName: "master_import_history_imported_by_profile_id_household_id_fkey"
             columns: ["imported_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      member_numbers: {
+        Row: {
+          chain_id: string
+          created_at: string
+          household_id: string
+          id: string
+          member_no: string
+          note: string
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          chain_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          member_no: string
+          note?: string
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          chain_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          member_no?: string
+          note?: string
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_numbers_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "member_numbers_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_numbers_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id", "household_id"]

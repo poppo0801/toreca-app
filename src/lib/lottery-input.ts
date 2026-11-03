@@ -95,6 +95,13 @@ export const lotteryInputSchema = z.object({
   resultEndDate: z.union([z.literal(""), dateStr]).default(""),
   procedureStart: flexInputSchema.default({ precision: "unknown", date: "", time: "" }),
   procedureDeadline: flexInputSchema,
+  /** 購入期間と受取期間を分ける（分けないときは procedure* が購入・受取の共通期間）。分離時は procedure* が購入、receive* が受取 */
+  procedureSplit: z.boolean().default(false),
+  receiveStart: flexInputSchema.default({ precision: "unknown", date: "", time: "" }),
+  receiveDeadline: flexInputSchema.default({ precision: "unknown", date: "", time: "" }),
+  /** 抽選方式と、継続・招待の有効期限（告知にあるときだけ） */
+  lotteryKind: z.enum(["normal", "ongoing", "invite"]).default("normal"),
+  validUntil: z.union([z.literal(""), dateStr]).default(""),
   receiveMethod: z.enum(["store", "shipping", "either", "unknown"]),
   applyMethod: z.enum(["web", "store", "app", "unknown"]),
   conditionsText: z.string().trim().max(2000),
@@ -145,6 +152,15 @@ export const lotteryInputSchema = z.object({
     const a = both ? `${s.date}T${s.time}` : s.date;
     const b = both ? `${e.date}T${e.time}` : e.date;
     if (a > b) ctx.addIssue({ code: "custom", message: "購入・受取の開始が終了より後になっています", path: ["procedureStart"] });
+  }
+  // 分離時の受取期間も同様に、開始が終了より後ろなら保存できない
+  if (v.procedureSplit) {
+    const rs = v.receiveStart;
+    const re = v.receiveDeadline;
+    if (rs.precision !== "unknown" && re.precision !== "unknown" && rs.date && re.date) {
+      const both = rs.precision === "date_time" && re.precision === "date_time";
+      if ((both ? `${rs.date}T${rs.time}` : rs.date) > (both ? `${re.date}T${re.time}` : re.date)) ctx.addIssue({ code: "custom", message: "受取の開始が終了より後になっています", path: ["receiveStart"] });
+    }
   }
   // 当選発表の期間: 開始日が必要で、最終日は開始日以降
   if (v.resultEndDate) {

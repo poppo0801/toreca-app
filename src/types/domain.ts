@@ -18,6 +18,9 @@ export type FlexibleDate =
 /** 抽選イベント自体の状態。個別の当落とは分離する。 */
 export type EventState = "before" | "open" | "closed" | "cancelled" | "postponed";
 
+/** normal=通常抽選 / ongoing=継続抽選（応募後も継続。ノジマオンライン等） / invite=招待制販売（商品別リクエスト。Amazon等） */
+export type LotteryKind = "normal" | "ongoing" | "invite";
+
 export type ReceiveMethod = "store" | "shipping" | "either" | "unknown";
 export type ApplyMethod = "web" | "store" | "app" | "unknown";
 export type ItemUnit = "box" | "pack" | "set";
@@ -218,6 +221,14 @@ export interface Lottery {
   /** 購入・受取の開始（不明なら unknown）。終了は procedureDeadline */
   procedureStart: FlexibleDate;
   procedureDeadline: FlexibleDate;
+  /** 購入期間と受取期間を分けるか。true のとき procedure* は購入手続きの期間、receive* が店舗受取の期間。false/未設定は従来どおり購入・受取が同じ期間 */
+  procedureSplit?: boolean;
+  receiveStart?: FlexibleDate;
+  receiveDeadline?: FlexibleDate;
+  /** 抽選方式。未設定は通常抽選 */
+  kind?: LotteryKind;
+  /** 継続・招待の有効期限（YYYY-MM-DD）。告知にあるときだけ。無期限とは仮定しない */
+  validUntil?: string;
   receiveMethod: ReceiveMethod;
   applyMethod: ApplyMethod;
   conditionsText: string;

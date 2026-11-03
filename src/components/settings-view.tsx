@@ -32,6 +32,7 @@ export function SettingsView() {
             <MenuLink href="/settings/lottery-data" title="抽選データ管理" testId="menu-lottery-data" />
             <MenuLink href="/settings/collection" title="抽選情報の自動収集" testId="menu-collection" />
             <MenuLink href="/settings/rules" title="応募ルール・スルー" testId="menu-rules" />
+            <MenuLink href="/settings/member-numbers" title="会員番号" testId="menu-member-numbers" />
           </>
         ) : (
           <p className="px-3 py-3 text-sm text-muted-foreground">マスター管理・応募ルールはSupabaseモード（ログイン後）で利用できます。</p>
