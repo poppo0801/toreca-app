@@ -13,6 +13,7 @@ import {
   type ApplyOptions,
   setEventState,
   setFulfillment,
+  revertFulfillment,
   setLotterySkip,
   setManaged,
   setResult,
@@ -94,6 +95,10 @@ export async function setAppliedAction(
   opts: ApplyOptions = {},
 ): Promise<MutationResult> {
   return mutate((c) => setApplied(c.db, c.householdId, lotteryId, accountId, applied, actor, selectedItemId, opts));
+}
+
+export async function revertFulfillmentAction(applicationId: string, to: "none" | "procedure_done", actor: string | null): Promise<MutationResult> {
+  return mutate((c) => revertFulfillment(c.db, applicationId, to, actor));
 }
 
 export async function setItemResultsAction(

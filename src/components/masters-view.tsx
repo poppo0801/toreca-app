@@ -1,16 +1,19 @@
 "use client";
 
+import { MoreHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { useApp } from "@/components/app-provider";
+import { ChainLogo } from "@/components/chain-logo";
 import { ChainLogoButton } from "@/components/chain-logo-manager";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
 import { SetCompositionButton } from "@/components/product-set-dialog";
 import { normName } from "@/lib/norm";
 import { Button } from "@/components/ui/button";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ENTITIES, ENTITY_KEYS, type Entity, type EntityKey, type Field } from "@/lib/masters";
-import { saveRecord, setRetired, type ActionResult } from "@/app/(app)/settings/masters/actions";
+import { saveRecord, setRetired, setRetiredBulk, type ActionResult } from "@/app/(app)/settings/masters/actions";
 import { geocodeAddress, type GeoCandidate } from "@/app/(app)/settings/household-actions";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { storeDistance } from "@/lib/store-distance";
@@ -30,10 +33,36 @@ export interface RuleRow {
 const isRetired = (e: Entity, r: Row) =>
   e.retire === "archived_at" ? r.archived_at != null : e.retire === "active" ? r.active === false : false;
 
+/** 一括の「表示管理」を使える種類（系列・店舗・商品）。非表示は削除ではなく、新規登録の選択候補から外すだけ（既存の抽選・応募履歴との紐付けは維持） */
+const BULK_KEYS: EntityKey[] = ["chains", "stores", "products"];
+
+/** 行末の「⋯」メニュー。使用頻度の低い操作をまとめる */
+function RowMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <details className="relative" data-testid="row-menu">
+      <summary
+        aria-label={label}
+        className="flex size-9 cursor-pointer list-none items-center justify-center rounded-md border bg-input text-sm hover:bg-muted [&::-webkit-details-marker]:hidden"
+      >
+        <MoreHorizontal className="size-4" aria-hidden="true" />
+      </summary>
+      <div className="absolute right-0 top-10 z-20 flex min-w-32 flex-col gap-1 rounded-lg border bg-card p-1.5 shadow-lg">{children}</div>
+    </details>
+  );
+}
+
 export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[] }) {
+  const { profile } = useApp();
+  const router = useRouter();
   const [key, setKey] = useState<EntityKey>("chains");
   const [showRetired, setShowRetired] = useState(false);
+  const [manage, setManage] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [logoFilter, setLogoFilter] = useState<"all" | "nologo">("all");
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [bulkPending, startBulk] = useTransition();
   const entity = ENTITIES[key];
+  const bulkable = BULK_KEYS.includes(key) && entity.retire === "archived_at";
 
   // 参照列の表示名を引く辞書
   const names = useMemo(() => {
@@ -59,12 +88,41 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
 
   const visible = rows[key]
     .filter((r) => showRetired || !isRetired(entity, r))
+    .filter((r) => (key === "chains" && logoFilter === "nologo" ? r.logo_sha256 == null : true))
     .filter((r) => {
       if (!isProducts) return true;
       if (category && r.category !== category) return false;
       if (codeKind === "none" ? r.product_code != null : codeKind ? r.product_code_kind !== codeKind : false) return false;
       if (!nq) return true;
       return [String(r.official_name ?? ""), String(r.product_code ?? ""), ...(aliasByProduct.get(r.id) ?? [])].some((t) => normName(t).includes(nq));
+    });
+
+  const pickedRows = visible.filter((r) => selected.has(r.id));
+  const toHide = pickedRows.filter((r) => !isRetired(entity, r));
+  const toShow = pickedRows.filter((r) => isRetired(entity, r));
+  const noLogoCount = key === "chains" ? rows.chains.filter((r) => !isRetired(entity, r) && r.logo_sha256 == null).length : 0;
+
+  const changeKey = (k: EntityKey) => {
+    setKey(k);
+    setManage(false);
+    setSelected(new Set());
+    setBulkMsg(null);
+  };
+  const toggleSel = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const bulk = (ids: string[], retired: boolean) =>
+    startBulk(async () => {
+      setBulkMsg(null);
+      const res = await setRetiredBulk(key, ids, retired, profile.id);
+      if (res.ok) {
+        setSelected(new Set());
+        router.refresh();
+      } else setBulkMsg(res.error);
     });
 
   return (
@@ -76,7 +134,7 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
             role="tab"
             type="button"
             aria-selected={k === key}
-            onClick={() => setKey(k)}
+            onClick={() => changeKey(k)}
             className={cn(
               "min-h-10 rounded-md border px-3 text-sm",
               k === key ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted",
@@ -87,13 +145,52 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
         ))}
       </div>
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <label className="flex min-h-10 items-center gap-2 text-sm">
           <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)} className="size-4" />
-          {entity.retire === "active" ? "無効も表示" : entity.retire === "archived_at" ? "アーカイブも表示" : ""}
+          {entity.retire === "active" ? "無効も表示" : entity.retire === "archived_at" ? "非表示を表示" : ""}
         </label>
-        <RecordDialog entity={entity} rows={rows} record={null} trigger={<Button size="sm">＋ 追加</Button>} />
+        <div className="flex items-center gap-1.5">
+          {bulkable && (
+            <Button
+              size="sm"
+              variant={manage ? "default" : "outline"}
+              aria-pressed={manage}
+              onClick={() => {
+                setManage((v) => !v);
+                setSelected(new Set());
+                setBulkMsg(null);
+              }}
+              data-testid="manage-toggle"
+            >
+              表示管理
+            </Button>
+          )}
+          <RecordDialog entity={entity} rows={rows} record={null} trigger={<Button size="sm">＋ 追加</Button>} />
+        </div>
       </div>
+
+      {key === "chains" && (
+        <div role="group" aria-label="ロゴの絞り込み" className="flex gap-1.5">
+          {(
+            [
+              ["all", "すべて"],
+              ["nologo", `ロゴ未登録${noLogoCount > 0 ? ` ${noLogoCount}` : ""}`],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={logoFilter === v}
+              onClick={() => setLogoFilter(v)}
+              data-testid={`logo-filter-${v}`}
+              className={cn("min-h-9 rounded-full border px-3 text-xs", logoFilter === v ? "border-primary bg-primary text-primary-foreground" : "bg-input hover:bg-muted")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {isProducts && (
         <div className="grid grid-cols-2 gap-2" role="search" aria-label="商品の検索">
@@ -125,14 +222,37 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
         </div>
       )}
 
+      {bulkable && manage && (
+        <div className="sticky top-[var(--header-h)] z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm shadow-sm" data-testid="bulk-bar">
+          <span className="flex-1">
+            {selected.size > 0 ? `${pickedRows.length}件を選択中` : "項目を選んでください"}
+            <InfoTip className="ml-1" text="非表示にした項目は、新規登録の選択候補に出なくなります。削除ではなく、既存の抽選・応募履歴との紐付けはそのまま残ります。「非表示を表示」で確認し、いつでも再表示できます。" label="非表示について" />
+          </span>
+          <Button size="sm" variant="outline" disabled={bulkPending || visible.length === 0} onClick={() => setSelected(new Set(selected.size === visible.length ? [] : visible.map((r) => r.id)))}>
+            {selected.size === visible.length && visible.length > 0 ? "選択を解除" : "すべて選択"}
+          </Button>
+          <Button size="sm" disabled={bulkPending || toHide.length === 0} onClick={() => bulk(toHide.map((r) => r.id), true)} data-testid="bulk-hide">
+            非表示にする{toHide.length > 0 ? ` (${toHide.length})` : ""}
+          </Button>
+          <Button size="sm" disabled={bulkPending || toShow.length === 0} onClick={() => bulk(toShow.map((r) => r.id), false)} data-testid="bulk-show">
+            再表示する{toShow.length > 0 ? ` (${toShow.length})` : ""}
+          </Button>
+          {bulkMsg && (
+            <p role="alert" className="w-full text-xs text-danger">
+              {bulkMsg}
+            </p>
+          )}
+        </div>
+      )}
+
       <ul className="space-y-2" aria-label={`${entity.label}一覧`}>
         {visible.map((r) => (
-          <MasterItem key={r.id} entity={entity} row={r} rows={rows} names={names} rules={rules} />
+          <MasterItem key={r.id} entity={entity} row={r} rows={rows} names={names} rules={rules} manage={bulkable && manage} selected={selected.has(r.id)} onSelect={() => toggleSel(r.id)} />
         ))}
       </ul>
       {visible.length === 0 && (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {entity.label}はまだ登録されていません。「＋ 追加」から登録してください。
+          {key === "chains" && logoFilter === "nologo" ? "ロゴ未登録の系列はありません。" : `${entity.label}はまだ登録されていません。「＋ 追加」から登録してください。`}
         </p>
       )}
     </div>
@@ -145,20 +265,29 @@ function MasterItem({
   rows,
   names,
   rules,
+  manage,
+  selected,
+  onSelect,
 }: {
   entity: Entity;
   row: Row;
   rows: MasterRows;
   names: Record<string, string>;
   rules: RuleRow[];
+  /** 表示管理モード（チェックボックスを出す） */
+  manage: boolean;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const { profile, data } = useApp();
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const retired = isRetired(entity, row);
+  const bulkKey = BULK_KEYS.includes(entity.key) && entity.retire === "archived_at";
   const dist = entity.key === "stores" ? storeDistance(data, { lat: row.latitude as number | null, lng: row.longitude as number | null }) : null;
   const hasPos = entity.key === "stores" && row.latitude != null && row.longitude != null;
+  const logoSrc = entity.key === "chains" ? (data.chains.find((c) => c.id === row.id)?.logoSrc ?? null) : null;
 
   const sub = (entity.subFields ?? [])
     .map((f) => {
@@ -178,19 +307,30 @@ function MasterItem({
       else setError(res.error);
     });
 
+  const title = (entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ");
+  const badges = (
+    <>
+      {row.is_provisional === true && (
+        <span className="ml-1.5 inline-block rounded border border-info px-1 align-middle text-[10px] font-normal text-info" title="仮登録（情報を補完してください）" data-testid="provisional-badge">
+          仮
+        </span>
+      )}
+      {retired && <span className="ml-1.5 align-middle text-xs font-normal text-muted-foreground">（{entity.retire === "active" ? "無効" : "非表示"}）</span>}
+    </>
+  );
+
   return (
     <li className={cn("rounded-lg border bg-card p-3", retired && "opacity-60")} data-testid="master-row">
-      <div className="flex items-start justify-between gap-2">
-        {entity.key === "products" && <ProductThumbById productId={row.id} heightClass="h-16" />}
+      <div className="flex items-center gap-2">
+        {manage && (
+          <input type="checkbox" className="size-5 shrink-0" checked={selected} onChange={onSelect} aria-label={`${title}を選択`} data-testid="master-select" />
+        )}
+        {entity.key === "products" && <ProductThumbById productId={row.id} heightClass="h-14" />}
+        {entity.key === "chains" && <ChainLogoTile src={logoSrc} name={title} />}
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">
-            {(entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ")}
-            {row.is_provisional === true && (
-              <span className="ml-2 rounded border border-info px-1 text-xs font-normal text-info" data-testid="provisional-badge">
-                仮登録（情報を補完してください）
-              </span>
-            )}
-            {retired && <span className="ml-2 text-xs font-normal text-muted-foreground">（{entity.retire === "active" ? "無効" : "アーカイブ済み"}）</span>}
+          <p className={cn("text-sm font-bold", entity.key === "products" ? "line-clamp-2 break-words" : "break-words")}>
+            {title}
+            {badges}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
           {entity.key === "stores" && (
@@ -204,15 +344,22 @@ function MasterItem({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {entity.key === "chains" && <ChainLogoButton chainId={row.id} name={String(row.name)} sha={typeof row.logo_sha256 === "string" ? row.logo_sha256 : null} />}
           {entity.key === "products" && <ProductImagesButton productId={row.id} name={String(row.official_name)} />}
-          {entity.key === "products" && <SetCompositionButton productId={row.id} name={String(row.official_name)} />}
           {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} stores={rows.stores} rules={rules} />}
           <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline">編集</Button>} />
-          <Button size="sm" variant="outline" onClick={toggle} disabled={pending}>
-            {entity.retire === "delete" ? "削除" : retired ? "復元" : entity.retire === "active" ? "無効化" : "アーカイブ"}
-          </Button>
+          {entity.key === "products" && (
+            <RowMenu label={`${title}のその他の操作`}>
+              <SetCompositionButton productId={row.id} name={String(row.official_name)} />
+            </RowMenu>
+          )}
+          {/* 系列・店舗・商品の非表示は「表示管理」から一括で行う（個別のボタンは出さない） */}
+          {!bulkKey && (
+            <Button size="sm" variant="outline" onClick={toggle} disabled={pending}>
+              {entity.retire === "delete" ? "削除" : retired ? (entity.retire === "active" ? "復元" : "再表示") : entity.retire === "active" ? "無効化" : "非表示にする"}
+            </Button>
+          )}
         </div>
       </div>
       {error && (
@@ -221,6 +368,16 @@ function MasterItem({
         </p>
       )}
     </li>
+  );
+}
+
+/** 系列ロゴの表示枠（32〜36px四方）。未登録なら頭文字のプレースホルダー */
+function ChainLogoTile({ src, name }: { src: string | null; name: string }) {
+  if (src) return <ChainLogo src={src} name={name} className="!m-0 size-9 rounded-md p-0.5" />;
+  return (
+    <span aria-hidden="true" data-testid="logo-placeholder" className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted text-sm font-bold text-muted-foreground">
+      {name.slice(0, 1)}
+    </span>
   );
 }
 
@@ -307,7 +464,7 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
           <DialogTitle>
             {entity.label}を{record ? "編集" : "追加"}
           </DialogTitle>
-          <DialogDescription>操作プロフィール「{profile.label}」として記録されます。</DialogDescription>
+          <DialogDescription className="sr-only">操作プロフィール「{profile.label}」として記録されます。</DialogDescription>
           <form onSubmit={submit} className="mt-3 space-y-3">
             {entity.fields.map((f) => (
               <label key={f.name} className="block text-sm">
@@ -318,7 +475,10 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
             ))}
             {entity.key === "stores" && (
               <div className="space-y-1.5 rounded-md border p-2" data-testid="store-geocode">
-                <p className="text-[11px] text-muted-foreground">「住所から位置を取得」を押すと、上の店舗の住所を国土地理院の住所検索（無料）に送り、緯度経度の候補を調べます（押さない限り送信しません）。取得できない場合は緯度・経度を手入力できます。</p>
+                <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  位置の取得
+                  <InfoTip text="「住所から位置を取得」を押すと、上の店舗の住所を国土地理院の住所検索（無料）に送り、緯度経度の候補を調べます（押さない限り送信しません）。取得できない場合は緯度・経度を手入力できます。" label="位置の取得" />
+                </p>
                 <Button type="button" size="sm" variant="outline" onClick={lookup} disabled={geo.busy || (values.address_optional ?? "").trim().length < 3}>
                   {geo.busy ? "検索中…" : "住所から位置を取得"}
                 </Button>

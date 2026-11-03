@@ -157,7 +157,7 @@ test("タブ・詳細・マトリクスを切り替えられる", async ({ page 
   await page.getByRole("tab", { name: /応募済み/ }).click();
   await expect(page.getByTestId("lottery-card").first()).toContainText("結果未確認");
   await page.getByRole("tab", { name: /当選/ }).click();
-  await expect(page.getByRole("button", { name: "購入済み" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "受取を記録" }).first()).toBeVisible();
   await page.getByRole("tab", { name: /★管理対象/ }).click();
   // 既定は詳細表示。シンプルにするとコンパクトな1行カード（★・小さな画像・店名・商品名・自分の応募状態）になる
   await expect(page.getByTestId("card-simple")).toHaveCount(0);
@@ -822,14 +822,37 @@ test("Stage 5I: 詳細カードの応募状況の行と右下の応募ボタン�
   await page.locator('[data-lottery-id="L3"]').screenshot({ path: "e2e/.results/stage5i-card-simple.png" });
 });
 
-test("Stage 5I: 当選タブでも、右下の応募ボタンが購入手続き・購入済みボタンに重ならない", async ({ page }) => {
+test("Stage 5N: 当選タブのカードはコンパクト。下段は1行で、次の期限と現在のユーザー用の「受取を記録」だけ（応募ボタンは出ない）", async ({ page }) => {
   await page.getByRole("tab", { name: /当選/ }).click();
   const card = page.getByTestId("lottery-card").first();
-  const mine = (await card.getByTestId("my-apply").boundingBox())!;
-  const buy = (await card.getByRole("button", { name: "購入済み" }).first().boundingBox())!;
-  const overlap = mine.x < buy.x + buy.width && buy.x < mine.x + mine.width && mine.y < buy.y + buy.height && buy.y < mine.y + mine.height;
+  await expect(card.getByTestId("my-apply")).toHaveCount(0);
+  const row = card.getByTestId("won-row");
+  await expect(row).toBeVisible();
+  const box = (await row.boundingBox())!;
+  expect(box.height).toBeLessThanOrEqual(60); // 縦に並ぶ操作ボタンで高くならない
+  const label = (await row.getByTestId("won-label").boundingBox())!;
+  const btn = (await row.getByRole("button", { name: "受取を記録" }).boundingBox())!;
+  const overlap = label.x < btn.x + btn.width && btn.x < label.x + label.width && label.y < btn.y + btn.height && btn.y < label.y + label.height;
   expect(overlap).toBe(false);
-  await card.getByRole("button", { name: "購入済み" }).first().click({ trial: true }); // 他の要素に遮られていない
+  await row.getByRole("button", { name: "受取を記録" }).click({ trial: true }); // 他の要素に遮られていない
+  await row.getByRole("button", { name: "受取を記録" }).click();
+  await expect(row.getByTestId("won-done")).toContainText("受取済み");
+});
+
+test("Stage 5N: 応募済みタブは発表日基準。「応募済み」ボタンの代わりに当選/落選ボタンがあり、発表日を太字で示す", async ({ page }) => {
+  await page.getByRole("tab", { name: /応募済み/ }).click();
+  const card = page.getByTestId("lottery-card").first();
+  await expect(card.getByTestId("my-apply")).toHaveCount(0);
+  await expect(card.getByTestId("result-won")).toBeVisible();
+  await expect(card.getByTestId("result-lost")).toBeVisible();
+  await expect(card.getByTestId("result-day")).toBeVisible();
+  const weight = await card.getByTestId("result-day").evaluate((el) => Number(getComputedStyle(el).fontWeight));
+  expect(weight).toBeGreaterThanOrEqual(700);
+  const id = await card.getAttribute("data-lottery-id");
+  await card.getByTestId("result-lost").click();
+  // 記録した本人の結果は「落選」表示になる（他のユーザーが結果待ちなら残り、全員確定なら応募済み(結果待ち)から外れる）
+  const same = page.locator(`[data-lottery-id="${id}"]`);
+  await expect.poll(async () => (await same.count()) === 0 || (await same.getByTestId("my-result").first().innerText()).includes("落選")).toBe(true);
 });
 
 test.describe("表示領域・固定配置・多重反応（iPhone不具合の修正の回帰）", () => {

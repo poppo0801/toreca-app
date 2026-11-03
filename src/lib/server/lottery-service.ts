@@ -733,6 +733,18 @@ export async function setFulfillment(db: Db, applicationId: string, fulfillment:
   return ok(void data);
 }
 
+/**
+ * 直前に記録した購入手続き／受取の取り消し（スワイプ操作のUndo用）。受取済みで自動作成された購入記録も、直後（5分以内）で金額が未入力のときだけ戻す。
+ * それ以外（時間が経った・金額を入力した・売却の原価に使われた）は取り消せず、履歴を保持する。
+ */
+export async function revertFulfillment(db: Db, applicationId: string, to: "none" | "procedure_done", actor: string | null): Promise<ServiceResult> {
+  if (!uuid.safeParse(applicationId).success || !z.enum(["none", "procedure_done"]).safeParse(to).success) return fail("リクエストが不正です");
+  const { error } = await db.rpc("revert_fulfillment", { p_application_id: applicationId, p_actor: actor as string, p_to: to });
+  if (!error) return ok(undefined);
+  if (error.code === "23514") return fail("時間が経っているか、購入記録が編集されているため取り消せません。購入履歴から修正してください");
+  return fail(mapDbError(error));
+}
+
 /** 「今回だけ」スルー。実行プロフィールにのみ作用し、他プロフィールへ伝播しない。 */
 export async function setLotterySkip(db: Db, householdId: string, profileId: string, lotteryId: string, skip: boolean, actor: string | null): Promise<ServiceResult> {
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(lotteryId).success) return fail("リクエストが不正です");

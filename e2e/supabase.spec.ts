@@ -87,7 +87,7 @@ test("未ログインはログイン画面へ。誤パスワードは拒否さ�
   await expect(page.getByText("メールアドレスまたはパスワードが正しくありません")).toBeVisible();
 });
 
-test("ログイン→ユーザー切替→マスター登録・アーカイブ→ログアウト", async ({ page }) => {
+test("ログイン→ユーザー切替→マスター登録・非表示→ログアウト", async ({ page }) => {
   await login(page);
   const header = page.locator("header");
   await expect(header).not.toContainText("操作中");
@@ -99,7 +99,7 @@ test("ログイン→ユーザー切替→マスター登録・アーカイブ�
   await page.reload();
   await expect(page.locator("header").getByTestId("current-profile")).toHaveText("B");
 
-  // マスター: 系列を追加→一覧に出る→アーカイブで非表示（削除ではない）
+  // マスター: 系列を追加→一覧に出る→表示管理で非表示（削除ではない）
   const name = `E2E系列-${Date.now()}`;
   await page.goto("/settings/masters");
   await page.getByRole("tab", { name: "系列", exact: true }).click();
@@ -116,10 +116,17 @@ test("ログイン→ユーザー切替→マスター登録・アーカイブ�
   await expect(page.getByRole("alert")).toContainText("既に登録");
   await page.getByRole("button", { name: "キャンセル" }).click();
 
-  await row.getByRole("button", { name: "アーカイブ" }).click();
+  // 個別の非表示ボタンは無く、「表示管理」で選んで一括で非表示にする（削除ではない）
+  await expect(row.getByRole("button", { name: /アーカイブ|非表示にする/ })).toHaveCount(0);
+  await page.getByTestId("manage-toggle").click();
+  await row.getByTestId("master-select").check();
+  await page.getByTestId("bulk-hide").click();
   await expect(row).toHaveCount(0);
-  await page.getByLabel("アーカイブも表示").check();
-  await expect(row).toContainText("アーカイブ済み");
+  await page.getByLabel("非表示を表示").check();
+  await expect(row).toContainText("非表示");
+  await row.getByTestId("master-select").check();
+  await page.getByTestId("bulk-show").click();
+  await expect(row).not.toContainText("（非表示）");
 
   await page.goto("/settings");
   await openAccordion(page, "acc-about");

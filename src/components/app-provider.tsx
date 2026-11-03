@@ -49,6 +49,7 @@ interface AppContextValue {
     reorderProfiles: (ids: string[]) => Promise<Outcome>;
     setResult: (applicationId: string, r: ResultStatus) => Promise<Outcome>;
     setFulfillment: (applicationId: string, f: FulfillmentStatus) => Promise<Outcome>;
+    revertFulfillment: (applicationId: string, to: "none" | "procedure_done") => Promise<Outcome>;
     setLotterySkip: (lotteryId: string, v: boolean) => Promise<Outcome>;
     setEventState: (lotteryId: string, s: EventState) => Promise<Outcome>;
     saveLottery: (id: string | null, input: LotteryInput) => Promise<Outcome>;
@@ -280,6 +281,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         reorderProfiles: (ids) => run((a) => repo.reorderProfiles(a, ids)),
         setResult: (id, r) => run((a) => repo.setResult(a, id, r)),
         setFulfillment: (id, f) => run((a) => repo.setFulfillment(a, id, f)),
+        revertFulfillment: (id, to) => run((a) => repo.revertFulfillment(a, id, to)),
         setLotterySkip: (id, v) => run((a) => repo.setLotterySkip(a, id, v)),
         setEventState: (id, s) => run((a) => repo.setEventState(a, id, s)),
         saveLottery: (id, input) => run((a) => repo.saveLottery(a, id, input)),

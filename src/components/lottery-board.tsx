@@ -11,6 +11,9 @@ import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
 import { OngoingSection } from "@/components/ongoing-section";
+import { SwipeCard } from "@/components/swipe-card";
+import { SwipeGuide } from "@/components/swipe-guide";
+import { UndoToastProvider } from "@/components/undo-toast";
 import { StatusLegend } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,6 +87,14 @@ function validateSession(v: unknown): SessionState | null {
 }
 
 export function LotteryBoard() {
+  return (
+    <UndoToastProvider>
+      <LotteryBoardInner />
+    </UndoToastProvider>
+  );
+}
+
+function LotteryBoardInner() {
   const { data, now, persistent, profile, settings, saveSettings } = useApp();
   const params = useSearchParams();
   const focusId = params.get("focus");
@@ -233,8 +244,10 @@ export function LotteryBoard() {
       <div className="space-y-2 pt-2">
         {legend && (
           <div className="rounded-lg border bg-card p-2 shadow-card" data-testid="legend">
-            <p className="mb-1 text-xs font-bold">ユーザーごとの応募状態アイコン</p>
+            <p className="mb-1 text-xs font-bold">応募状態アイコン</p>
             <StatusLegend />
+            <p className="mb-1 mt-2 text-xs font-bold">スワイプ操作（スマホ）</p>
+            <SwipeGuide className="space-y-0.5 text-xs" />
           </div>
         )}
 
@@ -382,7 +395,9 @@ export function LotteryBoard() {
                     style={phase === "leaving" ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
                   >
                     <div className={cn("min-h-0", phase === "leaving" && "overflow-hidden")}>
-                      <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
+                      <SwipeCard lottery={l} tab={tab}>
+                        <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
+                      </SwipeCard>
                     </div>
                   </li>
                 );

@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EMPTY_FLEX } from "@/lib/lottery-input";
-import { loadAppData, setApplied, type Db } from "@/lib/server/lottery-service";
+import { loadAppData, revertFulfillment, setApplied, setFulfillment, setResult, type Db } from "@/lib/server/lottery-service";
 import { saveLegacy as saveLottery, type LegacyInput } from "./helpers/legacy";
 import { adminClient, anonClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
@@ -171,6 +171,57 @@ describe.skipIf(!dbTestsEnabled)("Stage 5N: 会員番号・購入/受取・抽�
     await setApplied(u1, hid, lot2.value.id, mine.id, true, profs[0].id, null, { backfill: true, appliedAt: "2099-01-05T10:30" });
     const dated = (await u1.from("applications").select("applied_at").eq("lottery_id", lot2.value.id).eq("service_account_id", mine.id).single()).data!;
     expect(new Date(dated.applied_at!).toISOString()).toBe("2099-01-05T01:30:00.000Z");
+  });
+
+  // ------------------------------------------------------------------ 受取の取り消し（スワイプのUndo）
+  /** 当選済みの応募を1件用意して、その応募IDを返す */
+  async function wonApp(): Promise<string> {
+    const lot = await saveLottery(u1, hid, null, base(chainFuru, storeFuruTakara), profs[0].id);
+    if (!lot.ok) throw new Error(lot.error);
+    await u1.rpc("ensure_profile_accounts");
+    const acc = (await u1.from("service_accounts").select("id,managed_by_profile_id").eq("chain_id", chainFuru)).data!.find((a) => a.managed_by_profile_id === profs[0].id)!;
+    expect((await setApplied(u1, hid, lot.value.id, acc.id, true, profs[0].id)).ok).toBe(true);
+    const app = (await u1.from("applications").select("id").eq("lottery_id", lot.value.id).single()).data!;
+    expect((await setResult(u1, app.id, "won", profs[0].id)).ok).toBe(true);
+    return app.id;
+  }
+  it("受取済みの取り消し: 自動作成された購入記録も戻り、もう一度記録しても購入記録は1件だけ", async () => {
+    const id = await wonApp();
+    expect((await setFulfillment(u1, id, "purchased", profs[0].id)).ok).toBe(true);
+    expect(((await u1.from("purchases").select("id").eq("application_id", id)).data ?? []).length).toBe(1);
+
+    const r = await revertFulfillment(u1, id, "none", profs[0].id);
+    expect(r.ok).toBe(true);
+    expect((await u1.from("applications").select("fulfillment_status,procedure_completed_at").eq("id", id).single()).data).toMatchObject({ fulfillment_status: "none", procedure_completed_at: null });
+    expect(((await u1.from("purchases").select("id").eq("application_id", id)).data ?? []).length).toBe(0);
+
+    // 取り消し後に再度記録しても二重計上されない
+    await setFulfillment(u1, id, "purchased", profs[0].id);
+    await setFulfillment(u1, id, "purchased", profs[0].id);
+    expect(((await u1.from("purchases").select("id").eq("application_id", id)).data ?? []).length).toBe(1);
+  });
+  it("受取済みの取り消し: 金額を入力した購入記録は取り消せない（履歴を守る）。購入手続き済みは元に戻せる", async () => {
+    const id = await wonApp();
+    await setFulfillment(u1, id, "purchased", profs[0].id);
+    const pur = (await u1.from("purchases").select("id").eq("application_id", id).single()).data!;
+    await u1.from("purchase_items").update({ amount_paid: 5000 }).eq("purchase_id", pur.id);
+    const r = await revertFulfillment(u1, id, "none", profs[0].id);
+    expect(r.ok).toBe(false);
+    expect((await u1.from("applications").select("fulfillment_status").eq("id", id).single()).data!.fulfillment_status).toBe("purchased");
+    expect(((await u1.from("purchases").select("id").eq("application_id", id)).data ?? []).length).toBe(1);
+
+    const id2 = await wonApp();
+    expect((await setFulfillment(u1, id2, "procedure_done", profs[0].id)).ok).toBe(true);
+    expect((await revertFulfillment(u1, id2, "none", profs[0].id)).ok).toBe(true);
+    expect((await u1.from("applications").select("fulfillment_status").eq("id", id2).single()).data!.fulfillment_status).toBe("none");
+  });
+  it("受取済みの取り消し: 他の世帯の応募は取り消せない・未ログインは使えない", async () => {
+    const id = await wonApp();
+    await setFulfillment(u1, id, "purchased", profs[0].id);
+    const other = await revertFulfillment(u2, id, "none", null);
+    expect(other.ok).toBe(false);
+    expect((await anonClient().rpc("revert_fulfillment", { p_application_id: id, p_actor: profs[0].id, p_to: "none" })).error).not.toBeNull();
+    expect((await u1.from("applications").select("fulfillment_status").eq("id", id).single()).data!.fulfillment_status).toBe("purchased");
   });
 
   // ------------------------------------------------------------------ 系列の統合

@@ -4396,6 +4396,10 @@ export type Database = {
         Args: { p_endpoint: string }
         Returns: undefined
       }
+      revert_fulfillment: {
+        Args: { p_actor: string; p_application_id: string; p_to: string }
+        Returns: undefined
+      }
       save_ai_budget: {
         Args: { p_actor: string; p_budget: number; p_rate: number }
         Returns: undefined

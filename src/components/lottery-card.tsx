@@ -131,15 +131,19 @@ export function LotteryCard({
       )}
     >
       {!detailMode && (
-        <div className="flex items-center gap-1 p-1.5" data-testid="card-simple">
+        <div className="relative flex items-center gap-1.5 py-1.5 pl-1.5 pr-1.5" data-testid="card-simple">
+          {/* ★ は詳細表示と同じカード左上端（画像の列を占有しない）。少し小さくして、店舗名の表示幅を広げる */}
           <button
             type="button"
             onClick={toggleStar}
             aria-pressed={managed}
             aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
-            className="flex size-9 shrink-0 items-center justify-center rounded-full"
+            data-testid="card-star"
+            className="absolute left-0 top-0 z-10 flex size-8 items-center justify-center rounded-full"
           >
-            <Star className={cn("size-[18px]", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+            <span className="flex size-5 items-center justify-center rounded-full bg-card/80">
+              <Star className={cn("size-3.5", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
+            </span>
           </button>
           <button
             type="button"

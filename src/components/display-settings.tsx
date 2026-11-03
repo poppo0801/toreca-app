@@ -4,10 +4,41 @@ import { ArrowDown, ArrowUp, Eye, EyeOff, GripVertical, RotateCcw } from "lucide
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { CARD_FIELDS, CARD_FIELD_LABEL, DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { DEFAULT_NAV, MAX_NAV_SLOTS, availableNav, resolveNav } from "@/lib/profile-settings";
+import { readPref, writePref } from "@/services/local-device-store";
 import { cn } from "@/lib/utils";
+
+/** 抽選カードのスワイプ操作の使用（この端末だけの設定。誤操作が多いときはオフにできる） */
+function SwipeSetting() {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末設定の復元（マウント後に1回）
+    setOn(readPref("swipe", ["on", "off"] as const, "on") === "on");
+  }, []);
+  return (
+    <section aria-labelledby="swipe-title" className="space-y-2">
+      <h2 id="swipe-title" className="flex items-center gap-1 text-sm font-bold">
+        スワイプ操作
+        <InfoTip text="抽選カードを左右にスワイプして、★追加・応募済み・当落などを素早く記録します（スマホのみ）。操作後に3秒間「元に戻す」を出します。誤操作が多いときはオフにしてください。" label="スワイプ操作" />
+      </h2>
+      <label className="flex min-h-11 items-center gap-2 text-sm" data-testid="swipe-toggle">
+        <input
+          type="checkbox"
+          className="size-4"
+          checked={on}
+          onChange={(e) => {
+            setOn(e.target.checked);
+            writePref("swipe", e.target.checked ? "on" : "off");
+          }}
+        />
+        この端末でスワイプ操作を使う
+      </label>
+    </section>
+  );
+}
 
 /**
  * メニュー・表示設定（現在のプロフィールの設定）。下部メニューの項目と並び順、抽選カードの表示、テーマ。
@@ -172,6 +203,8 @@ export function DisplaySettings() {
           ))}
         </ul>
       </section>
+
+      <SwipeSetting />
 
       <section aria-labelledby="theme-title" className="space-y-2">
         <h2 id="theme-title" className="text-sm font-bold">

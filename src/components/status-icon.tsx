@@ -21,7 +21,7 @@ export function StatusIcon({ status, className }: { status: AccountStatus; class
 /** アイコンの意味の一覧（折りたたみで表示）。画面内で意味を確認できるようにする */
 export function StatusLegend({ className }: { className?: string }) {
   return (
-    <ul className={cn("grid grid-cols-2 gap-x-3 gap-y-1 text-xs", className)} aria-label="アイコンの意味">
+    <ul className={cn("flex flex-wrap gap-x-3 gap-y-1 text-xs", className)} aria-label="アイコンの意味">
       {(Object.keys(STATUS_META) as AccountStatus[]).map((k) => (
         <li key={k} className="flex items-center gap-1.5">
           <StatusIcon status={k} />

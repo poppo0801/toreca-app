@@ -217,3 +217,18 @@
     background-position: -30% 0;
   }
 }
+
+/* Undo通知の進捗バー: 残り時間に合わせて左から右へ伸びる（動きを減らす設定でも、バーは静止せず時間経過を示す） */
+@keyframes undo-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.undo-progress {
+  animation-name: undo-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}

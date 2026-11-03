@@ -39,6 +39,9 @@ export class InMemoryRepository implements LotteryRepository {
   async setFulfillment(actorId: string, applicationId: string, fulfillment: Parameters<typeof m.setFulfillment>[3]) {
     return this.apply((d) => m.setFulfillment(d, actorId, applicationId, fulfillment, new Date()));
   }
+  async revertFulfillment(actorId: string, applicationId: string, to: "none" | "procedure_done") {
+    return this.apply((d) => m.revertFulfillment(d, actorId, applicationId, to, new Date()));
+  }
   async setLotterySkip(profileId: string, lotteryId: string, skip: boolean) {
     return this.apply((d) => m.setLotterySkip(d, profileId, lotteryId, skip, new Date()));
   }

@@ -27,6 +27,8 @@ export interface LotteryRepository {
   reorderProfiles(actorId: string, ids: string[]): Promise<Outcome>;
   setResult(actorId: string, applicationId: string, result: ResultStatus): Promise<Outcome>;
   setFulfillment(actorId: string, applicationId: string, fulfillment: FulfillmentStatus): Promise<Outcome>;
+  /** 直前に記録した購入手続き／受取の取り消し（Undo用）。受取済みで自動作成された購入記録も戻す */
+  revertFulfillment(actorId: string, applicationId: string, to: "none" | "procedure_done"): Promise<Outcome>;
   setLotterySkip(profileId: string, lotteryId: string, skip: boolean): Promise<Outcome>;
   setEventState(actorId: string, lotteryId: string, state: EventState): Promise<Outcome>;
   saveLottery(actorId: string, id: string | null, input: LotteryInput): Promise<Outcome>;

@@ -80,7 +80,29 @@ export async function saveRecord(
   return { ok: true };
 }
 
-/** アーカイブ/有効化の切替。履歴性のあるマスターは物理削除しない。 */
+/**
+ * 系列・店舗・商品の一括「非表示／再表示」(archived_at の設定/解除)。削除ではなく、既存の抽選・応募履歴との紐付けはそのまま残る。
+ * 非表示にした項目は新規登録の選択候補から外れる。最大200件。
+ */
+export async function setRetiredBulk(entityKeyRaw: string, idsRaw: string[], retired: boolean, actorRaw: string | null): Promise<ActionResult> {
+  const key = entityKeySchema.safeParse(entityKeyRaw);
+  const ids = z.array(idSchema).min(1).max(200).safeParse(idsRaw);
+  const actor = actorSchema.safeParse(actorRaw);
+  if (!key.success || !ids.success || !actor.success) return fail("リクエストが不正です");
+  const entity = ENTITIES[key.data];
+  if (entity.retire !== "archived_at" || !["chains", "stores", "products"].includes(entity.key)) return fail("この種類は一括で非表示にできません");
+  const ctx = await context();
+  if (!ctx) return fail("ログインが必要です");
+  const { error } = await ctx.supabase
+    .from(entity.key as "chains" | "stores" | "products")
+    .update({ archived_at: retired ? new Date().toISOString() : null, updated_by_profile_id: actor.data })
+    .in("id", ids.data);
+  if (error) return dbError(error);
+  revalidatePath("/settings/masters");
+  return { ok: true };
+}
+
+/** 非表示/有効化の切替。履歴性のあるマスターは物理削除しない。 */
 export async function setRetired(
   entityKeyRaw: string,
   idRaw: string,

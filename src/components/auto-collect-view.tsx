@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
+import { InfoNote } from "@/components/ui/info-tip";
 import type { LotteryDraft } from "@/lib/lottery-match";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
@@ -591,7 +592,7 @@ export function AutoCollectView({
               受付前も含む
             </Chip>
           </div>
-          <p className="text-[11px] text-muted-foreground">締切が不明なものは「受付中」とせず、確認待ちにします（時刻を勝手に補いません）。</p>
+          <InfoNote text="締切が不明なものは「受付中」とせず、確認待ちにします（時刻を勝手に補いません）。" />
         </div>
         <div className="space-y-1">
           <p className="text-xs font-medium">店頭の対象都道府県（{s.prefectures.length}）</p>
@@ -611,13 +612,13 @@ export function AutoCollectView({
             <input type="checkbox" className="size-4" checked={s.include_online} onChange={(e) => setS({ ...s, include_online: e.target.checked })} />
             通販・発送対応の抽選を全国から収集する
           </label>
-          <p className="text-[11px] text-muted-foreground">「全国」の記載だけで発送可能とは判断しません。配送先の制限（居住地域の制限など）がある場合は確認待ちにします。</p>
+          <InfoNote text="「全国」の記載だけで発送可能とは判断しません。配送先の制限（居住地域の制限など）がある場合は確認待ちにします。" />
           <label className="flex items-center gap-2 text-xs">
             自宅からの最大距離（直線）
             <input className="h-8 w-20 rounded-md border bg-input px-2 text-sm" inputMode="numeric" placeholder="制限なし" aria-label="最大距離(km)" value={s.max_distance_km ?? ""} onChange={(e) => setS({ ...s, max_distance_km: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null })} />
             km
           </label>
-          <p className="text-[11px] text-muted-foreground">道路距離ではなく直線距離です。店舗の位置が未設定の場合は距離不明として確認待ちにします。通販には適用しません。</p>
+          <InfoNote text="道路距離ではなく直線距離です。店舗の位置が未設定の場合は距離不明として確認待ちにします。通販には適用しません。" />
         </div>
         <div className="space-y-1">
           <p className="text-xs font-medium">応募方法（未選択＝問わない）</p>
@@ -636,11 +637,11 @@ export function AutoCollectView({
               </Chip>
             ))}
           </div>
-          <p className="text-[11px] text-muted-foreground">Web応募＝通販とは判定しません（受取方法は別に判定します）。</p>
+          <InfoNote text="Web応募＝通販とは判定しません（受取方法は別に判定します）。" />
         </div>
         <details className="space-y-1">
           <summary className="cursor-pointer text-xs font-medium">応募条件の絞り込み（含む {s.req_include.length}／除外 {s.req_exclude.length}）</summary>
-          <p className="text-[11px] text-muted-foreground">「含む」は、選んだ条件のどれかを含む抽選だけ。「除外」は、含む抽選を除きます。応募資格を満たすかは判定しません。一般的な本人確認は対象にしません。</p>
+          <InfoNote text="「含む」は、選んだ条件のどれかを含む抽選だけ。「除外」は、含む抽選を除きます。応募資格を満たすかは判定しません。一般的な本人確認は対象にしません。" />
           <div className="space-y-1">
             {(["req_include", "req_exclude"] as const).map((k) => (
               <div key={k} className="space-y-1">
@@ -677,7 +678,7 @@ export function AutoCollectView({
               </div>
             </div>
           )}
-          <p className="text-[11px] text-muted-foreground">マスターに未登録の新商品も候補から除外しません（指定商品のみの場合は、判別できない商品を確認待ちにします）。</p>
+          <InfoNote text="マスターに未登録の新商品も候補から除外しません（指定商品のみの場合は、判別できない商品を確認待ちにします）。" />
         </details>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" className="size-4" checked={s.auto_register} onChange={(e) => setS({ ...s, auto_register: e.target.checked })} />
@@ -698,7 +699,7 @@ export function AutoCollectView({
             </select>
             ）
           </label>
-          <p className="text-[11px] text-muted-foreground">AI解析（有料）を使うため、初期は無効です。定期実行の呼び出し設定（Cron）は別途必要です。定期実行では候補の作成まで行い、登録は手動実行または候補画面から行います。</p>
+          <InfoNote text="AI解析（有料）を使うため、初期は無効です。定期実行の呼び出し設定（Cron）は別途必要です。定期実行では候補の作成まで行い、登録は手動実行または候補画面から行います。" />
           <label className="flex items-center gap-2 text-xs">
             1回のAI解析の上限
             <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.max_ai_per_run} aria-label="1回のAI解析の上限" onChange={(e) => setS({ ...s, max_ai_per_run: Math.min(50, Math.max(1, Number(e.target.value) || 1)) })} />

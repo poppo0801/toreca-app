@@ -175,6 +175,26 @@ export function setFulfillment(
   };
 }
 
+/** 直前に記録した購入手続き／受取の取り消し。受取済みで自動作成された購入記録も戻す（Undo用） */
+export function revertFulfillment(data: AppData, actorProfileId: string, applicationId: string, to: "none" | "procedure_done", at: Date): AppData {
+  const app = data.applications.find((a) => a.id === applicationId);
+  if (!app || app.result !== "won" || app.fulfillment === to) return data;
+  return {
+    ...data,
+    applications: data.applications.map((a) => (a.id === applicationId ? { ...a, fulfillment: to } : a)),
+    purchases: app.fulfillment === "purchased" ? data.purchases.filter((p) => !(p.applicationId === applicationId && p.source === "lottery")) : data.purchases,
+    audit: withAudit(data, {
+      actorProfileId,
+      at: at.toISOString(),
+      entityType: "award_fulfillment",
+      entityId: applicationId,
+      action: "revert_fulfillment",
+      before: { fulfillment: app.fulfillment },
+      after: { fulfillment: to },
+    }),
+  };
+}
+
 /** 「今回だけ」スルー。実行プロフィールにのみ作用し、他プロフィールへ伝播しない。 */
 export function setLotterySkip(
   data: AppData,

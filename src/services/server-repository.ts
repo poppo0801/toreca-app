@@ -7,6 +7,7 @@ import {
   setAppliedAction,
   setEventStateAction,
   setFulfillmentAction,
+  revertFulfillmentAction,
   setLotterySkipAction,
   setManagedAction,
   setResultAction,
@@ -41,6 +42,7 @@ export class ServerActionRepository implements LotteryRepository {
   updateProfile = (actor: string, profileId: string, input: Parameters<typeof updateProfileAction>[1]) => updateProfileAction(profileId, input, actor);
   setResult = (actor: string, appId: string, r: Parameters<typeof setResultAction>[1]) => setResultAction(appId, r, actor);
   setFulfillment = (actor: string, appId: string, f: Parameters<typeof setFulfillmentAction>[1]) => setFulfillmentAction(appId, f, actor);
+  revertFulfillment = (actor: string, appId: string, to: "none" | "procedure_done") => revertFulfillmentAction(appId, to, actor);
   setLotterySkip = (profileId: string, id: string, v: boolean) => setLotterySkipAction(profileId, id, v, profileId);
   setEventState = (actor: string, id: string, s: Parameters<typeof setEventStateAction>[1]) => setEventStateAction(id, s, actor);
   saveLottery = (actor: string, id: string | null, input: Parameters<typeof saveLotteryAction>[1]) => saveLotteryAction(id, input, actor);
