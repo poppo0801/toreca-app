@@ -261,7 +261,7 @@ class AnthropicExtractor implements LotteryExtractor {
     try {
       res = await this.client.messages.create({
         model: this.model,
-        max_tokens: 4096,
+        max_tokens: 8192,
         system: SYSTEM_PROMPT,
         // 5.5系は tool_choice の強制が使えないため auto + プロンプトの指示で record_lottery を呼ばせる
         tools: [RECORD_LOTTERY_TOOL as Anthropic.Tool],
