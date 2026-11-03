@@ -4343,6 +4343,7 @@ export type Database = {
         Args: { p_actor: string; p_application_id: string }
         Returns: undefined
       }
+      merge_chains: { Args: { p_from: string; p_into: string }; Returns: Json }
       next_management_no: {
         Args: { p_household: string; p_kind: string }
         Returns: string

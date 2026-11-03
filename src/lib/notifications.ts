@@ -1,5 +1,6 @@
 import { formatFlexible, formatResultShort, hasResultPeriod, isResultFinished, jstDateString, resultEndDay } from "@/lib/datetime";
 import { effectiveEventState, judgeAccount } from "@/lib/eligibility";
+import { receivePeriod, wonProgress } from "@/lib/lottery-flow";
 import { formatItem, isManaged } from "@/lib/lottery-view";
 import type { AppData, FlexibleDate, Lottery, Profile } from "@/types/domain";
 
@@ -42,6 +43,8 @@ export type NotificationType =
   | "result_day"
   | "result_unconfirmed"
   | "procedure_before"
+  | "pickup_start"
+  | "procedure_overdue"
   | "eligibility_expiry";
 
 export interface PlannedNotification {
@@ -256,35 +259,63 @@ export function planNotifications(
         }
       }
 
-      // ---- 購入手続き・受取期限（当選済みで未購入）
-      const won = data.applications.filter(
-        (a) =>
-          a.lotteryId === l.id && a.state === "applied" && a.result === "won" && a.fulfillment !== "purchased" &&
-          myAccounts.some((x) => x.id === a.accountId),
-      );
-      if (s.procedureEnabled && won.length > 0) {
-        const pd = l.procedureDeadline;
-        const pKey = flexKey(pd);
-        const who = [...new Set(won.map((a) => ownerName(a.accountId)).filter(Boolean))].join("、");
-        const mk = (tier: string, dueAt: Date, expiresAt: Date, body: string): Candidate => ({
-          ...base,
-          type: "procedure_before",
-          triggerKey: `procedure_before:${tier}:${l.id}:${pKey}`,
-          dueAt,
-          expiresAt,
-          group: `procedure:${l.id}`,
-          title: "購入手続き・受取の期限が近づいています",
-          body: `${label}\n当選: ${who}\n${body}`,
-        });
-        if (pd.precision === "date_time") {
-          const at = new Date(pd.at);
-          for (const h of s.procedureLeadHours) {
-            candidates.push(mk(`h${h}`, new Date(at.getTime() - h * HOUR), at, `期限 ${formatFlexible(pd)}（${remainingText(at, now)}）`));
+      // ---- 購入手続き・受取の期限（当選済みで未完了）。購入済みなら購入期限の通知は止まり、受取済みなら受取の通知も止まる。
+      // 通知の対象は担当プロフィール（通知先の対象ユーザー）の当選分だけ。購入と受取を分けた抽選は 購入期限 → 受取期間 の順に切り替える。
+      if (s.procedureEnabled) {
+        const wonApps = data.applications.filter(
+          (a) => a.lotteryId === l.id && a.state === "applied" && a.result === "won" && a.fulfillment !== "purchased" && myAccounts.some((x) => x.id === a.accountId),
+        );
+        const stages = new Map<string, { progress: ReturnType<typeof wonProgress>; names: string[] }>();
+        for (const a of wonApps) {
+          const progress = wonProgress(l, a, now);
+          const k = progress.stage;
+          const g = stages.get(k) ?? { progress, names: [] };
+          const nm = ownerName(a.accountId);
+          if (nm) g.names.push(nm);
+          stages.set(k, g);
+        }
+        for (const [stage, { progress, names }] of stages) {
+          const who = [...new Set(names)].join("、");
+          const period = stage === "purchase" ? { start: l.procedureStart, deadline: l.procedureDeadline } : receivePeriod(l);
+          const pd = period.deadline;
+          const pKey = flexKey(pd);
+          const word = stage === "purchase" ? "購入" : "受取";
+          const mk = (tier: string, dueAt: Date, expiresAt: Date, title: string, body: string, grouped = true): Candidate => ({
+            ...base,
+            type: "procedure_before",
+            // 受取（従来の購入・受取共通を含む）は従来のキー形式のまま。購入段階だけ接頭辞を付けて区別する
+            triggerKey: `procedure_before:${stage === "purchase" ? "p-" : ""}${tier}:${l.id}:${pKey}`,
+            dueAt,
+            expiresAt,
+            group: grouped ? `procedure:${stage}:${l.id}` : undefined,
+            title,
+            body: `${label}\n当選: ${who}\n${body}`,
+          });
+          if (pd.precision === "date_time") {
+            const at = new Date(pd.at);
+            for (const h of s.procedureLeadHours) {
+              candidates.push(mk(`h${h}`, new Date(at.getTime() - h * HOUR), at, `${word}期限が近づいています`, `期限 ${formatFlexible(pd)}（${remainingText(at, now)}）`));
+            }
+            // 期限当日の朝
+            const morning = jstAt(jstDateString(at), s.morningTime);
+            if (morning < at) candidates.push(mk("today", morning, at, `本日が${word}期限です`, `期限 ${formatFlexible(pd)}`));
+            candidates.push({ ...mk("overdue", new Date(at.getTime() + HOUR), new Date(at.getTime() + 25 * HOUR), `${word}の期限を過ぎています`, "手続きの状況を確認し、済んでいれば記録してください", false), type: "procedure_overdue" });
+          } else if (pd.precision === "date_only" && s.dateOnlyPolicy === "morning_of") {
+            const days = new Set([0, ...s.procedureLeadHours.map((h) => Math.max(1, Math.ceil(h / 24)))]);
+            for (const k of days) {
+              candidates.push(mk(`d${k}`, jstAt(addDaysJst(pd.date, -k), s.morningTime), endOfJstDay(pd.date), k === 0 ? `本日が${word}期限です（時刻未確認）` : `${word}期限が近づいています`, `期限 ${formatFlexible(pd)}`));
+            }
+            const next = jstAt(addDaysJst(pd.date, 1), s.morningTime);
+            candidates.push({ ...mk("overdue", next, new Date(next.getTime() + 24 * HOUR), `${word}の期限を過ぎています`, "手続きの状況を確認し、済んでいれば記録してください", false), type: "procedure_overdue" });
           }
-        } else if (pd.precision === "date_only" && s.dateOnlyPolicy === "morning_of") {
-          const days = new Set([0, ...s.procedureLeadHours.map((h) => Math.max(1, Math.ceil(h / 24)))]);
-          for (const k of days) {
-            candidates.push(mk(`d${k}`, jstAt(addDaysJst(pd.date, -k), s.morningTime), endOfJstDay(pd.date), `期限 ${formatFlexible(pd)}`));
+          // 受取期間の開始（期間の始まりが分かっているときだけ）
+          const st = period.start;
+          if (stage === "receive" && st.precision !== "unknown" && progress.status !== "overdue") {
+            const startAt = st.precision === "date_time" ? new Date(st.at) : jstAt(st.date, s.morningTime);
+            const until = pd.precision === "unknown" ? new Date(startAt.getTime() + 24 * HOUR) : pd.precision === "date_time" ? new Date(pd.at) : endOfJstDay(pd.date);
+            if (st.precision === "date_time" || s.dateOnlyPolicy === "morning_of") {
+              candidates.push({ ...mk("start", startAt, until, "受取期間が始まりました", `期間 ${formatFlexible(st)}〜${pd.precision === "unknown" ? "" : formatFlexible(pd)}`, false), type: "pickup_start" });
+            }
           }
         }
       }
@@ -395,7 +426,8 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
       (a) => a.lotteryId === l.id && a.state === "applied" && a.result === "won" && a.fulfillment !== "purchased" && accs.some((x) => x.id === a.accountId),
     );
     if (won) {
-      const pd = l.procedureDeadline;
+      const wonApp = data.applications.find((a) => a.lotteryId === l.id && a.state === "applied" && a.result === "won" && a.fulfillment !== "purchased" && accs.some((x) => x.id === a.accountId));
+      const pd = wonApp ? wonProgress(l, wonApp, now).deadline : l.procedureDeadline;
       const soon =
         pd.precision === "date_time"
           ? new Date(pd.at).getTime() - now.getTime() <= 72 * HOUR && new Date(pd.at) > now

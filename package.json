@@ -26,7 +26,8 @@
     "restore:drill": "node scripts/restore-drill.mjs",
     "restore": "node scripts/restore.mjs",
     "restore:images": "node scripts/restore-images.mjs",
-    "verify:prod": "node scripts/verify-production.mjs"
+    "verify:prod": "node scripts/verify-production.mjs",
+    "merge:chains": "node scripts/merge-chains.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",

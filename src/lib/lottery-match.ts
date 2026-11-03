@@ -378,6 +378,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   });
   const requirement = classifyRequirements([ex.conditionsText, ex.verificationText].filter(Boolean).join("\n"));
 
+  const splitPeriods = (ex.receiveStart?.precision ?? "unknown") !== "unknown" || (ex.receiveDeadline?.precision ?? "unknown") !== "unknown";
   const input: LotteryInput = {
     chain: chainRef,
     store: storeRef,
@@ -391,6 +392,12 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     resultEndDate: ex.resultEndDate ?? "",
     procedureStart: toFlex(ex.procedureStart),
     procedureDeadline: toFlex(ex.procedureDeadline),
+    // 購入手続きと店舗受取の期間が別々に読み取れたときだけ分離する（区別できなければ共通の期間のまま。推測で分けない）
+    procedureSplit: splitPeriods,
+    receiveStart: splitPeriods && ex.receiveStart ? toFlex(ex.receiveStart) : undefined,
+    receiveDeadline: splitPeriods && ex.receiveDeadline ? toFlex(ex.receiveDeadline) : undefined,
+    lotteryKind: ex.lotteryKind === "ongoing" || ex.lotteryKind === "invite" ? ex.lotteryKind : "normal",
+    validUntil: ex.lotteryKind === "ongoing" || ex.lotteryKind === "invite" ? (ex.validUntil ?? "") : "",
     receiveMethod: ex.receiveMethod,
     applyMethod: ex.applyMethod,
     conditionsText: ex.conditionsText,

@@ -29,7 +29,11 @@ begin
   v_chain_id := nullif(p->'chain'->>'id', '')::uuid;
   if v_chain_id is null then
     select c.id into v_chain_id from public.chains c
-     where c.household_id = hid and public.norm_name(c.name) = public.norm_name(p->'chain'->>'name') limit 1;
+     where c.household_id = hid and (
+       public.norm_name(c.name) = public.norm_name(p->'chain'->>'name')
+       or exists (select 1 from public.chain_aliases ca where ca.chain_id = c.id and ca.normalized_alias = public.norm_name(p->'chain'->>'name'))
+     )
+     order by (c.archived_at is null) desc, c.created_at limit 1;
     if v_chain_id is null then
       insert into public.chains (household_id, name, is_provisional, updated_by_profile_id)
       values (hid, btrim(p->'chain'->>'name'), true, p_actor) returning id into v_chain_id;

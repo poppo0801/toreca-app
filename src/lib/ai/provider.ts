@@ -14,7 +14,7 @@ export type InputKind = "text" | "image" | "url" | "x_url";
  * 解析仕様（プロンプト・ツール定義・検証ルール）のバージョン。精度をバージョンごとに比べられるよう、解析ログに記録する。
  * プロンプトやツール定義、検証ロジックを変えたら更新する。
  */
-export const PROMPT_VERSION = "2026-11-01.1";
+export const PROMPT_VERSION = "2026-11-06.1";
 
 export interface ExtractRequest {
   kind: InputKind;
@@ -82,6 +82,8 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - 読み取れなかった項目の理由や説明（「〜が読み取れませんでした」「記載がありません」など）を、conditions_text・verification_text・announcement_method・notes に書かない。読み取れなければ空文字にする。理由は warnings だけに書く。
 - 画像が複数枚あるときは、すべて同じ1件の抽選の告知（商品・応募条件・応募方法・当選発表・購入期間などが分かれて載っている）として、まとめて1件分を記録する。画像同士で内容が食い違うときは、どちらかに決めず warnings に書く。画像に明らかに別の抽選（別の店舗・商品の告知）が混ざっている場合は、混ぜずに最初の画像の抽選だけを記録し、warnings に「別の抽選が含まれている可能性」と書く。
 - 購入・受取の期間は、始まりを procedure_start、終わり（期限）を procedure_deadline に入れる。終わりだけ書かれていれば procedure_start は null。
+- 購入手続き（支払い・購入ページでの手続き）の期間と、店舗での受取（お渡し）の期間が別々に書かれているときだけ、購入手続き・支払いの期間を procedure_start / procedure_deadline に、店舗受取の期間を receive_start / receive_deadline に入れる。同じ期間として書かれている、または区別が読み取れないときは receive_start / receive_deadline は null にし、購入・受取の期間は procedure_start / procedure_deadline に入れる。発送手続きの期間・受取期限も、書かれていれば同様に区別する。書かれていない期限を推測で補わない。
+- 抽選方式 lottery_kind: 応募締切のある通常の抽選は normal。応募後も抽選が続き、期間やリセットで入れ替わるキャンペーン（応募後も継続して抽選される）は ongoing。商品ごとに招待リクエストを送り、招待が届いた人が購入できる販売（招待制）は invite。判断できなければ unknown。招待・継続の有効期限が告知に書かれていれば valid_until（無期限とは仮定しない）。同じURLが使い回される継続抽選では、日付や回の記載から新しい回かどうかを warnings に書く（リセットが確定していない場合は断定しない）。
 
 例（要点だけ。実際の告知の表記どおりに返す）:
 - 「1人1BOXまで」「お一人様1点まで」→ 購入数量の上限。purchase_limit_text に書き、limit_basis は unknown（応募回数の記載があるときだけ設定）。
@@ -145,6 +147,10 @@ export const RECORD_LOTTERY_TOOL = {
       result_end_date: { ...dateSchema, description: "当選発表が期間のときの最終日（年・月・日だけでよい）。単一の日の発表・期間の終わりが不明なら null" },
       procedure_start: { ...dateSchema, description: "購入・受取の開始日時（購入期間・受取期間の始まり）。無ければ null" },
       procedure_deadline: { ...dateSchema, description: "購入・受取の終了日時（期限）。無ければ null" },
+      receive_start: { ...dateSchema, description: "購入手続きと別に、店舗受取の期間が書かれているときだけ: 受取の開始日時。無ければ null" },
+      receive_deadline: { ...dateSchema, description: "購入手続きと別に、店舗受取の期間が書かれているときだけ: 受取の期限。無ければ null" },
+      lottery_kind: { type: "string", enum: ["normal", "ongoing", "invite", "unknown"], description: "抽選方式。通常=normal / 継続抽選=ongoing / 招待制販売=invite / 不明=unknown" },
+      valid_until: { ...dateSchema, description: "継続抽選・招待の有効期限（書かれているときだけ）。無ければ null" },
       announcement_method: { type: "string", description: "当選発表の方法（メール、マイページ等）" },
       announcement_url: { type: "string" },
       apply_url: { type: "string" },

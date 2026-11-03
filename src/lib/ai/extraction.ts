@@ -80,6 +80,13 @@ export interface ExtractedLottery {
   resultEndDate: string;
   procedureStart: ExtractedFlex;
   procedureDeadline: ExtractedFlex;
+  /** 購入手続きと別の店舗受取の期間（区別が読み取れたときだけ。両方不明なら分離しない） */
+  receiveStart?: ExtractedFlex;
+  receiveDeadline?: ExtractedFlex;
+  /** 抽選方式（unknown は通常として扱うが、確定とはしない） */
+  lotteryKind?: "normal" | "ongoing" | "invite" | "unknown";
+  /** 継続・招待の有効期限（YYYY-MM-DD）。不明は空 */
+  validUntil?: string;
   announcementMethod: string;
   announcementUrl: string;
   applyUrl: string;
@@ -135,6 +142,11 @@ export const rawExtractionSchema = z.object({
   result_end_date: rawDate,
   procedure_start: rawDate,
   procedure_deadline: rawDate,
+  /** 購入手続きと別に書かれた店舗受取の期間（区別が読み取れないときは null） */
+  receive_start: rawDate,
+  receive_deadline: rawDate,
+  lottery_kind: z.enum(["normal", "ongoing", "invite", "unknown"]).catch("unknown").default("unknown"),
+  valid_until: rawDate,
   announcement_method: str(200),
   announcement_url: str(2000),
   apply_url: str(2000),
@@ -320,6 +332,12 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     dates.push(f);
     if (f.precision !== "unknown") prevMs = dayMs(Number(f.date.slice(0, 4)), Number(f.date.slice(5, 7)), Number(f.date.slice(8, 10)));
   }
+  // 受取期間・有効期限（購入手続きとは別枠。区別が読み取れたときだけ入る）
+  const recvStart = normalizeFlex(r.receive_start, now, warnings, "受取開始", yctx, null);
+  const recvDeadline = normalizeFlex(r.receive_deadline, now, warnings, "受取締切", yctx, null);
+  const validW: string[] = [];
+  const validFlex = normalizeFlex(r.valid_until, now, validW, "有効期限", yctx, null);
+  if (validFlex.precision !== "unknown") warnings.push(...validW);
   // 発表期間の最終日: 開始日があり、最終日が開始日より後のときだけ採用（推測で補わない）
   let resultEndDate = "";
   if (dates[2].precision !== "unknown" && r.result_end_date) {
@@ -344,6 +362,10 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     resultEndDate,
     procedureStart: dates[3],
     procedureDeadline: dates[4],
+    receiveStart: recvStart,
+    receiveDeadline: recvDeadline,
+    lotteryKind: r.lottery_kind,
+    validUntil: validFlex.precision === "unknown" ? "" : validFlex.date,
     announcementMethod: r.announcement_method,
     announcementUrl: httpUrl(r.announcement_url),
     applyUrl: httpUrl(r.apply_url),
