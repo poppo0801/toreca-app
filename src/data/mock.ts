@@ -192,7 +192,7 @@ export function createMockData(now: Date): AppData {
     profiles: [
       { id: "pA", label: "A", color: "blue", initial: "A", allowedChainIds: null, allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
       { id: "pB", label: "B", color: "green", initial: "B", allowedChainIds: null, allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
-      { id: "pC", label: "C", color: "purple", initial: "C", allowedChainIds: ["c1"], allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
+      { id: "pC", label: "C", kind: "sub", color: "purple", initial: "C", allowedChainIds: ["c1"], allowedStoreIds: [], blockedChainIds: [], blockedStoreIds: [] },
     ],
     chains: [
       // 架空のロゴ（横長の画像。表示時に正方形のタイルへ収まることの確認用）

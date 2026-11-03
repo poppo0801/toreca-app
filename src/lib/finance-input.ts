@@ -14,7 +14,7 @@ export const expenseItemSchema = z.object({
   id: z.uuid().nullable().optional(),
   product: ref.refine((v) => v.id !== null || v.name.length > 0, "商品を選択または入力してください"),
   quantity: z.number().int("数量は整数で入力してください").min(1, "数量は1以上で入力してください").max(9999),
-  unit: z.enum(["box", "pack", "set"]),
+  unit: z.enum(["box", "pack", "set", "piece"]),
   /** 実際の購入金額。不明は null（0円と区別する） */
   amountPaid: optionalYen,
 });

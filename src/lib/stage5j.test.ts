@@ -11,7 +11,7 @@ describe("プロフィールの表示順（全画面で共通の定義）", () =
   it("応募状況・詳細・フォームの並びは data.profiles の順。順序を入れ替えると、アカウントの並びも同じ順に変わる", async () => {
     const repo = new InMemoryRepository();
     const d0 = await repo.load(NOW);
-    const l = d0.lotteries.find((x) => x.id === "L3")!;
+    const l = d0.lotteries.find((x) => x.id === "L1")!;
     const ids = (d: typeof d0) => accountsForLottery(d, l).map((a) => a.profileId);
     expect(ids(d0)).toEqual(["pA", "pB", "pC"]);
     const res = await repo.reorderProfiles("pA", ["pC", "pA", "pB"]);

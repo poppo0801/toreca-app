@@ -370,6 +370,7 @@ export function placeInfo(args: { receiveMethod: "store" | "shipping" | "either"
   if (kind === "online_only" || args.receiveMethod === "shipping") return { label: "通販", canShip: false, showLocation: false };
   if (args.receiveMethod === "either") return { label: pref, canShip: true, showLocation: true };
   // 受取方法が不明なら、都道府県を推測で出さない
-  if (args.receiveMethod === "unknown") return { label: null, canShip: false, showLocation: true };
+  // 受取方法が不明なら、店頭受取とみなして距離を出さない
+  if (args.receiveMethod === "unknown") return { label: null, canShip: false, showLocation: false };
   return { label: pref, canShip: false, showLocation: true };
 }

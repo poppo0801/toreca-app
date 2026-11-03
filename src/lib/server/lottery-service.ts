@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { normalizeCardDisplay } from "@/lib/card-display";
 import { normalizeProfileSettings } from "@/lib/profile-settings";
+import { profileSeesChain } from "@/lib/profile-scope";
 import { recordAiFeedback } from "@/lib/server/ai-feedback-service";
 import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
@@ -61,6 +62,36 @@ export function mapDbError(e: PgError): string {
 
 const uuid = z.uuid();
 const nowIso = () => new Date().toISOString();
+
+// ------------------------------------------------------------------ サブユーザーの対象系列（更新処理側の制限）
+/**
+ * 操作するプロフィールがサブで、その系列が対象外なら、拒否メッセージを返す（メインは常に null）。
+ * 画面で非表示にするだけでなく、更新処理でも同じ判定をする（系列の別名＝統合前の名前も同じ系列として扱う）。
+ * 対象系列が未設定のサブは、すべての系列が対象外。
+ */
+export async function subScopeError(db: Db, actor: string | null, chainId: string | null | undefined): Promise<string | null> {
+  if (!actor || !chainId) return null;
+  const { data: prof } = await db.from("profiles").select("kind").eq("id", actor).maybeSingle();
+  if (prof?.kind !== "sub") return null;
+  const [{ data: rules }, { data: chains }, { data: aliases }] = await Promise.all([
+    db.from("profile_target_rules").select("chain_id,store_id,mode").eq("profile_id", actor),
+    db.from("chains").select("id,name"),
+    db.from("chain_aliases").select("chain_id,alias"),
+  ]);
+  const allowed = (rules ?? []).filter((r) => r.mode === "allow" && r.store_id === null).map((r) => r.chain_id);
+  const lite = (chains ?? []).map((c) => ({ id: c.id, name: c.name, aliases: (aliases ?? []).filter((a) => a.chain_id === c.id).map((a) => a.alias) }));
+  return profileSeesChain({ kind: "sub", allowedChainIds: allowed }, lite, chainId) ? null : "このユーザーは対象外の系列の抽選を操作できません";
+}
+
+async function chainOfLottery(db: Db, lotteryId: string): Promise<string | null> {
+  const { data } = await db.from("lotteries").select("chain_id").eq("id", lotteryId).maybeSingle();
+  return data?.chain_id ?? null;
+}
+
+async function chainOfApplication(db: Db, applicationId: string): Promise<string | null> {
+  const { data } = await db.from("applications").select("lottery_id").eq("id", applicationId).maybeSingle();
+  return data ? chainOfLottery(db, data.lottery_id) : null;
+}
 
 /** DB の content_box（jsonb）を検証して読む。壊れた値は補正なし(null) */
 function parseContentBox(v: unknown): { x: number; y: number; w: number; h: number } | null {
@@ -234,6 +265,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       return {
         id: p.id,
         label: p.label,
+        kind: p.kind === "sub" ? ("sub" as const) : ("main" as const),
         initial: p.initial,
         color: p.color as ProfileColor,
         colorHex: p.color_hex,
@@ -620,6 +652,8 @@ export async function archiveLottery(db: Db, lotteryId: string, actor: string | 
 // ------------------------------------------------------------------ ★・応募・当落・購入・スルー
 export async function setManaged(db: Db, householdId: string, lotteryId: string, isManaged: boolean, actor: string | null): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success) return fail("リクエストが不正です");
+  const denied = await subScopeError(db, actor, await chainOfLottery(db, lotteryId));
+  if (denied) return fail(denied);
   const { error } = await db.from("lottery_management").upsert(
     {
       lottery_id: lotteryId, household_id: householdId, is_managed: isManaged, managed_source: "manual",
@@ -661,8 +695,10 @@ export async function setApplied(
 ): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success || !uuid.safeParse(accountId).success) return fail("リクエストが不正です");
   if (selectedItemId !== null && !uuid.safeParse(selectedItemId).success) return fail("リクエストが不正です");
-  const { data: mode } = await db.from("lotteries").select("multi_mode").eq("id", lotteryId).maybeSingle();
+  const { data: mode } = await db.from("lotteries").select("multi_mode,chain_id").eq("id", lotteryId).maybeSingle();
   if (!mode) return fail("対象のデータが見つかりません");
+  const denied = await subScopeError(db, actor, mode.chain_id);
+  if (denied) return fail(denied);
   // 応募状態を変えられるのは、操作中のプロフィール自身のアカウントだけ（他のプロフィールの応募状況は閲覧のみ）
   if (actor !== null) {
     const { data: own } = await db.from("service_accounts").select("managed_by_profile_id").eq("id", accountId).maybeSingle();
@@ -698,6 +734,8 @@ export async function setApplied(
 export async function setResult(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
   const r = z.enum(["pending", "won", "lost", "unknown"]).safeParse(result);
   if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  if (denied) return fail(denied);
   // 複数商品抽選は商品別の当落(setItemResults)で登録する（集計値を直接書き換えない）
   const { data: target } = await db.from("applications").select("lotteries(multi_mode)").eq("id", applicationId).maybeSingle();
   const lot = target?.lotteries as { multi_mode: string } | { multi_mode: string }[] | null | undefined;
@@ -717,6 +755,8 @@ export async function setResult(db: Db, applicationId: string, result: ResultSta
 export async function setFulfillment(db: Db, applicationId: string, fulfillment: FulfillmentStatus, actor: string | null): Promise<ServiceResult> {
   const f = z.enum(["procedure_done", "purchased"]).safeParse(fulfillment);
   if (!f.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  if (denied) return fail(denied);
   if (f.data === "purchased") {
     const { error } = await db.rpc("mark_purchased", { p_application_id: applicationId, p_actor: actor as string });
     return error ? fail(mapDbError(error)) : ok(undefined);
@@ -739,6 +779,8 @@ export async function setFulfillment(db: Db, applicationId: string, fulfillment:
  */
 export async function revertFulfillment(db: Db, applicationId: string, to: "none" | "procedure_done", actor: string | null): Promise<ServiceResult> {
   if (!uuid.safeParse(applicationId).success || !z.enum(["none", "procedure_done"]).safeParse(to).success) return fail("リクエストが不正です");
+  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  if (denied) return fail(denied);
   const { error } = await db.rpc("revert_fulfillment", { p_application_id: applicationId, p_actor: actor as string, p_to: to });
   if (!error) return ok(undefined);
   if (error.code === "23514") return fail("時間が経っているか、購入記録が編集されているため取り消せません。購入履歴から修正してください");
@@ -748,6 +790,8 @@ export async function revertFulfillment(db: Db, applicationId: string, to: "none
 /** 「今回だけ」スルー。実行プロフィールにのみ作用し、他プロフィールへ伝播しない。 */
 export async function setLotterySkip(db: Db, householdId: string, profileId: string, lotteryId: string, skip: boolean, actor: string | null): Promise<ServiceResult> {
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(lotteryId).success) return fail("リクエストが不正です");
+  const denied = await subScopeError(db, profileId, await chainOfLottery(db, lotteryId));
+  if (denied) return fail(denied);
   const { data: existing } = await db.from("skip_rules").select("id").eq("profile_id", profileId).eq("scope_type", "lottery").eq("lottery_id", lotteryId).maybeSingle();
   if (skip && !existing) {
     const { error } = await db.from("skip_rules").insert({ household_id: householdId, profile_id: profileId, scope_type: "lottery", lottery_id: lotteryId, updated_by_profile_id: actor });
@@ -816,6 +860,8 @@ export async function setItemResults(
 ): Promise<ServiceResult> {
   const r = itemResultsSchema.safeParse(results);
   if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  if (denied) return fail(denied);
   const { error } = await db.rpc("set_item_results", {
     p_application_id: applicationId,
     p_results: r.data.map((x) => ({ item_id: x.itemId, result: x.result })) as never,
@@ -833,6 +879,10 @@ export const profileSettingsSchema = z.object({
   iconMark: z.string().trim().min(1).max(20),
   /** null=本人のみ / 空配列=通知なし */
   notifyRecipientIds: z.array(z.uuid()).max(10).nullable(),
+  /** メイン／サブ。未指定=変更しない */
+  kind: z.enum(["main", "sub"]).optional(),
+  /** サブの対象系列。kind が sub のときだけ使い、指定した系列に置き換える（履歴は変えない）。未指定=変更しない */
+  targetChainIds: z.array(z.uuid()).max(200).optional(),
 });
 export type ProfileSettingsInput = z.input<typeof profileSettingsSchema>;
 
@@ -852,6 +902,33 @@ export async function reorderProfiles(db: Db, ids: string[], actor: string | nul
   return ok(undefined);
 }
 
+/** サブの対象系列（許可リストの系列行）を指定のものだけに置き換える。除外（block）と重なる系列は指定できない。店舗単位の設定には触れない */
+async function replaceTargetChains(db: Db, profileId: string, chainIds: string[], actor: string | null): Promise<ServiceResult> {
+  const want = [...new Set(chainIds)];
+  const { data: existing, error } = await db.from("profile_target_rules").select("id,chain_id,store_id,mode,household_id").eq("profile_id", profileId);
+  if (error) return fail(mapDbError(error));
+  const rows = existing ?? [];
+  if (rows.some((r) => r.store_id === null && r.mode === "block" && want.includes(r.chain_id))) return fail("除外に設定している系列は、サブの対象系列にできません");
+  if (want.length > 0) {
+    const { data: found } = await db.from("chains").select("id").in("id", want);
+    if ((found ?? []).length !== want.length) return fail("系列が見つかりません");
+  }
+  const chainAllow = rows.filter((r) => r.store_id === null && r.mode === "allow");
+  const remove = chainAllow.filter((r) => !want.includes(r.chain_id)).map((r) => r.id);
+  if (remove.length > 0) {
+    const { error: dErr } = await db.from("profile_target_rules").delete().in("id", remove);
+    if (dErr) return fail(mapDbError(dErr));
+  }
+  const have = new Set(chainAllow.map((r) => r.chain_id));
+  const householdId = rows[0]?.household_id ?? (await currentHouseholdId(db));
+  if (!householdId) return fail("世帯が見つかりません");
+  for (const chainId of want.filter((c) => !have.has(c))) {
+    const { error: iErr } = await db.from("profile_target_rules").insert({ household_id: householdId, profile_id: profileId, chain_id: chainId, store_id: null, mode: "allow", updated_by_profile_id: actor });
+    if (iErr) return fail(mapDbError(iErr));
+  }
+  return ok(undefined);
+}
+
 export async function updateProfileSettings(db: Db, profileId: string, raw: ProfileSettingsInput, actor: string | null): Promise<ServiceResult> {
   const p = profileSettingsSchema.safeParse(raw);
   if (!p.success || !uuid.safeParse(profileId).success) return fail(p.success ? "リクエストが不正です" : (p.error.issues[0]?.message ?? "入力内容を確認してください"));
@@ -860,9 +937,21 @@ export async function updateProfileSettings(db: Db, profileId: string, raw: Prof
   const valid = new Set((all ?? []).filter((x) => x.active).map((x) => x.id));
   if (v.notifyRecipientIds?.some((id) => !valid.has(id))) return fail("通知先に無効なユーザーが含まれています");
   const initial = Array.from(v.label)[0] ?? "A";
+  const { data: before } = await db.from("profiles").select("kind").eq("id", profileId).maybeSingle();
+  if (!before) return fail("対象のデータが見つかりません");
+  const nextKind = v.kind ?? (before.kind === "sub" ? "sub" : "main");
+  // 対象系列の置き換えは、応募・当落などの履歴には触れない（プロフィール単位の設定だけ）。メインへ戻すときは、対象系列の許可リストを外して全系列に戻す
+  if (nextKind === "sub" && v.targetChainIds) {
+    const r = await replaceTargetChains(db, profileId, v.targetChainIds, actor);
+    if (!r.ok) return r;
+  } else if (nextKind === "main" && before.kind === "sub") {
+    const r = await replaceTargetChains(db, profileId, [], actor);
+    if (!r.ok) return r;
+  }
   const { data, error } = await db
     .from("profiles")
     .update({
+      kind: nextKind,
       label: v.label,
       initial,
       color: v.color,

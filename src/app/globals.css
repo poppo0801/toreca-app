@@ -157,6 +157,21 @@
   }
 }
 
+/* 応募済みにしたカードの退場: 右へ滑らかにスライドし、移動の途中（40%）からフェードアウトして完全に消える */
+@keyframes apply-exit-slide {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(110%);
+    opacity: 0;
+  }
+}
+
 /* 設定の下のページへ移るときの、右からのスライド */
 @keyframes slide-in-right {
   from {

@@ -9,7 +9,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } fr
 import { jstDateString } from "@/lib/datetime";
 import { flexToJstDate, suggestedAmount } from "@/lib/finance";
 import { expenseSchema } from "@/lib/finance-input";
-import type { Purchase } from "@/types/domain";
+import type { Purchase, PurchaseUnit } from "@/types/domain";
 
 const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
 
@@ -17,7 +17,7 @@ interface ItemState {
   id: string | null;
   product: MasterRef;
   quantity: number;
-  unit: "box" | "pack" | "set";
+  unit: PurchaseUnit;
   /** 空欄=金額不明（0円とは別） */
   amount: string;
   /** 利用者が金額を直接編集したか。true の間は数量/商品を変えても自動で上書きしない */
@@ -114,7 +114,8 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      {/* 開いた直後に購入日（日付ピッカー・キーボード）が自動で開かないよう、最初のフォーカスは入力欄ではなくパネル自身にする */}
+      <DialogContent className="max-w-lg" onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus?.(); }}>
         <DialogTitle>{isEdit ? "支出を編集" : "支出を登録"}</DialogTitle>
         <DialogDescription>
           {fromLottery
@@ -122,14 +123,15 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
             : "購入した商品を記録します。マスター登録済みの商品は購入実績にも自動で反映されます。"}
         </DialogDescription>
         <form onSubmit={submit} className="mt-3 space-y-3" noValidate>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-sm">
-              購入日
-              <input type="date" aria-label="購入日" value={date} onChange={(e) => setDate(e.target.value)} className={field} />
+          {/* 2列とも「上: 項目名 / 下: 入力」で揃える（iOS の日付入力は既定で高さ・内側の余白が違うので、同じ高さ・見た目に固定する） */}
+          <div className="grid grid-cols-2 items-start gap-2">
+            <label className="block min-w-0 text-sm">
+              <span className="block leading-5">購入日</span>
+              <input type="date" aria-label="購入日" value={date} onChange={(e) => setDate(e.target.value)} className={`${field} block h-11 min-w-0 appearance-none text-left`} />
             </label>
-            <label className="text-sm">
-              購入方法
-              <select aria-label="購入方法" value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)} className={field}>
+            <label className="block min-w-0 text-sm">
+              <span className="block leading-5">購入方法</span>
+              <select aria-label="購入方法" value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)} className={`${field} block h-11 min-w-0`}>
                 <option value="store">店頭</option>
                 <option value="online">通販・ネット</option>
                 <option value="shipping">発送（抽選・予約）</option>
@@ -175,6 +177,7 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
                       <option value="box">BOX</option>
                       <option value="pack">パック</option>
                       <option value="set">セット</option>
+                      <option value="piece">個</option>
                     </select>
                     <input
                       type="number"

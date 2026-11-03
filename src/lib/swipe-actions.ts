@@ -1,5 +1,5 @@
 import { isSkippedBy } from "@/lib/eligibility";
-import { myApplication, needsResultConfirm, wonProgress } from "@/lib/lottery-flow";
+import { hasSeparateSteps, myApplication, needsResultConfirm, wonProgress } from "@/lib/lottery-flow";
 import { applyControlFor } from "@/lib/lottery-summary";
 import { isManaged, type Tab } from "@/lib/lottery-view";
 import type { AppData, Lottery } from "@/types/domain";
@@ -105,7 +105,7 @@ export function planSwipe(
       const p = wonProgress(lottery, mine, now);
       if (p.stage === "done") return { kind: "blocked", message: "すでに受取済みです" };
       if (!p.swipeable) return { kind: "blocked", message: "購入・受取の期間前です（履歴の補正は詳細から行えます）" };
-      return lottery.procedureSplit === true ? { kind: "choose-fulfillment" } : { kind: "run", op };
+      return hasSeparateSteps(lottery) ? { kind: "choose-fulfillment" } : { kind: "run", op };
     }
   }
 }

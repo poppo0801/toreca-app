@@ -77,7 +77,7 @@ describe("タブと並び順", () => {
   it("落選のみの抽選は応募済み/当選から外れ、全情報に履歴として残る", () => {
     const d = mk();
     expect(selectLotteries(d, "applied", DEFAULT_FILTERS, NOW).map((l) => l.id)).not.toContain("L10");
-    expect(selectLotteries(d, "all", DEFAULT_FILTERS, NOW).map((l) => l.id)).toContain("L10");
+    expect(selectLotteries(d, "all", { ...DEFAULT_FILTERS, status: "any" }, NOW).map((l) => l.id)).toContain("L10");
   });
   it("当選: 未購入が先、購入済みは後ろ", () => {
     const d = mk();

@@ -110,7 +110,7 @@ describe("スルー表示フィルター（★管理対象）", () => {
   it("商品フィルターは複数商品の抽選もいずれかの明細で絞り込める", () => {
     const l3 = d.lotteries.find((l) => l.id === "L3")!;
     const second = l3.items[1].productId;
-    const r = selectLotteries(d, "all", { ...DEFAULT_FILTERS, productId: second }, NOW, "pA").map((l) => l.id);
+    const r = selectLotteries(d, "all", { ...DEFAULT_FILTERS, status: "any", productId: second }, NOW, "pA").map((l) => l.id);
     expect(r).toContain("L3");
   });
 });

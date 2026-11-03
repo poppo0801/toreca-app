@@ -3426,6 +3426,7 @@ export type Database = {
           icon_mark: string
           id: string
           initial: string
+          kind: string
           label: string
           notify_recipient_ids: string[] | null
           sort_order: number
@@ -3441,6 +3442,7 @@ export type Database = {
           icon_mark?: string
           id?: string
           initial: string
+          kind?: string
           label: string
           notify_recipient_ids?: string[] | null
           sort_order?: number
@@ -3456,6 +3458,7 @@ export type Database = {
           icon_mark?: string
           id?: string
           initial?: string
+          kind?: string
           label?: string
           notify_recipient_ids?: string[] | null
           sort_order?: number

@@ -1,5 +1,5 @@
 import { flexToJstDate, productName, purchaseTotal, UNIT_LABEL } from "@/lib/finance";
-import type { AppData, ItemUnit, Purchase, PurchaseItem } from "@/types/domain";
+import type { AppData, Purchase, PurchaseItem, PurchaseUnit } from "@/types/domain";
 
 /**
  * 購入記録の表示用集計（純関数）。購入記録は収支の支出と同じデータ(purchases)で、別に複製を持たないため
@@ -74,7 +74,7 @@ export interface ProductTotal {
   /** 商品名（マスター未登録の自由入力名を含む） */
   label: string;
   /** 直接購入した数量（単位ごと） */
-  direct: Partial<Record<ItemUnit, number>>;
+  direct: Partial<Record<PurchaseUnit, number>>;
   /** BOX をパックに換算した合計（BOX×入数+パック）。入数が未設定なら null（推測しない） */
   packEquivalent: number | null;
   amount: number;

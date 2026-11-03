@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { createTapGate } from "@/lib/tap-guard";
-import { keyboardInset } from "@/lib/viewport-insets";
+import { isEditingElement, keyboardInset, visualShift } from "@/lib/viewport-insets";
 import { viewportGap } from "@/lib/viewport-gap";
 import { gapBottom, verdict, type Snap } from "@/lib/layout-diagnostics";
 
@@ -21,6 +21,30 @@ describe("キーボードが隠す高さ（--kb-inset）", () => {
     expect(keyboardInset(852, { height: 500, offsetTop: 0, scale: 2 })).toBe(0); // ピンチ拡大中
     expect(keyboardInset(852, { height: 100, offsetTop: 0, scale: 1 })).toBe(0);
     expect(keyboardInset(852, null)).toBe(0);
+  });
+});
+
+describe("見える下端とのずれ（--vv-shift）: キーボード開閉後に下部メニューが途切れる不具合", () => {
+  it("閉じたあとに visualViewport がずれたまま残るとき、その差を返す（メニューを見える下端へ寄せる）", () => {
+    expect(visualShift(793, { height: 793, offsetTop: 40, scale: 1 }, false)).toBe(40); // 見える領域が下へずれて残った
+    expect(visualShift(793, { height: 700, offsetTop: 0, scale: 1 }, false)).toBe(-93); // 高さが縮んだまま残った
+    expect(visualShift(793, { height: 793, offsetTop: 0, scale: 1 }, false)).toBe(0); // 正常
+    expect(visualShift(793, { height: 792, offsetTop: 0, scale: 1 }, false)).toBe(0); // 丸め
+  });
+  it("入力中（キーボード表示中）・ピンチ拡大中・極端な値・非対応では0", () => {
+    expect(visualShift(793, { height: 450, offsetTop: 0, scale: 1 }, true)).toBe(0);
+    expect(visualShift(793, { height: 700, offsetTop: 0, scale: 2 }, false)).toBe(0);
+    expect(visualShift(793, { height: 100, offsetTop: 0, scale: 1 }, false)).toBe(0);
+    expect(visualShift(793, null, false)).toBe(0);
+  });
+  it("文字入力できる要素だけを編集中とみなす", () => {
+    const el = (tagName: string, type = "") => ({ tagName, type, isContentEditable: false }) as unknown as Element;
+    expect(isEditingElement(el("INPUT", "text"))).toBe(true);
+    expect(isEditingElement(el("INPUT", "date"))).toBe(true);
+    expect(isEditingElement(el("INPUT", "checkbox"))).toBe(false);
+    expect(isEditingElement(el("TEXTAREA"))).toBe(true);
+    expect(isEditingElement(el("BUTTON"))).toBe(false);
+    expect(isEditingElement(null)).toBe(false);
   });
 });
 

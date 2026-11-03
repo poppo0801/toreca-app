@@ -1,18 +1,21 @@
-import { isResultFinished, resultSortKey, sortKey } from "@/lib/datetime";
-import { effectiveEventState, isSkippedBy } from "@/lib/eligibility";
-import { applyControlFor } from "@/lib/lottery-summary";
+import { isResultFinished, jstDateString, resultSortKey, sortKey } from "@/lib/datetime";
+import { effectiveEventState, isSkippedBy, profileSeesLottery } from "@/lib/eligibility";
 import { kindOf, myApplication, resultStage, wonProgress, wonSortRank } from "@/lib/lottery-flow";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
 export type Tab = "managed" | "applied" | "won" | "all";
-export type AllFilter = "any" | "unmanaged" | "skipped" | "history";
+export type AllFilter = "any" | "unmanaged" | "skipped";
 export type SortMode = "deadline" | "result";
 
 /** ★管理対象タブのスルー表示: normal=自分がスルーしていないもの / include=すべて / only=自分がスルーしたもの */
 export type SkipView = "normal" | "include" | "only";
 
-/** ★管理対象タブの応募済み表示: exclude=現在のプロフィールが応募済みの抽選を隠す（既定）/ include=含める */
-export type AppliedView = "exclude" | "include";
+/**
+ * 状態の絞り込み（現在選択中のプロフィール基準）。
+ *  default=受付中かつ未応募（全情報・★管理対象の既定）/ open=受付中 / closed=受付終了 / unapplied=未応募 / applied=応募済み / won=当選 / lost=落選 / any=すべて。
+ * 応募・当落は現在のプロフィールのものだけで判定する（他のプロフィールが応募済みでも、現在のプロフィールが未応募なら未応募）。
+ */
+export type StatusFilter = "default" | "open" | "closed" | "unapplied" | "applied" | "won" | "lost" | "any";
 
 export interface Filters {
   query: string;
@@ -20,7 +23,7 @@ export interface Filters {
   /** 商品で絞り込み（複数商品の抽選も、いずれかの明細に含まれていれば対象） */
   productId: string;
   skip: SkipView;
-  applied: AppliedView;
+  status: StatusFilter;
   prefecture: string;
   receiveMethod: string;
   allFilter: AllFilter;
@@ -32,12 +35,17 @@ export const DEFAULT_FILTERS: Filters = {
   chainId: "",
   productId: "",
   skip: "normal",
-  applied: "exclude",
+  status: "default",
   prefecture: "",
   receiveMethod: "",
   allFilter: "any",
   sort: "deadline",
 };
+
+/** タブごとの既定の絞り込み。全情報・★管理対象は「受付中かつ未応募」、応募済み・当選タブは状態で絞らない */
+export function defaultFiltersFor(tab: Tab): Filters {
+  return tab === "all" || tab === "managed" ? DEFAULT_FILTERS : { ...DEFAULT_FILTERS, status: "any" };
+}
 
 export function isManaged(data: AppData, lotteryId: string): boolean {
   return data.management.find((m) => m.lotteryId === lotteryId)?.isManaged ?? false;
@@ -73,13 +81,22 @@ export function isSkippedByAnyone(data: AppData, lotteryId: string): boolean {
   );
 }
 
-/** 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。 */
-export function inTab(data: AppData, lottery: Lottery, tab: Tab, now: Date): boolean {
+/**
+ * 受付の状態。継続抽選・招待制販売は有効期限（validUntil）を過ぎたら受付終了として扱う（期限が未設定なら、締切の扱いに従う）。
+ */
+export function eventStateOf(lottery: Lottery, now: Date): Lottery["eventState"] {
   const event = effectiveEventState(lottery, now);
+  if ((event === "open" || event === "before") && kindOf(lottery) !== "normal" && lottery.validUntil && lottery.validUntil < jstDateString(now)) return "closed";
+  return event;
+}
+
+/** 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。受付の終了・応募済みの除外は「状態」の絞り込みで行う。 */
+export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date): boolean {
+  void _now;
   switch (tab) {
     case "managed":
-      // 受付終了は自動整理。応募済みで結果待ちなら応募済みタブに残る。
-      return isManaged(data, lottery.id) && (event === "open" || event === "before");
+      // ★が付いている抽選だけ（★なしは表示しない）
+      return isManaged(data, lottery.id);
     case "applied":
       // 継続抽選・招待制販売は「継続中の抽選」に分けて表示する（応募済みタブの件数・一覧には含めない）
       return hasPendingResult(data, lottery.id) && kindOf(lottery) === "normal";
@@ -117,7 +134,7 @@ function matchFilters(data: AppData, lottery: Lottery, f: Filters): boolean {
   return true;
 }
 
-function matchAllFilter(data: AppData, lottery: Lottery, f: AllFilter, now: Date): boolean {
+function matchAllFilter(data: AppData, lottery: Lottery, f: AllFilter): boolean {
   switch (f) {
     case "any":
       return true;
@@ -125,8 +142,6 @@ function matchAllFilter(data: AppData, lottery: Lottery, f: AllFilter, now: Date
       return !isManaged(data, lottery.id);
     case "skipped":
       return isSkippedByAnyone(data, lottery.id);
-    case "history":
-      return ["closed", "cancelled"].includes(effectiveEventState(lottery, now));
   }
 }
 
@@ -161,24 +176,45 @@ function matchSkipView(data: AppData, lottery: Lottery, f: Filters, tab: Tab, pr
 }
 
 /**
- * ★管理対象タブで、現在のプロフィールが応募済みの抽選を隠す。判定は現在のプロフィールだけ（他のプロフィールの応募は無関係）。
+ * 状態の絞り込み。判定は現在のプロフィールだけ（他のプロフィールの応募は無関係）。
  * 応募は抽選単位（複数商品も1つの応募に含まれる）なので、応募済みなら未応募の商品は残らない。
  * keepIds は退場アニメーション中のカード（応募直後に一定時間だけ残す）。
  */
-function matchAppliedView(data: AppData, lottery: Lottery, f: Filters, tab: Tab, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): boolean {
-  if (tab !== "managed" || !profileId || f.applied === "include") return true;
+export function matchStatus(data: AppData, lottery: Lottery, status: StatusFilter, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): boolean {
+  if (status === "any") return true;
   if (keepIds?.has(lottery.id)) return true;
-  return applyControlFor(data, lottery, profileId, now).kind !== "applied";
+  const event = eventStateOf(lottery, now);
+  const open = event === "open" || event === "before";
+  const mine = profileId ? myApplication(data, lottery.id, profileId) : undefined;
+  switch (status) {
+    case "default":
+      return open && !mine;
+    case "open":
+      return open;
+    case "closed":
+      return event === "closed" || event === "cancelled";
+    case "unapplied":
+      return !mine;
+    case "applied":
+      return !!mine;
+    case "won":
+      return mine?.result === "won";
+    case "lost":
+      return mine?.result === "lost";
+  }
 }
 
 export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): Lottery[] {
+  // 「受付中・未応募」の既定は全情報・★管理対象のもの。応募済み・当選タブでは、状態を指定していなければ絞らない
+  const status: StatusFilter = f.status === "default" && (tab === "applied" || tab === "won") ? "any" : f.status;
   const list = data.lotteries.filter(
     (l) =>
       inTab(data, l, tab, now) &&
       matchFilters(data, l, f) &&
       matchSkipView(data, l, f, tab, profileId) &&
-      matchAppliedView(data, l, f, tab, now, profileId, keepIds) &&
-      (tab !== "all" || matchAllFilter(data, l, f.allFilter, now)),
+      matchStatus(data, l, status, now, profileId, keepIds) &&
+      (!profileId || profileSeesLottery(data, profileId, l)) &&
+      (tab !== "all" || matchAllFilter(data, l, f.allFilter)),
   );
 
   const byDeadline = (a: Lottery, b: Lottery) => sortKey(a.applyDeadline) - sortKey(b.applyDeadline);

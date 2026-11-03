@@ -13,7 +13,7 @@ export const manualPurchaseSchema = z.object({
       z.object({
         productId: z.union([z.uuid(), z.literal("")]),
         quantity: z.number().int("数量は整数で入力してください").min(1, "数量は1以上で入力してください").max(9999),
-        unit: z.enum(["box", "pack", "set"]),
+        unit: z.enum(["box", "pack", "set", "piece"]),
         /** 不明は null（0円と区別する） */
         amountPaid: z.number().int().min(0).max(100_000_000).nullable(),
       }),

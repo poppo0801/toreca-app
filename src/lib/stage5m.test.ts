@@ -11,6 +11,7 @@ import {
   visibleRequirementTags,
 } from "@/lib/lottery-taxonomy";
 import { splitNotes } from "@/lib/notes";
+import { effectiveEventState } from "@/lib/eligibility";
 import { DEFAULT_FILTERS, selectLotteries } from "@/lib/lottery-view";
 import * as m from "@/lib/mutations";
 import type { AppData } from "@/types/domain";
@@ -80,31 +81,63 @@ describe("備考の箇条書き", () => {
   });
 });
 
-describe("★管理対象の応募済みフィルター", () => {
+describe("状態の絞り込み（全情報・★管理対象の既定は受付中かつ現在のプロフィールが未応募）", () => {
   const managed = (d: AppData): AppData => ({ ...d, management: d.lotteries.map((l) => ({ lotteryId: l.id, isManaged: true, managedSource: "manual" as const })) });
-  it("既定は「応募済みを含まない」。現在のプロフィールで応募済みの抽選だけ隠れる", () => {
-    expect(DEFAULT_FILTERS.applied).toBe("exclude");
+  const ids = (d: AppData, tab: "managed" | "all" | "applied" | "won", f: Partial<typeof DEFAULT_FILTERS>, profile = "pA", keep?: ReadonlySet<string>) =>
+    selectLotteries(d, tab, { ...DEFAULT_FILTERS, ...f }, NOW, profile, keep).map((l) => l.id);
+  it("既定は「受付中・未応募」。現在のプロフィールで応募済みの抽選だけ隠れる（他のプロフィールの応募には影響されない）", () => {
+    expect(DEFAULT_FILTERS.status).toBe("default");
     const base = managed(createMockData(NOW));
     const applied = m.setApplied(base, "pA", "L4", "a-c3", true, NOW);
-    const idsA = selectLotteries(applied, "managed", DEFAULT_FILTERS, NOW, "pA").map((l) => l.id);
-    expect(idsA).not.toContain("L4");
-    // 他のプロフィールの応募状況では変わらない（Bは未応募なので表示される）
-    const idsB = selectLotteries(applied, "managed", DEFAULT_FILTERS, NOW, "pB").map((l) => l.id);
-    expect(idsB).toContain("L4");
+    expect(ids(applied, "managed", {}, "pA")).not.toContain("L4");
+    expect(ids(applied, "managed", {}, "pB")).toContain("L4"); // Bは未応募
   });
-  it("「応募済みを含む」では再表示される。応募済みタブなど他のタブには影響しない", () => {
+  it("受付終了の抽選は既定で除外され、「受付終了」「すべて」で表示される。全情報も同じ", () => {
+    const d = managed(createMockData(NOW));
+    const closed = d.lotteries.filter((l) => effectiveEventState(l, NOW) === "closed").map((l) => l.id);
+    expect(closed.length).toBeGreaterThan(0);
+    for (const tab of ["managed", "all"] as const) {
+      for (const id of closed) expect(ids(d, tab, {})).not.toContain(id);
+      for (const id of closed) expect(ids(d, tab, { status: "closed" })).toContain(id);
+      for (const id of closed) expect(ids(d, tab, { status: "any" })).toContain(id);
+    }
+  });
+  it("「応募済み」「当選」「落選」は現在のプロフィールの応募で判定する", () => {
+    const d = managed(createMockData(NOW));
+    const applied = m.setApplied(d, "pA", "L4", "a-c3", true, NOW);
+    expect(ids(applied, "managed", { status: "applied" }, "pA")).toContain("L4");
+    expect(ids(applied, "managed", { status: "applied" }, "pB")).not.toContain("L4");
+    expect(ids(applied, "managed", { status: "unapplied" }, "pB")).toContain("L4");
+    expect(ids(applied, "managed", { status: "won" }, "pA")).not.toContain("L4");
+    expect(ids(applied, "managed", { status: "lost" }, "pA")).not.toContain("L4");
+  });
+  it("★管理対象では、★が付いていない抽選は状態に関係なく表示しない", () => {
+    const d = createMockData(NOW);
+    const none: AppData = { ...d, management: [] };
+    expect(ids(none, "managed", { status: "any" })).toEqual([]);
+    expect(ids(none, "all", { status: "any" }).length).toBe(d.lotteries.length);
+  });
+  it("応募済み・当選タブでは既定のままでも状態で絞らない。他の条件（系列）とも組み合わせられる", () => {
     const applied = m.setApplied(managed(createMockData(NOW)), "pA", "L4", "a-c3", true, NOW);
-    expect(selectLotteries(applied, "managed", { ...DEFAULT_FILTERS, applied: "include" }, NOW, "pA").map((l) => l.id)).toContain("L4");
-    const tabHidden = selectLotteries(applied, "applied", DEFAULT_FILTERS, NOW, "pA").map((l) => l.id);
-    const tabShown = selectLotteries(applied, "applied", { ...DEFAULT_FILTERS, applied: "include" }, NOW, "pA").map((l) => l.id);
-    expect(tabHidden).toEqual(tabShown);
-    expect(tabHidden).toContain("L4");
+    expect(ids(applied, "applied", {})).toContain("L4");
+    const chainOfL4 = applied.lotteries.find((l) => l.id === "L4")!.chainId;
+    expect(ids(applied, "managed", { status: "any", chainId: chainOfL4 })).toContain("L4");
+    expect(ids(applied, "managed", { status: "any", chainId: "no-such-chain" })).toEqual([]);
   });
   it("退場アニメーション中のカードは一覧に残り、解除すると未応募で表示される", () => {
     const applied = m.setApplied(managed(createMockData(NOW)), "pA", "L4", "a-c3", true, NOW);
-    expect(selectLotteries(applied, "managed", DEFAULT_FILTERS, NOW, "pA", new Set(["L4"])).map((l) => l.id)).toContain("L4");
+    expect(ids(applied, "managed", {}, "pA", new Set(["L4"]))).toContain("L4");
     const undone = m.setApplied(applied, "pA", "L4", "a-c3", false, NOW);
-    expect(selectLotteries(undone, "managed", DEFAULT_FILTERS, NOW, "pA").map((l) => l.id)).toContain("L4");
+    expect(ids(undone, "managed", {}, "pA")).toContain("L4");
+  });
+  it("継続抽選・招待制販売は有効期限を過ぎたら受付終了として扱う（期限が未設定なら締切のまま）", () => {
+    const d = managed(createMockData(NOW));
+    const base = d.lotteries.find((l) => effectiveEventState(l, NOW) === "open")!;
+    const expired: AppData = { ...d, lotteries: d.lotteries.map((l) => (l.id === base.id ? { ...l, kind: "ongoing" as const, validUntil: "2026-10-01" } : l)) };
+    expect(ids(expired, "managed", {})).not.toContain(base.id);
+    expect(ids(expired, "managed", { status: "closed" })).toContain(base.id);
+    const noLimit: AppData = { ...d, lotteries: d.lotteries.map((l) => (l.id === base.id ? { ...l, kind: "ongoing" as const } : l)) };
+    expect(ids(noLimit, "managed", {})).toContain(base.id);
   });
 });
 

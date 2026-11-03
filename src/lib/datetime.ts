@@ -229,6 +229,57 @@ export function formatResultShort(l: ResultPeriod, now: Date): string {
   return hasResultPeriod(l) ? `${start}〜${formatMonthDay(resultEndDay(l)!, now)}` : start;
 }
 
+// ------------------------------------------------------------------ 曜日つきの日付（カード用。時刻は出さない）
+const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/** 暦日 YYYY-MM-DD（日本時間の日付として扱う）の曜日。端末のタイムゾーンに依存しない */
+export function weekdayJa(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return WEEKDAY_JA[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+}
+
+/** FlexibleDate の暦日(JST)。不明は null */
+export function ymdOfFlexible(v: FlexibleDate): string | null {
+  if (v.precision === "date_only") return v.date;
+  if (v.precision === "date_time") return jstDateString(new Date(v.at));
+  return null;
+}
+
+/** 「11/4（水）」。今年以外は年つき。時刻は出さない */
+export function formatMdW(ymd: string, now: Date): string {
+  return `${formatMonthDay(ymd, now)}（${weekdayJa(ymd)}）`;
+}
+
+/** 時刻を省いた「11/4（水）」。不明は null */
+export function formatFlexMdW(v: FlexibleDate, now: Date): string | null {
+  const ymd = ymdOfFlexible(v);
+  return ymd ? formatMdW(ymd, now) : null;
+}
+
+/** 日時つきの「11/6（金）23:59」。日付のみは時刻を出さず（補完しない）「11/6（金）」。不明は null */
+export function formatFlexMdWTime(v: FlexibleDate, now: Date): string | null {
+  const day = formatFlexMdW(v, now);
+  if (!day) return null;
+  const time = v.precision === "date_time" ? formatShort(v).split(" ")[1] : undefined;
+  return time ? `${day} ${time}` : day;
+}
+
+/** 期間「11/4（水）〜11/6（金）」。片方だけ分かるときは「〜11/6（金）」「11/4（水）〜」。両方不明は null（呼び出し側で「未定」を出す） */
+export function formatPeriodMdW(start: FlexibleDate, end: FlexibleDate, now: Date): string | null {
+  const s = formatFlexMdW(start, now);
+  const e = formatFlexMdW(end, now);
+  if (!s && !e) return null;
+  if (s && e) return s === e ? s : `${s}〜${e}`;
+  return s ? `${s}〜` : `〜${e}`;
+}
+
+/** 発表日（期間なら「11/3（火）〜11/5（木）」）。不明は null */
+export function formatResultMdW(l: ResultPeriod, now: Date): string | null {
+  const s = resultStartDay(l);
+  if (!s) return null;
+  return hasResultPeriod(l) ? `${formatMdW(s, now)}〜${formatMdW(resultEndDay(l)!, now)}` : formatMdW(s, now);
+}
+
 /** 画面表示用。formatFlexible と同じだが、日付のみは「(時刻未確認)」を付けない（時刻不明は内部の精度として保持し、補完もしない） */
 export function formatPlain(value: FlexibleDate): string {
   return value.precision === "date_only" ? formatShort(value) : formatFlexible(value);

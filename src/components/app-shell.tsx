@@ -13,7 +13,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { viewportGap } from "@/lib/viewport-gap";
-import { keyboardInset, SETTLE_MS } from "@/lib/viewport-insets";
+import { isEditingElement, keyboardInset, SETTLE_MS, visualShift } from "@/lib/viewport-insets";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,8 @@ const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
  * iOS のホーム画面アプリの表示領域まわりを CSS 変数に反映する。
  *  --vp-gap  : 起動直後だけ表示領域(innerHeight)が実際の画面より低いとき、100vh との差（standalone のときだけ）。下部の固定要素の bottom をその分下げる。
  *  --kb-inset: キーボードが隠している下側の高さ。ボトムシートの bottom をその分上げる。
+ *  --vv-shift: キーボードを閉じたあとなどに、見えている領域の下端がレイアウト上の下端とずれたまま残るときの差（符号あり。編集中は0）。
+ *              下部メニューなど固定要素の bottom をその分動かし、いつも見える下端に合わせる（キーボード開閉後に途切れる不具合の構造的な対処）。
  * 表示領域は起動・復帰・最初の操作のあとに、イベントなしで変わることがある（実機の診断）。以前は特定のイベントの瞬間に1回だけ測っていたため、
  * 測った後に表示領域が直ると補正値だけが残り、下部メニューが画面の下へはみ出す（下半分が隠れる）危険があった。
  * そこで、これらのきっかけの後は SETTLE_MS の間フレームごとに測り直す（値が変わったときだけ書き換える。無条件の再描画はしない）。
@@ -43,9 +45,9 @@ function useViewportGap() {
     probe.setAttribute("aria-hidden", "true");
     probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;left:0;top:0;width:0;height:100vh";
     document.body.appendChild(probe);
-    const set = (name: string, px: number) => {
+    const set = (name: string, px: number, signed = false) => {
       const prev = root.style.getPropertyValue(name);
-      const next = px > 0 ? `${px}px` : "";
+      const next = px > 0 || (signed && px < 0) ? `${px}px` : "";
       if (prev === next) return;
       if (next) root.style.setProperty(name, next);
       else root.style.removeProperty(name);
@@ -54,6 +56,7 @@ function useViewportGap() {
       const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
       set("--vp-gap", viewportGap(probe.getBoundingClientRect().height, window.innerHeight, standalone));
       set("--kb-inset", keyboardInset(window.innerHeight, window.visualViewport));
+      set("--vv-shift", visualShift(window.innerHeight, window.visualViewport, isEditingElement(document.activeElement)), true);
     };
     let until = 0;
     let raf = 0;
@@ -94,6 +97,7 @@ function useViewportGap() {
       probe.remove();
       root.style.removeProperty("--vp-gap");
       root.style.removeProperty("--kb-inset");
+      root.style.removeProperty("--vv-shift");
     };
   }, []);
 }
@@ -179,7 +183,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         {/* モバイル: 下部メニュー（プロフィール別・最大5枠。隠れた機能があれば「その他」）。背景は下端まで伸び、操作部分はホームインジケーターの少し上 */}
-        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(var(--vp-gap,0px)*-1)] z-30 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
+        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(0px_-_var(--vp-gap,0px)_-_var(--vv-shift,0px))] z-30 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
           <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
             {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
             {nav.more.length > 0 && (

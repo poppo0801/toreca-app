@@ -13,7 +13,7 @@ import { productName, purchaseStoreName, purchaseTotal, UNIT_LABEL } from "@/lib
 import { flexToJstDate } from "@/lib/finance";
 import { filterPurchases, periodLabel, productTotals, quantityLabel, shiftPeriod, summarize, type Period, type PeriodKind } from "@/lib/purchase-records";
 import { cn } from "@/lib/utils";
-import type { ItemUnit, Purchase } from "@/types/domain";
+import type { Purchase, PurchaseUnit } from "@/types/domain";
 
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
 const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
@@ -226,7 +226,7 @@ export function PurchasesView() {
         <ul className="divide-y overflow-hidden rounded-xl border bg-card shadow-card" data-testid="product-totals" aria-label="商品別の累計">
           {totals.map((r) => {
             const product = r.productId ? data.products.find((x) => x.id === r.productId) : undefined;
-            const units = (Object.keys(r.direct) as ItemUnit[]).map((u) => `${UNIT_LABEL[u]}×${r.direct[u]}`);
+            const units = (Object.keys(r.direct) as PurchaseUnit[]).map((u) => `${UNIT_LABEL[u]}×${r.direct[u]}`);
             return (
               <li key={r.productId ?? r.label} className="flex items-center gap-2.5 px-2.5 py-2" data-testid="product-total-row">
                 <span className="flex h-12 w-10 shrink-0 items-center justify-center">

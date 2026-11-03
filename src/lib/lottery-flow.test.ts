@@ -47,16 +47,16 @@ describe("当選後の購入・受取", () => {
   it("分離: 購入前は購入期限、購入手続き済みなら受取期限に切り替わる", () => {
     const l = lot({ procedureSplit: true, procedureDeadline: dateOnly("2026-11-12"), receiveStart: dateOnly("2026-11-15"), receiveDeadline: dateOnly("2026-11-25") });
     const before = wonProgress(l, app({ result: "won" }), NOW);
-    expect(before).toMatchObject({ stage: "purchase", action: "purchase", status: "open", label: "購入期限 11/12" });
+    expect(before).toMatchObject({ stage: "purchase", action: "purchase", status: "open", label: "購入期限 11/12（木）" });
     const bought = wonProgress(l, app({ result: "won", fulfillment: "procedure_done" }), NOW);
     expect(bought).toMatchObject({ stage: "receive", action: "receive", status: "waiting_start", swipeable: false });
-    expect(bought.label).toBe("11/15から受取");
+    expect(bought.label).toBe("11/15（日）から受取");
     const inWindow = wonProgress({ ...l, receiveStart: dateOnly("2026-11-09") }, app({ result: "won", fulfillment: "procedure_done" }), NOW);
     expect(inWindow).toMatchObject({ status: "open", swipeable: true });
-    expect(inWindow.label).toBe("受取可能 〜11/25");
+    expect(inWindow.label).toBe("受取可能 〜11/25（水）");
   });
   it("期限超過は要確認、受取済みは完了、期限が不明なら推測しない", () => {
-    expect(wonProgress(lot({ procedureDeadline: dateOnly("2026-11-09") }), app({ result: "won" }), NOW)).toMatchObject({ status: "overdue", label: "要確認（期限超過）" });
+    expect(wonProgress(lot({ procedureDeadline: dateOnly("2026-11-09") }), app({ result: "won" }), NOW)).toMatchObject({ status: "overdue", label: "期限超過" });
     expect(wonProgress(lot(), app({ result: "won", fulfillment: "purchased" }), NOW)).toMatchObject({ status: "done", action: null, label: "完了" });
     expect(wonProgress(lot(), app({ result: "won" }), NOW)).toMatchObject({ status: "unknown", label: "受取期限未確認" });
   });
@@ -68,6 +68,8 @@ describe("当選後の購入・受取", () => {
 
 describe("継続抽選・招待制販売", () => {
   const data = {
+    profiles: [],
+    chains: [],
     accounts: [{ id: "acc1", profileId: "p1", chainId: "c1" }, { id: "acc2", profileId: "p2", chainId: "c1" }],
     lotteries: [
       lot({ id: "N", kind: "normal" }),

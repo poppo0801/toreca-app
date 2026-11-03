@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
 
 const WON_CLASS = "border-success/70 bg-success/10 text-success hover:bg-success/20";
+/** 当選ボタンは主要操作のオレンジ、落選ボタンはグレー系（誤タップしやすい左右の並びは 落選｜当選） */
+const WON_BUTTON_CLASS = "border-primary bg-primary text-primary-foreground hover:bg-primary/90";
 const LOST_CLASS = "border-border bg-muted text-muted-foreground hover:bg-muted/70";
 
 const TONE_CLASS = {
@@ -69,11 +71,11 @@ export function ResultButtons({ lottery, compact = false, onOpenDetail }: { lott
   return (
     <>
       <span className="inline-flex shrink-0 items-center gap-1.5" role="group" aria-label={`${profile.label}の当落を記録`}>
-        <Button size="sm" variant="outline" className={cn(base, WON_CLASS)} disabled={busy} onClick={() => press("won")} data-testid="result-won">
-          当選
-        </Button>
         <Button size="sm" variant="outline" className={cn(base, LOST_CLASS)} disabled={busy} onClick={() => press("lost")} data-testid="result-lost">
           落選
+        </Button>
+        <Button size="sm" variant="outline" className={cn(base, WON_BUTTON_CLASS)} disabled={busy} onClick={() => press("won")} data-testid="result-won">
+          当選
         </Button>
       </span>
       {error && (

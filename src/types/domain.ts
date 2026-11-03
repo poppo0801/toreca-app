@@ -24,6 +24,8 @@ export type LotteryKind = "normal" | "ongoing" | "invite";
 export type ReceiveMethod = "store" | "shipping" | "either" | "unknown";
 export type ApplyMethod = "web" | "store" | "app" | "unknown";
 export type ItemUnit = "box" | "pack" | "set";
+/** 購入・売却の数量単位。抽選の商品明細（ItemUnit）に加えて、単品の「個」を使える */
+export type PurchaseUnit = ItemUnit | "piece";
 export type SourceKind = "manual" | "x_parse" | "auto" | "import";
 
 export type ProfileColor = "blue" | "green" | "purple" | "pink" | "teal";
@@ -33,6 +35,8 @@ export interface Profile {
   /** 無効化されたプロフィールは切替対象から外す（履歴表示には残す）。未指定=有効 */
   active?: boolean;
   label: string;
+  /** メイン=全系列を表示・操作 / サブ=対象系列（allowedChainIds）の抽選だけ。未指定=メイン */
+  kind?: "main" | "sub";
   color: ProfileColor;
   /** 自由な色指定（#RRGGBB）。あれば color より優先 */
   colorHex?: string | null;
@@ -298,7 +302,7 @@ export interface PurchaseItem {
   productLabel?: string | null;
   lotteryItemId?: string | null;
   quantity: number;
-  unit: ItemUnit;
+  unit: PurchaseUnit;
   /** 不明は null（捏造しない） */
   amountPaid: number | null;
 }
@@ -326,7 +330,7 @@ export interface Sale {
   productId: string | null;
   productLabel: string | null;
   quantity: number;
-  unit: "box" | "pack" | "set" | "piece";
+  unit: PurchaseUnit;
   amount: number;
   /** 売却手続きを行った人（所得帰属ではない） */
   sellerProfileId: string;

@@ -1,5 +1,5 @@
 import { formatFlexible, formatResultShort, hasResultPeriod, isResultFinished, jstDateString, resultEndDay } from "@/lib/datetime";
-import { effectiveEventState, judgeAccount } from "@/lib/eligibility";
+import { effectiveEventState, judgeAccount, profileSeesChainId } from "@/lib/eligibility";
 import { receivePeriod, wonProgress } from "@/lib/lottery-flow";
 import { formatItem, isManaged } from "@/lib/lottery-view";
 import type { AppData, FlexibleDate, Lottery, Profile } from "@/types/domain";
@@ -149,13 +149,15 @@ export function planNotifications(
     // 応募名義と通知先は別。この受信者宛てに集約する応募ユーザー（本人＋通知先に指定したユーザー）の分を1通にまとめる
     const applicantIds = new Set(applicantsFor(data, profile.id).map((p) => p.id));
     if (applicantIds.size === 0) continue;
-    const accounts = data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active);
+    // サブユーザーの通知は対象系列だけ（応募名義のアカウントも、受信するプロフィール自身も対象系列で絞る）
+    const accounts = data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active && profileSeesChainId(data, a.profileId, a.chainId));
     const ownerName = (accountId: string) => {
       const acc = accounts.find((x) => x.id === accountId);
       return data.profiles.find((p) => p.id === acc?.profileId)?.label ?? acc?.label;
     };
 
     for (const l of data.lotteries) {
+      if (!profileSeesChainId(data, profile.id, l.chainId)) continue;
       const label = lotteryLabel(data, l);
       const myAccounts = accounts.filter((a) => a.chainId === l.chainId);
       if (myAccounts.length === 0) continue;
@@ -393,11 +395,12 @@ export interface InAppAlert {
 export function computeAlerts(data: AppData, profileId: string, now: Date): InAppAlert[] {
   const alerts: InAppAlert[] = [];
   const applicantIds = new Set(applicantsFor(data, profileId).map((p) => p.id));
-  const mine = data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active);
+  const mine = data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active && profileSeesChainId(data, a.profileId, a.chainId));
   const owner = (accountId: string) => data.profiles.find((p) => p.id === mine.find((a) => a.id === accountId)?.profileId)?.label ?? "";
   const day = jstDateString(now);
 
   for (const l of data.lotteries) {
+    if (!profileSeesChainId(data, profileId, l.chainId)) continue;
     const accs = mine.filter((a) => a.chainId === l.chainId);
     if (accs.length === 0) continue;
     const label = lotteryLabel(data, l);
@@ -456,7 +459,7 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
  */
 export function tabDots(data: AppData, profileId: string, now: Date): { appliedDot: boolean; wonDot: boolean } {
   const applicantIds = new Set(applicantsFor(data, profileId).map((p) => p.id));
-  const mine = new Set(data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active).map((a) => a.id));
+  const mine = new Set(data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active && profileSeesChainId(data, a.profileId, a.chainId)).map((a) => a.id));
   let appliedDot = false;
   let wonDot = false;
   for (const l of data.lotteries) {

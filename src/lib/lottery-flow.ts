@@ -1,4 +1,5 @@
-import { formatShort, isPast, isResultFinished, isResultInPeriod, jstDateString, resultStartDay, formatResultShort } from "@/lib/datetime";
+import { profileSeesLottery } from "@/lib/eligibility";
+import { formatFlexMdW, formatPeriodMdW, formatResultMdW, formatShort, isPast, isResultFinished, isResultInPeriod, jstDateString, resultStartDay, formatResultShort } from "@/lib/datetime";
 import type { AppData, Application, FlexibleDate, Lottery, LotteryKind } from "@/types/domain";
 
 /**
@@ -20,7 +21,7 @@ export function myApplication(data: AppData, lotteryId: string, profileId: strin
 
 /** 応募済みタブの「継続中の抽選」: 現在のプロフィールが応募中（結果待ち）の、通常でない抽選 */
 export function ongoingFor(data: AppData, profileId: string): Lottery[] {
-  return data.lotteries.filter((l) => kindOf(l) !== "normal" && myApplication(data, l.id, profileId)?.result === "pending");
+  return data.lotteries.filter((l) => kindOf(l) !== "normal" && profileSeesLottery(data, profileId, l) && myApplication(data, l.id, profileId)?.result === "pending");
 }
 
 export interface OngoingGroup {
@@ -92,7 +93,7 @@ export interface WonProgress {
   action: "purchase" | "receive" | null;
   /** 表示する期限 */
   deadline: FlexibleDate;
-  /** カードに出す短い文言（例: 購入期限 11/7 / 受取可能 〜11/20 / 要確認（期限超過） / 完了） */
+  /** カードに出す短い文言（例: 購入期限 11/7 / 受取可能 〜11/20 / 期限超過 / 完了） */
   label: string;
   /** スワイプでの記録を許すか（期間前は不可） */
   swipeable: boolean;
@@ -104,6 +105,21 @@ function startedOn(v: FlexibleDate, now: Date): boolean {
   if (v.precision === "unknown") return true;
   if (v.precision === "date_only") return jstDateString(now) >= v.date;
   return new Date(v.at).getTime() <= now.getTime();
+}
+
+/**
+ * 購入と受取を別々に記録する抽選か。期間を分けて登録した抽選（procedureSplit）に加え、
+ * 受取方法が通販・発送の抽選は、購入と受取が別の出来事なので期間が分かれていなくても別々に記録する。
+ */
+export const hasSeparateSteps = (l: Pick<Lottery, "procedureSplit" | "receiveMethod">): boolean => l.procedureSplit === true || l.receiveMethod === "shipping";
+
+/**
+ * カードの右側に出す期間（購入期間。購入と受取が分かれている抽選は受取期間）。
+ * 応募締切などで代用せず、未設定なら null（呼び出し側で「未定」を出す）。
+ */
+export function displayPeriod(l: Pick<Lottery, "procedureSplit" | "procedureStart" | "procedureDeadline" | "receiveStart" | "receiveDeadline">, now: Date): { label: "購入" | "受取"; text: string | null } {
+  if (l.procedureSplit === true) return { label: "受取", text: formatPeriodMdW(l.receiveStart ?? UNKNOWN, l.receiveDeadline ?? UNKNOWN, now) };
+  return { label: "購入", text: formatPeriodMdW(l.procedureStart, l.procedureDeadline, now) };
 }
 
 /** 受取（または購入・受取共通）の期間 */
@@ -118,20 +134,23 @@ export function receivePeriod(l: Pick<Lottery, "procedureSplit" | "procedureStar
  */
 export function wonProgress(l: Lottery, app: Pick<Application, "fulfillment">, now: Date): WonProgress {
   if (app.fulfillment === "purchased") return { stage: "done", status: "done", action: null, deadline: UNKNOWN, label: "完了", swipeable: false };
-  const split = l.procedureSplit === true;
+  const split = hasSeparateSteps(l);
   const purchaseStage = split && app.fulfillment === "none";
+  // 発送で受取の期間を登録していない場合、受取の期限は分からない（購入の期間を受取の期限として扱わない）
+  const shippingNoReceiveDates = split && l.procedureSplit !== true && l.receiveStart == null && l.receiveDeadline == null;
+  if (!purchaseStage && shippingNoReceiveDates) return { stage: "receive", status: "open", action: "receive", deadline: UNKNOWN, label: "受取待ち（発送）", swipeable: true };
   const period = purchaseStage ? { start: l.procedureStart, deadline: l.procedureDeadline } : receivePeriod(l);
   const stage: WonStage = purchaseStage ? "purchase" : "receive";
   const action = purchaseStage ? "purchase" : "receive";
   const base = { stage, action, deadline: period.deadline } as const;
 
-  if (period.deadline.precision !== "unknown" && isPast(period.deadline, now) === true) return { ...base, status: "overdue", label: "要確認（期限超過）", swipeable: true };
+  if (period.deadline.precision !== "unknown" && isPast(period.deadline, now) === true) return { ...base, status: "overdue", label: "期限超過", swipeable: true };
   if (!startedOn(period.start, now)) {
-    const from = period.start.precision === "unknown" ? "" : formatShort(period.start);
+    const from = period.start.precision === "unknown" ? "" : (formatFlexMdW(period.start, now) ?? "");
     return { ...base, status: "waiting_start", label: `${from}から${stage === "purchase" ? "購入" : "受取"}`, swipeable: false };
   }
   if (period.deadline.precision === "unknown") return { ...base, status: "unknown", label: stage === "purchase" ? "購入期限未確認" : "受取期限未確認", swipeable: true };
-  const until = formatShort(period.deadline);
+  const until = formatFlexMdW(period.deadline, now) ?? formatShort(period.deadline);
   if (stage === "purchase") return { ...base, status: "open", label: `購入期限 ${until}`, swipeable: true };
   // 受取待ち: 購入済み（分離）または購入・受取共通の期間
   const inWindow = period.start.precision !== "unknown";
@@ -146,5 +165,5 @@ export function wonSortRank(p: WonProgress): number {
   return 1;
 }
 
-/** 発表日の表示（太字で強調する用）。不明は「未確認」 */
-export const resultDayText = (l: Pick<Lottery, "resultDate" | "resultEndDate">, now: Date): string => (l.resultDate.precision === "unknown" ? "発表日未確認" : formatResultShort(l, now));
+/** 発表日の表示（太字で強調する用）。曜日つき・時刻なし。不明は「発表日未確認」 */
+export const resultDayText = (l: Pick<Lottery, "resultDate" | "resultEndDate">, now: Date): string => formatResultMdW(l, now) ?? "発表日未確認";

@@ -1,4 +1,5 @@
 import { isPast, jstDateString } from "@/lib/datetime";
+import { profileSeesChain } from "@/lib/profile-scope";
 import type {
   AccountStatus,
   Application,
@@ -222,12 +223,24 @@ export function judgeAccount(data: AppData, lottery: Lottery, account: ServiceAc
   return { status: "eligible_unapplied", reason: "未応募" };
 }
 
-/** 抽選に関係するアカウント(系列一致・有効)を全プロフィール分返す */
+/** プロフィールが、その系列の抽選を表示・操作できるか（サブは対象系列のみ。別名の系列も同じ扱い） */
+export function profileSeesChainId(data: Pick<AppData, "profiles" | "chains">, profileId: string, chainId: string): boolean {
+  return profileSeesChain(data.profiles.find((p) => p.id === profileId), data.chains, chainId);
+}
+
+export function profileSeesLottery(data: Pick<AppData, "profiles" | "chains">, profileId: string, lottery: Pick<Lottery, "chainId">): boolean {
+  return profileSeesChainId(data, profileId, lottery.chainId);
+}
+
+/**
+ * 抽選に関係するアカウント(系列一致・有効)を全プロフィール分返す。
+ * 対象系列の外にあるサブユーザーのアカウントは含めない（その抽選のカードにアイコンを出さない・応募などの操作もできない。未応募扱いにもしない）。
+ */
 export function accountsForLottery(data: AppData, lottery: Lottery): ServiceAccount[] {
   const order = (a: ServiceAccount) => {
     const i = data.profiles.findIndex((p) => p.id === a.profileId);
     return i < 0 ? Number.MAX_SAFE_INTEGER : i;
   };
   // ユーザーの表示順（data.profiles の並び＝設定した順）に統一する。画面ごとに別の並べ方をしない
-  return data.accounts.filter((a) => a.chainId === lottery.chainId && a.active).sort((a, b) => order(a) - order(b));
+  return data.accounts.filter((a) => a.chainId === lottery.chainId && a.active && profileSeesChainId(data, a.profileId, lottery.chainId)).sort((a, b) => order(a) - order(b));
 }

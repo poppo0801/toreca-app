@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Minus } from "lucide-react";
+import { Check } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { useApplyExit } from "@/components/apply-exit";
@@ -36,6 +36,15 @@ export function useDeadlineBadge(deadline: FlexibleDate): DeadlineBadge | null {
   return deadlineBadge(deadline, now);
 }
 
+/** 未応募の印: 丸の中に「未」（モノクロ）。色は付けず、プロフィールの色は応募済みになったときだけ出す */
+export function UnappliedMark({ className }: { className?: string }) {
+  return (
+    <span data-testid="unapplied-mark" aria-hidden="true" className={cn("inline-flex shrink-0 items-center justify-center rounded-full border border-muted-foreground/70 text-[9px] font-bold leading-none text-muted-foreground", className)}>
+      未
+    </span>
+  );
+}
+
 /**
  * プロフィール別の応募状況（表示専用）。A ✓　B －　C ✓ のように小さく横並びにする。
  * タップしても状態は変わらない。操作は現在のプロフィール専用の MyApplyButton だけで行う。
@@ -62,8 +71,10 @@ export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; class
             data-account={m.accountId}
             className={cn("inline-flex items-center gap-0.5", mine && "rounded-full bg-muted/70 pr-1", m.status !== "applied" && "opacity-80")}
           >
-            <ProfileAvatar profile={owner} size="xs" />
-            {m.status === "applied" && m.result === "won" ? (
+            <ProfileAvatar profile={owner} size="xs" className={cn("size-[18px] text-[9px]", m.status !== "applied" && "grayscale")} />
+            {m.status === "eligible_unapplied" ? (
+              <UnappliedMark className="size-3.5" />
+            ) : m.status === "applied" && m.result === "won" ? (
               <span className="text-[11px] font-bold leading-none text-success">当選</span>
             ) : m.status === "applied" && m.result === "lost" ? (
               <span className="text-[11px] leading-none text-muted-foreground">落選</span>
@@ -135,11 +146,11 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         className={cn(
           "inline-flex min-h-9 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full border text-xs font-bold disabled:opacity-80",
           compact ? "size-10" : "px-2.5",
-          applied && compact ? "border-success/60 bg-success/10 text-success" : !applied && compact ? "border-primary bg-card text-primary-ink" : applied ? "border-success/60 bg-success/10 text-success" : "border-primary bg-primary text-primary-foreground",
+          applied && compact ? "border-success/60 bg-success/10 text-success" : !applied && compact ? "border-muted-foreground/60 bg-card text-muted-foreground" : applied ? "border-success/60 bg-success/10 text-success" : "border-primary bg-primary text-primary-foreground",
           className,
         )}
       >
-        {applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <Minus className="size-5" strokeWidth={2.6} aria-hidden="true" /> : null}
+        {applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <span aria-hidden="true" className="text-sm font-bold leading-none">未</span> : null}
         {!compact && (applied ? "応募済み" : "応募済みにする")}
       </button>
       {error && (

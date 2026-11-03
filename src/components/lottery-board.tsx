@@ -18,14 +18,16 @@ import { StatusLegend } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_FILTERS,
+  defaultFiltersFor,
   selectLotteries,
   type AllFilter,
-  type AppliedView,
   type Filters,
   type SkipView,
   type SortMode,
+  type StatusFilter,
   type Tab,
 } from "@/lib/lottery-view";
+import { profileSeesLottery } from "@/lib/eligibility";
 import { tabDots } from "@/lib/notifications";
 import { useTapGate } from "@/lib/tap-guard";
 import { readPref, readSession, writePref, writeSession } from "@/services/local-device-store";
@@ -40,7 +42,19 @@ const TABS: { value: Tab; label: string }[] = [
 ];
 
 const VIEW = ["list", "matrix"] as const;
-const APPLIED_VIEWS = ["exclude", "include"] as const;
+
+/** 状態の絞り込みの選択肢（現在のプロフィール基準）。「受付中・未応募」は全情報・★管理対象だけの既定 */
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "default", label: "状態: 受付中・未応募" },
+  { value: "open", label: "状態: 受付中" },
+  { value: "closed", label: "状態: 受付終了" },
+  { value: "unapplied", label: "状態: 未応募" },
+  { value: "applied", label: "状態: 応募済み" },
+  { value: "won", label: "状態: 当選" },
+  { value: "lost", label: "状態: 落選" },
+  { value: "any", label: "状態: すべて" },
+];
+const STATUS_VALUES = STATUS_OPTIONS.map((o) => o.value);
 
 const chip = "h-9 shrink-0 rounded-full border bg-input px-3 text-xs";
 
@@ -83,6 +97,7 @@ function validateSession(v: unknown): SessionState | null {
     const val = (s.filters as unknown as Record<string, unknown>)[k];
     if (typeof val === "string") f[k] = val;
   }
+  if (!STATUS_VALUES.includes(f.status as StatusFilter)) f.status = DEFAULT_FILTERS.status;
   return { tab: s.tab, filters: f as unknown as Filters };
 }
 
@@ -116,13 +131,10 @@ function LotteryBoardInner() {
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- 端末ローカル設定の復元 */
     setView(readPref("view", VIEW, "list"));
-    const appliedPref = readPref("appliedView", APPLIED_VIEWS, "exclude");
     const saved = readSession("board", validateSession);
     if (saved && !focusId) {
       setTab(saved.tab);
-      setFilters({ ...saved.filters, applied: appliedPref });
-    } else if (!focusId) {
-      setFilters((f) => ({ ...f, applied: appliedPref }));
+      setFilters(saved.filters);
     }
     setRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -133,10 +145,6 @@ function LotteryBoardInner() {
     // 通知から開いたとき（focus）は、その抽選を見せるための一時的な表示なので保存しない
     if (restored && !focusId) writeSession("board", { tab, filters });
   }, [restored, focusId, tab, filters]);
-  // 応募済みの表示設定は端末に保存する（★管理対象タブの設定。他のタブには影響しない）
-  useEffect(() => {
-    if (restored && !focusId) writePref("appliedView", filters.applied);
-  }, [restored, focusId, filters.applied]);
 
   // 通知から開いた抽選を表示する: 含まれる最初のタブを選び、絞り込みを解除して、カードまでスクロールする
   useEffect(() => {
@@ -144,10 +152,10 @@ function LotteryBoardInner() {
     const target = data.lotteries.find((l) => l.id === focusId);
     if (!target) return;
     const order: Tab[] = ["managed", "applied", "won", "all"];
-    const found = order.find((t) => selectLotteries(data, t, { ...DEFAULT_FILTERS, skip: "include", applied: "include" }, now, profile.id).some((l) => l.id === focusId)) ?? "all";
+    const found = order.find((t) => selectLotteries(data, t, { ...DEFAULT_FILTERS, skip: "include", status: "any" }, now, profile.id).some((l) => l.id === focusId)) ?? "all";
     // eslint-disable-next-line react-hooks/set-state-in-effect -- URLパラメータに応じた表示状態の同期
     setTab(found);
-    setFilters({ ...DEFAULT_FILTERS, skip: "include", applied: "include" });
+    setFilters({ ...DEFAULT_FILTERS, skip: "include", status: "any" });
     setView("list");
     setHighlight(focusId);
     const timer = window.setTimeout(() => {
@@ -159,24 +167,34 @@ function LotteryBoardInner() {
   }, [focusId]);
 
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
+  // タブを切り替えたとき、状態の絞り込みはそのタブの既定へ戻す（全情報と★管理対象は同じ既定なので、選んだ状態を保つ）
+  const selectTab = (next: Tab) => {
+    const before = defaultFiltersFor(tab).status;
+    const after = defaultFiltersFor(next).status;
+    if (before !== after) setFilters((f) => ({ ...f, status: after }));
+    setTab(next);
+  };
 
   // 応募直後のカードを一定時間だけ残して退場させる（★管理対象で「応募済みを含まない」のとき、一覧表示のみ）
-  const exit = useApplyExitController({ enabled: tab === "managed" && filters.applied === "exclude" && view === "list", resetKey: `${profile.id}|${tab}|${filters.applied}|${view}` });
+  // 応募した抽選が状態の絞り込みで外れるとき（未応募を見ているとき）だけ、退場アニメーションで見送る
+  const hidesApplied = (tab === "managed" || tab === "all") && (filters.status === "default" || filters.status === "unapplied");
+  const exit = useApplyExitController({ enabled: hidesApplied && view === "list", resetKey: `${profile.id}|${tab}|${filters.status}|${view}` });
   const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds), [data, tab, filters, now, profile.id, exit.keepIds]);
   // トレマネが新規に把握した（まだ詳細を確認していない）抽選の件数。自動収集で追加された抽選もここに含まれる
-  const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew).length, [data.lotteries]);
+  const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew && profileSeesLottery(data, profile.id, l)).length, [data, profile.id]);
   const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
   const showSkip = tab === "managed";
+  const statusDefault = defaultFiltersFor(tab).status;
   // 詳細フィルターで条件を変えている数（検索語は検索欄に出ているので含めない）
   const activeCount = [
     filters.chainId,
     filters.productId,
     filters.prefecture,
     filters.receiveMethod,
+    filters.status !== statusDefault,
     tab === "all" && filters.allFilter !== "any",
     showSkip && filters.skip !== "normal",
-    showSkip && filters.applied !== "exclude",
     filters.sort !== "deadline",
   ].filter(Boolean).length;
   const hasFilter = activeCount > 0 || filters.query.trim() !== "";
@@ -214,7 +232,7 @@ function LotteryBoardInner() {
         </div>
         <div role="tablist" aria-label="抽選の表示切替" className="grid grid-cols-4 rounded-lg bg-muted p-0.5">
           {TABS.map((t) => {
-            const count = selectLotteries(data, t.value, DEFAULT_FILTERS, now, profile.id).length;
+            const count = selectLotteries(data, t.value, defaultFiltersFor(t.value), now, profile.id).length;
             const selected = tab === t.value;
             const dot = (t.value === "applied" && dots.appliedDot) || (t.value === "won" && dots.wonDot);
             return (
@@ -223,17 +241,22 @@ function LotteryBoardInner() {
                 role="tab"
                 type="button"
                 aria-selected={selected}
-                onClick={() => setTab(t.value)}
-                className={cn("relative min-h-9 rounded-md px-0 text-xs font-medium leading-tight", selected ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}
+                onClick={() => selectTab(t.value)}
+                className={cn("min-h-9 rounded-md px-0 text-xs font-medium leading-tight", selected ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}
               >
-                {t.label}
-                <span className="ml-0.5 text-[11px] opacity-80">{count}</span>
-                {t.value === "all" && newCount > 0 && (
-                  <span data-testid="tab-new" aria-label={`新着${newCount}件`} className="ml-0.5 rounded bg-info/20 px-1 text-[10px] font-bold text-info">
-                    NEW{newCount}
+                {/* 1行に収める: 名前（赤丸は文字のすぐ右上）・件数・新着の小さなバッジ。タブの高さは変えない */}
+                <span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">
+                  <span className={cn("relative", dot && "mr-1.5")}>
+                    {t.label}
+                    {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute -right-2 -top-0.5 size-2 rounded-full bg-danger ring-1 ring-white" />}
                   </span>
-                )}
-                {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute right-1 top-0.5 size-2 rounded-full bg-danger ring-2 ring-muted" />}
+                  <span className="text-[11px] tabular-nums opacity-80">{count}</span>
+                  {t.value === "all" && newCount > 0 && (
+                    <span data-testid="tab-new" aria-label={`新着${newCount}件`} className="rounded-full bg-info px-1 text-[10px] font-bold leading-4 text-white tabular-nums">
+                      {newCount}
+                    </span>
+                  )}
+                </span>
               </button>
             );
           })}
@@ -302,6 +325,12 @@ function LotteryBoardInner() {
         {/* 詳細フィルターは初期状態で非表示。系列・商品・店舗の地域・スルー設定などをまとめて開く */}
         {advanced && (
           <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5" role="group" aria-label="詳細フィルター">
+            <Select
+              label="状態"
+              value={filters.status}
+              onChange={(v) => set("status", v as StatusFilter)}
+              options={STATUS_OPTIONS.filter((o) => o.value !== "default" || statusDefault === "default")}
+            />
             <Select label="系列" value={filters.chainId} onChange={(v) => set("chainId", v)} options={[{ value: "", label: "系列: すべて" }, ...data.chains.map((c) => ({ value: c.id, label: c.name }))]} />
             <Select
               label="商品"
@@ -332,17 +361,6 @@ function LotteryBoardInner() {
             />
             {showSkip && (
               <Select
-                label="応募済み表示"
-                value={filters.applied}
-                onChange={(v) => set("applied", v as AppliedView)}
-                options={[
-                  { value: "exclude", label: "応募済み: 含まない" },
-                  { value: "include", label: "応募済み: 含む" },
-                ]}
-              />
-            )}
-            {showSkip && (
-              <Select
                 label="スルー表示"
                 value={filters.skip}
                 onChange={(v) => set("skip", v as SkipView)}
@@ -362,7 +380,6 @@ function LotteryBoardInner() {
                   { value: "any", label: "すべて" },
                   { value: "unmanaged", label: "管理対象外" },
                   { value: "skipped", label: "スルーのみ" },
-                  { value: "history", label: "履歴（終了）" },
                 ]}
               />
             )}
@@ -373,7 +390,7 @@ function LotteryBoardInner() {
               </label>
             )}
             {hasFilter && (
-              <button type="button" className={cn(chip, "text-primary-ink")} onClick={() => setFilters(DEFAULT_FILTERS)}>
+              <button type="button" className={cn(chip, "text-primary-ink")} onClick={() => setFilters(defaultFiltersFor(tab))}>
                 解除
               </button>
             )}
@@ -384,17 +401,21 @@ function LotteryBoardInner() {
           <LotteryMatrix lotteries={lotteries} actionOnly={actionOnly} />
         ) : (
           <ApplyExitProvider value={exit.api}>
-            <ul className="space-y-2.5" aria-label="抽選一覧">
+            {/* 退場中のカードが画面の右へはみ出して横スクロールや残像にならないよう、退場中だけ横方向をクリップする */}
+            <ul className={cn("space-y-2.5", Object.keys(exit.phases).length > 0 && "overflow-x-clip")} aria-label="抽選一覧">
               {lotteries.map((l) => {
                 const phase = exit.phases[l.id];
+                const sliding = phase === "sliding";
+                const collapsing = phase === "collapsing";
                 return (
                   <li
                     key={l.id}
                     data-exit={phase}
-                    className={cn("grid transition-[grid-template-rows,opacity,transform,margin] duration-300 ease-out motion-reduce:transition-none", phase === "leaving" && "translate-x-full opacity-0 motion-reduce:translate-x-0")}
-                    style={phase === "leaving" ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
+                    // 高さを詰める（collapsing）のは、スライド＋フェードが終わって完全に消えたあと。スライド中は高さを変えない
+                    className={cn("grid transition-[grid-template-rows,margin] duration-[350ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
+                    style={collapsing ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
                   >
-                    <div className={cn("min-h-0", phase === "leaving" && "overflow-hidden")}>
+                    <div className={cn("min-h-0", collapsing && "overflow-hidden", sliding && "animate-[apply-exit-slide_0.9s_ease-in-out_forwards] motion-reduce:animate-none")}>
                       <SwipeCard lottery={l} tab={tab}>
                         <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
                       </SwipeCard>
@@ -412,7 +433,7 @@ function LotteryBoardInner() {
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
             <p>該当する抽選がありません。</p>
             {hasFilter && (
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => setFilters(DEFAULT_FILTERS)}>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => setFilters(defaultFiltersFor(tab))}>
                 フィルタを解除
               </Button>
             )}

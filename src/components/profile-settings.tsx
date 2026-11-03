@@ -38,11 +38,17 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
         : "custom",
   );
   const [picked, setPicked] = useState<string[]>(recipientsOf(profile));
+  // メイン=全系列 / サブ=対象系列だけ。種別・対象系列を変えても、応募・当落・購入の履歴は変わらない
+  const [kind, setKind] = useState<"main" | "sub">(profile.kind === "sub" ? "sub" : "main");
+  const [targets, setTargets] = useState<string[]>(profile.allowedChainIds ?? []);
+  const [chainQuery, setChainQuery] = useState("");
+  const chains = data.chains.filter((c) => !c.archived && (chainQuery.trim() === "" || c.name.toLowerCase().includes(chainQuery.trim().toLowerCase())));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     setError(null);
+    if (kind === "sub" && targets.length === 0 && !window.confirm("対象系列が未選択です。このままだと、このユーザーには抽選が1件も表示されません。保存しますか？")) return;
     setBusy(true);
     const res = await actions.updateProfile(profile.id, {
       label,
@@ -50,6 +56,8 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
       colorHex: hex,
       iconMark: mark,
       notifyRecipientIds: mode === "self" ? null : mode === "none" ? [] : picked,
+      kind,
+      ...(kind === "sub" ? { targetChainIds: targets } : {}),
     });
     setBusy(false);
     if (res.ok) onClose();
@@ -73,6 +81,50 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
           />
         </label>
       </div>
+
+      <fieldset data-testid="profile-kind">
+        <legend className="text-xs text-muted-foreground">種別</legend>
+        <div className="mt-1 flex gap-4">
+          {(
+            [
+              ["main", "メイン"],
+              ["sub", "サブ"],
+            ] as const
+          ).map(([v, text]) => (
+            <label key={v} className="flex min-h-10 items-center gap-2">
+              <input type="radio" name={`kind-${profile.id}`} checked={kind === v} onChange={() => setKind(v)} className="size-4" />
+              {text}
+            </label>
+          ))}
+        </div>
+        {kind === "sub" ? (
+          <div className="mt-1 space-y-1.5" data-testid="sub-targets">
+            <p className="text-xs text-muted-foreground">対象系列の抽選だけを表示・操作できます（通知も対象系列のみ）。未選択のときは何も表示しません。</p>
+            <input
+              type="search"
+              aria-label="系列を検索"
+              placeholder="系列を検索"
+              value={chainQuery}
+              onChange={(e) => setChainQuery(e.target.value)}
+              className="min-h-10 w-full rounded-md border bg-input px-3"
+            />
+            <ul className="max-h-44 overflow-y-auto rounded-md border p-1">
+              {chains.map((c) => (
+                <li key={c.id}>
+                  <label className="flex min-h-9 items-center gap-2 px-1">
+                    <input type="checkbox" checked={targets.includes(c.id)} onChange={(e) => setTargets((s) => (e.target.checked ? [...s, c.id] : s.filter((x) => x !== c.id)))} className="size-4" />
+                    {c.name}
+                  </label>
+                </li>
+              ))}
+              {chains.length === 0 && <li className="px-1 py-2 text-xs text-muted-foreground">該当する系列がありません</li>}
+            </ul>
+            <p className="text-xs text-muted-foreground">選択中: {targets.length}系列</p>
+          </div>
+        ) : (
+          <p className="mt-0.5 text-xs text-muted-foreground">全系列の抽選を表示・管理します。</p>
+        )}
+      </fieldset>
 
       <fieldset>
         <legend className="text-xs text-muted-foreground">アイコンカラー</legend>
@@ -203,7 +255,14 @@ export function ProfileSettings() {
               <li key={p.id} className="flex items-center gap-3 rounded-md border p-2" data-testid="profile-row">
                 <ProfileAvatar profile={p} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm">{p.label}</p>
+                  <p className="text-sm">
+                    {p.label}
+                    {p.kind === "sub" && (
+                      <span data-testid="sub-badge" className="ml-1.5 rounded border px-1 py-px align-middle text-[10px] text-muted-foreground">
+                        サブ・{(p.allowedChainIds ?? []).length}系列
+                      </span>
+                    )}
+                  </p>
                   <p className="truncate text-xs text-muted-foreground">通知先: {r.length === 0 ? "なし" : r.map(name).join("・")}</p>
                 </div>
                 {persistent && (

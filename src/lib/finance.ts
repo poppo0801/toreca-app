@@ -1,5 +1,5 @@
 import { jstDateString } from "@/lib/datetime";
-import type { AppData, FlexibleDate, ItemUnit, Product, Purchase, Sale } from "@/types/domain";
+import type { AppData, FlexibleDate, ItemUnit, Product, PurchaseUnit, Purchase, Sale } from "@/types/domain";
 
 /**
  * 収支管理の集計（純関数）。支出は購入記録(purchases)、収入は売却記録(sales)から導出し、
@@ -37,7 +37,7 @@ export function shiftMonth(ym: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-export const UNIT_LABEL: Record<ItemUnit | "piece", string> = { box: "BOX", pack: "パック", set: "セット", piece: "個" };
+export const UNIT_LABEL: Record<PurchaseUnit, string> = { box: "BOX", pack: "パック", set: "セット", piece: "個" };
 
 /** 購入の合計金額。未入力の明細は合計に含めず件数を返す。 */
 export function purchaseTotal(p: Pick<Purchase, "items">): { total: number; unknown: number } {
@@ -130,11 +130,11 @@ export function monthSummary(data: AppData, ym: string): MonthSummary {
 /** 定価からの仮計算。定価がない単位（セット等）は null（推測しない）。 */
 export function suggestedAmount(
   product: Pick<Product, "listPriceBox" | "listPricePack"> & { listPriceUnit?: number | null } | undefined,
-  unit: ItemUnit,
+  unit: PurchaseUnit,
   quantity: number,
 ): number | null {
   if (!product || !Number.isFinite(quantity) || quantity < 1) return null;
-  // BOX=BOX定価 / パック=1パック定価 / セット(単品・セット商品)=単品・セット定価。無ければ推測しない
+  // BOX=BOX定価 / パック=1パック定価 / セット・個(単品・セット商品)=単品・セット定価。無ければ推測しない
   const unitPrice = unit === "box" ? product.listPriceBox : unit === "pack" ? product.listPricePack : (product.listPriceUnit ?? null);
   return unitPrice == null ? null : unitPrice * quantity;
 }
@@ -148,7 +148,7 @@ export interface CostCandidate {
   remaining: number;
   quantity: number;
   amountPaid: number | null;
-  unit: ItemUnit;
+  unit: PurchaseUnit;
 }
 
 /** 購入明細のうち、まだ原価として使われていない数量。 */
@@ -244,7 +244,7 @@ export function annualStats(data: AppData, year: number): { total: SellerStats; 
 export interface ProductPurchaseRow {
   productId: string;
   /** その商品として直接購入した数量（単位ごと） */
-  direct: Partial<Record<ItemUnit, number>>;
+  direct: Partial<Record<PurchaseUnit, number>>;
   /** 直接購入分の支払額の合計（金額未入力の明細は含めない）と、未入力の明細数 */
   directAmount: number;
   directAmountUnknown: number;
