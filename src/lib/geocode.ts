@@ -9,10 +9,21 @@ export interface GeoHit {
   lng: number;
 }
 
-/** 比較用の正規化: 全角→半角、空白除去、丁目・番地・号を「-」に揃える */
+/** 漢数字（一〜九十九）を算用数字に。国土地理院の結果は「八丁目」「一丁目」のように漢数字で返るため、住所側と同じ形にそろえる */
+function kanjiToDigits(s: string): string {
+  const d: Record<string, number> = { 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  return s.replace(/[〇一二三四五六七八九十]+/g, (m) => {
+    if (m.includes("十")) {
+      const [h, l] = m.split("十");
+      return String((h ? (d[h] ?? 1) : 1) * 10 + (l ? (d[l] ?? 0) : 0));
+    }
+    return [...m].map((c) => d[c]).join("");
+  });
+}
+
+/** 比較用の正規化: 全角→半角、漢数字→算用数字、空白除去、丁目・番地・号を「-」に揃える */
 export function normalizeForMatch(s: string): string {
-  return s
-    .normalize("NFKC")
+  return kanjiToDigits(s.normalize("NFKC"))
     .replace(/[\s　]+/g, "")
     .replace(/[‐‑–—―−ー－]/g, "-")
     .replace(/丁目|番地|番/g, "-")

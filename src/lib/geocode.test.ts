@@ -8,6 +8,12 @@ describe("住所ジオコーディングの判定", () => {
     expect(normalizeForMatch("兵庫県神戸市中央区東川崎町１丁目")).toBe("兵庫県神戸市中央区東川崎町1");
     expect(normalizeForMatch("兵庫県神戸市中央区東川崎町1-7-2")).toBe("兵庫県神戸市中央区東川崎町1-7-2");
   });
+  it("国土地理院の結果（漢数字・番・号）も住所と同じ形にそろう", () => {
+    expect(pickCandidate("兵庫県神戸市北区上津台8-1-1 イオンモール神戸北3F", [hit("兵庫県神戸市北区上津台八丁目１番")]).kind).toBe("ok");
+    expect(pickCandidate("大阪府大阪市中央区西心斎橋1-6-14 ビル B1F", [hit("大阪府大阪市中央区西心斎橋一丁目６番１４号")]).kind).toBe("ok");
+    expect(pickCandidate("兵庫県神戸市中央区東川崎町1-7-2 umie", [hit("兵庫県神戸市中央区東川崎町一丁目７番")]).kind).toBe("ok");
+    expect(normalizeForMatch("十二")).toBe("12");
+  });
   it("検索住所: 都道府県が無ければ登録済みの都道府県を足す。推測はしない", () => {
     expect(buildQuery("神戸市中央区東川崎町1-7-2", "兵庫県")).toBe("兵庫県神戸市中央区東川崎町1-7-2");
     expect(buildQuery("兵庫県神戸市中央区東川崎町1-7-2", "大阪府")).toBe("兵庫県神戸市中央区東川崎町1-7-2");
