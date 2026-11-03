@@ -185,7 +185,7 @@ export function planStores(grid: Grid, snap: StoreSnapshot): { preview: Omit<Pre
     }
 
     const notes: string[] = [];
-    if (cur && "address_optional" in set && cur.latitude !== null) notes.push("住所が変わるため、位置情報（緯度経度）の再確認が必要になります。位置は自動では取得し直しません");
+    if (cur && "address_optional" in set && cur.latitude !== null) notes.push("住所が変わるため、位置情報（緯度経度）の再確認が必要になります。位置は自動で取得し直します");
     if (isNew && chainId) set.chain_id = chainId;
     if (isNew && newChainKey && errors.length === 0) {
       set.chain_name = newChainNames.get(newChainKey)!;

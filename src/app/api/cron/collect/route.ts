@@ -4,6 +4,7 @@ import { getExtractor } from "@/lib/ai/provider";
 import { collectDue } from "@/lib/collector/queue";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
 import { runCollection, runWorker } from "@/lib/server/collector/run";
+import { processGeocodeBatch } from "@/lib/server/geocode-service";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -23,6 +24,9 @@ async function handle(req: NextRequest) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: "server not configured" }, { status: 500 });
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as Db;
+
+  // 店舗の位置情報の取得待ち（住所の登録・変更・取込・自動収集のあと）を小分けで処理する。取得待ちが無ければ何もしない
+  const geo = await processGeocodeBatch(db, { limit: 6 }).catch(() => null);
 
   const now = new Date();
   const { data: targets } = await db.from("collection_settings").select("household_id,schedule_enabled,schedule_hour_jst,worker_enabled").or("schedule_enabled.eq.true,worker_enabled.eq.true");
@@ -49,7 +53,7 @@ async function handle(req: NextRequest) {
     }
   }
   summary.push({ household: targets?.length ?? 0, collected, worked, idle });
-  return NextResponse.json({ ok: true, ...summary[0] });
+  return NextResponse.json({ ok: true, ...summary[0], geocoded: geo?.ok ?? 0 });
 }
 
 export const GET = handle;

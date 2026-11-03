@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ENTITIES, ENTITY_KEYS, type Entity, type EntityKey, type Field } from "@/lib/masters";
-import { saveRecord, setRetired, setRetiredBulk, type ActionResult } from "@/app/(app)/settings/masters/actions";
+import { retryFailedGeocoding, saveRecord, setRetired, setRetiredBulk, type ActionResult } from "@/app/(app)/settings/masters/actions";
 import { geocodeAddress, type GeoCandidate } from "@/app/(app)/settings/household-actions";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { storeDistance } from "@/lib/store-distance";
@@ -48,6 +48,63 @@ function RowMenu({ label, children }: { label: string; children: React.ReactNode
       </summary>
       <div className="absolute right-0 top-10 z-20 flex min-w-32 flex-col gap-1 rounded-lg border bg-card p-1.5 shadow-lg">{children}</div>
     </details>
+  );
+}
+
+const GEO_ERROR_TEXT: Record<string, string> = {
+  no_match: "該当する位置が見つかりません",
+  ambiguous: "住所が曖昧で位置を特定できません",
+  temporary_limit: "一時的なエラーが続きました",
+  service_error: "住所検索サービスのエラー",
+  address_incomplete: "住所が不完全です（都道府県・市区町村・番地を補ってください）",
+};
+
+/** 店舗の位置情報の取得状態（取得済みは目立たせず、取得中・失敗・住所不完全だけ表示） */
+function GeoStatusChip({ status, error }: { status: string; error: string | null }) {
+  if (status === "ok" || status === "none") return null;
+  const label = status === "pending" ? "位置を取得中" : status === "failed" ? "位置の取得に失敗" : "住所が不完全";
+  const tone = status === "pending" ? "text-info" : "text-warn";
+  return (
+    <span className={cn("font-medium", tone)} data-testid="geo-status" data-status={status} title={error ? (GEO_ERROR_TEXT[error] ?? error) : undefined}>
+      {label}
+      {status !== "pending" && error && GEO_ERROR_TEXT[error] ? `（${GEO_ERROR_TEXT[error]}）` : ""}
+    </span>
+  );
+}
+
+/** 店舗一覧の上の1行: 取得中・失敗・住所不完全の件数。失敗した店舗だけをまとめて再取得できる（通常の登録・変更では操作不要） */
+function GeoStatusBar({ stores }: { stores: Record<string, unknown>[] }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+  const count = (s: string) => stores.filter((r) => r.archived_at == null && r.geo_status === s).length;
+  const [wait, failed, incomplete] = [count("pending"), count("failed"), count("incomplete")];
+  if (wait + failed + incomplete === 0) return null;
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-card px-3 py-2 text-xs" data-testid="geo-bar">
+      <span>位置情報:</span>
+      {wait > 0 && <span className="text-info">取得中 {wait}件</span>}
+      {failed > 0 && <span className="text-warn">取得失敗 {failed}件</span>}
+      {incomplete > 0 && <span className="text-muted-foreground">住所不完全 {incomplete}件</span>}
+      {failed > 0 && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          data-testid="geo-retry"
+          onClick={() =>
+            start(async () => {
+              const r = await retryFailedGeocoding();
+              setMsg(r.ok ? `${r.count}件を再取得します` : r.error);
+              router.refresh();
+            })
+          }
+        >
+          取得失敗を再取得
+        </Button>
+      )}
+      {msg && <span role="status">{msg}</span>}
+    </div>
   );
 }
 
@@ -245,6 +302,8 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
         </div>
       )}
 
+      {key === "stores" && <GeoStatusBar stores={rows.stores} />}
+
       <ul className="space-y-2" aria-label={`${entity.label}一覧`}>
         {visible.map((r) => (
           <MasterItem key={r.id} entity={entity} row={r} rows={rows} names={names} rules={rules} manage={bulkable && manage} selected={selected.has(r.id)} onSelect={() => toggleSel(r.id)} />
@@ -340,6 +399,7 @@ function MasterItem({
               ) : (
                 <span className="text-muted-foreground">{hasPos ? "自宅の位置が未設定（距離なし）" : "位置未設定（距離なし）"}</span>
               )}
+              <GeoStatusChip status={String(row.geo_status ?? "none")} error={typeof row.geo_error === "string" ? row.geo_error : null} />
               <span className="text-muted-foreground">{row.round_trip_fare != null ? `往復交通費 ${Number(row.round_trip_fare).toLocaleString("ja-JP")}円` : "交通費 未設定"}</span>
             </p>
           )}

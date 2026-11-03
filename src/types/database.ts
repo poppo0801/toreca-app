@@ -4102,6 +4102,11 @@ export type Database = {
           archived_at: string | null
           chain_id: string
           created_at: string
+          geo_address: string | null
+          geo_attempts: number
+          geo_checked_at: string | null
+          geo_error: string | null
+          geo_status: string
           household_id: string
           id: string
           is_provisional: boolean
@@ -4127,6 +4132,11 @@ export type Database = {
           archived_at?: string | null
           chain_id: string
           created_at?: string
+          geo_address?: string | null
+          geo_attempts?: number
+          geo_checked_at?: string | null
+          geo_error?: string | null
+          geo_status?: string
           household_id: string
           id?: string
           is_provisional?: boolean
@@ -4152,6 +4162,11 @@ export type Database = {
           archived_at?: string | null
           chain_id?: string
           created_at?: string
+          geo_address?: string | null
+          geo_attempts?: number
+          geo_checked_at?: string | null
+          geo_error?: string | null
+          geo_status?: string
           household_id?: string
           id?: string
           is_provisional?: boolean

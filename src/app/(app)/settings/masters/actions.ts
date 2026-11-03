@@ -1,9 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 import { buildSchema, ENTITIES, ENTITY_KEYS, toDbValues } from "@/lib/masters";
 import { createClient } from "@/lib/supabase/server";
+import { processGeocodeBatch, requeueFailedGeocoding } from "@/lib/server/geocode-service";
+import type { Db } from "@/lib/server/lottery-service";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -76,8 +79,20 @@ export async function saveRecord(
     : await table.insert({ ...row, household_id: ctx.householdId });
   if (error) return dbError(error);
 
+  // 店舗の住所を登録・変更したら、保存とは別に（応答のあとで）位置情報を取得する。失敗しても保存には影響せず、定期処理が再試行する
+  if (entity.key === "stores") after(() => processGeocodeBatch(ctx.supabase as unknown as Db, { limit: 3 }).then(() => undefined, () => undefined));
   revalidatePath("/settings/masters");
   return { ok: true };
+}
+
+/** 取得失敗の店舗だけを取得待ちに戻して、すぐ再取得を始める（住所不完全の店舗は対象外。住所を補完すると自動で取得待ちになる） */
+export async function retryFailedGeocoding(): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const ctx = await context();
+  if (!ctx) return { ok: false, error: "ログインが必要です" };
+  const count = await requeueFailedGeocoding(ctx.supabase as unknown as Db);
+  if (count > 0) after(() => processGeocodeBatch(ctx.supabase as unknown as Db, { limit: 8 }).then(() => undefined, () => undefined));
+  revalidatePath("/settings/masters");
+  return { ok: true, count };
 }
 
 /**
