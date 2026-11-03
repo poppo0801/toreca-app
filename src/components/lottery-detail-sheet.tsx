@@ -15,6 +15,10 @@ import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/
 import { deadlineBadge, formatMonthDay, formatPlain, hasResultPeriod, isResultFinished } from "@/lib/datetime";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { resultNotice } from "@/lib/lottery-summary";
+import { OngoingOps } from "@/components/ongoing-ops";
+import { PastApplyRecorder } from "@/components/past-apply-recorder";
+import { WonRecordButtons } from "@/components/won-actions";
+import { KIND_LABEL, kindOf, myApplication, wonProgress } from "@/lib/lottery-flow";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
@@ -24,7 +28,7 @@ import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
 import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
-import type { Application, Lottery } from "@/types/domain";
+import type { Application, FlexibleDate, Lottery } from "@/types/domain";
 
 function Chip({ children, className, title }: { children: React.ReactNode; className?: string; title?: string }) {
   return (
@@ -86,6 +90,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const apps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied").sort((a, b) => profileIdx(a.accountId) - profileIdx(b.accountId));
   const skipSource = skipSourceFor(data, profile.id, lottery);
   const skipException = hasSkipException(data, profile.id, lottery);
+  const mineApp = myApplication(data, lottery.id, profile.id);
+  const myWon = mineApp?.result === "won" ? mineApp : undefined;
   const rules = effectiveRules(data, lottery);
   const hasMyScopeSkip = data.skipRules.some((r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id);
   const dist = storeDistance(data, store);
@@ -170,11 +176,14 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 <DeadlineBadgeView badge={remaining} className="ml-1 px-1 py-0.5" />
               </Field>
               <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatPlain(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatPlain(lottery.resultDate)}</Field>
-              <Field label="購入・受取期間">
-                {lottery.procedureStart.precision === "unknown" && lottery.procedureDeadline.precision === "unknown"
-                  ? DASH
-                  : `${lottery.procedureStart.precision === "unknown" ? "" : formatPlain(lottery.procedureStart)}〜${lottery.procedureDeadline.precision === "unknown" ? "" : formatPlain(lottery.procedureDeadline)}`}
-              </Field>
+              <Field label={lottery.procedureSplit ? "購入期間" : "購入・受取期間"}>{periodText(lottery.procedureStart, lottery.procedureDeadline)}</Field>
+              {lottery.procedureSplit && <Field label="受取期間">{periodText(lottery.receiveStart ?? { precision: "unknown" }, lottery.receiveDeadline ?? { precision: "unknown" })}</Field>}
+              {kindOf(lottery) !== "normal" && (
+                <Field label="抽選方式">
+                  {KIND_LABEL[kindOf(lottery)]}
+                  {lottery.validUntil ? `（有効期限 ${lottery.validUntil.slice(5).replace("-", "/")}）` : ""}
+                </Field>
+              )}
             </dl>
 
             {/* 3. 方法 */}
@@ -237,6 +246,17 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   <ApplyStatusRow lottery={lottery} />
                   <MyApplyButton lottery={lottery} />
                 </div>
+                {persistent && <PastApplyRecorder lottery={lottery} />}
+                {persistent && <OngoingOps lottery={lottery} />}
+                {persistent && myWon && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-2 py-1.5" data-testid="detail-won">
+                    <span className="text-xs">
+                      <span className="font-bold text-success">{profile.label}は当選</span>
+                      <span className="ml-1.5 text-muted-foreground">{wonProgress(lottery, myWon, now).label}</span>
+                    </span>
+                    <WonRecordButtons lottery={lottery} app={myWon} />
+                  </div>
+                )}
                 {reviewReasons.length > 0 && (
                   <p className="flex items-start gap-1 text-xs text-warn" data-testid="review-summary">
                     <StatusIcon status="needs_review" className="mt-px size-3.5" />
@@ -295,13 +315,13 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                               {lottery.multiMode === "single" ? (
                                 <>
                                   <span className="text-xs">{RESULT_LABEL[a.result]}</span>
-                                  <span className="flex gap-1" role="group" aria-label={`${owner.label}の結果を登録`}>
+                                  {owner.id === profile.id && <span className="flex gap-1" role="group" aria-label={`${owner.label}の結果を登録`}>
                                     {(["pending", "won", "lost"] as const).map((r) => (
                                       <Button key={r} size="sm" variant={a.result === r ? "default" : "outline"} aria-pressed={a.result === r} onClick={() => actions.setResult(a.id, r)}>
                                         {RESULT_LABEL[r]}
                                       </Button>
                                     ))}
-                                  </span>
+                                  </span>}
                                 </>
                               ) : (
                                 <span className="text-xs text-muted-foreground">全体: {RESULT_LABEL[a.result]}</span>
@@ -437,6 +457,12 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
       </Dialog>
     </>
   );
+}
+
+/** 期間の表示（開始〜終了。どちらか不明なら空側を省く。両方不明は「—」） */
+function periodText(start: FlexibleDate, end: FlexibleDate): React.ReactNode {
+  if (start.precision === "unknown" && end.precision === "unknown") return DASH;
+  return `${start.precision === "unknown" ? "" : formatPlain(start)}〜${end.precision === "unknown" ? "" : formatPlain(end)}`;
 }
 
 /** 商品名の下に、ユーザーごとの当落を小さく添える（複数商品） */

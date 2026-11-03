@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { ExpenseInput, SaleInput } from "@/lib/finance-input";
-import type { ProfileSettingsInput } from "@/lib/server/lottery-service";
+import type { ApplyOptions, ProfileSettingsInput } from "@/lib/server/lottery-service";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import { createRepository } from "@/services";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
@@ -39,7 +39,7 @@ interface AppContextValue {
   dismissNotice: () => void;
   actions: {
     setManaged: (lotteryId: string, v: boolean) => Promise<Outcome>;
-    setApplied: (lotteryId: string, accountId: string, v: boolean, selectedItemId?: string | null) => Promise<Outcome>;
+    setApplied: (lotteryId: string, accountId: string, v: boolean, selectedItemId?: string | null, opts?: ApplyOptions) => Promise<Outcome>;
     setItemResults: (applicationId: string, results: { itemId: string; result: ResultStatus }[]) => Promise<Outcome>;
     saveExpense: (id: string | null, input: ExpenseInput) => Promise<Outcome>;
     deleteExpense: (id: string) => Promise<Outcome>;
@@ -270,7 +270,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
       dismissNotice: () => setNotice(null),
       actions: {
         setManaged: (id, v) => run((a) => repo.setManaged(a, id, v)),
-        setApplied: (id, acc, v, sel) => run((a) => repo.setApplied(a, id, acc, v, sel)),
+        setApplied: (id, acc, v, sel, opts) => run((a) => repo.setApplied(a, id, acc, v, sel, opts)),
         setItemResults: (id, r) => run((a) => repo.setItemResults(a, id, r)),
         saveExpense: (id, input) => run((a) => repo.saveExpense(a, id, input)),
         deleteExpense: (id) => run((a) => repo.deleteExpense(a, id)),

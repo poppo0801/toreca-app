@@ -27,11 +27,11 @@ export class InMemoryRepository implements LotteryRepository {
   async setManaged(actorId: string, lotteryId: string, isManaged: boolean) {
     return this.apply((d) => m.setManaged(d, actorId, lotteryId, isManaged, new Date()));
   }
-  async setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean) {
+  async setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean, _selected?: string | null, opts?: { backfill?: boolean; appliedAt?: string | null }) {
     // 応募状態を変えられるのは、操作中のプロフィール自身のアカウントだけ（他のプロフィールは閲覧のみ）
     const acc = this.data?.accounts.find((a) => a.id === accountId);
     if (acc && acc.profileId !== actorId) return { ok: false as const, error: "他のユーザーの応募状況は変更できません" };
-    return this.apply((d) => m.setApplied(d, actorId, lotteryId, accountId, applied, new Date()));
+    return this.apply((d) => m.setApplied(d, actorId, lotteryId, accountId, applied, new Date(), opts));
   }
   async setResult(actorId: string, applicationId: string, result: Parameters<typeof m.setResult>[3]) {
     return this.apply((d) => m.setResult(d, actorId, applicationId, result, new Date()));

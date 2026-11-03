@@ -20,6 +20,9 @@ import { placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
+import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
+import { WonRow } from "@/components/won-actions";
+import { myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -105,6 +108,13 @@ export function LotteryCard({
     else actions.setManaged(lottery.id, true);
   };
 
+  const appliedTab = tab === "applied";
+  const wonTab = tab === "won";
+  // 応募済みタブは発表日基準、当選タブは次の手続き（購入/受取）の期限を主役にする
+  const mineApp = myApplication(data, lottery.id, profile.id);
+  const wonApp = wonTab ? (mineApp?.result === "won" ? mineApp : data.applications.find((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won")) : undefined;
+  const won = wonApp ? wonProgress(lottery, wonApp, now) : null;
+  const stage = appliedTab ? resultStage(lottery, now) : null;
   const deadlineText = lottery.applyDeadline.precision === "unknown" ? null : formatShort(lottery.applyDeadline);
   const period = hasResultPeriod(lottery);
   const finished = event === "closed" || event === "cancelled";
@@ -149,7 +159,19 @@ export function LotteryCard({
               <ProductLine name={sum.name} extra={sum.extraKinds} />
               {/* 応募漏れ防止: 締切と残り時間は一覧でも必ず出す */}
               <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]" data-testid="card-deadline">
-                {finished ? (
+                {appliedTab ? (
+                  <>
+                    <span className={cn("inline-flex items-center gap-0.5", stage === "unknown" ? "text-muted-foreground" : "font-bold")} data-testid="result-day">
+                      <CalendarCheck className="size-3 shrink-0" aria-hidden="true" />
+                      {resultDayText(lottery, now)}
+                    </span>
+                    <ResultCountdownBadge lottery={lottery} className="px-1 py-0.5 text-[11px]" />
+                  </>
+                ) : wonTab && won ? (
+                  <span className={cn("font-medium", won.status === "overdue" && "font-bold text-danger", won.status === "done" && "text-success")} data-testid="won-deadline">
+                    {won.label}
+                  </span>
+                ) : finished ? (
                   <span className="text-muted-foreground">{EVENT_LABEL[event]}</span>
                 ) : (
                   <>
@@ -164,11 +186,11 @@ export function LotteryCard({
                     {event === "before" ? <Chip className="text-info">受付前</Chip> : <DeadlineBadgeView badge={badge} className="px-1 py-0.5 text-[11px]" />}
                   </>
                 )}
-                {notice === "unconfirmed" && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
+                {notice === "unconfirmed" && !appliedTab && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
               </span>
             </span>
           </button>
-          <MyApplyButton lottery={lottery} compact />
+          {appliedTab ? <ResultButtons lottery={lottery} compact onOpenDetail={openDetail} /> : wonTab ? null : <MyApplyButton lottery={lottery} compact />}
         </div>
       )}
       {detailMode && (
@@ -195,13 +217,33 @@ export function LotteryCard({
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
               <span className="grid gap-x-3 gap-y-1 text-xs [grid-template-columns:repeat(auto-fit,minmax(6.5rem,max-content))]">
-                {display.deadline && (
-                  <span className="inline-flex items-center gap-1" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                    <Clock className="size-3.5 shrink-0 text-primary-ink" aria-hidden="true" />
-                    <span className="font-medium">{deadlineText ?? "—"}</span>
+                {appliedTab ? (
+                  <>
+                    <span className={cn("inline-flex items-center gap-1", stage === "unknown" ? "text-muted-foreground" : "font-bold")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
+                      <CalendarCheck className="size-3.5 shrink-0" aria-hidden="true" />
+                      {resultDayText(lottery, now)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
+                      <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span>締切 {deadlineText ?? "—"}</span>
+                    </span>
+                  </>
+                ) : wonTab && won ? (
+                  <span className={cn("inline-flex items-center gap-1 font-medium", won.status === "overdue" && "font-bold text-danger", won.status === "done" && "text-success")} data-testid="won-deadline">
+                    <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+                    {won.label}
                   </span>
+                ) : (
+                  <>
+                    {display.deadline && (
+                      <span className="inline-flex items-center gap-1" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
+                        <Clock className="size-3.5 shrink-0 text-primary-ink" aria-hidden="true" />
+                        <span className="font-medium">{deadlineText ?? "—"}</span>
+                      </span>
+                    )}
+                  </>
                 )}
-                {display.announce && (
+                {!appliedTab && !wonTab && display.announce && (
                   <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}${period ? `〜${lottery.resultEndDate}` : ""}`}>
                     <CalendarCheck className="size-3.5 shrink-0" aria-hidden="true" />
                     {formatResultShort(lottery, now)}
@@ -220,7 +262,9 @@ export function LotteryCard({
                   {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
                 </span>
                 <span className="ml-auto">
-                  {event === "before" ? (
+                  {appliedTab ? (
+                    <ResultCountdownBadge lottery={lottery} />
+                  ) : wonTab ? null : event === "before" ? (
                     <Chip className="shrink-0 text-info">受付前</Chip>
                   ) : finished ? (
                     <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>
@@ -233,8 +277,8 @@ export function LotteryCard({
                 <span className="flex flex-wrap gap-1">
                   {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}
                   {event === "postponed" && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
-                  {notice === "unconfirmed" && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
-                  {notice === "in_period" && <Chip className="text-info">発表期間中</Chip>}
+                  {notice === "unconfirmed" && !appliedTab && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
+                  {notice === "in_period" && !appliedTab && <Chip className="text-info">発表期間中</Chip>}
                   {!managed && <Chip className="text-muted-foreground">管理対象外</Chip>}
                   {skipSource && <Chip className="text-muted-foreground">{{ lottery: "今回スルー", store: "店舗スルー中", chain: "系列スルー中" }[skipSource]}</Chip>}
                   {!skipSource && skipException && <Chip className="text-muted-foreground">スルー例外</Chip>}
@@ -256,19 +300,21 @@ export function LotteryCard({
           </div>
 
           {/* 下段: プロフィール別の応募状況（表示専用）｜現在のプロフィールの応募操作。同じ行に並べ、重ならない */}
-          <div className="flex items-center justify-between gap-2 border-t px-2.5 py-1.5" data-testid="card-bottom">
-            {display.accounts ? (
-              <div onClick={openDetail} className="min-w-0 flex-1 cursor-pointer">
-                <ApplyStatusRow lottery={lottery} />
-              </div>
-            ) : (
-              <span className="flex-1" />
-            )}
-            <MyApplyButton lottery={lottery} />
-          </div>
+          {!wonTab && (
+            <div className="flex items-center justify-between gap-2 border-t px-2.5 py-1.5" data-testid="card-bottom">
+              {display.accounts ? (
+                <div onClick={openDetail} className="min-w-0 flex-1 cursor-pointer">
+                  <ApplyStatusRow lottery={lottery} />
+                </div>
+              ) : (
+                <span className="flex-1" />
+              )}
+              {appliedTab ? <ResultButtons lottery={lottery} onOpenDetail={openDetail} /> : <MyApplyButton lottery={lottery} />}
+            </div>
+          )}
         </div>
       )}
-      {tab === "won" && <WonActions lottery={lottery} />}
+      {wonTab && <WonRow lottery={lottery} />}
 
       <LotteryDetailSheet lottery={lottery} open={open} onOpenChange={onOpenChange} />
       <Dialog open={confirmOff} onOpenChange={setConfirmOff}>
@@ -292,48 +338,5 @@ export function LotteryCard({
         </DialogContent>
       </Dialog>
     </article>
-  );
-}
-
-/** 当選タブ: 購入手続き／購入済みをワンアクションで。購入記録は応募ごとに1件のみ作成される。 */
-function WonActions({ lottery }: { lottery: Lottery }) {
-  const { data, actions } = useApp();
-  const [busy, run] = useBusy();
-  const idx = (accountId: string) => data.profiles.findIndex((p) => p.id === data.accounts.find((x) => x.id === accountId)?.profileId);
-  const wonApps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won").sort((a, b) => idx(a.accountId) - idx(b.accountId));
-  return (
-    <ul className="space-y-1 border-t px-2.5 py-1.5">
-      {wonApps.map((a) => {
-        const acc = data.accounts.find((x) => x.id === a.accountId)!;
-        const owner = data.profiles.find((p) => p.id === acc.profileId)!;
-        return (
-          <li key={a.id} className="flex flex-wrap items-center gap-2 text-xs">
-            <ProfileAvatar profile={owner} size="sm" />
-            <span className="font-bold text-success">当選</span>
-            {lottery.multiMode !== "single" && (
-              <span className="text-muted-foreground">
-                {lottery.items
-                  .filter((i) => i.id && a.itemResults[i.id] === "won")
-                  .map((i) => formatItem(i, data.products.find((p) => p.id === i.productId)))
-                  .join(" / ")}
-              </span>
-            )}
-            <span>期限 {formatFlexible(lottery.procedureDeadline)}</span>
-            {a.fulfillment === "purchased" ? (
-              <Chip className="border-success text-success">購入・受取済み</Chip>
-            ) : (
-              <>
-                <Button size="sm" variant="outline" aria-pressed={a.fulfillment === "procedure_done"} disabled={busy || a.fulfillment === "procedure_done"} onClick={() => void run(() => actions.setFulfillment(a.id, "procedure_done"))}>
-                  {a.fulfillment === "procedure_done" ? "手続き済み" : "購入手続き済み"}
-                </Button>
-                <Button size="sm" disabled={busy} onClick={() => void run(() => actions.setFulfillment(a.id, "purchased"))}>
-                  購入済み
-                </Button>
-              </>
-            )}
-          </li>
-        );
-      })}
-    </ul>
   );
 }

@@ -1,6 +1,7 @@
 import { isResultFinished, resultSortKey, sortKey } from "@/lib/datetime";
 import { effectiveEventState, isSkippedBy } from "@/lib/eligibility";
 import { applyControlFor } from "@/lib/lottery-summary";
+import { kindOf, myApplication, resultStage, wonProgress, wonSortRank } from "@/lib/lottery-flow";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
 export type Tab = "managed" | "applied" | "won" | "all";
@@ -80,7 +81,8 @@ export function inTab(data: AppData, lottery: Lottery, tab: Tab, now: Date): boo
       // 受付終了は自動整理。応募済みで結果待ちなら応募済みタブに残る。
       return isManaged(data, lottery.id) && (event === "open" || event === "before");
     case "applied":
-      return hasPendingResult(data, lottery.id);
+      // 継続抽選・招待制販売は「継続中の抽選」に分けて表示する（応募済みタブの件数・一覧には含めない）
+      return hasPendingResult(data, lottery.id) && kindOf(lottery) === "normal";
     case "won":
       return hasWon(data, lottery.id);
     case "all":
@@ -128,16 +130,24 @@ function matchAllFilter(data: AppData, lottery: Lottery, f: AllFilter, now: Date
   }
 }
 
-/** 最も早い結果待ち応募の観点から並べるための補助: 未確認の結果が期限超過なら最上位。 */
-function appliedRank(data: AppData, l: Lottery, now: Date): number {
-  if (isResultOverdue(data, l, now)) return 0;
-  if (l.resultDate.precision === "unknown") return 2; // 発表日不明は末尾の要確認グループ
+/** 応募済みタブの並び: 発表期間中・結果未確認を最優先 → 発表日の近い順 → 発表日不明は末尾。 */
+function appliedRank(_data: AppData, l: Lottery, now: Date): number {
+  const stage = resultStage(l, now);
+  if (stage === "overdue" || stage === "in_period") return 0;
+  if (stage === "unknown") return 2;
   return 1;
 }
 
-function wonRank(data: AppData, l: Lottery): number {
-  const apps = liveApplications(data, l.id).filter((a) => a.result === "won");
-  return apps.every((a) => a.fulfillment === "purchased") ? 1 : 0; // 完了済みは後ろ
+/** 当選タブの並び: 現在のプロフィールの次の手続きを基準に、期限超過 → 期限の近い順 → 期限未確認 → 完了。 */
+function wonProgressOf(data: AppData, l: Lottery, now: Date, profileId?: string) {
+  const won = liveApplications(data, l.id).filter((a) => a.result === "won");
+  const mine = profileId ? myApplication(data, l.id, profileId) : undefined;
+  const app = mine?.result === "won" ? mine : won.find((a) => a.fulfillment !== "purchased") ?? won[0];
+  return app ? wonProgress(l, app, now) : null;
+}
+function wonRank(data: AppData, l: Lottery, now: Date, profileId?: string): number {
+  const p = wonProgressOf(data, l, now, profileId);
+  return p ? wonSortRank(p) : 4;
 }
 
 /**
@@ -181,8 +191,8 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, 
       return r !== 0 ? r : safe(byResult(a, b));
     }
     if (tab === "won") {
-      const r = wonRank(data, a) - wonRank(data, b);
-      return r !== 0 ? r : safe(sortKey(a.procedureDeadline) - sortKey(b.procedureDeadline));
+      const r = wonRank(data, a, now, profileId) - wonRank(data, b, now, profileId);
+      return r !== 0 ? r : safe(sortKey(wonProgressOf(data, a, now, profileId)?.deadline ?? a.procedureDeadline) - sortKey(wonProgressOf(data, b, now, profileId)?.deadline ?? b.procedureDeadline));
     }
     return safe(f.sort === "result" ? byResult(a, b) : byDeadline(a, b));
   });

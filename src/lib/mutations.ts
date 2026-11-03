@@ -71,6 +71,7 @@ export function setApplied(
   accountId: string,
   applied: boolean,
   at: Date,
+  opts: { backfill?: boolean; appliedAt?: string | null } = {},
 ): AppData {
   const existing = data.applications.find(
     (a) => a.lotteryId === lotteryId && a.accountId === accountId,
@@ -87,7 +88,8 @@ export function setApplied(
           id: newId("app"),
           lotteryId,
           accountId,
-          appliedAt: nowIso,
+          // 後から記録する応募は、実際の応募日時が不明なら null（現在日時を実際の応募日時にしない）
+          appliedAt: opts.backfill ? (opts.appliedAt ? new Date(`${opts.appliedAt}:00+09:00`).toISOString() : null) : nowIso,
           state,
           result: "pending" as const,
           itemResults: {},

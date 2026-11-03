@@ -10,6 +10,7 @@ import {
   loadAppData,
   saveLottery,
   setApplied,
+  type ApplyOptions,
   setEventState,
   setFulfillment,
   setLotterySkip,
@@ -90,8 +91,9 @@ export async function setAppliedAction(
   applied: boolean,
   actor: string | null,
   selectedItemId: string | null = null,
+  opts: ApplyOptions = {},
 ): Promise<MutationResult> {
-  return mutate((c) => setApplied(c.db, c.householdId, lotteryId, accountId, applied, actor, selectedItemId));
+  return mutate((c) => setApplied(c.db, c.householdId, lotteryId, accountId, applied, actor, selectedItemId, opts));
 }
 
 export async function setItemResultsAction(

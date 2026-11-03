@@ -632,6 +632,22 @@ export async function setManaged(db: Db, householdId: string, lotteryId: string,
   return ok(undefined);
 }
 
+/**
+ * 締切後などに、記録し忘れていた応募を後から記録する（履歴の補正）。実際の応募日時が不明なら appliedAt は null のまま保存し、
+ * 現在日時を実際の応募日時として偽って保存しない。appliedAt は JST の "YYYY-MM-DDTHH:mm"。
+ */
+export interface ApplyOptions {
+  backfill?: boolean;
+  appliedAt?: string | null;
+}
+
+function backfillAppliedAt(opts: ApplyOptions): string | null {
+  const v = opts.appliedAt;
+  if (!v || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return null;
+  const t = new Date(`${v}:00+09:00`);
+  return Number.isNaN(t.getTime()) ? null : t.toISOString();
+}
+
 /** 応募の記録／取消。抽選×アカウントで一意。取消しても行は残す。 */
 export async function setApplied(
   db: Db,
@@ -641,6 +657,7 @@ export async function setApplied(
   applied: boolean,
   actor: string | null,
   selectedItemId: string | null = null,
+  opts: ApplyOptions = {},
 ): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success || !uuid.safeParse(accountId).success) return fail("リクエストが不正です");
   if (selectedItemId !== null && !uuid.safeParse(selectedItemId).success) return fail("リクエストが不正です");
@@ -664,7 +681,7 @@ export async function setApplied(
     if (existing.state === state) return ok(undefined);
     const { error } = await db
       .from("applications")
-      .update({ state, ...(applied && selected ? { selected_item_id: selected } : {}), updated_by_profile_id: actor })
+      .update({ state, ...(applied && selected ? { selected_item_id: selected } : {}), ...(applied && opts.backfill ? { applied_at: backfillAppliedAt(opts) } : {}), updated_by_profile_id: actor })
       .eq("id", existing.id);
     return error ? fail(mapDbError(error)) : ok(undefined);
   }
@@ -673,7 +690,7 @@ export async function setApplied(
   const { data: acc } = await db.from("service_accounts").select("chain_id,active").eq("id", accountId).maybeSingle();
   if (!lot || !acc || lot.chain_id !== acc.chain_id || !acc.active) return fail("この抽選に応募できるアカウントではありません");
   const { error } = await db.from("applications").insert({
-    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: nowIso(), state: "applied", selected_item_id: selected, updated_by_profile_id: actor,
+    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: opts.backfill ? backfillAppliedAt(opts) : nowIso(), state: "applied", selected_item_id: selected, updated_by_profile_id: actor,
   });
   return error ? fail(mapDbError(error)) : ok(undefined);
 }

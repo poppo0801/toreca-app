@@ -10,6 +10,7 @@ import { useAiJobs } from "@/components/ai-jobs-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
+import { OngoingSection } from "@/components/ongoing-section";
 import { StatusLegend } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -389,6 +390,8 @@ export function LotteryBoard() {
             </ul>
           </ApplyExitProvider>
         )}
+
+        {tab === "applied" && view === "list" && <OngoingSection />}
 
         {lotteries.length === 0 && (
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
