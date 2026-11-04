@@ -148,8 +148,13 @@ export function MemoListDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(async () => setMemos(await listMemosAction()), []);
   useEffect(() => {
-    if (open) void load();
-  }, [open, load]);
+    if (!open) return;
+    let live = true;
+    void listMemosAction().then((m) => live && setMemos(m));
+    return () => {
+      live = false;
+    };
+  }, [open]);
   const act = async (id: string, fn: () => Promise<unknown>) => {
     setBusy(id);
     await fn();
