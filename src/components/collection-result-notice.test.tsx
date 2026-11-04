@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeRun, type RunSummary } from "@/lib/collector/run-summary";
 
-let summaries: RunSummary[] = [];
+const summaries: RunSummary[] = [];
 let notice: RunSummary | null = null;
 let ackIds: string[] = [];
 const ack = vi.fn(async (..._a: unknown[]) => ({ ok: true }));
