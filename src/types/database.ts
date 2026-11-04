@@ -1228,6 +1228,144 @@ export type Database = {
           },
         ]
       }
+      chain_condition_states: {
+        Row: {
+          condition_id: string
+          confirmed_on: string | null
+          created_at: string
+          household_id: string
+          id: string
+          note: string
+          profile_id: string
+          state: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          condition_id: string
+          confirmed_on?: string | null
+          created_at?: string
+          household_id: string
+          id?: string
+          note?: string
+          profile_id: string
+          state?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          condition_id?: string
+          confirmed_on?: string | null
+          created_at?: string
+          household_id?: string
+          id?: string
+          note?: string
+          profile_id?: string
+          state?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chain_condition_states_condition_id_household_id_fkey"
+            columns: ["condition_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chain_conditions"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "chain_condition_states_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chain_condition_states_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "chain_condition_states_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      chain_conditions: {
+        Row: {
+          archived_at: string | null
+          chain_id: string
+          created_at: string
+          household_id: string
+          id: string
+          join_prev: string
+          kind: string
+          label: string
+          note: string
+          params: Json
+          sort_order: number
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          archived_at?: string | null
+          chain_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          join_prev?: string
+          kind: string
+          label?: string
+          note?: string
+          params?: Json
+          sort_order?: number
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          archived_at?: string | null
+          chain_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          join_prev?: string
+          kind?: string
+          label?: string
+          note?: string
+          params?: Json
+          sort_order?: number
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chain_conditions_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "chain_conditions_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chain_conditions_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       chain_requirements: {
         Row: {
           archived_at: string | null

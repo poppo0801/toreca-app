@@ -2114,6 +2114,7 @@ test("Stage 5P 設定とサブユーザー: 会員番号はユーザー管理の
   const links = await page.getByTestId("settings-menu").getByRole("link").allInnerTexts();
   expect(links[0]).toContain("ユーザー管理");
   expect(links[1]).toContain("会員番号"); // 上から2番目（ユーザー管理の直下）
+  expect(links[2]).toContain("抽選条件管理"); // 3番目（会員番号の直下）
 
   await page.goto("/settings/users");
   await page.getByTestId("profile-row").nth(2).getByRole("button", { name: /の設定を編集/ }).click();

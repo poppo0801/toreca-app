@@ -26,6 +26,7 @@ import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
+import { EligibilitySection } from "@/components/eligibility-mark";
 import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 import type { Application, FlexibleDate, Lottery } from "@/types/domain";
@@ -230,6 +231,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               <Field label="応募条件">
                 <RequirementView lottery={lottery} />
               </Field>
+              <EligibilitySection lottery={lottery} />
               <div className="grid grid-cols-2 gap-x-3">
                 <Field label="応募制限">
                   {lottery.limit.basis === "unknown" ? "未確認（要確認）" : `${LIMIT_BASIS_LABEL[lottery.limit.basis]}${lottery.limit.maxCount}回`}

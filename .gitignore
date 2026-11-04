@@ -18,3 +18,9 @@ data/import/
 
 # 実AI検証の出力（コミットしない）
 e2e/ai-live-output
+
+# 作業用の一時ファイル
+.*.tmp.mjs
+.dev.log
+.e2e-mock*.log
+.ov.png

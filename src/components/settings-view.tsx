@@ -23,6 +23,7 @@ export function SettingsView() {
       <MenuGroup>
         <MenuLink href="/settings/users" title="ユーザー管理" testId="menu-users" />
         {SUPABASE && <MenuLink href="/settings/member-numbers" title="会員番号" testId="menu-member-numbers" />}
+        {SUPABASE && <MenuLink href="/settings/conditions" title="抽選条件管理" testId="menu-conditions" />}
         <MenuLink href="/settings/display" title="メニュー・表示設定" testId="menu-display" />
       </MenuGroup>
 

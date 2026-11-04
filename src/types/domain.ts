@@ -318,6 +318,8 @@ export interface Purchase {
   purchasedOn: FlexibleDate;
   channel: PurchaseChannel;
   source: "lottery" | "manual" | "import";
+  /** 抽選外の購入を記録したプロフィール（資格判定の購入者。抽選からの購入は応募アカウントのプロフィール） */
+  buyerProfileId?: string | null;
   items: PurchaseItem[];
   note: string;
 }
@@ -448,6 +450,9 @@ export interface AppData {
   settings?: HouseholdSettings;
   /** 対戦記録（Stage 5A）。モックでは省略 */
   battles?: BattleRecord[];
+  /** 系列別の抽選条件（Stage 5R）と、プロフィール別の達成状況。未適用の環境・モックでは省略 */
+  chainConditions?: import("@/lib/chain-conditions").ChainCondition[];
+  chainConditionStates?: import("@/lib/chain-conditions").ConditionState[];
 }
 
 export type BattleResult = "win" | "lose" | "draw";

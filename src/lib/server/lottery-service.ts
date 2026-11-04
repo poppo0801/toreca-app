@@ -7,6 +7,7 @@ import { recordAiFeedback } from "@/lib/server/ai-feedback-service";
 import { DEFAULT_DISTANCE_BANDS_KM, validBands } from "@/lib/geo";
 import { manualPurchaseSchema, type ManualPurchaseInput } from "@/lib/purchase-input";
 import { chainLogoUrl } from "@/lib/chain-logo";
+import { isCondKind, isCondState, sanitizePurchaseParams, type CondKind, type CondState } from "@/lib/chain-conditions";
 import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
@@ -113,7 +114,7 @@ export async function currentHouseholdId(db: Db): Promise<string | null> {
  * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
  * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
  */
-async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"] }> {
+async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"]; chainConditions: AppData["chainConditions"]; chainConditionStates: AppData["chainConditionStates"] }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
   const from = (t: string): any => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,7 +177,27 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   } catch {
     /* 未適用 */
   }
-  return { battles, settings, chainAliases, storeAliases, profileSettings };
+  let chainConditions: AppData["chainConditions"];
+  let chainConditionStates: AppData["chainConditionStates"];
+  try {
+    const [cc, cs] = await Promise.all([scope(from("chain_conditions").select("*").is("archived_at", null).order("sort_order")), scope(from("chain_condition_states").select("*"))]);
+    if (!cc.error && !cs.error) {
+      const rows = cc.data as { id: string; chain_id: string; kind: string; label: string; params: unknown; note: string; join_prev: string; sort_order: number }[];
+      chainConditions = rows
+        .filter((r) => isCondKind(r.kind))
+        .map((r) => ({
+          id: r.id, chainId: r.chain_id, kind: r.kind as CondKind, label: r.label, note: r.note, joinPrev: r.join_prev === "or" ? ("or" as const) : ("and" as const), sortOrder: r.sort_order,
+          params: r.kind === "purchase" ? sanitizePurchaseParams(r.params) : {},
+        }));
+      const live = new Set(rows.map((r) => r.id));
+      chainConditionStates = (cs.data as { id: string; condition_id: string; profile_id: string; state: string; confirmed_on: string | null; note: string }[])
+        .filter((r) => live.has(r.condition_id) && isCondState(r.state))
+        .map((r) => ({ id: r.id, conditionId: r.condition_id, profileId: r.profile_id, state: r.state as CondState, confirmedOn: r.confirmed_on, note: r.note }));
+    }
+  } catch {
+    /* 未適用 */
+  }
+  return { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates };
 }
 /**
  * 世帯の全データを読み込む。householdId を指定すると、その世帯だけに絞る
@@ -256,7 +277,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   const imageUrl = (i: { id: string; sha256: string }, size: "full" | "thumb") => `/api/product-image/${i.id}?v=${i.sha256.slice(0, 12)}&s=${size}`;
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const { battles, settings, chainAliases, storeAliases, profileSettings } = await loadOptional(db, householdId);
+  const { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates } = await loadOptional(db, householdId);
 
   return {
     profiles: profiles.map((p) => {
@@ -393,6 +414,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       purchasedOn: dbToFlex(p.purchased_at ? "date_time" : p.purchased_date ? "date_only" : "unknown", p.purchased_date, p.purchased_at),
       channel: p.channel as "store" | "shipping" | "online" | "other",
       source: p.source_kind as "lottery" | "manual" | "import",
+      buyerProfileId: p.buyer_profile_id,
       note: p.note,
       items: pitems
         .filter((i) => i.purchase_id === p.id)
@@ -461,6 +483,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     battles,
     settings,
     profileSettings,
+    chainConditions,
+    chainConditionStates,
   };
 }
 

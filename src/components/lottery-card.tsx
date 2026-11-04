@@ -20,6 +20,7 @@ import { placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
+import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
 import { WonRow } from "@/components/won-actions";
 import { displayPeriod, myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
@@ -199,6 +200,7 @@ export function LotteryCard({
                   </>
                 )}
                 {notice === "unconfirmed" && !appliedTab && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
+                {!appliedTab && !wonTab && <EligibilityMark lottery={lottery} />}
               </span>
             </span>
           </button>
@@ -278,6 +280,7 @@ export function LotteryCard({
                   {!skipSource && skipException && <Chip className="text-muted-foreground">スルー例外</Chip>}
                 </span>
               )}
+              {!appliedTab && !wonTab && <EligibilityMark lottery={lottery} className="mt-1" />}
             </div>
             {/* ★ は画像の左上（本文とは別の列なので重ならない） */}
             <button
