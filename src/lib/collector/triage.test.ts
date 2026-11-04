@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_HOLD, canExcludeSource, classifyGap, decideHold, domainExcludable, feedbackTarget, hardSourceKeys, holdIntervalMs, hostOf, hostRole, manualRank, matchExclusion, preferredAlt, triagePatch, urgencyOf, type ExclusionRule, type HoldInput } from "@/lib/collector/triage";
+import { MAX_HOLD, needsImageRetry, canExcludeSource, classifyGap, decideHold, domainExcludable, feedbackTarget, hardSourceKeys, holdIntervalMs, hostOf, hostRole, manualRank, matchExclusion, preferredAlt, triagePatch, urgencyOf, type ExclusionRule, type HoldInput } from "@/lib/collector/triage";
 
 const NOW = new Date("2026-11-04T03:00:00Z"); // 12:00 JST
 const h = (n: number) => new Date(NOW.getTime() + n * 3600_000);
@@ -132,5 +132,16 @@ describe("収集元の除外ルール", () => {
     expect(feedbackTarget("wrong_info").target).toBe("ai_feedback");
     expect(feedbackTarget("out_of_scope_product").target).toBe("product_filter");
     expect(feedbackTarget("other").target).toBe("none");
+  });
+});
+
+describe("X画像の再取得", () => {
+  it("画像が取得できていなかったX投稿だけ、少数回に限って再取得する（同じ入力の再解析を繰り返さない）", () => {
+    const base = { isX: true, aiCalls: 1, holdCount: 0, texts: ["添付画像を確認できませんでした"] };
+    expect(needsImageRetry(base)).toBe(true);
+    expect(needsImageRetry({ ...base, aiCalls: 3 })).toBe(false);
+    expect(needsImageRetry({ ...base, holdCount: 2 })).toBe(false);
+    expect(needsImageRetry({ ...base, isX: false })).toBe(false);
+    expect(needsImageRetry({ ...base, texts: ["店舗を確実に特定できません"] })).toBe(false);
   });
 });

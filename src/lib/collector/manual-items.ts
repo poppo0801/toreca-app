@@ -14,6 +14,8 @@ export interface ManualRow {
   fail_kind: string | null;
   manual_since: string | null;
   draft: unknown;
+  /** 最後に取得できた情報（一覧の表示など）。系列・店舗が特定できない案件の手がかりにする */
+  last_good?: unknown;
 }
 
 export interface ManualItem {
@@ -38,6 +40,13 @@ export interface ManualItem {
 
 type DraftLike = { input?: { chain?: { name?: string }; store?: { name?: string }; items?: { product?: { name?: string } }[] } } | null;
 
+/** 一覧の表示（例: 「応募する （店舗名・新しいタブで開きます）」）から、店舗の手がかりになる短い文を作る */
+export function lastGoodHint(v: unknown): string | null {
+  const g = v as { title?: string; context?: string } | null;
+  const t = `${g?.title ?? ""} ${g?.context ?? ""}`.replace(/新しいタブで開きます/g, "").replace(/\s+/g, " ").trim();
+  return t.length >= 6 ? t.slice(0, 60) : null;
+}
+
 export function toManualItem(r: ManualRow, now: Date): ManualItem {
   const d = (r.draft ?? null) as DraftLike;
   const chain = d?.input?.chain?.name?.trim();
@@ -47,7 +56,7 @@ export function toManualItem(r: ManualRow, now: Date): ManualItem {
   const kind = r.fail_kind as FailKind | null;
   return {
     id: r.id,
-    where: [chain, store].filter(Boolean).join(" / ") || null,
+    where: [chain, store].filter(Boolean).join(" / ") || lastGoodHint(r.last_good) || null,
     products: (d?.input?.items ?? []).map((i) => i.product?.name?.trim() ?? "").filter(Boolean).slice(0, 4),
     title: r.title,
     reason: r.manual_reason || "自動で解決できませんでした",

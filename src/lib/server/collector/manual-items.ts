@@ -6,7 +6,7 @@ import type { Db } from "@/lib/server/lottery-service";
 export async function loadManualItems(db: Db, now = new Date(), limit = 60): Promise<ManualItem[]> {
   const { data } = await db
     .from("collection_candidates")
-    .select("id,title,source_url,due_at,manual_reason,fail_kind,manual_since,draft")
+    .select("id,title,source_url,due_at,manual_reason,fail_kind,manual_since,draft,last_good")
     .eq("triage", "manual")
     .eq("manual_state", "open")
     .limit(limit);

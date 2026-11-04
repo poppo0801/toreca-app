@@ -1,6 +1,6 @@
 import "server-only";
 import { hashNormalized } from "@/lib/collector/queue";
-import { decideHold, triagePatch } from "@/lib/collector/triage";
+import { decideHold, needsImageRetry, triagePatch } from "@/lib/collector/triage";
 import { extractPageText } from "@/lib/ai/page-text";
 import { fetchRespectingRobots } from "@/lib/server/safe-fetch";
 import { runReevaluation } from "@/lib/server/collector/reevaluate";
@@ -16,7 +16,7 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
   const { db, householdId, now } = deps;
   const out = { checked: 0, resolved: 0, held: 0, manual: 0, reanalyze: 0 };
   const nowIso = now.toISOString();
-  const base = () => db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,last_checked_at,triage").eq("household_id", householdId).eq("job_state", "review").eq("status", "pending").eq("kind", "new");
+  const base = () => db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,last_checked_at,triage,ai_calls,x_post_id").eq("household_id", householdId).eq("job_state", "review").eq("status", "pending").eq("kind", "new");
   const [due, legacy] = await Promise.all([base().eq("triage", "auto_retry").lte("next_run_at", nowIso).order("due_at", { ascending: true, nullsFirst: false }).limit(opts.max), base().is("triage", null).limit(Math.max(0, Math.floor(opts.max / 2)))]);
   const rows = [...(due.data ?? []), ...(legacy.data ?? [])];
   if (rows.length === 0) return out;
@@ -25,6 +25,13 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
 
   // 1) 無料の再調査（AIなし）
   await runReevaluation(deps, { execute: true, aiMax: 0, ids, budgetMs: Math.max(8_000, opts.timeLeft() - 4_000) }).catch(() => undefined);
+
+  // 1b) X投稿の添付画像を取得し直して再解析（画像が未取得だったものだけ、少数。X API・AIは月額予算の範囲内）
+  const imgIds = rows
+    .filter((r) => needsImageRetry({ isX: !!r.x_post_id || r.dedupe_key.startsWith("x:"), aiCalls: r.ai_calls ?? 0, holdCount: r.hold_count ?? 0, texts: [...(r.reasons ?? []), ...(((r.draft as { notices?: string[] } | null)?.notices) ?? [])] }))
+    .slice(0, 2)
+    .map((r) => r.id);
+  if (imgIds.length > 0 && opts.timeLeft() > 20_000) await runReevaluation(deps, { execute: true, aiMax: imgIds.length, classes: ["C"], ids: imgIds, budgetMs: Math.max(10_000, opts.timeLeft() - 4_000) }).catch(() => undefined);
 
   // 2) 取得元の再確認（無料）。本文が変わったときだけ再解析待ちへ
   const still = (await db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,triage,job_state,status").in("id", ids)).data ?? [];

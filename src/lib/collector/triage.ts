@@ -101,6 +101,15 @@ export function triagePatch(hd: HoldDecision, c: { hold_count?: number | null },
   return { triage: hd.triage, triage_reason: hd.reason.slice(0, 300) };
 }
 
+/**
+ * X投稿の添付画像を取得し直す価値があるか。画像が取得できていなかった旨の記録があり、再取得の回数が少ないものだけ。
+ * 同じ入力（画像なし）の再解析を繰り返さないよう、AI解析が3回を超えた候補・保留2回目以降は対象にしない。
+ */
+export function needsImageRetry(c: { isX: boolean; aiCalls: number; holdCount: number; texts: string[] }): boolean {
+  if (!c.isX || c.aiCalls > 2 || c.holdCount > 1) return false;
+  return c.texts.some((t) => /画像未取得|画像を確認|画像.{0,12}(確認できません|含まれていません|取得できません)|解析できていません/.test(t));
+}
+
 // ---------------------------------------------------------------- 取得元の関係（元の情報源・短縮URL・応募サービス）
 export type HostRole = "shortener" | "apply_service" | "aggregator" | "x" | "other";
 const SHORTENERS = new Set(["t.co", "bit.ly", "buff.ly", "ow.ly", "tinyurl.com", "lin.ee", "amzn.to", "goo.gl"]);

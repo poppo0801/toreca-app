@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { manualHeadline, manualSignature, sortManual, toManualItem, type ManualRow } from "@/lib/collector/manual-items";
+import { lastGoodHint, manualHeadline, manualSignature, sortManual, toManualItem, type ManualRow } from "@/lib/collector/manual-items";
 import { createMockData } from "@/data/mock";
 import { EXCLUSION_SCOPE_LABEL, originOf, sourceScopeOptions, xAccountOf } from "@/lib/provenance";
 
@@ -68,5 +68,13 @@ describe("今後この収集元を除外: 範囲の候補", () => {
     expect(xAccountOf("https://x.com/abc_DEF/status/1")).toBe("abc_DEF");
     expect(xAccountOf("https://x.com/home")).toBeNull();
     expect(EXCLUSION_SCOPE_LABEL.x_account).toBe("Xアカウント");
+  });
+});
+
+describe("系列・店舗が不明な案件の手がかり", () => {
+  it("一覧の表示から短い説明を作る。短すぎれば出さない", () => {
+    expect(lastGoodHint({ title: "応募する （北国書林 辰口店・新しいタブで開きます）", context: "" })).toBe("応募する （北国書林 辰口店・）");
+    expect(lastGoodHint({ title: "応募", context: "" })).toBeNull();
+    expect(lastGoodHint(null)).toBeNull();
   });
 });
