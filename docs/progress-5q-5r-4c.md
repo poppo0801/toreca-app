@@ -19,3 +19,13 @@
 - [x] 設定 > 抽選条件管理（一覧・シート）、カードのマーク、詳細の資格セクション
 - [x] 実DB結合テスト 9件通過、コンポーネントテスト 7件
 - [ ] 実DB E2E（supabase.spec）での画面確認は未実施
+
+### 5R コミット da950dd（完了）
+- migration 52（chain_conditions / chain_condition_states）、migration 53（purge_test_households に追加。テストデータ削除が FK で止まる問題の修正）を本番へ適用済み（どちらもバックアップ後）。
+
+## Stage 4C 追加（再評価）
+- [x] src/lib/collector/reevaluate.ts（rematch / judge）・ready.ts（isReady を純関数へ分離）・単体15件
+- [x] src/lib/server/collector/reevaluate.ts（runReevaluation / restoreReevaluation）、POST /api/cron/reevaluate（CRON_SECRET）
+- [x] 実DB結合テスト 6件、判定のみのローカル実行（本番データ読み取り: 59件 → B17/C14/D22/E5）
+- [ ] 本番デプロイ → 本番で判定のみ → 3件で安全確認 → 予算内で全体 → 復元確認
+- 再開手順: `node .c4.tmp.mjs <base> '<json>'` 相当（POST /api/cron/reevaluate、Bearer CRON_SECRET）。変更前の状態は候補の draft.reeval.before

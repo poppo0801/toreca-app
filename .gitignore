@@ -24,3 +24,6 @@ e2e/ai-live-output
 .dev.log
 .e2e-mock*.log
 .ov.png
+.*.out.json
+.testdb.log
+.e2e-*.log

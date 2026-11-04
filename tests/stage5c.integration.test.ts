@@ -251,8 +251,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 5C: 管理番号とExcel取り込み", (
     expect(pv.preview.rows.find((r) => r.no === st.management_no)!.notes[0]).toContain("再確認");
     const done = await applyImport(u1, "stores", file, "st.xlsx", pv.preview.fingerprint, profile);
     expect(done.ok && done.created[0]).toMatch(/^ST\d{6}$/);
-    const after = (await u1.from("stores").select("name,address_optional,round_trip_fare,location_review_needed,latitude,apply_method,receive_method,store_url,chain_id")).data!;
-    expect(after.find((s) => s.name === "採番店")).toMatchObject({ address_optional: "新住所", round_trip_fare: 1200, location_review_needed: true, latitude: 34.69 }); // 位置は消さない
+    const after = (await u1.from("stores").select("name,address_optional,round_trip_fare,location_review_needed,latitude,geo_status,apply_method,receive_method,store_url,chain_id")).data!;
+    expect(after.find((s) => s.name === "採番店")).toMatchObject({ address_optional: "新住所", round_trip_fare: 1200, location_review_needed: true, latitude: null, geo_status: "pending" }); // Stage 5P追加: 住所を変えると古い位置は破棄して取得待ち（古い座標を使い続けない）
     expect(after.find((s) => s.name === "取込店")).toMatchObject({ chain_id: chain, apply_method: "app", receive_method: "store", round_trip_fare: 800, location_review_needed: false });
 
     // 既存店舗の系列変更はエラー。未登録の系列は新規行なら新規系列として登録できる（エラーにならない）。エクスポート→取り込みは変更なし
