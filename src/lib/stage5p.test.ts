@@ -110,7 +110,7 @@ describe("メイン／サブユーザー", () => {
   it("サブは対象系列の抽選だけ表示する。メインは全系列", () => {
     const d = withSub();
     const idsC = selectLotteries(d, "all", { ...defaultFiltersFor("all"), status: "any" }, NOW, "pC").map((l) => l.id);
-    const idsA = selectLotteries(d, "all", { ...defaultFiltersFor("all"), status: "any" }, NOW, "pA").map((l) => l.id);
+    const idsA = selectLotteries(d, "all", { ...defaultFiltersFor("all"), status: "any", skip: "include" }, NOW, "pA").map((l) => l.id);
     expect(idsC.length).toBeGreaterThan(0);
     expect(idsC.every((id) => d.lotteries.find((l) => l.id === id)!.chainId === "c1")).toBe(true);
     expect(idsA).toHaveLength(d.lotteries.length);

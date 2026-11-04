@@ -115,7 +115,7 @@ describe("状態の絞り込み（全情報・★管理対象の既定は受付�
     const d = createMockData(NOW);
     const none: AppData = { ...d, management: [] };
     expect(ids(none, "managed", { status: "any" })).toEqual([]);
-    expect(ids(none, "all", { status: "any" }).length).toBe(d.lotteries.length);
+    expect(ids(none, "all", { status: "any", skip: "include" }).length).toBe(d.lotteries.length);
   });
   it("応募済み・当選タブでは既定のままでも状態で絞らない。他の条件（系列）とも組み合わせられる", () => {
     const applied = m.setApplied(managed(createMockData(NOW)), "pA", "L4", "a-c3", true, NOW);

@@ -7,7 +7,7 @@ export type Tab = "managed" | "applied" | "won" | "all";
 export type AllFilter = "any" | "unmanaged" | "skipped";
 export type SortMode = "deadline" | "result";
 
-/** ★管理対象タブのスルー表示: normal=自分がスルーしていないもの / include=すべて / only=自分がスルーしたもの */
+/** スルー表示（全タブ共通）: normal=自分がスルーしていないもの / include=すべて / only=自分がスルーしたもの */
 export type SkipView = "normal" | "include" | "only";
 
 /**
@@ -186,11 +186,13 @@ function wonRank(data: AppData, l: Lottery, now: Date, profileId?: string): numb
 }
 
 /**
- * スルーはユーザー別。★管理対象タブでは、既定で「自分がスルーした抽選」を一覧から外す（他のユーザーには影響しない）。
+ * スルーはプロフィール別。全タブ（全情報・★管理対象・応募済み・当選）で、既定で「自分がスルーした抽選」を一覧から外す（他のプロフィールには影響しない）。
+ * 応募・当選・購入・受取の記録は消さず、絞り込みで「含む／のみ」にすれば表示できる。全情報タブの「スルーのみ」はその絞り込み自体が表示対象を決めるため、ここでは外さない。
  * profileId を渡さない場合（集計用途など）はスルーで絞らない。
  */
 function matchSkipView(data: AppData, lottery: Lottery, f: Filters, tab: Tab, profileId?: string): boolean {
-  if (tab !== "managed" || !profileId || f.skip === "include") return true;
+  if (!profileId || f.skip === "include") return true;
+  if (tab === "all" && f.allFilter === "skipped") return true;
   const skipped = isSkippedBy(data, profileId, lottery);
   return f.skip === "only" ? skipped : !skipped;
 }

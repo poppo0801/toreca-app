@@ -1,6 +1,9 @@
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { LotteryDraft } from "@/lib/lottery-match";
 
+/** 商品マスター未登録の不足理由の先頭（判定・表示で共通） */
+export const PRODUCT_UNREGISTERED = "商品マスターに未登録の商品です（商品確認待ち）";
+
 /** 登録に十分な情報があるか（マスター照合が確実・締切が分かる・方式が確定・出典あり） */
 export function isReady(draft: LotteryDraft, input: LotteryInput = draft.input): { ready: boolean; missing: string[]; provisional: string[] } {
   const sure = (k: string) => k === "exact" || k === "alias" || k === "code";
@@ -26,7 +29,8 @@ export function isReady(draft: LotteryDraft, input: LotteryInput = draft.input):
   draft.summary.items.forEach((it, i) => {
     if (sure(it.kind)) return;
     const name = input.items[i]?.product.name ?? "";
-    if (it.kind === "none" && (draft.candidates.items[i]?.length ?? 0) === 0 && clearName(name) && !input.items[i]?.product.id) provisional.push(`商品「${name.trim()}」`);
+    // 商品マスターに無い商品は、自動収集では確定登録しない（利用者が既存商品の選択・新規登録・除外を決める）。手動登録時の仮登録は別の経路で維持する
+    if (it.kind === "none" && (draft.candidates.items[i]?.length ?? 0) === 0 && clearName(name) && !input.items[i]?.product.id) missing.push(`${PRODUCT_UNREGISTERED}: 「${name.trim()}」`);
     else missing.push(`商品「${name.trim() || "不明"}」を確実に判別できません`);
   });
   if (input.applyDeadline.precision === "unknown") missing.push("応募締切が不明です");

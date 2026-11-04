@@ -123,7 +123,7 @@ export function FilterSheet({
               value={draft.skip}
               onChange={(v) => set("skip", v as SkipView)}
               options={[
-                { value: "normal", label: "除く" },
+                { value: "normal", label: "非表示（通常）" },
                 { value: "include", label: "含む" },
                 { value: "only", label: "のみ" },
               ]}

@@ -47,7 +47,8 @@ const DAY = 86400_000;
 export const isNowGroup = (dueAt: Date | null, now: Date) => !!dueAt && dueAt.getTime() >= now.getTime() && dueAt.getTime() - now.getTime() <= 7 * DAY;
 
 /** 一覧に出す短い失敗理由。長い文章・URLは詳細に回す */
-export function shortReasonOf(x: { where: string | null; products: string[]; failLabel: string | null; hasDraft: boolean }): string {
+export function shortReasonOf(x: { where: string | null; products: string[]; failLabel: string | null; hasDraft: boolean; reason?: string }): string {
+  if (x.reason?.includes("商品確認待ち")) return "商品確認待ち（マスター未登録）";
   if (!x.where) return x.failLabel ? "店舗不明・公式ページ取得不可" : "店舗不明";
   if (x.products.length === 0 && x.hasDraft) return "商品不明";
   if (x.failLabel) return "公式ページ取得不可";
@@ -88,7 +89,7 @@ export function toManualItem(r: ManualRow, now: Date): ManualItem {
     since: r.manual_since,
     editable: !!d?.input,
     group: isNowGroup(dueAt, now) ? "now" : "later",
-    shortReason: shortReasonOf({ where, products, failLabel, hasDraft: !!d?.input }),
+    shortReason: shortReasonOf({ where, products, failLabel, hasDraft: !!d?.input, reason: r.manual_reason }),
   };
 }
 

@@ -63,8 +63,13 @@ export function setManaged(
   };
 }
 
+/** 応募済み・当選にした抽選は★管理対象にする（Stage 5Y）。既に★なら何もしない。取消・落選・購入済みでも自動では外さない */
+function ensureManaged(data: AppData, actorProfileId: string, lotteryId: string, at: Date): AppData {
+  return data.management.find((m) => m.lotteryId === lotteryId)?.isManaged ? data : setManaged(data, actorProfileId, lotteryId, true, at);
+}
+
 /** 応募の記録／取消。抽選×アカウントで一意。取消しても行は残し state を変える。 */
-export function setApplied(
+function setAppliedCore(
   data: AppData,
   actorProfileId: string,
   lotteryId: string,
@@ -114,7 +119,7 @@ export function setApplied(
   };
 }
 
-export function setResult(
+function setResultCore(
   data: AppData,
   actorProfileId: string,
   applicationId: string,
@@ -140,6 +145,18 @@ export function setResult(
       after: { result },
     }),
   };
+}
+
+
+export function setApplied(data: AppData, actorProfileId: string, lotteryId: string, accountId: string, applied: boolean, at: Date, opts: { backfill?: boolean; appliedAt?: string | null } = {}): AppData {
+  const out = setAppliedCore(data, actorProfileId, lotteryId, accountId, applied, at, opts);
+  return applied && out !== data ? ensureManaged(out, actorProfileId, lotteryId, at) : out;
+}
+
+export function setResult(data: AppData, actorProfileId: string, applicationId: string, result: ResultStatus, at: Date): AppData {
+  const out = setResultCore(data, actorProfileId, applicationId, result, at);
+  const lotteryId = data.applications.find((a) => a.id === applicationId)?.lotteryId;
+  return result === "won" && out !== data && lotteryId ? ensureManaged(out, actorProfileId, lotteryId, at) : out;
 }
 
 /**

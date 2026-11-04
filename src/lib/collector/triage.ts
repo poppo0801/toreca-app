@@ -4,6 +4,7 @@
  * 再試行の回数・間隔は内部で管理し、利用者の設定には出さない。締切が近い候補は、規定回数に達していなくても早めに手動確認へ移す。
  */
 import type { FailKind } from "@/lib/collector/queue";
+import { PRODUCT_UNREGISTERED } from "@/lib/collector/ready";
 
 export type Triage = "auto_register" | "auto_exclude" | "auto_retry" | "manual";
 export const TRIAGE_LABEL: Record<Triage, string> = { auto_register: "自動登録", auto_exclude: "自動除外", auto_retry: "自動再調査", manual: "要手動確認" };
@@ -78,6 +79,8 @@ export interface HoldDecision {
 export function decideHold(h: HoldInput): HoldDecision {
   const urgency = urgencyOf(h.dueAt, h.now);
   if (urgency === "overdue") return { triage: "auto_exclude", reason: "受付終了のため自動で除外しました（応募締切を過ぎています）", nextMs: null, urgency };
+  // 商品マスター未登録は再調査で解決しない。利用者が商品を確認する（既存商品の選択・新規登録・除外）
+  if (h.gaps.some((g) => g.startsWith(PRODUCT_UNREGISTERED))) return { triage: "manual", reason: `${PRODUCT_UNREGISTERED}。商品を確認してください`, nextMs: null, urgency };
   const classes = h.gaps.map(classifyGap);
   if (classes.includes("user")) return { triage: "manual", reason: `利用者の判断が必要です: ${h.gaps.find((g) => classifyGap(g) === "user")}`, nextMs: null, urgency };
   const left = h.dueAt ? h.dueAt.getTime() - h.now.getTime() : null;

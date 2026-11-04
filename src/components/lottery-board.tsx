@@ -165,7 +165,7 @@ function LotteryBoardInner() {
   const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew && profileSeesLottery(data, profile.id, l)).length, [data, profile.id]);
   const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
-  const showSkip = tab === "managed";
+  const showSkip = true;
   const statusDefault = defaultFiltersFor(tab).status;
   // 詳細フィルターで条件を変えている数（検索語は検索欄に出ているので含めない）
   const activeCount = countActiveFilters(filters, defaultFiltersFor(tab), { tab, showSkip });

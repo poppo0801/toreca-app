@@ -711,7 +711,7 @@ function backfillAppliedAt(opts: ApplyOptions): string | null {
 }
 
 /** 応募の記録／取消。抽選×アカウントで一意。取消しても行は残す。 */
-export async function setApplied(
+async function setAppliedCore(
   db: Db,
   householdId: string,
   lotteryId: string,
@@ -759,7 +759,7 @@ export async function setApplied(
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
 
-export async function setResult(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
+async function setResultCore(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
   const r = z.enum(["pending", "won", "lost", "unknown"]).safeParse(result);
   if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
   const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
@@ -880,7 +880,7 @@ const itemResultsSchema = z
  * 商品別の当落を登録する（B/C/D方式）。DB関数が方式のルール（Cは当選1商品まで、Dは選択商品のみ）を検証し、
  * 応募全体の当落（集計値）を再計算する。購入済みの応募は変更できない。
  */
-export async function setItemResults(
+async function setItemResultsCore(
   db: Db,
   applicationId: string,
   results: { itemId: string; result: ResultStatus }[],
@@ -896,6 +896,50 @@ export async function setItemResults(
     p_actor: actor as string,
   });
   return error ? fail(mapDbError(error)) : ok(undefined);
+}
+
+
+/**
+ * 応募済み・当選にした抽選は、★管理対象にする（Stage 5Y）。既に★なら何もしない（冪等・上書きしない）。
+ * 応募の取消・落選・購入済み・受取済みでも★は自動では外さない（利用者が手動で外す）。★は抽選の設定で、プロフィール別の応募・当落とは独立。
+ * ★の付与に失敗しても、応募・当落の記録は成功のまま（★は後から手動で付けられる）。
+ */
+async function autoManageLottery(db: Db, lotteryId: string, actor: string | null): Promise<void> {
+  const { data: lot } = await db.from("lotteries").select("household_id").eq("id", lotteryId).maybeSingle();
+  if (!lot) return;
+  const { data: cur } = await db.from("lottery_management").select("is_managed").eq("lottery_id", lotteryId).maybeSingle();
+  if (cur?.is_managed) return;
+  await db.from("lottery_management").upsert({ lottery_id: lotteryId, household_id: lot.household_id, is_managed: true, managed_source: "manual", managed_at: nowIso(), reviewed_at: nowIso(), updated_by_profile_id: actor }, { onConflict: "lottery_id" });
+  await db.from("lotteries").update({ is_new: false }).eq("id", lotteryId);
+}
+
+async function lotteryOfApplication(db: Db, applicationId: string): Promise<string | null> {
+  const { data } = await db.from("applications").select("lottery_id").eq("id", applicationId).maybeSingle();
+  return data?.lottery_id ?? null;
+}
+
+export async function setApplied(db: Db, householdId: string, lotteryId: string, accountId: string, applied: boolean, actor: string | null, selectedItemId: string | null = null, opts: ApplyOptions = {}): Promise<ServiceResult> {
+  const r = await setAppliedCore(db, householdId, lotteryId, accountId, applied, actor, selectedItemId, opts);
+  if (r.ok && applied) await autoManageLottery(db, lotteryId, actor).catch(() => undefined);
+  return r;
+}
+
+export async function setResult(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
+  const r = await setResultCore(db, applicationId, result, actor);
+  if (r.ok && result === "won") {
+    const lid = await lotteryOfApplication(db, applicationId);
+    if (lid) await autoManageLottery(db, lid, actor).catch(() => undefined);
+  }
+  return r;
+}
+
+export async function setItemResults(db: Db, applicationId: string, results: { itemId: string; result: ResultStatus }[], actor: string | null): Promise<ServiceResult> {
+  const r = await setItemResultsCore(db, applicationId, results, actor);
+  if (r.ok && results.some((x) => x.result === "won")) {
+    const lid = await lotteryOfApplication(db, applicationId);
+    if (lid) await autoManageLottery(db, lid, actor).catch(() => undefined);
+  }
+  return r;
 }
 
 // ------------------------------------------------------------------ プロフィール（表示名・色・マーク・通知先）
