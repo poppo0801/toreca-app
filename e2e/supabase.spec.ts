@@ -43,11 +43,21 @@ async function fillMasters(dialog: ReturnType<Page["getByRole"]>, chain: string,
   await dialog.getByRole("combobox", { name: "商品1", exact: true }).fill(product);
 }
 
-/** 詳細フィルターを開く（既に開いていれば何もしない） */
+/** 絞り込みシートを開く（既に開いていれば何もしない） */
 async function openFilters(page: Page) {
-  const btn = page.getByRole("button", { name: "詳細フィルターを開く" });
-  if ((await btn.getAttribute("aria-pressed")) !== "true") await btn.click();
-  await expect(page.getByRole("group", { name: "詳細フィルター" })).toBeVisible();
+  // 連続タップ防止（300ms）で直前の操作の直後のタップが無視されることがあるので、開くまで押し直す
+  await expect(async () => {
+    if (!(await page.getByTestId("filter-sheet").isVisible())) await page.getByTestId("filter-open").click();
+    await expect(page.getByTestId("filter-sheet")).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 8000 });
+}
+
+/** 絞り込みを1項目変えて「適用」する（シートが閉じていれば開く） */
+async function pickFilter(page: Page, label: string, value: string | { label: string }) {
+  await openFilters(page);
+  await page.getByTestId("filter-sheet").getByLabel(label).selectOption(value);
+  await page.getByTestId("filter-apply").click();
+  await expect(page.getByTestId("filter-sheet")).toHaveCount(0);
 }
 
 /** 下から開くパネルを閉じる（右上の閉じるボタンは無い。Esc・ハンドル・背景タップで閉じる） */
@@ -241,7 +251,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await page.goto("/lotteries");
   await page.getByRole("tab", { name: /全情報/ }).click();
   await openFilters(page);
-  await page.getByLabel("状態").selectOption("any"); // 受付終了の抽選も含める
+  await pickFilter(page, "状態", "any"); // 受付終了の抽選も含める
   await expect(page.getByTestId("lottery-card")).toHaveCount(1);
   await page.getByRole("tab", { name: /当選/ }).click();
   await expect(page.getByTestId("lottery-card").first().getByTestId("won-done")).toContainText("受取済");
@@ -324,11 +334,12 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
   await expect(page.getByTestId("notification-badge")).toHaveCount(0);
   await openFilters(page);
   await expect(page.getByLabel("スルー表示")).toHaveValue("normal");
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("lottery-card").filter({ hasText: "E2E店" })).toHaveCount(0); // 通常表示: 自分がスルーしたものは除く
-  await page.getByLabel("スルー表示").selectOption("only");
+  await pickFilter(page, "スルー表示", "only");
   const card2 = page.getByTestId("lottery-card").filter({ hasText: "E2E店" }).first();
   await expect(card2).toContainText("店舗スルー中");
-  await page.getByLabel("スルー表示").selectOption("include");
+  await pickFilter(page, "スルー表示", "include");
   await expect(card2).toBeVisible();
 
   // 今回だけ例外解除 → 再び未応募として扱われ、取り消すとスルーに戻る
@@ -2025,6 +2036,11 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await page.goto("/settings");
   await page.getByTestId("menu-collection").click();
   await expect(page.getByRole("heading", { name: "抽選情報の自動収集" })).toBeVisible();
+  // ②〜④は初期状態で閉じている。操作のため開く
+  for (const id of ["conditions", "run-settings", "history"]) {
+    const t = page.getByTestId(`${id}-toggle`);
+    if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+  }
 
   // 初期の収集元（Web2・X2）。まだ取得していないので「未取得」（取得できたと表示しない）
   const rows = page.getByTestId("source-row");

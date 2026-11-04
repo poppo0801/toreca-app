@@ -72,9 +72,7 @@ export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; class
             className={cn("inline-flex items-center gap-0.5", mine && "rounded-full bg-muted/70 pr-1", m.status !== "applied" && "opacity-80")}
           >
             <ProfileAvatar profile={owner} size="xs" className={cn("size-[18px] text-[9px]", m.status !== "applied" && "grayscale")} />
-            {m.status === "eligible_unapplied" ? (
-              <UnappliedMark className="size-3.5" />
-            ) : m.status === "applied" && m.result === "won" ? (
+            {m.status === "applied" && m.result === "won" ? (
               <span className="text-[11px] font-bold leading-none text-success">当選</span>
             ) : m.status === "applied" && m.result === "lost" ? (
               <span className="text-[11px] leading-none text-muted-foreground">落選</span>

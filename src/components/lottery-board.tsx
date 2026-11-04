@@ -8,6 +8,7 @@ import { useSearchParams } from "next/navigation";
 import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { useAiJobs } from "@/components/ai-jobs-provider";
+import { countActiveFilters, FilterSheet } from "@/components/lottery-filter-sheet";
 import { MemoFormDialog, MemoListDialog, RegisterChooser } from "@/components/collection-memos";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
@@ -57,32 +58,6 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "any", label: "状態: すべて" },
 ];
 const STATUS_VALUES = STATUS_OPTIONS.map((o) => o.value);
-
-const chip = "h-9 shrink-0 rounded-full border bg-input px-3 text-xs";
-
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-  className,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  className?: string;
-}) {
-  return (
-    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={cn(chip, className)}>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 interface SessionState {
   tab: Tab;
@@ -193,16 +168,8 @@ function LotteryBoardInner() {
   const showSkip = tab === "managed";
   const statusDefault = defaultFiltersFor(tab).status;
   // 詳細フィルターで条件を変えている数（検索語は検索欄に出ているので含めない）
-  const activeCount = [
-    filters.chainId,
-    filters.productId,
-    filters.prefecture,
-    filters.receiveMethod,
-    filters.status !== statusDefault,
-    tab === "all" && filters.allFilter !== "any",
-    showSkip && filters.skip !== "normal",
-    filters.sort !== "deadline",
-  ].filter(Boolean).length;
+  const activeCount = countActiveFilters(filters, defaultFiltersFor(tab), { tab, showSkip });
+  const filterKey = JSON.stringify(filters);
   const hasFilter = activeCount > 0 || filters.query.trim() !== "";
 
   return (
@@ -252,9 +219,9 @@ function LotteryBoardInner() {
               >
                 {/* 1行に収める: 名前（赤丸は文字のすぐ右上）・件数・新着の小さなバッジ。タブの高さは変えない */}
                 <span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">
-                  <span className={cn("relative", dot && "mr-1.5")}>
+                  <span className={cn("relative", dot && "ml-1.5")}>
                     {t.label}
-                    {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute -right-2 -top-0.5 size-2 rounded-full bg-danger ring-1 ring-white" />}
+                    {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute -left-2 -top-1 size-2 rounded-full bg-danger ring-1 ring-white" />}
                   </span>
                   <span className="text-[11px] tabular-nums opacity-80">{count}</span>
                   {t.value === "all" && newCount > 0 && (
@@ -301,7 +268,7 @@ function LotteryBoardInner() {
               className="h-10 w-full rounded-md border bg-input pl-9 pr-3 text-sm"
             />
           </label>
-          <Button variant="outline" size="icon" className="relative size-10" aria-pressed={advanced} aria-label="詳細フィルターを開く" onClick={() => gate() && setAdvanced((v) => !v)}>
+          <Button variant="outline" size="icon" className="relative size-10" aria-label="絞り込みを開く" data-testid="filter-open" onClick={() => gate() && setAdvanced(true)}>
             <SlidersHorizontal className="size-4" />
             {activeCount > 0 && (
               <span data-testid="filter-count" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -337,79 +304,27 @@ function LotteryBoardInner() {
           </Button>
         </div>
 
-        {/* 詳細フィルターは初期状態で非表示。系列・商品・店舗の地域・スルー設定などをまとめて開く */}
+        {view === "matrix" && (
+          <label className="flex h-8 items-center gap-1.5 text-xs">
+            <input type="checkbox" checked={actionOnly} onChange={(e) => setActionOnly(e.target.checked)} className="size-4" />
+            要対応のみ
+          </label>
+        )}
+        {/* 絞り込みはボトムシート（状態・系列・店舗・商品・応募方法・受取方法・都道府県などを組み合わせて「適用」）。開くたびに現在の条件から作り直す */}
         {advanced && (
-          <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5" role="group" aria-label="詳細フィルター">
-            <Select
-              label="状態"
-              value={filters.status}
-              onChange={(v) => set("status", v as StatusFilter)}
-              options={STATUS_OPTIONS.filter((o) => o.value !== "default" || statusDefault === "default")}
-            />
-            <Select label="系列" value={filters.chainId} onChange={(v) => set("chainId", v)} options={[{ value: "", label: "系列: すべて" }, ...data.chains.map((c) => ({ value: c.id, label: c.name }))]} />
-            <Select
-              label="商品"
-              value={filters.productId}
-              onChange={(v) => set("productId", v)}
-              options={[{ value: "", label: "商品: すべて" }, ...data.products.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.officialName }))]}
-            />
-            <Select label="都道府県" value={filters.prefecture} onChange={(v) => set("prefecture", v)} options={[{ value: "", label: "都道府県: すべて" }, ...prefectures.map((p) => ({ value: p, label: p }))]} />
-            <Select
-              label="受取方法"
-              value={filters.receiveMethod}
-              onChange={(v) => set("receiveMethod", v)}
-              options={[
-                { value: "", label: "受取: すべて" },
-                { value: "store", label: "店頭" },
-                { value: "shipping", label: "発送" },
-                { value: "either", label: "店頭/発送" },
-              ]}
-            />
-            <Select
-              label="並び順"
-              value={filters.sort}
-              onChange={(v) => set("sort", v as SortMode)}
-              options={[
-                { value: "deadline", label: "締切順" },
-                { value: "result", label: "発表日順" },
-              ]}
-            />
-            {showSkip && (
-              <Select
-                label="スルー表示"
-                value={filters.skip}
-                onChange={(v) => set("skip", v as SkipView)}
-                options={[
-                  { value: "normal", label: "スルー: 除く" },
-                  { value: "include", label: "スルー: 含む" },
-                  { value: "only", label: "スルー: のみ" },
-                ]}
-              />
-            )}
-            {tab === "all" && (
-              <Select
-                label="絞り込み"
-                value={filters.allFilter}
-                onChange={(v) => set("allFilter", v as AllFilter)}
-                options={[
-                  { value: "any", label: "すべて" },
-                  { value: "unmanaged", label: "管理対象外" },
-                  { value: "skipped", label: "スルーのみ" },
-                ]}
-              />
-            )}
-            {view === "matrix" && (
-              <label className="flex h-9 shrink-0 items-center gap-1.5 text-xs">
-                <input type="checkbox" checked={actionOnly} onChange={(e) => setActionOnly(e.target.checked)} className="size-4" />
-                要対応のみ
-              </label>
-            )}
-            {hasFilter && (
-              <button type="button" className={cn(chip, "text-primary-ink")} onClick={() => setFilters(defaultFiltersFor(tab))}>
-                解除
-              </button>
-            )}
-          </div>
+          <FilterSheet
+            key={`${tab}|${filterKey}`}
+            open
+            onOpenChange={setAdvanced}
+            data={data}
+            filters={filters}
+            base={defaultFiltersFor(tab)}
+            tab={tab}
+            showSkip={showSkip}
+            statusOptions={STATUS_OPTIONS.filter((o) => o.value !== "default" || statusDefault === "default")}
+            prefectures={prefectures}
+            onApply={(f) => setFilters(f)}
+          />
         )}
 
         {view === "matrix" ? (

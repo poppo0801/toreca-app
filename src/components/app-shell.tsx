@@ -64,6 +64,11 @@ function useViewportGap() {
       if (!raf) raf = requestAnimationFrame(tick);
     };
     settle();
+    // 表示領域が「イベントなしで、操作の数秒後に」直る場合の取りこぼし対策: 補正値だけが残ると下部メニューが画面の下へはみ出す（途切れる）。
+    // SETTLE_MS の期間外でも、画面が見えている間は低頻度（0.5秒ごと）で測り直す。値が変わったときだけ書き換えるので描画は増えない。
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === "visible" && !raf) measure();
+    }, 500);
     const opts = { passive: true, capture: true } as const;
     const vv = window.visualViewport;
     const onVisible = () => document.visibilityState === "visible" && settle();
@@ -87,6 +92,7 @@ function useViewportGap() {
     window.addEventListener("focusin", settle);
     window.addEventListener("focusout", settle);
     return () => {
+      window.clearInterval(poll);
       cancelAnimationFrame(raf);
       window.removeEventListener("pageshow", settle);
       window.removeEventListener("orientationchange", settle);

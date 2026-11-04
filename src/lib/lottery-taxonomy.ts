@@ -374,3 +374,12 @@ export function placeInfo(args: { receiveMethod: "store" | "shipping" | "either"
   if (args.receiveMethod === "unknown") return { label: null, canShip: false, showLocation: false };
   return { label: pref, canShip: false, showLocation: true };
 }
+
+/** カード用の短い表示（標準分類の主な方法を1語で）。補足・複数の方法は詳細画面で確認する。未確認（unknown・未設定）は null */
+export const ANNOUNCE_SHORT: Record<AnnounceMethod, string> = {
+  result_mail: "メール", winner_mail: "メール", result_page: "Web", app: "アプリ", x_dm: "X", line: "LINE", sms: "SMS", in_store: "店頭", sns_post: "X", phone: "電話", other: "その他", unknown: "",
+};
+export function announceShort(methods: readonly unknown[] | undefined): string | null {
+  const { primary } = splitAnnounce(methods ?? []);
+  return primary && ANNOUNCE_SHORT[primary] ? ANNOUNCE_SHORT[primary] : null;
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CalendarCheck, Clock, MapPin, Star, Store as StoreIcon, Truck } from "lucide-react";
+import { CalendarCheck, Clock, MapPin, Megaphone, Package, ShoppingBag, Star, Store as StoreIcon, Truck } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
@@ -16,7 +16,7 @@ import { DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { deadlineBadge, formatFlexible, formatFlexMdWTime, formatShort } from "@/lib/datetime";
 import { effectiveEventState, hasSkipException, skipSourceFor } from "@/lib/eligibility";
 import { DEADLINE_BAR_CLASS, EVENT_LABEL, RECEIVE_SHORT, APPLY_LABEL } from "@/lib/lottery-labels";
-import { placeInfo } from "@/lib/lottery-taxonomy";
+import { announceShort, placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
@@ -121,8 +121,8 @@ export function LotteryCard({
   const deadlineW = formatFlexMdWTime(lottery.applyDeadline, now);
   const periodInfo = displayPeriod(lottery, now);
   const periodNode = (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="period" aria-label={`${periodInfo.label}期間 ${periodInfo.text ?? "未定"}`}>
-      <span className="text-muted-foreground">{periodInfo.label}</span>
+    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="period" data-kind={periodInfo.label} title={`${periodInfo.label}期間`} aria-label={`${periodInfo.label}期間 ${periodInfo.text ?? "未定"}`}>
+      {periodInfo.label === "受取" ? <Package className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
       <span className={periodInfo.text ? "" : "text-muted-foreground"}>{periodInfo.text ?? "未定"}</span>
     </span>
   );
@@ -171,10 +171,10 @@ export function LotteryCard({
               </span>
               <ProductLine name={sum.name} extra={sum.extraKinds} />
               {/* 応募漏れ防止: 締切と残り時間は一覧でも必ず出す */}
-              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]" data-testid="card-deadline">
+              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] tracking-tight" data-testid="card-deadline">
                 {appliedTab ? (
                   <>
-                    <span className={cn("inline-flex items-center gap-0.5", stage === "unknown" ? "text-muted-foreground" : "font-bold")} data-testid="result-day">
+                    <span className={cn("inline-flex items-center gap-0.5", stage === "unknown" && "text-muted-foreground")} data-testid="result-day">
                       <CalendarCheck className="size-3 shrink-0" aria-hidden="true" />
                       {resultDayText(lottery, now)}
                     </span>
@@ -224,11 +224,11 @@ export function LotteryCard({
                 {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tracking-tight" data-testid="card-dates">
                 {appliedTab ? (
                   <>
                     {/* 応募済み: 左=当落発表日（発表期間） / 右=購入期間（分離していれば受取期間）。応募締切はカードに出さない（詳細で確認できる） */}
-                    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", stage === "unknown" ? "text-muted-foreground" : "font-bold")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
+                    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", stage === "unknown" && "text-muted-foreground")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
                       <CalendarCheck className="size-3.5 shrink-0" aria-hidden="true" />
                       {stage === "unknown" ? resultDayText(lottery, now) : `発表 ${resultDayText(lottery, now)}`}
                     </span>
@@ -244,7 +244,7 @@ export function LotteryCard({
                     {display.deadline && (
                       <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="deadline-day" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
                         <Clock className="size-3.5 shrink-0 text-primary-ink" aria-hidden="true" />
-                        <span className="font-medium">{deadlineW ?? "—"}</span>
+                        <span>{deadlineW ?? "—"}</span>
                       </span>
                     )}
                     {periodNode}
@@ -261,6 +261,12 @@ export function LotteryCard({
                     </span>
                   )}
                   {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
+                  {appliedTab && (
+                    <span className="inline-flex items-center gap-1" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods) ?? "未確認"}`}>
+                      <Megaphone className="size-3.5 shrink-0" aria-hidden="true" />
+                      {announceShort(lottery.announcementMethods) ?? "未確認"}
+                    </span>
+                  )}
                 </span>
                 {dist && placeI.showLocation && (
                   <span data-testid="distance" title="自宅からの直線距離（道路距離ではありません）" className={cn("inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-xs font-bold", BAND_CLASS[dist.band].split(" ").filter((c) => c.startsWith("text-")).join(" "))}>

@@ -56,7 +56,9 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), procedureSplit: false });
     mount("L2", "applied");
     expect(text('[data-testid="result-day"]')).toContain("発表 11/3（火）");
-    expect(text('[data-testid="period"]')).toBe("購入11/4（水）〜11/6（金）");
+    expect(text('[data-testid="period"]')).toBe("11/4（水）〜11/6（金）");
+    expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("購入");
+    expect(q('[data-testid="period"] svg')).not.toBeNull();
     expect(host.textContent).not.toContain("締切");
     expect(q('[data-testid="deadline-day"]')).toBeNull();
     // 左（発表）が右（期間）より先に並ぶ
@@ -67,12 +69,13 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
   it("購入・受取が分かれた抽選は右側に受取期間を出す", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureSplit: true, procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), receiveStart: dateOnly("2026-11-05"), receiveDeadline: dateOnly("2026-11-08") });
     mount("L2", "applied");
-    expect(text('[data-testid="period"]')).toBe("受取11/5（木）〜11/8（日）");
+    expect(text('[data-testid="period"]')).toBe("11/5（木）〜11/8（日）");
+    expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("受取");
   });
   it("期間が未設定なら「未定」（応募締切を代用しない）。発表日が不明ならカウントダウンを出さない", () => {
     patchLottery("L2", { resultDate: { precision: "unknown" }, procedureStart: { precision: "unknown" }, procedureDeadline: { precision: "unknown" }, applyDeadline: dateOnly("2026-11-30") });
     mount("L2", "applied");
-    expect(text('[data-testid="period"]')).toBe("購入未定");
+    expect(text('[data-testid="period"]')).toBe("未定");
     expect(text('[data-testid="result-day"]')).toContain("発表日未確認");
     expect(q('[data-testid="result-badge"]')).toBeNull();
     expect(host.textContent).not.toContain("11/30");
@@ -91,7 +94,7 @@ describe("全情報・★管理対象の詳細カード（日付・距離・残�
     patchLottery("L1", { applyDeadline: { precision: "date_time", at: "2026-11-06T14:59:00Z" }, procedureStart: dateOnly("2026-11-13"), procedureDeadline: dateOnly("2026-11-15") });
     mount("L1", "managed");
     expect(text('[data-testid="deadline-day"]')).toBe("11/6（金） 23:59");
-    expect(text('[data-testid="period"]')).toBe("購入11/13（金）〜11/15（日）");
+    expect(text('[data-testid="period"]')).toBe("11/13（金）〜11/15（日）");
   });
   it("残り日数は下段の操作ボタンの隣（上段のメタ行には置かない）", () => {
     mount("L1", "managed");
@@ -115,11 +118,12 @@ describe("全情報・★管理対象の詳細カード（日付・距離・残�
     mount("L1", "managed");
     expect(q('[data-testid="distance"]')).toBeNull();
   });
-  it("未応募のプロフィールはモノクロの「未」の丸。応募済みは色つきのまま", () => {
+  it("詳細カードの未応募は従来どおりの「－」（「未」の丸にしない）。アイコンはモノクロ、応募済みは色つきのまま", () => {
     mount("L1", "managed");
-    const marks = host.querySelectorAll('[data-testid="apply-status"] [data-testid="unapplied-mark"]');
-    expect(marks.length).toBeGreaterThan(0);
-    expect(marks[0].textContent).toBe("未");
+    expect(host.querySelectorAll('[data-testid="apply-status"] [data-testid="unapplied-mark"]').length).toBe(0);
+    const unapplied = host.querySelector('[data-testid="apply-status"] [data-status="eligible_unapplied"]');
+    expect(unapplied).not.toBeNull();
+    expect(unapplied!.getAttribute("aria-label")).toContain("未応募");
     const unappliedAvatar = host.querySelector('[data-testid="apply-status"] [data-status="eligible_unapplied"] span[aria-hidden="true"]');
     expect(unappliedAvatar?.className).toContain("grayscale");
   });

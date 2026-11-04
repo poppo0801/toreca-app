@@ -27,3 +27,4 @@ e2e/ai-live-output
 .*.out.json
 .testdb.log
 .e2e-*.log
+.db-*.log

@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { MoreHorizontal } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, MoreHorizontal } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
@@ -231,16 +231,28 @@ function MetricsPanel({ m }: { m: PipelineMetrics }) {
   );
 }
 
-/** 区画（動作状況・条件・利用設定・統計）。罫線で囲み、見出しの横に説明のⓘを置く */
-function Block({ no, title, tip, testId, children }: { no: string; title: string; tip?: string; testId: string; children: React.ReactNode }) {
+/**
+ * 区画（動作状況・条件・利用設定・統計）。見出しをタップして開閉する（初期状態は①だけ展開）。
+ * 閉じていても中身は保持する（入力途中の設定は消えない）。閉じている間は、概要（summary）と、重大な問題（alert）を見出しに出す。
+ */
+export function Block({ no, title, tip, testId, children, defaultOpen = false, summary, alert, forceOpen }: { no: string; title: string; tip?: string; testId: string; children?: React.ReactNode; defaultOpen?: boolean; summary?: string; alert?: string | null; forceOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const shown = open || !!forceOpen;
   return (
-    <section id={testId} className="scroll-mt-24 space-y-3 rounded-lg border p-3 text-sm" data-testid={testId}>
-      <h2 className="flex items-center gap-1.5 border-b pb-2 font-semibold">
-        <span className="text-muted-foreground" aria-hidden="true">{no}</span>
-        <span>{title}</span>
+    <section id={testId} className="scroll-mt-24 rounded-lg border text-sm" data-testid={testId} data-open={shown ? "true" : "false"}>
+      <h2 className="flex items-center gap-1.5 px-3 py-2 font-semibold">
+        <button type="button" className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 text-left" aria-expanded={shown} aria-controls={`${testId}-body`} onClick={() => setOpen((v) => !v)} data-testid={`${testId}-toggle`}>
+          <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", shown && "rotate-90")} aria-hidden="true" />
+          <span className="text-muted-foreground" aria-hidden="true">{no}</span>
+          <span>{title}</span>
+          {!shown && summary && <span className="min-w-0 truncate text-xs font-normal text-muted-foreground" data-testid={`${testId}-summary`}>{summary}</span>}
+        </button>
+        {!shown && alert && <span className="shrink-0 text-xs font-medium text-warn" role="alert" data-testid={`${testId}-alert`}>⚠ {alert}</span>}
         {tip && <InfoTip text={tip} label={title + "の説明"} />}
       </h2>
-      {children}
+      <div id={`${testId}-body`} hidden={!shown} className="space-y-3 border-t p-3">
+        {children}
+      </div>
     </section>
   );
 }
@@ -317,6 +329,16 @@ export function AutoCollectView({
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [tab, setTab] = useState<(typeof CAND_TABS)[number]["value"]>("pending");
+  // URLのハッシュ（#history など）で指定された区画は開いて表示する
+  const [hashOpen, setHashOpen] = useState("");
+  useEffect(() => {
+    const h = window.location.hash.replace("#", "");
+    if (!h) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URLのハッシュに応じた表示状態の同期
+    setHashOpen(h);
+    const t = window.setTimeout(() => document.getElementById(h)?.scrollIntoView({ block: "start" }), 100);
+    return () => window.clearTimeout(t);
+  }, []);
   const [s, setS] = useState(settings);
   const [showAllPref, setShowAllPref] = useState(false);
   const [productQ, setProductQ] = useState("");
@@ -383,7 +405,7 @@ export function AutoCollectView({
   return (
     <div className="space-y-4" data-testid="collection">
       {/* ① 自動収集の動作状況（現在の状態。設定ではない） */}
-      <Block no="①" title="動作状況" testId="status" tip="解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。">
+      <Block no="①" title="動作状況" testId="status" defaultOpen tip="解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。">
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} disabled={busy !== null} data-testid="collect-now">
             {busy === "run" ? "収集しています…" : "今すぐ収集"}
@@ -442,7 +464,7 @@ export function AutoCollectView({
       </Block>
 
       {/* ② 収集対象・条件（設定） */}
-      <Block no="②" title="収集対象・条件" testId="conditions">
+      <Block no="②" title="収集対象・条件" testId="conditions" forceOpen={hashOpen === "conditions"} summary={`都道府県${settings.prefectures.length}・自動登録${settings.auto_register ? "ON" : "OFF"}`}>
         <div className="divide-y [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
           <SetRow label="受付状況" tip="締切が不明なものは「受付中」とせず、確認待ちにします（時刻を勝手に補いません）。">
             <div className="flex flex-wrap gap-1.5">
@@ -626,7 +648,7 @@ export function AutoCollectView({
       </Block>
 
       {/* ③ AI・X APIの利用設定（設定値と現在の使用量） */}
-      <Block no="③" title="AI・X APIの利用設定" testId="run-settings">
+      <Block no="③" title="AI・X APIの利用設定" testId="run-settings" forceOpen={hashOpen === "run-settings"} summary={`今日のAI ${health.workerDayUsed}/${settings.worker_daily_ai_limit}件`} alert={health.state === "paused" ? "自動停止中" : health.state === "budget" ? "月額予算で停止中" : health.state === "limit" ? "本日の上限に到達" : null}>
         <div className="divide-y [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
           <SetRow label="定期実行" tip="AI解析（有料）を使うため、初期は無効です。定期実行の呼び出し設定（Cron）は別途必要です。定期実行では候補の作成まで行い、登録は手動実行または候補画面から行います。">
             <label className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -729,7 +751,7 @@ export function AutoCollectView({
       </Block>
 
       {/* ④ 統計・処理履歴（過去の実績） */}
-      <Block no="④" title="統計・処理履歴" testId="history">
+      <Block no="④" title="統計・処理履歴" testId="history" forceOpen={hashOpen === "history"} summary={`確認待ち${counts.pending}・登録済み${counts.auto_registered}`} alert={counts.failed > 0 ? `失敗${counts.failed}件` : null}>
         {runSummaries && runSummaries.length > 0 && (
           <div className="space-y-1.5" data-testid="run-summaries">
             <p className="text-xs font-medium">収集ごとの結果（その収集で発見した候補だけを集計）</p>

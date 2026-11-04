@@ -26,6 +26,10 @@ export interface Filters {
   status: StatusFilter;
   prefecture: string;
   receiveMethod: string;
+  /** 店舗で絞り込み */
+  storeId: string;
+  /** 応募方法（web / store / app / unknown）で絞り込み */
+  applyMethod: string;
   allFilter: AllFilter;
   sort: SortMode;
 }
@@ -38,6 +42,8 @@ export const DEFAULT_FILTERS: Filters = {
   status: "default",
   prefecture: "",
   receiveMethod: "",
+  storeId: "",
+  applyMethod: "",
   allFilter: "any",
   sort: "deadline",
 };
@@ -112,26 +118,40 @@ function matchFilters(data: AppData, lottery: Lottery, f: Filters): boolean {
   const store = data.stores.find((s) => s.id === lottery.storeId);
   if (f.prefecture && store?.prefecture !== f.prefecture) return false;
   if (f.receiveMethod && lottery.receiveMethod !== f.receiveMethod) return false;
+  if (f.storeId && lottery.storeId !== f.storeId) return false;
+  if (f.applyMethod && lottery.applyMethod !== f.applyMethod) return false;
   if (f.productId && !lottery.items.some((i) => i.productId === f.productId)) return false;
-  const q = f.query.trim().toLowerCase();
-  if (q) {
-    const chain = data.chains.find((c) => c.id === lottery.chainId);
-    const hay = [
-      chain?.name,
-      store?.name,
-      store?.prefecture,
-      lottery.memo,
-      ...lottery.items.flatMap((i) => {
-        const p = data.products.find((x) => x.id === i.productId);
-        return p ? [p.officialName, p.code, ...p.aliases] : [];
-      }),
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
-  return true;
+  return matchesQuery(data, lottery, f.query);
+}
+
+/** 検索語の正規化（全角半角・大小文字・空白の揺れを吸収。マスターの別名照合と同じ規則） */
+const normQuery = (s: string) => s.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+
+/**
+ * 横断検索: 商品名・商品の略称/別名/コード・系列名と別名・店舗名と別名・都道府県・メモのいずれかに一致すれば対象。
+ * 空白（全角含む）区切りの複数語は、すべての語がどこかに一致すること（AND）。
+ * 検索は表示済みの抽選（プロフィールの閲覧範囲で絞られた一覧）の中の絞り込みで、閲覧制限を回避しない。
+ */
+export function matchesQuery(data: AppData, lottery: Lottery, query: string): boolean {
+  const tokens = query.normalize("NFKC").trim().split(/\s+/).map(normQuery).filter(Boolean);
+  if (tokens.length === 0) return true;
+  const chain = data.chains.find((c) => c.id === lottery.chainId);
+  const store = data.stores.find((s) => s.id === lottery.storeId);
+  const hay = [
+    chain?.name,
+    ...(chain?.aliases ?? []),
+    store?.name,
+    ...(store?.aliases ?? []),
+    store?.prefecture,
+    lottery.memo,
+    ...lottery.items.flatMap((i) => {
+      const p = data.products.find((x) => x.id === i.productId);
+      return p ? [p.officialName, p.code, ...p.aliases] : [];
+    }),
+  ]
+    .filter((x): x is string => !!x)
+    .map(normQuery);
+  return tokens.every((t) => hay.some((h) => h.includes(t)));
 }
 
 function matchAllFilter(data: AppData, lottery: Lottery, f: AllFilter): boolean {
