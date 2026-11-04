@@ -183,17 +183,14 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
     await clearJobs();
   });
 
-  it("1日の上限: ワーカーはその日の上限を超えて解析を開始しない（既存のAI上限・予算の確認も通る）", async () => {
+  it("日次の件数上限はない: 旧設定の値が小さくても、ワーカーは月額予算の範囲で解析を続ける", async () => {
     await admin.from("collection_runs").delete().eq("household_id", hid);
     await admin.from("collection_daily_stats").delete().eq("household_id", hid);
     await setSettings({ worker_batch: 5, worker_daily_ai_limit: 2 });
     await u1.from("collection_candidates").insert(Array.from({ length: 5 }, (_, i) => job(`d${i}`)) as never);
     const r1 = await runWorker(deps());
-    expect(r1.ok && "aiCalls" in r1 && r1.aiCalls).toBe(2);
-    const r2 = await runWorker(deps());
-    expect(r2.ok && "aiCalls" in r2 && r2.aiCalls).toBe(0);
-    expect(r2.ok && "stopReason" in r2 && r2.stopReason).toContain("上限");
-    expect(await count(["pending"])).toBe(3);
+    expect(r1.ok && "aiCalls" in r1 && r1.aiCalls).toBe(5);
+    expect(await count(["pending"])).toBe(0);
     await setSettings({ worker_daily_ai_limit: 100 });
     await clearJobs();
   });
@@ -225,8 +222,11 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
     expect(await state("flaky")).toMatchObject({ job_state: "retry", attempts: 2 });
     await u1.from("collection_candidates").update({ next_run_at: null }).eq("dedupe_key", "https://w.example.invalid/flaky");
     await runWorker(robotsDeps);
-    expect(await state("flaky")).toMatchObject({ job_state: "failed", status: "failed", attempts: 3 });
-    // 隔離したものは、その後のワーカーで再解析されない
+    // 即時の再試行（3回）を使い切ったら、失敗として隔離せず、長い間隔の保留（自動再調査）へ。取得失敗なのでAIは使っていない
+    const held = await state("flaky");
+    expect(held).toMatchObject({ job_state: "retry", status: "pending", attempts: 0 });
+    expect(new Date(held.next_run_at!).getTime() - Date.now()).toBeGreaterThan(10 * 60_000);
+    // 保留中・隔離したものは、次回の時刻までワーカーで再解析されない
     expect(await runWorker(robotsDeps)).toEqual({ ok: true, skipped: "idle" });
     await clearJobs();
   });
