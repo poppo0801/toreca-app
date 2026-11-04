@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
 import { computeMetrics } from "@/lib/collector/metrics";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
-import { effectiveDailyLimit, healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
+import { healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
 import { estimateCostJpy } from "@/lib/collector/x-posts";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { ensureCollectionDefaults } from "@/lib/server/collector/run";
@@ -71,7 +71,6 @@ export default async function CollectionPage() {
   const srcs = (sources.data ?? []) as unknown as SourceView[];
   const statRows = (stats.data ?? []) as unknown as StatRow[];
   const todayRow = statRows.find((r) => r.day === today);
-  const daily = effectiveDailyLimit(st as never, now);
   const dailyUsed = todayRow?.ai_calls ?? 0;
   const lastWorkerAt = lastWorker.data?.started_at ? new Date(lastWorker.data.started_at) : null;
   const lastCollectAt = lastCollect.data?.started_at ? new Date(lastCollect.data.started_at) : null;
@@ -89,13 +88,10 @@ export default async function CollectionPage() {
     sources: srcs.map((s) => ({ name: s.name, enabled: s.enabled && s.kind === "web", lastSuccessAt: s.last_success_at ? new Date(s.last_success_at) : null, consecutiveFailures: s.consecutive_failures ?? 0 })),
     scheduleEnabled: st.schedule_enabled,
     lastCollectAt,
-    dailyUsed,
-    dailyLimit: daily.limit,
     budgetBlocked: budget.blocked,
     dueTodayQueued: dueToday.count ?? 0,
   });
-  const limitReached = dailyUsed >= daily.limit;
-  const state: HealthView["state"] = (running.count ?? 0) > 0 ? "running" : paused ? "paused" : budget.blocked && counts.queued > 0 ? "budget" : limitReached && counts.queued > 0 ? "limit" : counts.queued > 0 ? "waiting" : "ok";
+  const state: HealthView["state"] = (running.count ?? 0) > 0 ? "running" : paused ? "paused" : budget.blocked && counts.queued > 0 ? "budget" : counts.queued > 0 ? "waiting" : "ok";
   const health: HealthView = {
     state,
     warnings: warnings.map((w) => w.message),
@@ -110,9 +106,6 @@ export default async function CollectionPage() {
     todayDiscovered: (todayRow?.discovered_new ?? 0) + (todayRow?.discovered_initial ?? 0),
     todayDiscoveredInitial: todayRow?.discovered_initial ?? 0,
     todayAi: dailyUsed,
-    dailyLimit: daily.limit,
-    baseLimit: st.worker_daily_ai_limit,
-    overridden: daily.overridden,
     todayRegistered: todayRow?.registered_new ?? 0,
     monthCostJpy: Math.round(budget.costJpy * 10) / 10,
     budgetJpy: budget.budgetJpy,

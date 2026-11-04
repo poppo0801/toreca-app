@@ -43,7 +43,6 @@ const settingsInput = z.object({
   maxAiPerRun: z.number().int().min(1).max(50),
   workerEnabled: z.boolean(),
   workerBatch: z.number().int().min(1).max(20),
-  workerDailyAiLimit: z.number().int().min(0).max(500),
   recheckHours: z.number().int().min(1).max(168),
 });
 
@@ -59,7 +58,6 @@ const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("resume") }),
   z.object({ action: z.literal("setAiBudget"), budgetJpy: z.number().int().min(0).max(1_000_000), rate: z.number().min(50).max(500), actor: z.uuid().nullable().optional() }),
   // 本日(日本時間)だけの日次上限の一時変更。null で解除。翌日は通常の設定に戻る
-  z.object({ action: z.literal("setDailyOverride"), limit: z.number().int().min(0).max(1000).nullable() }),
   z.object({ action: z.literal("exclude"), id: uuid }),
   z.object({ action: z.literal("restore"), id: uuid }),
   z.object({ action: z.literal("addSource"), source: sourceInput }),
@@ -192,11 +190,6 @@ export async function POST(request: NextRequest) {
       const { error } = await db.rpc("save_ai_budget", { p_budget: b.budgetJpy, p_rate: b.rate, p_actor: (b.actor ?? null) as string });
       return error ? json({ ok: false, error: "保存に失敗しました" }, 500) : json({ ok: true });
     }
-    case "setDailyOverride": {
-      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-      const { error } = await db.from("collection_settings").update(b.limit === null ? { worker_limit_override: null, worker_limit_override_date: null } : { worker_limit_override: b.limit, worker_limit_override_date: today }).eq("household_id", householdId);
-      return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
-    }
     case "resume": {
       // 自動停止（連続失敗など）の解除
       const { error } = await db.from("collection_settings").update({ paused_until: null, paused_reason: null, consecutive_failures: 0 }).eq("household_id", householdId);
@@ -261,7 +254,7 @@ export async function POST(request: NextRequest) {
           prefectures: s.prefectures, include_online: s.includeOnline, max_distance_km: s.maxDistanceKm, apply_methods: s.applyMethods, receive_methods: s.receiveMethods,
           req_include: s.reqInclude, req_exclude: s.reqExclude, product_mode: s.productMode, product_ids: s.productIds, status_mode: s.statusMode, auto_register: s.autoRegister,
           schedule_enabled: s.scheduleEnabled, schedule_hour_jst: s.scheduleHourJst, x_enabled: s.xEnabled, x_monthly_budget_jpy: s.xMonthlyBudgetJpy, x_max_posts_per_run: s.xMaxPostsPerRun,
-          max_ai_per_run: s.maxAiPerRun, worker_enabled: s.workerEnabled, worker_batch: s.workerBatch, worker_daily_ai_limit: s.workerDailyAiLimit, recheck_hours: s.recheckHours, updated_at: new Date().toISOString(),
+          max_ai_per_run: s.maxAiPerRun, worker_enabled: s.workerEnabled, worker_batch: s.workerBatch, recheck_hours: s.recheckHours, updated_at: new Date().toISOString(),
         })
         .eq("household_id", householdId);
       return error ? json({ ok: false, error: "保存に失敗しました" }, 500) : json({ ok: true });

@@ -55,9 +55,6 @@ export interface SettingsView {
   max_ai_per_run: number;
   worker_enabled: boolean;
   worker_batch: number;
-  worker_daily_ai_limit: number;
-  worker_limit_override?: number | null;
-  worker_limit_override_date?: string | null;
   recheck_hours: number;
 }
 export interface CandidateView {
@@ -102,9 +99,6 @@ export interface OpsView {
   todayDiscovered: number;
   todayDiscoveredInitial: number;
   todayAi: number;
-  dailyLimit: number;
-  baseLimit: number;
-  overridden: boolean;
   todayRegistered: number;
   monthCostJpy: number;
   budgetJpy: number;
@@ -116,7 +110,7 @@ export interface OpsView {
   dueTodayQueued: number;
 }
 export interface HealthView {
-  state: "running" | "waiting" | "ok" | "paused" | "budget" | "limit";
+  state: "running" | "waiting" | "ok" | "paused" | "budget";
   warnings: string[];
   lastCollectAt: string | null;
   lastWorkerAt: string | null;
@@ -376,7 +370,7 @@ export function AutoCollectView({
       settings: {
         prefectures: s.prefectures, includeOnline: s.include_online, maxDistanceKm: s.max_distance_km, applyMethods: s.apply_methods, receiveMethods: s.receive_methods,
         reqInclude: s.req_include, reqExclude: s.req_exclude, productMode: s.product_mode, productIds: s.product_ids, statusMode: s.status_mode, autoRegister: s.auto_register,
-        scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, workerDailyAiLimit: s.worker_daily_ai_limit, recheckHours: s.recheck_hours,
+        scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, recheckHours: s.recheck_hours,
       },
     });
 
@@ -423,7 +417,7 @@ export function AutoCollectView({
         </div>
         <div className="space-y-1.5 rounded-md bg-muted/50 p-2 text-xs" data-testid="health">
           <p className="font-medium" data-testid="health-state" data-state={health.state}>
-            {{ running: "処理中", waiting: "稼働中（解析待ちを順次処理）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "月額予算で停止中", limit: "本日の上限で停止中" }[health.state]}
+            {{ running: "処理中", waiting: "稼働中（解析待ちを順次処理）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "月額予算で停止中" }[health.state]}
           </p>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
             <Kv label="最終収集" value={fmt(health.lastCollectAt)} />
@@ -431,29 +425,13 @@ export function AutoCollectView({
             <Kv label="処理待ち" value={`解析待ち ${counts.queued}（処理中 ${health.processing}）`} />
             <Kv label="エラー" value={counts.failed > 0 || health.warnings.length > 0 ? `失敗 ${counts.failed}件` : "なし"} tone={counts.failed > 0 || health.warnings.length > 0 ? "warn" : undefined} />
             <Kv label="ワーカー最終" value={fmt(health.lastWorkerAt)} />
-            <Kv label="ワーカー今日のAI" value={`今日のAI ${health.workerDayUsed}/${settings.worker_daily_ai_limit}`} />
+            <Kv label="今日のAI解析" value={`${health.workerDayUsed}件`} />
           </dl>
           {health.warnings.map((w, i) => (
             <p key={i} className="text-warn" role="alert" data-testid="health-warning">
               ⚠ {w}
             </p>
           ))}
-          {(health.state === "limit" || ops.overridden) && (
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="override">
-              <span className="text-[11px] text-muted-foreground">今日だけ上限を変更:</span>
-              {[ops.baseLimit, 150, 200].filter((v, i, a) => a.indexOf(v) === i && (v > ops.dailyLimit || v === ops.baseLimit)).map((v) => (
-                <Button key={v} size="sm" variant="outline" disabled={busy !== null || ops.budgetBlocked} data-testid={`override-${v}`} onClick={() => void act("ov", { action: "setDailyOverride", limit: v === ops.baseLimit ? null : v }, () => (v === ops.baseLimit ? "通常の上限に戻しました" : `今日だけ上限を${v}件にしました（明日は通常に戻ります）`))}>
-                  {v === ops.baseLimit ? `${v}件のまま` : `${v}件に引き上げ`}
-                </Button>
-              ))}
-              {ops.overridden && (
-                <Button size="sm" variant="outline" disabled={busy !== null} data-testid="override-clear" onClick={() => void act("ov", { action: "setDailyOverride", limit: null }, () => "通常の上限に戻しました")}>
-                  通常に戻す
-                </Button>
-              )}
-              {ops.budgetBlocked && <span className="text-[11px] text-warn">月額予算に達しているため、上限を変えても解析は再開しません</span>}
-            </div>
-          )}
         </div>
         {!aiConfigured && <p className="text-xs text-warn">AIが未設定のため、解析は行われません（候補の取得のみ）。</p>}
         {msg && (
@@ -648,7 +626,7 @@ export function AutoCollectView({
       </Block>
 
       {/* ③ AI・X APIの利用設定（設定値と現在の使用量） */}
-      <Block no="③" title="AI・X APIの利用設定" testId="run-settings" forceOpen={hashOpen === "run-settings"} summary={`今日のAI ${health.workerDayUsed}/${settings.worker_daily_ai_limit}件`} alert={health.state === "paused" ? "自動停止中" : health.state === "budget" ? "月額予算で停止中" : health.state === "limit" ? "本日の上限に到達" : null}>
+      <Block no="③" title="AI・X APIの利用設定" testId="run-settings" forceOpen={hashOpen === "run-settings"} summary={`今月 ${Math.round(ops.monthCostJpy).toLocaleString("ja-JP")}円／${ops.budgetJpy.toLocaleString("ja-JP")}円`} alert={health.state === "paused" ? "自動停止中" : health.state === "budget" ? "月額予算で停止中" : null}>
         <div className="divide-y [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
           <SetRow label="定期実行" tip="AI解析（有料）を使うため、初期は無効です。定期実行の呼び出し設定（Cron）は別途必要です。定期実行では候補の作成まで行い、登録は手動実行または候補画面から行います。">
             <label className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -670,8 +648,6 @@ export function AutoCollectView({
               <Num value={s.max_ai_per_run} unit="件" label="1回のAI解析の上限" onChange={(v) => setS({ ...s, max_ai_per_run: Math.min(50, Math.max(1, v || 1)) })} />
               <span className="whitespace-nowrap text-muted-foreground">ワーカー1回</span>
               <Num value={s.worker_batch} unit="件" label="ワーカー1回の解析件数" onChange={(v) => setS({ ...s, worker_batch: Math.min(20, Math.max(1, v || 1)) })} />
-              <span className="whitespace-nowrap text-muted-foreground">ワーカー1日</span>
-              <Num value={s.worker_daily_ai_limit} unit="件" label="ワーカーの1日のAI解析上限" onChange={(v) => setS({ ...s, worker_daily_ai_limit: Math.min(500, Math.max(0, v)) })} />
             </div>
           </SetRow>
           <SetRow label="解析ワーカー" tip="アプリを閉じていても、解析待ちを自動で解析し続けます。告知ページは指定の間隔で再確認します。">
@@ -720,9 +696,9 @@ export function AutoCollectView({
             <p className="text-xs font-medium">現在の使用量</p>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md bg-muted/50 p-2 text-xs">
               <div>
-                <dt className="text-[11px] text-muted-foreground">本日のAI解析／上限</dt>
+                <dt className="text-[11px] text-muted-foreground">本日のAI解析</dt>
                 <dd className="whitespace-nowrap font-semibold" data-testid="ops-ai">
-                  {ops.todayAi}／{ops.dailyLimit}件{ops.overridden && <span className="text-[11px] font-normal text-info">（今日だけ変更）</span>}
+                  {ops.todayAi}件
                 </dd>
               </div>
               <div>

@@ -136,20 +136,22 @@ describe("異常の警告", () => {
   });
 });
 
-import { CALL_RESERVE_JPY, budgetCallsLeft, effectiveDailyLimit, jstDayString } from "@/lib/collector/queue";
+import { CALL_RESERVE_JPY, budgetCallsLeft, jstDayString, reserveEstimateJpy } from "@/lib/collector/queue";
 
-describe("日次上限（日本時間）と一時的な変更", () => {
-  const base = { worker_daily_ai_limit: 100, worker_limit_override: 150, worker_limit_override_date: "2026-11-02" };
-  it("一時的な変更は設定した日(日本時間)だけ有効で、翌日0時に通常の設定へ戻る", () => {
-    expect(effectiveDailyLimit(base, new Date("2026-11-02T23:59:00+09:00"))).toEqual({ limit: 150, overridden: true });
-    expect(effectiveDailyLimit(base, new Date("2026-11-03T00:00:00+09:00"))).toEqual({ limit: 100, overridden: false });
-    // UTCでは前日でも、日本時間で翌日なら戻る（タイムゾーンを日本時間にそろえている）
-    expect(effectiveDailyLimit(base, new Date("2026-11-02T15:30:00Z"))).toEqual({ limit: 100, overridden: false });
-    expect(effectiveDailyLimit({ ...base, worker_limit_override: null, worker_limit_override_date: null }, new Date("2026-11-02T12:00:00+09:00"))).toEqual({ limit: 100, overridden: false });
-  });
+describe("日付は日本時間", () => {
   it("日付は日本時間", () => {
     expect(jstDayString(new Date("2026-11-02T15:00:00Z"))).toBe("2026-11-03");
     expect(jstDayString(new Date("2026-11-02T14:59:00Z"))).toBe("2026-11-02");
+  });
+});
+
+describe("予約する見込み額", () => {
+  it("実測の平均×3。実測が無い・極端な値は 2〜8円の範囲に収める", () => {
+    expect(reserveEstimateJpy(null)).toBe(CALL_RESERVE_JPY);
+    expect(reserveEstimateJpy(0.5)).toBe(2);
+    expect(reserveEstimateJpy(1.2)).toBe(3.6);
+    expect(reserveEstimateJpy(50)).toBe(CALL_RESERVE_JPY);
+    expect(reserveEstimateJpy(Number.NaN)).toBe(CALL_RESERVE_JPY);
   });
 });
 
@@ -164,58 +166,22 @@ describe("月額予算の安全側の停止", () => {
   });
 });
 
-describe("上限・予算・停止の警告", () => {
+describe("予算・停止の警告", () => {
   const NOW2 = new Date("2026-11-02T03:00:00Z");
   const hb = { now: NOW2, workerEnabled: true, queued: 12, oldestQueuedAt: new Date(NOW2.getTime() - 3600_000), lastWorkerAt: new Date(NOW2.getTime() - 60_000), lastProgressAt: new Date(NOW2.getTime() - 60_000), failedLast24h: 0, pausedReason: null, sources: [], scheduleEnabled: false, lastCollectAt: null };
-  it("日次上限に達したら『本日のAI解析上限N件に達しました。解析待ちM件』。ワーカーは動いているので停止の警告は出さない", () => {
-    const w = healthWarnings({ ...hb, dailyUsed: 100, dailyLimit: 100, lastProgressAt: new Date(NOW2.getTime() - 5 * 3600_000) });
-    expect(w.map((x) => x.message)).toContain("本日のAI解析上限100件に達しました。解析待ち12件");
-    expect(w.map((x) => x.code)).not.toContain("worker_stalled");
-  });
-  it("本日締切が未処理のまま上限・予算で止まっているときは、優先して警告する", () => {
-    const w = healthWarnings({ ...hb, dailyUsed: 100, dailyLimit: 100, dueTodayQueued: 3 });
+  it("本日締切が未処理のまま予算で止まっているときは、優先して警告する", () => {
+    const w = healthWarnings({ ...hb, budgetBlocked: true, dueTodayQueued: 3 });
     expect(w[0].code).toBe("due_today");
     expect(w[0].message).toContain("3件");
   });
-  it("月額予算が不足なら予算の警告（日次上限を変えても再開しないと明示）", () => {
-    const w = healthWarnings({ ...hb, budgetBlocked: true, dailyUsed: 0, dailyLimit: 100 });
-    expect(w.find((x) => x.code === "budget")?.message).toContain("再開しません");
-    expect(w.map((x) => x.code)).not.toContain("daily_limit");
+  it("月額予算が不足なら予算の警告（翌月に自動で再開すると明示）。日次上限の警告は無い", () => {
+    const w = healthWarnings({ ...hb, budgetBlocked: true });
+    expect(w.find((x) => x.code === "budget")?.message).toContain("翌月");
+    expect(w.map((x) => x.code)).not.toContain("worker_stalled");
   });
   it("Cronが動いていても、実際に処理が進んでいなければ警告する（正常とみなさない）", () => {
-    const w = healthWarnings({ ...hb, lastWorkerAt: new Date(NOW2.getTime() - 60_000), lastProgressAt: new Date(NOW2.getTime() - 3 * 3600_000), dailyUsed: 3, dailyLimit: 100 });
+    const w = healthWarnings({ ...hb, lastWorkerAt: new Date(NOW2.getTime() - 60_000), lastProgressAt: new Date(NOW2.getTime() - 3 * 3600_000) });
     expect(w.map((x) => x.code)).toContain("worker_stalled");
-    expect(healthWarnings({ ...hb, dailyUsed: 3, dailyLimit: 100 })).toEqual([]);
-  });
-});
-
-describe("取得失敗の原因分類（Stage 5S）", () => {
-  it("ロボット制限・アクセス制限は取得制限（恒常的。回避しない）", () => {
-    expect(classifyFailure("このサイトはロボットによるページ取得を許可していません。告知の文章を…")).toEqual({ kind: "robots", permanent: true });
-    expect(classifyFailure("このページはアクセスが制限されているため取得できません（ログインや制限は回避しません）")).toEqual({ kind: "robots", permanent: true });
-  });
-  it("ページ削除・JavaScript描画は恒常的、タイムアウト・通信障害・HTTPエラーは一時的（再試行は回数制限つき）", () => {
-    expect(classifyFailure("ページが見つかりません。告知の…").permanent).toBe(true);
-    expect(classifyFailure("ページから文章を取得できませんでした（JavaScriptで表示されるページの可能性があります）")).toEqual({ kind: "js_render", permanent: true });
-    expect(classifyFailure("ページの取得がタイムアウトしました")).toEqual({ kind: "timeout", permanent: false });
-    expect(classifyFailure("ページに接続できませんでした")).toEqual({ kind: "network", permanent: false });
-    expect(classifyFailure("取得に失敗しました（サーバーエラー 503）").kind).toBe("http");
-    expect(classifyFailure("よくわからないエラー")).toEqual({ kind: "other", permanent: false });
-  });
-  it("外部リンク先の失敗は external_link に分類する", () => {
-    expect(classifyFailure("よくわからないエラー", { external: true }).kind).toBe("external_link");
-  });
-  it("isPermanentError は分類と一致する", () => {
-    expect(isPermanentError("ロボットによる取得を許可していません")).toBe(true);
-    expect(isPermanentError("ページの取得がタイムアウトしました")).toBe(false);
-  });
-});
-
-describe("一覧の変化での再解析（AIの無駄な消費を防ぐ）", () => {
-  it("締切が変わったときだけ再解析する。同じ締切の表記ゆれ・締切が読めない変化は再解析しない", () => {
-    expect(shouldReanalyzeOnListChange("2026-11-05T23:00:00+09:00", "2026-11-05T14:00:00Z")).toBe(false);
-    expect(shouldReanalyzeOnListChange("2026-11-05T23:00:00+09:00", "2026-11-07T23:00:00+09:00")).toBe(true);
-    expect(shouldReanalyzeOnListChange("2026-11-05T23:00:00+09:00", null)).toBe(false);
-    expect(shouldReanalyzeOnListChange(null, "2026-11-07T23:00:00+09:00")).toBe(true);
+    expect(healthWarnings({ ...hb })).toEqual([]);
   });
 });

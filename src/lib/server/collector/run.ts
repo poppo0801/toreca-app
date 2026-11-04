@@ -17,8 +17,10 @@ import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
-import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FieldChange } from "@/lib/collector/queue";
+import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
+import { decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
+import { activeExclusions, recordHardSource } from "@/lib/server/collector/sources-health";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -126,6 +128,8 @@ interface QueuedPayload {
     newRound?: boolean;
     /** 取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取った */
     viaList?: boolean;
+    /** 一覧の表示から読み取ることになった元の取得失敗の原因 */
+    viaKind?: FailKind;
     /** 優先収集メモに関連する候補 */
     memoId?: string;
   };
@@ -184,12 +188,6 @@ export async function bumpStats(db: Db, householdId: string, now: Date, delta: S
   await db.rpc("bump_collection_stats", { p_household: householdId, p_day: jstDayString(now), p_delta: clean as unknown as Json }).then(() => undefined, () => undefined);
 }
 
-/** 本日(日本時間)の自動収集のAI解析数。手動実行・定期実行の合計 */
-async function aiUsedToday(db: Db, householdId: string, now: Date): Promise<number> {
-  const { data } = await db.from("collection_daily_stats").select("ai_calls").eq("household_id", householdId).eq("day", jstDayString(now)).maybeSingle();
-  return data?.ai_calls ?? 0;
-}
-
 /** AI読み取りの利用記録（既存の費用管理と同じテーブル）と、日別統計（回数・成功/失敗・トークン・費用）。入力した本文・画像そのものは保存しない */
 async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string): Promise<number> {
   const usedAi = result.ok || result.code !== "fetch_failed";
@@ -217,21 +215,17 @@ async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string
   return cost;
 }
 
+/** 自動収集の1時間あたりのAI読み取りの上限（外部APIへの負荷を抑えるための内部の速度制限。費用の制御ではなく、日次の件数上限でもない） */
+const COLLECTOR_HOURLY_RATE = 120;
+
 /**
- * 今回のAI読み取りの上限。次の全てを満たす範囲だけ、新しい読み取りを始める（0なら読み取らない）。
- *  - 自動AI解析がONで、月額予算が残っている（残額が「1回の見込み×件数」に満たない分は始めない。並列処理や利用額の反映遅れがあっても予算を超えないよう、安全側に止める）
- *  - 既存の時間/日の利用回数の上限
- *  - 本日の自動収集の日次上限（一時変更があれば当日のみ有効）
+ * 今回のAI読み取りの上限。日次の件数上限はない（Stage 5T で廃止）。費用は月額予算で制御する。
+ *  - 自動AI解析がONで、月額予算が残っている（残額が1回の見込みに満たない分は始めない。実際の呼び出しの直前に、予約でも並列実行を含めて予算内かを確認する）
+ *  - 1時間あたりの速度制限（外部APIの負荷対策）
  */
-export async function aiAllowance(deps: CollectDeps, perRun: number, daily: { limit: number }): Promise<{ allowed: number; note: string; stop: "daily" | "budget" | "auto_off" | "hourly" | "none_ai" | null }> {
+export async function aiAllowance(deps: CollectDeps, perRun: number): Promise<{ allowed: number; note: string; stop: "budget" | "auto_off" | "hourly" | "none_ai" | null }> {
   if (!deps.extractor) return { allowed: 0, note: "AIが未設定のため、読み取りは行いません", stop: "none_ai" };
-  const used = await aiUsedToday(deps.db, deps.householdId, deps.now);
-  const dailyLeft = Math.max(0, daily.limit - used);
-  if (dailyLeft <= 0) return { allowed: 0, note: `本日のAI解析上限${daily.limit}件に達しました`, stop: "daily" };
-  if (deps.extractor.engine !== "anthropic") return { allowed: Math.min(perRun, dailyLeft), note: "", stop: null };
-  const hourly = Number(process.env.AI_HOURLY_LIMIT) > 0 ? Number(process.env.AI_HOURLY_LIMIT) : 20;
-  const dailyGlobal = Number(process.env.AI_DAILY_LIMIT) > 0 ? Number(process.env.AI_DAILY_LIMIT) : 60;
-  const since = (ms: number) => new Date(deps.now.getTime() - ms).toISOString();
+  if (deps.extractor.engine !== "anthropic") return { allowed: perRun, note: "", stop: null };
   let budgetLeft = Number.POSITIVE_INFINITY;
   try {
     const b = await monthBudget(deps.db, deps.householdId);
@@ -240,16 +234,41 @@ export async function aiAllowance(deps: CollectDeps, perRun: number, daily: { li
     budgetLeft = budgetCallsLeft(b.budgetJpy, b.costJpy);
     if (b.blocked || budgetLeft <= 0) return { allowed: 0, note: "今月のAI予算に達したため、新しい解析を停止しています", stop: "budget" };
   } catch {
-    /* 予算の取得に失敗したときは、回数の上限だけで安全側に動く */
+    /* 予算の取得に失敗したときは、安全側に1件ずつ進める（実際の呼び出しの直前の予約で再確認する） */
     budgetLeft = 1;
   }
-  const [h, d] = await Promise.all([
-    deps.db.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", deps.householdId).gte("created_at", since(3600_000)).neq("status", "not_configured"),
-    deps.db.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", deps.householdId).gte("created_at", since(86400_000)).neq("status", "not_configured"),
-  ]);
-  const left = Math.min(hourly - (h.count ?? 0), dailyGlobal - (d.count ?? 0));
-  if (left <= 0) return { allowed: 0, note: "AI読み取りの利用回数の上限（時間・日）に達しているため、続きは次回に回します", stop: "hourly" };
-  return { allowed: Math.max(0, Math.min(perRun, dailyLeft, left, budgetLeft)), note: left < perRun ? "AI読み取りの利用上限に近いため、続きは次回に回します" : "", stop: null };
+  const hourly = Number(process.env.COLLECTOR_AI_HOURLY_LIMIT) > 0 ? Number(process.env.COLLECTOR_AI_HOURLY_LIMIT) : COLLECTOR_HOURLY_RATE;
+  const h = await deps.db.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", deps.householdId).gte("created_at", new Date(deps.now.getTime() - 3600_000).toISOString()).neq("status", "not_configured");
+  const left = hourly - (h.count ?? 0);
+  if (left <= 0) return { allowed: 0, note: "1時間あたりのAI読み取りの速度制限に達しているため、続きは次回に回します", stop: "hourly" };
+  return { allowed: Math.max(0, Math.min(perRun, left, budgetLeft)), note: left < perRun ? "AI読み取りの速度制限に近いため、続きは次回に回します" : "", stop: null };
+}
+
+/**
+ * 実際のAI呼び出しの直前に、月額予算の予約を取る（並列ワーカー・並列バッチでも予算を超えない）。
+ * 予約は見込み額（実測の平均×3、最大8円）で、今月の実費＋有効な予約＋今回の見込みが予算内のときだけ許可される。
+ * 実費（ai_extraction_logs）と予約（見込み）は別の値で、予約は完了後30秒で失効する。
+ */
+export interface BudgetSnapshot {
+  budgetJpy: number;
+  costJpy: number;
+  estimateJpy: number;
+}
+export async function budgetSnapshot(deps: CollectDeps): Promise<BudgetSnapshot | null> {
+  if (deps.extractor?.engine !== "anthropic") return null;
+  try {
+    const b = await monthBudget(deps.db, deps.householdId);
+    return { budgetJpy: b.budgetJpy, costJpy: b.costJpy, estimateJpy: reserveEstimateJpy(b.avgPerCallJpy) };
+  } catch {
+    return { budgetJpy: 0, costJpy: 0, estimateJpy: reserveEstimateJpy(null) }; // 取得に失敗したときは予算0として扱い、呼び出さない
+  }
+}
+export async function reserveBudget(deps: CollectDeps, snap: BudgetSnapshot | null): Promise<{ ok: true; release: () => Promise<void> } | { ok: false }> {
+  if (!snap) return { ok: true, release: async () => undefined }; // 有料のAIを使わないエンジン
+  const { data, error } = await deps.db.rpc("reserve_ai_budget", { p_household: deps.householdId, p_est_jpy: snap.estimateJpy, p_month_cost_jpy: snap.costJpy, p_budget_jpy: snap.budgetJpy, p_ttl_seconds: 300 });
+  if (error || !data) return { ok: false };
+  const id = data as unknown as string;
+  return { ok: true, release: async () => void (await deps.db.rpc("release_ai_budget", { p_id: id }).then(() => undefined, () => undefined)) };
 }
 
 export { isReady };
@@ -281,7 +300,10 @@ interface CandidateRow {
   due_at?: string | null;
   ai_calls?: number;
   cost_jpy?: number | string;
+  hold_count?: number;
+  triage?: string | null;
 }
+
 
 /** 取得とAI読み取り(通信が中心の処理)。複数の候補を並行して実行できる。判定・登録は processCandidate が順番に行う */
 async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promise<ExtractResult> {
@@ -298,10 +320,11 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     // 取得が制限された外部ページ（ロボット制限）は回避しない。代わりに、取得できたまとめサイトの一覧の表示（二次情報）から読み取る
     const listText = `${q.title}
 ${q.context}`.trim();
-    if (!result.ok && result.code === "fetch_failed" && q.kind === "web_page" && classifyFailure(result.message).kind === "robots" && listText.length >= 25) {
+    if (!result.ok && result.code === "fetch_failed" && q.kind === "web_page" && ["robots", "js_render"].includes(classifyFailure(result.message).kind) && listText.length >= 25) {
       const alt = await extractFromRequest({ kind: "text", text: listText, sourceUrl: q.url, now: deps.now }, "text", extractor, deps.now, ["取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取りました"]);
       if (alt.ok) {
         q.viaList = true;
+        q.viaKind = classifyFailure(result.message).kind;
         result = alt;
       }
     }
@@ -317,12 +340,16 @@ interface Outcome {
 }
 
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
-async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult): Promise<Outcome> {
+async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = []): Promise<Outcome> {
   const { db } = deps;
   const nowIso = deps.now.toISOString();
   const clear = { lease_until: null, locked_by: null };
+  // 実施した取得方法・元の情報源と応募サービスのホスト・最後に取得できた情報（内部ログ。設定画面には出さない）
+  const methods = [q.kind === "x_post" ? "X投稿" : q.kind === "x_oembed" ? "X埋め込み" : "直接取得", ...(q.viaList ? ["一覧の表示（二次情報）"] : [])];
+  const originHost = hostOf(c.source_url ?? q.url);
+  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: q.context.slice(0, 300), hints: q.hints ?? null } };
   // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
-  let acct: Record<string, unknown> = {};
+  let acct: Record<string, unknown> = { ...trace };
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
   const finish = async (jobState: "completed" | "skipped" | "review", patch: Record<string, unknown>, stat?: StatDelta) => {
     await db
@@ -338,12 +365,23 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     const delay = cls.permanent ? null : backoffMs(c.attempts);
     // 受付終了後の取得失敗は、失敗ではなく「受付終了」として除外する（失敗件数に数えず、原因は記録する）
     const lapsed = c.due_at ? new Date(c.due_at).getTime() < deps.now.getTime() : false;
+    // 取得困難の記録（原因・回数・最終確認日・代替取得の成否）。代替の取得方法（一覧の表示）を試した結果も残す
+    if (!lapsed && (delay === null || cls.permanent)) await recordHardSource(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, failKind: cls.kind, alt: q.viaList === undefined && cls.permanent ? { source: "list_text", ok: false } : undefined });
     if (lapsed) {
-      await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", fail_kind: "expired", reasons: ["受付終了のため取得しませんでした（応募締切を過ぎています）", `取得の失敗理由: ${FAIL_KIND_LABEL[cls.kind]}`], last_error: message.slice(0, 300), completed_at: nowIso, resolved_at: nowIso, ...acct, ...clear }).eq("id", c.id);
+      await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", fail_kind: "expired", triage: "auto_exclude", triage_reason: "受付終了のため自動で除外しました", reasons: ["受付終了のため取得しませんでした（応募締切を過ぎています）", `取得の失敗理由: ${FAIL_KIND_LABEL[cls.kind]}`], last_error: message.slice(0, 300), completed_at: nowIso, resolved_at: nowIso, ...acct, ...clear }).eq("id", c.id);
       await bumpStats(db, deps.householdId, deps.now, { excluded: 1 });
     } else if (delay === null) {
-      await db.from("collection_candidates").update({ status: "failed", job_state: "failed", fail_kind: cls.kind, reasons: [message, `原因: ${FAIL_KIND_LABEL[cls.kind]}`, "再試行しません（上限に達したか、再試行しても変わらない失敗です）"], last_error: message.slice(0, 300), completed_at: nowIso, ...acct, ...clear }).eq("id", c.id);
-      await bumpStats(db, deps.householdId, deps.now, { failed_jobs: 1 });
+      // 即時の再試行を使い切った／再試行しても変わらない失敗。恒常的でなければ長い間隔の保留（自動再調査）に、締切が近い・代替も無い場合は要手動確認へ
+      const hd = decideHold({ now: deps.now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: [message], holdCount: c.hold_count ?? 0, failKind: cls.kind, altTried: cls.permanent, important: !!q.memoId });
+      if (hd.triage === "auto_retry") {
+        await db.from("collection_candidates").update({ status: "pending", job_state: "retry", attempts: 0, fail_kind: cls.kind, reasons: [message, `原因: ${FAIL_KIND_LABEL[cls.kind]}`, hd.reason], last_error: message.slice(0, 300), ...triagePatch(hd, c, deps.now), ...acct, ...clear }).eq("id", c.id);
+      } else if (hd.triage === "auto_exclude") {
+        await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", fail_kind: "expired", reasons: [hd.reason], last_error: message.slice(0, 300), completed_at: nowIso, resolved_at: nowIso, ...triagePatch(hd, c, deps.now), ...acct, ...clear }).eq("id", c.id);
+        await bumpStats(db, deps.householdId, deps.now, { excluded: 1 });
+      } else {
+        await db.from("collection_candidates").update({ status: "failed", job_state: "failed", fail_kind: cls.kind, reasons: [message, `原因: ${FAIL_KIND_LABEL[cls.kind]}`, hd.reason], last_error: message.slice(0, 300), completed_at: nowIso, ...triagePatch(hd, c, deps.now), ...acct, ...clear }).eq("id", c.id);
+        await bumpStats(db, deps.householdId, deps.now, { failed_jobs: 1 });
+      }
     } else {
       await db
         .from("collection_candidates")
@@ -394,6 +432,15 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     input.memo = [input.memo, note].filter(Boolean).join("\n").slice(0, 2000);
   }
   const store = data.stores.find((s) => s.id === input.store.id);
+  // 代替の取得方法（一覧の表示）で必要な情報を得られた → 取得困難の記録に「代替成功」として残し、次回以降に優先する（系列・店舗×応募サービス単位）
+  if (q.viaList) await recordHardSource(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, chainName: input.chain.name, storeName: input.store.name, failKind: q.viaKind ?? "robots", alt: { source: "list_text", ok: true } });
+  // 収集元の除外ルール（利用者が指定した店舗・系列）に一致したら登録しない。理由は残す
+  const exRule = matchExclusion(rules, { storeId: input.store.id, chainId: input.chain.id, url: q.url });
+  if (exRule && (exRule.scope === "store" || exRule.scope === "chain")) {
+    await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "収集元の除外ルールに一致", reasons: [`収集元の除外ルール（${exRule.label || exRule.scope}）に一致したため登録しませんでした`], draft: { input, summary: draft.summary, confirmedAt: nowIso } as unknown as Json, resolved_at: nowIso, completed_at: nowIso, ...acct, ...clear }).eq("id", c.id);
+    await bumpStats(db, deps.householdId, deps.now, { excluded: 1 });
+    return { usedAi: true, registered: false, aiFailed: false };
+  }
   const dist = store ? storeDistance(data, store) : null;
   // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
   const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
@@ -447,17 +494,26 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister });
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする
-        await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
-        await finish("completed", { status: "auto_registered", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: stored, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
+        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto" }).eq("id", saved.value.id);
+        await finish("completed", { status: "auto_registered", triage: "auto_register", triage_reason: "条件に一致し、情報が十分なため自動登録", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: stored, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
         return { usedAi: true, registered: true, aiFailed: false };
       }
-      await finish("review", { status: "pending", reasons: [`自動登録できませんでした: ${saved.error}`], draft: stored, ...due }, { review_added: 1 });
+      // 登録の失敗はシステム側で解決できない → 要手動確認
+      await finish("review", { status: "pending", reasons: [`自動登録できませんでした: ${saved.error}`], draft: stored, ...triagePatch({ triage: "manual", reason: `自動登録に失敗しました: ${saved.error}`.slice(0, 200), nextMs: null, urgency: "unknown" }, c, deps.now), ...due }, { review_added: 1 });
       return { usedAi: true, registered: false, aiFailed: false };
     }
     await finish("review", { status: "pending", reasons: ["登録可能です（自動登録がオフのため、候補として保留しています）"], draft: stored, ...due }, { review_added: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
-  await finish("review", { status: "pending", reasons: reasons.length ? reasons : ["内容を確認してください"], draft: stored, ...due }, { review_added: 1 });
+  // ---- 登録できなかった候補: 自動再調査（保留）／要手動確認／自動除外に振り分ける（不明な項目を理由に、すぐ確認待ちへ送らない）
+  const gaps = reasons.length ? reasons : ["内容を確認してください"];
+  const dueAt = due ? new Date(due.due_at) : c.due_at ? new Date(c.due_at) : null;
+  const hd = decideHold({ now: deps.now, dueAt, gaps, holdCount: c.hold_count ?? 0, failKind: q.viaKind ?? null, altTried: !!q.viaList, important: !!q.memoId });
+  if (hd.triage === "auto_exclude") {
+    await finish("skipped", { status: "excluded", fail_kind: "expired", reasons: [hd.reason, ...gaps.slice(0, 3)], draft: stored, ...triagePatch(hd, c, deps.now), ...due }, { excluded: 1 });
+  } else {
+    await finish("review", { status: "pending", reasons: [...gaps, hd.reason].slice(0, 10), draft: { ...(stored as object), queued: { ...q, changed: false } } as unknown as Json, ...triagePatch(hd, c, deps.now), ...due }, { review_added: 1 });
+  }
   return { usedAi: true, registered: false, aiFailed: false };
 }
 
@@ -505,9 +561,8 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
       sources = sources.filter((s) => !s.last_attempt_at || now.getTime() - new Date(s.last_attempt_at).getTime() >= s.interval_hours * 3600_000 - 5 * 60_000);
     }
     const data = await loadAppData(db, householdId);
-    // AI読み取りは、1回の上限・本日の日次上限・月額予算・既存の時間/日の上限のすべてを守る
-    const daily = effectiveDailyLimit(settings as never, now);
-    const allow = await aiAllowance(deps, settings.max_ai_per_run, daily);
+    // AI読み取りは、1回の上限・月額予算（予約つき）・1時間の速度制限を守る。日次の件数上限はない
+    const allow = await aiAllowance(deps, settings.max_ai_per_run);
     if (allow.note) notices.push(allow.note);
     const aiLeft = allow.allowed;
 
@@ -747,6 +802,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   const workerId = `w-${Math.random().toString(36).slice(2, 10)}`;
   let fails = ctx.settings.consecutive_failures ?? 0;
   const lease = 150;
+  const rules = await activeExclusions(db, householdId);
+  let budgetHit = false;
   const triaged = await triageQueue(deps, ctx.cond);
   out.screened += triaged;
   await bumpStats(db, householdId, now, { excluded: triaged });
@@ -767,6 +824,14 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
       const q = (c.draft as unknown as Partial<QueuedPayload> | null)?.queued;
       if (!q) {
         await db.from("collection_candidates").update({ status: "failed", job_state: "failed", last_error: "ジョブの内容がありません", lease_until: null, locked_by: null, completed_at: now.toISOString() }).eq("id", c.id);
+        continue;
+      }
+      // 収集元の除外ルール（利用者が指定したXアカウント・個別サイト）に一致したら、AIを呼ばずに除外する
+      const exRule = matchExclusion(rules, { url: q.kind === "x_post" ? null : q.url, xUsername: q.kind === "x_post" ? q.sourceName : null });
+      if (exRule) {
+        await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "収集元の除外ルールに一致", reasons: [`収集元の除外ルール（${exRule.label || exRule.scope}）に一致したため除外しました`], resolved_at: now.toISOString(), completed_at: now.toISOString(), lease_until: null, locked_by: null }).eq("id", c.id);
+        out.screened++;
+        await bumpStats(db, householdId, now, { excluded: 1 });
         continue;
       }
       const hints = q.hints ?? parseListHints(`${q.title} ${q.context}`, now);
@@ -794,13 +859,33 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
     // 実行時間の上限(60秒)を超えて実行が打ち切られないよう、バッチごとに残り時間で打ち切る
     const limit = Math.max(5_000, ctx.timeLeft() - 6_000);
     const timedOut = (): ExtractResult => ({ ok: false, kind: "url", code: "ai_failed", message: "時間切れのため解析できませんでした" });
+    // 月額予算の予約: 実際の呼び出しの直前に、並列実行を含めて予算内かを確認する。取れなかった候補は解析せず、待機に戻す
+    const snap = await budgetSnapshot(deps);
+    const denied = new Set<string>();
     const results = await Promise.all(
-      toAnalyze.map((it) => withTimeout(extractFor(deps, it.q).catch((): ExtractResult => ({ ok: false, kind: "url", code: "ai_failed", message: "解析中にエラーが発生しました" })), limit, timedOut)),
+      toAnalyze.map(async (it): Promise<ExtractResult> => {
+        const rv = await reserveBudget(deps, snap);
+        if (!rv.ok) {
+          denied.add(it.c.id);
+          return { ok: false, kind: "url", code: "ai_failed", message: "予算" };
+        }
+        try {
+          return await withTimeout(extractFor(deps, it.q).catch((): ExtractResult => ({ ok: false, kind: "url", code: "ai_failed", message: "解析中にエラーが発生しました" })), limit, timedOut);
+        } finally {
+          await rv.release();
+        }
+      }),
     );
     let batchAiFail = 0;
     for (let i = 0; i < toAnalyze.length; i++) {
       const it = toAnalyze[i];
-      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i]).catch(async (): Promise<Outcome> => {
+      if (denied.has(it.c.id)) {
+        // 予算不足で解析していない: 処理済み扱いにせず（除外もせず）、試行回数を戻して待機に残す
+        budgetHit = true;
+        await db.from("collection_candidates").update({ job_state: it.c.triage === "auto_retry" ? "retry" : "pending", lease_until: null, locked_by: null, attempts: Math.max(0, (it.c.attempts ?? 1) - 1) }).eq("id", it.c.id);
+        continue;
+      }
+      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules).catch(async (): Promise<Outcome> => {
         await db.from("collection_candidates").update({ status: "pending", job_state: "retry", last_error: "解析中にエラーが発生しました", next_run_at: new Date(now.getTime() + 15 * 60_000).toISOString(), lease_until: null, locked_by: null }).eq("id", it.c.id);
         return { usedAi: true, registered: false, aiFailed: true };
       });
@@ -819,6 +904,10 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
       const until = new Date(Date.now() + AI_PAUSE_MS).toISOString();
       await db.from("collection_settings").update({ consecutive_failures: fails, paused_until: until, paused_reason: "AI読み取りが連続で失敗したため、6時間停止します" }).eq("household_id", householdId);
       out.stopReason = "AI読み取りが連続で失敗したため、自動処理を一時停止しました";
+      break;
+    }
+    if (budgetHit) {
+      out.stopReason = "今月のAI予算に達したため停止しています";
       break;
     }
     if (aiLeft <= 0) break;
@@ -889,7 +978,6 @@ export type WorkerOutcome =
   | { ok: true; runId: string; aiCalls: number; processed: number; screened: number; registered: number; queued: number; rechecked: number; changed: number; stopReason: string | null }
   | { ok: false; message: string };
 
-const jstDayStart = (now: Date) => new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(now)}T00:00:00+09:00`).toISOString();
 
 /**
  * 定期ワーカー(Supabase Cronが数分おきに起動)の1回分。解析待ちがなければ何もせず、すぐ終了する。
@@ -905,11 +993,11 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
   if (settings.paused_until && new Date(settings.paused_until).getTime() > Date.now()) return { ok: true, skipped: "paused" };
   if (settings.paused_until) await db.from("collection_settings").update({ paused_until: null, paused_reason: null, consecutive_failures: 0 }).eq("household_id", householdId);
 
-  // 本日の上限に達している間は、実行記録を毎回は増やさない(最初の1回だけ記録する)
-  const dailyLimit = effectiveDailyLimit(settings as never, now);
-  if ((await aiUsedToday(db, householdId, now)) >= dailyLimit.limit) {
-    const last = await db.from("collection_runs").select("stop_reason,started_at").eq("household_id", householdId).eq("phase", "worker").order("started_at", { ascending: false }).limit(1).maybeSingle();
-    if (last.data?.stop_reason?.startsWith("本日のワーカー") && last.data.started_at >= jstDayStart(now)) return { ok: true, skipped: "daily_limit" };
+  // 月額予算に達している間は、実行記録を毎回は増やさない(最初の1回だけ記録する)
+  const budgetStop = await db.from("collection_runs").select("stop_reason,started_at").eq("household_id", householdId).eq("phase", "worker").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  if (budgetStop.data?.stop_reason?.startsWith("今月のAI予算") && budgetStop.data.started_at >= jstMonthStart(now)) {
+    const snap = await budgetSnapshot(deps);
+    if (snap && snap.costJpy + snap.estimateJpy > snap.budgetJpy) return { ok: true, skipped: "budget" };
   }
   const ready = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).or(`and(job_state.in.(pending,retry),or(next_run_at.is.null,next_run_at.lte.${new Date().toISOString()})),and(job_state.eq.processing,lease_until.lt.${new Date().toISOString()})`);
   const hasWork = (ready.count ?? 0) > 0;
@@ -923,9 +1011,9 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
   try {
     const cond = conditionsFromRow(settings as unknown as Record<string, unknown>);
     const data = await loadAppData(db, householdId);
-    // ワーカーの1日の上限(日本時間)と、既存のAI利用上限・月額予算
-    const allow = await aiAllowance(deps, settings.worker_batch, dailyLimit);
-    let stopReason: string | null = allow.stop === "daily" ? "本日のワーカーのAI読み取り上限に達しました" : allow.stop === "budget" ? "今月のAI予算に達したため停止しています" : allow.note || null;
+    // 月額予算（予約つき）と1時間の速度制限。日次の件数上限はない
+    const allow = await aiAllowance(deps, settings.worker_batch);
+    let stopReason: string | null = allow.stop === "budget" ? "今月のAI予算に達したため停止しています" : allow.note || null;
     await runMemoPass(deps, { data }).catch(() => undefined);
     const q = await processQueue(deps, { settings, cond, data, aiLeft: allow.allowed, timeLeft, perBatch: AI_CONCURRENCY });
     stopReason = q.stopReason ?? stopReason;
@@ -996,9 +1084,9 @@ export async function registerCandidate(db: Db, householdId: string, actor: stri
   if (!input) return { ok: false, message: "登録できる内容がありません（解析前の候補です）" };
   const saved = await saveLottery(db, householdId, null, { ...input, isManaged: false, applications: [] }, actor);
   if (!saved.ok) return { ok: false, message: saved.error };
-  await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
+  await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto_confirmed", confirmed_at: new Date().toISOString(), confirmed_by_profile_id: actor }).eq("id", saved.value.id);
   await bumpStats(db, householdId, new Date(), { registered_new: 1 });
-  await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: ["確認のうえ登録しました"], resolved_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq("id", candidateId);
+  await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: ["確認のうえ登録しました"], manual_state: "resolved", manual_resolved_at: new Date().toISOString(), manual_resolved_by: actor, resolved_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq("id", candidateId);
   return { ok: true, lotteryId: saved.value.id };
 }
 

@@ -164,6 +164,38 @@ export type Database = {
           },
         ]
       }
+      ai_budget_reservations: {
+        Row: {
+          est_jpy: number
+          expires_at: string
+          household_id: string
+          id: string
+          reserved_at: string
+        }
+        Insert: {
+          est_jpy: number
+          expires_at: string
+          household_id: string
+          id?: string
+          reserved_at?: string
+        }
+        Update: {
+          est_jpy?: number
+          expires_at?: string
+          household_id?: string
+          id?: string
+          reserved_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_budget_reservations_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_extraction_feedback: {
         Row: {
           adopted_count: number
@@ -1439,6 +1471,7 @@ export type Database = {
       chains: {
         Row: {
           archived_at: string | null
+          brand_group: string | null
           created_at: string
           default_application_rule: string
           household_id: string
@@ -1448,11 +1481,13 @@ export type Database = {
           logo_sha256: string | null
           memo: string
           name: string
+          operation_kind: string | null
           updated_at: string
           updated_by_profile_id: string | null
         }
         Insert: {
           archived_at?: string | null
+          brand_group?: string | null
           created_at?: string
           default_application_rule?: string
           household_id: string
@@ -1462,11 +1497,13 @@ export type Database = {
           logo_sha256?: string | null
           memo?: string
           name: string
+          operation_kind?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
         Update: {
           archived_at?: string | null
+          brand_group?: string | null
           created_at?: string
           default_application_rule?: string
           household_id?: string
@@ -1476,6 +1513,7 @@ export type Database = {
           logo_sha256?: string | null
           memo?: string
           name?: string
+          operation_kind?: string | null
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -1511,7 +1549,9 @@ export type Database = {
           draft: Json | null
           due_at: string | null
           fail_kind: string | null
+          fetch_methods: string[]
           fetched_at: string
+          hold_count: number
           household_id: string
           id: string
           job_state: string
@@ -1519,20 +1559,30 @@ export type Database = {
           last_changed_at: string | null
           last_checked_at: string | null
           last_error: string | null
+          last_good: Json | null
           lease_until: string | null
           list_hash: string | null
           locked_by: string | null
           lottery_id: string | null
+          manual_reason: string
+          manual_resolved_at: string | null
+          manual_resolved_by: string | null
+          manual_since: string | null
+          manual_state: string | null
           memo_id: string | null
           next_run_at: string | null
+          origin_host: string | null
           page_hash: string | null
           reasons: string[]
           resolved_at: string | null
+          service_host: string | null
           source_id: string | null
           source_url: string | null
           started_at: string | null
           status: string
           title: string
+          triage: string | null
+          triage_reason: string
           x_post_id: string | null
         }
         Insert: {
@@ -1549,7 +1599,9 @@ export type Database = {
           draft?: Json | null
           due_at?: string | null
           fail_kind?: string | null
+          fetch_methods?: string[]
           fetched_at?: string
+          hold_count?: number
           household_id: string
           id?: string
           job_state?: string
@@ -1557,20 +1609,30 @@ export type Database = {
           last_changed_at?: string | null
           last_checked_at?: string | null
           last_error?: string | null
+          last_good?: Json | null
           lease_until?: string | null
           list_hash?: string | null
           locked_by?: string | null
           lottery_id?: string | null
+          manual_reason?: string
+          manual_resolved_at?: string | null
+          manual_resolved_by?: string | null
+          manual_since?: string | null
+          manual_state?: string | null
           memo_id?: string | null
           next_run_at?: string | null
+          origin_host?: string | null
           page_hash?: string | null
           reasons?: string[]
           resolved_at?: string | null
+          service_host?: string | null
           source_id?: string | null
           source_url?: string | null
           started_at?: string | null
           status: string
           title?: string
+          triage?: string | null
+          triage_reason?: string
           x_post_id?: string | null
         }
         Update: {
@@ -1587,7 +1649,9 @@ export type Database = {
           draft?: Json | null
           due_at?: string | null
           fail_kind?: string | null
+          fetch_methods?: string[]
           fetched_at?: string
+          hold_count?: number
           household_id?: string
           id?: string
           job_state?: string
@@ -1595,20 +1659,30 @@ export type Database = {
           last_changed_at?: string | null
           last_checked_at?: string | null
           last_error?: string | null
+          last_good?: Json | null
           lease_until?: string | null
           list_hash?: string | null
           locked_by?: string | null
           lottery_id?: string | null
+          manual_reason?: string
+          manual_resolved_at?: string | null
+          manual_resolved_by?: string | null
+          manual_since?: string | null
+          manual_state?: string | null
           memo_id?: string | null
           next_run_at?: string | null
+          origin_host?: string | null
           page_hash?: string | null
           reasons?: string[]
           resolved_at?: string | null
+          service_host?: string | null
           source_id?: string | null
           source_url?: string | null
           started_at?: string | null
           status?: string
           title?: string
+          triage?: string | null
+          triage_reason?: string
           x_post_id?: string | null
         }
         Relationships: [
@@ -1712,6 +1786,177 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "households"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_exclusions: {
+        Row: {
+          active: boolean
+          chain_id: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          household_id: string
+          id: string
+          key: string
+          label: string
+          reason_code: string
+          reason_note: string
+          released_at: string | null
+          released_by_profile_id: string | null
+          scope: string
+          store_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          chain_id?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id: string
+          id?: string
+          key: string
+          label?: string
+          reason_code: string
+          reason_note?: string
+          released_at?: string | null
+          released_by_profile_id?: string | null
+          scope: string
+          store_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          chain_id?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id?: string
+          id?: string
+          key?: string
+          label?: string
+          reason_code?: string
+          reason_note?: string
+          released_at?: string | null
+          released_by_profile_id?: string | null
+          scope?: string
+          store_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_exclusions_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_exclusions_created_by_profile_id_household_id_fkey"
+            columns: ["created_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_exclusions_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_exclusions_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      collection_hard_sources: {
+        Row: {
+          alt_fail: number
+          alt_source: string | null
+          alt_success: number
+          chain_id: string | null
+          created_at: string
+          fail_count: number
+          fail_kind: string | null
+          household_id: string
+          id: string
+          key: string
+          label: string
+          last_checked_at: string | null
+          last_failed_at: string | null
+          needs_manual: boolean
+          origin_url: string | null
+          scope: string
+          service_host: string | null
+          store_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          alt_fail?: number
+          alt_source?: string | null
+          alt_success?: number
+          chain_id?: string | null
+          created_at?: string
+          fail_count?: number
+          fail_kind?: string | null
+          household_id: string
+          id?: string
+          key: string
+          label?: string
+          last_checked_at?: string | null
+          last_failed_at?: string | null
+          needs_manual?: boolean
+          origin_url?: string | null
+          scope: string
+          service_host?: string | null
+          store_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          alt_fail?: number
+          alt_source?: string | null
+          alt_success?: number
+          chain_id?: string | null
+          created_at?: string
+          fail_count?: number
+          fail_kind?: string | null
+          household_id?: string
+          id?: string
+          key?: string
+          label?: string
+          last_checked_at?: string | null
+          last_failed_at?: string | null
+          needs_manual?: boolean
+          origin_url?: string | null
+          scope?: string
+          service_host?: string | null
+          store_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_hard_sources_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_hard_sources_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_hard_sources_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
           },
         ]
       }
@@ -2503,8 +2748,12 @@ export type Database = {
           campaign_id: string | null
           chain_id: string
           conditions_text: string
+          confirmed_at: string | null
+          confirmed_by_profile_id: string | null
           created_at: string
           event_state: string
+          exclusion_reason_code: string | null
+          exclusion_reason_note: string
           household_id: string
           id: string
           import_key: string | null
@@ -2528,6 +2777,7 @@ export type Database = {
           receive_start_at: string | null
           receive_start_date: string | null
           receive_start_precision: string
+          registration_path: string | null
           requirement_details: Json
           requirement_logic: string
           requirement_tags: string[]
@@ -2561,8 +2811,12 @@ export type Database = {
           campaign_id?: string | null
           chain_id: string
           conditions_text?: string
+          confirmed_at?: string | null
+          confirmed_by_profile_id?: string | null
           created_at?: string
           event_state?: string
+          exclusion_reason_code?: string | null
+          exclusion_reason_note?: string
           household_id: string
           id?: string
           import_key?: string | null
@@ -2586,6 +2840,7 @@ export type Database = {
           receive_start_at?: string | null
           receive_start_date?: string | null
           receive_start_precision?: string
+          registration_path?: string | null
           requirement_details?: Json
           requirement_logic?: string
           requirement_tags?: string[]
@@ -2619,8 +2874,12 @@ export type Database = {
           campaign_id?: string | null
           chain_id?: string
           conditions_text?: string
+          confirmed_at?: string | null
+          confirmed_by_profile_id?: string | null
           created_at?: string
           event_state?: string
+          exclusion_reason_code?: string | null
+          exclusion_reason_note?: string
           household_id?: string
           id?: string
           import_key?: string | null
@@ -2644,6 +2903,7 @@ export type Database = {
           receive_start_at?: string | null
           receive_start_date?: string | null
           receive_start_precision?: string
+          registration_path?: string | null
           requirement_details?: Json
           requirement_logic?: string
           requirement_tags?: string[]
@@ -4420,6 +4680,8 @@ export type Database = {
           memo: string
           name: string
           nearest_station: string
+          operation_source: string
+          operation_verified_at: string | null
           parking_memo: string
           prefecture: string
           receive_method: string | null
@@ -4450,6 +4712,8 @@ export type Database = {
           memo?: string
           name: string
           nearest_station?: string
+          operation_source?: string
+          operation_verified_at?: string | null
           parking_memo?: string
           prefecture?: string
           receive_method?: string | null
@@ -4480,6 +4744,8 @@ export type Database = {
           memo?: string
           name?: string
           nearest_station?: string
+          operation_source?: string
+          operation_verified_at?: string | null
           parking_memo?: string
           prefecture?: string
           receive_method?: string | null
@@ -4601,7 +4867,9 @@ export type Database = {
           draft: Json | null
           due_at: string | null
           fail_kind: string | null
+          fetch_methods: string[]
           fetched_at: string
+          hold_count: number
           household_id: string
           id: string
           job_state: string
@@ -4609,20 +4877,30 @@ export type Database = {
           last_changed_at: string | null
           last_checked_at: string | null
           last_error: string | null
+          last_good: Json | null
           lease_until: string | null
           list_hash: string | null
           locked_by: string | null
           lottery_id: string | null
+          manual_reason: string
+          manual_resolved_at: string | null
+          manual_resolved_by: string | null
+          manual_since: string | null
+          manual_state: string | null
           memo_id: string | null
           next_run_at: string | null
+          origin_host: string | null
           page_hash: string | null
           reasons: string[]
           resolved_at: string | null
+          service_host: string | null
           source_id: string | null
           source_url: string | null
           started_at: string | null
           status: string
           title: string
+          triage: string | null
+          triage_reason: string
           x_post_id: string | null
         }[]
         SetofOptions: {
@@ -4718,9 +4996,20 @@ export type Database = {
         }
         Returns: undefined
       }
+      release_ai_budget: { Args: { p_id: string }; Returns: undefined }
       remove_push_subscription: {
         Args: { p_endpoint: string }
         Returns: undefined
+      }
+      reserve_ai_budget: {
+        Args: {
+          p_budget_jpy: number
+          p_est_jpy: number
+          p_household: string
+          p_month_cost_jpy: number
+          p_ttl_seconds?: number
+        }
+        Returns: string
       }
       revert_fulfillment: {
         Args: { p_actor: string; p_application_id: string; p_to: string }

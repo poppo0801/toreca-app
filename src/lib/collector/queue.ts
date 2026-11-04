@@ -180,22 +180,19 @@ export function isNewRound(next: LotteryInput, cur: Lottery): boolean {
   return ns.precision !== "unknown" && !!ns.date && ns.date > od.date;
 }
 
-// ---------------------------------------------------------------- 日次上限・予算
+// ---------------------------------------------------------------- 月額予算（Stage 5T: 日次の件数上限は廃止。費用は月額予算で制御する）
 const jstDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 export const jstDayString = jstDay;
 
-/**
- * 今日(日本時間)のAI解析の日次上限。一時的な変更(override)は、設定した日だけ有効で、翌日(日本時間0時)に通常の設定へ戻る。
- */
-export function effectiveDailyLimit(s: { worker_daily_ai_limit: number; worker_limit_override: number | null; worker_limit_override_date: string | null }, now: Date): { limit: number; overridden: boolean } {
-  if (s.worker_limit_override !== null && s.worker_limit_override_date === jstDay(now)) return { limit: s.worker_limit_override, overridden: true };
-  return { limit: s.worker_daily_ai_limit, overridden: false };
-}
-
-/** 1回のAI読み取りの費用の見込み（安全側。実測の平均は1円未満）。並列処理中の利用額や反映の遅れがあっても予算を超えないよう、残額がこの金額×件数に満たない分は始めない */
+/** 1回のAI読み取りの費用の見込みの上限（安全側。実測の平均は1円未満）。残額がこの金額に満たない分は始めない */
 export const CALL_RESERVE_JPY = 8;
 export function budgetCallsLeft(budgetJpy: number, costJpy: number, reserveJpy = CALL_RESERVE_JPY): number {
   return Math.max(0, Math.floor((budgetJpy - costJpy) / reserveJpy));
+}
+/** 予約する見込み額: 今月の実測の平均×3（誤差の余裕）。実測が無い間、または極端な値のときは 2〜CALL_RESERVE_JPY の範囲に収める */
+export function reserveEstimateJpy(avgPerCallJpy: number | null): number {
+  if (avgPerCallJpy === null || !Number.isFinite(avgPerCallJpy)) return CALL_RESERVE_JPY;
+  return Math.min(CALL_RESERVE_JPY, Math.max(2, Math.round(avgPerCallJpy * 3 * 100) / 100));
 }
 
 // ---------------------------------------------------------------- 異常の警告（画面に表示）
@@ -212,26 +209,22 @@ export interface HealthInput {
   lastCollectAt: Date | null;
   /** 最後に解析待ちが実際に処理された時刻（Cronの実行ではなく、キューが進んだ時刻） */
   lastProgressAt?: Date | null;
-  dailyUsed?: number;
-  dailyLimit?: number;
   budgetBlocked?: boolean;
   /** 本日締切で未処理の候補 */
   dueTodayQueued?: number;
 }
 export interface HealthWarning {
-  code: "due_today" | "daily_limit" | "budget" | "paused" | "worker_stalled" | "queue_stuck" | "failures_surge" | "source_stale" | "collect_stale";
+  code: "due_today" | "budget" | "paused" | "worker_stalled" | "queue_stuck" | "failures_surge" | "source_stale" | "collect_stale";
   message: string;
 }
 export function healthWarnings(h: HealthInput): HealthWarning[] {
   const out: HealthWarning[] = [];
-  const limitReached = h.dailyLimit !== undefined && (h.dailyUsed ?? 0) >= h.dailyLimit;
   const mins = (d: Date | null) => (d ? (h.now.getTime() - d.getTime()) / 60_000 : Infinity);
-  if (h.dueTodayQueued && h.dueTodayQueued > 0 && (limitReached || h.budgetBlocked || h.pausedReason)) out.push({ code: "due_today", message: `本日締切の候補が${h.dueTodayQueued}件、未処理のままです。優先して確認してください` });
-  if (h.budgetBlocked && h.queued > 0) out.push({ code: "budget", message: `今月のAI予算に達したため、新しい解析を停止しています。解析待ち${h.queued}件（日次上限を変えても再開しません）` });
-  else if (limitReached && h.queued > 0) out.push({ code: "daily_limit", message: `本日のAI解析上限${h.dailyLimit}件に達しました。解析待ち${h.queued}件` });
+  if (h.dueTodayQueued && h.dueTodayQueued > 0 && (h.budgetBlocked || h.pausedReason)) out.push({ code: "due_today", message: `本日締切の候補が${h.dueTodayQueued}件、未処理のままです。優先して確認してください` });
+  if (h.budgetBlocked && h.queued > 0) out.push({ code: "budget", message: `今月のAI予算に達したため、新しい解析を停止しています。解析待ち${h.queued}件（翌月（日本時間）に自動で再開します）` });
   if (h.pausedReason) out.push({ code: "paused", message: `自動処理を停止しています: ${h.pausedReason}` });
   // Cronが動いているだけでは正常とみなさない: 解析待ちがあり、停止・上限でもないのに、実際に処理が進んでいない
-  if (h.workerEnabled && h.queued > 0 && !h.pausedReason && !limitReached && !h.budgetBlocked && mins(h.lastProgressAt !== undefined ? h.lastProgressAt : h.lastWorkerAt) > 30) out.push({ code: "worker_stalled", message: "解析待ちがありますが、30分以上処理が進んでいません（定期実行の設定を確認してください）" });
+  if (h.workerEnabled && h.queued > 0 && !h.pausedReason && !h.budgetBlocked && mins(h.lastProgressAt !== undefined ? h.lastProgressAt : h.lastWorkerAt) > 30) out.push({ code: "worker_stalled", message: "解析待ちがありますが、30分以上処理が進んでいません（定期実行の設定を確認してください）" });
   if (h.queued > 0 && h.oldestQueuedAt && mins(h.oldestQueuedAt) > 48 * 60) out.push({ code: "queue_stuck", message: "2日以上前から解析待ちが残っています" });
   if (h.failedLast24h >= 10) out.push({ code: "failures_surge", message: `直近24時間の失敗が${h.failedLast24h}件に増えています` });
   for (const s of h.sources) {

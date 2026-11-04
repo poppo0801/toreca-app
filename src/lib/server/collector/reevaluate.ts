@@ -1,6 +1,5 @@
 import "server-only";
 import { judge, isXCandidate, type CandidateLite, type Judgement, type ReevalClass, type StoredDraft } from "@/lib/collector/reevaluate";
-import { effectiveDailyLimit } from "@/lib/collector/queue";
 import { isReady } from "@/lib/collector/ready";
 import { aiAllowance, conditionsFromRow, processQueue, type CollectDeps } from "@/lib/server/collector/run";
 import { monthBudget } from "@/lib/server/ai-budget";
@@ -155,7 +154,7 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
           note(c, j, "failed", "rematch");
           continue;
         }
-        await db.from("lotteries").update({ source_kind: "auto", is_new: true }).eq("id", saved.value.id);
+        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto" }).eq("id", saved.value.id);
         const via: ReevalMarker["via"] = markers.get(c.id)?.via ?? (j.cls === "B" ? "rematch" : "rule");
         const m = mark(c, j, via, { registeredLotteryId: saved.value.id });
         await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: [...j.reasons, "確認待ち候補の再評価で自動登録しました（★管理対象・応募記録は作っていません）"], draft: { ...stored, input, summary: j.rematched.summary, reeval: m } as unknown as Json, resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
@@ -175,7 +174,7 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
 
   // ---- 2) 追加取得＋AI再解析（C: X投稿、D: 取得元の再確認）。件数・予算の上限内。候補は優先順位順
   const requestN = Math.min(first.requeue.length, Math.max(0, opts.aiMax));
-  const allow = await aiAllowance(deps, requestN, effectiveDailyLimit(settings as never, now));
+  const allow = await aiAllowance(deps, requestN);
   const aiN = deps.extractor ? Math.min(requestN, allow.allowed) : 0;
   const chosen = first.requeue.slice(0, aiN);
   let aiCalls = 0;

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getExtractor, type ExtractOutput, type ExtractRequest, type LotteryExtractor } from "@/lib/ai/provider";
 import { runCollection, runWorker, type CollectDeps } from "@/lib/server/collector/run";
 import { monthBudget } from "@/lib/server/ai-budget";
-import { effectiveDailyLimit, jstDayString } from "@/lib/collector/queue";
+import { jstDayString } from "@/lib/collector/queue";
 import type { SafeFetchResult } from "@/lib/server/safe-fetch";
 import type { Db } from "@/lib/server/lottery-service";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
@@ -119,26 +119,17 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 日別統計・日次上限・月額
     expect(deny.data ?? []).toHaveLength(0);
   });
 
-  it("日次上限: 上限に達したら新しい解析を始めない。当日だけ一時的に引き上げると再開し、翌日は通常に戻る", async () => {
-    await setSettings({ worker_daily_ai_limit: 5 }); // 本日の解析数は既に5件
+  it("日次の件数上限はない: 本日の解析数が多くても、月額予算が残っていれば解析を続ける", async () => {
+    await setSettings({ worker_daily_ai_limit: 5 }); // 旧設定（廃止。値が小さくても無視される）。本日の解析数は既に5件
     const jobs = ["q1", "q2"].map((n) => ({ household_id: hid, dedupe_key: `https://q.example.invalid/${n}`, source_url: `https://q.example.invalid/${n}`, title: n, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: `https://q.example.invalid/${n}`, title: n, context: "", sourceName: "t", attempts: 0 } } }));
     await u1.from("collection_candidates").insert(jobs as never);
     pages = [];
     const r1 = await runWorker(deps({ trigger: "cron", canRegister: false, extractor: metered() }));
-    expect(JSON.stringify(r1)).toMatch(/上限|daily_limit/);
-    expect(pages).toHaveLength(0); // 上限に達したらAIも呼ばず、ページも取得しない
-    // 今日だけ上限を引き上げ（画面の操作と同じ更新）→ 再開
-    await setSettings({ worker_limit_override: 150, worker_limit_override_date: jstDayString(NOW) });
-    const row = (await u1.from("collection_settings").select("*").single()).data!;
-    expect(effectiveDailyLimit(row as never, NOW)).toEqual({ limit: 150, overridden: true });
-    const r2 = await runWorker(deps({ trigger: "cron", canRegister: false, extractor: metered() }));
-    expect(r2.ok && "aiCalls" in r2 && r2.aiCalls).toBe(2);
-    // 翌日(日本時間)は通常の設定に戻る
-    expect(effectiveDailyLimit(row as never, new Date(NOW.getTime() + 24 * 3600_000))).toEqual({ limit: 5, overridden: false });
-    await setSettings({ worker_limit_override: null, worker_limit_override_date: null, worker_daily_ai_limit: 100 });
+    expect(r1.ok && "aiCalls" in r1 && r1.aiCalls).toBe(2);
+    await setSettings({ worker_daily_ai_limit: 100 });
   });
 
-  it("月額予算: 実トークンから費用を計算して記録(二重計上なし)。レート変更が反映され、予算に近づくと安全側に止まり、日次上限を上げても再開しない。予算を戻せば再開", async () => {
+  it("月額予算: 実トークンから費用を計算して記録(二重計上なし)。レート変更が反映され、予算に近づくと安全側に止まる。予算を戻せば再開", async () => {
     const b0 = await monthBudget(u1, hid);
     const logs = (await u1.from("ai_extraction_logs").select("input_tokens,output_tokens,engine").eq("household_id", hid)).data!;
     const real = logs.filter((l) => l.engine === "anthropic");
@@ -157,11 +148,10 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 日別統計・日次上限・月額
     await u1.rpc("save_ai_budget", { p_budget: Math.ceil(b1.costJpy) + 5, p_rate: 200, p_actor: profile });
     const j = { household_id: hid, dedupe_key: "https://q.example.invalid/budget", source_url: "https://q.example.invalid/budget", title: "b", status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: "https://q.example.invalid/budget", title: "b", context: "", sourceName: "t", attempts: 0 } } };
     await u1.from("collection_candidates").insert(j as never);
-    await setSettings({ worker_limit_override: 500, worker_limit_override_date: jstDayString(NOW), worker_daily_ai_limit: 500 });
     pages = [];
     const r = await runWorker(deps({ trigger: "cron", canRegister: false, extractor: metered() }));
     expect(JSON.stringify(r)).toContain("予算");
-    expect(pages).toHaveLength(0); // 日次上限を上げても、予算が不足なら解析しない
+    expect(pages).toHaveLength(0); // 予算が不足なら解析しない
     // 予算0円でも止まる
     await u1.rpc("save_ai_budget", { p_budget: 0, p_rate: 150, p_actor: profile });
     expect((await monthBudget(u1, hid)).blocked).toBe(true);
