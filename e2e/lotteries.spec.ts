@@ -1217,10 +1217,10 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     await expect(mine.locator("span").first()).toBeVisible(); // プロフィールのアバター
   });
 
-  test("★管理対象は既定で「受付中・未応募」。応募直後は2.5秒そのまま表示し、右へゆっくりスライド（途中からフェード）してから一覧が詰まる", async ({ page }) => {
+  test("★管理対象は既定で「受付中・未応募」。応募直後は約1秒そのまま表示し、右へ約0.55秒でスライド（フェードアウト）してから一覧が詰まる", async ({ page }) => {
     const c = card(page, "L4");
     await expect(c).toBeVisible();
-    // 退場の段階（wait → sliding → collapsing）を記録する。スライドは約0.9秒、そのあと0.35秒で一覧が詰まる
+    // 退場の段階（wait → sliding → collapsing）を記録する。スライドは約0.55秒、そのあと0.35秒で一覧が詰まる
     await page.evaluate(() => {
       const w = window as unknown as { __exits: string[] };
       w.__exits = [];
@@ -1229,7 +1229,7 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     const t0 = Date.now();
     await c.getByTestId("my-apply").click();
     await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "applied");
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(500);
     await expect(c).toBeVisible();
     await expect(c.locator("xpath=ancestor::li[1]")).toHaveAttribute("data-exit", "wait");
     // スライド中: 高さは変えず、カードはまだ画面にあり、右へ動いている途中（残像が右端に残らない）
@@ -1237,14 +1237,14 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     const slideStart = Date.now();
     const li = c.locator("xpath=ancestor::li[1]");
     const h0 = (await li.boundingBox())!.height;
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(200);
     expect(Math.abs((await li.boundingBox())!.height - h0)).toBeLessThanOrEqual(1); // スライド中は一覧を詰めない
     const midX = (await c.boundingBox())!.x;
     expect(midX).toBeGreaterThan(0); // 少し動いている（移動中）
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true); // 横スクロールが出ない
     await expect(c).toHaveCount(0, { timeout: 4000 });
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(2500 + 900); // 保持2.5秒＋スライド0.9秒のあとに消える
-    expect(Date.now() - slideStart).toBeGreaterThanOrEqual(1100); // スライド＋詰める時間（一瞬で消えない）
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(1000 + 550); // 保持1秒＋スライド0.55秒のあとに消える
+    expect(Date.now() - slideStart).toBeGreaterThanOrEqual(700); // スライド＋詰める時間（一瞬で消えない）
     expect(await page.evaluate(() => (window as unknown as { __exits: string[] }).__exits)).toEqual(expect.arrayContaining(["hold", "wait", "sliding", "collapsing"]));
     // 応募済みタブには表示される（他のタブの表示は変わらない）
     await page.getByRole("tab", { name: /応募済み/ }).click();
@@ -1429,5 +1429,48 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     const chains = await page.getByTestId("lottery-card").evaluateAll((els) => els.map((e) => e.getAttribute("data-lottery-id")));
     expect(chains.length).toBeGreaterThan(0);
     expect(chains).not.toContain("L3");
+  });
+});
+
+test.describe("Stage 5Q: 見出し・収支の年月選択・シンプルカードの幅", () => {
+  test("応募済みタブのシンプルカードは画面幅に収まり、横スクロールが出ない", async ({ page }) => {
+    await page.getByRole("button", { name: "シンプル表示にする" }).click();
+    await page.getByRole("tab", { name: /応募済み/ }).click();
+    await expect(page.getByTestId("card-simple").first()).toBeVisible();
+    const bad = await page.evaluate(() => {
+      const w = document.documentElement.clientWidth;
+      return { scroll: document.documentElement.scrollWidth > w + 1, over: [...document.querySelectorAll('[data-testid="lottery-card"]')].filter((c) => c.getBoundingClientRect().right > w + 1).length };
+    });
+    expect(bad).toEqual({ scroll: false, over: 0 });
+  });
+
+  test("ページ見出しは下部メニューと同じアイコン付きで、ページ間で同じ高さに表示される", async ({ page }) => {
+    const top = async (path: string) => {
+      await page.goto(path);
+      const h = page.getByRole("heading", { level: 1 }).first();
+      await expect(h.locator("svg")).toHaveCount(1);
+      return Math.round((await h.boundingBox())!.y);
+    };
+    const a = await top("/lotteries");
+    const b = await top("/purchases");
+    const c = await top("/finance");
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+  });
+
+  test("収支: 年月をタップして月を選ぶと、その月へ直接移動する。購入履歴へのアイコンリンクがあり、当選率の文字リンクはない", async ({ page }) => {
+    await page.goto("/finance");
+    await expect(page.getByTestId("month-label")).toBeVisible();
+    await page.getByTestId("month-label").click();
+    await page.getByRole("button", { name: "前の年" }).click();
+    await page.getByRole("button", { name: "3月" }).click();
+    const y = new Date().getFullYear() - 1;
+    await expect(page.getByTestId("month-label")).toHaveText(`${y}年3月`);
+    await expect(page.getByTestId("to-purchases")).toHaveAttribute("href", "/purchases");
+    await expect(page.getByRole("link", { name: /当選/ })).toHaveCount(0);
+  });
+
+  test("説明のⓘは「補足」の文字を出さない", async ({ page }) => {
+    await expect(page.getByText("補足", { exact: true })).toHaveCount(0);
   });
 });

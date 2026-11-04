@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ReceiptText } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ExpenseDialog } from "@/components/expense-dialog";
+import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { SaleDialog } from "@/components/sale-dialog";
 import { Button } from "@/components/ui/button";
@@ -27,6 +29,40 @@ const TABS: { value: LedgerFilter; label: string }[] = [
   { value: "income", label: "収入" },
 ];
 
+/** 年月の選択（年を移動して月を選ぶ。購入記録の期間選択と同じ操作）。選んだ月へ直接移動する */
+function MonthPicker({ ym, onPick, onClose }: { ym: string; onPick: (v: string) => void; onClose: () => void }) {
+  const [year, setYear] = useState(Number(ym.slice(0, 4)));
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent data-testid="month-picker">
+        <DialogTitle>年月を選択</DialogTitle>
+        <DialogDescription className="sr-only">月を選ぶと、その月の収支へ移動します</DialogDescription>
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" size="icon" className="size-9" aria-label="前の年" onClick={() => setYear(year - 1)}>
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="text-sm font-semibold">{year}年</span>
+            <Button variant="ghost" size="icon" className="size-9" aria-label="次の年" onClick={() => setYear(year + 1)}>
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+              const v = `${year}-${String(m).padStart(2, "0")}`;
+              return (
+                <button key={m} type="button" onClick={() => onPick(v)} aria-pressed={v === ym} className={cn("min-h-10 rounded-md border text-sm", v === ym ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}>
+                  {m}月
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * 収支管理。初期表示は当月。支出は購入記録、収入は売却記録から作られるため、抽選の購入済みや購入実績と同じデータを見ている
  * （収支明細と購入実績を別々に持たないので二重計上されない）。
@@ -38,6 +74,7 @@ export function FinanceView() {
   const [seller, setSeller] = useState<string>("all");
   const [expense, setExpense] = useState<{ id: string | null } | null>(null);
   const [sale, setSale] = useState<{ id: string | null } | null>(null);
+  const [picking, setPicking] = useState(false);
 
   const summary = useMemo(() => monthSummary(data, ym), [data, ym]);
   const entries = useMemo(() => ledgerEntries(data, ym, filter, filter === "income" ? seller : "all"), [data, ym, filter, seller]);
@@ -50,27 +87,32 @@ export function FinanceView() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-base font-bold">収支</h1>
-        {persistent && (
-          <div className="flex gap-1.5">
-            <Button size="sm" onClick={() => setExpense({ id: null })}>
-              ＋支出
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setSale({ id: null })}>
-              ＋売却
-            </Button>
-          </div>
-        )}
+      <div className={PAGE_HEADING_ROW}>
+        <PageHeading navId="finance">収支</PageHeading>
+        <div className="flex items-center gap-1.5">
+          <Link href="/purchases" aria-label="購入履歴を見る" data-testid="to-purchases" className="flex size-9 items-center justify-center rounded-md hover:bg-muted">
+            <ReceiptText className="size-[18px]" aria-hidden="true" />
+          </Link>
+          {persistent && (
+            <>
+              <Button size="sm" onClick={() => setExpense({ id: null })}>
+                ＋支出
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setSale({ id: null })}>
+                ＋売却
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center justify-between rounded-lg bg-card px-1 py-0.5">
         <Button variant="ghost" size="icon" className="size-10" aria-label="前の月" onClick={() => setYm(shiftMonth(ym, -1))}>
           <ChevronLeft className="size-5" />
         </Button>
-        <span className="text-sm font-semibold" data-testid="month-label">
+        <button type="button" onClick={() => setPicking(true)} aria-label="年月を選ぶ" data-testid="month-label" className="min-h-10 rounded-md px-3 text-sm font-semibold hover:bg-muted">
           {y}年{Number(mo)}月
-        </span>
+        </button>
         <Button variant="ghost" size="icon" className="size-10" aria-label="次の月" onClick={() => setYm(shiftMonth(ym, 1))}>
           <ChevronRight className="size-5" />
         </Button>
@@ -169,11 +211,9 @@ export function FinanceView() {
         <Link href="/finance/analysis" className="underline underline-offset-2">
           年間売却実績・収益分析
         </Link>
-        <Link href="/records" className="underline underline-offset-2">
-          応募・当選実績
-        </Link>
       </nav>
 
+      {picking && <MonthPicker ym={ym} onPick={(v) => { setYm(v); setPicking(false); }} onClose={() => setPicking(false)} />}
       {expense && (
         <ExpenseDialog
           key={expense.id ?? "new"}

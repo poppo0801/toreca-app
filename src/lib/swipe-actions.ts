@@ -33,6 +33,25 @@ export const SWIPE_MAP: Record<Tab, { right?: SwipeOp; left?: SwipeOp }> = {
   won: { right: "receive" },
 };
 
+/**
+ * 確定したあと、カードを一覧から外す可能性が高い操作（指を離した位置から同じ方向へ流れてフェードアウトする）。
+ * 応募済みへの変更は専用の退場アニメーション（apply-exit）が担当し、★追加はカードが一覧に残るので、ここには含めない。
+ */
+export function leavesListOnCommit(op: SwipeOp, tab: Tab): boolean {
+  switch (op) {
+    case "unmanage":
+    case "skip_once":
+      return true;
+    case "result_won":
+    case "result_lost":
+      return tab === "applied";
+    case "receive":
+      return tab === "won";
+    default:
+      return false;
+  }
+}
+
 export type SwipeTone = "primary" | "success" | "muted" | "warn";
 
 export const OP_META: Record<SwipeOp, { hint: string; done: string; tone: SwipeTone }> = {

@@ -4,10 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 /**
  * 応募完了カードを残しておく時間と、退場アニメーションの長さ。目で追える速さにする:
- *   応募済みの表示を保持（2.5秒）→ 右へスライドしながら途中からフェードアウト（0.9秒）→ 完全に消えてから一覧を詰める（0.35秒）
+ *   応募済みの表示を保持（1秒）→ 右へスライドしながらフェードアウト（0.55秒。幅の6割ほど動いた時点で完全に透明）→ 消えてから一覧を詰める（0.35秒）
  */
-export const EXIT_WAIT_MS = 2500;
-export const EXIT_SLIDE_MS = 900;
+export const EXIT_WAIT_MS = 1000;
+export const EXIT_SLIDE_MS = 550;
 export const EXIT_COLLAPSE_MS = 350;
 
 /** hold=保存中（カードを残す）/ wait=応募済みを見せる / sliding=右へスライド＋フェード / collapsing=高さを詰める */
@@ -32,7 +32,7 @@ const prefersReducedMotion = () => typeof window !== "undefined" && typeof windo
 
 /**
  * 退場待ちのカードを管理する。
- * - 応募成功 → 2.5秒そのまま表示 → 右へスライド＋途中からフェードアウト（高さは変えない）→ 消えたあとに一覧を詰める → 一覧から外れる
+ * - 応募成功 → 1秒そのまま表示 → 右へスライド＋フェードアウト（高さは変えない）→ 消えたあとに一覧を詰める → 一覧から外れる
  * - 待機中に応募を解除したら退場をキャンセル
  * - プロフィール・タブ・フィルター・表示形式が変わったら、待たずにすべて破棄して最新の結果を表示（古いタイマーは残さない）
  */

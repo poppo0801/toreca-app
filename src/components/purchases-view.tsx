@@ -1,5 +1,6 @@
 "use client";
 
+import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
@@ -91,8 +92,8 @@ export function PurchasesView() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-base font-bold">購入記録</h1>
+      <div className={PAGE_HEADING_ROW}>
+        <PageHeading navId="purchases">購入記録</PageHeading>
         {persistent && (
           <Button size="sm" onClick={() => setEdit({ id: null })}>
             ＋購入を記録

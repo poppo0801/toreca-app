@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createMockData } from "@/data/mock";
 import { dateOnly, jstDateString } from "@/lib/datetime";
 import * as m from "@/lib/mutations";
-import { opFor, planSwipe, SWIPE_MAP, SWIPE_OPS_ENABLED } from "@/lib/swipe-actions";
+import { leavesListOnCommit, opFor, planSwipe, SWIPE_MAP, SWIPE_OPS_ENABLED } from "@/lib/swipe-actions";
 import type { AppData, Lottery } from "@/types/domain";
 
 const NOW = new Date("2026-10-26T03:00:00Z"); // JST 12:00
@@ -102,5 +102,17 @@ describe("当選タブ", () => {
     expect(planSwipe(d, lot(d, "L7"), "won", "right", "pB", NOW)).toMatchObject({ kind: "blocked", message: "このユーザーは当選していません" });
     const done = m.setFulfillment(withL7({ procedureDeadline: day(9) }), "pA", d.applications.find((a) => a.lotteryId === "L7")!.id, "purchased", NOW);
     expect(planSwipe(done, lot(done, "L7"), "won", "right", "pA", NOW)).toMatchObject({ kind: "blocked", message: "すでに受取済みです" });
+  });
+});
+
+describe("leavesListOnCommit（確定後に同じ方向へ流れて消える操作）", () => {
+  it("一覧から外れる操作だけ true。応募済み（専用の退場）・★追加は false", () => {
+    expect(leavesListOnCommit("unmanage", "managed")).toBe(true);
+    expect(leavesListOnCommit("skip_once", "all")).toBe(true);
+    expect(leavesListOnCommit("result_won", "applied")).toBe(true);
+    expect(leavesListOnCommit("result_lost", "applied")).toBe(true);
+    expect(leavesListOnCommit("receive", "won")).toBe(true);
+    expect(leavesListOnCommit("mark_applied", "managed")).toBe(false);
+    expect(leavesListOnCommit("add_managed", "all")).toBe(false);
   });
 });

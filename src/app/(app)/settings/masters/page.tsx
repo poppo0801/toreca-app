@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { MastersView, type MasterRows, type RuleRow } from "@/components/masters-view";
 import { ENTITY_KEYS } from "@/lib/masters";
@@ -30,7 +31,7 @@ export default async function MastersPage() {
           ← 設定
         </Link>
       </p>
-      <h1 className="mb-1 text-lg font-bold">マスター管理</h1>
+      <PageHeading navId="settings" className="mb-1">マスター管理</PageHeading>
       <p className="mb-3 text-xs">
         <Link href="/settings/masters/import" className="underline" data-testid="link-master-import">
           商品・店舗をExcelで取り込み・出力

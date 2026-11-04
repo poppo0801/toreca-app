@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { MasterImportView, type ImportHistoryRow } from "@/components/master-import-view";
 import { isSupabaseMode } from "@/lib/supabase/env";
@@ -23,7 +24,7 @@ export default async function MasterImportPage() {
           ← マスター管理
         </Link>
       </p>
-      <h1 className="mb-1 text-lg font-bold">Excel取り込み・出力</h1>
+      <PageHeading navId="settings" className="mb-1">Excel取り込み・出力</PageHeading>
       <p className="mb-3 text-xs text-muted-foreground">商品・店舗マスターをExcel（.xlsx）で一括で出力・更新します。</p>
       {isSupabaseMode ? (
         <MasterImportView history={history} />

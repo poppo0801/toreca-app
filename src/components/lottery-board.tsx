@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import { ApplyExitProvider, useApplyExitController } from "@/components/apply-exit";
 import { useSearchParams } from "next/navigation";
 import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
@@ -202,9 +203,9 @@ function LotteryBoardInner() {
   return (
     <div>
       {/* 固定領域: 見出し＋タブ。この下の検索・フィルター・カードだけがスクロールする */}
-      <div className="sticky top-[var(--header-h)] z-20 -mx-3 space-y-1.5 border-b bg-background px-3 pb-1.5 pt-1 md:-mx-6 md:px-6">
-        <div className="flex h-9 items-center justify-between gap-2">
-          <h1 className="text-base font-bold">抽選管理</h1>
+      <div className="sticky top-[var(--header-h)] z-20 -mx-3 space-y-1.5 border-b bg-background px-3 pb-1.5 md:-mx-6 md:px-6">
+        <div className={PAGE_HEADING_ROW}>
+          <PageHeading navId="lotteries">抽選管理</PageHeading>
           <div className="flex items-center gap-1">
             <Link href="/records" aria-label="応募実績・当選率を見る" className="flex size-9 items-center justify-center rounded-md hover:bg-muted">
               <ChartColumn className="size-[18px]" aria-hidden="true" />
@@ -401,8 +402,9 @@ function LotteryBoardInner() {
           <LotteryMatrix lotteries={lotteries} actionOnly={actionOnly} />
         ) : (
           <ApplyExitProvider value={exit.api}>
-            {/* 退場中のカードが画面の右へはみ出して横スクロールや残像にならないよう、退場中だけ横方向をクリップする */}
-            <ul className={cn("space-y-2.5", Object.keys(exit.phases).length > 0 && "overflow-x-clip")} aria-label="抽選一覧">
+            {/* カードが画面の横へはみ出して横スクロールや残像にならないよう、横方向をクリップする（ring が欠けないよう左右に1の余白）。
+                グリッドの列は minmax(0,1fr) で、中身の最小幅（折り返さない文字など）に引き伸ばされないようにする */}
+            <ul className="-mx-1 space-y-2.5 overflow-x-clip px-1" aria-label="抽選一覧">
               {lotteries.map((l) => {
                 const phase = exit.phases[l.id];
                 const sliding = phase === "sliding";
@@ -412,10 +414,10 @@ function LotteryBoardInner() {
                     key={l.id}
                     data-exit={phase}
                     // 高さを詰める（collapsing）のは、スライド＋フェードが終わって完全に消えたあと。スライド中は高さを変えない
-                    className={cn("grid transition-[grid-template-rows,margin] duration-[350ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
+                    className={cn("grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,margin] duration-[350ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
                     style={collapsing ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
                   >
-                    <div className={cn("min-h-0", collapsing && "overflow-hidden", sliding && "animate-[apply-exit-slide_0.9s_ease-in-out_forwards] motion-reduce:animate-none")}>
+                    <div className={cn("min-h-0 min-w-0", collapsing && "overflow-hidden", sliding && "animate-[apply-exit-slide_0.55s_cubic-bezier(0.4,0,0.6,1)_forwards] motion-reduce:animate-none")}>
                       <SwipeCard lottery={l} tab={tab}>
                         <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
                       </SwipeCard>

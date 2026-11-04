@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { createTapGate } from "@/lib/tap-guard";
-import { isEditingElement, keyboardInset, visualShift } from "@/lib/viewport-insets";
+import { isEditingElement, keyboardInset, SHIFT_STABLE_FRAMES, stabilizeShift, visualShift, type ShiftState } from "@/lib/viewport-insets";
 import { viewportGap } from "@/lib/viewport-gap";
 import { gapBottom, verdict, type Snap } from "@/lib/layout-diagnostics";
 
@@ -80,5 +80,29 @@ describe("表示切替の連続操作ゲート（300ms）", () => {
     expect(b()).toBe(true); // 別のボタンは影響されない
     t += 250;
     expect(a()).toBe(true);
+  });
+});
+
+describe("stabilizeShift（オーバースクロールで下部メニューが浮き上がらない）", () => {
+  const start: ShiftState = { raw: 0, same: 0, applied: 0 };
+  const run = (seq: number[], touching = false) => seq.reduce((s, raw) => stabilizeShift(s, raw, touching), start);
+
+  it("バウンス中（値が毎フレーム変わる）は採用しない", () => {
+    expect(run([4, 9, 15, 22, 30, 24, 18, 11, 6, 3, 8, 12]).applied).toBe(0);
+  });
+  it("指が触れている間は同じ値が続いても採用しない", () => {
+    expect(run(Array(30).fill(20), true).applied).toBe(0);
+  });
+  it("キーボードを閉じたあとに残る静的なずれは、同じ値が続けば採用する", () => {
+    expect(run(Array(SHIFT_STABLE_FRAMES - 1).fill(-30)).applied).toBe(0);
+    expect(run(Array(SHIFT_STABLE_FRAMES).fill(-30)).applied).toBe(-30);
+  });
+  it("0 に戻ったらすぐ補正を外す", () => {
+    const s = run(Array(SHIFT_STABLE_FRAMES).fill(-30));
+    expect(stabilizeShift(s, 0, false).applied).toBe(0);
+  });
+  it("採用済みの値は、指が触れている間は保つ", () => {
+    const s = run(Array(SHIFT_STABLE_FRAMES).fill(-30));
+    expect(stabilizeShift(s, 25, true).applied).toBe(-30);
   });
 });

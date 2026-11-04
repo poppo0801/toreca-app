@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
 import { effectiveDailyLimit, healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
@@ -123,7 +124,7 @@ export default async function CollectionPage() {
           ← 設定
         </Link>
       </p>
-      <h1 className="mb-3 text-lg font-bold">抽選情報の自動収集</h1>
+      <PageHeading navId="settings" className="mb-3">抽選情報の自動収集</PageHeading>
       <AutoCollectView
         settings={st as unknown as SettingsView}
         sources={srcs}

@@ -1,5 +1,6 @@
 "use client";
 
+import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -130,8 +131,8 @@ export function CollectionView() {
 
   return (
     <div className="space-y-3" data-testid="collection">
-      <div className="flex items-center gap-2">
-        <h1 className="mr-auto text-lg font-bold">コレクション</h1>
+      <div className={PAGE_HEADING_ROW}>
+        <PageHeading navId="collection">コレクション</PageHeading>
         <Button size="sm" onClick={() => setForm({ kind: "new" })} data-testid="add-card">
           ＋カード登録
         </Button>

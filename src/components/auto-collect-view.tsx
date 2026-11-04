@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
-import { InfoNote } from "@/components/ui/info-tip";
+import { InfoTip } from "@/components/ui/info-tip";
 import type { LotteryDraft } from "@/lib/lottery-match";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
@@ -203,6 +203,53 @@ export function reviewTopics(c: { reasons: string[]; draft: { flags?: Record<str
   return TOPIC_ORDER.filter((t) => set.has(t));
 }
 
+/** 区画（動作状況・条件・利用設定・統計）。罫線で囲み、見出しの横に説明のⓘを置く */
+function Block({ no, title, tip, testId, children }: { no: string; title: string; tip?: string; testId: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-3 rounded-lg border p-3 text-sm" data-testid={testId}>
+      <h2 className="flex items-center gap-1.5 border-b pb-2 font-semibold">
+        <span className="text-muted-foreground" aria-hidden="true">{no}</span>
+        <span>{title}</span>
+        {tip && <InfoTip text={tip} label={title + "の説明"} />}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/** 設定項目1つ（項目名＋ⓘ＋入力）。項目同士は親の divide で区切る */
+function SetRow({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="flex items-center gap-1 text-xs font-medium">
+        {label}
+        {tip && <InfoTip text={tip} label={label + "の説明"} />}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+/** ラベルと値のまとまり（値は折り返さない） */
+function Kv({ label, value, tone }: { label: string; value: string; tone?: "warn" }) {
+  return (
+    <div>
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className={cn("font-semibold", tone === "warn" && "text-warn")}>{value}</dd>
+    </div>
+  );
+}
+
+/** 数値入力＋単位（数値と単位は離さない） */
+function Num({ value, unit, label, onChange, wide }: { value: number; unit: string; label: string; onChange: (v: number) => void; wide?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <input className={cn("h-8 rounded-md border bg-input px-2 text-sm", wide ? "w-24" : "w-16")} inputMode="numeric" value={String(value)} aria-label={label} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, "")) || 0)} />
+      <span>{unit}</span>
+    </span>
+  );
+}
+
 export function AutoCollectView({
   settings,
   sources,
@@ -295,14 +342,14 @@ export function AutoCollectView({
     tab === "queued" ? ["pending", "retry", "processing"].includes(js(c)) : tab === "pending" ? js(c) === "review" : tab === "excluded" ? js(c) === "skipped" : tab === "failed" ? js(c) === "failed" : c.status === tab,
   );
   const readyCount = candidates.filter((c) => js2(c) === "review" && c.draft?.ready && c.draft.verdict === "match" && c.kind !== "update").length;
-  const queued = counts.queued;
   const prefShown = showAllPref ? PREFECTURE_LIST : PREFECTURE_LIST.filter((p) => s.prefectures.includes(p));
   const reqTags = REQUIREMENT_TAGS.filter((t) => !HIDDEN_REQUIREMENT_TAGS.includes(t.code) && t.code !== "unknown");
   const productList = products.filter((p) => !productQ || p.name.includes(productQ)).slice(0, 60);
 
   return (
     <div className="space-y-4" data-testid="collection">
-      <section className="space-y-2 rounded-lg border p-3 text-sm">
+      {/* ① 自動収集の動作状況（現在の状態。設定ではない） */}
+      <Block no="①" title="動作状況" testId="status" tip="解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。">
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} disabled={busy !== null} data-testid="collect-now">
             {busy === "run" ? "収集しています…" : "今すぐ収集"}
@@ -312,78 +359,24 @@ export function AutoCollectView({
               登録可能な{readyCount}件をまとめて登録
             </Button>
           )}
-          <span className="text-xs text-muted-foreground" data-testid="collect-usage">
-            今月のX取得 {usage.xPosts}件（約{usage.xCostJpy}円・AIとは別集計）／自動収集のNEW {usage.newAuto}件
-          </span>
+          {health.state === "paused" && (
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("resume", { action: "resume" }, () => "自動停止を解除しました")}>
+              自動停止を解除
+            </Button>
+          )}
         </div>
-        {!aiConfigured && <p className="text-xs text-warn">AIが未設定のため、解析は行われません（候補の取得のみ）。</p>}
-        {queued > 0 && (
-          <p className="text-xs text-muted-foreground" data-testid="queued-note">
-            解析待ちが{queued}件あります。締切が近いものから、AI読み取りの上限の範囲で順に解析します（ワーカーが自動で続けます）。
+        <div className="space-y-1.5 rounded-md bg-muted/50 p-2 text-xs" data-testid="health">
+          <p className="font-medium" data-testid="health-state" data-state={health.state}>
+            {{ running: "処理中", waiting: "稼働中（解析待ちを順次処理）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "月額予算で停止中", limit: "本日の上限で停止中" }[health.state]}
           </p>
-        )}
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md border p-2 text-xs sm:grid-cols-4" data-testid="ops">
-          <div>
-            <div className="text-[11px] text-muted-foreground">本日の新規発見</div>
-            <div className="font-semibold" data-testid="ops-discovered">
-              {ops.todayDiscovered}件{ops.todayDiscoveredInitial > 0 && <span className="text-[11px] font-normal text-muted-foreground">（初回取込{ops.todayDiscoveredInitial}）</span>}
-            </div>
-          </div>
-          <div>
-            <div className="text-[11px] text-muted-foreground">本日のAI解析／上限</div>
-            <div className="font-semibold" data-testid="ops-ai">
-              {ops.todayAi}／{ops.dailyLimit}件{ops.overridden && <span className="text-[11px] font-normal text-info">（今日だけ変更）</span>}
-            </div>
-          </div>
-          <div>
-            <div className="text-[11px] text-muted-foreground">解析待ち</div>
-            <div className="font-semibold" data-testid="ops-queued">{counts.queued}件</div>
-          </div>
-          <div>
-            <div className="text-[11px] text-muted-foreground">本日の新規登録</div>
-            <div className="font-semibold" data-testid="ops-registered">{ops.todayRegistered}件</div>
-          </div>
-          <div className="col-span-2">
-            <div className="text-[11px] text-muted-foreground">今月のAI料金（推定）／予算</div>
-            <div className="font-semibold" data-testid="ops-cost">
-              {Math.round(ops.monthCostJpy).toLocaleString("ja-JP")}円／{ops.budgetJpy.toLocaleString("ja-JP")}円
-              <span className="text-[11px] font-normal text-muted-foreground">（残り{Math.max(0, Math.round(ops.budgetJpy - ops.monthCostJpy)).toLocaleString("ja-JP")}円）</span>
-            </div>
-          </div>
-          <div>
-            <div className="text-[11px] text-muted-foreground">最終収集成功</div>
-            <div className="font-semibold">{fmt(health.lastCollectAt)}</div>
-          </div>
-          <div className="col-span-2 sm:col-span-4" data-testid="ops-rate">
-            <div className="text-[11px] text-muted-foreground">自動登録率（AI解析が完了した候補のうち、自動登録できた割合）</div>
-            <div className="font-semibold">
-              {rate.total > 0 ? `${Math.round((rate.reg / rate.total) * 100)}%` : "—"}
-              <span className="text-[11px] font-normal text-muted-foreground">
-                　過去30日: 解析成功{rate.total}件 → 自動登録{rate.reg}件（うち仮登録を伴う{rate.prov}件）／確認待ち追加{rate.review}件／重複{rate.dup}件／解析対象外{rate.excl}件／取得失敗{rate.failed}件
-              </span>
-            </div>
-          </div>
-          <div>
-            <div className="text-[11px] text-muted-foreground">最終ワーカー／処理が進んだ時刻</div>
-            <div className="font-semibold">{fmt(health.lastWorkerAt)}／{fmt(ops.lastProgressAt)}</div>
-          </div>
-        </div>
-        <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs" data-testid="health">
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-            <span className="font-medium" data-testid="health-state" data-state={health.state}>
-              {{ running: "処理中", waiting: "稼働中（解析待ちを順次処理）", ok: "正常（解析待ちなし）", paused: "自動停止中", budget: "月額予算で停止中", limit: "本日の上限で停止中" }[health.state]}
-            </span>
-            <span className="text-muted-foreground">解析待ち {counts.queued}（処理中 {health.processing}）／確認待ち {counts.pending}／失敗 {counts.failed}／除外 {counts.excluded}</span>
-            <details className="inline">
-              <summary className="inline cursor-pointer text-info" aria-label="処理状態の説明">ⓘ</summary>
-              <span className="block pt-1 text-[11px] text-muted-foreground">
-                解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。
-              </span>
-            </details>
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            最終収集 {fmt(health.lastCollectAt)}／ワーカー最終実行 {fmt(health.lastWorkerAt)}／次回の定期収集 {health.nextCollectAt ? fmt(health.nextCollectAt) : "（定期収集は無効）"}／ワーカー今日のAI {health.workerDayUsed}/{settings.worker_daily_ai_limit}
-          </p>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+            <Kv label="最終収集" value={fmt(health.lastCollectAt)} />
+            <Kv label="次回予定" value={health.nextCollectAt ? fmt(health.nextCollectAt) : "定期収集は無効"} />
+            <Kv label="処理待ち" value={`解析待ち ${counts.queued}（処理中 ${health.processing}）`} />
+            <Kv label="エラー" value={counts.failed > 0 || health.warnings.length > 0 ? `失敗 ${counts.failed}件` : "なし"} tone={counts.failed > 0 || health.warnings.length > 0 ? "warn" : undefined} />
+            <Kv label="ワーカー最終" value={fmt(health.lastWorkerAt)} />
+            <Kv label="ワーカー今日のAI" value={`今日のAI ${health.workerDayUsed}/${settings.worker_daily_ai_limit}`} />
+          </dl>
           {health.warnings.map((w, i) => (
             <p key={i} className="text-warn" role="alert" data-testid="health-warning">
               ⚠ {w}
@@ -405,42 +398,338 @@ export function AutoCollectView({
               {ops.budgetBlocked && <span className="text-[11px] text-warn">月額予算に達しているため、上限を変えても解析は再開しません</span>}
             </div>
           )}
-          {health.state === "paused" && (
-            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("resume", { action: "resume" }, () => "自動停止を解除しました")}>
-              自動停止を解除
-            </Button>
-          )}
         </div>
+        {!aiConfigured && <p className="text-xs text-warn">AIが未設定のため、解析は行われません（候補の取得のみ）。</p>}
         {msg && (
           <p role={msg.ok ? "status" : "alert"} className={cn("text-xs", msg.ok ? "text-teal-700 dark:text-teal-300" : "text-danger")} data-testid="collect-msg">
             {msg.text}
           </p>
         )}
-      </section>
+      </Block>
 
-      <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="budget">
-        <h2 className="font-semibold">AI費用・日別の統計</h2>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          月額予算
-          <input className="h-8 w-24 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={budgetInput.budget} aria-label="AI月額予算(円)" onChange={(e) => setBudgetInput({ ...budgetInput, budget: e.target.value.replace(/\D/g, "") })} />
-          円／為替 1ドル=
-          <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="decimal" value={budgetInput.rate} aria-label="為替レート(円)" onChange={(e) => setBudgetInput({ ...budgetInput, rate: e.target.value.replace(/[^\d.]/g, "") })} />
-          円
-          <Button size="sm" variant="outline" disabled={busy !== null} data-testid="save-budget" onClick={() => void act("bud", { action: "setAiBudget", budgetJpy: Number(budgetInput.budget || 0), rate: Number(budgetInput.rate || 150), actor: profile.id }, () => "予算とレートを保存しました")}>
-            保存
-          </Button>
-          <details className="inline">
-            <summary className="inline cursor-pointer text-info" aria-label="費用の計算方法">ⓘ</summary>
-            <span className="block pt-1 text-[11px] text-muted-foreground">
-              AIの利用記録の実際の入出力トークン数に、モデル別の単価（Anthropic公式の料金ページで確認した値）と上の為替レートを掛けた推定です。画像・再試行も記録した分は含みます。月の区切りは日本時間です。X APIの料金は別に集計します。残額が「1回の見込み（約8円）×件数」に満たない分は、安全のため新しい解析を始めません。実際の請求額はAnthropic Consoleで確認してください。アプリ内の停止条件であり、外部サービスの課金上限は変更しません。
-            </span>
+      {/* ② 収集対象・条件（設定） */}
+      <Block no="②" title="収集対象・条件" testId="conditions">
+        <div className="divide-y [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
+          <SetRow label="受付状況" tip="締切が不明なものは「受付中」とせず、確認待ちにします（時刻を勝手に補いません）。">
+            <div className="flex flex-wrap gap-1.5">
+              <Chip on={s.status_mode === "open"} onClick={() => setS({ ...s, status_mode: "open" })}>
+                現在応募可能のみ
+              </Chip>
+              <Chip on={s.status_mode === "open_or_before"} onClick={() => setS({ ...s, status_mode: "open_or_before" })}>
+                受付前も含む
+              </Chip>
+            </div>
+          </SetRow>
+          <SetRow label={`店頭の対象地域（${s.prefectures.length}）`}>
+            <div className="flex flex-wrap gap-1.5" data-testid="pref-chips">
+              {prefShown.map((p) => (
+                <Chip key={p} on={s.prefectures.includes(p)} onClick={() => toggleArr("prefectures", p)}>
+                  {p}
+                </Chip>
+              ))}
+              <button type="button" className="min-h-8 text-xs text-info underline" onClick={() => setShowAllPref((v) => !v)} data-testid="pref-toggle">
+                {showAllPref ? "選択中だけ表示" : "追加・除外する"}
+              </button>
+            </div>
+          </SetRow>
+          <SetRow label="通販" tip="「全国」の記載だけで発送可能とは判断しません。配送先の制限（居住地域の制限など）がある場合は確認待ちにします。">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" className="size-4" checked={s.include_online} onChange={(e) => setS({ ...s, include_online: e.target.checked })} />
+              <span>通販・発送対応を全国から収集</span>
+            </label>
+          </SetRow>
+          <SetRow label="自宅からの最大距離" tip="道路距離ではなく直線距離です。店舗の位置が未設定の場合は距離不明として確認待ちにします。通販には適用しません。">
+            <label className="flex items-center gap-1.5 text-xs">
+              <input className="h-8 w-20 rounded-md border bg-input px-2 text-sm" inputMode="numeric" placeholder="制限なし" aria-label="最大距離(km)" value={s.max_distance_km ?? ""} onChange={(e) => setS({ ...s, max_distance_km: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null })} />
+              <span className="whitespace-nowrap">km</span>
+            </label>
+          </SetRow>
+          <SetRow label="応募方法・受取方法" tip="未選択は「問わない」。Web応募＝通販とは判定しません（受取方法は別に判定します）。">
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap gap-1.5">
+                {APPLY_CHANNELS.map((c) => (
+                  <Chip key={c.code} on={s.apply_methods.includes(c.code)} onClick={() => toggleArr("apply_methods", c.code)}>
+                    {c.label}
+                  </Chip>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {RECEIVE_KINDS.map((c) => (
+                  <Chip key={c.code} on={s.receive_methods.includes(c.code)} onClick={() => toggleArr("receive_methods", c.code)}>
+                    {c.label}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+          </SetRow>
+          <details className="space-y-1">
+            <summary className="flex cursor-pointer items-center gap-1 text-xs font-medium">
+              応募条件の絞り込み<span className="whitespace-nowrap font-normal text-muted-foreground">（含む {s.req_include.length}／除外 {s.req_exclude.length}）</span>
+              <InfoTip text="「含む」は、選んだ条件のどれかを含む抽選だけ。「除外」は、含む抽選を除きます。応募資格を満たすかは判定しません。一般的な本人確認は対象にしません。" />
+            </summary>
+            <div className="space-y-1 pt-1">
+              {(["req_include", "req_exclude"] as const).map((k) => (
+                <div key={k} className="space-y-1">
+                  <p className="text-[11px] text-muted-foreground">{k === "req_include" ? "含む条件" : "除外する条件"}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {reqTags.map((t) => (
+                      <Chip key={t.code} on={s[k].includes(t.code)} onClick={() => toggleArr(k, t.code)}>
+                        {t.label}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </details>
+          <details className="space-y-1">
+            <summary className="flex cursor-pointer items-center gap-1 text-xs font-medium">
+              商品の絞り込み<span className="font-normal text-muted-foreground">（{s.product_mode === "all" ? "全商品" : s.product_mode === "include" ? `指定${s.product_ids.length}商品のみ` : `指定${s.product_ids.length}商品を除外`}）</span>
+              <InfoTip text="マスターに未登録の新商品も候補から除外しません（指定商品のみの場合は、判別できない商品を確認待ちにします）。" />
+            </summary>
+            <div className="space-y-1.5 pt-1">
+              <div className="flex gap-1.5">
+                {(["all", "include", "exclude"] as const).map((m) => (
+                  <Chip key={m} on={s.product_mode === m} onClick={() => setS({ ...s, product_mode: m })}>
+                    {m === "all" ? "全商品" : m === "include" ? "指定商品のみ" : "指定商品を除外"}
+                  </Chip>
+                ))}
+              </div>
+              {s.product_mode !== "all" && (
+                <div className="space-y-1">
+                  <input className={input} placeholder="商品名で検索" value={productQ} onChange={(e) => setProductQ(e.target.value)} aria-label="商品を検索" />
+                  <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+                    {productList.map((p) => (
+                      <Chip key={p.id} on={s.product_ids.includes(p.id)} onClick={() => toggleArr("product_ids", p.id)}>
+                        {p.name}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </details>
+          <SetRow label="自動登録" tip="★管理対象・応募記録は作りません。既存の手動登録の内容は上書きしません。">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" className="size-4" checked={s.auto_register} onChange={(e) => setS({ ...s, auto_register: e.target.checked })} />
+              <span>条件に合い情報が十分な抽選を「全情報」へ自動登録</span>
+            </label>
+          </SetRow>
         </div>
-        <p className="text-[11px] text-muted-foreground" data-testid="avg-cost">
-          今月の解析 {ops.monthCalls}回{ops.avgPerCallJpy !== null && `／1回あたり平均 約${ops.avgPerCallJpy.toFixed(2)}円（実測）`}
-        </p>
+
+        <div className="space-y-2 border-t pt-3" data-testid="sources">
+          <h3 className="text-xs font-bold">収集元</h3>
+          <ul className="divide-y">
+            {sources.map((src) => {
+              const st = STATUS_LABEL[src.status] ?? STATUS_LABEL.never;
+              return (
+                <li key={src.id} className="space-y-1 py-2" data-testid="source-row">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="rounded border px-1 text-[11px]">{src.kind === "web" ? "Web" : "X"}</span>
+                    <span className="font-medium">{src.name}</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", st.cls)} data-testid="source-status">
+                      {src.enabled ? st.label : "無効"}
+                    </span>
+                    <label className="ml-auto flex items-center gap-1 text-xs">
+                      <input type="checkbox" checked={src.enabled} className="size-4" aria-label={`${src.name}を有効にする`} onChange={(e) => void act("t" + src.id, { action: "toggleSource", id: src.id, enabled: e.target.checked })} />
+                      有効
+                    </label>
+                  </div>
+                  <p className="break-all text-[11px] text-muted-foreground">{src.kind === "web" ? src.url : `@${src.x_username}${src.x_user_id ? `（ID ${src.x_user_id}）` : ""}`}</p>
+                  <p className="text-[11px] text-muted-foreground" data-testid="source-fresh">
+                    最終確認 {fmt(src.last_attempt_at)}／最終成功 {fmt(src.last_success_at)}／取得{src.last_item_count}件・新規候補{src.last_new_count}件
+                    {src.last_result && ` ／${{ new: "新規情報あり", changed: "内容変更あり", no_new: "新規情報なし", failed: "収集失敗" }[src.last_result]}`}
+                    {(src.consecutive_failures ?? 0) >= 3 && ` ／${src.consecutive_failures}回連続で失敗`}
+                  </p>
+                  {src.error_message && src.status !== "ok" && (
+                    <p className="text-[11px] text-danger" data-testid="source-error">
+                      {src.error_message}
+                    </p>
+                  )}
+                  <div className="flex gap-1.5">
+                    <Button variant="outline" size="sm" disabled={busy !== null || !src.enabled} onClick={() => void run(src.id)}>
+                      この元だけ実行
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        if (window.confirm(`「${src.name}」を削除しますか？（収集済みの候補・登録済みの抽選は残ります）`)) void act("d" + src.id, { action: "deleteSource", id: src.id });
+                      }}
+                    >
+                      削除
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+            {sources.length === 0 && <li className="py-2 text-xs text-muted-foreground">収集元がありません。</li>}
+          </ul>
+          <div className="space-y-1.5 rounded-lg border p-2" data-testid="add-source">
+            <div className="flex items-center gap-1.5">
+              <Chip on={add.kind === "web"} onClick={() => setAdd({ ...add, kind: "web", value: "" })}>
+                Webサイト
+              </Chip>
+              <Chip on={add.kind === "x"} onClick={() => setAdd({ ...add, kind: "x", value: "" })}>
+                Xアカウント
+              </Chip>
+              <InfoTip
+                text={
+                  add.kind === "web"
+                    ? "任意のURLを追加できますが、専用の解析設定が無いサイトは、一覧の外部リンクを告知として読むだけです。リンクが取れない場合は「解析設定が必要」と表示します。robots.txtで許可されていないサイトは取得しません。"
+                    : "X公式APIで取得します（APIキーと月額予算の設定が必要。設定するまで呼び出しません）。"
+                }
+              />
+            </div>
+            <input className={input} placeholder="名称（任意）" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} aria-label="収集元の名称" />
+            <input className={input} placeholder={add.kind === "web" ? "https://…（抽選情報の一覧ページ）" : "アカウント名（例: pokecachan）"} value={add.value} onChange={(e) => setAdd({ ...add, value: e.target.value })} aria-label={add.kind === "web" ? "収集するURL" : "Xのアカウント名"} />
+            <Button size="sm" disabled={busy !== null || !add.value.trim()} onClick={() => void addSource()} data-testid="add-source-submit">
+              追加
+            </Button>
+          </div>
+        </div>
+      </Block>
+
+      {/* ③ AI・X APIの利用設定（設定値と現在の使用量） */}
+      <Block no="③" title="AI・X APIの利用設定" testId="run-settings">
+        <div className="divide-y [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
+          <SetRow label="定期実行" tip="AI解析（有料）を使うため、初期は無効です。定期実行の呼び出し設定（Cron）は別途必要です。定期実行では候補の作成まで行い、登録は手動実行または候補画面から行います。">
+            <label className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <input type="checkbox" className="size-4" checked={s.schedule_enabled} onChange={(e) => setS({ ...s, schedule_enabled: e.target.checked })} data-testid="schedule-enabled" />
+              <span className="whitespace-nowrap">毎日</span>
+              <select className="h-8 rounded-md border bg-input px-1" value={s.schedule_hour_jst} onChange={(e) => setS({ ...s, schedule_hour_jst: Number(e.target.value) })} aria-label="実行時刻（日本時間）">
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>
+                    {h}:00
+                  </option>
+                ))}
+              </select>
+              <span className="whitespace-nowrap">に実行</span>
+            </label>
+          </SetRow>
+          <SetRow label="AI解析の上限">
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 text-xs">
+              <span className="whitespace-nowrap text-muted-foreground">1回の収集</span>
+              <Num value={s.max_ai_per_run} unit="件" label="1回のAI解析の上限" onChange={(v) => setS({ ...s, max_ai_per_run: Math.min(50, Math.max(1, v || 1)) })} />
+              <span className="whitespace-nowrap text-muted-foreground">ワーカー1回</span>
+              <Num value={s.worker_batch} unit="件" label="ワーカー1回の解析件数" onChange={(v) => setS({ ...s, worker_batch: Math.min(20, Math.max(1, v || 1)) })} />
+              <span className="whitespace-nowrap text-muted-foreground">ワーカー1日</span>
+              <Num value={s.worker_daily_ai_limit} unit="件" label="ワーカーの1日のAI解析上限" onChange={(v) => setS({ ...s, worker_daily_ai_limit: Math.min(500, Math.max(0, v)) })} />
+            </div>
+          </SetRow>
+          <SetRow label="解析ワーカー" tip="アプリを閉じていても、解析待ちを自動で解析し続けます。告知ページは指定の間隔で再確認します。">
+            <div className="space-y-1.5 text-xs">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" className="size-4" checked={s.worker_enabled} onChange={(e) => setS({ ...s, worker_enabled: e.target.checked })} data-testid="worker-enabled" />
+                <span>解析待ちを自動で解析する</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="whitespace-nowrap text-muted-foreground">告知ページの再確認</span>
+                <Num value={s.recheck_hours} unit="時間ごと" label="告知ページを再確認する間隔(時間)" onChange={(v) => setS({ ...s, recheck_hours: Math.min(168, Math.max(1, v || 1)) })} />
+              </div>
+            </div>
+          </SetRow>
+          <SetRow label="X公式API（従量課金）">
+            <div className="space-y-1.5 text-xs">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" className="size-4" checked={s.x_enabled} onChange={(e) => setS({ ...s, x_enabled: e.target.checked })} data-testid="x-enabled" />
+                <span>X公式APIを使う</span>
+              </label>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5">
+                <span className="whitespace-nowrap text-muted-foreground">月額予算</span>
+                <Num value={s.x_monthly_budget_jpy} unit="円" wide label="X APIの月額予算(円)" onChange={(v) => setS({ ...s, x_monthly_budget_jpy: Math.max(0, v) })} />
+                <span className="whitespace-nowrap text-muted-foreground">1回の取得上限</span>
+                <Num value={s.x_max_posts_per_run} unit="投稿" label="1回の取得上限(投稿)" onChange={(v) => setS({ ...s, x_max_posts_per_run: Math.min(100, Math.max(5, v || 5)) })} />
+              </div>
+              <p className="text-[11px] text-muted-foreground" data-testid="x-state">
+                <span className="whitespace-nowrap">APIキー（X_BEARER_TOKEN）: {xConfigured ? "設定済み" : "未設定"}</span>
+                <InfoTip text="予算が0円、またはキー未設定の間は、X APIを呼びません。1投稿あたり約0.005米ドルの従量課金（公開情報。X Developer Consoleで確認してください）。予算に達すると停止します。" />
+              </p>
+            </div>
+          </SetRow>
+          <SetRow label="AI月額予算" tip="AIの利用記録の実際の入出力トークン数に、モデル別の単価（Anthropic公式の料金ページで確認した値）と為替レートを掛けた推定です。画像・再試行も記録した分は含みます。月の区切りは日本時間です。X APIの料金は別に集計します。残額が「1回の見込み（約8円）×件数」に満たない分は、安全のため新しい解析を始めません。実際の請求額はAnthropic Consoleで確認してください。アプリ内の停止条件であり、外部サービスの課金上限は変更しません。">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs" data-testid="budget">
+              <Num value={Number(budgetInput.budget || 0)} unit="円" wide label="AI月額予算(円)" onChange={(v) => setBudgetInput({ ...budgetInput, budget: String(v) })} />
+              <span className="whitespace-nowrap">為替 1ドル=</span>
+              <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="decimal" value={budgetInput.rate} aria-label="為替レート(円)" onChange={(e) => setBudgetInput({ ...budgetInput, rate: e.target.value.replace(/[^\d.]/g, "") })} />
+              <span className="whitespace-nowrap">円</span>
+              <Button size="sm" variant="outline" disabled={busy !== null} data-testid="save-budget" onClick={() => void act("bud", { action: "setAiBudget", budgetJpy: Number(budgetInput.budget || 0), rate: Number(budgetInput.rate || 150), actor: profile.id }, () => "予算とレートを保存しました")}>
+                保存
+              </Button>
+            </div>
+          </SetRow>
+          {/* 現在の使用量（設定値ではなく、いまの実績） */}
+          <div className="space-y-1" data-testid="ops">
+            <p className="text-xs font-medium">現在の使用量</p>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md bg-muted/50 p-2 text-xs">
+              <div>
+                <dt className="text-[11px] text-muted-foreground">本日のAI解析／上限</dt>
+                <dd className="whitespace-nowrap font-semibold" data-testid="ops-ai">
+                  {ops.todayAi}／{ops.dailyLimit}件{ops.overridden && <span className="text-[11px] font-normal text-info">（今日だけ変更）</span>}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] text-muted-foreground">今月のAI費用（推定）／予算</dt>
+                <dd className="font-semibold" data-testid="ops-cost">
+                  <span className="whitespace-nowrap">{Math.round(ops.monthCostJpy).toLocaleString("ja-JP")}円／{ops.budgetJpy.toLocaleString("ja-JP")}円</span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] text-muted-foreground">今月のX取得</dt>
+                <dd className="whitespace-nowrap font-semibold" data-testid="collect-usage">{usage.xPosts}件（約{usage.xCostJpy}円）</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] text-muted-foreground">今月のAI解析</dt>
+                <dd className="font-semibold" data-testid="avg-cost">
+                  <span className="whitespace-nowrap">{ops.monthCalls}回</span>
+                  {ops.avgPerCallJpy !== null && <span className="text-[11px] font-normal text-muted-foreground">（平均 約{ops.avgPerCallJpy.toFixed(2)}円）</span>}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+        <Button onClick={() => void saveSettings()} disabled={busy !== null} data-testid="save-conditions">
+          {busy === "save" ? "保存しています…" : "設定を保存"}
+        </Button>
+      </Block>
+
+      {/* ④ 統計・処理履歴（過去の実績） */}
+      <Block no="④" title="統計・処理履歴" testId="history">
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-4" data-testid="ops-stats">
+          <div>
+            <dt className="text-[11px] text-muted-foreground">本日の新規発見</dt>
+            <dd className="font-semibold" data-testid="ops-discovered">
+              {ops.todayDiscovered}件{ops.todayDiscoveredInitial > 0 && <span className="text-[11px] font-normal text-muted-foreground">（初回取込{ops.todayDiscoveredInitial}）</span>}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted-foreground">本日の新規登録</dt>
+            <dd className="font-semibold" data-testid="ops-registered">{ops.todayRegistered}件</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted-foreground">確認待ち</dt>
+            <dd className="font-semibold" data-testid="ops-pending">{counts.pending}件</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted-foreground">取得失敗</dt>
+            <dd className="font-semibold">{counts.failed}件</dd>
+          </div>
+          <div className="col-span-2 sm:col-span-4" data-testid="ops-rate">
+            <dt className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              自動登録率
+              <InfoTip text="AI解析が完了した候補のうち、自動登録できた割合（直近30日）。仮登録を伴うものを含みます。" />
+            </dt>
+            <dd className="font-semibold">
+              {rate.total > 0 ? `${Math.round((rate.reg / rate.total) * 100)}%` : "—"}
+              <span className="text-[11px] font-normal text-muted-foreground">
+                {" "}30日: 解析{rate.total}→登録{rate.reg}（仮{rate.prov}）／確認待ち+{rate.review}／重複{rate.dup}／対象外{rate.excl}／失敗{rate.failed}
+              </span>
+            </dd>
+          </div>
+        </dl>
         <details data-testid="stats">
-          <summary className="cursor-pointer text-xs font-medium text-info">日別の統計（過去30日）</summary>
+          <summary className="min-h-8 cursor-pointer text-xs font-medium text-info">日別の統計（30日）</summary>
           <div className="mt-2 space-y-2">
             <div className="flex h-16 items-end gap-px" role="img" aria-label="日別の新規発見・AI解析・登録の推移" data-testid="stats-chart">
               {[...stats].reverse().map((r) => {
@@ -456,7 +745,7 @@ export function AutoCollectView({
               })}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              <span className="text-info">■</span> 新規発見　<span className="text-muted-foreground">■</span> AI解析　<span className="text-success">■</span> 実際に登録（新規発見・AI解析・登録は別の数字です）
+              <span className="text-info">■</span> 新規発見　<span className="text-muted-foreground">■</span> AI解析　<span className="text-success">■</span> 実際に登録
             </p>
             <div className="max-h-72 overflow-auto rounded border">
               <table className="w-full text-[11px]" data-testid="stats-table">
@@ -507,236 +796,25 @@ export function AutoCollectView({
             </div>
           </div>
         </details>
-      </section>
-
-      <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="sources">
-        <h2 className="font-semibold">収集元</h2>
-        <ul className="divide-y">
-          {sources.map((src) => {
-            const st = STATUS_LABEL[src.status] ?? STATUS_LABEL.never;
-            return (
-              <li key={src.id} className="space-y-1 py-2" data-testid="source-row">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="rounded border px-1 text-[11px]">{src.kind === "web" ? "Web" : "X"}</span>
-                  <span className="font-medium">{src.name}</span>
-                  <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", st.cls)} data-testid="source-status">
-                    {src.enabled ? st.label : "無効"}
-                  </span>
-                  <label className="ml-auto flex items-center gap-1 text-xs">
-                    <input type="checkbox" checked={src.enabled} className="size-4" aria-label={`${src.name}を有効にする`} onChange={(e) => void act("t" + src.id, { action: "toggleSource", id: src.id, enabled: e.target.checked })} />
-                    有効
-                  </label>
-                </div>
-                <p className="break-all text-[11px] text-muted-foreground">{src.kind === "web" ? src.url : `@${src.x_username}${src.x_user_id ? `（ID ${src.x_user_id}）` : ""}`}</p>
-                <p className="text-[11px] text-muted-foreground" data-testid="source-fresh">
-                  最終確認 {fmt(src.last_attempt_at)}／最終成功 {fmt(src.last_success_at)}／取得{src.last_item_count}件・新規候補{src.last_new_count}件
-                  {src.last_result && ` ／${{ new: "新規情報あり", changed: "内容変更あり", no_new: "新規情報なし", failed: "収集失敗" }[src.last_result]}`}
-                  {(src.consecutive_failures ?? 0) >= 3 && ` ／${src.consecutive_failures}回連続で失敗`}
+        <div className="space-y-1 border-t pt-3" data-testid="runs">
+          <h3 className="text-xs font-bold">処理履歴</h3>
+          <ul className="divide-y text-xs">
+            {runs.map((r) => (
+              <li key={r.id} className="space-y-0.5 py-1.5">
+                <p>
+                  <span className="text-muted-foreground">{fmt(r.started_at)}</span> {r.trigger === "cron" ? "定期" : "手動"}・{r.status === "done" ? "完了" : r.status === "running" ? "実行中" : "失敗"}／新規{r.new_count}・登録{r.registered_count}・AI{r.ai_calls}・X取得{r.x_posts}・エラー{r.error_count}
                 </p>
-                {src.error_message && src.status !== "ok" && (
-                  <p className="text-[11px] text-danger" data-testid="source-error">
-                    {src.error_message}
+                {(r.summary ?? []).map((x, i) => (
+                  <p key={i} className="pl-2 text-[11px] text-muted-foreground">
+                    {x.name}: {x.message}
                   </p>
-                )}
-                <div className="flex gap-1.5">
-                  <Button variant="outline" size="sm" disabled={busy !== null || !src.enabled} onClick={() => void run(src.id)}>
-                    この元だけ実行
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy !== null}
-                    onClick={() => {
-                      if (window.confirm(`「${src.name}」を削除しますか？（収集済みの候補・登録済みの抽選は残ります）`)) void act("d" + src.id, { action: "deleteSource", id: src.id });
-                    }}
-                  >
-                    削除
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
-          {sources.length === 0 && <li className="py-2 text-xs text-muted-foreground">収集元がありません。</li>}
-        </ul>
-        <div className="space-y-1.5 rounded-lg border p-2" data-testid="add-source">
-          <div className="flex gap-1.5">
-            <Chip on={add.kind === "web"} onClick={() => setAdd({ ...add, kind: "web", value: "" })}>
-              Webサイト
-            </Chip>
-            <Chip on={add.kind === "x"} onClick={() => setAdd({ ...add, kind: "x", value: "" })}>
-              Xアカウント
-            </Chip>
-          </div>
-          <input className={input} placeholder="名称（任意）" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} aria-label="収集元の名称" />
-          <input className={input} placeholder={add.kind === "web" ? "https://…（抽選情報の一覧ページ）" : "アカウント名（例: pokecachan）"} value={add.value} onChange={(e) => setAdd({ ...add, value: e.target.value })} aria-label={add.kind === "web" ? "収集するURL" : "Xのアカウント名"} />
-          <Button size="sm" disabled={busy !== null || !add.value.trim()} onClick={() => void addSource()} data-testid="add-source-submit">
-            追加
-          </Button>
-          <p className="text-[11px] text-muted-foreground">
-            {add.kind === "web"
-              ? "任意のURLを追加できますが、専用の解析設定が無いサイトは、一覧の外部リンクを告知として読むだけです。リンクが取れない場合は「解析設定が必要」と表示します。robots.txtで許可されていないサイトは取得しません。"
-              : "X公式APIで取得します（APIキーと月額予算の設定が必要。設定するまで呼び出しません）。"}
-          </p>
-        </div>
-      </section>
-
-      <section className="space-y-3 rounded-lg border p-3 text-sm" data-testid="conditions">
-        <h2 className="font-semibold">収集条件</h2>
-        <div className="space-y-1">
-          <p className="text-xs font-medium">受付状況</p>
-          <div className="flex flex-wrap gap-1.5">
-            <Chip on={s.status_mode === "open"} onClick={() => setS({ ...s, status_mode: "open" })}>
-              現在応募可能のみ
-            </Chip>
-            <Chip on={s.status_mode === "open_or_before"} onClick={() => setS({ ...s, status_mode: "open_or_before" })}>
-              受付前も含む
-            </Chip>
-          </div>
-          <InfoNote text="締切が不明なものは「受付中」とせず、確認待ちにします（時刻を勝手に補いません）。" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs font-medium">店頭の対象都道府県（{s.prefectures.length}）</p>
-          <div className="flex flex-wrap gap-1.5" data-testid="pref-chips">
-            {prefShown.map((p) => (
-              <Chip key={p} on={s.prefectures.includes(p)} onClick={() => toggleArr("prefectures", p)}>
-                {p}
-              </Chip>
-            ))}
-            <button type="button" className="text-xs text-info underline" onClick={() => setShowAllPref((v) => !v)} data-testid="pref-toggle">
-              {showAllPref ? "選択中だけ表示" : "追加・除外する"}
-            </button>
-          </div>
-        </div>
-        <div className="space-y-1">
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" className="size-4" checked={s.include_online} onChange={(e) => setS({ ...s, include_online: e.target.checked })} />
-            通販・発送対応の抽選を全国から収集する
-          </label>
-          <InfoNote text="「全国」の記載だけで発送可能とは判断しません。配送先の制限（居住地域の制限など）がある場合は確認待ちにします。" />
-          <label className="flex items-center gap-2 text-xs">
-            自宅からの最大距離（直線）
-            <input className="h-8 w-20 rounded-md border bg-input px-2 text-sm" inputMode="numeric" placeholder="制限なし" aria-label="最大距離(km)" value={s.max_distance_km ?? ""} onChange={(e) => setS({ ...s, max_distance_km: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null })} />
-            km
-          </label>
-          <InfoNote text="道路距離ではなく直線距離です。店舗の位置が未設定の場合は距離不明として確認待ちにします。通販には適用しません。" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs font-medium">応募方法（未選択＝問わない）</p>
-          <div className="flex flex-wrap gap-1.5">
-            {APPLY_CHANNELS.map((c) => (
-              <Chip key={c.code} on={s.apply_methods.includes(c.code)} onClick={() => toggleArr("apply_methods", c.code)}>
-                {c.label}
-              </Chip>
-            ))}
-          </div>
-          <p className="text-xs font-medium">受取方法（未選択＝問わない）</p>
-          <div className="flex flex-wrap gap-1.5">
-            {RECEIVE_KINDS.map((c) => (
-              <Chip key={c.code} on={s.receive_methods.includes(c.code)} onClick={() => toggleArr("receive_methods", c.code)}>
-                {c.label}
-              </Chip>
-            ))}
-          </div>
-          <InfoNote text="Web応募＝通販とは判定しません（受取方法は別に判定します）。" />
-        </div>
-        <details className="space-y-1">
-          <summary className="cursor-pointer text-xs font-medium">応募条件の絞り込み（含む {s.req_include.length}／除外 {s.req_exclude.length}）</summary>
-          <InfoNote text="「含む」は、選んだ条件のどれかを含む抽選だけ。「除外」は、含む抽選を除きます。応募資格を満たすかは判定しません。一般的な本人確認は対象にしません。" />
-          <div className="space-y-1">
-            {(["req_include", "req_exclude"] as const).map((k) => (
-              <div key={k} className="space-y-1">
-                <p className="text-[11px] text-muted-foreground">{k === "req_include" ? "含む条件" : "除外する条件"}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {reqTags.map((t) => (
-                    <Chip key={t.code} on={s[k].includes(t.code)} onClick={() => toggleArr(k, t.code)}>
-                      {t.label}
-                    </Chip>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </details>
-        <details className="space-y-1">
-          <summary className="cursor-pointer text-xs font-medium">商品の絞り込み（{s.product_mode === "all" ? "ポケモンカード全商品" : s.product_mode === "include" ? `指定した${s.product_ids.length}商品のみ` : `指定した${s.product_ids.length}商品を除外`}）</summary>
-          <div className="flex gap-1.5">
-            {(["all", "include", "exclude"] as const).map((m) => (
-              <Chip key={m} on={s.product_mode === m} onClick={() => setS({ ...s, product_mode: m })}>
-                {m === "all" ? "全商品" : m === "include" ? "指定商品のみ" : "指定商品を除外"}
-              </Chip>
-            ))}
-          </div>
-          {s.product_mode !== "all" && (
-            <div className="space-y-1">
-              <input className={input} placeholder="商品名で検索" value={productQ} onChange={(e) => setProductQ(e.target.value)} aria-label="商品を検索" />
-              <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                {productList.map((p) => (
-                  <Chip key={p.id} on={s.product_ids.includes(p.id)} onClick={() => toggleArr("product_ids", p.id)}>
-                    {p.name}
-                  </Chip>
                 ))}
-              </div>
-            </div>
-          )}
-          <InfoNote text="マスターに未登録の新商品も候補から除外しません（指定商品のみの場合は、判別できない商品を確認待ちにします）。" />
-        </details>
-        <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" className="size-4" checked={s.auto_register} onChange={(e) => setS({ ...s, auto_register: e.target.checked })} />
-          条件に合い、情報が十分な抽選を「全情報」へ自動登録する（★管理対象・応募記録は作りません）
-        </label>
-
-        <div className="space-y-1.5 rounded-lg border p-2" data-testid="run-settings">
-          <p className="text-xs font-medium">実行・費用の管理</p>
-          <label className="flex flex-wrap items-center gap-2 text-xs">
-            <input type="checkbox" className="size-4" checked={s.schedule_enabled} onChange={(e) => setS({ ...s, schedule_enabled: e.target.checked })} data-testid="schedule-enabled" />
-            定期実行する（毎日
-            <select className="h-8 rounded-md border bg-input px-1" value={s.schedule_hour_jst} onChange={(e) => setS({ ...s, schedule_hour_jst: Number(e.target.value) })} aria-label="実行時刻（日本時間）">
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={h}>
-                  {h}:00
-                </option>
-              ))}
-            </select>
-            ）
-          </label>
-          <InfoNote text="AI解析（有料）を使うため、初期は無効です。定期実行の呼び出し設定（Cron）は別途必要です。定期実行では候補の作成まで行い、登録は手動実行または候補画面から行います。" />
-          <label className="flex items-center gap-2 text-xs">
-            1回のAI解析の上限
-            <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.max_ai_per_run} aria-label="1回のAI解析の上限" onChange={(e) => setS({ ...s, max_ai_per_run: Math.min(50, Math.max(1, Number(e.target.value) || 1)) })} />
-            件
-          </label>
-          <label className="flex flex-wrap items-center gap-2 text-xs">
-            <input type="checkbox" className="size-4" checked={s.worker_enabled} onChange={(e) => setS({ ...s, worker_enabled: e.target.checked })} data-testid="worker-enabled" />
-            解析待ちを自動で解析し続ける（アプリを閉じていても継続）
-          </label>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            1回
-            <input className="h-8 w-14 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.worker_batch} aria-label="ワーカー1回の解析件数" onChange={(e) => setS({ ...s, worker_batch: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })} />
-            件／1日の上限
-            <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.worker_daily_ai_limit} aria-label="ワーカーの1日のAI解析上限" onChange={(e) => setS({ ...s, worker_daily_ai_limit: Math.min(500, Math.max(0, Number(e.target.value.replace(/\D/g, "")) || 0)) })} />
-            件／告知ページの再確認
-            <input className="h-8 w-14 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.recheck_hours} aria-label="告知ページを再確認する間隔(時間)" onChange={(e) => setS({ ...s, recheck_hours: Math.min(168, Math.max(1, Number(e.target.value) || 1)) })} />
-            時間ごと
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" className="size-4" checked={s.x_enabled} onChange={(e) => setS({ ...s, x_enabled: e.target.checked })} data-testid="x-enabled" />
-            X公式APIを使う（従量課金）
-          </label>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            月額予算
-            <input className="h-8 w-24 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.x_monthly_budget_jpy} aria-label="X APIの月額予算(円)" onChange={(e) => setS({ ...s, x_monthly_budget_jpy: Math.max(0, Number(e.target.value.replace(/\D/g, "")) || 0) })} />
-            円／1回の取得上限
-            <input className="h-8 w-16 rounded-md border bg-input px-2 text-sm" inputMode="numeric" value={s.x_max_posts_per_run} aria-label="1回の取得上限(投稿)" onChange={(e) => setS({ ...s, x_max_posts_per_run: Math.min(100, Math.max(5, Number(e.target.value) || 5)) })} />
-            投稿
-          </div>
-          <p className="text-[11px] text-muted-foreground" data-testid="x-state">
-            APIキー（X_BEARER_TOKEN）: {xConfigured ? "設定済み" : "未設定"}／今月の取得 {usage.xPosts}件（約{usage.xCostJpy}円）。予算が0円、またはキー未設定の間は、X APIを呼びません。1投稿あたり約0.005米ドルの従量課金（公開情報。X Developer Consoleで確認してください）。予算に達すると停止します。
-          </p>
+              </li>
+            ))}
+            {runs.length === 0 && <li className="py-1.5 text-muted-foreground">まだ収集していません。</li>}
+          </ul>
         </div>
-        <Button onClick={() => void saveSettings()} disabled={busy !== null} data-testid="save-conditions">
-          {busy === "save" ? "保存しています…" : "条件を保存"}
-        </Button>
-      </section>
+      </Block>
 
       <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="candidates">
         <h2 className="font-semibold">収集候補</h2>
@@ -892,25 +970,6 @@ export function AutoCollectView({
           }}
         />
       )}
-
-      <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="runs">
-        <h2 className="font-semibold">収集履歴</h2>
-        <ul className="divide-y text-xs">
-          {runs.map((r) => (
-            <li key={r.id} className="space-y-0.5 py-1.5">
-              <p>
-                <span className="text-muted-foreground">{fmt(r.started_at)}</span> {r.trigger === "cron" ? "定期" : "手動"}・{r.status === "done" ? "完了" : r.status === "running" ? "実行中" : "失敗"}／新規{r.new_count}・登録{r.registered_count}・AI{r.ai_calls}・X取得{r.x_posts}・エラー{r.error_count}
-              </p>
-              {(r.summary ?? []).map((x, i) => (
-                <p key={i} className="pl-2 text-[11px] text-muted-foreground">
-                  {x.name}: {x.message}
-                </p>
-              ))}
-            </li>
-          ))}
-          {runs.length === 0 && <li className="py-1.5 text-muted-foreground">まだ収集していません。</li>}
-        </ul>
-      </section>
     </div>
   );
 }

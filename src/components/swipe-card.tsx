@@ -11,7 +11,7 @@ import { myApplication } from "@/lib/lottery-flow";
 import { applyControlFor } from "@/lib/lottery-summary";
 import { formatItem, type Tab } from "@/lib/lottery-view";
 import { classifyAxis, commitDirection, pullOffset, SWIPE, type SwipeDirection } from "@/lib/swipe";
-import { OP_META, opFor, planSwipe, type SwipeOp, type SwipeTone } from "@/lib/swipe-actions";
+import { leavesListOnCommit, OP_META, opFor, planSwipe, type SwipeOp, type SwipeTone } from "@/lib/swipe-actions";
 import { readPref } from "@/services/local-device-store";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -53,6 +53,9 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
   const enabled = useSwipeEnabled() && persistent;
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
+  /** 確定して一覧から外れる操作のとき、離した位置から同じ方向へ流れてフェードアウトしている向き */
+  const [leaving, setLeaving] = useState<SwipeDirection | null>(null);
+  const leaveTimer = useRef<number | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const g = useRef<{ id: number; x: number; y: number; axis: "pending" | "horizontal" | "vertical" } | null>(null);
@@ -145,8 +148,16 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           return toast.show({ message: plan.message, tone: "error" });
         case "open-detail":
           return toast.show({ message: plan.message, tone: "error" });
-        case "run":
-          return void run(plan.op);
+        case "run": {
+          const leaves = leavesListOnCommit(plan.op, tab);
+          if (leaves) setLeaving(dir);
+          return void run(plan.op).finally(() => {
+            // 一覧に残った（失敗した・絞り込みで外れなかった）場合は、状態を反映して自然に元の位置へ戻す
+            if (!leaves) return;
+            if (leaveTimer.current) window.clearTimeout(leaveTimer.current);
+            leaveTimer.current = window.setTimeout(() => setLeaving(null), 260);
+          });
+        }
         case "confirm":
           return setDialog({ kind: "confirm", op: plan.op });
         case "choose-item":
@@ -202,6 +213,13 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
     }
   };
 
+  useEffect(
+    () => () => {
+      if (leaveTimer.current) window.clearTimeout(leaveTimer.current);
+    },
+    [],
+  );
+
   const activeDir: SwipeDirection | null = offset > 6 ? "right" : offset < -6 ? "left" : null;
   const hintOp = activeDir === "right" ? rightOp : activeDir === "left" ? leftOp : null;
   const reached = Math.abs(offset) >= SWIPE.COMMIT_PX * 0.95;
@@ -209,7 +227,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
   return (
     <div
       ref={root}
-      className="relative rounded-xl"
+      className="relative min-w-0 max-w-full rounded-xl"
       style={{ touchAction: enabled ? "pan-y" : undefined }}
       data-swipe-tab={tab}
       onPointerDown={onPointerDown}
@@ -229,7 +247,15 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           {OP_META[hintOp].hint}
         </div>
       )}
-      <div style={{ transform: offset ? `translateX(${offset}px)` : undefined, transition: dragging ? "none" : "transform 180ms ease-out" }} className="relative">
+      <div
+        style={{
+          transform: leaving ? `translateX(${leaving === "right" ? 45 : -45}%)` : offset ? `translateX(${offset}px)` : undefined,
+          opacity: leaving ? 0 : undefined,
+          transition: dragging ? "none" : leaving ? "transform 220ms ease-out, opacity 220ms ease-out" : "transform 180ms ease-out, opacity 180ms ease-out",
+        }}
+        data-leaving={leaving ?? undefined}
+        className="relative"
+      >
         {children}
       </div>
 

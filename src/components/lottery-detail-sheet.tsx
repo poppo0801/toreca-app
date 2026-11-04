@@ -26,7 +26,7 @@ import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
-import { setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
+import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 import type { Application, FlexibleDate, Lottery } from "@/types/domain";
 
@@ -66,6 +66,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const [duplicating, setDuplicating] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [confirmChainSkip, setConfirmChainSkip] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [ruleMsg, setRuleMsg] = useState<string | null>(null);
 
@@ -94,6 +95,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const myWon = mineApp?.result === "won" ? mineApp : undefined;
   const rules = effectiveRules(data, lottery);
   const hasMyScopeSkip = data.skipRules.some((r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id);
+  /** 現在のプロフィールの系列単位のスルー（設定 > 応募ルールのスルー一覧と同じもの） */
+  const myChainSkip = data.skipRules.find((r) => r.profileId === profile.id && r.scope === "chain" && r.scopeId === lottery.chainId);
   const dist = storeDistance(data, store);
   const place = placeInfo({ receiveMethod: lottery.receiveMethod, prefecture: store?.prefecture, storeKind: store?.salesKind });
   const unconfirmed = lottery.unconfirmedFields ?? [];
@@ -351,9 +354,20 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   編集
                 </Button>
               )}
-              <Button size="sm" variant="outline" aria-pressed={hasMyScopeSkip} onClick={() => actions.setLotterySkip(lottery.id, !hasMyScopeSkip)}>
-                {hasMyScopeSkip ? `${profile.label}のスルーを解除` : `${profile.label}は今回スルー`}
+              <Button size="sm" variant="outline" aria-pressed={hasMyScopeSkip} data-testid="skip-once" onClick={() => actions.setLotterySkip(lottery.id, !hasMyScopeSkip)}>
+                {hasMyScopeSkip ? "今回のスルーを解除" : "今回のみスルー"}
               </Button>
+              {persistent && chain && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-pressed={!!myChainSkip}
+                  data-testid="skip-chain"
+                  onClick={() => (myChainSkip ? void runRule(() => removeSkipRuleAction(myChainSkip.id)) : setConfirmChainSkip(true))}
+                >
+                  {myChainSkip ? "この系列のスルーを解除" : "この系列はスルー"}
+                </Button>
+              )}
             </div>
             <details className="text-sm" data-testid="more-ops">
               <summary className="flex min-h-9 cursor-pointer items-center text-muted-foreground">その他の操作</summary>
@@ -431,6 +445,29 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               }}
             >
               中止にする
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmChainSkip} onOpenChange={setConfirmChainSkip}>
+        <DialogContent>
+          <DialogTitle>{chain?.name}をスルーしますか？</DialogTitle>
+          <DialogDescription>
+            {profile.label}の「{chain?.name}」の抽選がすべてスルー扱いになります（他のユーザーには影響しません）。応募・当選・購入の履歴は消えません。解除は、この画面か設定の応募ルールからいつでもできます。
+          </DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">キャンセル</Button>
+            </DialogClose>
+            <Button
+              variant="danger"
+              data-testid="skip-chain-confirm"
+              onClick={() => {
+                if (lottery.chainId) void runRule(() => addSkipRuleAction(profile.id, "chain", lottery.chainId as string, profile.id));
+                setConfirmChainSkip(false);
+              }}
+            >
+              この系列をスルーする
             </Button>
           </div>
         </DialogContent>

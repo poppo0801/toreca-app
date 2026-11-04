@@ -1,5 +1,6 @@
 "use client";
 
+import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -91,8 +92,8 @@ export function RecordsView() {
 
   return (
     <div className="space-y-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-base font-bold">応募実績・当選率</h1>
+      <div className={PAGE_HEADING_ROW}>
+        <PageHeading navId="lotteries">応募実績・当選率</PageHeading>
         <Link href="/lotteries" className="text-xs text-info underline underline-offset-2">
           抽選管理へ
         </Link>

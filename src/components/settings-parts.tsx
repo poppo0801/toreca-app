@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useId, useState } from "react";
@@ -17,7 +18,7 @@ export function SubPageHeader({ title, description }: { title: string; descripti
           ← 設定
         </Link>
       </p>
-      <h1 className="text-lg font-bold">{title}</h1>
+      <PageHeading navId="settings">{title}</PageHeading>
       {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
     </header>
   );

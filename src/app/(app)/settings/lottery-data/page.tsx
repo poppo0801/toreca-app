@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { LotteryDataView, type LotteryImportHistoryRow } from "@/components/lottery-data-view";
 import { isSupabaseMode } from "@/lib/supabase/env";
@@ -23,7 +24,7 @@ export default async function LotteryDataPage() {
           ← 設定
         </Link>
       </p>
-      <h1 className="mb-3 text-lg font-bold">抽選データ管理</h1>
+      <PageHeading navId="settings" className="mb-3">抽選データ管理</PageHeading>
       {isSupabaseMode ? <LotteryDataView history={history} /> : <p className="text-sm text-muted-foreground">Excelの取り込み・出力は Supabase モード（ログイン後）でのみ利用できます。</p>}
     </>
   );

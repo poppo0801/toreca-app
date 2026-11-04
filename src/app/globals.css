@@ -130,6 +130,8 @@
 @layer base {
   /* 最初の描画前・オーバースクロール時にも、テーマの背景色になる（黒い画面を残さない） */
   html {
+    /* 最下部・最上部のゴム紐バウンスを抑える（下部メニューが浮き上がる原因の一つ。iOS 16+）。補正値の過剰適用は app-shell の stabilizeShift でも防ぐ */
+    overscroll-behavior-y: none;
     background: var(--background);
     color-scheme: light;
   }
@@ -157,17 +159,17 @@
   }
 }
 
-/* 応募済みにしたカードの退場: 右へ滑らかにスライドし、移動の途中（40%）からフェードアウトして完全に消える */
+/* 応募済みにしたカードの退場: 右へ滑らかにスライドしながらフェードアウトし、幅の6割ほど動いた時点（時間の60%）で完全に透明になる */
 @keyframes apply-exit-slide {
   0% {
     transform: translateX(0);
     opacity: 1;
   }
-  40% {
-    opacity: 1;
+  60% {
+    opacity: 0;
   }
   100% {
-    transform: translateX(110%);
+    transform: translateX(100%);
     opacity: 0;
   }
 }

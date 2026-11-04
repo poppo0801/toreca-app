@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { RulesView } from "@/components/rules-view";
 import { isSupabaseMode } from "@/lib/supabase/env";
@@ -12,7 +13,7 @@ export default function RulesPage() {
           ← 設定
         </Link>
       </p>
-      <h1 className="mb-3 text-lg font-bold">応募ルール・スルー</h1>
+      <PageHeading navId="settings" className="mb-3">応募ルール・スルー</PageHeading>
       {isSupabaseMode ? <RulesView /> : <p className="text-sm text-muted-foreground">Supabaseモード（ログイン後）でのみ利用できます。</p>}
     </>
   );

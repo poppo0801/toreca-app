@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronLeft } from "lucide-react";
@@ -40,7 +41,7 @@ export function BattlesView() {
           <Link href="/settings" aria-label="設定へ戻る" className="-ml-1 flex size-9 items-center justify-center rounded-md hover:bg-muted">
             <ChevronLeft className="size-5" aria-hidden="true" />
           </Link>
-          <h1 className="text-base font-bold">対戦記録</h1>
+          <PageHeading navId="battles">対戦記録</PageHeading>
         </div>
         {persistent && available && (
           <Button size="sm" onClick={() => setEdit({ record: null })}>

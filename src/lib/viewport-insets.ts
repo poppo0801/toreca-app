@@ -23,6 +23,33 @@ export function visualShift(innerHeight: number, vv: { height: number; offsetTop
   return Math.abs(shift) >= 2 && Math.abs(shift) <= innerHeight * 0.5 ? shift : 0;
 }
 
+/** 補正値を採用するために、同じ値が続く必要があるフレーム数（約0.17秒）。オーバースクロールのバウンス中は毎フレーム値が変わるので採用されない */
+export const SHIFT_STABLE_FRAMES = 10;
+
+export interface ShiftState {
+  /** 直近の測定値 */
+  raw: number;
+  /** raw が同じ値で続いたフレーム数 */
+  same: number;
+  /** 実際に CSS へ反映している値 */
+  applied: number;
+}
+
+/**
+ * --vv-shift に反映する値を決める（過剰補正の防止）。
+ * 最下部・最上部のオーバースクロール（ゴム紐のバウンス）中も visualViewport.offsetTop は動くが、これは「ずれたまま残った」状態ではなく一時的な動き。
+ * ここで補正すると下部メニューがバウンスの分だけ浮き上がる。そこで:
+ *  - 指が触れている間は更新しない（現在値のまま）
+ *  - 0 に戻った測定値はすぐ採用（通常の位置は安全）
+ *  - 0 以外の値は、SHIFT_STABLE_FRAMES 連続で同じ値になったときだけ採用（キーボードを閉じたあとに残る静的なずれだけが対象）
+ */
+export function stabilizeShift(prev: ShiftState, raw: number, touching: boolean): ShiftState {
+  if (touching) return { raw, same: 0, applied: prev.applied };
+  const same = raw === prev.raw ? prev.same + 1 : 1;
+  if (raw === 0) return { raw, same, applied: 0 };
+  return { raw, same, applied: same >= SHIFT_STABLE_FRAMES ? raw : prev.applied };
+}
+
 /** 文字を入力できる要素にフォーカスがあるか（iOS のキーボードが出ている状態の目安） */
 export function isEditingElement(el: Element | null): boolean {
   if (!el) return false;

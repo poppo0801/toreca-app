@@ -1,3 +1,4 @@
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { MemberNumbersView } from "@/components/member-numbers-view";
 import type { MemberNumber } from "@/lib/member-number";
@@ -21,7 +22,7 @@ export default async function MemberNumbersPage() {
           ← 設定
         </Link>
       </p>
-      <h1 className="mb-3 text-lg font-bold">会員番号</h1>
+      <PageHeading navId="settings" className="mb-3">会員番号</PageHeading>
       {isSupabaseMode ? <MemberNumbersView rows={rows} /> : <p className="text-sm text-muted-foreground">Supabaseモード（ログイン後）でのみ利用できます。</p>}
     </>
   );

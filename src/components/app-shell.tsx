@@ -4,28 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
-import { Banknote, Ellipsis, Layers, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
+import { Ellipsis, Settings } from "lucide-react";
 import { AiJobsProvider } from "@/components/ai-jobs-provider";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
 import { LayoutDiagnostics, useDiagEnabled } from "@/components/layout-diagnostics";
 import { NotificationBell } from "@/components/notification-bell";
+import { iconOf } from "@/components/page-heading";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { viewportGap } from "@/lib/viewport-gap";
-import { isEditingElement, keyboardInset, SETTLE_MS, visualShift } from "@/lib/viewport-insets";
+import { isEditingElement, keyboardInset, SETTLE_MS, stabilizeShift, visualShift, type ShiftState } from "@/lib/viewport-insets";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
-
-/** メニュー項目のアイコン。機能を足すときは NAV_ITEMS（profile-settings.ts）と、ここに1行ずつ足す */
-const NAV_ICON: Record<string, LucideIcon> = {
-  lotteries: Ticket,
-  purchases: ReceiptText,
-  finance: Wallet,
-  battles: Swords,
-  collection: Layers,
-};
-const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
 
 /**
  * iOS のホーム画面アプリの表示領域まわりを CSS 変数に反映する。
@@ -33,6 +24,7 @@ const iconOf = (id: string) => NAV_ICON[id] ?? Banknote;
  *  --kb-inset: キーボードが隠している下側の高さ。ボトムシートの bottom をその分上げる。
  *  --vv-shift: キーボードを閉じたあとなどに、見えている領域の下端がレイアウト上の下端とずれたまま残るときの差（符号あり。編集中は0）。
  *              下部メニューなど固定要素の bottom をその分動かし、いつも見える下端に合わせる（キーボード開閉後に途切れる不具合の構造的な対処）。
+ *              ただし最下部・最上部のオーバースクロール（バウンス）中は値が動き続けるため、指が触れている間は更新せず、同じ値が続いたときだけ採用する（stabilizeShift。メニューが浮き上がる不具合の対処）。
  * 表示領域は起動・復帰・最初の操作のあとに、イベントなしで変わることがある（実機の診断）。以前は特定のイベントの瞬間に1回だけ測っていたため、
  * 測った後に表示領域が直ると補正値だけが残り、下部メニューが画面の下へはみ出す（下半分が隠れる）危険があった。
  * そこで、これらのきっかけの後は SETTLE_MS の間フレームごとに測り直す（値が変わったときだけ書き換える。無条件の再描画はしない）。
@@ -52,11 +44,14 @@ function useViewportGap() {
       if (next) root.style.setProperty(name, next);
       else root.style.removeProperty(name);
     };
+    let touching = false;
+    let shift: ShiftState = { raw: 0, same: 0, applied: 0 };
     const measure = () => {
       const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
       set("--vp-gap", viewportGap(probe.getBoundingClientRect().height, window.innerHeight, standalone));
       set("--kb-inset", keyboardInset(window.innerHeight, window.visualViewport));
-      set("--vv-shift", visualShift(window.innerHeight, window.visualViewport, isEditingElement(document.activeElement)), true);
+      shift = stabilizeShift(shift, visualShift(window.innerHeight, window.visualViewport, isEditingElement(document.activeElement)), touching);
+      set("--vv-shift", shift.applied, true);
     };
     let until = 0;
     let raf = 0;
@@ -78,8 +73,17 @@ function useViewportGap() {
     document.addEventListener("visibilitychange", onVisible);
     vv?.addEventListener("resize", settle);
     vv?.addEventListener("scroll", measure);
-    window.addEventListener("touchstart", settle, opts);
-    window.addEventListener("touchend", settle, opts);
+    const onTouchStart = () => {
+      touching = true;
+      settle();
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      touching = e.touches.length > 0;
+      settle();
+    };
+    window.addEventListener("touchstart", onTouchStart, opts);
+    window.addEventListener("touchend", onTouchEnd, opts);
+    window.addEventListener("touchcancel", onTouchEnd, opts);
     window.addEventListener("focusin", settle);
     window.addEventListener("focusout", settle);
     return () => {
@@ -90,8 +94,9 @@ function useViewportGap() {
       document.removeEventListener("visibilitychange", onVisible);
       vv?.removeEventListener("resize", settle);
       vv?.removeEventListener("scroll", measure);
-      window.removeEventListener("touchstart", settle, opts);
-      window.removeEventListener("touchend", settle, opts);
+      window.removeEventListener("touchstart", onTouchStart, opts);
+      window.removeEventListener("touchend", onTouchEnd, opts);
+      window.removeEventListener("touchcancel", onTouchEnd, opts);
       window.removeEventListener("focusin", settle);
       window.removeEventListener("focusout", settle);
       probe.remove();

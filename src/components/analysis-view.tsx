@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -54,7 +55,7 @@ export function AnalysisView() {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-base font-bold">年間売却実績・収益分析</h1>
+        <PageHeading navId="finance">年間売却実績・収益分析</PageHeading>
         <Link href="/finance" className="text-sm underline underline-offset-2">
           収支へ戻る
         </Link>
