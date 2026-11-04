@@ -377,7 +377,7 @@ export function placeInfo(args: { receiveMethod: "store" | "shipping" | "either"
 
 /** カード用の短い表示（標準分類の主な方法を1語で）。補足・複数の方法は詳細画面で確認する。未確認（unknown・未設定）は null */
 export const ANNOUNCE_SHORT: Record<AnnounceMethod, string> = {
-  result_mail: "メール", winner_mail: "メール", result_page: "Web", app: "アプリ", x_dm: "X", line: "LINE", sms: "SMS", in_store: "店頭", sns_post: "X", phone: "電話", other: "その他", unknown: "",
+  result_mail: "メール", winner_mail: "当選者のみメール", result_page: "Web確認", app: "公式アプリ", x_dm: "X DM", line: "LINE", sms: "SMS", in_store: "店頭掲示", sns_post: "SNS投稿", phone: "電話", other: "その他", unknown: "",
 };
 export function announceShort(methods: readonly unknown[] | undefined): string | null {
   const { primary } = splitAnnounce(methods ?? []);

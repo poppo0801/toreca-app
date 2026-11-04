@@ -55,8 +55,8 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
   it("左=発表日（曜日つき）／右=購入期間。応募締切はカードに出さない。時刻は出さない", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), procedureSplit: false });
     mount("L2", "applied");
-    expect(text('[data-testid="result-day"]')).toContain("発表 11/3（火）");
-    expect(text('[data-testid="period"]')).toBe("11/4（水）〜11/6（金）");
+    expect(text('[data-testid="result-day"]')).toContain("発表 11/3(火)");
+    expect(text('[data-testid="period"]')).toBe("11/4(水)〜11/6(金)");
     expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("購入");
     expect(q('[data-testid="period"] svg')).not.toBeNull();
     expect(host.textContent).not.toContain("締切");
@@ -69,7 +69,7 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
   it("購入・受取が分かれた抽選は右側に受取期間を出す", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureSplit: true, procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), receiveStart: dateOnly("2026-11-05"), receiveDeadline: dateOnly("2026-11-08") });
     mount("L2", "applied");
-    expect(text('[data-testid="period"]')).toBe("11/5（木）〜11/8（日）");
+    expect(text('[data-testid="period"]')).toBe("11/5(木)〜11/8(日)");
     expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("受取");
   });
   it("期間が未設定なら「未定」（応募締切を代用しない）。発表日が不明ならカウントダウンを出さない", () => {
@@ -93,8 +93,8 @@ describe("全情報・★管理対象の詳細カード（日付・距離・残�
   it("左=抽選締切（曜日つき・時刻あり）／右=購入期間（曜日つき・時刻なし）", () => {
     patchLottery("L1", { applyDeadline: { precision: "date_time", at: "2026-11-06T14:59:00Z" }, procedureStart: dateOnly("2026-11-13"), procedureDeadline: dateOnly("2026-11-15") });
     mount("L1", "managed");
-    expect(text('[data-testid="deadline-day"]')).toBe("11/6（金） 23:59");
-    expect(text('[data-testid="period"]')).toBe("11/13（金）〜11/15（日）");
+    expect(text('[data-testid="deadline-day"]')).toBe("11/6(金) 23:59");
+    expect(text('[data-testid="period"]')).toBe("11/13(金)〜11/15(日)");
   });
   it("残り日数は下段の操作ボタンの隣（上段のメタ行には置かない）", () => {
     mount("L1", "managed");

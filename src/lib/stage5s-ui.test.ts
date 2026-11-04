@@ -56,12 +56,13 @@ describe("絞り込み: 店舗・応募方法", () => {
 describe("当落発表方法の短い表示", () => {
   it("標準分類の主な方法を1語で（メール・アプリ・Web・店頭・SMS・X・電話・その他）。未確認は null", () => {
     expect(announceShort(["result_mail"])).toBe("メール");
-    expect(announceShort(["winner_mail"])).toBe("メール");
-    expect(announceShort(["app"])).toBe("アプリ");
-    expect(announceShort(["result_page"])).toBe("Web");
-    expect(announceShort(["in_store"])).toBe("店頭");
+    expect(announceShort(["winner_mail"])).toBe("当選者のみメール");
+    expect(announceShort(["app"])).toBe("公式アプリ");
+    expect(announceShort(["result_page"])).toBe("Web確認");
+    expect(announceShort(["in_store"])).toBe("店頭掲示");
     expect(announceShort(["sms"])).toBe("SMS");
-    expect(announceShort(["x_dm"])).toBe("X");
+    expect(announceShort(["x_dm"])).toBe("X DM");
+    expect(announceShort(["sns_post"])).toBe("SNS投稿"); // X・Instagramなどの投稿。DMとは区別し、Xの投稿と断定しない
     expect(announceShort(["phone"])).toBe("電話");
     expect(announceShort(["other"])).toBe("その他");
     expect(announceShort(["unknown"])).toBeNull();

@@ -245,18 +245,18 @@ export function ymdOfFlexible(v: FlexibleDate): string | null {
   return null;
 }
 
-/** 「11/4（水）」。今年以外は年つき。時刻は出さない */
+/** 「11/4(水)」。今年以外は年つき。時刻は出さない */
 export function formatMdW(ymd: string, now: Date): string {
-  return `${formatMonthDay(ymd, now)}（${weekdayJa(ymd)}）`;
+  return `${formatMonthDay(ymd, now)}(${weekdayJa(ymd)})`;
 }
 
-/** 時刻を省いた「11/4（水）」。不明は null */
+/** 時刻を省いた「11/4(水)」。不明は null */
 export function formatFlexMdW(v: FlexibleDate, now: Date): string | null {
   const ymd = ymdOfFlexible(v);
   return ymd ? formatMdW(ymd, now) : null;
 }
 
-/** 日時つきの「11/6（金）23:59」。日付のみは時刻を出さず（補完しない）「11/6（金）」。不明は null */
+/** 日時つきの「11/6(金)23:59」。日付のみは時刻を出さず（補完しない）「11/6(金)」。不明は null */
 export function formatFlexMdWTime(v: FlexibleDate, now: Date): string | null {
   const day = formatFlexMdW(v, now);
   if (!day) return null;
@@ -264,7 +264,7 @@ export function formatFlexMdWTime(v: FlexibleDate, now: Date): string | null {
   return time ? `${day} ${time}` : day;
 }
 
-/** 期間「11/4（水）〜11/6（金）」。片方だけ分かるときは「〜11/6（金）」「11/4（水）〜」。両方不明は null（呼び出し側で「未定」を出す） */
+/** 期間「11/4(水)〜11/6(金)」。片方だけ分かるときは「〜11/6(金)」「11/4(水)〜」。両方不明は null（呼び出し側で「未定」を出す） */
 export function formatPeriodMdW(start: FlexibleDate, end: FlexibleDate, now: Date): string | null {
   const s = formatFlexMdW(start, now);
   const e = formatFlexMdW(end, now);
@@ -273,7 +273,7 @@ export function formatPeriodMdW(start: FlexibleDate, end: FlexibleDate, now: Dat
   return s ? `${s}〜` : `〜${e}`;
 }
 
-/** 発表日（期間なら「11/3（火）〜11/5（木）」）。不明は null */
+/** 発表日（期間なら「11/3(火)〜11/5(木)」）。不明は null */
 export function formatResultMdW(l: ResultPeriod, now: Date): string | null {
   const s = resultStartDay(l);
   if (!s) return null;

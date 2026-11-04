@@ -24,22 +24,22 @@ describe("曜日つきの日付（日本時間の暦日から計算。固定値�
     expect(weekdayJa("2027-01-01")).toBe("金");
   });
   it("日時は日本時間の日付で曜日を決める（UTCでは前日でも、日本時間で見る）", () => {
-    // 2026-11-03T16:00Z = 日本時間 2026-11-04 01:00（水）
-    expect(formatFlexMdW(dateTime("2026-11-03T16:00:00Z"), NOW)).toBe("11/4（水）");
-    expect(formatFlexMdWTime(dateTime("2026-11-06T14:59:00Z"), NOW)).toBe("11/6（金） 23:59");
-    expect(formatFlexMdWTime(dateOnly("2026-11-06"), NOW)).toBe("11/6（金）"); // 時刻を補わない
+    // 2026-11-03T16:00Z = 日本時間 2026-11-04 01:00(水)
+    expect(formatFlexMdW(dateTime("2026-11-03T16:00:00Z"), NOW)).toBe("11/4(水)");
+    expect(formatFlexMdWTime(dateTime("2026-11-06T14:59:00Z"), NOW)).toBe("11/6(金) 23:59");
+    expect(formatFlexMdWTime(dateOnly("2026-11-06"), NOW)).toBe("11/6(金)"); // 時刻を補わない
     expect(formatFlexMdW(U, NOW)).toBeNull();
   });
   it("期間: 同日は1日、片方だけなら片側、両方不明は null", () => {
-    expect(formatPeriodMdW(dateOnly("2026-11-04"), dateOnly("2026-11-06"), NOW)).toBe("11/4（水）〜11/6（金）");
-    expect(formatPeriodMdW(dateOnly("2026-11-04"), dateOnly("2026-11-04"), NOW)).toBe("11/4（水）");
-    expect(formatPeriodMdW(U, dateOnly("2026-11-06"), NOW)).toBe("〜11/6（金）");
-    expect(formatPeriodMdW(dateOnly("2026-11-04"), U, NOW)).toBe("11/4（水）〜");
+    expect(formatPeriodMdW(dateOnly("2026-11-04"), dateOnly("2026-11-06"), NOW)).toBe("11/4(水)〜11/6(金)");
+    expect(formatPeriodMdW(dateOnly("2026-11-04"), dateOnly("2026-11-04"), NOW)).toBe("11/4(水)");
+    expect(formatPeriodMdW(U, dateOnly("2026-11-06"), NOW)).toBe("〜11/6(金)");
+    expect(formatPeriodMdW(dateOnly("2026-11-04"), U, NOW)).toBe("11/4(水)〜");
     expect(formatPeriodMdW(U, U, NOW)).toBeNull();
   });
   it("発表日（期間つき）。不明は「発表日未確認」", () => {
-    expect(resultDayText({ resultDate: dateOnly("2026-11-03") }, NOW)).toBe("11/3（火）");
-    expect(resultDayText({ resultDate: dateOnly("2026-11-03"), resultEndDate: "2026-11-05" }, NOW)).toBe("11/3（火）〜11/5（木）");
+    expect(resultDayText({ resultDate: dateOnly("2026-11-03") }, NOW)).toBe("11/3(火)");
+    expect(resultDayText({ resultDate: dateOnly("2026-11-03"), resultEndDate: "2026-11-05" }, NOW)).toBe("11/3(火)〜11/5(木)");
     expect(resultDayText({ resultDate: U }, NOW)).toBe("発表日未確認");
     expect(formatResultMdW({ resultDate: U }, NOW)).toBeNull();
   });
@@ -48,10 +48,10 @@ describe("曜日つきの日付（日本時間の暦日から計算。固定値�
 describe("応募済みカードの右側の期間（購入期間／分離していれば受取期間。応募締切で代用しない）", () => {
   const base = { procedureSplit: false, procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), receiveStart: undefined, receiveDeadline: undefined } as const;
   it("通常は購入期間", () => {
-    expect(displayPeriod(base, NOW)).toEqual({ label: "購入", text: "11/4（水）〜11/6（金）" });
+    expect(displayPeriod(base, NOW)).toEqual({ label: "購入", text: "11/4(水)〜11/6(金)" });
   });
   it("購入・受取が分離している抽選は受取期間", () => {
-    expect(displayPeriod({ ...base, procedureSplit: true, receiveStart: dateOnly("2026-11-05"), receiveDeadline: dateOnly("2026-11-08") }, NOW)).toEqual({ label: "受取", text: "11/5（木）〜11/8（日）" });
+    expect(displayPeriod({ ...base, procedureSplit: true, receiveStart: dateOnly("2026-11-05"), receiveDeadline: dateOnly("2026-11-08") }, NOW)).toEqual({ label: "受取", text: "11/5(木)〜11/8(日)" });
   });
   it("未設定は null（呼び出し側で「未定」）。分離で受取期間が未設定でも購入期間を代用しない", () => {
     expect(displayPeriod({ ...base, procedureStart: U, procedureDeadline: U }, NOW).text).toBeNull();
@@ -73,7 +73,7 @@ describe("通販・発送の購入／受取（別々に記録・購入記録は�
     expect(hasSeparateSteps(lot({ receiveMethod: "store", procedureSplit: true }))).toBe(true);
   });
   it("購入前は購入期限、購入後は「受取待ち（発送）」（購入の期限を受取の期限にしない）、受取後は完了", () => {
-    expect(wonProgress(lot(), app("none"), NOW)).toMatchObject({ stage: "purchase", action: "purchase", label: "購入期限 11/20（金）" });
+    expect(wonProgress(lot(), app("none"), NOW)).toMatchObject({ stage: "purchase", action: "purchase", label: "購入期限 11/20(金)" });
     expect(wonProgress(lot(), app("procedure_done"), NOW)).toMatchObject({ stage: "receive", action: "receive", status: "open", label: "受取待ち（発送）" });
     expect(wonProgress(lot(), app("purchased"), NOW)).toMatchObject({ stage: "done", status: "done" });
   });

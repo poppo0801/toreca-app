@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CalendarCheck, Clock, MapPin, Megaphone, Package, ShoppingBag, Star, Store as StoreIcon, Truck } from "lucide-react";
+import { AtSign, CalendarCheck, Clock, Globe, Gift, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, type LucideIcon } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
@@ -16,14 +16,14 @@ import { DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
 import { deadlineBadge, formatFlexible, formatFlexMdWTime, formatShort } from "@/lib/datetime";
 import { effectiveEventState, hasSkipException, skipSourceFor } from "@/lib/eligibility";
 import { DEADLINE_BAR_CLASS, EVENT_LABEL, RECEIVE_SHORT, APPLY_LABEL } from "@/lib/lottery-labels";
-import { announceShort, placeInfo } from "@/lib/lottery-taxonomy";
+import { splitAnnounce, announceShort, placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
 import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
 import { WonRow } from "@/components/won-actions";
-import { displayPeriod, myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
+import { displayPeriod, wonPeriodRows, myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -57,6 +57,25 @@ function ProductLine({ name, quantity, extra, className }: { name: string; quant
  * 複数商品は先頭の1種類だけ出して「＋他N種」に集約する（全商品は詳細）。応募締切までの残り時間は右上に目立たせる。
  * プロフィール別の応募状況は表示専用。応募の操作は現在のプロフィール専用のボタンだけで行う。
  */
+/** 当落発表方法のアイコン（短い名称と組み合わせる）。X投稿（SNS投稿）とX DMは別のアイコン */
+const ANNOUNCE_ICON: Record<string, LucideIcon> = { result_mail: Mail, winner_mail: Mail, result_page: Globe, app: Smartphone, x_dm: MessageSquare, line: MessageSquare, sms: MessageSquare, in_store: StoreIcon, sns_post: AtSign, phone: Phone, other: Megaphone };
+
+/** 期間1行（購入=買い物袋 / 受取=プレゼントボックス）。日付の途中で折り返さない */
+function PeriodLine({ label, text }: { label: "購入" | "受取"; text: string | null }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="period" data-kind={label} title={`${label}期間`} aria-label={`${label}期間 ${text ?? "未定"}`}>
+      {label === "受取" ? <Gift className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+      <span className={text ? "" : "text-muted-foreground"}>{text ?? "未定"}</span>
+    </span>
+  );
+}
+
+function AnnounceGlyph({ methods }: { methods: readonly unknown[] | undefined }) {
+  const { primary } = splitAnnounce(methods ?? []);
+  const Icon = (primary && ANNOUNCE_ICON[primary]) || Megaphone;
+  return <Icon className="size-3.5 shrink-0" aria-hidden="true" />;
+}
+
 export function LotteryCard({
   lottery,
   tab,
@@ -120,12 +139,8 @@ export function LotteryCard({
   // 詳細カードの日付: 左=抽選締切（曜日つき・時刻あり） / 右=購入期間（購入と受取が分かれていれば受取期間。曜日つき・時刻なし。未設定は「未定」で、応募締切を代用しない）
   const deadlineW = formatFlexMdWTime(lottery.applyDeadline, now);
   const periodInfo = displayPeriod(lottery, now);
-  const periodNode = (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="period" data-kind={periodInfo.label} title={`${periodInfo.label}期間`} aria-label={`${periodInfo.label}期間 ${periodInfo.text ?? "未定"}`}>
-      {periodInfo.label === "受取" ? <Package className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-      <span className={periodInfo.text ? "" : "text-muted-foreground"}>{periodInfo.text ?? "未定"}</span>
-    </span>
-  );
+  const periodNode = <PeriodLine label={periodInfo.label} text={periodInfo.text} />;
+  const wonRows = wonTab ? wonPeriodRows(lottery, now) : [];
   const finished = event === "closed" || event === "cancelled";
 
   return (
@@ -181,8 +196,11 @@ export function LotteryCard({
                     <ResultCountdownBadge lottery={lottery} className="px-1 py-0.5 text-[11px]" />
                   </>
                 ) : wonTab && won ? (
-                  <span className={cn("font-medium", won.status === "overdue" && "font-bold text-danger", won.status === "done" && "text-success")} data-testid="won-deadline">
-                    {won.label}
+                  /* 当選: 購入・受取の期間（状態「期限超過」などは下段の操作エリアに1回だけ表示する） */
+                  <span className="flex flex-col gap-y-0.5" data-testid="won-periods">
+                    {wonRows.map((r) => (
+                      <PeriodLine key={r.label} label={r.label} text={r.text} />
+                    ))}
                   </span>
                 ) : finished ? (
                   <span className="text-muted-foreground">{EVENT_LABEL[event]}</span>
@@ -216,15 +234,15 @@ export function LotteryCard({
             </span>
             <div role="button" tabIndex={0} aria-label={`${storeLine} ${sum.name}の詳細を開く`} onClick={openDetail} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(); } }} className="min-w-0 cursor-pointer space-y-1 text-left">
               {/* 店舗名（最大2行）→ 都道府県 → 距離。狭い幅では都道府県・距離が次の行へ折り返す */}
-              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="card-place">
+              <div className="flex min-w-0 flex-nowrap items-center gap-x-1.5 text-xs text-muted-foreground" data-testid="card-place">
                 <ChainLogo src={chain?.logoSrc} name={chain?.name ?? ""} />
-                <span className="line-clamp-2 min-w-0 max-w-full break-words" data-testid="store-name">{storeLine}</span>
-                {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 rounded-full border bg-input px-1.5 py-px text-[11px] leading-none text-foreground">{place}</span>}
-                {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 rounded-full border border-info px-1.5 py-px text-[11px] leading-none text-info">発送可</span>}
+                <span className="min-w-0 flex-1 truncate" data-testid="store-name" title={storeLine}>{storeLine}</span>
+                {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 whitespace-nowrap rounded-full border bg-input px-1.5 py-px text-[10px] leading-none text-foreground">{place}</span>}
+                {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 whitespace-nowrap rounded-full border border-info px-1.5 py-px text-[10px] leading-none text-info">発送可</span>}
                 {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tracking-tight" data-testid="card-dates">
+              <span className="flex flex-col items-start gap-y-0.5 text-xs" data-testid="card-dates">
                 {appliedTab ? (
                   <>
                     {/* 応募済み: 左=当落発表日（発表期間） / 右=購入期間（分離していれば受取期間）。応募締切はカードに出さない（詳細で確認できる） */}
@@ -235,10 +253,11 @@ export function LotteryCard({
                     {periodNode}
                   </>
                 ) : wonTab && won ? (
-                  <span className={cn("inline-flex items-center gap-1 font-medium", won.status === "overdue" && "font-bold text-danger", won.status === "done" && "text-success")} data-testid="won-deadline">
-                    <Clock className="size-3.5 shrink-0" aria-hidden="true" />
-                    {won.label}
-                  </span>
+                  <>
+                    {wonRows.map((r) => (
+                      <PeriodLine key={r.label} label={r.label} text={r.text} />
+                    ))}
+                  </>
                 ) : (
                   <>
                     {display.deadline && (
@@ -262,8 +281,8 @@ export function LotteryCard({
                   )}
                   {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
                   {appliedTab && (
-                    <span className="inline-flex items-center gap-1" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods) ?? "未確認"}`}>
-                      <Megaphone className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods) ?? "未確認"}`}>
+                      <AnnounceGlyph methods={lottery.announcementMethods} />
                       {announceShort(lottery.announcementMethods) ?? "未確認"}
                     </span>
                   )}

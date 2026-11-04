@@ -1399,7 +1399,7 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
   test("応募済みタブ: 左=発表日／右=購入期間（応募締切は出さない）。落選が左・当選（オレンジ）が右", async ({ page }) => {
     await page.getByRole("tab", { name: /応募済み/ }).click();
     const c = page.getByTestId("lottery-card").first();
-    await expect(c.getByTestId("result-day")).toContainText(/発表 \d+\/\d+（[日月火水木金土]）|発表日未確認/);
+    await expect(c.getByTestId("result-day")).toContainText(/発表 \d+\/\d+\([日月火水木金土]\)|発表日未確認/);
     // 「購入」「受取」の文字は出さず、小さなアイコンで示す（意味はタップ長押し/title と詳細で確認）
     await expect(c.getByTestId("period")).not.toContainText(/購入|受取/);
     await expect(c.getByTestId("period")).toHaveAttribute("data-kind", /^(購入|受取)$/);
@@ -1408,7 +1408,9 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     await expect(c).not.toContainText("締切");
     const day = (await c.getByTestId("result-day").boundingBox())!;
     const period = (await c.getByTestId("period").boundingBox())!;
-    expect(period.x).toBeGreaterThan(day.x); // 発表が左・期間が右
+    expect(period.y).toBeGreaterThan(day.y); // 発表・期間は1行ずつ（上=発表、下=期間）。日付は途中で折り返さない
+    expect(day.height).toBeLessThan(22);
+    expect(period.height).toBeLessThan(22);
     const lost = (await c.getByTestId("result-lost").boundingBox())!;
     const won = (await c.getByTestId("result-won").boundingBox())!;
     expect(lost.x + lost.width).toBeLessThanOrEqual(won.x + 1);
@@ -1418,10 +1420,12 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
   test("詳細カード: 日付は曜日つき。左=抽選締切／右=購入期間。★は左上の端、未応募は「－」", async ({ page }) => {
     await page.getByRole("tab", { name: /全情報/ }).click();
     const c = card(page, "L4");
-    await expect(c.getByTestId("deadline-day")).toContainText(/\d+\/\d+（[日月火水木金土]）/);
+    await expect(c.getByTestId("deadline-day")).toContainText(/\d+\/\d+\([日月火水木金土]\)/);
     const dl = (await c.getByTestId("deadline-day").boundingBox())!;
     const pe = (await c.getByTestId("period").boundingBox())!;
-    expect(pe.x).toBeGreaterThan(dl.x);
+    expect(pe.y).toBeGreaterThan(dl.y); // 抽選締切と購入期間は1行ずつ
+    expect(dl.height).toBeLessThan(22);
+    expect(pe.height).toBeLessThan(22);
     await expect(c.getByTestId("apply-status").getByTestId("unapplied-mark")).toHaveCount(0); // 詳細カードの未応募は「－」
     await expect(c.getByTestId("apply-status").locator('[data-status="eligible_unapplied"] svg.lucide-minus').first()).toBeVisible();
     const cb = (await c.boundingBox())!;

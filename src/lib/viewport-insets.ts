@@ -61,3 +61,13 @@ export function isEditingElement(el: Element | null): boolean {
 
 /** 起動直後〜操作直後など、表示領域が後から変わる場面で、フレームごとに測り直す期間(ms) */
 export const SETTLE_MS = 4000;
+
+/** 指が触れている状態の有効期間(ms)。touchend/touchcancel を取りこぼしても（アラート・システムジェスチャー・バックグラウンド移行）、これを過ぎたら離れたものとして扱う */
+export const TOUCH_STALE_MS = 1500;
+/**
+ * 「触れている」と見なすか。以前は touchend を取りこぼすと触れたままの扱いが残り、補正値（--vv-shift）が更新されず、
+ * 下部メニューが途切れたまま固定される危険があった。最後のタッチイベントから TOUCH_STALE_MS を過ぎたら触れていない扱いにする。
+ */
+export function isTouchingNow(flag: boolean, lastTouchAt: number, now: number): boolean {
+  return flag && now - lastTouchAt < TOUCH_STALE_MS;
+}

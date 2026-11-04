@@ -122,6 +122,20 @@ export function displayPeriod(l: Pick<Lottery, "procedureSplit" | "procedureStar
   return { label: "購入", text: formatPeriodMdW(l.procedureStart, l.procedureDeadline, now) };
 }
 
+/**
+ * 当選タブの詳細カードの期間。購入と受取が分かれていれば「購入」「受取」を1行ずつ、共通の期間なら「受取」だけ。
+ * 曜日つき・時刻なし。未設定は text=null（呼び出し側で「未定」）。
+ */
+export function wonPeriodRows(l: Pick<Lottery, "procedureSplit" | "procedureStart" | "procedureDeadline" | "receiveStart" | "receiveDeadline">, now: Date): { label: "購入" | "受取"; text: string | null }[] {
+  if (l.procedureSplit === true) {
+    return [
+      { label: "購入", text: formatPeriodMdW(l.procedureStart, l.procedureDeadline, now) },
+      { label: "受取", text: formatPeriodMdW(l.receiveStart ?? UNKNOWN, l.receiveDeadline ?? UNKNOWN, now) },
+    ];
+  }
+  return [{ label: "受取", text: formatPeriodMdW(l.procedureStart, l.procedureDeadline, now) }];
+}
+
 /** 受取（または購入・受取共通）の期間 */
 export function receivePeriod(l: Pick<Lottery, "procedureSplit" | "procedureStart" | "procedureDeadline" | "receiveStart" | "receiveDeadline">): { start: FlexibleDate; deadline: FlexibleDate } {
   return l.procedureSplit ? { start: l.receiveStart ?? UNKNOWN, deadline: l.receiveDeadline ?? UNKNOWN } : { start: l.procedureStart, deadline: l.procedureDeadline };

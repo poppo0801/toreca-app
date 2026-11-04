@@ -14,7 +14,7 @@ import { iconOf } from "@/components/page-heading";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { viewportGap } from "@/lib/viewport-gap";
-import { isEditingElement, keyboardInset, SETTLE_MS, stabilizeShift, visualShift, type ShiftState } from "@/lib/viewport-insets";
+import { isEditingElement, isTouchingNow, keyboardInset, SETTLE_MS, stabilizeShift, visualShift, type ShiftState } from "@/lib/viewport-insets";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
@@ -45,12 +45,13 @@ function useViewportGap() {
       else root.style.removeProperty(name);
     };
     let touching = false;
+    let lastTouchAt = 0;
     let shift: ShiftState = { raw: 0, same: 0, applied: 0 };
     const measure = () => {
       const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
       set("--vp-gap", viewportGap(probe.getBoundingClientRect().height, window.innerHeight, standalone));
       set("--kb-inset", keyboardInset(window.innerHeight, window.visualViewport));
-      shift = stabilizeShift(shift, visualShift(window.innerHeight, window.visualViewport, isEditingElement(document.activeElement)), touching);
+      shift = stabilizeShift(shift, visualShift(window.innerHeight, window.visualViewport, isEditingElement(document.activeElement)), isTouchingNow(touching, lastTouchAt, performance.now()));
       set("--vv-shift", shift.applied, true);
     };
     let until = 0;
@@ -71,7 +72,11 @@ function useViewportGap() {
     }, 500);
     const opts = { passive: true, capture: true } as const;
     const vv = window.visualViewport;
-    const onVisible = () => document.visibilityState === "visible" && settle();
+    const onVisible = () => {
+      // 復帰・退避のたびに触れた状態を捨てる（取りこぼしたtouchendの影響を残さない）
+      touching = false;
+      if (document.visibilityState === "visible") settle();
+    };
     window.addEventListener("pageshow", settle);
     window.addEventListener("orientationchange", settle);
     window.addEventListener("resize", settle);
@@ -80,13 +85,19 @@ function useViewportGap() {
     vv?.addEventListener("scroll", measure);
     const onTouchStart = () => {
       touching = true;
+      lastTouchAt = performance.now();
       settle();
+    };
+    const onTouchMove = () => {
+      lastTouchAt = performance.now();
     };
     const onTouchEnd = (e: TouchEvent) => {
       touching = e.touches.length > 0;
+      lastTouchAt = performance.now();
       settle();
     };
     window.addEventListener("touchstart", onTouchStart, opts);
+    window.addEventListener("touchmove", onTouchMove, opts);
     window.addEventListener("touchend", onTouchEnd, opts);
     window.addEventListener("touchcancel", onTouchEnd, opts);
     window.addEventListener("focusin", settle);
@@ -101,6 +112,7 @@ function useViewportGap() {
       vv?.removeEventListener("resize", settle);
       vv?.removeEventListener("scroll", measure);
       window.removeEventListener("touchstart", onTouchStart, opts);
+      window.removeEventListener("touchmove", onTouchMove, opts);
       window.removeEventListener("touchend", onTouchEnd, opts);
       window.removeEventListener("touchcancel", onTouchEnd, opts);
       window.removeEventListener("focusin", settle);
