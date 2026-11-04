@@ -15,6 +15,8 @@ export interface ListingEntry {
   context: string;
   /** リンクを含む1枚のカード（article / li）全体の文章。商品名・店舗名・締切・条件がそろう。カードが特定できなければ未設定 */
   card?: string;
+  /** カードの構造から読み取れた店舗名・商品名（サイトごとの決まった位置。読めなければ未設定） */
+  fields?: CardFields;
 }
 
 /** 広告・アフィリエイト・SNS共有・計測などのドメイン（告知ではない） */
@@ -92,7 +94,7 @@ const strip = (html: string) =>
  * リンクを含むカード（article / li）の文章を返す。店舗名・商品名はリンクより前のカード冒頭にあり、
  * タグの属性が長いため「リンク直前の数百文字」では届かない。別のカードに踏み込まないよう、カードが閉じていれば使わない
  */
-export function enclosingCard(html: string, start: number, end: number): string | null {
+export function enclosingCardHtml(html: string, start: number, end: number): string | null {
   const head = html.slice(Math.max(0, start - 8000), start);
   let open = -1;
   let tag = "";
@@ -105,8 +107,39 @@ export function enclosingCard(html: string, start: number, end: number): string 
   if (html.slice(open, start).toLowerCase().includes(`</${tag}>`)) return null;
   const close = html.toLowerCase().indexOf(`</${tag}>`, end);
   if (close < 0 || close - open > 12000) return null;
-  const text = strip(html.slice(open, close));
+  return html.slice(open, close);
+}
+
+export function enclosingCard(html: string, start: number, end: number): string | null {
+  const raw = enclosingCardHtml(html, start, end);
+  const text = raw ? strip(raw) : "";
   return text.length >= 8 ? text.slice(0, 500) : null;
+}
+
+/** 一覧のカードの構造から読み取れる店舗名・商品名（文章の並びから推測せず、サイトごとの決まった位置だけを読む） */
+export interface CardFields {
+  store?: string;
+  product?: string;
+}
+
+export function cardFields(adapter: AdapterId, rawCard: string): CardFields {
+  const clean = (t: string | undefined) => {
+    const v = strip(t ?? "").slice(0, 80);
+    return v.length >= 2 ? v : undefined;
+  };
+  if (adapter === "pokeso") {
+    // 「商品名 / 店舗名 / 販売価格（定価）¥…」の順に並ぶ。価格の見出しの直前2つの文字列
+    const nodes = rawCard.split(/<[^>]+>/).map((n) => strip(n)).filter(Boolean);
+    const i = nodes.findIndex((n) => /^(販売価格|定価)$/.test(n));
+    if (i >= 2) return { product: clean(nodes[i - 2]), store: clean(nodes[i - 1]) };
+    return {};
+  }
+  if (adapter === "torecabiyori") {
+    const store = /<strong\b[^>]*>([\s\S]*?)<\/strong>/i.exec(rawCard)?.[1];
+    const product = /<a\b[^>]*href=["']\/chusen\/[^"']*["'][^>]*>([\s\S]*?)<\/a>/i.exec(rawCard)?.[1];
+    return { store: clean(store), product: clean(product) };
+  }
+  return {};
 }
 
 /** 一覧ページのHTMLから外部リンクの候補を取り出す。同じ宛先は1件にまとめる */
@@ -146,8 +179,10 @@ export function parseListing(adapter: AdapterId, html: string, baseUrl: string):
     const ctx = strip(html.slice(Math.max(prevEnd, start - 400), Math.min(nextStart, end + 200))).slice(-360);
     const prev = seen.get(url);
     if (!prev) {
-      const card = enclosingCard(html, start, end);
-      seen.set(url, card ? { url, kind, title, context: ctx, card } : { url, kind, title, context: ctx });
+      const raw = enclosingCardHtml(html, start, end);
+      const card = raw ? enclosingCard(html, start, end) : null;
+      const f = raw ? cardFields(adapter, raw) : {};
+      seen.set(url, { url, kind, title, context: ctx, ...(card ? { card } : {}), ...(f.store || f.product ? { fields: f } : {}) });
     }
     else if (!prev.title && title) prev.title = title;
   }

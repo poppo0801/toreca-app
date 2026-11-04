@@ -30,7 +30,7 @@ import {
   type StatusFilter,
   type Tab,
 } from "@/lib/lottery-view";
-import { profileSeesLottery } from "@/lib/eligibility";
+import { isSkippedBy, profileSeesLottery } from "@/lib/eligibility";
 import { tabDots } from "@/lib/notifications";
 import { useTapGate } from "@/lib/tap-guard";
 import { readPref, readSession, writePref, writeSession } from "@/services/local-device-store";
@@ -162,7 +162,7 @@ function LotteryBoardInner() {
   const exit = useApplyExitController({ enabled: hidesApplied && view === "list", resetKey: `${profile.id}|${tab}|${filters.status}|${view}` });
   const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds), [data, tab, filters, now, profile.id, exit.keepIds]);
   // トレマネが新規に把握した（まだ詳細を確認していない）抽選の件数。自動収集で追加された抽選もここに含まれる
-  const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew && profileSeesLottery(data, profile.id, l)).length, [data, profile.id]);
+  const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew && profileSeesLottery(data, profile.id, l) && !isSkippedBy(data, profile.id, l)).length, [data, profile.id]);
   const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
   const showSkip = true;

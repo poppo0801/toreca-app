@@ -16,13 +16,13 @@ export async function enrichFromListings(deps: CollectDeps, opts: { max: number 
     .from("collection_candidates")
     .select("id,source_id,source_url,draft,triage,manual_state,job_state,status")
     .eq("household_id", householdId)
-    .eq("status", "pending")
+    .in("status", ["pending", "failed"])
     .eq("kind", "new")
     .in("job_state", ["review", "failed"])
     .limit(300);
   const need = (rows ?? []).filter((r) => {
-    const q = (r.draft as { queued?: { card?: string; cardChecked?: boolean; viaList?: boolean; kind?: string; context?: string } } | null)?.queued;
-    return !!q && q.kind === "web_page" && !q.card && !q.cardChecked && !!q.context && (r.triage === "auto_retry" || (r.triage === "manual" && r.manual_state === "open"));
+    const q = (r.draft as { queued?: { card?: string; cardChecked?: boolean; viaList?: boolean; kind?: string; context?: string; fields?: unknown } } | null)?.queued;
+    return !!q && q.kind === "web_page" && (!q.card || !q.fields) && !q.cardChecked && !!q.context && (r.triage === "auto_retry" || (r.triage === "manual" && r.manual_state === "open"));
   });
   if (need.length === 0) return out;
   const { data: sources } = await db.from("collection_sources").select("id,url,adapter,kind,enabled").eq("household_id", householdId).eq("kind", "web");
@@ -53,7 +53,7 @@ export async function enrichFromListings(deps: CollectDeps, opts: { max: number 
           triage: null,
           manual_state: null,
           reasons: ["一覧のカード全体の文章から再解析待ち"],
-          draft: { ...prior, queued: { ...q, card: e.card, changed: true } } as never,
+          draft: { ...prior, queued: { ...q, card: e.card, ...(e.fields ? { fields: e.fields } : {}), changed: true } } as never,
         })
         .eq("id", r.id);
       out.enriched++;

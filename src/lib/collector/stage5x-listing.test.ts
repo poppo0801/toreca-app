@@ -37,3 +37,18 @@ describe("抽選ではないリンクは候補にしない（5X）", () => {
     expect(parseListing("generic", html, "https://list.example.invalid/").map((x) => x.url)).toEqual(["https://shop.example.invalid/lottery/1"]);
   });
 });
+
+describe("カードの構造から店舗名・商品名を読む（5X）", () => {
+  const tags = 'class="p-2 text-xs"';
+  it("pokeso: 価格の見出しの直前の2つが 商品名・店舗名", () => {
+    const html = `<article><div ${tags}><span ${tags}>30th CELEBRATION</span><span ${tags}>架空ショップ久米川店</span><span ${tags}>販売価格<!-- --> <span>¥7,200</span></span><a href="https://t.co/zzzz" ${tags}>応募する</a></div></article>`;
+    const e = parseListing("pokeso", html, "https://list.example.invalid/");
+    expect(e[0].fields).toEqual({ product: "30th CELEBRATION", store: "架空ショップ久米川店" });
+  });
+  it("トレカ日和: 店舗は強調表示、商品は商品ページへのリンク。読めなければ推測しない", () => {
+    const html = `<ul><li data-lot><p><a href="/chusen/pk-x/"><span>架空商品</span></a></p><p><strong>架空書店 本店</strong></p><a href="https://forms.example.invalid/f">応募</a></li></ul>`;
+    expect(parseListing("torecabiyori", html, "https://list.example.invalid/chusen/")[0].fields).toEqual({ product: "架空商品", store: "架空書店 本店" });
+    const none = parseListing("pokeso", `<article><span>説明だけ</span><a href="https://t.co/q">応募する</a></article>`, "https://list.example.invalid/");
+    expect(none[0].fields).toBeUndefined();
+  });
+});

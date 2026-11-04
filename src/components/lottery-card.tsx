@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { AtSign, CalendarCheck, Clock, Globe, Gift, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, type LucideIcon } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { FitLine } from "@/components/fit-line";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
 import { ProductThumb } from "@/components/product-image";
@@ -63,10 +64,10 @@ const ANNOUNCE_ICON: Record<string, LucideIcon> = { result_mail: Mail, winner_ma
 /** 期間1行（購入=買い物袋 / 受取=プレゼントボックス）。日付の途中で折り返さない */
 function PeriodLine({ label, text }: { label: "購入" | "受取"; text: string | null }) {
   return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="period" data-kind={label} title={`${label}期間`} aria-label={`${label}期間 ${text ?? "未定"}`}>
-      {label === "受取" ? <Gift className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+    <FitLine innerProps={{ "data-testid": "period", "data-kind": label, title: `${label}期間`, "aria-label": `${label}期間 ${text ?? "未定"}` }}>
+      {label === "受取" ? <Gift className="size-[1.15em] shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-[1.15em] shrink-0 text-muted-foreground" aria-hidden="true" />}
       <span className={text ? "" : "text-muted-foreground"}>{text ?? "未定"}</span>
-    </span>
+    </FitLine>
   );
 }
 
@@ -189,10 +190,10 @@ export function LotteryCard({
               <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] tracking-tight" data-testid="card-deadline">
                 {appliedTab ? (
                   <>
-                    <span className={cn("inline-flex items-center gap-0.5", stage === "unknown" && "text-muted-foreground")} data-testid="result-day">
-                      <CalendarCheck className="size-3 shrink-0" aria-hidden="true" />
+                    <FitLine className="inline-block w-auto" innerProps={{ className: cn("gap-0.5", stage === "unknown" && "text-muted-foreground"), "data-testid": "result-day" }}>
+                      <CalendarCheck className="size-[1.1em] shrink-0" aria-hidden="true" />
                       {resultDayText(lottery, now)}
-                    </span>
+                    </FitLine>
                     <ResultCountdownBadge lottery={lottery} className="px-1 py-0.5 text-[11px]" />
                   </>
                 ) : wonTab && won ? (
@@ -207,10 +208,10 @@ export function LotteryCard({
                 ) : (
                   <>
                     {deadlineText ? (
-                      <span className="inline-flex items-center gap-0.5 font-medium" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                        <Clock className="size-3 text-primary-ink" aria-hidden="true" />
+                      <FitLine className="inline-block w-auto" innerProps={{ className: "gap-0.5 font-medium", "data-testid": "simple-deadline", "aria-label": `応募締切 ${formatFlexible(lottery.applyDeadline)}` }}>
+                        <Clock className="size-[1.1em] text-primary-ink" aria-hidden="true" />
                         {deadlineText}
-                      </span>
+                      </FitLine>
                     ) : (
                       <span className="text-muted-foreground">締切未確認</span>
                     )}
@@ -242,14 +243,14 @@ export function LotteryCard({
                 {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
-              <span className="flex flex-col items-start gap-y-0.5 text-xs" data-testid="card-dates">
+              <span className="flex w-full min-w-0 flex-col items-stretch gap-y-0.5 text-xs" data-testid="card-dates">
                 {appliedTab ? (
                   <>
                     {/* 応募済み: 左=当落発表日（発表期間） / 右=購入期間（分離していれば受取期間）。応募締切はカードに出さない（詳細で確認できる） */}
-                    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", stage === "unknown" && "text-muted-foreground")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
-                      <CalendarCheck className="size-3.5 shrink-0" aria-hidden="true" />
+                    <FitLine innerProps={{ className: stage === "unknown" ? "text-muted-foreground" : undefined, "data-testid": "result-day", "aria-label": `当選発表 ${formatFlexible(lottery.resultDate)}` }}>
+                      <CalendarCheck className="size-[1.15em] shrink-0" aria-hidden="true" />
                       {stage === "unknown" ? resultDayText(lottery, now) : `発表 ${resultDayText(lottery, now)}`}
-                    </span>
+                    </FitLine>
                     {periodNode}
                   </>
                 ) : wonTab && won ? (
@@ -261,10 +262,10 @@ export function LotteryCard({
                 ) : (
                   <>
                     {display.deadline && (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="deadline-day" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                        <Clock className="size-3.5 shrink-0 text-primary-ink" aria-hidden="true" />
+                      <FitLine innerProps={{ "data-testid": "deadline-day", "aria-label": `応募締切 ${formatFlexible(lottery.applyDeadline)}` }}>
+                        <Clock className="size-[1.15em] shrink-0 text-primary-ink" aria-hidden="true" />
                         <span>{deadlineW ?? "—"}</span>
-                      </span>
+                      </FitLine>
                     )}
                     {periodNode}
                   </>

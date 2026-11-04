@@ -1328,6 +1328,8 @@ test.describe("Stage 5M: 抽選UI改善", () => {
 
 test.describe("Stage 4C: NEW表示", () => {
   test("全情報タブに、まだ確認していない新着の件数が出る（トレマネが新規に把握した抽選が対象）", async ({ page }) => {
+    // 新着(L5)はAがスルー中の店舗のため、通常表示ではAの一覧とバッジに含めない（スルー表示は全タブ共通）。スルーしていないBで確認する
+    await switchProfile(page, "B");
     const badge = page.getByRole("tab", { name: /全情報/ }).getByTestId("tab-new");
     await expect(badge).toHaveText("1"); // 「NEW」の文字は出さず、小さな件数バッジだけ
     await expect(page.getByRole("tab", { name: /全情報/ })).not.toContainText("NEW");
@@ -1492,5 +1494,71 @@ test.describe("Stage 5Q: 見出し・収支の年月選択・シンプルカー�
 
   test("説明のⓘは「補足」の文字を出さない", async ({ page }) => {
     await expect(page.getByText("補足", { exact: true })).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------- Stage 5Z: 日付行は必ず1行（折り返し・はみ出しを成功扱いにしない）
+test.describe("Stage 5Z 日付の1行表示", () => {
+  const ids = ["deadline-day", "period", "result-day", "simple-deadline"];
+  /** 現在の画面の日付行を検査し、検査した行数を返す */
+  async function checkRows(page: Page, label: string): Promise<number> {
+    let checked = 0;
+    const cards = page.getByTestId("lottery-card");
+    const n = await cards.count();
+    for (let i = 0; i < n; i++) {
+      const c = cards.nth(i);
+      const cb = (await c.boundingBox())!;
+      for (const id of ids) {
+        const rows = c.getByTestId(id);
+        for (let k = 0; k < (await rows.count()); k++) {
+          const r = rows.nth(k);
+          const b = (await r.boundingBox())!;
+          const lh = await r.evaluate((e) => parseFloat(getComputedStyle(e).lineHeight) || parseFloat(getComputedStyle(e).fontSize) * 1.4);
+          expect(b.height, `${label}/${id} 高さ`).toBeLessThan(lh * 1.6); // 折り返すと2行分以上になる
+          expect(b.x + b.width, `${label}/${id} 右端`).toBeLessThanOrEqual(cb.x + cb.width + 0.5);
+          expect(await r.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), `${label}/${id} 内容幅`).toBe(true);
+          checked++;
+        }
+      }
+    }
+    return checked;
+  }
+
+  for (const width of [320, 375, 390, 430]) {
+    test(`${width}px: 詳細・シンプルの全タブで、日付行が折り返さずカード幅からはみ出さない（長い店舗名でも）`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      let total = 0;
+      for (const detail of [true, false]) {
+        const toggle = page.getByTestId("view-toggle");
+        if ((await toggle.getAttribute("aria-pressed")) !== String(detail)) {
+          await toggle.click();
+          await expect(toggle).toHaveAttribute("aria-pressed", String(detail));
+          await page.waitForTimeout(350);
+        }
+        for (const tab of [/全情報/, /★管理対象/, /応募済み/, /当選/]) {
+          await page.getByRole("tab", { name: tab }).click();
+          await page.evaluate(() => {
+            for (const e of document.querySelectorAll<HTMLElement>('[data-testid="store-name"]')) e.textContent = "とても長い系列名の長い長い店舗名 ○○駅前ショッピングセンター店 本館2階";
+          });
+          total += await checkRows(page, `${detail ? "詳細" : "シンプル"}/${tab}`);
+        }
+      }
+      expect(total, "検査した日付行が0件（空振り）").toBeGreaterThan(10);
+    });
+  }
+
+  test("収まらない長い日付は、行全体の文字サイズが縮小されて1行に収まる（一部だけ小さくならない）", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.getByRole("tab", { name: /全情報/ }).click();
+    const row = page.getByTestId("period").filter({ hasText: /\d+\/\d+/ }).first();
+    const before = await row.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+    // 利用できる幅を狭めて（親の幅を70pxに固定）、収まらない状況を作る。幅の変化で測り直される
+    await row.evaluate((e) => { e.parentElement!.style.width = "70px"; });
+    await expect.poll(async () => row.evaluate((e) => e.scrollWidth <= e.parentElement!.clientWidth + 1)).toBe(true);
+    const after = await row.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+    expect(after).toBeLessThan(before); // 日付行全体の文字サイズを縮小（アイコンは em 指定で同じ比率）
+    expect(after).toBeGreaterThanOrEqual(8);
+    const h = (await row.boundingBox())!.height;
+    expect(h).toBeLessThan(after * 1.8); // 折り返していない
   });
 });
