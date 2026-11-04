@@ -26,6 +26,7 @@ import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
+import { RegistrationOrigin } from "@/components/registration-origin";
 import { EligibilitySection } from "@/components/eligibility-mark";
 import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
@@ -203,7 +204,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               <Field label="発表方法" className="col-span-2">
                 <AnnounceView lottery={lottery} />
               </Field>
-              <Field label="登録元">{{ manual: "手動", x_parse: "X解析（未確認）", auto: "自動取得", import: "インポート" }[lottery.sourceKind]}</Field>
+              <Field label="登録経路">
+                <RegistrationOrigin lottery={lottery} />
+              </Field>
             </dl>
 
             {/* 4. URL */}

@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ackRunNoticesAction, getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
+import { ManualBanner, ManualItemSummary } from "@/components/manual-review";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { manualSignature, type ManualItem } from "@/lib/collector/manual-items";
 import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { cn } from "@/lib/utils";
 
 const SEEN_KEY = "trm.runNotice";
+const MANUAL_SEEN_KEY = "trm.manualNotice";
 
 /** 収集結果の件数表（ポップアップ・ベル・設定の履歴で共通） */
 export function RunCounts({ s, compact = false }: { s: RunSummary; compact?: boolean }) {
@@ -46,26 +49,44 @@ export function RunStateLabel({ s }: { s: RunSummary }) {
  * 履歴は通知（ベル）と、設定の自動収集から確認できる。
  */
 export function CollectionResultNotice() {
-  const [notice, setNotice] = useState<{ s: RunSummary; ackIds: string[] } | null>(null);
+  const [notice, setNotice] = useState<{ s: RunSummary | null; ackIds: string[]; manual: ManualItem[] } | null>(null);
 
   useEffect(() => {
     let live = true;
     void getRunNoticesAction().then((r) => {
-      if (!live || !r.notice) return;
-      let seen = "";
-      try {
-        seen = window.sessionStorage.getItem(SEEN_KEY) ?? "";
-      } catch {
-        /* 保存できなくても動作は継続 */
+      if (!live) return;
+      const store = (k: string): string => {
+        try {
+          return window.sessionStorage.getItem(k) ?? "";
+        } catch {
+          return "";
+        }
+      };
+      const put = (k: string, v: string) => {
+        try {
+          window.sessionStorage.setItem(k, v);
+        } catch {
+          /* 保存できなくても動作は継続 */
+        }
+      };
+      let run: RunSummary | null = null;
+      if (r.notice) {
+        const stamp = `${r.notice.runId}:${r.notice.state}`;
+        if (store(SEEN_KEY) !== stamp) {
+          // この起動中に表示済みなら繰り返さない（処理中のまま繰り返さない）
+          put(SEEN_KEY, stamp);
+          run = r.notice;
+        }
       }
-      const stamp = `${r.notice.runId}:${r.notice.state}`;
-      if (seen === stamp) return; // この起動中に表示済み（処理中のまま繰り返さない）
-      try {
-        window.sessionStorage.setItem(SEEN_KEY, stamp);
-      } catch {
-        /* noop */
+      // 要手動確認: 未対応の案件の集合が変わったときだけ、起動時に最上部の赤い警告で知らせる。閉じただけでは対応済みにならず、通知・設定の一覧に残る
+      const open = r.manual ?? [];
+      const sig = manualSignature(open);
+      let manual: ManualItem[] = [];
+      if (open.length > 0 && store(MANUAL_SEEN_KEY) !== sig) {
+        put(MANUAL_SEEN_KEY, sig);
+        manual = open;
       }
-      setNotice({ s: r.notice, ackIds: r.ackIds });
+      if (run || manual.length > 0) setNotice({ s: run, ackIds: run ? r.ackIds : [], manual });
     });
     return () => {
       live = false;
@@ -78,18 +99,34 @@ export function CollectionResultNotice() {
   };
   if (!notice) return null;
   const s = notice.s;
-  const processing = s.state === "processing";
+  const processing = s?.state === "processing";
   return (
     <Dialog open onOpenChange={(v) => !v && close()}>
       <DialogContent className="max-w-sm space-y-3" data-testid="run-notice">
-        <DialogTitle className="flex items-center gap-2">
-          {runTitle(s)}
-          <RunStateLabel s={s} />
-        </DialogTitle>
+        {/* 取得不可（要手動確認）は、通常の解析件数・登録件数より上に置く */}
+        <ManualBanner count={notice.manual.length} />
+        {notice.manual.length > 0 && (
+          <ul className="max-h-56 space-y-1.5 overflow-y-auto" data-testid="manual-notice-list">
+            {notice.manual.slice(0, 5).map((it) => (
+              <li key={it.id} className="rounded-md bg-danger/5 p-1.5">
+                <ManualItemSummary it={it} />
+              </li>
+            ))}
+            {notice.manual.length > 5 && <li className="text-xs text-muted-foreground">ほか{notice.manual.length - 5}件</li>}
+          </ul>
+        )}
+        {s ? (
+          <DialogTitle className="flex items-center gap-2">
+            {runTitle(s)}
+            <RunStateLabel s={s} />
+          </DialogTitle>
+        ) : (
+          <DialogTitle className="sr-only">要手動確認</DialogTitle>
+        )}
         <DialogDescription className="sr-only">自動収集の結果の要約</DialogDescription>
         {processing && <p className="text-xs text-muted-foreground">解析の途中です。数字は途中経過で、最終結果ではありません。</p>}
-        <RunCounts s={s} />
-        {(s.excluded > 0 || s.duplicates > 0 || s.costJpy > 0) && (
+        {s && <RunCounts s={s} />}
+        {s && (s.excluded > 0 || s.duplicates > 0 || s.costJpy > 0) && (
           <p className="text-[11px] text-muted-foreground">
             対象外 {s.excluded}件・重複 {s.duplicates}件・AI費用 約{s.costJpy}円
           </p>
@@ -98,15 +135,22 @@ export function CollectionResultNotice() {
           <button type="button" onClick={close} className="min-h-9 rounded-md px-3 text-sm text-muted-foreground hover:bg-muted" data-testid="run-notice-close">
             閉じる
           </button>
+          {notice.manual.length > 0 && (
+            <Link href="/settings/collection#manual" onClick={close} className="flex min-h-9 items-center rounded-md bg-danger px-3 text-sm text-white" data-testid="run-notice-manual">
+              要手動確認の一覧へ
+            </Link>
+          )}
+          {s && (
           <Link href="/settings/collection#history" onClick={close} className="flex min-h-9 items-center rounded-md border px-3 text-sm hover:bg-muted" data-testid="run-notice-detail">
             詳細
           </Link>
-          {s.autoRegistered > 0 && (
+          )}
+          {s && s.autoRegistered > 0 && (
             <Link href="/lotteries" onClick={close} className="flex min-h-9 items-center rounded-md border px-3 text-sm hover:bg-muted" data-testid="run-notice-lotteries">
               登録された抽選
             </Link>
           )}
-          {s.review > 0 && (
+          {s && s.review > 0 && (
             <Link href="/settings/collection#candidates" onClick={close} className="flex min-h-9 items-center rounded-md bg-primary px-3 text-sm text-primary-foreground" data-testid="run-notice-review">
               確認待ちへ
             </Link>

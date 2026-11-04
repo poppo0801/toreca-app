@@ -377,6 +377,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       eventState: l.event_state as EventState,
       limit: { basis: l.limit_basis as "account" | "person" | "family" | "address" | "unknown", maxCount: l.limit_max_count },
       sourceKind: l.source_kind as "manual" | "x_parse" | "auto" | "import",
+      registrationPath: (l.registration_path ?? (l.source_kind === "auto" ? "auto" : "manual")) as "manual" | "manual_ai" | "auto" | "auto_confirmed",
+      confirmedAt: l.confirmed_at ?? null,
       isNew: l.is_new,
       memo: l.memo,
       createdAt: l.created_at,
@@ -557,6 +559,8 @@ export async function saveLottery(
     })
     .eq("id", data as string);
   if (tax.error) return fail("抽選は保存しましたが、発表方法・応募条件の分類を保存できませんでした。もう一度保存してください");
+  // 登録経路（新規）: 手動登録／AIを利用した手動登録。自動収集は収集処理が「自動収集」に上書きする
+  if (id === null) await db.from("lotteries").update({ registration_path: input.aiFeedback ? "manual_ai" : "manual" }).eq("id", data as string);
   // AI読み取りから新規登録した場合: AIの抽出結果と最終内容の比較を1回だけ記録する（失敗しても登録自体は成功のまま）
   if (id === null && input.aiFeedback) {
     try {

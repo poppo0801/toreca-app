@@ -253,6 +253,10 @@ export interface Lottery {
   eventState: EventState;
   limit: ApplicationLimit;
   sourceKind: SourceKind;
+  /** 登録経路: manual=手動 / manual_ai=AIを利用した手動 / auto=自動収集（未確認） / auto_confirmed=自動収集後にユーザーが確認 */
+  registrationPath?: "manual" | "manual_ai" | "auto" | "auto_confirmed";
+  /** 利用者が内容を確認した日時（確認した履歴であり、内容の正確性を保証するものではない） */
+  confirmedAt?: string | null;
   /** AI/自動登録の確認済みフラグ。NEWバッジに使う */
   isNew: boolean;
   memo: string;

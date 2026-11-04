@@ -6,6 +6,8 @@ import { Bell } from "lucide-react";
 import { getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
 import { useApp } from "@/components/app-provider";
 import { RunCounts, RunStateLabel } from "@/components/collection-result-notice";
+import { ManualBanner, ManualItemSummary } from "@/components/manual-review";
+import type { ManualItem } from "@/lib/collector/manual-items";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { computeAlerts } from "@/lib/notifications";
@@ -32,8 +34,10 @@ export function NotificationBell() {
   const [read, setRead] = useState<Set<string>>(new Set());
   // 自動収集の結果の履歴（抽選の通知とは別の区画。通知を開いたときに読み込む）
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  // 要手動確認（自動収集で解決できなかった案件）。閉じたポップアップに関係なく、対応するまで通知に残す
+  const [manual, setManual] = useState<ManualItem[]>([]);
   const alerts = useMemo(() => computeAlerts(data, profile.id, now), [data, profile.id, now]);
-  const count = alerts.length;
+  const count = alerts.length + manual.length;
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末ローカルの既読状態の復元
@@ -50,6 +54,14 @@ export function NotificationBell() {
       /* 非対応 */
     }
   }, [count]);
+
+  useEffect(() => {
+    let live = true;
+    void getRunNoticesAction().then((r) => live && setManual(r.manual ?? []));
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -101,8 +113,23 @@ export function NotificationBell() {
         <DialogContent className="max-w-lg">
           <DialogTitle>{profile.label} の通知</DialogTitle>
           <DialogDescription>
-            {count === 0 ? "未対応の項目はありません。" : `未対応 ${count}件${unread > 0 ? `（未読 ${unread}件）` : ""}。応募・当落登録・購入が済むと自動で消えます。`}
+            {count === 0 && manual.length === 0 ? "未対応の項目はありません。" : `未対応 ${count}件${unread > 0 ? `（未読 ${unread}件）` : ""}。応募・当落登録・購入が済むと自動で消えます。`}
           </DialogDescription>
+          {manual.length > 0 && (
+            <section className="mt-3 space-y-1.5" data-testid="manual-section">
+              <ManualBanner count={manual.length} />
+              <ul className="max-h-48 space-y-1.5 overflow-y-auto">
+                {manual.slice(0, 6).map((it) => (
+                  <li key={it.id} className="rounded-md border border-danger/40 p-1.5">
+                    <ManualItemSummary it={it} />
+                  </li>
+                ))}
+              </ul>
+              <Link href="/settings/collection#manual" onClick={() => setOpen(false)} className="block text-right text-xs text-info underline" data-testid="manual-section-link">
+                要手動確認の一覧へ{manual.length > 6 ? `（ほか${manual.length - 6}件）` : ""}
+              </Link>
+            </section>
+          )}
           <ul className="mt-3 space-y-1.5" data-testid="alerts-list">
             {alerts.map((a) => (
               <li key={a.key}>

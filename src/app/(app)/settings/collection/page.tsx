@@ -1,6 +1,9 @@
 import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
-import { AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
+import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
+import { ManualReviewList } from "@/components/manual-review";
+import { ExclusionRules, HardSources, type ExclusionView, type HardSourceView } from "@/components/source-controls";
+import { loadManualItems } from "@/lib/server/collector/manual-items";
 import { computeMetrics } from "@/lib/collector/metrics";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
 import { healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
@@ -62,6 +65,11 @@ export default async function CollectionPage() {
   ]);
   const metricRows = await db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000);
   const metrics = computeMetrics(metricRows.data ?? [], now);
+  const [manualItems, exclusions, hardSources] = await Promise.all([
+    loadManualItems(db as never, now),
+    db.from("collection_exclusions").select("id,scope,key,label,reason_code,reason_note,active,created_at,released_at").order("created_at", { ascending: false }).limit(200),
+    db.from("collection_hard_sources").select("id,scope,key,label,service_host,fail_kind,fail_count,last_checked_at,alt_source,alt_success,alt_fail,needs_manual").order("last_checked_at", { ascending: false }).limit(100),
+  ]);
   const { data: authUser } = await db.auth.getUser();
   const runSummaries = (await loadRunNotices(db as never, authUser.user?.id ?? null, 6)).summaries;
   const candidates = [lReview, lQueued, lReg, lEx, lDup, lFail].flatMap((r) => r.data ?? []);
@@ -124,6 +132,10 @@ export default async function CollectionPage() {
         </Link>
       </p>
       <PageHeading navId="settings" className="mb-3">抽選情報の自動収集</PageHeading>
+      {/* 要手動確認（システムが解決できなかった案件）。優先収集メモとは別の一覧 */}
+      <div className="mb-3">
+        <ManualReviewList items={manualItems} />
+      </div>
       <AutoCollectView
         settings={st as unknown as SettingsView}
         sources={srcs}
@@ -140,6 +152,18 @@ export default async function CollectionPage() {
         aiConfigured={Boolean(process.env.ANTHROPIC_API_KEY?.trim()) || process.env.AI_PROVIDER === "mock"}
         usage={{ xPosts, xCostJpy: estimateCostJpy(xPosts), aiCalls: budget.calls, newAuto: newCount.count ?? 0 }}
       />
+      <div className="mt-3">
+        <Block no="⑤" title="収集元の管理" testId="sources" summary={`除外${(exclusions.data ?? []).filter((r) => r.active).length}件・取得困難${(hardSources.data ?? []).length}件`}>
+          <div className="space-y-2">
+            <p className="text-xs font-medium">除外中の収集元</p>
+            <ExclusionRules rules={(exclusions.data ?? []) as unknown as ExclusionView[]} />
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium">取得が難しい収集元（記録）</p>
+            <HardSources rows={(hardSources.data ?? []) as unknown as HardSourceView[]} />
+          </div>
+        </Block>
+      </div>
     </>
   );
 }

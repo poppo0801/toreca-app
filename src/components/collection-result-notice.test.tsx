@@ -6,9 +6,10 @@ import { summarizeRun, type RunSummary } from "@/lib/collector/run-summary";
 const summaries: RunSummary[] = [];
 let notice: RunSummary | null = null;
 let ackIds: string[] = [];
+let manual: unknown[] = [];
 const ack = vi.fn(async (..._a: unknown[]) => ({ ok: true }));
 vi.mock("@/app/(app)/collection-notice-actions", () => ({
-  getRunNoticesAction: async () => ({ summaries, notice, ackIds }),
+  getRunNoticesAction: async () => ({ summaries, notice, ackIds, manual }),
   ackRunNoticesAction: (...a: unknown[]) => ack(...a),
 }));
 

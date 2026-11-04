@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
 import { ackRuns, loadRunNotices, type RunNotices } from "@/lib/server/collector/run-notices";
 
-const EMPTY: RunNotices = { summaries: [], notice: null, ackIds: [] };
+const EMPTY: RunNotices = { summaries: [], notice: null, ackIds: [], manual: [] };
 
 /** 起動時の収集結果の通知と、直近の収集の履歴（デモモード・未ログインでは空） */
 export async function getRunNoticesAction(): Promise<RunNotices> {

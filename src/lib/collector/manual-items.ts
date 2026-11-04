@@ -1,0 +1,76 @@
+/**
+ * 要手動確認（システム側で解決できなかった候補）の表示用データ（Stage 5T）。
+ * 優先収集メモ（利用者が自発的に指定した調査依頼）とは別物で、同じ一覧には混在させない。
+ */
+import { FAIL_KIND_LABEL, type FailKind } from "@/lib/collector/queue";
+import { hostOf, manualRank, urgencyOf, URGENCY_LABEL, type Urgency } from "@/lib/collector/triage";
+
+export interface ManualRow {
+  id: string;
+  title: string;
+  source_url: string | null;
+  due_at: string | null;
+  manual_reason: string;
+  fail_kind: string | null;
+  manual_since: string | null;
+  draft: unknown;
+}
+
+export interface ManualItem {
+  id: string;
+  /** 系列・店舗（解析済みの場合）。不明なら null */
+  where: string | null;
+  /** 商品（解析済みの場合） */
+  products: string[];
+  title: string;
+  reason: string;
+  /** 取得できなかった原因（分類）。取得以外の理由なら null */
+  failLabel: string | null;
+  dueAt: string | null;
+  urgency: Urgency;
+  urgencyLabel: string;
+  sourceUrl: string | null;
+  sourceHost: string | null;
+  since: string | null;
+  /** 解析済みの内容があり、画面上で編集して登録できる */
+  editable: boolean;
+}
+
+type DraftLike = { input?: { chain?: { name?: string }; store?: { name?: string }; items?: { product?: { name?: string } }[] } } | null;
+
+export function toManualItem(r: ManualRow, now: Date): ManualItem {
+  const d = (r.draft ?? null) as DraftLike;
+  const chain = d?.input?.chain?.name?.trim();
+  const store = d?.input?.store?.name?.trim();
+  const dueAt = r.due_at ? new Date(r.due_at) : null;
+  const urgency = urgencyOf(dueAt, now);
+  const kind = r.fail_kind as FailKind | null;
+  return {
+    id: r.id,
+    where: [chain, store].filter(Boolean).join(" / ") || null,
+    products: (d?.input?.items ?? []).map((i) => i.product?.name?.trim() ?? "").filter(Boolean).slice(0, 4),
+    title: r.title,
+    reason: r.manual_reason || "自動で解決できませんでした",
+    failLabel: kind && FAIL_KIND_LABEL[kind] ? FAIL_KIND_LABEL[kind] : null,
+    dueAt: r.due_at,
+    urgency,
+    urgencyLabel: URGENCY_LABEL[urgency],
+    sourceUrl: r.source_url,
+    sourceHost: hostOf(r.source_url),
+    since: r.manual_since,
+    editable: !!d?.input,
+  };
+}
+
+/** 締切が近い順（本日→明日→近い→締切不明→余裕あり）。同じ緊急度では締切の早い順、次に重要度の目安として手動確認になった順 */
+export function sortManual(items: ManualItem[]): ManualItem[] {
+  return items.slice().sort((a, b) => manualRank(a.urgency) - manualRank(b.urgency) || (a.dueAt ?? "9").localeCompare(b.dueAt ?? "9") || (a.since ?? "").localeCompare(b.since ?? ""));
+}
+
+/** 最上部の赤い警告の文言 */
+export const manualHeadline = (n: number) => `取得不可：${n}件／要手動確認`;
+
+/** 表示済みの判定用。開いている案件の集合が変わったときだけ、起動時に再度知らせる（閉じただけで対応済みにはしない） */
+export function manualSignature(items: Pick<ManualItem, "id">[]): string {
+  return items.map((i) => i.id).sort().join(",");
+}
