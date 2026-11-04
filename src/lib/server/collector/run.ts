@@ -18,6 +18,7 @@ import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-f
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FieldChange } from "@/lib/collector/queue";
+import { runMemoPass } from "@/lib/server/collector/memos";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -665,6 +666,8 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
     }
 
     // ------------------------------------------------ 解析(キュー): 手動実行でも、定期ワーカーと同じ処理(原子的な取得・優先順位・再試行)を使う
+    // 優先収集メモの照合（既存の抽選・候補・参考URL）。該当する解析待ちを先に処理できるよう、キューの処理の前に行う
+    await runMemoPass(deps, { data }).catch(() => undefined);
     const q = await processQueue(deps, { settings, cond, data, aiLeft, timeLeft, perBatch: AI_CONCURRENCY });
     aiCalls += q.aiCalls;
     registered += q.registered;
@@ -923,6 +926,7 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
     // ワーカーの1日の上限(日本時間)と、既存のAI利用上限・月額予算
     const allow = await aiAllowance(deps, settings.worker_batch, dailyLimit);
     let stopReason: string | null = allow.stop === "daily" ? "本日のワーカーのAI読み取り上限に達しました" : allow.stop === "budget" ? "今月のAI予算に達したため停止しています" : allow.note || null;
+    await runMemoPass(deps, { data }).catch(() => undefined);
     const q = await processQueue(deps, { settings, cond, data, aiLeft: allow.allowed, timeLeft, perBatch: AI_CONCURRENCY });
     stopReason = q.stopReason ?? stopReason;
     const rc = timeLeft() > 12_000 ? await recheckPages(deps, { max: 8, recheckHours: settings.recheck_hours, timeLeft }) : { checked: 0, changed: 0 };

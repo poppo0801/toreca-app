@@ -141,6 +141,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
 
   // マスターは1つも作らず、名称を入力するだけで登録（保存時に仮登録される）
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E電機", "E2E店", "E2Eテスト商品");
   await expect(dialog.getByTestId("new-master-hint").first()).toContainText("仮登録");
@@ -278,6 +279,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
   // 2時間後に締切の未応募の抽選を登録（既存マスターは名称の一致で再利用され、重複作成されない）
   const dl = jstParts(120);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E電機", "E2E店", "E2Eテスト商品");
   await expect(dialog.getByTestId("new-master-hint")).toHaveCount(0); // すべて既存マスター
@@ -363,6 +365,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
 test("複数商品の抽選（B方式）: 商品ごとの当落→当選した商品だけが購入・収支に入る", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E電機", "E2E店", "E2E複数商品1");
   await dialog.getByTestId("add-item").click(); // 商品を追加 → 2商品になると、その近くに抽選方式が出る
@@ -430,6 +433,7 @@ test("商品画像: 画像なしはプレースホルダー、手動アップロ
   await login(page);
   // 画像なしの商品を（抽選登録の自動仮登録で）用意
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E画像電機", "E2E画像店", "E2E画像商品");
   await dialog.getByRole("button", { name: "保存" }).click();
@@ -510,6 +514,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証（ai-live）で確認する。費用を発生させない");
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog").first();
   await dialog.getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
@@ -564,6 +569,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
 
   // 同じ内容を再度読み取ると、登録済みとして重複の注意が出る（二重登録の防止）
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const d2 = page.getByRole("dialog").first();
   await d2.getByTestId("ai-open").click();
   const ai2 = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
@@ -582,6 +588,7 @@ test("商品マスター: 検索・絞り込み、セット構成の登録、画
   await login(page);
   // 抽選登録の自動仮登録で2商品を用意（セット商品と構成商品）
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2Eセット電機", "E2Eセット店", "E2Eセット商品");
   await dialog.getByTestId("add-item").click(); // 商品を追加 → 2商品になると、その近くに抽選方式が出る
@@ -645,6 +652,7 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   test.setTimeout(120_000); // 端末2台分の操作を含む長いシナリオ
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const form = page.getByTestId("lottery-form");
   await expect(form).toBeVisible();
 
@@ -704,6 +712,7 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await expect(page.getByTestId("draft-resume")).toHaveCount(0);
   await expect(page.getByTestId("form-minimized")).toHaveCount(0);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const form2 = page.getByTestId("lottery-form");
   await expect(form2.getByRole("combobox", { name: "店舗", exact: true })).toHaveValue("");
   await fillMasters(form2, "E2Eフォーム電機", "E2Eフォーム店", "E2Eフォーム商品");
@@ -775,6 +784,7 @@ test("購入記録: 収支・抽選の購入と同じ記録。登録・編集・
 
   // 抽選で当選→購入済み → 購入記録に自動で入る（金額は未入力）
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const form = page.getByTestId("lottery-form");
   await fillMasters(form, "E2E購入電機", "E2E購入店", "E2E購入商品");
   await form.getByLabel("Aは応募済み").check();
@@ -922,6 +932,7 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
 
   // 店舗マスターを用意（抽選登録の自動仮登録）
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const form = page.getByTestId("lottery-form");
   await fillMasters(form, "E2E位置電機", "E2E位置店", "E2E位置商品");
   await form.getByRole("button", { name: "保存" }).click();
@@ -1351,6 +1362,7 @@ test("まとめてAI読み取り: 文章・画像（A=1件に複数枚/B=1枚ず
   await page.goto("/lotteries");
   await expect(page.getByTestId("bulk-badge")).toBeVisible(); // 未確認の結果がある（再読み込み後も）
   await page.getByTestId("register").click();
+  await page.getByTestId("register-lottery").click();
   await page.getByTestId("lottery-form").getByTestId("bulk-open").click();
   await expect(page).toHaveURL(/\/lotteries\/bulk$/);
   await page.getByTestId("job-row").first().click();
@@ -1422,6 +1434,7 @@ test("縦長画像(786×10,810px): ブラウザで幅を保って11枚に分割�
 
   // 単体: 送信される画像は11枚（長辺を縮小して幅116pxになる従来方式ではない）
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   await page.getByRole("dialog").first().getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
   await ai.getByRole("tab", { name: "画像" }).click();
@@ -1497,6 +1510,7 @@ test("iPhone共有: 未ログインで共有を開くとログイン後に共有
 test("Stage 5I: 当落発表を期間で指定でき（チェックした時だけ終了日欄）、一覧に『開始〜終了』で出る。解除すると単一日に戻る", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E期間電機", "E2E期間店", "E2E期間商品");
   await dialog.getByLabel("応募締切の日付").fill("2099-02-01");
@@ -1567,6 +1581,7 @@ test("Stage 5I: 商品画像は軽量サムネイルを内容ハッシュ入りU
   const noise = await sharp((await import("node:crypto")).randomBytes(700 * 900 * 3), { raw: { width: 700, height: 900, channels: 3 } }).png().toBuffer();
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E速度電機", "E2E速度店", "E2E速度商品");
   await dialog.getByRole("button", { name: "保存" }).click();
@@ -1646,6 +1661,7 @@ test("表示領域: 抽選登録のボトムシートは、開いた直後・最
     await page.emulateMedia({ colorScheme: theme });
     for (let round = 0; round < 2; round++) {
       await page.getByRole("button", { name: "＋登録" }).click();
+      await page.getByTestId("register-lottery").click();
       const dialog = page.getByRole("dialog");
       await check(dialog); // 開いた直後
       await dialog.getByRole("combobox", { name: "系列", exact: true }).focus(); // 入力欄にフォーカス
@@ -1674,6 +1690,7 @@ test("表示領域: 抽選登録のボトムシートは、開いた直後・最
 test("Stage 5J 登録フォーム: 仮登録は項目名の横の小さなバッジ（説明文なし）。商品は1つが基本で、追加すると抽選方式が出る。戻すと単一に戻る", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E5J電機", "E2E5J店", "E2E5J商品");
   // 仮登録はバッジ（系列・店舗・商品の項目名の横）。長い説明文は常時出さない
@@ -1745,6 +1762,7 @@ test("Stage 5J ユーザーの表示順: 設定で並べ替えると、抽選カ
   expect(await labelsIn(sheet.getByTestId("user-section").locator("[data-account]"))).toEqual(after);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   const formLabels = (await dialog.locator("label").filter({ hasText: /の応募状況$/ }).allInnerTexts()).map((t) => t.trim().slice(0, 1));
   if (formLabels.length >= 2) expect(formLabels.filter((l) => after.includes(l))).toEqual(after.filter((l) => formLabels.includes(l)));
@@ -1758,6 +1776,7 @@ test("Stage 5J ユーザーの表示順: 設定で並べ替えると、抽選カ
 test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類のタグ。発表方法は単一選択、応募条件は複数選択で、詳細に分類ラベルで表示される。AND/ORは複数のときだけ", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E5L電機", "E2E5L店", "E2E5L商品");
   await dialog.getByLabel("応募締切の日付").fill("2099-04-01");
@@ -1956,6 +1975,7 @@ test("Stage 5M 系列ロゴ: マスター管理で登録→抽選カードの店
   const chain = `E2E5M系列${stamp}`;
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
+  await page.getByTestId("register-lottery").click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, chain, `E2E5M店${stamp}`, `E2E5M商品${stamp}`);
   await dialog.getByLabel("応募締切の日付").fill("2099-04-01");

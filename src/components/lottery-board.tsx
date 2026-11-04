@@ -8,6 +8,7 @@ import { useSearchParams } from "next/navigation";
 import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { useAiJobs } from "@/components/ai-jobs-provider";
+import { MemoFormDialog, MemoListDialog, RegisterChooser } from "@/components/collection-memos";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
@@ -116,6 +117,10 @@ function LotteryBoardInner() {
   const focusId = params.get("focus");
   const { unseen: unseenJobs } = useAiJobs();
   const [registering, setRegistering] = useState(false);
+  // ＋登録: 抽選情報を登録／優先収集メモ（入口は1つのまま、選んでから開く）
+  const [chooser, setChooser] = useState(false);
+  const [memoForm, setMemoForm] = useState(false);
+  const [memoList, setMemoList] = useState(false);
   const [tab, setTab] = useState<Tab>("managed");
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   // シンプル／詳細はプロフィール別の設定（既定は詳細＝従来の情報量）
@@ -221,7 +226,7 @@ function LotteryBoardInner() {
             </button>
             {persistent ? (
               <>
-                <Button size="sm" className="relative" onClick={() => setRegistering(true)} data-testid="register">
+                <Button size="sm" className="relative" onClick={() => setChooser(true)} data-testid="register">
                   ＋登録
                   {unseenJobs > 0 && <span className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-card bg-info" data-testid="bulk-badge" aria-label={`まとめて登録の確認待ち ${unseenJobs}件`} />}
                 </Button>
@@ -264,6 +269,15 @@ function LotteryBoardInner() {
         </div>
       </div>
       {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
+      <RegisterChooser
+        open={chooser}
+        onOpenChange={setChooser}
+        onLottery={() => { setChooser(false); setRegistering(true); }}
+        onMemo={() => { setChooser(false); setMemoForm(true); }}
+        onMemoList={() => { setChooser(false); setMemoList(true); }}
+      />
+      {memoForm && <MemoFormDialog open onOpenChange={setMemoForm} />}
+      {memoList && <MemoListDialog open onOpenChange={setMemoList} />}
 
       <div className="space-y-2 pt-2">
         {legend && (
