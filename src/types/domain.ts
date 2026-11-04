@@ -68,6 +68,10 @@ export interface Chain {
   archived?: boolean;
   /** 系列ロゴの表示URL（正方形の画像。未登録は null/未設定）。所属する全店舗で共通に使う */
   logoSrc?: string | null;
+  /** 共通ブランド（例: カードボックス）。直営/その他で系列を分けても、同じブランドとして関係を保持する */
+  brandGroup?: string | null;
+  /** 運営区分: direct=直営 / other=その他 / unconfirmed=所属未確認 / 未設定=区分なし */
+  operationKind?: "direct" | "other" | "unconfirmed" | null;
 }
 
 export interface Store {

@@ -147,7 +147,34 @@ function decide<T>(ranked: Ranked<T>[]): MatchResult<T> {
   return { kind: best.kind, item: null, candidates: ranked.slice(0, 3).map((r) => r.item) };
 }
 
+/**
+ * 共通ブランドの系列（カードボックスの直営/その他/所属未確認）の振り分け。照合の順序:
+ *  1 既存の店舗マスターと一致する店舗がある系列（確認済みの直営→その他）  2 一致する店舗が無ければ、ブランド名だけで確定せず「所属未確認」の系列
+ * 同じ店舗名が複数の系列にあって決められないときも、所属未確認のまま（系列名だけで直営・その他を確定しない）。
+ */
+export function refineBrandChain(r: MatchResult<Chain>, chains: Chain[], hint: { stores?: Store[]; storeName?: string }): MatchResult<Chain> {
+  const item = r.item;
+  if (!item?.brandGroup || !(r.kind === "exact" || r.kind === "alias")) return r;
+  const siblings = chains.filter((c) => !c.archived && c.brandGroup === item.brandGroup);
+  if (siblings.length < 2) return r;
+  const unconfirmed = siblings.find((c) => c.operationKind === "unconfirmed") ?? item;
+  if (!hint.storeName || !hint.stores) return { kind: r.kind, item: unconfirmed, candidates: [] };
+  const hits = siblings.filter((c) => {
+    const m = matchStore(hint.storeName as string, c.id, hint.stores as Store[], item.brandGroup as string);
+    return m.item && (m.kind === "exact" || m.kind === "alias");
+  });
+  // 一致が1つの系列だけ（直営・その他を確認済みの店舗に基づいて決める）。複数・なしは所属未確認
+  const confirmed = hits.filter((c) => c.operationKind === "direct" || c.operationKind === "other");
+  if (hits.length === 1) return { kind: r.kind, item: hits[0], candidates: [] };
+  if (confirmed.length === 1 && hits.length === 1) return { kind: r.kind, item: confirmed[0], candidates: [] };
+  return { kind: r.kind, item: unconfirmed, candidates: [] };
+}
+
 export function matchChain(name: string, chains: Chain[], hint: { stores?: Store[]; storeName?: string } = {}): MatchResult<Chain> {
+  return refineBrandChain(matchChainBase(name, chains, hint), chains, hint);
+}
+
+function matchChainBase(name: string, chains: Chain[], hint: { stores?: Store[]; storeName?: string } = {}): MatchResult<Chain> {
   const active = chains.filter((c) => !c.archived);
   const ranked = rankByName(name, active, (c) => [c.name, ...(c.aliases ?? [])], cleanName);
   // 同じ系列の別名として複数の系列が登録されている（古本市場／ふるいち等）とき: その店舗が登録されている系列、なければ店舗数の多い系列
