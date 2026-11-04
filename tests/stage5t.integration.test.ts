@@ -69,7 +69,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 5T", () => {
     aiCalls = 0;
     // 実エンジンでの予約を検証するため anthropic 相当のエンジン名で動かす（AI呼び出しはモック）
     const d = deps();
-    d.extractor = { engine: "anthropic", extract: async (r) => { aiCalls++; return getExtractor({ AI_PROVIDER: "mock" })!.extract(r); } } as never;
+    d.extractor = { engine: "anthropic", extract: async (r: never) => { aiCalls++; return getExtractor({ AI_PROVIDER: "mock" })!.extract(r); } } as never;
     const q = await processQueue(d, { settings: { auto_register: false }, cond: DEFAULT_CONDITIONS, data: await loadAppData(u1, hid), aiLeft: 20, timeLeft: () => 50_000, perBatch: 4 });
     expect(aiCalls).toBe(0);
     expect(q.aiCalls).toBe(0);
