@@ -36,6 +36,22 @@ export interface ManualItem {
   since: string | null;
   /** 解析済みの内容があり、画面上で編集して登録できる */
   editable: boolean;
+  /** now=今すぐ確認（締切が7日以内）/ later=締切に余裕がある・不明（件数の警告には含めない） */
+  group: "now" | "later";
+  /** 一覧に出す短い理由（詳細は reason / failLabel） */
+  shortReason: string;
+}
+
+const DAY = 86400_000;
+/** 今すぐ確認が必要か: 受付中で、締切が7日以内 */
+export const isNowGroup = (dueAt: Date | null, now: Date) => !!dueAt && dueAt.getTime() >= now.getTime() && dueAt.getTime() - now.getTime() <= 7 * DAY;
+
+/** 一覧に出す短い失敗理由。長い文章・URLは詳細に回す */
+export function shortReasonOf(x: { where: string | null; products: string[]; failLabel: string | null; hasDraft: boolean }): string {
+  if (!x.where) return x.failLabel ? "店舗不明・公式ページ取得不可" : "店舗不明";
+  if (x.products.length === 0 && x.hasDraft) return "商品不明";
+  if (x.failLabel) return "公式ページ取得不可";
+  return "情報が不足";
 }
 
 type DraftLike = { input?: { chain?: { name?: string }; store?: { name?: string }; items?: { product?: { name?: string } }[] } } | null;
@@ -54,13 +70,16 @@ export function toManualItem(r: ManualRow, now: Date): ManualItem {
   const dueAt = r.due_at ? new Date(r.due_at) : null;
   const urgency = urgencyOf(dueAt, now);
   const kind = r.fail_kind as FailKind | null;
+  const where = [chain, store].filter(Boolean).join(" / ") || null;
+  const products = (d?.input?.items ?? []).map((i) => i.product?.name?.trim() ?? "").filter(Boolean).slice(0, 4);
+  const failLabel = kind && FAIL_KIND_LABEL[kind] ? FAIL_KIND_LABEL[kind] : null;
   return {
     id: r.id,
-    where: [chain, store].filter(Boolean).join(" / ") || lastGoodHint(r.last_good) || null,
-    products: (d?.input?.items ?? []).map((i) => i.product?.name?.trim() ?? "").filter(Boolean).slice(0, 4),
+    where: where || lastGoodHint(r.last_good) || null,
+    products,
     title: r.title,
     reason: r.manual_reason || "自動で解決できませんでした",
-    failLabel: kind && FAIL_KIND_LABEL[kind] ? FAIL_KIND_LABEL[kind] : null,
+    failLabel,
     dueAt: r.due_at,
     urgency,
     urgencyLabel: URGENCY_LABEL[urgency],
@@ -68,6 +87,8 @@ export function toManualItem(r: ManualRow, now: Date): ManualItem {
     sourceHost: hostOf(r.source_url),
     since: r.manual_since,
     editable: !!d?.input,
+    group: isNowGroup(dueAt, now) ? "now" : "later",
+    shortReason: shortReasonOf({ where, products, failLabel, hasDraft: !!d?.input }),
   };
 }
 
@@ -77,7 +98,7 @@ export function sortManual(items: ManualItem[]): ManualItem[] {
 }
 
 /** 最上部の赤い警告の文言 */
-export const manualHeadline = (n: number) => `取得不可：${n}件／要手動確認`;
+export const manualHeadline = (n: number) => `要手動確認：${n}件`;
 
 /** 表示済みの判定用。開いている案件の集合が変わったときだけ、起動時に再度知らせる（閉じただけで対応済みにはしない） */
 export function manualSignature(items: Pick<ManualItem, "id">[]): string {

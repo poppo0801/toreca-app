@@ -30,3 +30,10 @@ describe("一覧のカード全体の文章（5X）", () => {
     expect(h.prefecture).toBe("東京都");
   });
 });
+
+describe("抽選ではないリンクは候補にしない（5X）", () => {
+  it("カレンダー購読・アプリのダウンロードは除外する", () => {
+    const html = `<a href="https://calendar.google.com/calendar/u/0?cid=abc">Googleカレンダーで購読</a><a href="https://apps.apple.com/jp/app/x/id1">アプリ</a><a href="https://shop.example.invalid/lottery/1">ポケカ抽選</a>`;
+    expect(parseListing("generic", html, "https://list.example.invalid/").map((x) => x.url)).toEqual(["https://shop.example.invalid/lottery/1"]);
+  });
+});

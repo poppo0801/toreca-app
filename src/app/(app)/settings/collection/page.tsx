@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
 import { ManualReviewList } from "@/components/manual-review";
 import { ExclusionRules, HardSources, type ExclusionView, type HardSourceView } from "@/components/source-controls";
-import { loadManualItems } from "@/lib/server/collector/manual-items";
+import { loadManualGroups } from "@/lib/server/collector/manual-items";
 import { computeMetrics } from "@/lib/collector/metrics";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
 import { healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
@@ -65,8 +65,8 @@ export default async function CollectionPage() {
   ]);
   const metricRows = await db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000);
   const metrics = computeMetrics(metricRows.data ?? [], now);
-  const [manualItems, exclusions, hardSources] = await Promise.all([
-    loadManualItems(db as never, now),
+  const [manualGroups, exclusions, hardSources] = await Promise.all([
+    loadManualGroups(db as never, now),
     db.from("collection_exclusions").select("id,scope,key,label,reason_code,reason_note,active,created_at,released_at").order("created_at", { ascending: false }).limit(200),
     db.from("collection_hard_sources").select("id,scope,key,label,service_host,fail_kind,fail_count,last_checked_at,alt_source,alt_success,alt_fail,needs_manual").order("last_checked_at", { ascending: false }).limit(100),
   ]);
@@ -134,7 +134,7 @@ export default async function CollectionPage() {
       <PageHeading navId="settings" className="mb-3">抽選情報の自動収集</PageHeading>
       {/* 要手動確認（システムが解決できなかった案件）。優先収集メモとは別の一覧 */}
       <div className="mb-3">
-        <ManualReviewList items={manualItems} />
+        <ManualReviewList groups={manualGroups} />
       </div>
       <AutoCollectView
         settings={st as unknown as SettingsView}

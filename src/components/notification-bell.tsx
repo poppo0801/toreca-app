@@ -117,7 +117,7 @@ export function NotificationBell() {
           </DialogDescription>
           {manual.length > 0 && (
             <section className="mt-3 space-y-1.5" data-testid="manual-section">
-              <ManualBanner count={manual.length} />
+              <ManualBanner count={manual.length} urgent={manual.some((i) => i.urgency === "today" || i.urgency === "tomorrow")} />
               <ul className="max-h-48 space-y-1.5 overflow-y-auto">
                 {manual.slice(0, 6).map((it) => (
                   <li key={it.id} className="rounded-md border border-danger/40 p-1.5">

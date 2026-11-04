@@ -104,7 +104,7 @@ export function CollectionResultNotice() {
     <Dialog open onOpenChange={(v) => !v && close()}>
       <DialogContent className="max-w-sm space-y-3" data-testid="run-notice">
         {/* 取得不可（要手動確認）は、通常の解析件数・登録件数より上に置く */}
-        <ManualBanner count={notice.manual.length} />
+        <ManualBanner count={notice.manual.length} urgent={notice.manual.some((i) => i.urgency === "today" || i.urgency === "tomorrow")} />
         {notice.manual.length > 0 && (
           <ul className="max-h-56 space-y-1.5 overflow-y-auto" data-testid="manual-notice-list">
             {notice.manual.slice(0, 5).map((it) => (

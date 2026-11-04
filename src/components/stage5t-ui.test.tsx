@@ -35,7 +35,7 @@ vi.mock("@/components/app-provider", async () => {
 });
 
 import { CollectionResultNotice } from "@/components/collection-result-notice";
-import { ManualReviewList } from "@/components/manual-review";
+import { ManualReviewList, type ManualGroups } from "@/components/manual-review";
 import { RegistrationOrigin } from "@/components/registration-origin";
 import { ExclusionRules, HardSources } from "@/components/source-controls";
 
@@ -69,14 +69,14 @@ describe("要手動確認のポップアップ（取得不可の赤い警告）"
     await act(async () => root.render(createElement(CollectionResultNotice)));
     await flush();
     const dialog = q("run-notice")!;
-    expect(q("manual-banner")!.textContent).toBe("取得不可：2件／要手動確認");
+    expect(q("manual-banner")!.textContent).toBe("要手動確認：2件");
     expect(q("manual-banner")!.getAttribute("role")).toBe("alert");
     // 赤い警告は、解析件数・登録件数（run-counts）より前にある
     const all = [...dialog.querySelectorAll("[data-testid]")].map((e) => e.getAttribute("data-testid"));
     expect(all.indexOf("manual-banner")).toBeLessThan(all.indexOf("run-counts"));
     expect(qa("manual-item")).toHaveLength(2);
     expect(dialog.textContent).toContain("系列A / 店舗A");
-    expect(dialog.textContent).toContain("取得制限（ロボット・アクセス制限）");
+    expect(dialog.textContent).toContain("公式ページ取得不可");
     expect(q("manual-source")!.getAttribute("href")).toBe("https://shop.example.invalid/a");
     expect(q("run-notice-manual")).not.toBeNull();
   });
@@ -111,23 +111,45 @@ describe("要手動確認のポップアップ（取得不可の赤い警告）"
 });
 
 describe("要手動確認の一覧（設定）", () => {
-  it("元URL・編集して登録・再調査・対象外・対応完了の操作が並ぶ。件数が0なら表示しない", async () => {
-    await act(async () => root.render(createElement(ManualReviewList, { items })));
-    expect(qa("manual-row")).toHaveLength(2);
-    expect(qa("manual-edit")).toHaveLength(1); // 解析済みの案件だけ
-    expect(qa("manual-recheck")).toHaveLength(2);
-    expect(qa("manual-dismiss")).toHaveLength(2);
-    expect(qa("manual-done")).toHaveLength(2);
-    expect(q("manual-banner")!.textContent).toContain("2件");
+  const groups = (over: Partial<ManualGroups> = {}): ManualGroups => ({ open: items, retrying: [], retryingCount: 0, closed: [], ...over });
+  it("今すぐ確認（締切7日以内）を優先して表示し、締切不明は折りたたむ。件数の警告には今すぐ確認だけを数える", async () => {
+    await act(async () => root.render(createElement(ManualReviewList, { groups: groups() })));
+    expect(q("manual-banner")!.textContent).toBe("要手動確認：1件");
+    expect(q("manual-now")!.querySelectorAll("[data-testid=manual-row]")).toHaveLength(1);
+    expect(q("manual-later")!.textContent).toContain("1件");
+    expect(q("manual-now")!.textContent).toContain("公式ページ取得不可");
+  });
+  it("一覧には操作ボタンを並べず、「詳細・対応」を開くと元情報・編集して登録・再調査・対象外・対応完了が出る", async () => {
+    await act(async () => root.render(createElement(ManualReviewList, { groups: groups() })));
+    expect(q("manual-recheck")).toBeNull();
+    expect(q("manual-done")).toBeNull();
+    expect(qa("manual-detail")).toHaveLength(2);
+    await act(async () => qa("manual-detail")[0].click());
+    expect(q("manual-open-source")).not.toBeNull();
+    expect(qa("manual-edit")).toHaveLength(1);
+    expect(qa("manual-recheck")).toHaveLength(1);
+    expect(qa("manual-done")).toHaveLength(1);
     await act(async () => qa("manual-dismiss")[0].click());
     expect(q("manual-dismiss-form")).not.toBeNull();
     const opts = [...document.querySelectorAll<HTMLOptionElement>('[data-testid="manual-dismiss-code"] option')].map((o) => o.textContent);
     expect(opts).toContain("信頼性に疑問があるショップ");
     expect(opts).toContain("抽選ではない");
     expect(opts).toHaveLength(8);
+  });
+  it("自動再調査中・終了済みは折りたたみで件数だけ示し、操作ボタンは出さない。通常の説明を赤字にしない", async () => {
+    await act(async () => root.render(createElement(ManualReviewList, { groups: groups({ retrying: [items[1]], retryingCount: 5, closed: [items[1]] }) })));
+    expect(q("manual-retrying")!.textContent).toContain("自動再調査中（対応不要）：5件");
+    expect(q("manual-retrying")!.textContent).toContain("ほか4件");
+    expect(q("manual-closed")).not.toBeNull();
+    expect(q("manual-retrying")!.querySelector("[data-testid=manual-detail]")).toBeNull();
+    expect(document.querySelector("[data-testid=manual-review] .text-danger:not([data-testid=manual-banner]):not([data-testid=manual-due])")).toBeNull();
+  });
+  it("今すぐ確認が0件なら「0件」。何も無ければ表示しない", async () => {
+    await act(async () => root.render(createElement(ManualReviewList, { groups: groups({ open: [items[1]] }) })));
+    expect(q("manual-none")!.textContent).toBe("要手動確認：0件");
     act(() => root.unmount());
     root = createRoot(host);
-    await act(async () => root.render(createElement(ManualReviewList, { items: [] })));
+    await act(async () => root.render(createElement(ManualReviewList, { groups: groups({ open: [] }) })));
     expect(q("manual-review")).toBeNull();
   });
 });

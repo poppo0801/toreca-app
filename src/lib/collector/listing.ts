@@ -32,6 +32,10 @@ const SKIP_HOSTS = [
   "line.me/R/",
   "www.facebook.com",
   "b.hatena.ne.jp",
+  // 抽選の告知ではないページ（カレンダー購読・アプリのダウンロード）
+  "calendar.google.com",
+  "apps.apple.com",
+  "play.google.com",
   "fonts.googleapis.com",
   "fonts.gstatic.com",
   "www.googletagmanager.com",

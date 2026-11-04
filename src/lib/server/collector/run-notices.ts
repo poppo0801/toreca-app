@@ -17,7 +17,7 @@ export interface RunNotices {
 const RUN_COLS = "id,trigger,status,started_at,finished_at,new_count,registered_count,ai_calls";
 
 export async function loadRunNotices(db: Db, userId: string | null, limit = 8): Promise<RunNotices> {
-  const manual = await loadManualItems(db).catch(() => [] as ManualItem[]);
+  const manual = await loadManualItems(db, new Date(), 60, true).catch(() => [] as ManualItem[]);
   const runs = ((await db.from("collection_runs").select(RUN_COLS).eq("phase", "collect").order("started_at", { ascending: false }).limit(limit)).data ?? []) as unknown as RunLite[];
   if (runs.length === 0) return { summaries: [], notice: null, ackIds: [], manual };
   const ids = runs.map((r) => r.id);

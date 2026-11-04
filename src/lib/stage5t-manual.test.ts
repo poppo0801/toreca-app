@@ -24,7 +24,7 @@ describe("要手動確認の表示データ", () => {
     expect(sortManual(items).map((i) => i.id)).toEqual(["today", "tomorrow", "unknown", "later"]);
   });
   it("最上部の赤い警告の文言と、表示済み判定の署名（案件の集合が変わったときだけ変わる）", () => {
-    expect(manualHeadline(3)).toBe("取得不可：3件／要手動確認");
+    expect(manualHeadline(3)).toBe("要手動確認：3件");
     expect(manualSignature([{ id: "b" }, { id: "a" }])).toBe(manualSignature([{ id: "a" }, { id: "b" }]));
     expect(manualSignature([{ id: "a" }])).not.toBe(manualSignature([{ id: "a" }, { id: "b" }]));
   });
