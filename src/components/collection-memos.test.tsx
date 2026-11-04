@@ -19,7 +19,7 @@ vi.mock("@/app/(app)/lotteries/memo-actions", () => ({
   listMemosAction: async () => memos,
 }));
 
-import { MemoFormDialog, MemoListDialog, RegisterChooser } from "@/components/collection-memos";
+import { MemoFormDialog, MemoListDialog } from "@/components/collection-memos";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,13 +45,11 @@ afterEach(() => {
 });
 
 describe("優先収集メモのUI", () => {
-  it("＋登録の入口で「抽選情報を登録」「優先収集メモ」を選べる", () => {
+  it("メモの登録画面から、メモ一覧へ移動できる", () => {
     const calls: string[] = [];
-    act(() => root.render(createElement(RegisterChooser, { open: true, onOpenChange: () => {}, onLottery: () => calls.push("lottery"), onMemo: () => calls.push("memo"), onMemoList: () => calls.push("list") })));
-    act(() => q("register-lottery")!.click());
-    act(() => q("register-memo")!.click());
+    act(() => root.render(createElement(MemoFormDialog, { open: true, onOpenChange: () => {}, onList: () => calls.push("list") })));
     act(() => q("open-memo-list")!.click());
-    expect(calls).toEqual(["lottery", "memo", "list"]);
+    expect(calls).toEqual(["list"]);
   });
 
   it("系列＋商品だけで保存できる（検証はサーバー側）", async () => {

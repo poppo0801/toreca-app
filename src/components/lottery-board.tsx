@@ -5,11 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import { ApplyExitProvider, useApplyExitController } from "@/components/apply-exit";
 import { useSearchParams } from "next/navigation";
-import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
+import { ChartColumn, CircleHelp, LayoutList, NotebookPen, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { useAiJobs } from "@/components/ai-jobs-provider";
 import { countActiveFilters, FilterSheet } from "@/components/lottery-filter-sheet";
-import { MemoFormDialog, MemoListDialog, RegisterChooser } from "@/components/collection-memos";
+import { MemoFormDialog, MemoListDialog } from "@/components/collection-memos";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryMatrix } from "@/components/lottery-matrix";
@@ -92,8 +92,7 @@ function LotteryBoardInner() {
   const focusId = params.get("focus");
   const { unseen: unseenJobs } = useAiJobs();
   const [registering, setRegistering] = useState(false);
-  // ＋登録: 抽選情報を登録／優先収集メモ（入口は1つのまま、選んでから開く）
-  const [chooser, setChooser] = useState(false);
+  // ＋登録は抽選情報の登録画面を直接開く。優先収集メモはその左のメモアイコンから登録する
   const [memoForm, setMemoForm] = useState(false);
   const [memoList, setMemoList] = useState(false);
   const [tab, setTab] = useState<Tab>("managed");
@@ -193,7 +192,10 @@ function LotteryBoardInner() {
             </button>
             {persistent ? (
               <>
-                <Button size="sm" className="relative" onClick={() => setChooser(true)} data-testid="register">
+                <button type="button" aria-label="優先収集メモを登録" title="優先収集メモ" onClick={() => gate() && setMemoForm(true)} className="flex size-9 items-center justify-center rounded-md hover:bg-muted" data-testid="memo-open">
+                  <NotebookPen className="size-[18px]" aria-hidden="true" />
+                </button>
+                <Button size="sm" className="relative" onClick={() => setRegistering(true)} data-testid="register">
                   ＋登録
                   {unseenJobs > 0 && <span className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-card bg-info" data-testid="bulk-badge" aria-label={`まとめて登録の確認待ち ${unseenJobs}件`} />}
                 </Button>
@@ -236,14 +238,7 @@ function LotteryBoardInner() {
         </div>
       </div>
       {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
-      <RegisterChooser
-        open={chooser}
-        onOpenChange={setChooser}
-        onLottery={() => { setChooser(false); setRegistering(true); }}
-        onMemo={() => { setChooser(false); setMemoForm(true); }}
-        onMemoList={() => { setChooser(false); setMemoList(true); }}
-      />
-      {memoForm && <MemoFormDialog open onOpenChange={setMemoForm} />}
+      {memoForm && <MemoFormDialog open onOpenChange={setMemoForm} onList={() => { setMemoForm(false); setMemoList(true); }} />}
       {memoList && <MemoListDialog open onOpenChange={setMemoList} />}
 
       <div className="space-y-2 pt-2">

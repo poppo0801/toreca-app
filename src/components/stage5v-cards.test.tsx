@@ -54,14 +54,14 @@ describe("日付表示のコンパクト化（5V）", () => {
     expect(dates.className).not.toMatch(/tracking|font-bold|font-semibold/);
     expect(dates.innerHTML).not.toMatch(/font-bold|font-semibold/);
   });
-  it("詳細カードの日付は1行ずつ（縦に並べ、各行は途中で折り返さない）", () => {
+  it("詳細カードの2種類の日時は、同じ1行（date-row）に並べ、各項目は途中で折り返さない", () => {
     mount("L1", "all");
-    const dates = q('[data-testid="card-dates"]')!;
-    expect(dates.className).toContain("flex-col");
-    for (const row of [q('[data-testid="deadline-day"]'), q('[data-testid="period"]')]) {
-      expect(row).not.toBeNull();
-      expect(row!.className).toContain("whitespace-nowrap");
-    }
+    const row = q('[data-testid="date-row"]')!;
+    expect(row.className).toContain("whitespace-nowrap");
+    expect(row.querySelector('[data-testid="deadline-day"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="period"]')).not.toBeNull();
+    for (const item of [q('[data-testid="deadline-day"]'), q('[data-testid="period"]')]) expect(item!.className).toContain("whitespace-nowrap");
+    expect(qa('[data-testid="date-row"]')).toHaveLength(1);
   });
 });
 
@@ -111,21 +111,19 @@ describe("当落発表方法（応募済みタブ）", () => {
     mount("L2", "applied");
     return q('[data-testid="announce-method"]')!;
   };
-  it("X DMとSNS投稿を区別し、アイコン＋短い名称で出す。未確認は推測しない", () => {
-    expect(withMethods(["x_dm"]).textContent).toBe("X DM");
-    expect(withMethods(["sns_post"]).textContent).toBe("SNS投稿");
-    expect(withMethods(["winner_mail"]).textContent).toBe("当選者のみメール");
-    expect(withMethods(["result_mail"]).textContent).toBe("メール");
-    expect(withMethods(["result_page"]).textContent).toBe("Web確認");
-    expect(withMethods(["app"]).textContent).toBe("公式アプリ");
-    expect(withMethods(["in_store"]).textContent).toBe("店頭掲示");
-    expect(withMethods(["phone"]).textContent).toBe("電話");
-    expect(withMethods(["sms"]).textContent).toBe("SMS");
-    expect(withMethods(["other"]).textContent).toBe("その他");
-    expect(withMethods(["unknown"]).textContent).toBe("未確認");
-    expect(withMethods([]).textContent).toBe("未確認");
-    expect(withMethods(["x_dm"]).querySelector("svg")).not.toBeNull();
-    expect(withMethods(["x_dm"]).querySelector("svg")!.getAttribute("class")).not.toBe(withMethods(["sns_post"]).querySelector("svg")!.getAttribute("class"));
+  it("発表方法は拡声器＋短い名称に統一し、「発表」の文字は付けない。未確認は項目ごと出さない（推測しない）", () => {
+    const labels: Record<string, string> = { x_dm: "X DM", sns_post: "SNS投稿", winner_mail: "当選者のみメール", result_mail: "メール", result_page: "Web確認", app: "公式アプリ", in_store: "店頭掲示", phone: "電話", sms: "SMS", other: "その他" };
+    for (const [m, label] of Object.entries(labels)) {
+      const el = withMethods([m]);
+      expect(el.textContent, m).toBe(label);
+      expect(el.querySelector("svg")!.getAttribute("class"), m).toContain("lucide-megaphone");
+    }
+    for (const none of [["unknown"], []]) {
+      patch("L2", { announcementMethods: none as never });
+      mount("L2", "applied");
+      expect(q('[data-testid="announce-method"]')).toBeNull();
+      expect(host.textContent).not.toContain("未確認");
+    }
   });
 });
 

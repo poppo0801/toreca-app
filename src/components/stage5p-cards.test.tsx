@@ -55,7 +55,7 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
   it("左=発表日（曜日つき）／右=購入期間。応募締切はカードに出さない。時刻は出さない", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), procedureSplit: false });
     mount("L2", "applied");
-    expect(text('[data-testid="result-day"]')).toContain("発表 11/3(火)");
+    expect(text('[data-testid="result-day"]')).toBe("11/3(火)");
     expect(text('[data-testid="period"]')).toBe("11/4(水)〜11/6(金)");
     expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("購入");
     expect(q('[data-testid="period"] svg')).not.toBeNull();

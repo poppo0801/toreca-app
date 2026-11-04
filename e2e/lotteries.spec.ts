@@ -1381,6 +1381,7 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
   });
 
   test("タブ: 「NEW」の文字は出さず小さな件数バッジ。赤丸は文字のすぐ近く。タブの高さは1行のまま", async ({ page }) => {
+    await switchProfile(page, "B"); // 新着(L5)はAがスルー中の店舗のため、スルーしていないBで確認する
     const all = page.getByRole("tab", { name: /全情報/ });
     await expect(all).not.toContainText("NEW");
     await expect(all.getByTestId("tab-new")).toBeVisible();
@@ -1401,7 +1402,7 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
   test("応募済みタブ: 左=発表日／右=購入期間（応募締切は出さない）。落選が左・当選（オレンジ）が右", async ({ page }) => {
     await page.getByRole("tab", { name: /応募済み/ }).click();
     const c = page.getByTestId("lottery-card").first();
-    await expect(c.getByTestId("result-day")).toContainText(/発表 \d+\/\d+\([日月火水木金土]\)|発表日未確認/);
+    await expect(c.getByTestId("result-day")).toHaveText(/^\d+\/\d+\([日月火水木金土]\)|発表日未確認/); // 「発表」の文字は出さず、アイコンで示す
     // 「購入」「受取」の文字は出さず、小さなアイコンで示す（意味はタップ長押し/title と詳細で確認）
     await expect(c.getByTestId("period")).not.toContainText(/購入|受取/);
     await expect(c.getByTestId("period")).toHaveAttribute("data-kind", /^(購入|受取)$/);
@@ -1410,7 +1411,8 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     await expect(c).not.toContainText("締切");
     const day = (await c.getByTestId("result-day").boundingBox())!;
     const period = (await c.getByTestId("period").boundingBox())!;
-    expect(period.y).toBeGreaterThan(day.y); // 発表・期間は1行ずつ（上=発表、下=期間）。日付は途中で折り返さない
+    expect(Math.abs(period.y - day.y)).toBeLessThan(6); // 発表日と期間は同じ1行（左=発表日、右=期間）。日付は途中で折り返さない
+    expect(period.x).toBeGreaterThan(day.x + day.width - 1);
     expect(day.height).toBeLessThan(22);
     expect(period.height).toBeLessThan(22);
     const lost = (await c.getByTestId("result-lost").boundingBox())!;
@@ -1425,7 +1427,8 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     await expect(c.getByTestId("deadline-day")).toContainText(/\d+\/\d+\([日月火水木金土]\)/);
     const dl = (await c.getByTestId("deadline-day").boundingBox())!;
     const pe = (await c.getByTestId("period").boundingBox())!;
-    expect(pe.y).toBeGreaterThan(dl.y); // 抽選締切と購入期間は1行ずつ
+    expect(Math.abs(pe.y - dl.y)).toBeLessThan(6); // 抽選締切と購入期間は同じ1行（左=締切、右=期間）
+    expect(pe.x).toBeGreaterThan(dl.x + dl.width - 1);
     expect(dl.height).toBeLessThan(22);
     expect(pe.height).toBeLessThan(22);
     await expect(c.getByTestId("apply-status").getByTestId("unapplied-mark")).toHaveCount(0); // 詳細カードの未応募は「－」
@@ -1499,10 +1502,12 @@ test.describe("Stage 5Q: 見出し・収支の年月選択・シンプルカー�
 
 // ---------------------------------------------------------------- Stage 5Z: 日付行は必ず1行（折り返し・はみ出しを成功扱いにしない）
 test.describe("Stage 5Z 日付の1行表示", () => {
-  const ids = ["deadline-day", "period", "result-day", "simple-deadline"];
-  /** 現在の画面の日付行を検査し、検査した行数を返す */
+  const ids = ["date-row", "deadline-day", "period", "result-day", "simple-deadline"];
+  let twoInRow = 0;
+  /** 現在の画面の日付行を検査し、検査した行数を返す（twoInRow=2種類の日時が同じ行に並んだカード数） */
   async function checkRows(page: Page, label: string): Promise<number> {
     let checked = 0;
+    twoInRow = 0;
     const cards = page.getByTestId("lottery-card");
     const n = await cards.count();
     for (let i = 0; i < n; i++) {
@@ -1520,6 +1525,15 @@ test.describe("Stage 5Z 日付の1行表示", () => {
           checked++;
         }
       }
+      // 合格条件: 詳細カードの日時情報（2種類）は同じ行にある（縦に分かれていない）
+      const dr = c.getByTestId("date-row");
+      if ((await dr.count()) > 0) {
+        const items = dr.first().locator('[data-testid="deadline-day"], [data-testid="result-day"], [data-testid="period"]');
+        const boxes = await items.evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }));
+        for (const b of boxes) expect(Math.abs(b.y - boxes[0].y), `${label} 日時が同じ行にない`).toBeLessThan(4);
+        for (let k = 1; k < boxes.length; k++) expect(boxes[k].x, `${label} 日時が重なっている`).toBeGreaterThanOrEqual(boxes[k - 1].x + boxes[k - 1].w - 1);
+        if (boxes.length >= 2) twoInRow++;
+      }
     }
     return checked;
   }
@@ -1528,6 +1542,7 @@ test.describe("Stage 5Z 日付の1行表示", () => {
     test(`${width}px: 詳細・シンプルの全タブで、日付行が折り返さずカード幅からはみ出さない（長い店舗名でも）`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
       let total = 0;
+      let pairs = 0;
       for (const detail of [true, false]) {
         const toggle = page.getByTestId("view-toggle");
         if ((await toggle.getAttribute("aria-pressed")) !== String(detail)) {
@@ -1541,24 +1556,51 @@ test.describe("Stage 5Z 日付の1行表示", () => {
             for (const e of document.querySelectorAll<HTMLElement>('[data-testid="store-name"]')) e.textContent = "とても長い系列名の長い長い店舗名 ○○駅前ショッピングセンター店 本館2階";
           });
           total += await checkRows(page, `${detail ? "詳細" : "シンプル"}/${tab}`);
+          if (detail) pairs += twoInRow;
         }
       }
       expect(total, "検査した日付行が0件（空振り）").toBeGreaterThan(10);
+      expect(pairs, "2種類の日時が同じ行に並んだカードが0件（空振り）").toBeGreaterThan(0);
     });
   }
 
-  test("収まらない長い日付は、行全体の文字サイズが縮小されて1行に収まる（一部だけ小さくならない）", async ({ page }) => {
+  test("収まらない2種類の日時は、日付行全体の文字サイズが縮小されて同じ1行に収まる（一部だけ小さくならない）", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 800 });
     await page.getByRole("tab", { name: /全情報/ }).click();
-    const row = page.getByTestId("period").filter({ hasText: /\d+\/\d+/ }).first();
+    const row = page.getByTestId("date-row").filter({ has: page.locator('[data-testid="deadline-day"]') }).filter({ hasText: /\d+\/\d+.*\d+\/\d+/ }).first();
     const before = await row.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
-    // 利用できる幅を狭めて（親の幅を70pxに固定）、収まらない状況を作る。幅の変化で測り直される
-    await row.evaluate((e) => { e.parentElement!.style.width = "70px"; });
+    // 利用できる幅を狭めて（親の幅を150pxに固定）、収まらない状況を作る。幅の変化で測り直される
+    await row.evaluate((e) => { e.parentElement!.style.width = "150px"; });
     await expect.poll(async () => row.evaluate((e) => e.scrollWidth <= e.parentElement!.clientWidth + 1)).toBe(true);
     const after = await row.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
     expect(after).toBeLessThan(before); // 日付行全体の文字サイズを縮小（アイコンは em 指定で同じ比率）
     expect(after).toBeGreaterThanOrEqual(8);
-    const h = (await row.boundingBox())!.height;
-    expect(h).toBeLessThan(after * 1.8); // 折り返していない
+    expect((await row.boundingBox())!.height).toBeLessThan(after * 1.8); // 折り返していない
+    const ys = await row.locator("[data-testid]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().y));
+    for (const y of ys) expect(Math.abs(y - ys[0])).toBeLessThan(4); // 2種類の日時は同じ行のまま
+  });
+});
+
+test.describe("優先収集メモの入口", () => {
+  test("＋登録は抽選情報の登録を直接開く。メモのアイコンは＋登録の左にあり、優先収集メモの登録を開く。320pxでもはみ出さない", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    const memo = page.getByTestId("memo-open");
+    const reg = page.getByTestId("register");
+    // モックはデモデータ（保存されない）のため＋登録は出ない場合がある。出るときだけ配置と動作を確認する
+    if ((await reg.count()) === 0) {
+      test.skip(true, "デモデータでは＋登録を表示しない");
+      return;
+    }
+    const mb = (await memo.boundingBox())!;
+    const rb = (await reg.boundingBox())!;
+    expect(mb.x + mb.width).toBeLessThanOrEqual(rb.x + 1);
+    expect(Math.abs(mb.y - rb.y)).toBeLessThan(12);
+    expect(rb.x + rb.width).toBeLessThanOrEqual(320);
+    await memo.click();
+    await expect(page.getByTestId("memo-chain")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await reg.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByTestId("register-chooser")).toHaveCount(0);
   });
 });

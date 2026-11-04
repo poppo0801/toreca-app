@@ -190,7 +190,6 @@ run("ui1")("ui1: 画面から文章を読み取り→登録フォームへ反映
   test.setTimeout(120_000);
   await login(page);
   await page.getByRole("button", { name: "＋登録" }).click();
-  await page.getByTestId("register-lottery").click();
   const form = page.getByTestId("lottery-form");
   await form.getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();

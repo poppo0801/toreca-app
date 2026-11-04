@@ -9,31 +9,10 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { isMemoOpen, MEMO_STATE_LABEL, type MemoInput, type MemoRow } from "@/lib/collector/memos";
 import { cn } from "@/lib/utils";
 
-/** ＋登録の入口: 抽選情報の登録／優先収集メモ（既存の抽選タブは増やさない） */
-export function RegisterChooser({ open, onOpenChange, onLottery, onMemo, onMemoList }: { open: boolean; onOpenChange: (v: boolean) => void; onLottery: () => void; onMemo: () => void; onMemoList: () => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xs space-y-2" data-testid="register-chooser">
-        <DialogTitle>登録</DialogTitle>
-        <DialogDescription className="sr-only">登録する内容を選びます</DialogDescription>
-        <Button className="w-full justify-start" onClick={onLottery} data-testid="register-lottery">
-          抽選情報を登録
-        </Button>
-        <Button variant="outline" className="w-full justify-start" onClick={onMemo} data-testid="register-memo">
-          優先収集メモ
-        </Button>
-        <button type="button" className="w-full pt-1 text-left text-xs text-muted-foreground underline" onClick={onMemoList} data-testid="open-memo-list">
-          優先収集メモの一覧
-        </button>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 const EMPTY: MemoInput = { chainId: null, chainName: "", storeId: null, storeName: "", productIds: [], productNames: [], referenceUrl: "", note: "", announcedStart: "", priority: "normal" };
 
 /** 優先収集メモの登録。系列＋商品だけでも保存できる。未登録の名称は仮名称として保存する */
-export function MemoFormDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function MemoFormDialog({ open, onOpenChange, onList }: { open: boolean; onOpenChange: (v: boolean) => void; onList?: () => void }) {
   const { data, profile } = useApp();
   const router = useRouter();
   const [v, setV] = useState<MemoInput>(EMPTY);
@@ -122,7 +101,12 @@ export function MemoFormDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             {err}
           </p>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2">
+          {onList && (
+            <Button variant="ghost" size="sm" className="mr-auto" onClick={onList} data-testid="open-memo-list">
+              メモ一覧
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             閉じる
           </Button>
