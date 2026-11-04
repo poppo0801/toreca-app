@@ -8,7 +8,9 @@ import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { LotteryDraft } from "@/lib/lottery-match";
+import { RunCounts, RunStateLabel } from "@/components/collection-result-notice";
 import type { PipelineMetrics } from "@/lib/collector/metrics";
+import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import { HIDDEN_REQUIREMENT_TAGS, REQUIREMENT_TAGS } from "@/lib/lottery-taxonomy";
@@ -232,7 +234,7 @@ function MetricsPanel({ m }: { m: PipelineMetrics }) {
 /** 区画（動作状況・条件・利用設定・統計）。罫線で囲み、見出しの横に説明のⓘを置く */
 function Block({ no, title, tip, testId, children }: { no: string; title: string; tip?: string; testId: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-3 rounded-lg border p-3 text-sm" data-testid={testId}>
+    <section id={testId} className="scroll-mt-24 space-y-3 rounded-lg border p-3 text-sm" data-testid={testId}>
       <h2 className="flex items-center gap-1.5 border-b pb-2 font-semibold">
         <span className="text-muted-foreground" aria-hidden="true">{no}</span>
         <span>{title}</span>
@@ -290,10 +292,13 @@ export function AutoCollectView({
   aiConfigured,
   usage,
   metrics,
+  runSummaries,
 }: {
   settings: SettingsView;
   /** 直近30日の品質指標（サーバーで集計） */
   metrics?: PipelineMetrics;
+  /** 収集実行ごとの結果（定期・手動。複数のワーカー実行にまたがる解析も同じ収集に紐づく） */
+  runSummaries?: RunSummary[];
   sources: SourceView[];
   candidates: CandidateView[];
   /** 全件の数（一覧に表示している件数ではない） */
@@ -725,6 +730,28 @@ export function AutoCollectView({
 
       {/* ④ 統計・処理履歴（過去の実績） */}
       <Block no="④" title="統計・処理履歴" testId="history">
+        {runSummaries && runSummaries.length > 0 && (
+          <div className="space-y-1.5" data-testid="run-summaries">
+            <p className="text-xs font-medium">収集ごとの結果（その収集で発見した候補だけを集計）</p>
+            <ul className="space-y-1.5">
+              {runSummaries.map((s) => (
+                <li key={s.runId} className="space-y-1 rounded-md border p-2" data-testid="run-summary">
+                  <p className="flex items-center gap-2 text-xs font-medium">
+                    {runTitle(s)}
+                    <RunStateLabel s={s} />
+                    {!s.legacy && s.costJpy > 0 && <span className="font-normal text-muted-foreground">AI約{s.costJpy}円</span>}
+                  </p>
+                  <RunCounts s={s} compact />
+                  {!s.legacy && (s.excluded > 0 || s.duplicates > 0) && (
+                    <p className="text-[11px] text-muted-foreground">
+                      対象外 {s.excluded}件・重複 {s.duplicates}件
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {metrics && <MetricsPanel m={metrics} />}
         <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-4" data-testid="ops-stats">
           <div>
@@ -846,7 +873,7 @@ export function AutoCollectView({
         </div>
       </Block>
 
-      <section className="space-y-2 rounded-lg border p-3 text-sm" data-testid="candidates">
+      <section id="candidates" className="scroll-mt-24 space-y-2 rounded-lg border p-3 text-sm" data-testid="candidates">
         <h2 className="font-semibold">収集候補</h2>
         <div role="tablist" aria-label="候補の種類" className="grid grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5 sm:grid-cols-6">
           {CAND_TABS.map((t) => (

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { CollectionResultNotice } from "@/components/collection-result-notice";
 import { SplashScreen } from "@/components/splash-screen";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -22,7 +23,13 @@ async function AuthGate({ children }: { children: React.ReactNode }) {
     // 応募名義はユーザー(プロフィール)ごとに1つ。系列ごとの内部アカウントを自動で保証する（画面での管理は不要）
     await supabase.rpc("ensure_profile_accounts");
   }
-  return <AppShell>{children}</AppShell>;
+  return (
+    <>
+      <AppShell>{children}</AppShell>
+      {/* 自動収集の結果。新しい結果があるときだけ、起動時に1回表示する（AppShellの配置は変えない） */}
+      {isSupabaseMode && <CollectionResultNotice />}
+    </>
+  );
 }
 
 /**

@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bell } from "lucide-react";
+import { getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
 import { useApp } from "@/components/app-provider";
+import { RunCounts, RunStateLabel } from "@/components/collection-result-notice";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { computeAlerts } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +30,8 @@ export function NotificationBell() {
   const { data, profile, now } = useApp();
   const [open, setOpen] = useState(false);
   const [read, setRead] = useState<Set<string>>(new Set());
+  // 自動収集の結果の履歴（抽選の通知とは別の区画。通知を開いたときに読み込む）
+  const [runs, setRuns] = useState<RunSummary[]>([]);
   const alerts = useMemo(() => computeAlerts(data, profile.id, now), [data, profile.id, now]);
   const count = alerts.length;
 
@@ -45,6 +50,15 @@ export function NotificationBell() {
       /* 非対応 */
     }
   }, [count]);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void getRunNoticesAction().then((r) => live && setRuns(r.summaries.filter((s) => !s.legacy).slice(0, 4)));
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   const markAllRead = useCallback(() => {
     const next = new Set([...read, ...alerts.map((a) => a.key)]);
@@ -109,6 +123,20 @@ export function NotificationBell() {
               </li>
             ))}
           </ul>
+          {runs.length > 0 && (
+            <section className="mt-3 space-y-1.5 border-t pt-2" data-testid="run-history">
+              <h3 className="text-xs font-semibold text-muted-foreground">自動収集の結果</h3>
+              {runs.map((s) => (
+                <Link key={s.runId} href="/settings/collection#history" onClick={() => setOpen(false)} className="block space-y-1 rounded-md border p-2 hover:bg-muted" data-testid="run-history-row">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    {runTitle(s)}
+                    <RunStateLabel s={s} />
+                  </span>
+                  <RunCounts s={s} compact />
+                </Link>
+              ))}
+            </section>
+          )}
           <div className="mt-3 flex justify-end">
             <DialogClose className="min-h-10 rounded-md px-3 text-sm text-muted-foreground hover:bg-muted">閉じる</DialogClose>
           </div>
