@@ -17,7 +17,7 @@ import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
-import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, isPermanentError, type FieldChange } from "@/lib/collector/queue";
+import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, effectiveDailyLimit, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FieldChange } from "@/lib/collector/queue";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -123,6 +123,10 @@ interface QueuedPayload {
     changed?: boolean;
     /** 同じURLで新しい抽選回が始まった（前回の締切より後の応募期間） */
     newRound?: boolean;
+    /** 取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取った */
+    viaList?: boolean;
+    /** 優先収集メモに関連する候補 */
+    memoId?: string;
   };
 }
 
@@ -186,12 +190,13 @@ async function aiUsedToday(db: Db, householdId: string, now: Date): Promise<numb
 }
 
 /** AI読み取りの利用記録（既存の費用管理と同じテーブル）と、日別統計（回数・成功/失敗・トークン・費用）。入力した本文・画像そのものは保存しない */
-async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string): Promise<void> {
+async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string): Promise<number> {
   const usedAi = result.ok || result.code !== "fetch_failed";
+  let cost = 0;
   if (usedAi) {
     const input = result.usage?.input ?? 0;
     const output = result.usage?.output ?? 0;
-    const cost = result.engine === "anthropic" ? (estimateAiCostJpy(result.model, input, output, deps.usdJpy ?? USD_JPY_ESTIMATE) ?? 0) : 0;
+    cost = result.engine === "anthropic" ? (estimateAiCostJpy(result.model, input, output, deps.usdJpy ?? USD_JPY_ESTIMATE) ?? 0) : 0;
     const valid = result.ok || result.code === "not_lottery" || result.code === "nothing_found";
     await bumpStats(deps.db, deps.householdId, deps.now, { ai_calls: 1, ai_success: valid ? 1 : 0, ai_failed: valid ? 0 : 1, input_tokens: input, output_tokens: output, cost_jpy: Math.round(cost * 10000) / 10000 });
   }
@@ -208,6 +213,7 @@ async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string
     prompt_version: result.ok ? result.promptVersion : PROMPT_VERSION,
     extraction: result.ok ? (result.extraction as unknown as Json) : null,
   });
+  return cost;
 }
 
 /**
@@ -271,6 +277,9 @@ interface CandidateRow {
   job_state: string;
   kind: string;
   created_at: string;
+  due_at?: string | null;
+  ai_calls?: number;
+  cost_jpy?: number | string;
 }
 
 /** 取得とAI読み取り(通信が中心の処理)。複数の候補を並行して実行できる。判定・登録は processCandidate が順番に行う */
@@ -285,6 +294,16 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     result = await extractFromRequest({ kind, text: rich.text, images: rich.images.length ? rich.images : undefined, sourceUrl: q.url, postedOn: p.createdAt.slice(0, 10) || undefined, now: deps.now }, kind, extractor, deps.now, []);
   } else {
     result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed, fetchXRich: makeXRichFetcher({ db: deps.db, householdId: deps.householdId, client: deps.xClient, enrich: { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage }, oembed: deps.fetchOembed, now: deps.now }) });
+    // 取得が制限された外部ページ（ロボット制限）は回避しない。代わりに、取得できたまとめサイトの一覧の表示（二次情報）から読み取る
+    const listText = `${q.title}
+${q.context}`.trim();
+    if (!result.ok && result.code === "fetch_failed" && q.kind === "web_page" && classifyFailure(result.message).kind === "robots" && listText.length >= 25) {
+      const alt = await extractFromRequest({ kind: "text", text: listText, sourceUrl: q.url, now: deps.now }, "text", extractor, deps.now, ["取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取りました"]);
+      if (alt.ok) {
+        q.viaList = true;
+        result = alt;
+      }
+    }
   }
   return result;
 }
@@ -301,29 +320,39 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const { db } = deps;
   const nowIso = deps.now.toISOString();
   const clear = { lease_until: null, locked_by: null };
+  // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
+  let acct: Record<string, unknown> = {};
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
   const finish = async (jobState: "completed" | "skipped" | "review", patch: Record<string, unknown>, stat?: StatDelta) => {
     await db
       .from("collection_candidates")
-      .update({ ...patch, job_state: jobState, completed_at: nowIso, resolved_at: nowIso, last_error: null, analyzed_version: PROMPT_VERSION, last_checked_at: nowIso, ...clear })
+      .update({ ...patch, ...acct, job_state: jobState, completed_at: nowIso, resolved_at: nowIso, last_error: null, analyzed_version: PROMPT_VERSION, last_checked_at: nowIso, ...clear })
       .eq("id", c.id);
     if (stat) await bumpStats(db, deps.householdId, deps.now, stat);
   };
   // 失敗: 一時的なものは指数バックオフで再試行(15分→1時間→4時間)。上限・永続エラーは隔離する(無限に再解析しない)
   const fail = async (message: string) => {
-    const delay = isPermanentError(message) ? null : backoffMs(c.attempts);
-    if (delay === null) {
-      await db.from("collection_candidates").update({ status: "failed", job_state: "failed", reasons: [message, "再試行しません（上限に達したか、再試行しても変わらない失敗です）"], last_error: message.slice(0, 300), completed_at: nowIso, ...clear }).eq("id", c.id);
+    const external = q.kind === "web_page"; // まとめサイトの一覧から辿った外部ページ
+    const cls = classifyFailure(message, { external });
+    const delay = cls.permanent ? null : backoffMs(c.attempts);
+    // 受付終了後の取得失敗は、失敗ではなく「受付終了」として除外する（失敗件数に数えず、原因は記録する）
+    const lapsed = c.due_at ? new Date(c.due_at).getTime() < deps.now.getTime() : false;
+    if (lapsed) {
+      await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", fail_kind: "expired", reasons: ["受付終了のため取得しませんでした（応募締切を過ぎています）", `取得の失敗理由: ${FAIL_KIND_LABEL[cls.kind]}`], last_error: message.slice(0, 300), completed_at: nowIso, resolved_at: nowIso, ...acct, ...clear }).eq("id", c.id);
+      await bumpStats(db, deps.householdId, deps.now, { excluded: 1 });
+    } else if (delay === null) {
+      await db.from("collection_candidates").update({ status: "failed", job_state: "failed", fail_kind: cls.kind, reasons: [message, `原因: ${FAIL_KIND_LABEL[cls.kind]}`, "再試行しません（上限に達したか、再試行しても変わらない失敗です）"], last_error: message.slice(0, 300), completed_at: nowIso, ...acct, ...clear }).eq("id", c.id);
       await bumpStats(db, deps.householdId, deps.now, { failed_jobs: 1 });
     } else {
       await db
         .from("collection_candidates")
-        .update({ status: "pending", job_state: "retry", reasons: [message, `再試行待ち（${c.attempts}/${MAX_ATTEMPTS}回目の失敗）`], last_error: message.slice(0, 300), next_run_at: new Date(deps.now.getTime() + delay).toISOString(), ...clear })
+        .update({ status: "pending", job_state: "retry", fail_kind: cls.kind, reasons: [message, `再試行待ち（${c.attempts}/${MAX_ATTEMPTS}回目の失敗。原因: ${FAIL_KIND_LABEL[cls.kind]}）`], last_error: message.slice(0, 300), next_run_at: new Date(deps.now.getTime() + delay).toISOString(), ...acct, ...clear })
         .eq("id", c.id);
     }
   };
 
-  await logAi(deps, result, q.url).catch(() => undefined);
+  const callCost = await logAi(deps, result, q.url).catch(() => 0);
+  if (result.ok || result.code !== "fetch_failed") acct = { ai_calls: (c.ai_calls ?? 0) + 1, cost_jpy: Math.round(((Number(c.cost_jpy) || 0) + callCost) * 10000) / 10000 };
   if (!result.ok) {
     if (result.code === "not_lottery" || result.code === "nothing_found") {
       await finish("skipped", { status: "excluded", reasons: ["抽選の告知とは判断できませんでした"], draft: null }, { excluded: 1 });
@@ -358,6 +387,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   } else if (!input.store.name.trim() && input.receiveMethod === "shipping") {
     input.store = { id: null, name: "オンライン", prefecture: "" };
   }
+  if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
     const note = "まとめサイトの一覧の表示（二次情報）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
     input.memo = [input.memo, note].filter(Boolean).join("\n").slice(0, 2000);
@@ -519,9 +549,9 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           seenKeys.push({ key, hash: hashNormalized(`${e.title} ${e.context}`), e, hints: parseListHints(`${e.title} ${e.context}`, now) });
         }
         // 既に保存している候補は、内容の変化を確認する（広告・カウントダウンなどの変化は無視した正規化ハッシュで比べる）
-        const existing = new Map<string, { id: string; list_hash: string | null; job_state: string; status: string; lottery_id: string | null; draft: Json | null; change_count: number }>();
+        const existing = new Map<string, { id: string; list_hash: string | null; job_state: string; status: string; lottery_id: string | null; draft: Json | null; change_count: number; due_at: string | null }>();
         for (let i = 0; i < seenKeys.length; i += 100) {
-          const { data: ex } = await db.from("collection_candidates").select("id,dedupe_key,list_hash,job_state,status,lottery_id,draft,change_count").eq("household_id", householdId).in("dedupe_key", seenKeys.slice(i, i + 100).map((x) => x.key));
+          const { data: ex } = await db.from("collection_candidates").select("id,dedupe_key,list_hash,job_state,status,lottery_id,draft,change_count,due_at").eq("household_id", householdId).in("dedupe_key", seenKeys.slice(i, i + 100).map((x) => x.key));
           for (const r of ex ?? []) existing.set(r.dedupe_key, r);
         }
         const unchangedIds: string[] = [];
@@ -535,7 +565,9 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
             } else {
               changed++;
               const live = old.status === "auto_registered" || old.status === "duplicate" || old.job_state === "review";
-              const reopen = live || (old.job_state === "skipped" && !preScreenFromList(hints, cond, now) && !(old.draft as { input?: unknown } | null)?.input);
+              // 一覧の表記ゆれ（お気に入り・応募するなど）では再解析しない。応募締切が変わったときだけ、AIで再解析する
+              const newDue = hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null);
+              const reopen = (live && shouldReanalyzeOnListChange(old.due_at, newDue)) || (old.job_state === "skipped" && !preScreenFromList(hints, cond, now) && !(old.draft as { input?: unknown } | null)?.input);
               const patch: Record<string, unknown> = { list_hash: hash, content_hash: sha(`${e.title}|${e.context}`), last_checked_at: now.toISOString(), last_changed_at: now.toISOString(), change_count: old.change_count + 1, due_at: hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null) };
               if (reopen && old.job_state !== "pending" && old.job_state !== "processing") {
                 const payload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, sourceName: s.name, attempts: 0, hints, changed: true } };
@@ -547,7 +579,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           }
           const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, sourceName: s.name, attempts: 0, hints } };
           const dueAt = hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null);
-          const base = { household_id: householdId, source_id: s.id, dedupe_key: key, source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), content_hash: sha(`${e.title}|${e.context}`), list_hash: hash, due_at: dueAt, last_checked_at: now.toISOString() };
+          const base = { household_id: householdId, source_id: s.id, dedupe_key: key, source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), content_hash: sha(`${e.title}|${e.context}`), list_hash: hash, due_at: dueAt, last_checked_at: now.toISOString(), discovered_run_id: runId };
           // 一覧の表示だけで除外できるもの(締切済み・対象外の地域)は、AI読み取りの前に除外する。候補としては保存し、次回以降は再判定しない
           const why = preScreenFromList(hints, cond, now);
           if (why) {
@@ -620,7 +652,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           const likely = rel.relevant || (hasImg && looksLikeLottery(p.text) && rel.uncertain);
           if (!likely) continue;
           const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: p.text.slice(0, 80), context: "", sourceName: s.name, attempts: 0, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt } } };
-          rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: p.text.slice(0, 80).replace(/\n/g, " ") || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString() });
+          rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: p.text.slice(0, 80).replace(/\n/g, " ") || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
         }
         const ins3 = rows.length ? await db.from("collection_candidates").upsert(rows as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true }).select("id") : { data: [] as { id: string }[] };
         const added = ins3.data?.length ?? 0;

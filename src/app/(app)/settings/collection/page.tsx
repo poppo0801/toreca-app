@@ -1,6 +1,7 @@
 import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
+import { computeMetrics } from "@/lib/collector/metrics";
 import { effectiveDailyLimit, healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
 import { estimateCostJpy } from "@/lib/collector/x-posts";
 import { monthBudget } from "@/lib/server/ai-budget";
@@ -58,6 +59,8 @@ export default async function CollectionPage() {
     cnt().in("job_state", ["pending", "retry", "processing"]).gt("due_at", now.toISOString()).lte("due_at", endOfToday),
     db.from("collection_candidates").select("completed_at").not("completed_at", "is", null).order("completed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
+  const metricRows = await db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000);
+  const metrics = computeMetrics(metricRows.data ?? [], now);
   const candidates = [lReview, lQueued, lReg, lEx, lDup, lFail].flatMap((r) => r.data ?? []);
   const counts = { pending: nReview.count ?? 0, queued: nQueued.count ?? 0, auto_registered: nReg.count ?? 0, excluded: nEx.count ?? 0, duplicate: nDup.count ?? 0, failed: nFail.count ?? 0 };
   const xPosts = (monthRuns.data ?? []).reduce((a, r) => a + r.x_posts, 0);
@@ -131,6 +134,7 @@ export default async function CollectionPage() {
         candidates={candidates as unknown as CandidateView[]}
         counts={counts}
         health={health}
+        metrics={metrics}
         ops={ops}
         stats={statRows}
         runs={(runs.data ?? []) as unknown as RunView[]}

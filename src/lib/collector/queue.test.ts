@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ATTEMPTS, backoffMs, collectDue, detectCancel, diffAgainstLottery, healthWarnings, hashNormalized, isNewRound, isPermanentError, nextCollectAt, normalizeForHash, priorityScore, scheduledInstant } from "@/lib/collector/queue";
+import { classifyFailure, shouldReanalyzeOnListChange, MAX_ATTEMPTS, backoffMs, collectDue, detectCancel, diffAgainstLottery, healthWarnings, hashNormalized, isNewRound, isPermanentError, nextCollectAt, normalizeForHash, priorityScore, scheduledInstant } from "@/lib/collector/queue";
 import { EMPTY_FLEX, type LotteryInput } from "@/lib/lottery-input";
 import type { Lottery } from "@/types/domain";
 
@@ -186,5 +186,36 @@ describe("上限・予算・停止の警告", () => {
     const w = healthWarnings({ ...hb, lastWorkerAt: new Date(NOW2.getTime() - 60_000), lastProgressAt: new Date(NOW2.getTime() - 3 * 3600_000), dailyUsed: 3, dailyLimit: 100 });
     expect(w.map((x) => x.code)).toContain("worker_stalled");
     expect(healthWarnings({ ...hb, dailyUsed: 3, dailyLimit: 100 })).toEqual([]);
+  });
+});
+
+describe("取得失敗の原因分類（Stage 5S）", () => {
+  it("ロボット制限・アクセス制限は取得制限（恒常的。回避しない）", () => {
+    expect(classifyFailure("このサイトはロボットによるページ取得を許可していません。告知の文章を…")).toEqual({ kind: "robots", permanent: true });
+    expect(classifyFailure("このページはアクセスが制限されているため取得できません（ログインや制限は回避しません）")).toEqual({ kind: "robots", permanent: true });
+  });
+  it("ページ削除・JavaScript描画は恒常的、タイムアウト・通信障害・HTTPエラーは一時的（再試行は回数制限つき）", () => {
+    expect(classifyFailure("ページが見つかりません。告知の…").permanent).toBe(true);
+    expect(classifyFailure("ページから文章を取得できませんでした（JavaScriptで表示されるページの可能性があります）")).toEqual({ kind: "js_render", permanent: true });
+    expect(classifyFailure("ページの取得がタイムアウトしました")).toEqual({ kind: "timeout", permanent: false });
+    expect(classifyFailure("ページに接続できませんでした")).toEqual({ kind: "network", permanent: false });
+    expect(classifyFailure("取得に失敗しました（サーバーエラー 503）").kind).toBe("http");
+    expect(classifyFailure("よくわからないエラー")).toEqual({ kind: "other", permanent: false });
+  });
+  it("外部リンク先の失敗は external_link に分類する", () => {
+    expect(classifyFailure("よくわからないエラー", { external: true }).kind).toBe("external_link");
+  });
+  it("isPermanentError は分類と一致する", () => {
+    expect(isPermanentError("ロボットによる取得を許可していません")).toBe(true);
+    expect(isPermanentError("ページの取得がタイムアウトしました")).toBe(false);
+  });
+});
+
+describe("一覧の変化での再解析（AIの無駄な消費を防ぐ）", () => {
+  it("締切が変わったときだけ再解析する。同じ締切の表記ゆれ・締切が読めない変化は再解析しない", () => {
+    expect(shouldReanalyzeOnListChange("2026-11-05T23:00:00+09:00", "2026-11-05T14:00:00Z")).toBe(false);
+    expect(shouldReanalyzeOnListChange("2026-11-05T23:00:00+09:00", "2026-11-07T23:00:00+09:00")).toBe(true);
+    expect(shouldReanalyzeOnListChange("2026-11-05T23:00:00+09:00", null)).toBe(false);
+    expect(shouldReanalyzeOnListChange(null, "2026-11-07T23:00:00+09:00")).toBe(true);
   });
 });

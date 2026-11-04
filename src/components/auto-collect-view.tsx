@@ -8,6 +8,7 @@ import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { LotteryDraft } from "@/lib/lottery-match";
+import type { PipelineMetrics } from "@/lib/collector/metrics";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import { HIDDEN_REQUIREMENT_TAGS, REQUIREMENT_TAGS } from "@/lib/lottery-taxonomy";
@@ -203,6 +204,31 @@ export function reviewTopics(c: { reasons: string[]; draft: { flags?: Record<str
   return TOPIC_ORDER.filter((t) => set.has(t));
 }
 
+const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)}%`);
+const hrs = (v: number | null) => (v === null ? "—" : v >= 48 ? `${Math.round(v / 24)}日` : `${Math.round(v)}時間`);
+
+/** 直近30日の品質指標。登録率だけでなく、所要時間・締切前の割合・重複・滞留・AI費用を見る */
+function MetricsPanel({ m }: { m: PipelineMetrics }) {
+  return (
+    <div className="space-y-1.5 rounded-md bg-muted/50 p-2 text-xs" data-testid="pipeline-metrics">
+      <p className="font-medium">品質指標（直近30日・{m.total}件）</p>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
+        <Kv label="登録成功率" value={pct(m.registrationRate)} />
+        <Kv label="発見→登録" value={hrs(m.avgHoursToRegister)} />
+        <Kv label="締切前に登録" value={pct(m.registeredBeforeDeadlineRate)} />
+        <Kv label="重複登録率" value={pct(m.duplicateRate)} />
+        <Kv label="確認待ち滞留(平均)" value={hrs(m.reviewAvgHours)} />
+        <Kv label="AI費用" value={`${m.aiCostJpy}円（${m.aiCalls}回）`} />
+      </dl>
+      {m.failedByKind.length > 0 && (
+        <p data-testid="failed-by-kind" className="text-muted-foreground">
+          失敗の原因: {m.failedByKind.map((f) => `${f.label} ${f.count}`).join("・")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** 区画（動作状況・条件・利用設定・統計）。罫線で囲み、見出しの横に説明のⓘを置く */
 function Block({ no, title, tip, testId, children }: { no: string; title: string; tip?: string; testId: string; children: React.ReactNode }) {
   return (
@@ -263,8 +289,11 @@ export function AutoCollectView({
   xConfigured,
   aiConfigured,
   usage,
+  metrics,
 }: {
   settings: SettingsView;
+  /** 直近30日の品質指標（サーバーで集計） */
+  metrics?: PipelineMetrics;
   sources: SourceView[];
   candidates: CandidateView[];
   /** 全件の数（一覧に表示している件数ではない） */
@@ -696,6 +725,7 @@ export function AutoCollectView({
 
       {/* ④ 統計・処理履歴（過去の実績） */}
       <Block no="④" title="統計・処理履歴" testId="history">
+        {metrics && <MetricsPanel m={metrics} />}
         <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-4" data-testid="ops-stats">
           <div>
             <dt className="text-[11px] text-muted-foreground">本日の新規発見</dt>

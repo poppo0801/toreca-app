@@ -125,6 +125,8 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
   const recv = receiveKind(input.receiveMethod);
   const place = placeInfo({ receiveMethod: input.receiveMethod, prefecture: ctx.prefecture || null, storeKind: ctx.storeKind });
   const onlineOnly = place.label === "通販";
+  // 受取方法が不明でも、地域が対象で締切などが明確なら登録できる（受取方法は推測せず「未確認」を残す）
+  if (recv === "unknown" && !onlineOnly && ctx.prefecture && cond.prefectures.includes(ctx.prefecture)) notes.push("受取方法は未確認です（告知で確認してください）");
   if (cond.receiveMethods.length > 0) {
     const kind: ReceiveKind = onlineOnly ? "shipping" : recv;
     if (kind === "unknown") review.push("受取方法が不明です");
@@ -133,7 +135,7 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
   if (onlineOnly) {
     if (!cond.includeOnline) excluded.push("通販・発送の抽選は収集しない設定です");
     else notes.push("通販・発送（全国対象。配送先の制限がないかは告知で確認してください）");
-  } else if (recv === "unknown") {
+  } else if (recv === "unknown" && !(ctx.prefecture && cond.prefectures.includes(ctx.prefecture))) {
     review.push("受取方法（店頭・発送）が不明です");
   } else if (place.canShip && cond.includeOnline && !cond.prefectures.includes(ctx.prefecture)) {
     notes.push("店頭受取の地域は対象外ですが、発送で受け取れます");

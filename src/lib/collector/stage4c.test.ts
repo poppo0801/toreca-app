@@ -66,8 +66,13 @@ describe("地域・通販・距離", () => {
     expect(ev({ receiveMethod: "either" }, {}, { prefecture: "北海道" }).verdict).toBe("match");
     expect(ev({ receiveMethod: "either" }, { includeOnline: false }, { prefecture: "北海道" }).verdict).toBe("exclude");
   });
-  it("受取方法が不明なら要確認（推測しない）", () => {
-    expect(ev({ receiveMethod: "unknown" }).verdict).toBe("review");
+  it("受取方法が不明: 地域が対象なら「未確認」の注記つきで一致、地域も不明（または対象外）なら要確認（推測しない）", () => {
+    const r = ev({ receiveMethod: "unknown" });
+    expect(r.verdict).toBe("match");
+    expect(r.reasons.join("")).toContain("受取方法は未確認");
+    expect(ev({ receiveMethod: "unknown" }, {}, { prefecture: "" }).verdict).toBe("review");
+    expect(ev({ receiveMethod: "unknown" }, {}, { prefecture: "北海道" }).verdict).toBe("review");
+    expect(ev({ receiveMethod: "unknown" }, { maxDistanceKm: 10 }, { distanceKm: 50 }).verdict).toBe("exclude");
   });
   it("距離制限: 超えたら除外、位置不明は要確認（0kmにしない）、通販には適用しない", () => {
     expect(ev({}, { maxDistanceKm: 10 }, { distanceKm: 5 }).verdict).toBe("match");

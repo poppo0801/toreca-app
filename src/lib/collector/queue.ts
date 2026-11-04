@@ -39,7 +39,43 @@ export function backoffMs(attempts: number): number | null {
   return [15 * 60_000, 60 * 60_000, 4 * H][Math.max(0, attempts - 1)] ?? 4 * H;
 }
 /** 再試行しても結果が変わらない失敗（ロボット取得の拒否など） */
-export const isPermanentError = (message: string) => /ロボット|許可していません|robots/i.test(message);
+export const isPermanentError = (message: string) => classifyFailure(message).permanent;
+
+// ---------------------------------------------------------------- 取得失敗の原因分類（Stage 5S）
+export type FailKind = "http" | "timeout" | "js_render" | "robots" | "not_found" | "x_api" | "image" | "external_link" | "network" | "expired" | "other";
+export const FAIL_KIND_LABEL: Record<FailKind, string> = {
+  http: "HTTPエラー", timeout: "タイムアウト", js_render: "JavaScript描画", robots: "取得制限（ロボット・アクセス制限）", not_found: "ページ削除・URL変更",
+  x_api: "X API取得失敗", image: "画像取得失敗", external_link: "外部リンク先の取得失敗", network: "一時的な通信障害", expired: "受付終了", other: "その他",
+};
+/**
+ * 失敗メッセージを原因別に分類する。恒常的（再試行しても変わらない）か、一時的（間隔と回数を制限して再試行）かを区別する。
+ * 取得制限（robots・ログイン要・403）は回避しない。
+ */
+export function classifyFailure(message: string, ctx: { external?: boolean } = {}): { kind: FailKind; permanent: boolean } {
+  const m = message;
+  let kind: FailKind = "other";
+  if (/ロボット|許可していません|robots|アクセスが制限/i.test(m)) kind = "robots";
+  else if (/見つかりません|404|410|削除/.test(m)) kind = "not_found";
+  else if (/JavaScript/i.test(m)) kind = "js_render";
+  else if (/タイムアウト|時間切れ|timeout/i.test(m)) kind = "timeout";
+  else if (/X API|Xの投稿|投稿を取得/.test(m)) kind = "x_api";
+  else if (/画像/.test(m)) kind = "image";
+  else if (/接続できません|通信|ネットワーク/.test(m)) kind = "network";
+  else if (/HTTP|ステータス|サーバー|5dd|429/.test(m)) kind = "http";
+  if (ctx.external && (kind === "other" || kind === "http")) kind = "external_link";
+  return { kind, permanent: kind === "robots" || kind === "not_found" || kind === "js_render" };
+}
+
+/**
+ * まとめサイトの一覧の表示が変わったとき、再解析（AI）が必要か。
+ * 一覧の文言は「お気に入り」「応募する」などの表記ゆれで頻繁に変わるため、応募締切が変わった場合だけ再解析する。
+ * 締切が同じなら、本文の変化は無料の本文確認（recheckPages）に任せる。
+ */
+export function shouldReanalyzeOnListChange(oldDueAt: string | null, newDueAt: string | null): boolean {
+  if (!newDueAt) return false;
+  if (!oldDueAt) return true;
+  return new Date(oldDueAt).getTime() !== new Date(newDueAt).getTime();
+}
 
 // ---------------------------------------------------------------- 定期収集の実行時刻（日本時間の指定時刻を過ぎていて、今日はまだ収集していなければ実行）
 export function scheduledInstant(now: Date, hourJst: number): Date {

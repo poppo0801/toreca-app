@@ -1498,15 +1498,19 @@ export type Database = {
       }
       collection_candidates: {
         Row: {
+          ai_calls: number
           analyzed_version: string | null
           attempts: number
           change_count: number
           completed_at: string | null
           content_hash: string | null
+          cost_jpy: number
           created_at: string
           dedupe_key: string
+          discovered_run_id: string | null
           draft: Json | null
           due_at: string | null
+          fail_kind: string | null
           fetched_at: string
           household_id: string
           id: string
@@ -1519,6 +1523,7 @@ export type Database = {
           list_hash: string | null
           locked_by: string | null
           lottery_id: string | null
+          memo_id: string | null
           next_run_at: string | null
           page_hash: string | null
           reasons: string[]
@@ -1531,15 +1536,19 @@ export type Database = {
           x_post_id: string | null
         }
         Insert: {
+          ai_calls?: number
           analyzed_version?: string | null
           attempts?: number
           change_count?: number
           completed_at?: string | null
           content_hash?: string | null
+          cost_jpy?: number
           created_at?: string
           dedupe_key: string
+          discovered_run_id?: string | null
           draft?: Json | null
           due_at?: string | null
+          fail_kind?: string | null
           fetched_at?: string
           household_id: string
           id?: string
@@ -1552,6 +1561,7 @@ export type Database = {
           list_hash?: string | null
           locked_by?: string | null
           lottery_id?: string | null
+          memo_id?: string | null
           next_run_at?: string | null
           page_hash?: string | null
           reasons?: string[]
@@ -1564,15 +1574,19 @@ export type Database = {
           x_post_id?: string | null
         }
         Update: {
+          ai_calls?: number
           analyzed_version?: string | null
           attempts?: number
           change_count?: number
           completed_at?: string | null
           content_hash?: string | null
+          cost_jpy?: number
           created_at?: string
           dedupe_key?: string
+          discovered_run_id?: string | null
           draft?: Json | null
           due_at?: string | null
+          fail_kind?: string | null
           fetched_at?: string
           household_id?: string
           id?: string
@@ -1585,6 +1599,7 @@ export type Database = {
           list_hash?: string | null
           locked_by?: string | null
           lottery_id?: string | null
+          memo_id?: string | null
           next_run_at?: string | null
           page_hash?: string | null
           reasons?: string[]
@@ -1697,6 +1712,156 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "households"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_memos: {
+        Row: {
+          announced_start: string | null
+          chain_id: string | null
+          chain_name: string
+          check_count: number
+          created_at: string
+          created_by_profile_id: string | null
+          fetch_state: string
+          found_candidate_id: string | null
+          household_id: string
+          id: string
+          last_checked_at: string | null
+          last_content_hash: string | null
+          lottery_id: string | null
+          note: string
+          priority: string
+          product_ids: string[]
+          product_names: string[]
+          reference_url: string | null
+          state: string
+          state_detail: string
+          store_id: string | null
+          store_name: string
+          updated_at: string
+        }
+        Insert: {
+          announced_start?: string | null
+          chain_id?: string | null
+          chain_name?: string
+          check_count?: number
+          created_at?: string
+          created_by_profile_id?: string | null
+          fetch_state?: string
+          found_candidate_id?: string | null
+          household_id: string
+          id?: string
+          last_checked_at?: string | null
+          last_content_hash?: string | null
+          lottery_id?: string | null
+          note?: string
+          priority?: string
+          product_ids?: string[]
+          product_names?: string[]
+          reference_url?: string | null
+          state?: string
+          state_detail?: string
+          store_id?: string | null
+          store_name?: string
+          updated_at?: string
+        }
+        Update: {
+          announced_start?: string | null
+          chain_id?: string | null
+          chain_name?: string
+          check_count?: number
+          created_at?: string
+          created_by_profile_id?: string | null
+          fetch_state?: string
+          found_candidate_id?: string | null
+          household_id?: string
+          id?: string
+          last_checked_at?: string | null
+          last_content_hash?: string | null
+          lottery_id?: string | null
+          note?: string
+          priority?: string
+          product_ids?: string[]
+          product_names?: string[]
+          reference_url?: string | null
+          state?: string
+          state_detail?: string
+          store_id?: string | null
+          store_name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_memos_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_memos_created_by_profile_id_household_id_fkey"
+            columns: ["created_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_memos_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_memos_lottery_id_household_id_fkey"
+            columns: ["lottery_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "lotteries"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_memos_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      collection_run_acks: {
+        Row: {
+          acked_at: string
+          household_id: string
+          run_id: string
+          user_id: string
+        }
+        Insert: {
+          acked_at?: string
+          household_id: string
+          run_id: string
+          user_id: string
+        }
+        Update: {
+          acked_at?: string
+          household_id?: string
+          run_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_run_acks_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_run_acks_run_id_household_id_fkey"
+            columns: ["run_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "collection_runs"
+            referencedColumns: ["id", "household_id"]
           },
         ]
       }
@@ -4423,15 +4588,19 @@ export type Database = {
           p_worker: string
         }
         Returns: {
+          ai_calls: number
           analyzed_version: string | null
           attempts: number
           change_count: number
           completed_at: string | null
           content_hash: string | null
+          cost_jpy: number
           created_at: string
           dedupe_key: string
+          discovered_run_id: string | null
           draft: Json | null
           due_at: string | null
+          fail_kind: string | null
           fetched_at: string
           household_id: string
           id: string
@@ -4444,6 +4613,7 @@ export type Database = {
           list_hash: string | null
           locked_by: string | null
           lottery_id: string | null
+          memo_id: string | null
           next_run_at: string | null
           page_hash: string | null
           reasons: string[]
