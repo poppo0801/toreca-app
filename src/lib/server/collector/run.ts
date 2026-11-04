@@ -117,6 +117,8 @@ interface QueuedPayload {
     url: string;
     title: string;
     context: string;
+    /** 一覧の1枚のカード全体の文章（商品名・店舗名・締切・条件）。取得制限のときの二次情報として使う */
+    card?: string;
     sourceName: string;
     post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string };
     attempts: number;
@@ -319,7 +321,7 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed, fetchXRich: makeXRichFetcher({ db: deps.db, householdId: deps.householdId, client: deps.xClient, enrich: { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage }, oembed: deps.fetchOembed, now: deps.now }) });
     // 取得が制限された外部ページ（ロボット制限）は回避しない。代わりに、取得できたまとめサイトの一覧の表示（二次情報）から読み取る
     const listText = `${q.title}
-${q.context}`.trim();
+${q.card ?? q.context}`.trim();
     if (!result.ok && result.code === "fetch_failed" && q.kind === "web_page" && ["robots", "js_render"].includes(classifyFailure(result.message).kind) && listText.length >= 25) {
       const alt = await extractFromRequest({ kind: "text", text: listText, sourceUrl: q.url, now: deps.now }, "text", extractor, deps.now, ["取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取りました"]);
       if (alt.ok) {
@@ -347,7 +349,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 実施した取得方法・元の情報源と応募サービスのホスト・最後に取得できた情報（内部ログ。設定画面には出さない）
   const methods = [q.kind === "x_post" ? "X投稿" : q.kind === "x_oembed" ? "X埋め込み" : "直接取得", ...(q.viaList ? ["一覧の表示（二次情報）"] : [])];
   const originHost = hostOf(c.source_url ?? q.url);
-  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: q.context.slice(0, 300), hints: q.hints ?? null } };
+  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null } };
   // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
   let acct: Record<string, unknown> = { ...trace };
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
@@ -626,14 +628,14 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
               const reopen = (live && shouldReanalyzeOnListChange(old.due_at, newDue)) || (old.job_state === "skipped" && !preScreenFromList(hints, cond, now) && !(old.draft as { input?: unknown } | null)?.input);
               const patch: Record<string, unknown> = { list_hash: hash, content_hash: sha(`${e.title}|${e.context}`), last_checked_at: now.toISOString(), last_changed_at: now.toISOString(), change_count: old.change_count + 1, due_at: hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null) };
               if (reopen && old.job_state !== "pending" && old.job_state !== "processing") {
-                const payload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, sourceName: s.name, attempts: 0, hints, changed: true } };
+                const payload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), sourceName: s.name, attempts: 0, hints, changed: true } };
                 Object.assign(patch, { job_state: "pending", status: old.job_state === "skipped" ? "pending" : old.status, kind: old.lottery_id ? "update" : "new", attempts: 0, next_run_at: null, reasons: ["内容の変更を検出しました（再解析待ち）"], draft: { ...((old.draft as object | null) ?? {}), ...payload } });
               }
               await db.from("collection_candidates").update(patch as never).eq("id", old.id);
             }
             continue;
           }
-          const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, sourceName: s.name, attempts: 0, hints } };
+          const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), sourceName: s.name, attempts: 0, hints } };
           const dueAt = hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null);
           const base = { household_id: householdId, source_id: s.id, dedupe_key: key, source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), content_hash: sha(`${e.title}|${e.context}`), list_hash: hash, due_at: dueAt, last_checked_at: now.toISOString(), discovered_run_id: runId };
           // 一覧の表示だけで除外できるもの(締切済み・対象外の地域)は、AI読み取りの前に除外する。候補としては保存し、次回以降は再判定しない

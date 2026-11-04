@@ -13,6 +13,8 @@ export interface ListingEntry {
   /** 一覧上の見出し・周辺の文章（関連判定の材料。AIには渡さない） */
   title: string;
   context: string;
+  /** リンクを含む1枚のカード（article / li）全体の文章。商品名・店舗名・締切・条件がそろう。カードが特定できなければ未設定 */
+  card?: string;
 }
 
 /** 広告・アフィリエイト・SNS共有・計測などのドメイン（告知ではない） */
@@ -82,6 +84,27 @@ const strip = (html: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+/**
+ * リンクを含むカード（article / li）の文章を返す。店舗名・商品名はリンクより前のカード冒頭にあり、
+ * タグの属性が長いため「リンク直前の数百文字」では届かない。別のカードに踏み込まないよう、カードが閉じていれば使わない
+ */
+export function enclosingCard(html: string, start: number, end: number): string | null {
+  const head = html.slice(Math.max(0, start - 8000), start);
+  let open = -1;
+  let tag = "";
+  for (const m of head.matchAll(/<(article|li)[\s>]/gi)) {
+    open = m.index ?? -1;
+    tag = m[1].toLowerCase();
+  }
+  if (open < 0) return null;
+  open += Math.max(0, start - 8000);
+  if (html.slice(open, start).toLowerCase().includes(`</${tag}>`)) return null;
+  const close = html.toLowerCase().indexOf(`</${tag}>`, end);
+  if (close < 0 || close - open > 12000) return null;
+  const text = strip(html.slice(open, close));
+  return text.length >= 8 ? text.slice(0, 500) : null;
+}
+
 /** 一覧ページのHTMLから外部リンクの候補を取り出す。同じ宛先は1件にまとめる */
 export function parseListing(adapter: AdapterId, html: string, baseUrl: string): ListingEntry[] {
   let self = "";
@@ -118,7 +141,10 @@ export function parseListing(adapter: AdapterId, html: string, baseUrl: string):
     const nextStart = i + 1 < found.length ? (found[i + 1].index ?? html.length) : html.length;
     const ctx = strip(html.slice(Math.max(prevEnd, start - 400), Math.min(nextStart, end + 200))).slice(-360);
     const prev = seen.get(url);
-    if (!prev) seen.set(url, { url, kind, title, context: ctx });
+    if (!prev) {
+      const card = enclosingCard(html, start, end);
+      seen.set(url, card ? { url, kind, title, context: ctx, card } : { url, kind, title, context: ctx });
+    }
     else if (!prev.title && title) prev.title = title;
   }
   return [...seen.values()];

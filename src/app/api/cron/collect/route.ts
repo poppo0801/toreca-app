@@ -4,6 +4,7 @@ import { getExtractor } from "@/lib/ai/provider";
 import { collectDue } from "@/lib/collector/queue";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
 import { runCollection, runWorker } from "@/lib/server/collector/run";
+import { enrichFromListings } from "@/lib/server/collector/enrich";
 import { runHoldPass } from "@/lib/server/collector/hold";
 import { processGeocodeBatch } from "@/lib/server/geocode-service";
 import { createXClient } from "@/lib/server/collector/x-client";
@@ -50,6 +51,7 @@ async function handle(req: NextRequest) {
     if (t.worker_enabled) {
       // 保留（自動再調査）: 次回調査の時刻を過ぎた候補を、朝6時の収集を待たずに再調査する（無料の再照合と取得元の再確認が中心）
       const t0 = Date.now();
+      await enrichFromListings(base, { max: 40 }).catch(() => undefined);
       await runHoldPass(base, { max: 6, timeLeft: () => 30_000 - (Date.now() - t0) }).catch(() => undefined);
       const out = await runWorker({ ...base, budgetMs: Math.max(25_000, 54_000 - (Date.now() - t0)) });
       if (out.ok && "runId" in out) worked++;
