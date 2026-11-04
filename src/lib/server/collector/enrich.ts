@@ -1,6 +1,10 @@
 import "server-only";
 import { normalizeUrl, parseListing, type AdapterId } from "@/lib/collector/listing";
-import { WEB_LIST_MAX_BYTES, type CollectDeps } from "@/lib/server/collector/run";
+import { matchExistingLottery } from "@/lib/collector/crossref";
+import { jstDateString } from "@/lib/datetime";
+import { loadAppData } from "@/lib/server/lottery-service";
+import { appendSourceUrl, bumpStats, WEB_LIST_MAX_BYTES, type CollectDeps } from "@/lib/server/collector/run";
+import type { AppData } from "@/types/domain";
 import { fetchRespectingRobots } from "@/lib/server/safe-fetch";
 
 /**
@@ -26,6 +30,7 @@ export async function enrichFromListings(deps: CollectDeps, opts: { max: number 
   });
   if (need.length === 0) return out;
   const { data: sources } = await db.from("collection_sources").select("id,url,adapter,kind,enabled").eq("household_id", householdId).eq("kind", "web");
+  let appData: AppData | null = null;
   const bySource = new Map<string, typeof need>();
   for (const r of need) if (r.source_id) bySource.set(r.source_id, [...(bySource.get(r.source_id) ?? []), r]);
   for (const s of sources ?? []) {
@@ -44,6 +49,35 @@ export async function enrichFromListings(deps: CollectDeps, opts: { max: number 
         await db.from("collection_candidates").update({ draft: { ...prior, queued: { ...q, cardChecked: true } } as never }).eq("id", r.id);
         continue;
       }
+      // 登録済みの抽選と、店舗・商品・締切日がそろって一致するなら、AIを使わずに重複として整理する（根拠を記録）
+      const hints = (q as { hints?: { deadlineIso?: string | null; deadlineDate?: string | null } }).hints;
+      const dueDate = hints?.deadlineIso ? jstDateString(new Date(hints.deadlineIso)) : (hints?.deadlineDate ?? null);
+      if (e.fields) {
+        appData ??= await loadAppData(db, householdId);
+        const m = matchExistingLottery({ store: e.fields.store, product: e.fields.product, dueDate }, appData);
+        if (m) {
+          const nowIso = deps.now.toISOString();
+          const added = r.source_url ? await appendSourceUrl(db, m.lotteryId, r.source_url) : false;
+          await db
+            .from("collection_candidates")
+            .update({
+              status: "duplicate",
+              job_state: "completed",
+              lottery_id: m.lotteryId,
+              triage: "auto_exclude",
+              triage_reason: "登録済みの抽選と同一（店舗・商品・締切日が一致）",
+              manual_state: null,
+              reasons: ["登録済みの抽選と同一と判断しました", ...m.evidence, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選に同じ情報源があります"],
+              draft: { ...prior, queued: { ...q, card: e.card, fields: e.fields, cardChecked: true } } as never,
+              resolved_at: nowIso,
+              completed_at: nowIso,
+            })
+            .eq("id", r.id);
+          await bumpStats(db, householdId, deps.now, { duplicates: 1 });
+          out.enriched++;
+          continue;
+        }
+      }
       await db
         .from("collection_candidates")
         .update({
@@ -53,7 +87,7 @@ export async function enrichFromListings(deps: CollectDeps, opts: { max: number 
           triage: null,
           manual_state: null,
           reasons: ["一覧のカード全体の文章から再解析待ち"],
-          draft: { ...prior, queued: { ...q, card: e.card, ...(e.fields ? { fields: e.fields } : {}), changed: true } } as never,
+          draft: { ...prior, queued: { ...q, card: e.card, ...(e.fields ? { fields: e.fields } : {}), changed: true, cardChecked: true } } as never,
         })
         .eq("id", r.id);
       out.enriched++;

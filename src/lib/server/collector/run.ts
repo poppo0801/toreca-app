@@ -277,7 +277,7 @@ export async function reserveBudget(deps: CollectDeps, snap: BudgetSnapshot | nu
 
 export { isReady };
 
-async function appendSourceUrl(db: Db, lotteryId: string, url: string): Promise<boolean> {
+export async function appendSourceUrl(db: Db, lotteryId: string, url: string): Promise<boolean> {
   const { data } = await db.from("lotteries").select("source_urls").eq("id", lotteryId).maybeSingle();
   if (!data) return false;
   const cur = data.source_urls ?? [];
