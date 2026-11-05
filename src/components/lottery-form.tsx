@@ -261,7 +261,7 @@ function MinimizedBar({
   return (
     <div
       data-testid="form-minimized"
-      className="fixed inset-x-3 bottom-[calc(3.25rem_+_env(safe-area-inset-bottom)_+_0.5rem_-_var(--vp-gap,0px)_-_var(--vv-shift,0px))] z-40 rounded-xl border border-primary bg-card shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
+      className="fixed inset-x-3 bottom-[calc(3.25rem_+_env(safe-area-inset-bottom)_+_0.5rem)] z-40 rounded-xl border border-primary bg-card shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
     >
       {confirming ? (
         <div role="alert" className="flex items-center gap-2 p-2 text-sm">
@@ -314,6 +314,7 @@ export function LotteryFormDialog({
   lottery,
   prefill,
   onSaved,
+  restoreSignal,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -323,6 +324,8 @@ export function LotteryFormDialog({
   prefill?: { draft: LotteryDraft; runId: string | null };
   /** 保存に成功したときに呼ばれる（新規登録なら作成した抽選のID） */
   onSaved?: (lotteryId: string | null) => void;
+  /** 値が変わるたびに、最小化している登録フォームを開き直す（同じ候補をもう一度開くとき） */
+  restoreSignal?: number;
 }) {
   const { data, actions, reload } = useApp();
   const isEdit = lottery !== null;
@@ -343,6 +346,10 @@ export function LotteryFormDialog({
   const [urlsText, setUrlsText] = useState(() => initial.urlsText);
   const [sources, setSources] = useState<Record<string, FieldSource>>(() => initial.sources);
   const [minimized, setMinimized] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 開き直しの要求に応じて最小化を解除する
+    if (restoreSignal) setMinimized(false);
+  }, [restoreSignal]);
   const [pending, setPending] = useState<null | "discard" | "reset" | "bulk">(null);
   const router = useRouter();
   const [conflict, setConflict] = useState(false);

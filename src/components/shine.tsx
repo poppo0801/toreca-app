@@ -9,6 +9,17 @@ import { shineTier } from "@/lib/collection";
  * 触れた・なぞった位置に光が追従する（--mx/--my。rAFで間引き。変形はしないので、カード操作の反応は変わらない）。
  * 動きを減らす設定の扱いは CSS 側（静止した薄いホログラム）。演出OFF・対象外のレアリティでは何も付けない。
  */
+/** 画面外のカードは光の演出を止める（電池の消費を抑える）。1つの IntersectionObserver を共有する */
+let io: IntersectionObserver | null = null;
+function observe(el: HTMLElement | null) {
+  if (!el || typeof IntersectionObserver === "undefined") return;
+  io ??= new IntersectionObserver((entries) => {
+    for (const en of entries) (en.target as HTMLElement).dataset.offscreen = en.isIntersecting ? "0" : "1";
+  });
+  io.observe(el);
+  return () => io?.unobserve(el);
+}
+
 export function useShine(rarity: string, enabled: boolean, opts: { once?: boolean } = {}) {
   const tier = enabled ? shineTier(rarity) : 0;
   const raf = useRef(0);
@@ -31,7 +42,7 @@ export function useShine(rarity: string, enabled: boolean, opts: { once?: boolea
   };
   return {
     className: cn("card-shine", opts.once && "card-shine-once"),
-    props: { "data-tier": tier, onPointerDown: move, onPointerMove: move, onPointerLeave: leave, onPointerUp: leave, onPointerCancel: leave, style: undefined as CSSProperties | undefined },
+    props: { ref: observe, "data-tier": tier, onPointerDown: move, onPointerMove: move, onPointerLeave: leave, onPointerUp: leave, onPointerCancel: leave, style: undefined as CSSProperties | undefined },
   };
 }
 

@@ -102,7 +102,7 @@ test("検索は1行でコンパクト。詳細フィルターは初期状態で�
 test("見出しとタブは固定され、その下だけがスクロールする。フィルター状態は再読込後も保持される", async ({ page }) => {
   const tabs = page.getByRole("tablist", { name: "抽選の表示切替" });
   const header = (await page.locator("header").boundingBox())!;
-  await page.evaluate(() => window.scrollTo(0, 400));
+  await page.evaluate(() => document.getElementById("app-scroll")!.scrollTo(0, 400));
   const t = (await tabs.boundingBox())!;
   // スクロールしてもタブはヘッダーの直下に留まる
   expect(t.y).toBeGreaterThanOrEqual(header.y + header.height - 2);
@@ -201,8 +201,8 @@ test("カードは商品画像を左に大きく表示し、タップで詳細�
 
   // 状態の既定を「すべて」にしているため、L1は受付終了の抽選より下にある。先に表示位置へ動かしてから、その位置を基準にする
   await card.scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollBy(0, 120));
-  const y0 = await page.evaluate(() => window.scrollY);
+  await page.evaluate(() => document.getElementById("app-scroll")!.scrollBy(0, 120));
+  const y0 = await page.evaluate(() => document.getElementById("app-scroll")!.scrollTop);
   await card.getByRole("button", { name: /の詳細を開く/ }).click();
   const sheet = page.getByTestId("lottery-detail-sheet");
   await expect(sheet).toBeVisible();
@@ -223,7 +223,7 @@ test("カードは商品画像を左に大きく表示し、タップで詳細�
   if (vp.width < 768) await sheet.getByTestId("sheet-handle").click();
   else await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
-  await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - y0)).toBeLessThan(4);
+  await expect.poll(async () => Math.abs((await page.evaluate(() => document.getElementById("app-scroll")!.scrollTop)) - y0)).toBeLessThan(4);
 });
 
 test("応募状態のアイコンは意味を画面内で確認できる（凡例）。「？」だけの表示は使わない", async ({ page }) => {
@@ -337,7 +337,7 @@ test.describe("レイアウト（Safe Area・固定メニュー）", () => {
     const row = (await nav.locator("> div").boundingBox())!;
     expect(row.height).toBeLessThanOrEqual(56);
     // 最下部までスクロールしたとき、最後のカードがナビの下に隠れない
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.evaluate(() => { const s = document.getElementById("app-scroll")!; s.scrollTo(0, s.scrollHeight); });
     const navBox = (await nav.boundingBox())!;
     const last = (await page.getByTestId("lottery-card").last().boundingBox())!;
     expect(last.y + last.height).toBeLessThanOrEqual(navBox.y + 1);
@@ -904,16 +904,48 @@ test.describe("表示領域・固定配置・多重反応（iPhone不具合の�
     }
   });
 
-  test("補正値が古いまま残らない: 表示領域が変わったあとに測り直し、通常のブラウザ(standaloneでない)では補正が外れる", async ({ page, isMobile }) => {
+  test("下部メニューは測定に依存しない: 補正用の変数が残っていても、表示領域の高さが変わっても、常に表示領域の下端に接する", async ({ page, isMobile }) => {
     test.skip(!isMobile, "下部メニューはスマホ幅のみ");
-    await page.waitForTimeout(4500); // 起動直後の測り直しの期間(4秒)が終わるまで待つ
-    await page.evaluate(() => document.documentElement.style.setProperty("--vp-gap", "59px")); // 古い補正が残った状態を再現
-    const hidden = (await page.getByTestId("bottom-nav").boundingBox())!;
-    expect(hidden.y + hidden.height).toBeGreaterThan((await vpBottom(page)) + 50); // 補正が残ると下へはみ出す
-    await page.evaluate(() => window.dispatchEvent(new Event("resize"))); // 表示領域の変化
-    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--vp-gap"))).toBe("");
-    const nav = (await page.getByTestId("bottom-nav").boundingBox())!;
-    expect(Math.abs(nav.y + nav.height - (await vpBottom(page)))).toBeLessThan(1.5);
+    // 古い仕組みの補正値が残っていた状態を再現しても、メニューは動かない（位置は補正値ではなくレイアウトで決まる）
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty("--vp-gap", "59px");
+      document.documentElement.style.setProperty("--vv-shift", "-40px");
+    });
+    const check = async () => {
+      const nav = (await page.getByTestId("bottom-nav").boundingBox())!;
+      expect(Math.abs(nav.y + nav.height - (await vpBottom(page)))).toBeLessThan(1.5);
+    };
+    await check();
+    // 表示領域が変わる（起動直後の低い状態→通常、キーボード、向き）。メニューは追従して下端に接し続ける
+    const vp = page.viewportSize()!;
+    for (const h of [vp.height - 59, vp.height - 300, vp.height]) {
+      await page.setViewportSize({ width: vp.width, height: h });
+      await page.waitForTimeout(80);
+      await check();
+    }
+  });
+
+  test("ページ全体はスクロールしない。スクロールするのは中身だけで、動かしてもヘッダー・下部メニューの位置は変わらない（バウンスがメニューへ伝わらない構造）", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "下部メニューはスマホ幅のみ");
+    const before = {
+      nav: (await page.getByTestId("bottom-nav").boundingBox())!,
+      header: (await page.locator("header").boundingBox())!,
+    };
+    const m = await page.evaluate(() => {
+      const s = document.getElementById("app-scroll")!;
+      const de = document.documentElement;
+      return { docScrollable: de.scrollHeight > de.clientHeight + 1, bodyScrollable: document.body.scrollHeight > window.innerHeight + 1, inner: s.scrollHeight > s.clientHeight, overflowY: getComputedStyle(s).overflowY };
+    });
+    expect(m.docScrollable, "ページ全体（document）がスクロールしない").toBe(false);
+    expect(m.inner).toBe(true);
+    expect(m.overflowY).toBe("auto");
+    await page.evaluate(() => { const s = document.getElementById("app-scroll")!; s.scrollTo(0, s.scrollHeight); });
+    await page.waitForTimeout(100);
+    const after = { nav: (await page.getByTestId("bottom-nav").boundingBox())!, header: (await page.locator("header").boundingBox())! };
+    expect(after.nav).toEqual(before.nav);
+    expect(after.header).toEqual(before.header);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    expect(await page.evaluate(() => getComputedStyle(document.getElementById("app-scroll")!).overscrollBehaviorY)).toBe("contain");
   });
 
   test("ボトムシート: 最下部までスクロールしても最後の操作が表示領域内にあり、覆われない。キーボードが隠す分(--kb-inset)だけ上がり、閉じて開き直しても同じ", async ({ page, isMobile }) => {
@@ -1385,7 +1417,7 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     await expect(card(page, "L3")).toBeVisible();
   });
 
-  test("タブ: 「NEW」の文字は出さず小さな件数バッジ。赤丸は文字のすぐ近く。タブの高さは1行のまま", async ({ page }) => {
+  test("タブ: 「NEW」の文字は出さず小さな件数バッジ。赤丸はタブ名の左（文字に重ねない）", async ({ page }) => {
     await switchProfile(page, "B"); // 新着(L5)はAがスルー中の店舗のため、スルーしていないBで確認する
     const all = page.getByRole("tab", { name: /全情報/ });
     await expect(all).not.toContainText("NEW");
@@ -1397,11 +1429,13 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     await expect(dot).toBeVisible();
     const t = (await applied.boundingBox())!;
     const d = (await dot.boundingBox())!;
-    // 文字の左上: 文字の左端より左に出て、文字・件数と重ならない。タブの左端からは離れる
-    const label = (await applied.locator("span.relative").boundingBox())!;
-    expect(d.x + d.width).toBeLessThanOrEqual(label.x + 1);
+    // タブ名の左側（同じ行）。文字・件数と重ならず、タブの左端からは離れる
+    const row = (await applied.locator("span.inline-flex").first().boundingBox())!;
+    const count = (await applied.getByTestId("tab-count-applied").boundingBox())!;
     expect(d.x).toBeGreaterThanOrEqual(t.x + 2);
-    expect(d.y).toBeLessThan(label.y + label.height / 2);
+    expect(d.x + d.width).toBeLessThanOrEqual(row.x + row.width / 2);
+    expect(d.y + d.height).toBeLessThanOrEqual(count.y + 1);
+    expect(Math.abs(d.y + d.height / 2 - (row.y + row.height / 2))).toBeLessThanOrEqual(3);
   });
 
   test("応募済みタブ: 左=発表日／右=購入期間（応募締切は出さない）。落選が左・当選（オレンジ）が右", async ({ page }) => {
@@ -1574,8 +1608,9 @@ test.describe("Stage 5Z 日付の1行表示", () => {
     await page.getByRole("tab", { name: /全情報/ }).click();
     const row = page.getByTestId("date-row").filter({ has: page.locator('[data-testid="deadline-day"]') }).filter({ hasText: /\d+\/\d+.*\d+\/\d+/ }).first();
     const before = await row.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
-    // 利用できる幅を狭めて（親の幅を150pxに固定）、収まらない状況を作る。幅の変化で測り直される
-    await row.evaluate((e) => { e.parentElement!.style.width = "150px"; });
+    // 利用できる幅を狭めて（日付行の必要幅の8割に固定）、収まらない状況を作る。幅の変化で測り直される（日付の桁数で必要幅が変わるため固定値にしない）
+    const needed = await row.evaluate((e) => e.scrollWidth);
+    await row.evaluate((e, w) => { e.parentElement!.style.width = `${w}px`; }, Math.max(100, Math.floor(needed * 0.8)));
     await expect.poll(async () => row.evaluate((e) => e.scrollWidth <= e.parentElement!.clientWidth + 1)).toBe(true);
     const after = await row.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
     expect(after).toBeLessThan(before); // 日付行全体の文字サイズを縮小（アイコンは em 指定で同じ比率）

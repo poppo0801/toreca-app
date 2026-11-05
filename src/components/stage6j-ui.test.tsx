@@ -1,3 +1,4 @@
+/* eslint-disable react/no-children-prop -- createElement で子要素を props に渡すため */
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +8,7 @@ import type { Rank } from "@/lib/collector/completeness";
 const dismiss = vi.fn(async (..._a: unknown[]) => ({ ok: true }) as { ok: boolean; error?: string });
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
 vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: "p1" }, reload: async () => null }) }));
-vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: (p: { prefill?: { draft?: { input?: { chain?: { name?: string } } } } }) => createElement("div", { "data-testid": "edit-form", "data-chain": p.prefill?.draft?.input?.chain?.name ?? "" }) }));
+vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: (p: { restoreSignal?: number; prefill?: { draft?: { input?: { chain?: { name?: string } } } } }) => createElement("div", { "data-testid": "edit-form", "data-chain": p.prefill?.draft?.input?.chain?.name ?? "", "data-restore": String(p.restoreSignal ?? 0) }) }));
 vi.mock("@/app/(app)/settings/collection/manual-actions", () => ({ manualDismissAction: (...a: unknown[]) => dismiss(...a), manualDoneAction: async () => ({ ok: true }), manualRecheckAction: async () => ({ ok: true }) }));
 
 import { AutoCollectView, type CandidateView } from "@/components/auto-collect-view";
@@ -86,7 +87,7 @@ describe("Stage 6J: スワイプ行の判定", () => {
   const mk = (over: Partial<{ onRight: () => void; onLeft: () => void; enabled: boolean }> = {}) => {
     const onRight = over.onRight ?? vi.fn();
     const onLeft = over.onLeft ?? vi.fn();
-    return { onRight, onLeft, node: createElement(SwipeEnabledProvider, { value: over.enabled ?? true }, createElement(SwipeRow, { onRight, onLeft }, createElement("button", { type: "button", "data-testid": "inner" }, "中身"))) };
+    return { onRight, onLeft, node: createElement(SwipeEnabledProvider, { value: over.enabled ?? true }, createElement(SwipeRow, { onRight: onRight as () => void, onLeft: onLeft as () => void, children: createElement("button", { type: "button", "data-testid": "inner" }, "中身") })) };
   };
   it("右スワイプで編集(onRight)・左スワイプで除外(onLeft)。一定距離を超えたときだけ確定する", async () => {
     vi.useFakeTimers();
@@ -202,6 +203,10 @@ describe("Stage 6J: 収集候補のスワイプ", () => {
     expect(form).not.toBeNull();
     expect(form.getAttribute("data-chain")).toBe(chain);
     expect(fetchBody).toEqual([]); // 開いただけ。何も変更しない
+    // 閉じると最小化されて残る登録フォームは、同じ候補をもう一度開くたびに「開き直し」の合図が変わる（最小化が解除される）
+    const first = form.getAttribute("data-restore");
+    await swipe(q('[data-testid="swipe-row"]', qa('[data-testid="candidate-row"]')[0])!, 120);
+    expect(q('[data-testid="edit-form"]')!.getAttribute("data-restore")).not.toBe(first);
   });
 });
 

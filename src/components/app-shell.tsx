@@ -13,114 +13,54 @@ import { NotificationBell } from "@/components/notification-bell";
 import { iconOf } from "@/components/page-heading";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { viewportGap } from "@/lib/viewport-gap";
-import { isEditingElement, isTouchingNow, keyboardInset, SETTLE_MS, stabilizeShift, visualShift, type ShiftState } from "@/lib/viewport-insets";
+import { keyboardInset } from "@/lib/viewport-insets";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
 /**
- * iOS のホーム画面アプリの表示領域まわりを CSS 変数に反映する。
- *  --vp-gap  : 起動直後だけ表示領域(innerHeight)が実際の画面より低いとき、100vh との差（standalone のときだけ）。下部の固定要素の bottom をその分下げる。
- *  --kb-inset: キーボードが隠している下側の高さ。ボトムシートの bottom をその分上げる。
- *  --vv-shift: キーボードを閉じたあとなどに、見えている領域の下端がレイアウト上の下端とずれたまま残るときの差（符号あり。編集中は0）。
- *              下部メニューなど固定要素の bottom をその分動かし、いつも見える下端に合わせる（キーボード開閉後に途切れる不具合の構造的な対処）。
- *              ただし最下部・最上部のオーバースクロール（バウンス）中は値が動き続けるため、指が触れている間は更新せず、同じ値が続いたときだけ採用する（stabilizeShift。メニューが浮き上がる不具合の対処）。
- * 表示領域は起動・復帰・最初の操作のあとに、イベントなしで変わることがある（実機の診断）。以前は特定のイベントの瞬間に1回だけ測っていたため、
- * 測った後に表示領域が直ると補正値だけが残り、下部メニューが画面の下へはみ出す（下半分が隠れる）危険があった。
- * そこで、これらのきっかけの後は SETTLE_MS の間フレームごとに測り直す（値が変わったときだけ書き換える。無条件の再描画はしない）。
+ * キーボードが隠している下側の高さを --kb-inset に反映する（ボトムシートの位置・最大高さの調整用）。イベント駆動のみ（常時のタイマー・ポーリングはしない）。
+ *
+ * 下部メニューの位置はここでは扱わない。以前は fixed の下部メニューの bottom を、測定値（--vp-gap / --vv-shift）で動かして表示領域に合わせていたが、
+ * iOS のホーム画面アプリは起動直後・復帰・キーボード開閉・バウンスのたびに innerHeight / 100vh / visualViewport が互いに食い違う一時的な値を取り、
+ * 測定→補正は常に動く標的を追う形で、補正が残る（下が切れる）・過剰に効く（浮く）のどちらかに必ずなった（docs/stage6j-viewport.md）。
+ * 現在は画面全体を固定の入れ物にして下部メニューをその最下段に置くため、メニューの位置に測定は不要。
  */
-function useViewportGap() {
+function useKeyboardInset() {
   useEffect(() => {
     const root = document.documentElement;
-    const mq = window.matchMedia("(display-mode: standalone)");
-    const probe = document.createElement("div");
-    probe.setAttribute("aria-hidden", "true");
-    probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;left:0;top:0;width:0;height:100vh";
-    document.body.appendChild(probe);
-    const set = (name: string, px: number, signed = false) => {
-      const prev = root.style.getPropertyValue(name);
-      const next = px > 0 || (signed && px < 0) ? `${px}px` : "";
-      if (prev === next) return;
-      if (next) root.style.setProperty(name, next);
-      else root.style.removeProperty(name);
+    const vv = window.visualViewport;
+    const apply = () => {
+      const px = keyboardInset(window.innerHeight, vv ?? null);
+      if (px > 0) root.style.setProperty("--kb-inset", `${px}px`);
+      else root.style.removeProperty("--kb-inset");
     };
-    let touching = false;
-    let lastTouchAt = 0;
-    let shift: ShiftState = { raw: 0, same: 0, applied: 0 };
-    const measure = () => {
-      const standalone = mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-      set("--vp-gap", viewportGap(probe.getBoundingClientRect().height, window.innerHeight, standalone));
-      set("--kb-inset", keyboardInset(window.innerHeight, window.visualViewport));
-      shift = stabilizeShift(shift, visualShift(window.innerHeight, window.visualViewport, isEditingElement(document.activeElement)), isTouchingNow(touching, lastTouchAt, performance.now()));
-      set("--vv-shift", shift.applied, true);
-    };
-    let until = 0;
+    // キーボードの出入りのアニメーション中だけ、フレームごとに追従する（約0.6秒。終われば止める）
     let raf = 0;
+    let until = 0;
     const tick = () => {
-      measure();
+      apply();
       raf = performance.now() < until ? requestAnimationFrame(tick) : 0;
     };
-    const settle = () => {
-      until = performance.now() + SETTLE_MS;
+    const follow = () => {
+      until = performance.now() + 600;
       if (!raf) raf = requestAnimationFrame(tick);
     };
-    settle();
-    // 表示領域が「イベントなしで、操作の数秒後に」直る場合の取りこぼし対策: 補正値だけが残ると下部メニューが画面の下へはみ出す（途切れる）。
-    // SETTLE_MS の期間外でも、画面が見えている間は低頻度（0.5秒ごと）で測り直す。値が変わったときだけ書き換えるので描画は増えない。
-    const poll = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !raf) measure();
-    }, 500);
-    const opts = { passive: true, capture: true } as const;
-    const vv = window.visualViewport;
-    const onVisible = () => {
-      // 復帰・退避のたびに触れた状態を捨てる（取りこぼしたtouchendの影響を残さない）
-      touching = false;
-      if (document.visibilityState === "visible") settle();
-    };
-    window.addEventListener("pageshow", settle);
-    window.addEventListener("orientationchange", settle);
-    window.addEventListener("resize", settle);
-    document.addEventListener("visibilitychange", onVisible);
-    vv?.addEventListener("resize", settle);
-    vv?.addEventListener("scroll", measure);
-    const onTouchStart = () => {
-      touching = true;
-      lastTouchAt = performance.now();
-      settle();
-    };
-    const onTouchMove = () => {
-      lastTouchAt = performance.now();
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      touching = e.touches.length > 0;
-      lastTouchAt = performance.now();
-      settle();
-    };
-    window.addEventListener("touchstart", onTouchStart, opts);
-    window.addEventListener("touchmove", onTouchMove, opts);
-    window.addEventListener("touchend", onTouchEnd, opts);
-    window.addEventListener("touchcancel", onTouchEnd, opts);
-    window.addEventListener("focusin", settle);
-    window.addEventListener("focusout", settle);
+    apply();
+    vv?.addEventListener("resize", follow);
+    vv?.addEventListener("scroll", apply);
+    window.addEventListener("focusin", follow);
+    window.addEventListener("focusout", follow);
+    window.addEventListener("orientationchange", follow);
+    document.addEventListener("visibilitychange", follow);
     return () => {
-      window.clearInterval(poll);
       cancelAnimationFrame(raf);
-      window.removeEventListener("pageshow", settle);
-      window.removeEventListener("orientationchange", settle);
-      window.removeEventListener("resize", settle);
-      document.removeEventListener("visibilitychange", onVisible);
-      vv?.removeEventListener("resize", settle);
-      vv?.removeEventListener("scroll", measure);
-      window.removeEventListener("touchstart", onTouchStart, opts);
-      window.removeEventListener("touchmove", onTouchMove, opts);
-      window.removeEventListener("touchend", onTouchEnd, opts);
-      window.removeEventListener("touchcancel", onTouchEnd, opts);
-      window.removeEventListener("focusin", settle);
-      window.removeEventListener("focusout", settle);
-      probe.remove();
-      root.style.removeProperty("--vp-gap");
+      vv?.removeEventListener("resize", follow);
+      vv?.removeEventListener("scroll", apply);
+      window.removeEventListener("focusin", follow);
+      window.removeEventListener("focusout", follow);
+      window.removeEventListener("orientationchange", follow);
+      document.removeEventListener("visibilitychange", follow);
       root.style.removeProperty("--kb-inset");
-      root.style.removeProperty("--vv-shift");
     };
   }, []);
 }
@@ -141,12 +81,16 @@ function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, notice, dismissNotice, settings } = useApp();
   const [more, setMore] = useState(false);
-  useViewportGap();
+  useKeyboardInset();
   const diag = useDiagEnabled(); // 明示的な診断モードでだけ true（通常は常に false）
   useProfileTheme();
   const nav = resolveNav(settings.nav);
   const all = availableNav();
   const settingsActive = pathname.startsWith("/settings");
+  // ページを移ったら、スクロール領域を先頭へ戻す（ページ全体のスクロールではないため、自動では戻らない）
+  useEffect(() => {
+    document.getElementById("app-scroll")?.scrollTo({ top: 0 });
+  }, [pathname]);
   const slots = nav.direct.length + (nav.more.length > 0 ? 1 : 0);
 
   const link = (n: NavItem, cls: string, activeCls: string, idleCls: string, icon: string) => {
@@ -161,18 +105,20 @@ function Shell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-dvh md:flex">
+    // 画面全体を固定の入れ物にして（上下左右を表示領域に固定）、中のスクロール領域だけを動かす。下部メニューは固定配置ではなく入れ物の最下段なので、
+    // 表示領域の測定・補正に頼らず、常に表示領域の下端に接する（docs/stage6j-viewport.md）
+    <div className="fixed inset-0 flex flex-col md:flex-row" data-testid="app-root">
       {/* PC: 左ナビ（利用できるすべての機能。ユーザー切替・通知・設定はヘッダー） */}
-      <aside className="hidden w-52 shrink-0 flex-col gap-4 border-r bg-header p-4 md:flex">
+      <aside className="hidden w-52 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-header p-4 md:flex">
         <BrandLogo className="px-1 pt-1" />
         <nav aria-label="メイン" className="flex flex-col gap-1">
           {all.map((n) => link(n, "flex min-h-10 items-center gap-2 rounded-md px-3 text-sm", "bg-primary text-primary-foreground", "hover:bg-muted", "size-4"))}
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザー・設定（歯車）。ステータスバー/Dynamic Island分は Safe Area で確保 */}
-        <header className="sticky top-0 z-30 border-b border-t-2 border-t-primary bg-header pt-safe px-safe shadow-card">
+        <header className="relative z-30 shrink-0 border-b border-t-2 border-t-primary bg-header pt-safe px-safe shadow-card">
           <div className="flex h-10 items-center justify-between px-3">
             <BrandLogo className="md:hidden" />
             <span className="hidden md:block" />
@@ -191,7 +137,9 @@ function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-3 pb-[calc(3.25rem+env(safe-area-inset-bottom)+0.75rem)] pt-2 md:px-6 md:pb-8 md:pt-3">
+        {/* スクロールするのはここだけ（ページ全体はスクロールしない）。ヘッダーと下部メニューは動かない。ゴム紐のバウンスも中だけで、メニューには伝わらない */}
+        <main id="app-scroll" data-testid="app-scroll" className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [--header-h:0px] [-webkit-overflow-scrolling:touch]">
+          <div className="mx-auto w-full max-w-5xl px-3 pb-6 pt-2 md:px-6 md:pb-8 md:pt-3">
           <p className="sr-only" aria-live="polite">
             現在の操作プロフィール: {profile.label}
           </p>
@@ -204,9 +152,10 @@ function Shell({ children }: { children: React.ReactNode }) {
             </div>
           )}
           {children}
+          </div>
         </main>
         {/* モバイル: 下部メニュー（プロフィール別・最大5枠。隠れた機能があれば「その他」）。背景は下端まで伸び、操作部分はホームインジケーターの少し上 */}
-        <nav aria-label="メイン" data-testid="bottom-nav" className="fixed inset-x-0 bottom-[calc(0px_-_var(--vp-gap,0px)_-_var(--vv-shift,0px))] z-30 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
+        <nav aria-label="メイン" data-testid="bottom-nav" className="relative z-30 shrink-0 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
           <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
             {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
             {nav.more.length > 0 && (

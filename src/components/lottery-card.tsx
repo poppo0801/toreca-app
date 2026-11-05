@@ -26,6 +26,7 @@ import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions
 import { WonRow } from "@/components/won-actions";
 import { displayPeriod, wonPeriodRows, myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
 import { scopedApplications, scopeSet } from "@/lib/profile-link";
+import { scrollToTop, scrollTopOf } from "@/lib/app-scroll";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -124,13 +125,13 @@ export function LotteryCard({
   const barClass = event === "before" ? "border-l-info" : DEADLINE_BAR_CLASS[badge?.tone ?? "ended"];
 
   const openDetail = () => {
-    scrollY.current = window.scrollY;
+    scrollY.current = scrollTopOf();
     setOpen(true);
   };
   // 詳細を閉じたら、一覧のスクロール位置を元に戻す
   const onOpenChange = (v: boolean) => {
     setOpen(v);
-    if (!v) requestAnimationFrame(() => window.scrollTo({ top: scrollY.current }));
+    if (!v) requestAnimationFrame(() => scrollToTop(scrollY.current));
   };
   const toggleStar = () => {
     if (managed) setConfirmOff(true); // ★OFFは確認ダイアログ

@@ -70,7 +70,7 @@ test.describe("Stage 6H 画面", () => {
       const boxes = await tabs.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
       expect(new Set(boxes.map((h) => Math.round(h))).size, `タブの高さがそろっていません ${boxes}`).toBe(1);
       const all = page.getByRole("tab", { name: /全情報/ });
-      const label = await all.locator("span.relative").first().boundingBox();
+      const label = await all.locator("span.inline-flex").first().boundingBox();
       const count = await page.getByTestId("tab-count-all").boundingBox();
       expect(label && count && count.y >= label.y + label.height - 1, `件数が名称の下にありません（w=${w}）`).toBeTruthy();
       await noOverflow(page);
@@ -123,12 +123,12 @@ test.describe("Stage 6H 画面", () => {
       await expect(page.getByTestId("manual-banner")).toBeVisible();
       // 一覧の上でホイール → 一覧の中がスクロールし、画面全体は動かない
       await list.scrollIntoViewIfNeeded();
-      const y0 = await page.evaluate(() => window.scrollY);
+      const y0 = await page.evaluate(() => document.getElementById("app-scroll")!.scrollTop);
       const box = (await list.boundingBox())!;
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.wheel(0, 80);
       await expect.poll(async () => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-      expect(await page.evaluate(() => window.scrollY)).toBe(y0);
+      expect(await page.evaluate(() => document.getElementById("app-scroll")!.scrollTop)).toBe(y0);
       // 詳細・対応（詳細への移動）はそのまま使える
       await list.locator('[data-testid="manual-detail"]').first().click();
       await expect(page.getByTestId("manual-detail-panel")).toBeVisible();

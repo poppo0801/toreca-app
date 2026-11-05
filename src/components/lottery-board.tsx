@@ -233,11 +233,11 @@ function LotteryBoardInner() {
                 onClick={() => selectTab(t.value)}
                 className={cn("min-h-10 rounded-md px-0 py-0.5 text-xs font-medium leading-tight", selected ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}
               >
-                {/* 2行: 上段=名前（赤丸は文字のすぐ右上）／下段=件数（新着のバッジは件数の右）。全タブで同じ高さ・位置にそろえる */}
+                {/* 2行: 上段=赤丸＋名前（赤丸はタブ名の左。文字に重ねない）／下段=件数（新着のバッジは件数の右）。全タブで同じ高さ・位置にそろえる */}
                 <span className="flex flex-col items-center justify-center whitespace-nowrap">
-                  <span className={cn("relative", dot && "ml-1.5")}>
+                  <span className="inline-flex items-center gap-1">
+                    {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="size-2 shrink-0 rounded-full bg-danger" />}
                     {t.label}
-                    {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute -left-2 -top-1 size-2 rounded-full bg-danger ring-1 ring-white" />}
                   </span>
                   <span className="inline-flex h-4 items-center gap-0.5 text-[11px] tabular-nums" data-testid={`tab-count-${t.value}`}>
                     <span className="opacity-80">{count}</span>

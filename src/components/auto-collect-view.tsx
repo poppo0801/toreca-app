@@ -375,6 +375,12 @@ export function AutoCollectView({
   const [productQ, setProductQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CandidateView | null>(null);
+  // 登録フォームは閉じると最小化されて残る（入力を失わない）。同じ候補を開き直すときは最小化を解除する（restoreSignal）
+  const [editNonce, setEditNonce] = useState(0);
+  const openEdit = (c: CandidateView) => {
+    setEditing(c);
+    setEditNonce((n) => n + 1);
+  };
   // 「要手動確認」から渡された候補の編集フォームを、収集候補の一覧を経由せずに直接開く（解析済みの内容をそのまま反映）
   const editReq = useEditRequest();
   const editReqId = editReq?.id ?? null;
@@ -382,7 +388,7 @@ export function AutoCollectView({
     if (!editReqId) return;
     const c = candidates.find((x) => x.id === editReqId);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 要手動確認からの編集要求を受けてフォームを開く
-    if (c?.draft?.input) setEditing(c);
+    if (c?.draft?.input) openEdit(c);
     editReq?.clear();
     // 要求が来たときだけ（候補の一覧の更新では開き直さない）
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1096,7 +1102,7 @@ export function AutoCollectView({
             const uniqueReasons = [...new Set(c.reasons)];
             return (
               <li key={c.id} className="text-xs" data-testid="candidate-row">
-                <SwipeRow onRight={swipeable && d ? () => setEditing(c) : undefined} onLeft={swipeable ? () => swipeExclude(c) : undefined} rightLabel="編集" leftLabel="除外">
+                <SwipeRow onRight={swipeable && d ? () => openEdit(c) : undefined} onLeft={swipeable ? () => swipeExclude(c) : undefined} rightLabel="編集" leftLabel="除外">
                 <div className="space-y-1 py-2">
                 <p className="flex items-start gap-1.5 font-medium">
                   {c.job_state === "review" && c.kind !== "update" && (
@@ -1188,7 +1194,7 @@ export function AutoCollectView({
                     </Button>
                   )}
                   {c.job_state === "review" && c.kind !== "update" && d && (
-                    <Button size="sm" disabled={busy !== null} data-testid="cand-edit" onClick={() => setEditing(c)}>
+                    <Button size="sm" disabled={busy !== null} data-testid="cand-edit" onClick={() => openEdit(c)}>
                       編集して登録
                     </Button>
                   )}
@@ -1284,6 +1290,8 @@ export function AutoCollectView({
       )}
       {editing?.draft?.input && (
         <LotteryFormDialog
+          key={editing.id}
+          restoreSignal={editNonce}
           open
           lottery={null}
           onOpenChange={(v) => !v && setEditing(null)}

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "next-themes";
 import { APP_DESCRIPTION, APP_NAME, APP_SUBTITLE } from "@/lib/brand";
+import { startupImages } from "@/lib/startup-images";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,7 +19,8 @@ export const metadata: Metadata = {
     ],
     apple: { url: "/icons/v2/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
   },
-  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "black-translucent" },
+  // 起動画面: iOS がホーム画面アプリを起動してから最初のHTMLが届くまで（サーバーの起動待ちを含む）、黒い画面ではなくロゴの画面を出す
+  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "black-translucent", startupImage: startupImages() },
 };
 
 export const viewport: Viewport = {

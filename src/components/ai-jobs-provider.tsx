@@ -102,7 +102,7 @@ export function AiJobsProvider({ children }: { children: React.ReactNode }) {
     <AiJobsContext.Provider value={value}>
       {children}
       {toast && (
-        <div role="status" data-testid="ai-job-toast" className="fixed inset-x-3 bottom-[calc(3.25rem_+_env(safe-area-inset-bottom)_+_0.5rem_-_var(--vp-gap,0px)_-_var(--vv-shift,0px))] z-40 flex items-center gap-2 rounded-xl border border-primary bg-card px-3 py-2 text-sm shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96">
+        <div role="status" data-testid="ai-job-toast" className="fixed inset-x-3 bottom-[calc(3.25rem_+_env(safe-area-inset-bottom)_+_0.5rem)] z-40 flex items-center gap-2 rounded-xl border border-primary bg-card px-3 py-2 text-sm shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96">
           <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
           <span className="min-w-0 flex-1">{completionMessage(toast)}</span>
           <Link href={`/lotteries/bulk?job=${toast.id}`} onClick={() => setToast(null)} className="shrink-0 text-xs font-bold text-primary-ink underline" data-testid="ai-job-toast-link">

@@ -269,7 +269,7 @@
   mask-image: none;
   animation: card-shine-sweep 1.2s ease-out 0.25s both;
 }
-/* 上位ティア: 数秒おきに細い光が1回走る（静止している間の大半は何も乗らない） */
+/* 上位ティア: 数秒おきに細い光が1回走る（静止している間の大半は何も乗らない）。間隔はレアリティで変える（SAR/URほど短い）。画面外のカードは止める */
 .card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
 .card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after {
   opacity: 1;
@@ -278,11 +278,15 @@
   background-position: 130% 0;
   -webkit-mask-image: none;
   mask-image: none;
-  animation: card-shine-sweep 6s ease-in-out 1.5s infinite;
+  animation: card-shine-sweep var(--shine-cycle, 3.6s) ease-in-out 1s infinite;
 }
+.card-shine[data-tier="2"] { --shine-cycle: 3.8s; }
+.card-shine[data-tier="3"] { --shine-cycle: 3s; }
+.card-shine[data-offscreen="1"]::after { animation-play-state: paused; }
+/* 走る時間は周期の約25%（周期3.8sで約0.95秒、3sで約0.75秒）。残りは何も乗らない */
 @keyframes card-shine-sweep {
   0% { background-position: 130% 0; }
-  16%, 100% { background-position: -30% 0; }
+  25%, 100% { background-position: -30% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .card-shine::before,
