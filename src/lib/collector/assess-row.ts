@@ -5,6 +5,7 @@
 import { assessCompleteness, missingSummary, priorityOf, RANK_LABEL, STAGE_SHORT, type Assessment, type Priority, type Rank } from "@/lib/collector/completeness";
 import { conflictLabels, SOURCE_LABEL, SOURCE_RANK, FIELD_LABEL, FIELD_KEYS, type FieldMap, type SourceKind } from "@/lib/collector/fields";
 import { rematch, type StoredDraft } from "@/lib/collector/reevaluate";
+import { evaluateCandidate, type CollectionConditions } from "@/lib/collector/conditions";
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { AppData } from "@/types/domain";
 
@@ -49,7 +50,7 @@ interface Row {
 
 const jstDate = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 
-export function assessRow(row: Row, data: AppData, now: Date, important: Set<string>): RowAssess | null {
+export function assessRow(row: Row, data: AppData, now: Date, important: Set<string>, cond?: CollectionConditions): RowAssess | null {
   const d = row.draft as (Omit<StoredDraft, "fields" | "tracking"> & { fields?: FieldMap; tracking?: unknown; related?: string[]; viaList?: boolean }) | null;
   if (!d?.input || !d.summary) return null;
   const rm = rematch(d as unknown as StoredDraft, data);
@@ -57,7 +58,10 @@ export function assessRow(row: Row, data: AppData, now: Date, important: Set<str
   const fieldConflicts = conflictLabels(d.fields);
   const warnConflict = (d.warnings ?? []).find((w) => /矛盾|食い違/.test(w));
   const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目: ${fieldConflicts.join("・")}` : warnConflict ? `情報に矛盾の疑い: ${warnConflict.slice(0, 40)}` : null;
-  const a: Assessment = assessCompleteness(input, rm.summary, { today: jstDate(now), conflict, candidates: rm.candidates as never, modePending: !!d.modePending });
+  // 収集条件の判定（地域・受取方法など）。未確認なら、登録可能（A）とはしない
+  const store = data.stores.find((s) => s.id === input.store.id);
+  const ev = cond ? evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: null, now }) : null;
+  const a: Assessment = assessCompleteness(input, rm.summary, { today: jstDate(now), conflict, candidates: rm.candidates as never, modePending: !!d.modePending, verdict: ev?.verdict, verdictReasons: ev?.reasons });
   const dl = input.applyDeadline;
   const dueAt = dl.precision !== "unknown" && dl.date ? new Date(`${dl.date}T${dl.precision === "date_time" && dl.time ? dl.time : "23:59"}:00+09:00`) : row.due_at ? new Date(row.due_at) : null;
   const chainId = input.chain.id;

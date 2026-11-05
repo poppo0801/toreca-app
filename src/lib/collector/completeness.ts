@@ -42,7 +42,7 @@ export interface Assessment {
 
 const known = (f?: { precision: string; date?: string | null }) => !!f && f.precision !== "unknown" && !!f.date;
 
-export function assessCompleteness(input: LotteryInput, summary: Summary, ctx: { today: string; conflict?: string | null; candidates?: LotteryDraft["candidates"]; modePending?: boolean }): Assessment {
+export function assessCompleteness(input: LotteryInput, summary: Summary, ctx: { today: string; conflict?: string | null; candidates?: LotteryDraft["candidates"]; modePending?: boolean; /** 収集条件の判定結果。review（地域・受取方法などが未確認）のときは、登録可能（A）にしない */ verdict?: "match" | "review" | "exclude" | "upcoming"; verdictReasons?: string[] }): Assessment {
   const chainNamed = !!(input.chain.id || input.chain.name.trim());
   const storeName = input.store.name.trim();
   const online = input.receiveMethod === "shipping" || isOnlineLikeName(storeName);
@@ -94,11 +94,17 @@ export function assessCompleteness(input: LotteryInput, summary: Summary, ctx: {
     rank = "A";
     reasons.push("重要項目がすべて揃い、マスター照合も解決しています");
   }
+  // 収集条件の判定に必要な情報（地域・受取方法）が未確認なら、登録条件を満たしていない（A→B）。不足の要約にも出す
+  const condMissing = ctx.verdict === "review" ? (ctx.verdictReasons ?? []).filter((r) => /地域|都道府県|受取方法|店舗の位置|距離/.test(r)) : [];
+  if (rank === "A" && condMissing.length > 0) {
+    rank = "B";
+    reasons.push(`収集条件の判定に必要な情報が未確認: ${condMissing[0]}`);
+  }
   if (ctx.modePending && (rank === "A" || rank === "B")) {
     rank = "C";
     reasons.push("複数商品の応募方式が未確定");
   }
-  const missing = [...critical, ...masterIssues.map((m) => `${m}の確認`)];
+  const missing = [...critical, ...masterIssues.map((m) => `${m}の確認`), ...(condMissing.length > 0 ? ["所在地・受取方法の確認"] : [])];
   // 補助情報の不足は、ランクに関係なく不足の要約に添える（重要項目が揃っているときだけ）
   if (critical.length === 0) {
     if (!input.resultDate || !known(input.resultDate)) missing.push("当選発表日");

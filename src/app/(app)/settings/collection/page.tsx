@@ -11,7 +11,7 @@ import { loadRunNotices } from "@/lib/server/collector/run-notices";
 import { healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
 import { estimateCostJpy } from "@/lib/collector/x-posts";
 import { monthBudget } from "@/lib/server/ai-budget";
-import { ensureCollectionDefaults } from "@/lib/server/collector/run";
+import { conditionsFromRow, ensureCollectionDefaults } from "@/lib/server/collector/run";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -86,7 +86,7 @@ export default async function CollectionPage() {
   const importantSet = appData ? importantChains(appData) : new Set<string>();
   const candidates = [lReview, lQueued, lReg, lEx, lDup, lFail]
     .flatMap((r) => r.data ?? [])
-    .map((c) => ({ ...c, assess: appData && c.job_state === "review" ? assessRow({ draft: c.draft, due_at: c.due_at, source_url: c.source_url, memo_id: (c as { memo_id?: string | null }).memo_id }, appData, now, importantSet) : null }));
+    .map((c) => ({ ...c, assess: appData && c.job_state === "review" ? assessRow({ draft: c.draft, due_at: c.due_at, source_url: c.source_url, memo_id: (c as { memo_id?: string | null }).memo_id }, appData, now, importantSet, conditionsFromRow(settings.data as unknown as Record<string, unknown>)) : null }));
   const counts = { pending: nReview.count ?? 0, queued: nQueued.count ?? 0, auto_registered: nReg.count ?? 0, excluded: nEx.count ?? 0, duplicate: nDup.count ?? 0, failed: nFail.count ?? 0 };
   const xPosts = (monthRuns.data ?? []).reduce((a, r) => a + r.x_posts, 0);
   const st = settings.data!;

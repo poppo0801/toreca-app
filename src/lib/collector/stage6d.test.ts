@@ -239,3 +239,14 @@ describe("Stage 6D: 矛盾の誤検出を避ける（短縮URL・受取方法の
     expect(mergeSides(mk("", "store", "9"), mk("", "shipping", "10")).conflicts.map((c) => c.field)).toEqual(["receiveMethod"]);
   });
 });
+
+describe("Stage 6D: 収集条件の判定が『要確認』のときは、登録可能（A）にしない", () => {
+  const full = { chain: { id: "c1", name: "ふるいち" }, store: { id: "s1", name: "三宮店", prefecture: "" }, ...prod("30th CELEBRATION", "p1"), applyDeadline: flex("2026-11-10", "23:59"), applyMethod: "web" as const };
+  const okSummary = sum("exact", "exact", [{ name: "x", kind: "exact", matchedName: "x" }]);
+  it("地域・受取方法が未確認で収集条件を満たせない候補は A ではなく B（不足に『所在地・受取方法の確認』）", () => {
+    const a = assessCompleteness(input(full), okSummary, { today: "2026-11-05", verdict: "review", verdictReasons: ["受取方法（店頭・発送）が不明です"] });
+    expect(a.rank).toBe("B");
+    expect(a.missing).toContain("所在地・受取方法の確認");
+    expect(assessCompleteness(input(full), okSummary, { today: "2026-11-05", verdict: "match" }).rank).toBe("A");
+  });
+});

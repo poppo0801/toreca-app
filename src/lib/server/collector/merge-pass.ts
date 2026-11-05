@@ -6,7 +6,8 @@ import { triagePatch } from "@/lib/collector/triage";
 import { deepClean } from "@/lib/text-safe";
 import { loadOpen, loadSourceCtx } from "@/lib/server/collector/open";
 import { runReevaluation } from "@/lib/server/collector/reevaluate";
-import { bumpStats, type CollectDeps } from "@/lib/server/collector/run";
+import { bumpStats, conditionsFromRow, type CollectDeps } from "@/lib/server/collector/run";
+import { evaluateCandidate } from "@/lib/collector/conditions";
 import { jstDateString } from "@/lib/datetime";
 
 /**
@@ -48,7 +49,13 @@ export async function runMergePass(deps: CollectDeps, opts: { execute: boolean; 
   const today = jstDateString(now);
   const sctx = await loadSourceCtx(db, householdId);
   const all = await loadOpen(db, householdId, sctx);
-  const rank = (o: OpenLite) => assessCompleteness(o.input, o.summary, { today }).rank;
+  const settingsRow = (await db.from("collection_settings").select("*").eq("household_id", householdId).maybeSingle()).data;
+  const cond = settingsRow ? conditionsFromRow(settingsRow as unknown as Record<string, unknown>) : null;
+  const verdictOf = (o: OpenLite) => (cond ? evaluateCandidate(o.input, cond, { prefecture: o.input.store.prefecture || "", storeKind: "physical", distanceKm: null, now }) : null);
+  const rank = (o: OpenLite) => {
+    const ev = verdictOf(o);
+    return assessCompleteness(o.input, o.summary, { today, verdict: ev?.verdict, verdictReasons: ev?.reasons }).rank;
+  };
   const rankBefore: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
   for (const o of all) rankBefore[rank(o)]++;
 
@@ -111,7 +118,8 @@ export async function runMergePass(deps: CollectDeps, opts: { execute: boolean; 
     rankBefore,
     rankAfter,
     rows: all.map((o) => {
-      const a = assessCompleteness(o.input, o.summary, { today, conflict: conflictLabels(o.fields).length > 0 ? "矛盾" : null });
+      const ev = verdictOf(o);
+      const a = assessCompleteness(o.input, o.summary, { today, conflict: conflictLabels(o.fields).length > 0 ? "矛盾" : null, verdict: ev?.verdict, verdictReasons: ev?.reasons });
       return { id: o.id, rank: a.rank, missing: a.missing, conflict: a.conflict, stage: a.stage, chain: o.input.chain.name };
     }),
   };
