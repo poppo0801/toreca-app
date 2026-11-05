@@ -144,3 +144,4 @@ describe("Stage 6H: X APIの応答からプロフィールを読む", () => {
     expect(p.quoted?.profile).toMatchObject({ name: "TSUTAYA 竹原店", location: "広島県竹原市" });
   });
 });
+

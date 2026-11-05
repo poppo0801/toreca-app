@@ -61,7 +61,7 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
       const r = await get(`/users/by/username/${encodeURIComponent(username)}`, { "user.fields": "id,username,name,location,description" });
       if (!r.ok) return r;
       const d = (r.json as { data?: { id?: unknown; username?: unknown; name?: unknown; location?: unknown; description?: unknown }; errors?: { detail?: unknown }[] }) ?? {};
-      if (typeof d.data?.id === "string" && /^d{1,25}$/.test(d.data.id)) {
+      if (typeof d.data?.id === "string" && /^\d{1,25}$/.test(d.data.id)) {
         const s = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : "");
         return { ok: true, id: d.data.id, username: typeof d.data.username === "string" ? d.data.username : username, profile: { name: s(d.data.name, 80), location: s(d.data.location, 100), description: s(d.data.description, 300) } };
       }
