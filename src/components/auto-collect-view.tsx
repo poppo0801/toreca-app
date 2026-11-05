@@ -166,6 +166,13 @@ const CAND_TABS = [
   { value: "failed", label: "取得失敗" },
 ] as const;
 
+/** 設定の比較用の値（保存する項目だけ。配列は順序に依存しない） */
+const SETTING_KEYS = ["prefectures", "include_online", "max_distance_km", "apply_methods", "receive_methods", "req_include", "req_exclude", "product_mode", "product_ids", "status_mode", "track_upcoming", "auto_register", "schedule_enabled", "schedule_hour_jst", "x_enabled", "x_monthly_budget_jpy", "x_max_posts_per_run", "max_ai_per_run", "worker_enabled", "worker_batch", "recheck_hours"] as const;
+export function settingsKey(x: SettingsView): string {
+  const rec = x as unknown as Record<string, unknown>;
+  return JSON.stringify(SETTING_KEYS.map((k) => (Array.isArray(rec[k]) ? [...(rec[k] as unknown[])].sort() : (k === "track_upcoming" ? rec[k] !== false : (rec[k] ?? null)))));
+}
+
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 const input = "h-9 w-full min-w-0 rounded-md border bg-input px-2 text-sm";
 
@@ -341,6 +348,26 @@ export function AutoCollectView({
     return () => window.clearTimeout(t);
   }, []);
   const [s, setS] = useState(settings);
+  // 保存済みの設定（保存先で確認できた値）。未保存の変更は、これとの差で判定する
+  const [saved, setSaved] = useState(settings);
+  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const dirty = settingsKey(s) !== settingsKey(saved);
+  const propKey = settingsKey(settings);
+  useEffect(() => {
+    // 他の端末での変更・再読み込みで保存済みの値が変わったとき、未保存の変更が無ければ追従する
+    if (!dirty) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 保存済みの設定への同期
+      setS(settings);
+      setSaved(settings);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- サーバーの値（propKey）が変わったときだけ
+  }, [propKey]);
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
   const [showAllPref, setShowAllPref] = useState(false);
   const [productQ, setProductQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -378,15 +405,24 @@ export function AutoCollectView({
   const toggleArr = (key: "prefectures" | "apply_methods" | "receive_methods" | "req_include" | "req_exclude" | "product_ids", v: string) =>
     setS((cur) => ({ ...cur, [key]: cur[key].includes(v) ? cur[key].filter((x) => x !== v) : [...cur[key], v] }));
 
-  const saveSettings = () =>
-    act("save", {
-      action: "saveSettings",
-      settings: {
+  const saveSettings = async () => {
+    setSaveMsg(null);
+    const r = await act("save", { action: "saveSettings", settings: {
         prefectures: s.prefectures, includeOnline: s.include_online, maxDistanceKm: s.max_distance_km, applyMethods: s.apply_methods, receiveMethods: s.receive_methods,
         reqInclude: s.req_include, reqExclude: s.req_exclude, productMode: s.product_mode, productIds: s.product_ids, statusMode: s.status_mode, trackUpcoming: s.track_upcoming !== false, autoRegister: s.auto_register,
         scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, recheckHours: s.recheck_hours,
-      },
-    });
+      } }, () => "保存しました");
+    if (r.ok && r.settings) {
+      // 保存先で確認できた値を、保存済みの値として反映する
+      setSaved(r.settings as unknown as SettingsView);
+      setS(r.settings as unknown as SettingsView);
+      setSaveMsg({ ok: true, text: "保存しました（保存先で確認済み）" });
+    } else setSaveMsg({ ok: false, text: `保存できませんでした。変更は残しています: ${r.error ?? "原因不明"}` });
+  };
+  const discardChanges = () => {
+    setS(saved);
+    setSaveMsg(null);
+  };
 
   const [add, setAdd] = useState<{ kind: "web" | "x"; name: string; value: string }>({ kind: "web", name: "", value: "" });
   const addSource = async () => {
@@ -481,7 +517,7 @@ export function AutoCollectView({
       </Block>
 
       {/* ② 収集対象・条件（設定） */}
-      <Block no="②" title="収集対象・条件" testId="conditions" forceOpen={hashOpen === "conditions"} summary={`都道府県${settings.prefectures.length}・自動登録${settings.auto_register ? "ON" : "OFF"}`}>
+      <Block no="②" title="収集対象・条件" testId="conditions" forceOpen={hashOpen === "conditions"} alert={dirty ? "未保存の変更" : null} summary={`都道府県${settings.prefectures.length}・自動登録${settings.auto_register ? "ON" : "OFF"}`}>
         <div className="divide-y [&>*]:py-2.5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
           <SetRow label="受付状況" tip="締切が不明なものは「受付中」とせず、確認待ちにします（時刻を勝手に補いません）。">
             <div className="flex flex-wrap gap-1.5">
@@ -600,8 +636,12 @@ export function AutoCollectView({
           </SetRow>
         </div>
 
-        <div className="space-y-2 border-t pt-3" data-testid="sources">
-          <h3 className="text-xs font-bold">収集元</h3>
+        <details className="border-t pt-3" data-testid="sources">
+          <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 text-xs font-bold" data-testid="sources-toggle">
+            <ChevronRight className="size-4 text-muted-foreground transition-transform [details[open]_&]:rotate-90" aria-hidden="true" />
+            収集元（{sources.length}件）
+          </summary>
+          <div className="space-y-2 pt-2">
           <ul className="divide-y">
             {sources.map((src) => {
               const st = STATUS_LABEL[src.status] ?? STATUS_LABEL.never;
@@ -671,6 +711,26 @@ export function AutoCollectView({
               追加
             </Button>
           </div>
+          </div>
+        </details>
+
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3" data-testid="conditions-save">
+          <Button onClick={() => void saveSettings()} disabled={busy !== null || !dirty} data-testid="save-conditions-inline">
+            {busy === "save" ? "保存しています…" : "設定を保存"}
+          </Button>
+          {dirty && (
+            <Button variant="outline" onClick={discardChanges} disabled={busy !== null} data-testid="discard-conditions">
+              変更を破棄
+            </Button>
+          )}
+          <span className={cn("text-xs", dirty ? "font-medium text-warn" : "text-muted-foreground")} data-testid="settings-state">
+            {dirty ? "未保存の変更があります" : "保存済み"}
+          </span>
+          {saveMsg && (
+            <span role={saveMsg.ok ? "status" : "alert"} className={cn("w-full text-xs", saveMsg.ok ? "text-teal-700 dark:text-teal-300" : "text-danger")} data-testid="save-result">
+              {saveMsg.text}
+            </span>
+          )}
         </div>
       </Block>
 
@@ -770,8 +830,8 @@ export function AutoCollectView({
             </dl>
           </div>
         </div>
-        <Button onClick={() => void saveSettings()} disabled={busy !== null} data-testid="save-conditions">
-          {busy === "save" ? "保存しています…" : "設定を保存"}
+        <Button onClick={() => void saveSettings()} disabled={busy !== null || !dirty} data-testid="save-conditions">
+          {busy === "save" ? "保存しています…" : dirty ? "設定を保存（未保存の変更あり）" : "設定を保存"}
         </Button>
       </Block>
 

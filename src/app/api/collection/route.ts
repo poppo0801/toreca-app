@@ -5,6 +5,7 @@ import { lotteryInputSchema } from "@/lib/lottery-input";
 import { isXHost } from "@/lib/server/x-source";
 import { applyCandidateUpdate, ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
+import { saveCollectionSettings } from "@/lib/server/collector/settings";
 import { excludeCandidates, requeueCandidates, undoExclude } from "@/lib/server/collector/review-actions";
 import { rebuildQueued } from "@/lib/collector/queued";
 import { learnAliases, planAliasLearning, type LearnInput } from "@/lib/server/collector/learn";
@@ -272,16 +273,8 @@ export async function POST(request: NextRequest) {
       const s = b.settings;
       const bad = s.prefectures.find((p) => !PREFECTURE_LIST.includes(p));
       if (bad) return json({ ok: false, error: `都道府県の指定が不正です: ${bad}` }, 422);
-      const { error } = await db
-        .from("collection_settings")
-        .update({
-          prefectures: s.prefectures, include_online: s.includeOnline, max_distance_km: s.maxDistanceKm, apply_methods: s.applyMethods, receive_methods: s.receiveMethods,
-          req_include: s.reqInclude, req_exclude: s.reqExclude, product_mode: s.productMode, product_ids: s.productIds, status_mode: s.statusMode, track_upcoming: s.trackUpcoming, auto_register: s.autoRegister,
-          schedule_enabled: s.scheduleEnabled, schedule_hour_jst: s.scheduleHourJst, x_enabled: s.xEnabled, x_monthly_budget_jpy: s.xMonthlyBudgetJpy, x_max_posts_per_run: s.xMaxPostsPerRun,
-          max_ai_per_run: s.maxAiPerRun, worker_enabled: s.workerEnabled, worker_batch: s.workerBatch, recheck_hours: s.recheckHours, updated_at: new Date().toISOString(),
-        })
-        .eq("household_id", householdId);
-      return error ? json({ ok: false, error: "保存に失敗しました" }, 500) : json({ ok: true });
+      const r = await saveCollectionSettings(db, householdId, s as never);
+      return r.ok ? json({ ok: true, settings: r.settings }) : json({ ok: false, error: r.error }, 500);
     }
   }
 }
