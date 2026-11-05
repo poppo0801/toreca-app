@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,9 @@ import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import { HIDDEN_REQUIREMENT_TAGS, REQUIREMENT_TAGS } from "@/lib/lottery-taxonomy";
+import { RANKS, RANK_LABEL, type Rank } from "@/lib/collector/completeness";
+import type { RowAssess } from "@/lib/collector/assess-row";
+import { filterRows, nextAfter, rankCounts, SORT_LABEL, sortRows, type SortKey } from "@/lib/collector/review-list";
 import { cn } from "@/lib/utils";
 
 export interface SourceView {
@@ -76,6 +79,8 @@ export interface CandidateView {
   last_error?: string | null;
   due_at?: string | null;
   last_changed_at?: string | null;
+  /** 情報充実度（A〜E）・対応優先度・項目別の出典。確認待ちの候補だけ（表示のたびに再計算） */
+  assess?: RowAssess | null;
 }
 export interface StatRow {
   day: string;
@@ -340,6 +345,13 @@ export function AutoCollectView({
   const [productQ, setProductQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CandidateView | null>(null);
+  // 確認待ちの絞り込み・並び順（初期は対応優先度順）、即時除外の取り消し、一括除外の確認、登録後に開く次の候補
+  const [rankFilter, setRankFilter] = useState<"all" | Rank>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("priority");
+  const [undo, setUndo] = useState<{ label: string; items: { id: string; prev: Record<string, unknown> }[] } | null>(null);
+  const undoTimer = useRef<number | undefined>(undefined);
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const [nextEdit, setNextEdit] = useState<CandidateView | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleOpen = (id: string) => setExpanded((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [budgetInput, setBudgetInput] = useState({ budget: String(ops.budgetJpy), rate: String(ops.rate) });
@@ -393,6 +405,31 @@ export function AutoCollectView({
   const list = candidates.filter((c) =>
     tab === "queued" ? ["pending", "retry", "processing"].includes(js(c)) : tab === "pending" ? js(c) === "review" : tab === "excluded" ? js(c) === "skipped" : tab === "failed" ? js(c) === "failed" : c.status === tab,
   );
+  const dueMsOf = (c: CandidateView) => {
+    const dl = c.draft?.input?.applyDeadline;
+    if (dl && dl.precision !== "unknown" && dl.date) return new Date(`${dl.date}T${dl.time || "23:59"}:00+09:00`).getTime();
+    return c.due_at ? new Date(c.due_at).getTime() : null;
+  };
+  const reviewRows = tab === "pending" ? list.map((c) => ({ c, row: { id: c.id, fetched_at: c.fetched_at, dueMs: dueMsOf(c), kind: c.kind, assess: c.assess ? { rank: c.assess.rank, priority: c.assess.priority } : null } })) : [];
+  const byId = new Map(reviewRows.map((x) => [x.row.id, x.c]));
+  const ranks = rankCounts(reviewRows.map((x) => x.row));
+  const shown: CandidateView[] = tab === "pending" ? sortRows(filterRows(reviewRows.map((x) => x.row), rankFilter), sortKey).map((r) => byId.get(r.id)!) : list;
+  const showUndo = (label: string, items: { id: string; prev: Record<string, unknown> }[]) => {
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    setUndo({ label, items });
+    undoTimer.current = window.setTimeout(() => setUndo(null), 3500);
+  };
+  const doUndo = async () => {
+    if (!undo) return;
+    const u = undo;
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    setUndo(null);
+    await act("undo", { action: "undoExclude", items: u.items }, (x) => `元に戻しました（${x.restored}件）`);
+  };
+  const quickExclude = async (c: CandidateView) => {
+    const r = await act("qx" + c.id, { action: "exclude", id: c.id }, () => "除外しました");
+    if (r.ok) showUndo(c.assess ? `${c.draft?.input?.chain?.name ?? ""} ${c.draft?.input?.store?.name ?? ""}`.trim() || "候補" : "候補", (r.prev as { id: string; prev: Record<string, unknown> }[] | undefined) ?? []);
+  };
   const readyCount = candidates.filter((c) => js2(c) === "review" && c.draft?.ready && c.draft.verdict === "match" && c.kind !== "update").length;
   const prefShown = showAllPref ? PREFECTURE_LIST : PREFECTURE_LIST.filter((p) => s.prefectures.includes(p));
   const reqTags = REQUIREMENT_TAGS.filter((t) => !HIDDEN_REQUIREMENT_TAGS.includes(t.code) && t.code !== "unknown");
@@ -895,7 +932,7 @@ export function AutoCollectView({
         </div>
         {tab === "pending" && list.some((c) => c.job_state === "review" && c.kind !== "update") && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="bulk-bar">
-            <Button size="sm" variant="outline" onClick={() => setSel(new Set(list.filter((c) => c.job_state === "review" && c.kind !== "update").map((c) => c.id)))} data-testid="bulk-all">
+            <Button size="sm" variant="outline" onClick={() => setSel(new Set(shown.filter((c) => c.job_state === "review" && c.kind !== "update").map((c) => c.id)))} data-testid="bulk-all">
               すべて選択
             </Button>
             <Button size="sm" variant="outline" disabled={sel.size === 0} onClick={() => setSel(new Set())}>
@@ -904,13 +941,46 @@ export function AutoCollectView({
             <Button size="sm" disabled={busy !== null || sel.size === 0} data-testid="bulk-register" onClick={() => void act("br", { action: "bulkRegister", ids: [...sel].slice(0, 50), actor: profile.id }, (x) => `登録しました: ${x.registered}件${Number(x.failed) > 0 ? `（失敗${x.failed}件）` : ""}`).then(() => setSel(new Set()))}>
               選択を登録（{sel.size}）
             </Button>
-            <Button size="sm" variant="outline" disabled={busy !== null || sel.size === 0} data-testid="bulk-exclude" onClick={() => void act("bx", { action: "bulkExclude", ids: [...sel].slice(0, 100) }, (x) => `除外しました: ${x.excluded}件`).then(() => setSel(new Set()))}>
+            <Button size="sm" variant="outline" disabled={busy !== null || sel.size === 0} data-testid="bulk-reanalyze" onClick={() => void act("brx", { action: "bulkReanalyze", ids: [...sel].slice(0, 50) }, (x) => `再調査待ちに戻しました: 成功${x.requeued}件・失敗${x.failed}件`).then((r) => r.ok && setSel(new Set()))}>
+              選択を再調査
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy !== null || sel.size === 0} data-testid="bulk-exclude" onClick={() => setConfirmBulk(true)}>
               選択を除外
             </Button>
+            {confirmBulk && sel.size > 0 && (
+              <p className="flex w-full flex-wrap items-center gap-1.5 rounded-md border border-warn/40 bg-warn/5 p-2" role="alert" data-testid="bulk-confirm">
+                <span>選択した{sel.size}件の候補だけを除外します（元に戻せます。収集元の除外ルールは作りません）。</span>
+                <Button size="sm" disabled={busy !== null} data-testid="bulk-confirm-yes" onClick={() => void act("bx", { action: "bulkExclude", ids: [...sel].slice(0, 100) }, (x) => `除外しました: 成功${x.excluded}件・失敗${x.failed}件`).then((r) => { setConfirmBulk(false); if (r.ok) { setSel(new Set()); showUndo(`${r.excluded}件`, (r.prev as { id: string; prev: Record<string, unknown> }[] | undefined) ?? []); } })}>
+                  除外する
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmBulk(false)}>
+                  やめる
+                </Button>
+              </p>
+            )}
+          </div>
+        )}
+        {tab === "pending" && reviewRows.some((x) => x.row.assess) && (
+          <div className="flex items-center gap-1 text-[11px]" data-testid="review-controls">
+            <div role="group" aria-label="情報充実度" className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto" data-testid="rank-filter">
+              {(["all", ...RANKS] as const).map((r) => (
+                <button key={r} type="button" aria-pressed={rankFilter === r} onClick={() => setRankFilter(r)} className={cn("min-h-8 shrink-0 rounded-md border px-2 font-medium", rankFilter === r ? "bg-primary text-primary-foreground" : "bg-card")} data-testid={`rank-${r}`} title={r === "all" ? "すべて" : RANK_LABEL[r]}>
+                  {r === "all" ? "すべて" : r}
+                  <span className="ml-0.5 opacity-70">{ranks[r]}</span>
+                </button>
+              ))}
+            </div>
+            <select aria-label="並び順" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="min-h-8 shrink-0 rounded-md border bg-card px-1" data-testid="sort-select">
+              {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
+                <option key={k} value={k}>
+                  {SORT_LABEL[k]}
+                </option>
+              ))}
+            </select>
           </div>
         )}
         <ul className="divide-y">
-          {list.map((c) => {
+          {shown.map((c) => {
             const d = c.draft?.input;
             const queuedOnly = ["pending", "retry", "processing"].includes(c.job_state ?? "");
             const topics = reviewTopics(c);
@@ -921,8 +991,35 @@ export function AutoCollectView({
                   {c.job_state === "review" && c.kind !== "update" && (
                     <input type="checkbox" className="mt-0.5 size-4 shrink-0" checked={sel.has(c.id)} onChange={() => toggleSel(c.id)} aria-label="選択" data-testid="cand-select" />
                   )}
-                  <span>{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</span>
+                  {c.assess && (
+                    <span className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded border text-[11px] font-bold", { A: "border-teal-600/50 text-teal-700 dark:text-teal-300", B: "border-teal-600/30 text-teal-700 dark:text-teal-300", C: "border-amber-600/50 text-amber-700 dark:text-amber-300", D: "border-orange-600/40 text-orange-700 dark:text-orange-300", E: "text-muted-foreground" }[c.assess.rank])} title={`情報充実度 ${c.assess.rank}: ${c.assess.rankLabel}`} data-testid="cand-rank" data-rank={c.assess.rank}>
+                      {c.assess.rank}
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1">{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</span>
+                  {c.job_state === "review" && c.kind !== "update" && (
+                    <button type="button" className="inline-flex min-h-8 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium text-muted-foreground" disabled={busy !== null} onClick={() => void quickExclude(c)} aria-label="この候補を除外" data-testid="cand-quick-exclude">
+                      除外
+                    </button>
+                  )}
                 </p>
+                {c.assess && (
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" data-testid="cand-assess">
+                    <span className={c.assess.missing ? "text-warn" : "text-teal-700 dark:text-teal-300"} data-testid="cand-missing">
+                      {c.assess.missing ? `不足：${c.assess.missing}` : "情報は揃っています"}
+                    </span>
+                    <span className={cn("font-medium", c.assess.priority.alert ? "text-danger" : "text-muted-foreground")} data-testid="cand-priority">
+                      {c.assess.priority.label}
+                    </span>
+                    <span className="text-muted-foreground">{c.assess.stageLabel}</span>
+                    {c.assess.sourceLabel && <span className="text-muted-foreground">{c.assess.sourceLabel}</span>}
+                    {c.assess.conflict && (
+                      <span className="font-medium text-warn" data-testid="cand-conflict" title={c.assess.conflict}>
+                        矛盾あり
+                      </span>
+                    )}
+                  </p>
+                )}
                 <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
                   {d?.applyDeadline && <span>締切: {d.applyDeadline.precision === "unknown" ? "不明" : `${d.applyDeadline.date ?? ""}${d.applyDeadline.time ? ` ${d.applyDeadline.time}` : ""}`}</span>}
                   {topics.length > 0 && (
@@ -946,6 +1043,21 @@ export function AutoCollectView({
                 </p>
                 {expanded.has(c.id) && (
                   <div className="space-y-1 rounded-md border bg-muted/50 p-2 text-[11px] leading-relaxed" data-testid="cand-detail">
+                    {c.assess && c.assess.fields.length > 0 && (
+                      <ul className="space-y-0.5" data-testid="cand-fields">
+                        {c.assess.fields.map((f) => (
+                          <li key={f.key} className={f.state === "conflict" ? "text-warn" : undefined}>
+                            <span className="font-medium">{f.label}</span>: {f.value}
+                            <span className="text-muted-foreground">
+                              {" "}
+                              — {f.source}
+                              {f.state === "confirmed" ? "・確定" : f.state === "conflict" ? `・矛盾（他: ${f.alt ?? "不明"}）` : "・未確認"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {c.assess && <p className="text-muted-foreground">判定（{c.assess.rank}）: {c.assess.reasons.join(" ／ ")}{c.assess.related > 0 ? ` ／ 関連候補${c.assess.related}件` : ""}</p>}
                     {uniqueReasons.length > 0 && <ul className="list-disc pl-4">{uniqueReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
                     {d && (
                       <p className="text-muted-foreground">
@@ -1017,23 +1129,47 @@ export function AutoCollectView({
               </li>
             );
           })}
-          {list.length === 0 && <li className="py-2 text-xs text-muted-foreground">該当する候補はありません。</li>}
+          {shown.length === 0 && <li className="py-2 text-xs text-muted-foreground">該当する候補はありません。</li>}
         </ul>
       </section>
 
+      {nextEdit && !editing && (
+        <p className="flex items-center gap-2 text-xs" data-testid="next-candidate">
+          <Button size="sm" onClick={() => { setEditing(nextEdit); setNextEdit(null); }} data-testid="open-next">
+            次の候補を開く
+          </Button>
+          <span className="truncate text-muted-foreground">{nextEdit.draft?.input?.chain?.name} {nextEdit.draft?.input?.store?.name}</span>
+          <button type="button" className="ml-auto text-muted-foreground underline" onClick={() => setNextEdit(null)}>
+            閉じる
+          </button>
+        </p>
+      )}
+      {undo && (
+        <div role="status" className="fixed inset-x-3 z-40 flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2 text-xs shadow-lg" style={{ bottom: "calc(env(safe-area-inset-bottom) + 4.75rem)" }} data-testid="undo-toast">
+          <span className="min-w-0 truncate">{undo.label}を除外しました</span>
+          <Button size="sm" variant="outline" onClick={() => void doUndo()} data-testid="undo-button">
+            元に戻す
+          </Button>
+        </div>
+      )}
       {editing?.draft?.input && (
         <LotteryFormDialog
           open
           lottery={null}
           onOpenChange={(v) => !v && setEditing(null)}
           prefill={{
-            draft: { input: editing.draft.input, flags: (editing.draft.flags ?? {}) as never, modePending: Boolean(editing.draft.modePending), duplicates: [], warnings: editing.draft.warnings ?? [], evidence: (editing.draft.evidence ?? {}) as never, generalNotes: [], candidates: { chain: [], store: [], items: [] }, summary: (editing.draft.summary ?? { chain: "none", store: "none", items: [] }) as never } as unknown as LotteryDraft,
+            draft: { input: editing.draft.input, flags: { ...(editing.draft.flags ?? {}), ...(editing.assess?.flags ?? {}) } as never, modePending: Boolean(editing.draft.modePending), duplicates: [], warnings: editing.draft.warnings ?? [], evidence: (editing.draft.evidence ?? {}) as never, generalNotes: [], candidates: { chain: [], store: [], items: [] }, summary: (editing.draft.summary ?? { chain: "none", store: "none", items: [] }) as never } as unknown as LotteryDraft,
             runId: null,
           }}
           onSaved={(lotteryId) => {
             const id = editing.id;
+            // 登録後は次の確認候補を開きやすくする（処理済みの候補は一覧から消える）。失敗したときは成功したように見せない
+            const rest = shown.filter((x) => x.id !== id && x.job_state === "review" && x.kind !== "update" && x.draft?.input);
+            const nxt = nextAfter(shown.filter((x) => x.id === id || rest.some((y) => y.id === x.id)), id);
             setEditing(null);
-            if (lotteryId) void act("mr" + id, { action: "markRegistered", id, lotteryId }, () => "登録しました");
+            if (lotteryId) {
+              void act("mr" + id, { action: "markRegistered", id, lotteryId }, () => "登録しました").then((r) => r.ok && setNextEdit(nxt && nxt.id !== id ? nxt : null));
+            }
           }}
         />
       )}

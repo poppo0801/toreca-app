@@ -4,6 +4,8 @@ import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsVi
 import { ManualReviewList } from "@/components/manual-review";
 import { ExclusionRules, HardSources, type ExclusionView, type HardSourceView } from "@/components/source-controls";
 import { loadManualGroups } from "@/lib/server/collector/manual-items";
+import { assessRow, importantChains } from "@/lib/collector/assess-row";
+import { loadAppData } from "@/lib/server/lottery-service";
 import { computeMetrics } from "@/lib/collector/metrics";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
 import { healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
@@ -29,7 +31,7 @@ export default async function CollectionPage() {
   const monthStart = new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(now)}-01T00:00:00+09:00`).toISOString();
   const endOfToday = new Date(`${today}T23:59:59+09:00`).toISOString();
   const since30 = jstDayString(new Date(now.getTime() - 29 * 86400_000));
-  const cols = "id,source_id,title,source_url,status,reasons,draft,lottery_id,fetched_at,job_state,kind,attempts,next_run_at,last_error,due_at,last_changed_at";
+  const cols = "id,source_id,title,source_url,status,reasons,draft,lottery_id,fetched_at,job_state,kind,attempts,next_run_at,last_error,due_at,last_changed_at,memo_id";
   const cand = () => db.from("collection_candidates").select(cols).order("created_at", { ascending: false }).limit(100);
   const cnt = () => db.from("collection_candidates").select("id", { count: "exact", head: true });
   const [settings, sources, runs, products, monthRuns, newCount, lReview, lQueued, lReg, lEx, lDup, lFail, nReview, nQueued, nProc, nReg, nEx, nDup, nFail, oldest, failed24, lastCollect, lastWorker, running, stats, budget, dueToday, lastProgress] = await Promise.all([
@@ -79,7 +81,12 @@ export default async function CollectionPage() {
   ]);
   const { data: authUser } = await db.auth.getUser();
   const runSummaries = (await loadRunNotices(db as never, authUser.user?.id ?? null, 6)).summaries;
-  const candidates = [lReview, lQueued, lReg, lEx, lDup, lFail].flatMap((r) => r.data ?? []);
+  // 情報充実度（A〜E）・対応優先度は、表示のたびに保存済みの草稿と最新のマスターから再計算する（古いランクを残さない）
+  const appData = hhId ? await loadAppData(db as never, hhId).catch(() => null) : null;
+  const importantSet = appData ? importantChains(appData) : new Set<string>();
+  const candidates = [lReview, lQueued, lReg, lEx, lDup, lFail]
+    .flatMap((r) => r.data ?? [])
+    .map((c) => ({ ...c, assess: appData && c.job_state === "review" ? assessRow({ draft: c.draft, due_at: c.due_at, source_url: c.source_url, memo_id: (c as { memo_id?: string | null }).memo_id }, appData, now, importantSet) : null }));
   const counts = { pending: nReview.count ?? 0, queued: nQueued.count ?? 0, auto_registered: nReg.count ?? 0, excluded: nEx.count ?? 0, duplicate: nDup.count ?? 0, failed: nFail.count ?? 0 };
   const xPosts = (monthRuns.data ?? []).reduce((a, r) => a + r.x_posts, 0);
   const st = settings.data!;
