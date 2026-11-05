@@ -10,7 +10,8 @@ import { CardBulkDialog, BULK_MAX_IMAGES } from "@/components/card-bulk";
 import { CardDetailSheet } from "@/components/card-detail-sheet";
 import { CardFormDialog, type CardFormMode } from "@/components/card-form";
 import { Button } from "@/components/ui/button";
-import { breakdown, DEFAULT_FILTERS, filterCards, isShine, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
+import { ShineButton } from "@/components/shine";
+import { breakdown, DEFAULT_FILTERS, filterCards, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs } from "@/lib/profile-settings";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { cn } from "@/lib/utils";
@@ -284,9 +285,9 @@ export function CollectionView() {
         <ul key={animKey} className={cn("grid gap-2", COLS_CLASS[prefs.cols])} data-testid="card-grid" data-cols={prefs.cols}>
           {visible.map((r, i) => (
             <li key={r.id} className={cn("relative [contain-intrinsic-size:auto_9rem] [content-visibility:auto]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-tile">
-              <button type="button" onClick={() => setOpenId(r.id)} aria-label={`${r.name} ${r.rarity}の詳細を開く`} className={cn("relative block w-full overflow-hidden rounded-lg", prefs.fx && isShine(r.rarity) && "card-shine")}>
+              <ShineButton rarity={r.rarity} enabled={prefs.fx} onClick={() => setOpenId(r.id)} aria-label={`${r.name} ${r.rarity}の詳細を開く`} className="relative block w-full overflow-hidden rounded-lg">
                 <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="aspect-[5/7] w-full" />
-              </button>
+              </ShineButton>
               <button type="button" onClick={() => void toggleFav(r.id, r.favRank === null)} aria-pressed={r.favRank !== null} aria-label={r.favRank !== null ? `${r.name}のお気に入りを外す` : `${r.name}をお気に入りにする`} className="absolute left-0 top-0 flex size-8 items-center justify-center" data-testid="tile-fav">
                 <span className="flex size-5 items-center justify-center rounded-full bg-card/85 shadow-sm">
                   <Star className={cn("size-3.5", r.favRank !== null ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />

@@ -292,3 +292,11 @@ export function batchDuplicateKey(id: CardIdentity, sha: string | null): string[
 /** ハイレアリティ（光沢の演出の対象）。控えめな演出に限る */
 export const SHINE_RARITIES = ["SAR", "UR", "SSR", "HR", "CSR", "CHR", "BWR", "AR", "SR", "ACE"];
 export const isShine = (rarity: string) => SHINE_RARITIES.includes(rarity.trim().toUpperCase());
+
+/** 演出の強さ（レアリティ別）。3=最上位（SAR・UR・HR・SSR）／2=上位（SR・CSR・CHR・BWR・ACE）／1=AR。対象外は 0 */
+export function shineTier(rarity: string): 0 | 1 | 2 | 3 {
+  const r = rarity.trim().toUpperCase();
+  if (["SAR", "UR", "HR", "SSR"].includes(r)) return 3;
+  if (["SR", "CSR", "CHR", "BWR", "ACE"].includes(r)) return 2;
+  return r === "AR" ? 1 : 0;
+}

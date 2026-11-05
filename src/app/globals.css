@@ -202,20 +202,52 @@
   animation-delay: calc(var(--i, 0) * 22ms);
 }
 
-/* ハイレアカードの控えめな光沢（高レアリティだけ。常時のアニメーションはせず、押した・ホバーしたときと、詳細を開いたとき1回だけ）。画像の上に薄く重ねるだけ */
+/*
+ * ハイレアカードの光沢・ホログラム（Stage 6F）。レアリティで強さを変える（data-tier: 1=AR / 2=SR系 / 3=SAR・UR・HR・SSR）。
+ *  - ::before = 虹色のホログラム（位置は --mx/--my で、触れた・傾けた位置に追従）／::after = 斜めの光の反射（スイープ）
+ *  - 文字・イラストは隠さない（pointer-events なし・加算系の合成・不透明度は控えめ）。変形はしない（transform/opacity/background-position のみで軽量）
+ *  - 上位ティアだけゆっくり常時きらめく。動きを減らす設定では、アニメーションをやめて静止した薄いホログラムにする
+ */
 .card-shine {
   position: relative;
+  --shine-holo: 0.22;
+  --shine-glint: 0.45;
+  --mx: 50%;
+  --my: 40%;
+  isolation: isolate;
 }
+.card-shine[data-tier="1"] { --shine-holo: 0.14; --shine-glint: 0.34; }
+.card-shine[data-tier="2"] { --shine-holo: 0.24; --shine-glint: 0.5; }
+.card-shine[data-tier="3"] { --shine-holo: 0.36; --shine-glint: 0.65; }
+.card-shine::before,
 .card-shine::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / 0.28) 45%, rgb(255 220 150 / 0.22) 52%, transparent 68%);
+  border-radius: inherit;
+}
+.card-shine::before {
+  background:
+    radial-gradient(circle at var(--mx) var(--my), rgb(255 255 255 / 0.55), transparent 38%),
+    linear-gradient(115deg, rgb(255 80 160 / 0.7), rgb(255 200 60 / 0.7) 22%, rgb(80 230 140 / 0.7) 44%, rgb(70 170 255 / 0.7) 66%, rgb(190 110 255 / 0.7) 88%);
+  background-size: 100% 100%, 260% 260%;
+  background-position: 0 0, var(--mx) var(--my);
+  mix-blend-mode: color-dodge;
+  opacity: var(--shine-holo);
+  transition: opacity 0.25s ease-out;
+}
+.card-shine::after {
+  background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / var(--shine-glint)) 45%, rgb(255 225 160 / calc(var(--shine-glint) * 0.8)) 52%, transparent 68%);
   background-size: 250% 100%;
   background-position: 130% 0;
   opacity: 0;
   mix-blend-mode: screen;
+}
+.card-shine:hover::before,
+.card-shine:active::before,
+.card-shine[data-touch="1"]::before {
+  opacity: calc(var(--shine-holo) * 1.7);
 }
 .card-shine:hover::after,
 .card-shine:active::after {
@@ -226,13 +258,31 @@
   opacity: 1;
   animation: card-shine-sweep 1.2s ease-out 0.25s both;
 }
+.card-shine[data-tier="2"]::after,
+.card-shine[data-tier="3"]::after {
+  /* 上位ティア: 数秒おきに光が走る（常時の負荷を避けるため、間隔を長く取る） */
+  opacity: 1;
+  animation: card-shine-sweep 5.5s ease-in-out 1s infinite;
+}
+.card-shine[data-tier="3"]::before {
+  animation: card-holo-drift 7s ease-in-out infinite alternate;
+}
 @keyframes card-shine-sweep {
-  from {
-    background-position: 130% 0;
+  0% { background-position: 130% 0; }
+  22%, 100% { background-position: -30% 0; }
+}
+@keyframes card-holo-drift {
+  from { background-position: 0 0, 10% 20%; }
+  to { background-position: 0 0, 90% 80%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-shine::before,
+  .card-shine::after,
+  .card-shine-once::after {
+    animation: none !important;
+    transition: none;
   }
-  to {
-    background-position: -30% 0;
-  }
+  .card-shine::after { opacity: 0; }
 }
 
 /* Undo通知の進捗バー: 残り時間に合わせて左から右へ伸びる（動きを減らす設定でも、バーは静止せず時間経過を示す） */

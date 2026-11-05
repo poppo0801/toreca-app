@@ -7,6 +7,7 @@ import { FlagChip, FlagPanel } from "@/components/review-flag";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import type { CardExtraction, CardField } from "@/lib/ai/card-provider";
+import { conditionOptions } from "@/lib/card-condition";
 import { matchCard, type CardRow, type CardSummaryRow } from "@/lib/collection";
 import { parseYen } from "@/lib/collection-input";
 import { sha256Hex, shrinkToJpeg } from "@/lib/client-image";
@@ -314,7 +315,13 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
                   </label>
                   <label className="text-sm">
                     <span className="text-[13px]">状態</span>
-                    <input value={h.condition} onChange={(e) => setH({ ...h, condition: e.target.value })} className={field} aria-label="状態" maxLength={30} placeholder="美品・PSA10 など" />
+                    <select value={h.condition} onChange={(e) => setH({ ...h, condition: e.target.value })} className={field} aria-label="状態" data-testid="holding-condition">
+                      {conditionOptions(h.condition).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
                 <label className="block text-sm">

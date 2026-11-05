@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { isAllowedCondition } from "@/lib/card-condition";
 import { cardInputSchema, holdingInputSchema, priceInputSchema, type CardInput, type HoldingInput, type PriceInput } from "@/lib/collection-input";
 import type { CardRow, FavoriteRow, HoldingRow, PriceRow } from "@/lib/collection";
 import { createClient } from "@/lib/supabase/server";
@@ -159,6 +160,7 @@ export async function saveCardAction(input: { cardId: string | null; card: CardI
   if (!db) return fail("ログインが必要です");
   const holding = input.holding ? holdingInputSchema.safeParse(input.holding) : null;
   if (holding && !holding.success) return fail(holding.error.issues[0]?.message ?? "入力内容を確認してください");
+  if (holding?.success && !isAllowedCondition(holding.data.condition)) return fail("状態は A+・A・B+・B・C から選んでください");
   let card: z.output<typeof cardInputSchema> | null = null;
   if (input.cardId === null) {
     const p = cardInputSchema.safeParse(input.card);
@@ -205,6 +207,9 @@ export async function updateHoldingAction(holdingId: string, input: HoldingInput
   if (!p.success) return fail(p.error.issues[0]?.message ?? "入力内容を確認してください");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
+  // 状態は5段階のみ。ただし、いま保存されている旧表記のままなら（選び直すまで）そのまま残せる
+  const cur = await any(db).from("card_holdings").select("condition").eq("id", holdingId).is("archived_at", null).maybeSingle();
+  if (!isAllowedCondition(p.data.condition, (cur.data?.condition as string | undefined) ?? null)) return fail("状態は A+・A・B+・B・C から選んでください");
   const { error } = await any(db).from("card_holdings").update({ ...holdingRow(p.data), updated_by_profile_id: actor }).eq("id", holdingId).is("archived_at", null);
   return error ? fail(mapError(error)) : { ok: true };
 }

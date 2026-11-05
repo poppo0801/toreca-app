@@ -7,7 +7,9 @@ import { CardFormDialog } from "@/components/card-form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { isShine, type CardRow, type CardSummaryRow, type HoldingRow, type PriceRow } from "@/lib/collection";
+import { useShine } from "@/components/shine";
+import { conditionOptions, initialCondition, normalizeGrade } from "@/lib/card-condition";
+import { type CardRow, type CardSummaryRow, type HoldingRow, type PriceRow } from "@/lib/collection";
 import { parseYen } from "@/lib/collection-input";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +85,7 @@ export function CardDetailSheet({
 
   const hist = prices.filter((p) => p.cardId === card.id).slice().sort((a, b) => b.confirmedOn.localeCompare(a.confirmedOn) || b.createdAt.localeCompare(a.createdAt)).slice(0, 8);
   const field = "mt-0.5 min-h-10 w-full rounded-md border bg-input px-2 text-sm";
-  const shine = fx && isShine(card.rarity);
+  const shine = useShine(card.rarity, fx, { once: true });
   const img = mainUrl ?? thumbUrl;
 
   return (
@@ -101,7 +103,7 @@ export function CardDetailSheet({
           </div>
           <SheetBody className="space-y-4 border-t pt-3">
             <div className="flex justify-center">
-              <div className={cn("relative flex max-h-[46dvh] w-[min(70%,18rem)] items-center justify-center overflow-hidden rounded-xl", shine && "card-shine card-shine-once")} data-testid="detail-image">
+              <div className={cn("relative flex max-h-[46dvh] w-[min(70%,18rem)] items-center justify-center overflow-hidden rounded-xl", shine.className)} data-testid="detail-image" {...shine.props}>
                 {/* eslint-disable-next-line @next/next/no-img-element -- 期限つきURLの画像 */}
                 {img ? <img src={img} alt={card.name} className="max-h-[46dvh] w-full object-contain" decoding="async" /> : <div className="flex h-52 w-full items-center justify-center rounded-xl border bg-muted text-xs text-muted-foreground">画像なし</div>}
               </div>
@@ -149,7 +151,7 @@ export function CardDetailSheet({
                             <span className="text-muted-foreground">{h.unitPriceYen === null ? "金額不明" : `${yen(h.unitPriceYen)}／枚`}</span>
                             <span className="ml-auto text-xs text-muted-foreground">{h.acquiredOn ?? "日付不明"}</span>
                           </div>
-                          <p className="text-xs text-muted-foreground">{[h.source, h.condition, h.note].filter(Boolean).join(" ・ ")}</p>
+                          <p className="text-xs text-muted-foreground">{[h.source, h.condition && (normalizeGrade(h.condition) ? `状態 ${normalizeGrade(h.condition)}` : `状態 旧表記「${h.condition}」`), h.note].filter(Boolean).join(" ・ ")}</p>
                           <div className="flex gap-2">
                             <Button type="button" size="sm" variant="ghost" onClick={() => setEditH(h)}>
                               編集
@@ -275,6 +277,7 @@ function HoldingEditor({ h, onSave, onCancel }: { h: HoldingRow; onSave: (v: { q
   const [p, setP] = useState(h.unitPriceYen === null ? "" : String(h.unitPriceYen));
   const [d, setD] = useState(h.acquiredOn ?? "");
   const [s, setS] = useState(h.source);
+  const [cond, setCond] = useState(initialCondition(h.condition));
   const [err, setErr] = useState<string | null>(null);
   const field = "mt-0.5 min-h-10 w-full rounded-md border bg-input px-2 text-sm";
   return (
@@ -296,6 +299,16 @@ function HoldingEditor({ h, onSave, onCancel }: { h: HoldingRow; onSave: (v: { q
           購入元
           <input value={s} onChange={(e) => setS(e.target.value)} className={field} maxLength={60} />
         </label>
+        <label className="col-span-2 text-xs">
+          状態
+          <select value={cond} onChange={(e) => setCond(e.target.value)} className={field} data-testid="holding-condition">
+            {conditionOptions(h.condition).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       {err && <p className="text-xs text-danger">{err}</p>}
       <div className="flex gap-2">
@@ -306,7 +319,7 @@ function HoldingEditor({ h, onSave, onCancel }: { h: HoldingRow; onSave: (v: { q
             const price = parseYen(p);
             const qty = Number(q);
             if (price === "invalid" || !Number.isInteger(qty) || qty < 1) return setErr("枚数・購入金額を確認してください");
-            onSave({ quantity: qty, acquiredOn: d, unitPriceYen: price, source: s, condition: h.condition, note: h.note, purchaseId: h.purchaseId });
+            onSave({ quantity: qty, acquiredOn: d, unitPriceYen: price, source: s, condition: cond, note: h.note, purchaseId: h.purchaseId });
           }}
         >
           保存
