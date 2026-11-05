@@ -8,6 +8,7 @@ import { ICON_MARKS, ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { recipientsOf } from "@/lib/notifications";
+import { linkCandidates } from "@/lib/profile-link";
 import { cn } from "@/lib/utils";
 import type { Profile, ProfileColor } from "@/types/domain";
 
@@ -41,6 +42,9 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
   // メイン=全系列 / サブ=対象系列だけ。種別・対象系列を変えても、応募・当落・購入の履歴は変わらない
   const [kind, setKind] = useState<"main" | "sub">(profile.kind === "sub" ? "sub" : "main");
   const [targets, setTargets] = useState<string[]>(profile.allowedChainIds ?? []);
+  // サブの紐づけ先（同一世帯の有効なメイン）。メインの「応募済み」「当選」タブに、紐づくサブの履歴も表示される
+  const [mainId, setMainId] = useState<string>(profile.linkedMainId ?? "");
+  const linkedSubs = data.profiles.filter((p) => p.kind === "sub" && p.linkedMainId === profile.id);
   const [chainQuery, setChainQuery] = useState("");
   const chains = data.chains.filter((c) => !c.archived && (chainQuery.trim() === "" || c.name.toLowerCase().includes(chainQuery.trim().toLowerCase())));
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +61,7 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
       iconMark: mark,
       notifyRecipientIds: mode === "self" ? null : mode === "none" ? [] : picked,
       kind,
-      ...(kind === "sub" ? { targetChainIds: targets } : {}),
+      ...(kind === "sub" ? { targetChainIds: targets, mainProfileId: mainId || null } : {}),
     });
     setBusy(false);
     if (res.ok) onClose();
@@ -97,8 +101,25 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
             </label>
           ))}
         </div>
+        {kind === "main" && linkedSubs.length > 0 && (
+          <p className="mt-1 text-xs text-muted-foreground" data-testid="linked-subs">
+            紐づくサブ: {linkedSubs.map((s) => s.label).join("・")}（「応募済み」「当選」タブにも表示されます）。サブにするには、先にサブの紐づけを解除してください。
+          </p>
+        )}
         {kind === "sub" ? (
           <div className="mt-1 space-y-1.5" data-testid="sub-targets">
+            <label className="block">
+              <span className="text-xs text-muted-foreground">紐づけ先のメインユーザー</span>
+              <select aria-label="紐づけ先のメインユーザー" data-testid="link-main" value={mainId} onChange={(e) => setMainId(e.target.value)} className="mt-0.5 min-h-11 w-full rounded-md border bg-input px-2">
+                <option value="">紐づけない</option>
+                {linkCandidates(data.profiles, profile.id).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-0.5 block text-xs text-muted-foreground">紐づけると、そのメインの「応募済み」「当選」タブにこのユーザーの履歴も表示されます。変更しても応募・当落の履歴は変わりません。</span>
+            </label>
             <p className="text-xs text-muted-foreground">対象系列の抽選だけを表示・操作できます（通知も対象系列のみ）。未選択のときは何も表示しません。</p>
             <input
               type="search"
@@ -260,6 +281,11 @@ export function ProfileSettings() {
                     {p.kind === "sub" && (
                       <span data-testid="sub-badge" className="ml-1.5 rounded border px-1 py-px align-middle text-[10px] text-muted-foreground">
                         サブ・{(p.allowedChainIds ?? []).length}系列
+                      </span>
+                    )}
+                    {p.kind === "sub" && (
+                      <span data-testid="link-badge" className="ml-1 rounded border px-1 py-px align-middle text-[10px] text-muted-foreground">
+                        {p.linkedMainId ? `→ ${name(p.linkedMainId)}` : "未紐づけ"}
                       </span>
                     )}
                   </p>

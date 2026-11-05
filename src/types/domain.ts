@@ -37,6 +37,8 @@ export interface Profile {
   label: string;
   /** メイン=全系列を表示・操作 / サブ=対象系列（allowedChainIds）の抽選だけ。未指定=メイン */
   kind?: "main" | "sub";
+  /** サブの紐づけ先メインユーザーのID（Stage 6J）。メインの応募済み・当選タブに、紐づくサブの履歴も表示する。未紐づけ・メインは null */
+  linkedMainId?: string | null;
   color: ProfileColor;
   /** 自由な色指定（#RRGGBB）。あれば color より優先 */
   colorHex?: string | null;

@@ -10,6 +10,7 @@ import { chainLogoUrl } from "@/lib/chain-logo";
 import { isCondKind, isCondState, sanitizePurchaseParams, type CondKind, type CondState } from "@/lib/chain-conditions";
 import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
+import { validateLink } from "@/lib/profile-link";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
 import type { Database } from "@/types/database";
 import type {
@@ -87,6 +88,27 @@ export async function subScopeError(db: Db, actor: string | null, chainId: strin
 async function chainOfLottery(db: Db, lotteryId: string): Promise<string | null> {
   const { data } = await db.from("lotteries").select("chain_id").eq("id", lotteryId).maybeSingle();
   return data?.chain_id ?? null;
+}
+
+/**
+ * 応募の記録（当落・購入・受取）の操作者の確認（Stage 6J）。
+ *  - 記録は常に応募アカウントの所有プロフィールの行に保存される（操作者の履歴には書き込まない）。操作者が誰でも、所有者は変わらない。
+ *  - サブユーザーが操作できるのは自分の記録だけ（他のユーザーの記録は不可）。メインは従来どおり（画面は本人＋紐づくサブの記録だけを出す）。
+ */
+export async function ownerScopeError(db: Db, actor: string | null, applicationId: string): Promise<string | null> {
+  if (!actor) return null;
+  const { data: app } = await db.from("applications").select("service_account_id").eq("id", applicationId).maybeSingle();
+  if (!app) return null;
+  const { data: acc } = await db.from("service_accounts").select("managed_by_profile_id").eq("id", app.service_account_id).maybeSingle();
+  const ownerId = acc?.managed_by_profile_id;
+  if (!ownerId || ownerId === actor) return null;
+  const { data: me } = await db.from("profiles").select("kind").eq("id", actor).maybeSingle();
+  if (me?.kind !== "sub") return null;
+  return "サブユーザーは自分の記録だけ操作できます";
+}
+
+async function applicationAccessError(db: Db, actor: string | null, applicationId: string): Promise<string | null> {
+  return (await ownerScopeError(db, actor, applicationId)) ?? (await subScopeError(db, actor, await chainOfApplication(db, applicationId)));
 }
 
 async function chainOfApplication(db: Db, applicationId: string): Promise<string | null> {
@@ -287,6 +309,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         id: p.id,
         label: p.label,
         kind: p.kind === "sub" ? ("sub" as const) : ("main" as const),
+        linkedMainId: p.main_profile_id ?? null,
         initial: p.initial,
         color: p.color as ProfileColor,
         colorHex: p.color_hex,
@@ -762,7 +785,7 @@ async function setAppliedCore(
 async function setResultCore(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
   const r = z.enum(["pending", "won", "lost", "unknown"]).safeParse(result);
   if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
-  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  const denied = await applicationAccessError(db, actor, applicationId);
   if (denied) return fail(denied);
   // 複数商品抽選は商品別の当落(setItemResults)で登録する（集計値を直接書き換えない）
   const { data: target } = await db.from("applications").select("lotteries(multi_mode)").eq("id", applicationId).maybeSingle();
@@ -783,7 +806,7 @@ async function setResultCore(db: Db, applicationId: string, result: ResultStatus
 export async function setFulfillment(db: Db, applicationId: string, fulfillment: FulfillmentStatus, actor: string | null): Promise<ServiceResult> {
   const f = z.enum(["procedure_done", "purchased"]).safeParse(fulfillment);
   if (!f.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
-  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  const denied = await applicationAccessError(db, actor, applicationId);
   if (denied) return fail(denied);
   if (f.data === "purchased") {
     const { error } = await db.rpc("mark_purchased", { p_application_id: applicationId, p_actor: actor as string });
@@ -807,7 +830,7 @@ export async function setFulfillment(db: Db, applicationId: string, fulfillment:
  */
 export async function revertFulfillment(db: Db, applicationId: string, to: "none" | "procedure_done", actor: string | null): Promise<ServiceResult> {
   if (!uuid.safeParse(applicationId).success || !z.enum(["none", "procedure_done"]).safeParse(to).success) return fail("リクエストが不正です");
-  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  const denied = await applicationAccessError(db, actor, applicationId);
   if (denied) return fail(denied);
   const { error } = await db.rpc("revert_fulfillment", { p_application_id: applicationId, p_actor: actor as string, p_to: to });
   if (!error) return ok(undefined);
@@ -888,7 +911,7 @@ async function setItemResultsCore(
 ): Promise<ServiceResult> {
   const r = itemResultsSchema.safeParse(results);
   if (!r.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
-  const denied = await subScopeError(db, actor, await chainOfApplication(db, applicationId));
+  const denied = await applicationAccessError(db, actor, applicationId);
   if (denied) return fail(denied);
   const { error } = await db.rpc("set_item_results", {
     p_application_id: applicationId,
@@ -955,6 +978,8 @@ export const profileSettingsSchema = z.object({
   kind: z.enum(["main", "sub"]).optional(),
   /** サブの対象系列。kind が sub のときだけ使い、指定した系列に置き換える（履歴は変えない）。未指定=変更しない */
   targetChainIds: z.array(z.uuid()).max(200).optional(),
+  /** サブの紐づけ先メインユーザー（Stage 6J）。null=解除、未指定=変更しない。kind が main のときは常に解除される */
+  mainProfileId: z.uuid().nullable().optional(),
 });
 export type ProfileSettingsInput = z.input<typeof profileSettingsSchema>;
 
@@ -1009,9 +1034,20 @@ export async function updateProfileSettings(db: Db, profileId: string, raw: Prof
   const valid = new Set((all ?? []).filter((x) => x.active).map((x) => x.id));
   if (v.notifyRecipientIds?.some((id) => !valid.has(id))) return fail("通知先に無効なユーザーが含まれています");
   const initial = Array.from(v.label)[0] ?? "A";
-  const { data: before } = await db.from("profiles").select("kind").eq("id", profileId).maybeSingle();
+  const { data: before } = await db.from("profiles").select("kind,main_profile_id").eq("id", profileId).maybeSingle();
   if (!before) return fail("対象のデータが見つかりません");
   const nextKind = v.kind ?? (before.kind === "sub" ? "sub" : "main");
+  // メイン／サブの紐づけ: サブだけが、同一世帯の有効なメインに紐づけられる（サブ同士・自分自身は不可）。メインへ戻すと解除。紐づくサブがいるメインはサブにできない
+  const { data: kinds } = await db.from("profiles").select("id,kind,active,label,main_profile_id");
+  const lite = (kinds ?? []).map((k) => ({ id: k.id, kind: k.kind === "sub" ? ("sub" as const) : ("main" as const), active: k.active, label: k.label, linkedMainId: k.main_profile_id }));
+  if (nextKind === "sub" && before.kind !== "sub" && lite.some((k) => k.linkedMainId === profileId)) return fail("紐づくサブユーザーがいるため、サブにできません。先にサブの紐づけを解除してください");
+  let nextMain: string | null | undefined = undefined;
+  if (nextKind === "main") nextMain = null;
+  else if (v.mainProfileId !== undefined) {
+    const chk = validateLink(lite.map((k) => (k.id === profileId ? { ...k, kind: "sub" as const } : k)), profileId, v.mainProfileId);
+    if (!chk.ok) return fail(chk.error);
+    nextMain = v.mainProfileId;
+  }
   // 対象系列の置き換えは、応募・当落などの履歴には触れない（プロフィール単位の設定だけ）。メインへ戻すときは、対象系列の許可リストを外して全系列に戻す
   if (nextKind === "sub" && v.targetChainIds) {
     const r = await replaceTargetChains(db, profileId, v.targetChainIds, actor);
@@ -1024,6 +1060,7 @@ export async function updateProfileSettings(db: Db, profileId: string, raw: Prof
     .from("profiles")
     .update({
       kind: nextKind,
+      ...(nextMain !== undefined ? { main_profile_id: nextMain } : {}),
       label: v.label,
       initial,
       color: v.color,

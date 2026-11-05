@@ -6,7 +6,8 @@ import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { hasSeparateSteps, myApplication, wonProgress } from "@/lib/lottery-flow";
+import { hasSeparateSteps, wonProgress } from "@/lib/lottery-flow";
+import { ownerIdOf, scopedApplications, scopeSet } from "@/lib/profile-link";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Application, Lottery } from "@/types/domain";
@@ -26,7 +27,7 @@ const TONE: Record<string, string> = {
  *  - 通販・発送の抽選: 「購入を記録」「受取を記録」を並べて出し、押した方が「✓購入済」「✓受取済」に変わる（別々の状態）。
  * 購入記録は応募ごとに1件（受取済みにしたときに DB 関数が1件だけ作る。何度押しても二重計上しない）。期間前に押したときは確認する（履歴の補正は期間外でも可能）。
  */
-export function WonRecordButtons({ lottery, app }: { lottery: Lottery; app: Application }) {
+export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lottery; app: Application; ownerLabel?: string }) {
   const { now, actions } = useApp();
   const [busy, run] = useBusy();
   const [confirm, setConfirm] = useState<"purchase" | "receive" | null>(null);
@@ -47,7 +48,7 @@ export function WonRecordButtons({ lottery, app }: { lottery: Lottery; app: Appl
       <DialogContent>
         <DialogTitle>期間前ですが記録しますか？</DialogTitle>
         <DialogDescription>
-          {p.label}。{confirm === "purchase" ? "購入" : "受取"}の期間より前です。履歴の補正などで記録する場合のみ「記録する」を押してください。
+          {ownerLabel ? `${ownerLabel}の記録として、` : ""}{p.label}。{confirm === "purchase" ? "購入" : "受取"}の期間より前です。履歴の補正などで記録する場合のみ「記録する」を押してください。
         </DialogDescription>
         <div className="mt-4 flex justify-end gap-2">
           <DialogClose asChild>
@@ -124,39 +125,44 @@ export function WonRecordButtons({ lottery, app }: { lottery: Lottery; app: Appl
 }
 
 /**
- * 当選タブのカード下段（1行）。当選したプロフィールの状況を小さく並べ、次の手続きの期限と、現在のプロフィール用の記録ボタンを出す。
- * 他のプロフィールの操作ボタンは並べない（閲覧のみ）。当選者が複数でも抽選カードは1枚のまま。
+ * 当選タブのカード下段。対象は「現在のユーザー＋紐づくサブ」の当選で、当選したユーザーごとに1行（アイコン・次の手続きの期限・記録ボタン）を出す。
+ * 購入・受取の記録は、その行のユーザー（応募の所有者）の記録として保存される。当選者が複数でも抽選カードは1枚のまま。
+ * 世帯内の他のメインユーザー・紐づいていないサブの当選は出さない。
  */
 export function WonRow({ lottery }: { lottery: Lottery }) {
   const { data, now, profile } = useApp();
-  const idx = (accountId: string) => data.profiles.findIndex((p) => p.id === data.accounts.find((x) => x.id === accountId)?.profileId);
-  const wonApps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won").sort((a, b) => idx(a.accountId) - idx(b.accountId));
-  const mine = myApplication(data, lottery.id, profile.id);
-  const myWon = mine?.result === "won" ? mine : undefined;
-  const shown = myWon ?? wonApps[0];
-  if (!shown) return null;
-  const p = wonProgress(lottery, shown, now);
+  const scope = scopeSet(data.profiles, profile.id);
+  const idx = (a: Application) => data.profiles.findIndex((p) => p.id === ownerIdOf(data, a));
+  const wonApps = scopedApplications(data, lottery.id, scope)
+    .filter((a) => a.result === "won")
+    .sort((a, b) => Number(ownerIdOf(data, b) === profile.id) - Number(ownerIdOf(data, a) === profile.id) || idx(a) - idx(b));
+  if (wonApps.length === 0) return null;
+  // 複数のユーザーが当選しているときは、誰の記録かを名前でも示す（アイコンの色だけに頼らない）
+  const multi = wonApps.length > 1 || ownerIdOf(data, wonApps[0]) !== profile.id;
 
   return (
-    <div className="flex items-center gap-2 border-t px-2.5 py-1.5" data-testid="won-row">
-      <span className="flex shrink-0 items-center gap-1" aria-label="当選したユーザー">
-        {wonApps.map((a) => {
-          const owner = data.profiles.find((x) => x.id === data.accounts.find((acc) => acc.id === a.accountId)?.profileId);
-          if (!owner) return null;
-          const done = a.fulfillment === "purchased";
-          const bought = a.fulfillment === "procedure_done";
-          return (
-            <span key={a.id} className="relative inline-flex" title={`${owner.label}: 当選${done ? "・受取済み" : bought ? "・購入手続き済み" : ""}`} data-won-done={done || undefined}>
-              <ProfileAvatar profile={owner} size="xs" />
-              {done && <Check className="absolute -bottom-1 -right-1 size-3 rounded-full bg-success p-px text-background" strokeWidth={3} aria-hidden="true" />}
+    <div className="border-t" data-testid="won-row">
+      {wonApps.map((a, i) => {
+        const owner = data.profiles.find((x) => x.id === ownerIdOf(data, a));
+        const p = wonProgress(lottery, a, now);
+        const done = a.fulfillment === "purchased";
+        const bought = a.fulfillment === "procedure_done";
+        return (
+          <div key={a.id} className={cn("flex items-center gap-2 px-2.5 py-1.5", i > 0 && "border-t border-dashed")} data-testid="won-item" data-owner={owner?.id}>
+            {owner && (
+              <span className="relative inline-flex shrink-0 items-center gap-1" title={`${owner.label}: 当選${done ? "・受取済み" : bought ? "・購入手続き済み" : ""}`} data-won-done={done || undefined}>
+                <ProfileAvatar profile={owner} size="xs" />
+                {multi && <span className="max-w-[4rem] truncate text-[11px] text-muted-foreground">{owner.label}</span>}
+                {done && <Check className="absolute -bottom-1 -left-1 size-3 rounded-full bg-success p-px text-background" strokeWidth={3} aria-hidden="true" />}
+              </span>
+            )}
+            <span className={cn("min-w-0 flex-1 truncate text-xs", TONE[p.status])} data-testid="won-label" data-status={p.status}>
+              {p.label}
             </span>
-          );
-        })}
-      </span>
-      <span className={cn("min-w-0 flex-1 truncate text-xs", TONE[p.status])} data-testid="won-label" data-status={p.status}>
-        {myWon || wonApps.length === 1 ? p.label : `${p.label}（他のユーザー）`}
-      </span>
-      {myWon && <WonRecordButtons lottery={lottery} app={myWon} />}
+            <WonRecordButtons lottery={lottery} app={a} ownerLabel={multi ? owner?.label : undefined} />
+          </div>
+        );
+      })}
     </div>
   );
 }

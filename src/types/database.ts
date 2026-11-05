@@ -4074,6 +4074,7 @@ export type Database = {
           initial: string
           kind: string
           label: string
+          main_profile_id: string | null
           notify_recipient_ids: string[] | null
           sort_order: number
           updated_at: string
@@ -4090,6 +4091,7 @@ export type Database = {
           initial: string
           kind?: string
           label: string
+          main_profile_id?: string | null
           notify_recipient_ids?: string[] | null
           sort_order?: number
           updated_at?: string
@@ -4106,6 +4108,7 @@ export type Database = {
           initial?: string
           kind?: string
           label?: string
+          main_profile_id?: string | null
           notify_recipient_ids?: string[] | null
           sort_order?: number
           updated_at?: string

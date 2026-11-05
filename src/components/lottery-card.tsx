@@ -25,6 +25,7 @@ import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
 import { WonRow } from "@/components/won-actions";
 import { displayPeriod, wonPeriodRows, myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
+import { scopedApplications, scopeSet } from "@/lib/profile-link";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -140,7 +141,9 @@ export function LotteryCard({
   const wonTab = tab === "won";
   // 応募済みタブは発表日基準、当選タブは次の手続き（購入/受取）の期限を主役にする
   const mineApp = myApplication(data, lottery.id, profile.id);
-  const wonApp = wonTab ? (mineApp?.result === "won" ? mineApp : data.applications.find((a) => a.lotteryId === lottery.id && a.state === "applied" && a.result === "won")) : undefined;
+  // 当選タブの期間表示は、現在のユーザー＋紐づくサブの当選から（自分が当選していれば自分を優先。購入・受取が済んでいない当選を先に）
+  const wonScoped = wonTab ? scopedApplications(data, lottery.id, scopeSet(data.profiles, profile.id)).filter((a) => a.result === "won") : [];
+  const wonApp = wonTab ? (mineApp?.result === "won" ? mineApp : wonScoped.find((a) => a.fulfillment !== "purchased") ?? wonScoped[0]) : undefined;
   const won = wonApp ? wonProgress(lottery, wonApp, now) : null;
   const stage = appliedTab ? resultStage(lottery, now) : null;
   const deadlineText = lottery.applyDeadline.precision === "unknown" ? null : formatShort(lottery.applyDeadline);

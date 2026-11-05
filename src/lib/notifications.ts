@@ -1,6 +1,7 @@
 import { formatFlexible, formatResultShort, hasResultPeriod, isResultFinished, jstDateString, resultEndDay } from "@/lib/datetime";
 import { effectiveEventState, judgeAccount, profileSeesChainId } from "@/lib/eligibility";
 import { receivePeriod, wonProgress } from "@/lib/lottery-flow";
+import { scopeProfileIds } from "@/lib/profile-link";
 import { formatItem, isManaged } from "@/lib/lottery-view";
 import type { AppData, FlexibleDate, Lottery, Profile } from "@/types/domain";
 
@@ -458,7 +459,8 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
  *  - wonDot: 当選済みで購入・受取が完了していない応募がある（「当選」タブ）
  */
 export function tabDots(data: AppData, profileId: string, now: Date): { appliedDot: boolean; wonDot: boolean } {
-  const applicantIds = new Set(applicantsFor(data, profileId).map((p) => p.id));
+  // タブに表示される範囲（現在のユーザー＋紐づくサブ）と同じ。通知の送り先設定には影響しない（赤丸はタブ内の未対応を示すだけ）
+  const applicantIds = new Set(scopeProfileIds(data.profiles, profileId));
   const mine = new Set(data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active && profileSeesChainId(data, a.profileId, a.chainId)).map((a) => a.id));
   let appliedDot = false;
   let wonDot = false;

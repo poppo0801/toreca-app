@@ -1,6 +1,7 @@
 import { isResultFinished, jstDateString, resultSortKey, sortKey } from "@/lib/datetime";
 import { effectiveEventState, isSkippedBy, profileSeesLottery } from "@/lib/eligibility";
 import { matchRegion } from "@/lib/region-filter";
+import { scopedApplications, scopeSet } from "@/lib/profile-link";
 import { kindOf, myApplication, resultStage, wonProgress, wonSortRank } from "@/lib/lottery-flow";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
@@ -59,17 +60,18 @@ export function isManaged(data: AppData, lotteryId: string): boolean {
   return data.management.find((m) => m.lotteryId === lotteryId)?.isManaged ?? false;
 }
 
-function liveApplications(data: AppData, lotteryId: string): Application[] {
-  return data.applications.filter((a) => a.lotteryId === lotteryId && a.state === "applied");
+/** 有効な応募。scope（プロフィールID）を渡すと、そのユーザーの応募だけ。渡さなければ全員分 */
+function liveApplications(data: AppData, lotteryId: string, scope?: ReadonlySet<string>): Application[] {
+  return scopedApplications(data, lotteryId, scope);
 }
 
 /** 結果待ち（未確認）の応募を持つか */
-export function hasPendingResult(data: AppData, lotteryId: string): boolean {
-  return liveApplications(data, lotteryId).some((a) => a.result === "pending");
+export function hasPendingResult(data: AppData, lotteryId: string, scope?: ReadonlySet<string>): boolean {
+  return liveApplications(data, lotteryId, scope).some((a) => a.result === "pending");
 }
 
-export function hasWon(data: AppData, lotteryId: string): boolean {
-  return liveApplications(data, lotteryId).some((a) => a.result === "won");
+export function hasWon(data: AppData, lotteryId: string, scope?: ReadonlySet<string>): boolean {
+  return liveApplications(data, lotteryId, scope).some((a) => a.result === "won");
 }
 
 /** 発表予定を過ぎたのに結果が未登録 */
@@ -98,8 +100,11 @@ export function eventStateOf(lottery: Lottery, now: Date): Lottery["eventState"]
   return event;
 }
 
-/** 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。受付の終了・応募済みの除外は「状態」の絞り込みで行う。 */
-export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date): boolean {
+/**
+ * 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。受付の終了・応募済みの除外は「状態」の絞り込みで行う。
+ * 応募済み・当選は scope（現在のユーザー＋紐づくサブ）の応募だけで判定する。全情報・★管理対象は世帯共通（scope に依存しない）。
+ */
+export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date, scope?: ReadonlySet<string>): boolean {
   void _now;
   switch (tab) {
     case "managed":
@@ -107,9 +112,9 @@ export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date): bo
       return isManaged(data, lottery.id);
     case "applied":
       // 継続抽選・招待制販売は「継続中の抽選」に分けて表示する（応募済みタブの件数・一覧には含めない）
-      return hasPendingResult(data, lottery.id) && kindOf(lottery) === "normal";
+      return hasPendingResult(data, lottery.id, scope) && kindOf(lottery) === "normal";
     case "won":
-      return hasWon(data, lottery.id);
+      return hasWon(data, lottery.id, scope);
     case "all":
       return true;
   }
@@ -176,14 +181,14 @@ function appliedRank(_data: AppData, l: Lottery, now: Date): number {
 }
 
 /** 当選タブの並び: 現在のプロフィールの次の手続きを基準に、期限超過 → 期限の近い順 → 期限未確認 → 完了。 */
-function wonProgressOf(data: AppData, l: Lottery, now: Date, profileId?: string) {
-  const won = liveApplications(data, l.id).filter((a) => a.result === "won");
+function wonProgressOf(data: AppData, l: Lottery, now: Date, profileId?: string, scope?: ReadonlySet<string>) {
+  const won = liveApplications(data, l.id, scope).filter((a) => a.result === "won");
   const mine = profileId ? myApplication(data, l.id, profileId) : undefined;
   const app = mine?.result === "won" ? mine : won.find((a) => a.fulfillment !== "purchased") ?? won[0];
   return app ? wonProgress(l, app, now) : null;
 }
-function wonRank(data: AppData, l: Lottery, now: Date, profileId?: string): number {
-  const p = wonProgressOf(data, l, now, profileId);
+function wonRank(data: AppData, l: Lottery, now: Date, profileId?: string, scope?: ReadonlySet<string>): number {
+  const p = wonProgressOf(data, l, now, profileId, scope);
   return p ? wonSortRank(p) : 4;
 }
 
@@ -231,9 +236,11 @@ export function matchStatus(data: AppData, lottery: Lottery, status: StatusFilte
 export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): Lottery[] {
   // 「受付中・未応募」の既定は全情報・★管理対象のもの。応募済み・当選タブでは、状態を指定していなければ絞らない
   const status: StatusFilter = f.status === "default" && (tab === "applied" || tab === "won") ? "any" : f.status;
+  // 応募済み・当選タブの表示範囲: 現在のユーザー＋紐づくサブ（profileId を渡さない集計用途は全員分）
+  const scope = profileId ? scopeSet(data.profiles, profileId) : undefined;
   const list = data.lotteries.filter(
     (l) =>
-      inTab(data, l, tab, now) &&
+      inTab(data, l, tab, now, scope) &&
       matchFilters(data, l, f) &&
       matchSkipView(data, l, f, tab, profileId) &&
       matchStatus(data, l, status, now, profileId, keepIds) &&
@@ -251,8 +258,8 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, 
       return r !== 0 ? r : safe(byResult(a, b));
     }
     if (tab === "won") {
-      const r = wonRank(data, a, now, profileId) - wonRank(data, b, now, profileId);
-      return r !== 0 ? r : safe(sortKey(wonProgressOf(data, a, now, profileId)?.deadline ?? a.procedureDeadline) - sortKey(wonProgressOf(data, b, now, profileId)?.deadline ?? b.procedureDeadline));
+      const r = wonRank(data, a, now, profileId, scope) - wonRank(data, b, now, profileId, scope);
+      return r !== 0 ? r : safe(sortKey(wonProgressOf(data, a, now, profileId, scope)?.deadline ?? a.procedureDeadline) - sortKey(wonProgressOf(data, b, now, profileId, scope)?.deadline ?? b.procedureDeadline));
     }
     return safe(f.sort === "result" ? byResult(a, b) : byDeadline(a, b));
   });

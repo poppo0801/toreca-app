@@ -19,6 +19,7 @@ import { OngoingOps } from "@/components/ongoing-ops";
 import { PastApplyRecorder } from "@/components/past-apply-recorder";
 import { WonRecordButtons } from "@/components/won-actions";
 import { KIND_LABEL, kindOf, myApplication, wonProgress } from "@/lib/lottery-flow";
+import { canOperateOwner, ownerIdOf, scopedApplications, scopeSet } from "@/lib/profile-link";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
@@ -94,7 +95,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const skipSource = skipSourceFor(data, profile.id, lottery);
   const skipException = hasSkipException(data, profile.id, lottery);
   const mineApp = myApplication(data, lottery.id, profile.id);
-  const myWon = mineApp?.result === "won" ? mineApp : undefined;
+  // 当選の購入・受取の記録は、現在のユーザーと紐づくサブの当選が対象（記録は応募の所有者に保存される）
+  const scopedWon = scopedApplications(data, lottery.id, scopeSet(data.profiles, profile.id)).filter((a) => a.result === "won");
   const rules = effectiveRules(data, lottery);
   const hasMyScopeSkip = data.skipRules.some((r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id);
   /** 現在のプロフィールの系列単位のスルー（設定 > 応募ルールのスルー一覧と同じもの） */
@@ -256,15 +258,18 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 </div>
                 {persistent && <PastApplyRecorder lottery={lottery} />}
                 {persistent && <OngoingOps lottery={lottery} />}
-                {persistent && myWon && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-2 py-1.5" data-testid="detail-won">
-                    <span className="text-xs">
-                      <span className="font-bold text-success">{profile.label}は当選</span>
-                      <span className="ml-1.5 text-muted-foreground">{wonProgress(lottery, myWon, now).label}</span>
-                    </span>
-                    <WonRecordButtons lottery={lottery} app={myWon} />
-                  </div>
-                )}
+                {persistent && scopedWon.map((w) => {
+                  const wo = data.profiles.find((p) => p.id === ownerIdOf(data, w));
+                  return (
+                    <div key={w.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-2 py-1.5" data-testid="detail-won" data-owner={wo?.id}>
+                      <span className="text-xs">
+                        <span className="font-bold text-success">{wo?.label ?? ""}は当選</span>
+                        <span className="ml-1.5 text-muted-foreground">{wonProgress(lottery, w, now).label}</span>
+                      </span>
+                      <WonRecordButtons lottery={lottery} app={w} ownerLabel={wo && wo.id !== profile.id ? wo.label : undefined} />
+                    </div>
+                  );
+                })}
                 {reviewReasons.length > 0 && (
                   <p className="flex items-start gap-1 text-xs text-warn" data-testid="review-summary">
                     <StatusIcon status="needs_review" className="mt-px size-3.5" />
@@ -323,7 +328,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                               {lottery.multiMode === "single" ? (
                                 <>
                                   <span className="text-xs">{RESULT_LABEL[a.result]}</span>
-                                  {owner.id === profile.id && <span className="flex gap-1" role="group" aria-label={`${owner.label}の結果を登録`}>
+                                  {canOperateOwner(data.profiles, profile.id, owner.id) && <span className="flex gap-1" role="group" aria-label={`${owner.label}の結果を登録`}>
                                     {(["pending", "won", "lost"] as const).map((r) => (
                                       <Button key={r} size="sm" variant={a.result === r ? "default" : "outline"} aria-pressed={a.result === r} onClick={() => actions.setResult(a.id, r)}>
                                         {RESULT_LABEL[r]}
