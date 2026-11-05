@@ -7,6 +7,7 @@ import { deepClean } from "@/lib/text-safe";
 import { loadOpen, loadSourceCtx } from "@/lib/server/collector/open";
 import { runReevaluation } from "@/lib/server/collector/reevaluate";
 import { bumpStats, conditionsFromRow, type CollectDeps } from "@/lib/server/collector/run";
+import { isStoreKind } from "@/lib/lottery-taxonomy";
 import { evaluateCandidate } from "@/lib/collector/conditions";
 import { jstDateString } from "@/lib/datetime";
 
@@ -51,7 +52,12 @@ export async function runMergePass(deps: CollectDeps, opts: { execute: boolean; 
   const all = await loadOpen(db, householdId, sctx);
   const settingsRow = (await db.from("collection_settings").select("*").eq("household_id", householdId).maybeSingle()).data;
   const cond = settingsRow ? conditionsFromRow(settingsRow as unknown as Record<string, unknown>) : null;
-  const verdictOf = (o: OpenLite) => (cond ? evaluateCandidate(o.input, cond, { prefecture: o.input.store.prefecture || "", storeKind: "physical", distanceKm: null, now }) : null);
+  // 候補の店舗がマスターの店舗と確実に結び付いているときは、マスターの都道府県・販売形態で判定する（候補に地域が無くても、確認待ちにしない。推測はしない）
+  const stores = new Map(((await db.from("stores").select("id,prefecture,sales_kind").eq("household_id", householdId).is("archived_at", null).limit(2000)).data ?? []).map((s: { id: string; prefecture: string | null; sales_kind: string | null }) => [s.id, s]));
+  const verdictOf = (o: OpenLite) => {
+    const m = o.input.store.id ? stores.get(o.input.store.id) : undefined;
+    return cond ? evaluateCandidate(o.input, cond, { prefecture: m?.prefecture || o.input.store.prefecture || "", storeKind: isStoreKind(m?.sales_kind) ? m.sales_kind : "physical", distanceKm: null, now }) : null;
+  };
   const rank = (o: OpenLite) => {
     const ev = verdictOf(o);
     return assessCompleteness(o.input, o.summary, { today, verdict: ev?.verdict, verdictReasons: ev?.reasons }).rank;

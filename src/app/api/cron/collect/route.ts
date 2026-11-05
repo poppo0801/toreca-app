@@ -4,6 +4,7 @@ import { getExtractor } from "@/lib/ai/provider";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
 import { runCollection, runWorker } from "@/lib/server/collector/run";
 import { enrichFromListings } from "@/lib/server/collector/enrich";
+import { runLowInfoPass, runMergePass } from "@/lib/server/collector/merge-pass";
 import { runHoldPass } from "@/lib/server/collector/hold";
 import { planScheduledCollection } from "@/lib/server/collector/schedule";
 import { processGeocodeBatch } from "@/lib/server/geocode-service";
@@ -56,7 +57,15 @@ async function handle(req: NextRequest) {
       await runHoldPass(base, { max: 6, timeLeft: () => 30_000 - (Date.now() - t0) }).catch(() => undefined);
       const out = await runWorker({ ...base, budgetMs: Math.max(25_000, 54_000 - (Date.now() - t0)) });
       if (out.ok && "runId" in out) worked++;
-      else idle++;
+      else {
+        idle++;
+        // 解析待ちが無いときだけ、1時間に1回（毎時最初の呼び出し）、保存済みの結果で項目別の統合と低情報量の整理を行う（AI・X APIは呼ばない。何も無ければ書き込まない）
+        if (now.getUTCMinutes() < 5) {
+          const mp = { ...base, trigger: "manual" as const };
+          await runMergePass(mp, { execute: true }).catch(() => undefined);
+          await runLowInfoPass(mp, { execute: true }).catch(() => undefined);
+        }
+      }
     }
   }
   summary.push({ household: targets?.length ?? 0, collected, worked, idle });
