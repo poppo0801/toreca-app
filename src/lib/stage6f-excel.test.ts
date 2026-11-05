@@ -71,7 +71,7 @@ describe("Stage 6F-9: 抽選Excelで、購入/受取の分離・抽選の種類�
     expect(lot.lottery_kind).toBe("ongoing");
     expect(lot.valid_until_date).toBe("2027-03-31");
     expect(lot.receive_start_date).toBe("2026-12-15");
-    expect(lot.receive_end_date ?? lot.receive_deadline_date).toBeTruthy();
+    expect(lot.receive_deadline_date).toBe("2026-12-20");
   });
 
   it("旧い形式のファイル（新しい列が無い）で更新しても、既存の分離・種類は変わらない", async () => {
