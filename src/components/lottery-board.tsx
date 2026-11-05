@@ -33,6 +33,7 @@ import {
 import { isSkippedBy, profileSeesLottery } from "@/lib/eligibility";
 import { tabDots } from "@/lib/notifications";
 import { useTapGate } from "@/lib/tap-guard";
+import { KANSAI3, loadRegion, REGION_LABEL, regionMode, saveRegion, validateRegion } from "@/lib/region-filter";
 import { readPref, readSession, writePref, writeSession } from "@/services/local-device-store";
 import { cn } from "@/lib/utils";
 
@@ -69,11 +70,17 @@ function validateSession(v: unknown): SessionState | null {
   if (!v || typeof v !== "object") return null;
   const s = v as Partial<SessionState>;
   if (!s.tab || !TABS.some((t) => t.value === s.tab) || !s.filters || typeof s.filters !== "object") return null;
-  const f: Record<string, string> = { ...DEFAULT_FILTERS };
+  const f: Record<string, string | string[]> = { ...DEFAULT_FILTERS };
+  let hasRegion = false;
   for (const k of Object.keys(DEFAULT_FILTERS)) {
     const val = (s.filters as unknown as Record<string, unknown>)[k];
     if (typeof val === "string") f[k] = val;
+    if (k === "prefectures" && validateRegion(val)) {
+      f[k] = val as string[];
+      hasRegion = true;
+    }
   }
+  if (!hasRegion) f.prefectures = [...KANSAI3]; // 古い形式の保存値は、既定の地域（関西3県）にする
   if (!STATUS_VALUES.includes(f.status as StatusFilter)) f.status = DEFAULT_FILTERS.status;
   return { tab: s.tab, filters: f as unknown as Filters };
 }
@@ -96,7 +103,9 @@ function LotteryBoardInner() {
   const [memoForm, setMemoForm] = useState(false);
   const [memoList, setMemoList] = useState(false);
   const [tab, setTab] = useState<Tab>("managed");
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  // 地域は端末に保存した選択（未保存は関西3県）を既定にする。通販・所在地不明は地域では除外しない
+  const [region, setRegion] = useState<string[]>([...KANSAI3]);
+  const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, prefectures: [...KANSAI3] });
   // シンプル／詳細はプロフィール別の設定（既定は詳細＝従来の情報量）
   const cardView = settings.cardView ?? "detail";
   const gate = useTapGate(); // 表示切替・フィルターの誤った連続発火を300msだけ無視する
@@ -112,9 +121,13 @@ function LotteryBoardInner() {
     /* eslint-disable react-hooks/set-state-in-effect -- 端末ローカル設定の復元 */
     setView(readPref("view", VIEW, "list"));
     const saved = readSession("board", validateSession);
+    const savedRegion = loadRegion();
+    if (savedRegion) setRegion(savedRegion);
     if (saved && !focusId) {
       setTab(saved.tab);
       setFilters(saved.filters);
+    } else if (savedRegion) {
+      setFilters((f) => ({ ...f, prefectures: savedRegion }));
     }
     setRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -167,7 +180,8 @@ function LotteryBoardInner() {
   const showSkip = true;
   const statusDefault = defaultFiltersFor(tab).status;
   // 詳細フィルターで条件を変えている数（検索語は検索欄に出ているので含めない）
-  const activeCount = countActiveFilters(filters, defaultFiltersFor(tab), { tab, showSkip });
+  const baseFilters = { ...defaultFiltersFor(tab), prefectures: region };
+  const activeCount = countActiveFilters(filters, baseFilters, { tab, showSkip });
   const filterKey = JSON.stringify(filters);
   const hasFilter = activeCount > 0 || filters.query.trim() !== "";
 
@@ -313,12 +327,16 @@ function LotteryBoardInner() {
             onOpenChange={setAdvanced}
             data={data}
             filters={filters}
-            base={defaultFiltersFor(tab)}
+            base={baseFilters}
             tab={tab}
             showSkip={showSkip}
             statusOptions={STATUS_OPTIONS.filter((o) => o.value !== "default" || statusDefault === "default")}
             prefectures={prefectures}
-            onApply={(f) => setFilters(f)}
+            onApply={(f) => {
+              setFilters(f);
+              setRegion(f.prefectures);
+              saveRegion(f.prefectures);
+            }}
           />
         )}
 
@@ -359,9 +377,17 @@ function LotteryBoardInner() {
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
             <p>該当する抽選がありません。</p>
             {hasFilter && (
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => setFilters(defaultFiltersFor(tab))}>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => setFilters(baseFilters)}>
                 フィルタを解除
               </Button>
+            )}
+            {filters.prefectures.length > 0 && (
+              <p className="mt-2 text-xs" data-testid="region-hint">
+                地域: {REGION_LABEL[regionMode(filters.prefectures, prefectures)]}で絞り込み中（通販・発送のみは対象外にしません）
+                <button type="button" className="ml-2 min-h-8 text-info underline" onClick={() => { setFilters((f) => ({ ...f, prefectures: [] })); setRegion([]); saveRegion([]); }}>
+                  すべての地域を表示
+                </button>
+              </p>
             )}
             {tab === "managed" && !hasFilter && <p className="mt-1">「全情報」から★を付けると、ここに表示されます。</p>}
           </div>

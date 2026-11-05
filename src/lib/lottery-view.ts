@@ -1,5 +1,6 @@
 import { isResultFinished, jstDateString, resultSortKey, sortKey } from "@/lib/datetime";
 import { effectiveEventState, isSkippedBy, profileSeesLottery } from "@/lib/eligibility";
+import { matchRegion } from "@/lib/region-filter";
 import { kindOf, myApplication, resultStage, wonProgress, wonSortRank } from "@/lib/lottery-flow";
 import type { AppData, Application, Lottery, LotteryItem, Product } from "@/types/domain";
 
@@ -24,7 +25,8 @@ export interface Filters {
   productId: string;
   skip: SkipView;
   status: StatusFilter;
-  prefecture: string;
+  /** 地域（都道府県の複数選択。空 = 地域で絞らない）。通販・発送のみ・所在地不明は除外しない（region-filter.ts） */
+  prefectures: string[];
   receiveMethod: string;
   /** 店舗で絞り込み */
   storeId: string;
@@ -40,7 +42,7 @@ export const DEFAULT_FILTERS: Filters = {
   productId: "",
   skip: "normal",
   status: "default",
-  prefecture: "",
+  prefectures: [],
   receiveMethod: "",
   storeId: "",
   applyMethod: "",
@@ -116,7 +118,7 @@ export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date): bo
 function matchFilters(data: AppData, lottery: Lottery, f: Filters): boolean {
   if (f.chainId && lottery.chainId !== f.chainId) return false;
   const store = data.stores.find((s) => s.id === lottery.storeId);
-  if (f.prefecture && store?.prefecture !== f.prefecture) return false;
+  if (!matchRegion(f.prefectures, store?.prefecture, lottery.receiveMethod === "shipping" || (store?.salesKind ?? "physical") !== "physical")) return false;
   if (f.receiveMethod && lottery.receiveMethod !== f.receiveMethod) return false;
   if (f.storeId && lottery.storeId !== f.storeId) return false;
   if (f.applyMethod && lottery.applyMethod !== f.applyMethod) return false;

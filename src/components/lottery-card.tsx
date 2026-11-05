@@ -193,7 +193,7 @@ export function LotteryCard({
               </span>
               <ProductLine name={sum.name} extra={sum.extraKinds} />
               {/* 応募漏れ防止: 締切と残り時間は一覧でも必ず出す */}
-              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] tracking-tight" data-testid="card-deadline">
+              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]" data-testid="card-deadline">
                 {appliedTab ? (
                   <>
                     <FitLine className="inline-block w-auto" innerProps={{ className: cn("gap-0.5", stage === "unknown" && "text-muted-foreground"), "data-testid": "result-day" }}>
@@ -250,7 +250,7 @@ export function LotteryCard({
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
               {/* 日時は2種類あっても同じ1行に並べる（FitLineが実測し、余白→字間→行全体の文字サイズの順に詰める） */}
-              <span className="block w-full min-w-0 text-xs" data-testid="card-dates">
+              <span className="block w-full min-w-0 text-[11px]" data-testid="card-dates">
                 <FitLine innerProps={{ className: "gap-3", "data-testid": "date-row" }}>
                   {appliedTab ? (
                     <>
@@ -278,7 +278,7 @@ export function LotteryCard({
               </span>
               {/* 受取方法と、店頭受取のときの自宅からの直線距離（通販・位置が未設定のときは出さない。推測しない）。残り時間は下段の操作ボタンの隣 */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="card-meta">
-                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                   {display.receive && (
                     <span className="inline-flex items-center gap-1" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
                       {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}

@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, type HTMLAttributes, type ReactNo
 import { cn } from "@/lib/utils";
 
 /** これより小さくはしない（読めなくなる前に、はみ出さないことを優先する最小の文字サイズ） */
-export const FIT_MIN_PX = 8;
+export const FIT_MIN_PX = 9;
 
 /**
  * 日付行を必ず1行に収める。折り返さず、収まらないときは次の順で詰める（Stage 5Z）。

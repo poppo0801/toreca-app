@@ -13,6 +13,7 @@ import type { PipelineMetrics } from "@/lib/collector/metrics";
 import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
+import { presetSelection, REGION_LABEL, regionMode } from "@/lib/region-filter";
 import { HIDDEN_REQUIREMENT_TAGS, REQUIREMENT_TAGS } from "@/lib/lottery-taxonomy";
 import { RANKS, RANK_LABEL, type Rank } from "@/lib/collector/completeness";
 import type { RowAssess } from "@/lib/collector/assess-row";
@@ -541,6 +542,12 @@ export function AutoCollectView({
           </SetRow>
           <SetRow label={`店頭の対象地域（${s.prefectures.length}）`}>
             <div className="flex flex-wrap gap-1.5" data-testid="pref-chips">
+              {(["kansai3", "kanto6"] as const).map((m) => (
+                <Chip key={m} on={regionMode(s.prefectures, PREFECTURE_LIST as string[]) === m} onClick={() => setS({ ...s, prefectures: presetSelection(m) })} testId={`pref-preset-${m}`}>
+                  {REGION_LABEL[m]}
+                </Chip>
+              ))}
+              {regionMode(s.prefectures, PREFECTURE_LIST as string[]) === "custom" && <span className="self-center text-[11px] text-muted-foreground">カスタム</span>}
               {prefShown.map((p) => (
                 <Chip key={p} on={s.prefectures.includes(p)} onClick={() => toggleArr("prefectures", p)}>
                   {p}

@@ -424,6 +424,11 @@ test("対戦記録: 設定から開ける。モックでは保存できない旨
 
 test("抽選カード右上は受取方法で決まる（店頭=受取店舗の都道府県、発送=通販）。距離は店舗名の右（通販は出さない）", async ({ page }) => {
   await page.getByRole("tab", { name: /全情報/ }).click();
+  // 地域の既定は関西3県。東京の店舗も確認するため、地域を「すべて」にする（通販・所在地不明は地域では除外されない）
+  await page.getByTestId("filter-open").click();
+  await page.getByTestId("f-region-all").click();
+  await page.getByTestId("filter-apply").click();
+  await expect(page.getByTestId("filter-sheet")).toHaveCount(0);
   // 店頭受取（三宮店・自宅の近く）: 都道府県。距離はカードに出さない
   const near = page.getByTestId("lottery-card").filter({ hasText: "三宮店" }).first();
   await expect(near.getByTestId("place-chip")).toContainText("兵庫県");

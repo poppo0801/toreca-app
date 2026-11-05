@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { presetSelection, REGION_LABEL, regionMode, toggleRegion, type RegionMode } from "@/lib/region-filter";
 import type { AllFilter, Filters, SkipView, SortMode, StatusFilter } from "@/lib/lottery-view";
 import type { AppData } from "@/types/domain";
 
@@ -19,13 +20,42 @@ export function countActiveFilters(f: Filters, base: Filters, opts: { tab: strin
     f.storeId,
     f.productId,
     f.applyMethod,
-    f.prefecture,
+    [...f.prefectures].sort().join() !== [...base.prefectures].sort().join(),
     f.receiveMethod,
     f.status !== base.status,
     opts.tab === "all" && f.allFilter !== "any",
     opts.showSkip && f.skip !== "normal",
     f.sort !== "deadline",
   ].filter(Boolean).length;
+}
+
+/** 地域（都道府県の複数選択）。プリセットと、データに存在する都道府県のチェックボックス */
+function RegionField({ selected, present, onChange }: { selected: string[]; present: string[]; onChange: (v: string[]) => void }) {
+  const mode = regionMode(selected, present);
+  const presets: Exclude<RegionMode, "custom">[] = ["kansai3", "kanto6", "all"];
+  return (
+    <fieldset className="col-span-2 space-y-1.5" data-testid="f-region" data-mode={mode}>
+      <legend className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        地域
+        {mode === "custom" && <span className="rounded-full border px-1.5 text-[10px] text-foreground" data-testid="f-region-custom">{REGION_LABEL.custom}</span>}
+      </legend>
+      <div className="flex flex-wrap gap-1.5">
+        {presets.map((m) => (
+          <button key={m} type="button" aria-pressed={mode === m} onClick={() => onChange(presetSelection(m))} data-testid={`f-region-${m}`} className={cn("min-h-8 rounded-full border px-3 text-xs", mode === m ? "border-foreground bg-foreground text-background" : "bg-input")}>
+            {REGION_LABEL[m]}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1" data-testid="f-pref">
+        {present.map((p) => (
+          <label key={p} className="flex min-h-8 items-center gap-1 text-xs">
+            <input type="checkbox" className="size-4" checked={selected.length === 0 || selected.includes(p)} onChange={() => onChange(toggleRegion(selected, p, present))} />
+            {p}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
 }
 
 function Field({ label, value, onChange, options, testId }: { label: string; value: string; onChange: (v: string) => void; options: FilterOption[]; testId: string }) {
@@ -106,7 +136,7 @@ export function FilterSheet({
           <Field label="商品" value={draft.productId} onChange={(v) => set("productId", v)} options={[{ value: "", label: "すべて" }, ...data.products.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.officialName }))]} testId="f-product" />
           <Field label="応募方法" value={draft.applyMethod} onChange={(v) => set("applyMethod", v)} options={APPLY_METHODS} testId="f-apply" />
           <Field label="受取方法" value={draft.receiveMethod} onChange={(v) => set("receiveMethod", v)} options={RECEIVE_METHODS} testId="f-receive" />
-          <Field label="都道府県" value={draft.prefecture} onChange={(v) => set("prefecture", v)} options={[{ value: "", label: "すべて" }, ...prefectures.map((p) => ({ value: p, label: p }))]} testId="f-pref" />
+          <RegionField selected={draft.prefectures} present={prefectures} onChange={(v) => set("prefectures", v)} />
           <Field
             label="並び順"
             value={draft.sort}

@@ -7,7 +7,7 @@ describe("日付行の文字サイズ調整（5Z）", () => {
     expect(fitFontSize(120, 120, 12)).toBe(12);
   });
   it("収まらないときは、必要幅との比率で行全体を縮小する", () => {
-    expect(fitFontSize(150, 100, 12)).toBe(8); // 12 × 2/3
+    expect(fitFontSize(150, 100, 12)).toBe(9); // 12 × 2/3 = 8 → 下限 9
     expect(fitFontSize(120, 100, 12)).toBe(10);
   });
   it("読めなくなる下限より小さくしない", () => {
