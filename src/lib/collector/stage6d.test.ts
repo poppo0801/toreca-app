@@ -218,3 +218,24 @@ describe("Stage 6D: 同一抽選の照合と補足投稿の紐付け", () => {
     expect(matchSupplement([a], { input: supWithChain, account: "shop", postedAt: "2026-11-08T02:00:00Z", urls: [] }, "self").target).toBeNull();
   });
 });
+
+describe("Stage 6D: 矛盾の誤検出を避ける（短縮URL・受取方法の限定）", () => {
+  const mk = (memo: string, receive: "store" | "either" | "shipping", at: string) => side(input({ chain: { id: "c1", name: "ふるいち" }, memo, receiveMethod: receive, applyDeadline: flex("2026-11-10", "23:59") }), sum("exact", "none"), src("aggregator_x", `https://x.com/a/status/${at}`, `x:${at}`, "2026-11-05T01:00:00Z", `acc${at}`));
+  it("短縮URL（t.co）と実URLは矛盾にしない。実URLを採用する", () => {
+    const m = mergeSides(mk("応募URL: https://t.co/abc", "store", "1"), mk("応募URL: https://shop.example.invalid/apply", "store", "2"));
+    expect(m.conflicts).toEqual([]);
+    expect(m.input.memo).toContain("https://shop.example.invalid/apply");
+    // 実URLが主で、他が短縮URLのときは、実URLのまま
+    const m2 = mergeSides(mk("応募URL: https://shop.example.invalid/apply", "store", "3"), mk("応募URL: https://t.co/abc", "store", "4"));
+    expect(m2.input.memo).toContain("https://shop.example.invalid/apply");
+    expect(m2.conflicts).toEqual([]);
+  });
+  it("異なる実URL同士は矛盾として記録する", () => {
+    const m = mergeSides(mk("応募URL: https://a.example.invalid/x", "store", "5"), mk("応募URL: https://b.example.invalid/y", "store", "6"));
+    expect(m.conflicts.map((c) => c.field)).toEqual(["applyUrl"]);
+  });
+  it("受取方法『店頭・発送どちらも可』と『店頭のみ』は矛盾にしない。店頭と発送は矛盾", () => {
+    expect(mergeSides(mk("", "store", "7"), mk("", "either", "8")).conflicts).toEqual([]);
+    expect(mergeSides(mk("", "store", "9"), mk("", "shipping", "10")).conflicts.map((c) => c.field)).toEqual(["receiveMethod"]);
+  });
+});

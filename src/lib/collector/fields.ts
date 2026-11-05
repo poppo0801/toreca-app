@@ -147,8 +147,11 @@ function comparable(k: FieldKey, i: LotteryInput): string {
       return normName(i.store.name);
     case "items":
       return i.items.map((x) => productKey(x.product.name)).filter(Boolean).sort().join("|");
-    case "applyUrl":
-      return applyUrlOf(i).replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+    case "applyUrl": {
+      const u = applyUrlOf(i).replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+      // 短縮URL（t.co 等）は、展開先が分からないため他のURLとは比較できない（矛盾にしない）
+      return /^https?:\/\/(t\.co|bit\.ly|buff\.ly|ow\.ly|tinyurl\.com|lin\.ee|amzn\.to|goo\.gl)\//.test(u) ? "short" : u;
+    }
     case "announcement":
     case "conditions":
       // 文言の違いは矛盾としない（有無だけを補完の対象にする）
@@ -272,7 +275,19 @@ export function mergeSides(carrier: Side, other: Side): MergeResult {
       filled.push(k);
       continue;
     }
-    if (comparable(k, carrier.input) === comparable(k, other.input)) {
+    const cc = comparable(k, carrier.input);
+    const oc = comparable(k, other.input);
+    // 短縮URLと実URL: 実URLの方を採用する（矛盾にしない）。「店頭・発送どちらも可」と限定した受取方法: 矛盾にしない
+    if (k === "applyUrl" && (cc === "short" || oc === "short") && cc !== oc) {
+      if (cc === "short") {
+        copyField(k, other.input, input, other.summary, summary);
+        fields[k] = { value: ov.slice(0, 120), source: osrc, state: isOfficial(osrc.kind) ? "confirmed" : "unverified", origins: [osrc.origin] };
+        updated.push(k);
+      }
+      continue;
+    }
+    if (k === "receiveMethod" && cc !== oc && (cv === "either" || ov === "either")) continue;
+    if (cc === oc) {
       // 同じ値: 独立した出どころ（元の投稿が異なる）が増えれば確定
       const origins = [...new Set([...(cp?.origins ?? [csrc.origin]), ...(op?.origins ?? [osrc.origin])])];
       const prev = fields[k];
