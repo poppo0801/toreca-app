@@ -64,6 +64,9 @@ const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("addSource"), source: sourceInput }),
   z.object({ action: z.literal("updateSource"), id: uuid, source: sourceInput }),
   z.object({ action: z.literal("toggleSource"), id: uuid, enabled: z.boolean() }),
+  // 公式Xアカウントと系列・店舗の対応づけ（利用者が明示的に登録したものだけを使う。まとめアカウントは登録しない）
+  z.object({ action: z.literal("linkXAccount"), username: z.string().trim().transform((s) => s.replace(/^@/, "").toLowerCase()).pipe(z.string().regex(/^[a-z0-9_]{1,15}$/)), role: z.enum(["official_store", "official_chain"]), chainId: uuid.nullable().optional(), storeId: uuid.nullable().optional(), note: z.string().max(200).optional(), actor: z.uuid().nullable().optional() }),
+  z.object({ action: z.literal("unlinkXAccount"), id: uuid }),
   z.object({ action: z.literal("deleteSource"), id: uuid }),
   z.object({ action: z.literal("saveSettings"), settings: settingsInput }),
 ]);
@@ -235,6 +238,18 @@ export async function POST(request: NextRequest) {
       const { error } = await q;
       if (error) return json({ ok: false, error: error.code === "23505" ? "同じ収集元が既に登録されています" : "保存に失敗しました" }, error.code === "23505" ? 409 : 500);
       return json({ ok: true });
+    }
+    case "linkXAccount": {
+      // まとめアカウント（収集元に登録したXアカウント）は紹介元であり、実施店舗の公式アカウントではない
+      const { data: agg } = await db.from("collection_sources").select("id").eq("household_id", householdId).eq("kind", "x").ilike("x_username", b.username).limit(1);
+      if ((agg ?? []).length > 0) return json({ ok: false, error: "収集元のまとめアカウントは、店舗・系列の公式アカウントとして登録できません" }, 422);
+      const row = { household_id: householdId, username: b.username, role: b.role, chain_id: b.role === "official_chain" ? (b.chainId ?? null) : null, store_id: b.role === "official_store" ? (b.storeId ?? null) : null, note: b.note ?? "", created_by_profile_id: b.actor ?? null };
+      const { error } = await db.from("x_account_links").upsert(row as never, { onConflict: "household_id,username" });
+      return error ? json({ ok: false, error: error.code === "23514" ? "店舗または系列を指定してください" : "保存に失敗しました" }, error.code === "23514" ? 422 : 500) : json({ ok: true });
+    }
+    case "unlinkXAccount": {
+      const { error } = await db.from("x_account_links").delete().eq("id", b.id);
+      return error ? json({ ok: false, error: "削除に失敗しました" }, 500) : json({ ok: true });
     }
     case "toggleSource": {
       const { error } = await db.from("collection_sources").update({ enabled: b.enabled, updated_at: new Date().toISOString() }).eq("id", b.id);

@@ -85,3 +85,25 @@ export async function preferredAltFor(db: Db, householdId: string, url: string |
   }
   return null;
 }
+
+/** 取得制限が確定している応募先へ、同じURLの取得を繰り返さないための判定（Stage 6B）。この日数を過ぎたら取得を試し直す（制限が解除された場合に気づくため） */
+export const ALT_RECHECK_DAYS = 7;
+export const ALT_MIN_SUCCESS = 2;
+
+/**
+ * 取得困難の記録から、ページの取得を省いて最初から代替（一覧の文章）で読み取ってよいかを判断する。
+ * 条件: 応募サービス／ドメイン全体が robots で拒否されている記録があり、一覧文章による代替の成功が失敗を上回り（2回以上）、直近の失敗が新しい。
+ * 個別のページ単位の失敗（ページ削除など）や、短縮URLは対象にしない。
+ */
+export async function altPlanFor(db: Db, householdId: string, url: string | null, now: Date): Promise<{ skipFetch: boolean; failKind: FailKind }> {
+  const none = { skipFetch: false, failKind: "robots" as FailKind };
+  for (const k of hardSourceKeys({ url }).filter((x) => x.scope === "service" || x.scope === "domain")) {
+    const rec = (await db.from("collection_hard_sources").select("fail_kind,alt_source,alt_success,alt_fail,last_failed_at").eq("household_id", householdId).eq("scope", k.scope).eq("key", k.key).maybeSingle()).data;
+    if (!rec || rec.fail_kind !== "robots" || rec.alt_source !== "list_text") continue;
+    if ((rec.alt_success ?? 0) < ALT_MIN_SUCCESS || (rec.alt_success ?? 0) <= (rec.alt_fail ?? 0)) continue;
+    const age = rec.last_failed_at ? (now.getTime() - new Date(rec.last_failed_at).getTime()) / 86_400_000 : Infinity;
+    if (age > ALT_RECHECK_DAYS) continue;
+    return { skipFetch: true, failKind: "robots" };
+  }
+  return none;
+}

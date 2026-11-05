@@ -1,7 +1,7 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
 import type { ExtractRequest } from "@/lib/ai/provider";
-import { remainingPosts, type XPost } from "@/lib/collector/x-posts";
+import { remainingPosts, type QuotedPost, type XPost } from "@/lib/collector/x-posts";
 import { MAX_IMAGES } from "@/lib/server/lottery-extract-service";
 import { splitTallImages } from "@/lib/server/image-split";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
@@ -33,6 +33,8 @@ export interface XRichOk {
   linkedPage: boolean;
   /** none=画像なし / not_fetched=画像あり・未取得（本文のみ） / partial=一部のみ取得 / fetched=すべて取得 */
   imageStatus: "none" | "not_fetched" | "partial" | "fetched";
+  /** APIで取得した投稿（再解析で再取得しないために保持する）。公開oEmbedのときは無い */
+  post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; quoted?: QuotedPost };
 }
 export type XRichResult = XRichOk | { ok: false; message: string };
 
@@ -41,24 +43,40 @@ export interface EnrichDeps {
   fetchImage?: typeof fetchXImage;
 }
 
-/** 本文・画像URL・リンクから、解析に渡す本文（リンク先の案内を統合）と画像（縦長は分割）を作る */
-export async function enrichXPost(post: { text: string; links: string[]; images: string[] }, deps: EnrichDeps): Promise<{ text: string; images: ImageInput[]; linkedPage: boolean; imagesUsed: number; linkUrl?: string }> {
+/** 画像の扱いを3段階で区別する: 見つかった（投稿に添付されていた）／取得できた（ダウンロード成功）／AIへ渡した（縦長の分割後の枚数） */
+export interface ImageStats {
+  found: number;
+  fetched: number;
+  sent: number;
+}
+
+/**
+ * 本文・画像URL・リンク・引用元の投稿から、解析に渡す本文（リンク先の案内・引用元を統合）と画像（縦長は分割）を作る。
+ * 引用元の投稿（まとめアカウントが公式の投稿を引用して紹介する場合）の本文・画像・リンクも使う。
+ */
+export async function enrichXPost(
+  post: { text: string; links: string[]; images: string[]; quoted?: { username: string; text: string; images: string[]; links: string[] } },
+  deps: EnrichDeps,
+): Promise<{ text: string; images: ImageInput[]; linkedPage: boolean; imagesUsed: number; linkUrl?: string; stats: ImageStats; quotedUsed: boolean }> {
   let text = post.text;
   let linkedPage = false;
-  // リンク先（抽選案内）があれば、アクセスできる範囲で本文を統合する（1件まで。robots.txt・SSRF対策つき）
-  const ext = post.links.find((l) => !/^https:\/\/(x|twitter)\.com\//.test(l));
+  const q = post.quoted;
+  if (q && q.text.trim()) text += `\n\n【引用元の投稿${q.username ? `（@${q.username}）` : ""}】\n${q.text}`;
+  // リンク先（抽選案内）があれば、アクセスできる範囲で本文を統合する（1件まで。robots.txt・SSRF対策つき）。自分の投稿のリンクを優先し、なければ引用元のリンク
+  const ext = [...post.links, ...(q?.links ?? [])].find((l) => !/^https:\/\/(x|twitter)\.com\//.test(l));
   if (ext) {
     const pg = await (deps.fetchPage ?? ((u: string) => fetchRespectingRobots(u)))(ext);
     if (pg.ok) {
-      const t = extractPageText(pg.body, pg.finalUrl);
-      if (t.text.length >= 30) {
-        text += `\n\n【リンク先の案内（${ext}）】\n${t.text.slice(0, 6000)}`;
+      const t2 = extractPageText(pg.body, pg.finalUrl);
+      if (t2.text.length >= 30) {
+        text += `\n\n【リンク先の案内（${ext}）】\n${t2.text.slice(0, 6000)}`;
         linkedPage = true;
       }
     }
   }
+  const urls = [...post.images, ...(q?.images ?? [])];
   const images: ImageInput[] = [];
-  for (const u of post.images.slice(0, MAX_IMAGES)) {
+  for (const u of urls.slice(0, MAX_IMAGES)) {
     const img = await (deps.fetchImage ?? fetchXImage)(u);
     if (img) images.push({ mediaType: img.mediaType, base64: img.base64 });
   }
@@ -67,7 +85,7 @@ export async function enrichXPost(post: { text: string; links: string[]; images:
     const split = await splitTallImages(images);
     if (split.ok) used = split.images.slice(0, MAX_IMAGES);
   }
-  return { text: text.slice(0, 20_000), images: used, linkedPage, imagesUsed: images.length, linkUrl: ext };
+  return { text: text.slice(0, 20_000), images: used, linkedPage, imagesUsed: images.length, linkUrl: ext, stats: { found: urls.length, fetched: images.length, sent: used.length }, quotedUsed: !!(q && (q.text.trim() || q.images.length)) };
 }
 
 const jstMonthStart = (now: Date) => new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(now)}-01T00:00:00+09:00`).toISOString();
@@ -114,11 +132,11 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
         await o.db.rpc("bump_collection_stats", { p_household: o.householdId, p_day: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(o.now ?? new Date()), p_delta: { x_posts_manual: 1 } }).then(() => undefined, () => undefined);
         const p = r.post;
         const rich = await enrichXPost(p, o.enrich ?? {});
-        const imageStatus = p.images.length === 0 ? "none" : rich.imagesUsed === 0 ? "not_fetched" : rich.imagesUsed < p.images.length ? "partial" : "fetched";
-        if (imageStatus === "not_fetched") notices.push(`画像未取得: 添付画像${p.images.length}枚を取得できませんでした（本文のみで解析します）`);
-        else if (imageStatus === "partial") notices.push(`添付画像${p.images.length}枚のうち${rich.imagesUsed}枚を取得できました`);
+        const imageStatus = rich.stats.found === 0 ? "none" : rich.imagesUsed === 0 ? "not_fetched" : rich.imagesUsed < rich.stats.found ? "partial" : "fetched";
+        if (imageStatus === "not_fetched") notices.push(`画像未取得: 添付画像${rich.stats.found}枚を取得できませんでした（本文のみで解析します）`);
+        else if (imageStatus === "partial") notices.push(`添付画像${rich.stats.found}枚のうち${rich.imagesUsed}枚を取得できました`);
         if (rich.linkUrl && !rich.linkedPage) notices.push("リンク先の本文は取得できませんでした（本文と画像のみで解析します）");
-        return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: p.images.length, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage, imageStatus };
+        return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: rich.stats.found, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage, imageStatus, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? parsed.user, ...(p.quoted ? { quoted: p.quoted } : {}) } };
       }
       notices.push(`X APIで取得できませんでした（${r.message}）。本文のみを取得します`);
     } else notices.push(gate.reason);

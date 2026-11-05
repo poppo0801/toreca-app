@@ -9,12 +9,15 @@ import { sniffImage } from "@/lib/server/image-sniff";
  */
 
 const BASE = "https://api.x.com/2";
+/** 取得する項目。note_tweet=長文の全文／引用元の投稿（本文・画像・投稿者）を展開して返してもらう */
+const TWEET_FIELDS = "created_at,entities,attachments,referenced_tweets,author_id,note_tweet";
+const EXPANSIONS = "attachments.media_keys,author_id,referenced_tweets.id,referenced_tweets.id.author_id,referenced_tweets.id.attachments.media_keys";
 
 export type XResult<T> = ({ ok: true } & T) | { ok: false; code: XApiErrorCode; message: string };
 
 export interface XClient {
   lookupUser(username: string): Promise<XResult<{ id: string; username: string }>>;
-  userPosts(userId: string, username: string, opts: { sinceId?: string | null; max: number }): Promise<XResult<{ posts: XPost[]; newestId: string | null }>>;
+  userPosts(userId: string, username: string, opts: { sinceId?: string | null; max: number; startTime?: string | null }): Promise<XResult<{ posts: XPost[]; newestId: string | null }>>;
   /** 投稿URLから投稿を1件取得する（単件・一括・共有の解析用。取得した投稿1件ぶんの従量課金） */
   getPost(id: string, username: string): Promise<XResult<{ post: XPost }>>;
 }
@@ -54,8 +57,9 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
     },
     async getPost(id, username) {
       const r = await get(`/tweets/${encodeURIComponent(id)}`, {
-        "tweet.fields": "created_at,entities,attachments,referenced_tweets,author_id",
-        expansions: "attachments.media_keys",
+        "tweet.fields": TWEET_FIELDS,
+        "user.fields": "username",
+        expansions: EXPANSIONS,
         "media.fields": "type,url",
       });
       if (!r.ok) return r;
@@ -66,12 +70,15 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
     async userPosts(userId, username, opts) {
       const params: Record<string, string> = {
         max_results: String(Math.min(100, Math.max(5, opts.max))),
-        "tweet.fields": "created_at,entities,attachments,referenced_tweets,author_id",
-        expansions: "attachments.media_keys",
+        "tweet.fields": TWEET_FIELDS,
+        "user.fields": "username",
+        expansions: EXPANSIONS,
         "media.fields": "type,url",
         exclude: "retweets,replies",
       };
       if (opts.sinceId) params.since_id = opts.sinceId;
+      // 初回の取得は期間を絞る（新しいアカウントの過去の投稿を大量に取得して課金されるのを防ぐ）
+      else if (opts.startTime) params.start_time = opts.startTime.replace(/\.\d{3}Z$/, "Z");
       const r = await get(`/users/${encodeURIComponent(userId)}/tweets`, params);
       if (!r.ok) return r;
       const posts = parseXPosts(r.json, username);

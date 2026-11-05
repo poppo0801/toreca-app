@@ -2321,6 +2321,7 @@ export type Database = {
       collection_source_attempts: {
         Row: {
           created_at: string
+          detail: Json | null
           household_id: string
           id: string
           items: number
@@ -2334,6 +2335,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          detail?: Json | null
           household_id: string
           id?: string
           items?: number
@@ -2347,6 +2349,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          detail?: Json | null
           household_id?: string
           id?: string
           items?: number
@@ -4852,6 +4855,64 @@ export type Database = {
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      x_account_links: {
+        Row: {
+          chain_id: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          household_id: string
+          id: string
+          note: string
+          role: string
+          store_id: string | null
+          username: string
+        }
+        Insert: {
+          chain_id?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id: string
+          id?: string
+          note?: string
+          role: string
+          store_id?: string | null
+          username: string
+        }
+        Update: {
+          chain_id?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id?: string
+          id?: string
+          note?: string
+          role?: string
+          store_id?: string | null
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_account_links_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "x_account_links_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "x_account_links_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
             referencedColumns: ["id", "household_id"]
           },
         ]

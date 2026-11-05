@@ -2,10 +2,17 @@ import "server-only";
 import { hashNormalized } from "@/lib/collector/queue";
 import { rebuildQueued } from "@/lib/collector/queued";
 import { decideHold, needsImageRetry, triagePatch } from "@/lib/collector/triage";
+import type { FailKind } from "@/lib/collector/queue";
 import { extractPageText } from "@/lib/ai/page-text";
 import { fetchRespectingRobots } from "@/lib/server/safe-fetch";
 import { runReevaluation } from "@/lib/server/collector/reevaluate";
 import { bumpStats, type CollectDeps } from "@/lib/server/collector/run";
+
+/** 代替の取得方法（一覧の文章）で読み取り済みか。解析時に草稿へ記録している（保留判定で「代替でも不可」を早く判断するため） */
+function altTriedOf(draft: unknown): boolean {
+  const d = draft as { viaList?: boolean; queued?: { viaList?: boolean } } | null;
+  return !!(d?.viaList || d?.queued?.viaList);
+}
 
 /**
  * 保留（自動再調査）の実行（Stage 5T）。ワーカーの各回で、次回調査の時刻を過ぎた候補だけを再調査する。朝6時の収集を待たない。
@@ -17,7 +24,7 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
   const { db, householdId, now } = deps;
   const out = { checked: 0, resolved: 0, held: 0, manual: 0, reanalyze: 0 };
   const nowIso = now.toISOString();
-  const base = () => db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,last_checked_at,triage,ai_calls,x_post_id").eq("household_id", householdId).eq("job_state", "review").eq("status", "pending").eq("kind", "new");
+  const base = () => db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,last_checked_at,triage,ai_calls,x_post_id,fail_kind,memo_id").eq("household_id", householdId).eq("job_state", "review").eq("status", "pending").eq("kind", "new");
   const [due, legacy] = await Promise.all([base().eq("triage", "auto_retry").lte("next_run_at", nowIso).order("due_at", { ascending: true, nullsFirst: false }).limit(opts.max), base().is("triage", null).limit(Math.max(0, Math.floor(opts.max / 2)))]);
   const rows = [...(due.data ?? []), ...(legacy.data ?? [])];
   if (rows.length === 0) return out;
@@ -35,7 +42,7 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
   if (imgIds.length > 0 && opts.timeLeft() > 20_000) await runReevaluation(deps, { execute: true, aiMax: imgIds.length, classes: ["C"], ids: imgIds, budgetMs: Math.max(10_000, opts.timeLeft() - 4_000) }).catch(() => undefined);
 
   // 2) 取得元の再確認（無料）。本文が変わったときだけ再解析待ちへ
-  const still = (await db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,triage,job_state,status").in("id", ids)).data ?? [];
+  const still = (await db.from("collection_candidates").select("id,source_url,dedupe_key,reasons,due_at,hold_count,page_hash,draft,triage,job_state,status,fail_kind,memo_id").in("id", ids)).data ?? [];
   out.resolved = still.filter((r) => r.job_state !== "review" || r.status !== "pending").length;
   for (const c of still) {
     if (c.job_state !== "review" || c.status !== "pending") continue;
@@ -62,7 +69,7 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
       continue;
     }
     // 3) 保留を続けるか、要手動確認か
-    const hd = decideHold({ now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: (c.reasons ?? []).slice(0, 8), holdCount: c.hold_count ?? 0, failKind: null, altTried: false, important: false });
+    const hd = decideHold({ now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: (c.reasons ?? []).slice(0, 8), holdCount: c.hold_count ?? 0, failKind: (c.fail_kind as FailKind | null) ?? null, altTried: altTriedOf(c.draft), important: !!c.memo_id });
     if (hd.triage === "auto_exclude") {
       await db.from("collection_candidates").update({ ...patch, status: "excluded", job_state: "skipped", fail_kind: "expired", reasons: [hd.reason], resolved_at: nowIso, completed_at: nowIso, ...triagePatch(hd, c, now) }).eq("id", c.id);
       await bumpStats(db, householdId, now, { excluded: 1 });

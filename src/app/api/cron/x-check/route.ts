@@ -5,27 +5,33 @@ import { createXClient } from "@/lib/server/collector/x-client";
 import { enrichXPost } from "@/lib/server/collector/x-rich";
 import { extractFromRequest } from "@/lib/server/lottery-extract-service";
 import { X_COST_PER_POST_JPY } from "@/lib/collector/x-posts";
+import { judgeXPost } from "@/lib/collector/x-relevance";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /** 診断で使ってよいアカウント（固定。任意のアカウントでX APIを呼ばせない） */
-const ALLOWED = ["OnchainOutlaw", "pokecachan"] as const;
-const MAX_POSTS = 3;
+const ALLOWED = ["OnchainOutlaw", "pokecachan", "pokecayoyaku"] as const;
+const DEFAULT_POSTS = 3;
+const MAX_POSTS_LIMIT = 12;
 
 /**
  * X API 接続の少数テスト（運用確認用）。CRON_SECRET による認証が必要。
- * 指定アカウント（固定の2件のみ）から最大3件の公開投稿を取得し、本文・画像・リンク先の取得状況と、AI解析結果の要点を返す。
- * 何も保存しない（候補・抽選・利用量にも記録しない）。定期収集の設定は変更しない。トークン等の秘密は返さない。
- * ?analyze=1 のとき、画像またはリンク先を持つ投稿だけAI解析する（AI予算は消費するため最大2件）。
+ * 指定アカウント（固定の3件のみ）から最大 `max` 件（既定3・上限12）の公開投稿を取得し、本文・画像・引用元・リンク先の取得状況と、
+ * 解析対象になるかの判定、AI解析結果の要点（画像から読み取れた項目と根拠）を返す。何も保存しない（候補・抽選・利用量にも記録しない）。
+ * 定期収集の設定は変更しない。トークン等の秘密は返さない。X APIの費用は取得した投稿数ぶん発生する（返却値の estimatedCostJpy）。
+ * ?analyze=1 のとき、解析対象の投稿をAI解析する（AI予算を消費するため最大 `analyzeMax` 件、既定2・上限4）。
  */
 export async function POST(req: NextRequest) {
   if (!isAuthorizedCron(req.headers.get("authorization"), process.env.CRON_SECRET)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const client = createXClient();
   if (!client) return NextResponse.json({ ok: false, tokenConfigured: false, message: "X_BEARER_TOKEN が本番環境で読み込めません" });
 
-  const analyze = req.nextUrl.searchParams.get("analyze") === "1";
-  const requested = (req.nextUrl.searchParams.get("users") ?? ALLOWED.join(",")).split(",").map((s) => s.trim());
+  const sp = req.nextUrl.searchParams;
+  const analyze = sp.get("analyze") === "1";
+  const maxPosts = Math.min(MAX_POSTS_LIMIT, Math.max(1, Number(sp.get("max")) || DEFAULT_POSTS));
+  const analyzeMax = Math.min(4, Math.max(1, Number(sp.get("analyzeMax")) || 2));
+  const requested = (sp.get("users") ?? ALLOWED.join(",")).split(",").map((s) => s.trim());
   const users = ALLOWED.filter((u) => requested.some((r) => r.toLowerCase() === u.toLowerCase()));
   const extractor = analyze ? getExtractor() : null;
   const now = new Date();
@@ -39,46 +45,57 @@ export async function POST(req: NextRequest) {
       accounts.push({ user, ok: false, code: lu.code, message: lu.message });
       continue;
     }
-    const r = await client.userPosts(lu.id, user, { max: MAX_POSTS });
+    const r = await client.userPosts(lu.id, user, { max: maxPosts });
     if (!r.ok) {
       accounts.push({ user, ok: false, code: r.code, message: r.message });
       continue;
     }
     const posts: unknown[] = [];
-    for (const p of r.posts.slice(0, MAX_POSTS)) {
+    for (const p of r.posts.slice(0, maxPosts)) {
       fetched++;
+      const j = judgeXPost({ text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, quoted: p.quoted ?? null }, now);
       const rich = await enrichXPost(p, {});
       const item: Record<string, unknown> = {
         id: p.id,
         createdAt: p.createdAt,
         textChars: p.text.length,
-        imagesFound: p.images.length,
-        imagesFetched: rich.imagesUsed,
-        imagePartsSent: rich.images.length,
+        imagesFound: rich.stats.found,
+        imagesFetched: rich.stats.fetched,
+        imagePartsSent: rich.stats.sent,
+        quoted: p.quoted ? { user: p.quoted.username, textChars: p.quoted.text.length, images: p.quoted.images.length, links: p.quoted.links.length } : null,
         links: p.links.length,
         linkedPageFetched: rich.linkedPage,
+        judge: j.pass ? { pass: true, basis: j.basis } : { pass: false, skip: j.skip },
         textHead: p.text.slice(0, 60).replace(/\s+/g, " "),
       };
-      if (extractor && analyzed < 2 && (rich.images.length > 0 || rich.linkedPage)) {
+      if (extractor && analyzed < analyzeMax && j.pass && (rich.images.length > 0 || rich.linkedPage || p.quoted)) {
         analyzed++;
-        const res = await extractFromRequest({ kind: "x_url", text: rich.text, images: rich.images, sourceUrl: p.url, postedOn: p.createdAt.slice(0, 10), now }, "x_url", extractor, now, []);
+        const kind = rich.images.length > 0 ? "image" : "x_url";
+        const res = await extractFromRequest({ kind, text: rich.text, images: rich.images.length ? rich.images : undefined, sourceUrl: p.url, postedOn: p.createdAt.slice(0, 10), now }, kind, extractor, now, []);
         if (res.ok) {
           const e = res.extraction;
+          const fromImage = Object.entries(e.evidence)
+            .filter(([, v]) => (v?.source ?? "").startsWith("画像"))
+            .map(([k, v]) => ({ field: k, source: v?.source, quote: (v?.quote ?? "").slice(0, 60), verified: v?.verified ?? null }));
           item.ai = {
             ok: true,
             usage: res.usage,
-            keys: Object.keys(e).length,
-            summary: JSON.stringify({
+            imagesSentToAi: rich.images.length,
+            summary: {
               chain: e.chainName,
               store: e.storeName,
               items: e.items.map((i) => i.name),
+              applyStart: `${e.applyStart.date} ${e.applyStart.time}`.trim(),
               applyDeadline: `${e.applyDeadline.date} ${e.applyDeadline.time}`.trim(),
               resultDate: e.resultDate.date,
               receiveMethod: e.receiveMethod,
-              evidenceSources: Object.fromEntries(Object.entries(e.evidence).map(([k, v]) => [k, v?.source ?? ""])),
-            }).slice(0, 900),
+              applyMethod: e.applyMethod,
+              applyUrl: e.applyUrl,
+            },
+            extractedFromImage: fromImage,
+            evidenceSources: Object.fromEntries(Object.entries(e.evidence).map(([k, v]) => [k, v?.source ?? ""])),
           };
-        } else item.ai = { ok: false, code: res.code, message: res.message };
+        } else item.ai = { ok: false, code: res.code, message: res.message, usage: res.usage };
       }
       posts.push(item);
     }

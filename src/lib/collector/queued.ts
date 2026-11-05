@@ -78,6 +78,21 @@ export function listInfoFromQueued(q: { title?: string; context?: string; card?:
   };
 }
 
+/** X投稿の取得済み情報を再利用する期間（日）。これを過ぎたら再取得する（保存・再利用の範囲を限定し、画像URLの期限切れも避ける） */
+export const XPOST_REUSE_DAYS = 30;
+
+/** 草稿に保存したX投稿の情報から、再解析用の post を復元する（期限内のものだけ） */
+export function storedPostOf(draft: unknown, now: Date = new Date()): Obj | null {
+  if (!isObj(draft)) return null;
+  const q = isObj(draft.queued) && isObj(draft.queued.post) ? draft.queued.post : null;
+  if (q) return q;
+  const s = isObj(draft.xpost) ? draft.xpost : null;
+  if (!s || typeof s.id !== "string") return null;
+  const age = (now.getTime() - new Date(String(s.fetchedAt ?? "")).getTime()) / 86_400_000;
+  if (!Number.isFinite(age) || age > XPOST_REUSE_DAYS) return null;
+  return { id: s.id, text: s.text ?? "", images: s.images ?? [], links: s.links ?? [], createdAt: s.createdAt ?? "", username: s.username ?? "", ...(isObj(s.quoted) ? { quoted: s.quoted } : {}) };
+}
+
 export interface RebuildBase {
   kind: "web_page" | "x_oembed" | "x_post";
   url: string;
@@ -115,11 +130,14 @@ export function rebuildQueued(prior: unknown, base: RebuildBase, fresh?: Partial
   const fields = pickVal("fields");
   const hints = pickVal("hints");
   const seenAt = freshWins && fresh ? fresh.seenAt : (old?.seenAt ?? "");
+  // X投稿は、保存済みの本文・画像URL・引用元・リンクがあれば再取得せずに使う（同じ投稿を必要なく再取得・再解析しない）
+  const post = base.kind === "web_page" ? null : storedPostOf(prior);
   return {
     // 優先収集メモの関連・X投稿の本文など、元の queued にある付加情報は残す
     ...priorQ,
     ...(base.extra ?? {}),
-    kind: base.kind,
+    kind: post ? "x_post" : base.kind,
+    ...(post ? { post } : {}),
     url: base.url,
     title,
     context,

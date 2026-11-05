@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { normalizeConditions, evaluateCandidate, preScreenFromList, type CollectionConditions } from "@/lib/collector/conditions";
 import { judgeRelevance, normalizeUrl, parseListHints, parseListing, looksLikeLottery, type AdapterId, type ListHints, type ListingEntry } from "@/lib/collector/listing";
-import { remainingPosts, X_COST_PER_POST_JPY, type XPost } from "@/lib/collector/x-posts";
+import { remainingPosts, X_COST_PER_POST_JPY, type QuotedPost, type XPost } from "@/lib/collector/x-posts";
 import { isReady } from "@/lib/collector/ready";
 import { extractPageText } from "@/lib/ai/page-text";
 import { PROMPT_VERSION, type LotteryExtractor } from "@/lib/ai/provider";
@@ -19,10 +19,17 @@ import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
+import { saveCandidateRows } from "@/lib/server/collector/save-rows";
+import { deepClean, safeSlice, safeSliceEnd } from "@/lib/text-safe";
+import { emptyFunnel, funnelLine, judgeXPost, type XFunnel } from "@/lib/collector/x-relevance";
+import type { ImageStats } from "@/lib/server/collector/x-rich";
 import { listInfoFromQueued, rebuildQueued, type AiReason } from "@/lib/collector/queued";
 import { dueSources, runResultOf, type AttemptStatus } from "@/lib/collector/schedule";
 import { decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
-import { activeExclusions, recordHardSource } from "@/lib/server/collector/sources-health";
+import { activeExclusions, altPlanFor, recordAltSuccess, recordHardSource } from "@/lib/server/collector/sources-health";
+import { loadXLinks } from "@/lib/server/collector/x-accounts";
+import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from "@/lib/collector/x-accounts";
+import { classifyStage, STAGE_LABEL } from "@/lib/collector/stage";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -37,6 +44,8 @@ import type { AppData } from "@/types/domain";
 
 export const WEB_LIST_MAX_BYTES = 4_500_000;
 const MAX_NEW_PER_SOURCE = 60;
+/** 新しいXアカウントの初回の取得は、この日数分に絞る（以後は since_id で続きから） */
+const X_FIRST_FETCH_DAYS = 14;
 /** 1回の収集でこれを超える新規候補が出たら警告する */
 const MASS_NEW_WARN = 150;
 const STALE_RUN_MS = 15 * 60_000;
@@ -68,6 +77,8 @@ export interface CollectDeps {
   onlySourceIds?: string[];
   /** 定期収集のスロット。指定すると、その収集元だけを取得し、取得結果を定期収集の記録として残す（手動収集の履歴とは独立） */
   scheduled?: { slotDate: string; sourceIds: string[] };
+  /** 利用者が登録した公式Xアカウントの対応づけ（解析の開始時に読み込む） */
+  xLinks?: Map<string, XLink>;
 }
 
 export interface SourceReport {
@@ -77,6 +88,8 @@ export interface SourceReport {
   message: string;
   items: number;
   newCount: number;
+  /** Xの収集元: 各段階で何件が次へ進んだか */
+  funnel?: XFunnel;
 }
 
 export type CollectOutcome =
@@ -126,7 +139,15 @@ interface QueuedPayload {
     /** 一覧のカードの構造から読み取れた店舗名・商品名 */
     fields?: { store?: string; product?: string };
     sourceName: string;
-    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string };
+    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; quoted?: QuotedPost };
+    /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
+    imageStats?: ImageStats;
+    /** AI解析へ回した根拠（本文／画像／引用／リンク） */
+    relevanceBasis?: string;
+    /** 取得の経路（X API／公開oEmbed） */
+    xVia?: "api" | "oembed";
+    /** 保存済みの画像が取得できず、X APIで投稿を取り直した（1回だけ） */
+    refetched?: boolean;
     attempts: number;
     /** 一覧の表示から読み取れた締切・地域（AI解析の優先順位と、解析前の再確認に使う） */
     hints?: ListHints;
@@ -136,6 +157,8 @@ interface QueuedPayload {
     newRound?: boolean;
     /** 取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取った */
     viaList?: boolean;
+    /** 過去の代替成功の記録により、取得制限のURLへ再アクセスせずに読み取った */
+    altSkipped?: boolean;
     /** 一覧の表示から読み取ることになった元の取得失敗の原因 */
     viaKind?: FailKind;
     /** 優先収集メモに関連する候補 */
@@ -328,6 +351,30 @@ interface CandidateRow {
 }
 
 
+/**
+ * X投稿の取得済み情報（解析後も草稿に残す）。再解析で同じ投稿を再取得しないための保存で、投稿ID・投稿者・日時・本文・画像URL・引用元・リンクと、
+ * 画像の扱い（見つかった／取得できた／AIへ渡した）、画像から読み取れた項目を持つ。本文は上限を設け、取得から30日を過ぎたら再取得する（queued.ts）。
+ */
+function xpostSnapshot(q: QueuedPayload["queued"], evidence: Partial<Record<string, { source?: string }>>, nowIso: string): Record<string, unknown> | null {
+  const p = q.post;
+  if (!p) return null;
+  const fromImage = Object.entries(evidence).filter(([, v]) => (v?.source ?? "").startsWith("画像")).map(([k]) => k);
+  return {
+    id: p.id,
+    username: p.username ?? "",
+    createdAt: p.createdAt,
+    text: safeSlice(p.text, 4000),
+    images: p.images.slice(0, 8),
+    links: p.links.slice(0, 5),
+    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 2000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
+    fetchedAt: nowIso,
+    via: q.xVia ?? null,
+    basis: q.relevanceBasis ?? null,
+    imageStats: q.imageStats ?? null,
+    extractedFromImage: fromImage,
+  };
+}
+
 /** 取得とAI読み取り(通信が中心の処理)。複数の候補を並行して実行できる。判定・登録は processCandidate が順番に行う */
 async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promise<ExtractResult> {
   let result: ExtractResult;
@@ -336,13 +383,53 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     const p = q.post;
     // 本文＋添付画像（複数・縦長は分割）＋リンク先の本文を統合（単件・一括・共有と共通の処理）
     const rich = await enrichXPost(p, { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage });
+    // 画像は「見つかった／取得できた／AIへ渡した」を別々に記録する（取得とAI解析を混同しない）
+    q.imageStats = rich.stats;
+    q.xVia = "api";
+    // 保存済みの画像URLがすべて取得できない（期限切れ等）ときは、1回だけX APIで投稿を取り直す（予算の範囲内。X APIが使えなければ従来どおり再試行）
+    if (rich.stats.found > 0 && rich.stats.fetched === 0 && deps.xClient && !q.refetched) {
+      const inner: QueuedPayload["queued"] = { ...q, kind: "x_oembed", post: undefined, refetched: true };
+      const r = await extractFor(deps, inner);
+      q.post = inner.post;
+      q.imageStats = inner.imageStats;
+      q.xVia = inner.xVia;
+      return r;
+    }
+    // 画像が情報の中心の投稿で、画像を1枚も取得できなかったときは、本文だけで有料のAI解析をしない（後で再試行する）
+    if (rich.stats.found > 0 && rich.stats.fetched === 0 && q.relevanceBasis === "image") {
+      return { ok: false, kind: "image", code: "fetch_failed", message: `添付画像${rich.stats.found}枚を取得できませんでした（画像が情報の中心の投稿のため、解析を見送りました）`, suggest: "image" };
+    }
     const kind = rich.images.length > 0 ? "image" : "x_url";
-    result = await extractFromRequest({ kind, text: rich.text, images: rich.images.length ? rich.images : undefined, sourceUrl: q.url, postedOn: p.createdAt.slice(0, 10) || undefined, now: deps.now }, kind, extractor, deps.now, []);
+    const notes = rich.stats.found > 0 && rich.stats.fetched < rich.stats.found ? [`画像未取得: 添付画像${rich.stats.found}枚のうち${rich.stats.fetched}枚を取得できました`] : [];
+    result = await extractFromRequest({ kind, text: rich.text, images: rich.images.length ? rich.images : undefined, sourceUrl: q.url, postedOn: p.createdAt.slice(0, 10) || undefined, now: deps.now }, kind, extractor, deps.now, notes);
   } else {
-    result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed, fetchXRich: makeXRichFetcher({ db: deps.db, householdId: deps.householdId, client: deps.xClient, enrich: { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage }, oembed: deps.fetchOembed, now: deps.now }) });
-    // 取得が制限された外部ページ（ロボット制限）は回避しない。代わりに、取得できたまとめサイトの一覧の表示（二次情報）から読み取る
-    // 一覧のカードの構造から読み取れた店舗名・商品名は、見出し付きで先頭に置く（AIが推測せずに済むように）
+    // 一覧の情報（二次情報）。取得が制限されたページの代替解析で使う。店舗名・商品名は見出し付きで先頭に置く（AIが推測せずに済むように）
     const listText = [q.fields?.store ? `店舗: ${q.fields.store}` : "", q.fields?.product ? `商品: ${q.fields.product}` : "", q.title, q.card ?? q.context].filter(Boolean).join("\n").trim();
+    // 過去に「取得制限（robots）で、一覧の文章による代替が成功」と分かっている応募サービス・ドメインは、同じ制限URLへ再アクセスせず、最初から代替で読み取る
+    if (q.kind === "web_page" && listText.length >= 25) {
+      const plan = await altPlanFor(deps.db, deps.householdId, q.url, deps.now).catch(() => null);
+      if (plan?.skipFetch) {
+        const alt = await extractFromRequest({ kind: "text", text: listText, sourceUrl: q.url, now: deps.now }, "text", extractor, deps.now, ["取得が制限されている応募先のため、まとめサイトの一覧の表示（二次情報）から読み取りました"]);
+        if (alt.ok) {
+          q.viaList = true;
+          q.viaKind = plan.failKind;
+          q.altSkipped = true;
+          return alt;
+        }
+      }
+    }
+    const xRich = makeXRichFetcher({ db: deps.db, householdId: deps.householdId, client: deps.xClient, enrich: { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage }, oembed: deps.fetchOembed, now: deps.now });
+    const fetchXRich: typeof xRich = async (u) => {
+      const r = await xRich(u);
+      if (r.ok) {
+        q.imageStats = { found: r.imagesFound, fetched: r.imagesUsed, sent: r.images.length };
+        q.xVia = r.via;
+        if (r.post) q.post = r.post;
+      }
+      return r;
+    };
+    result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed, fetchXRich });
+    // 取得が制限された外部ページ（ロボット制限）は回避しない。代わりに、取得できたまとめサイトの一覧の表示（二次情報）から読み取る
     if (!result.ok && result.code === "fetch_failed" && q.kind === "web_page" && ["robots", "js_render"].includes(classifyFailure(result.message).kind) && listText.length >= 25) {
       const alt = await extractFromRequest({ kind: "text", text: listText, sourceUrl: q.url, now: deps.now }, "text", extractor, deps.now, ["取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取りました"]);
       if (alt.ok) {
@@ -377,7 +464,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const finish = async (jobState: "completed" | "skipped" | "review", patch: Record<string, unknown>, stat?: StatDelta) => {
     await db
       .from("collection_candidates")
-      .update({ ...patch, ...acct, job_state: jobState, completed_at: nowIso, resolved_at: nowIso, last_error: null, analyzed_version: PROMPT_VERSION, last_checked_at: nowIso, ...clear })
+      .update(deepClean({ ...patch, ...acct, job_state: jobState, completed_at: nowIso, resolved_at: nowIso, last_error: null, analyzed_version: PROMPT_VERSION, last_checked_at: nowIso, ...clear }) as never)
       .eq("id", c.id);
     if (stat) await bumpStats(db, deps.householdId, deps.now, stat);
   };
@@ -424,11 +511,15 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     return { usedAi: result.code !== "fetch_failed", registered: false, aiFailed: result.code === "ai_failed" || result.code === "rate_limited" };
   }
 
-  const draft = buildDraft(result.extraction, data, { sourceUrl: q.url });
+  // 公式Xアカウントの対応づけ（利用者が登録したものだけ）。告知から読み取れなかった系列/店舗だけを補い、食い違いは上書きせず注意にする
+  const author = q.post?.username ? normUsername(q.post.username) : usernameFromPostUrl(q.url);
+  const hint = author ? applyAccountHint(result.extraction, deps.xLinks?.get(author), data) : null;
+  const draft = buildDraft(hint?.extraction ?? result.extraction, data, { sourceUrl: q.url });
+  if (hint && hint.warnings.length > 0) draft.warnings.push(...hint.warnings);
   // 自動収集は★管理対象にせず、応募記録も作らない
   const input: LotteryInput = { ...draft.input, isManaged: false, applications: [], sourceUrls: [...new Set([...(draft.input.sourceUrls ?? []), q.url])].slice(0, 10) };
   // ---- 読み取れなかった項目を、まとめサイトの一覧の表示（二次情報）で補う。補った項目は根拠として明示し、確定情報とは区別する
-  const secondary: string[] = [];
+  const secondary: string[] = [...(hint?.used ?? [])];
   const lh = q.hints;
   if (input.applyDeadline.precision === "unknown" && lh?.deadlineIso) {
     input.applyDeadline = { ...isoToFlex(lh.deadlineIso) };
@@ -451,12 +542,14 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
-    const note = "まとめサイトの一覧の表示（二次情報）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
+    const note = "二次情報（まとめサイトの一覧・公式アカウントの対応づけ）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
     input.memo = [input.memo, note].filter(Boolean).join("\n").slice(0, 2000);
   }
   const store = data.stores.find((s) => s.id === input.store.id);
   // 代替の取得方法（一覧の表示）で必要な情報を得られた → 取得困難の記録に「代替成功」として残し、次回以降に優先する（系列・店舗×応募サービス単位）
-  if (q.viaList) await recordHardSource(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, chainName: input.chain.name, storeName: input.store.name, failKind: q.viaKind ?? "robots", alt: { source: "list_text", ok: true } });
+  // 取得制限が分かっている応募先を最初から代替で読み取った場合は、失敗を数え直さず、代替の成功だけを記録する（失敗日時を更新すると、制限の解除に気づけなくなる）
+  if (q.viaList && q.altSkipped) await recordAltSuccess(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, source: "list_text" });
+  else if (q.viaList) await recordHardSource(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, chainName: input.chain.name, storeName: input.store.name, failKind: q.viaKind ?? "robots", alt: { source: "list_text", ok: true } });
   // 収集元の除外ルール（利用者が指定した店舗・系列）に一致したら登録しない。理由は残す
   const exRule = matchExclusion(rules, { storeId: input.store.id, chainId: input.chain.id, url: q.url });
   if (exRule && (exRule.scope === "store" || exRule.scope === "chain")) {
@@ -468,7 +561,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
   const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
   const { ready, missing, provisional } = isReady(draft, input);
-  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso) } as unknown as Json;
+  const stage = classifyStage(input, jstDayString(deps.now));
+  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso) } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）
@@ -511,7 +605,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     await finish("skipped", { status: "excluded", reasons: ev.reasons, draft: stored, ...due }, { excluded: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
-  const reasons = [...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
+  // 受付前の予告は除外しない。詳細が確定していれば通常の登録対象、未発表なら再調査として保持する
+  const stageGap = !ready && (stage === "teaser" || stage === "partial") ? [`${STAGE_LABEL[stage]}: 応募の日時が未発表または不明です`] : [];
+  const reasons = [...stageGap, ...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
   if (ev.verdict === "match" && ready && dups.length === 0) {
     if (autoRegister && (deps.canRegister || deps.serviceRegister)) {
       const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister });
@@ -548,7 +644,7 @@ async function recordAttempts(deps: CollectDeps, runId: string, reports: SourceR
     return /予算/.test(r.message) ? "budget" : "error";
   });
   if (reports.length === 0) return statuses;
-  const rows = reports.map((r, i) => ({ household_id: deps.householdId, run_id: runId, source_id: r.sourceId, trigger: deps.trigger, slot_date: deps.scheduled?.slotDate ?? null, status: statuses[i], items: r.items, new_count: r.newCount, message: r.message.slice(0, 300) }));
+  const rows = reports.map((r, i) => ({ household_id: deps.householdId, run_id: runId, source_id: r.sourceId, trigger: deps.trigger, slot_date: deps.scheduled?.slotDate ?? null, status: statuses[i], items: r.items, new_count: r.newCount, message: r.message.slice(0, 300), detail: r.funnel ?? null }));
   const { error } = await deps.db.from("collection_source_attempts").insert(rows as never);
   if (error) console.error(`[collect] 収集元ごとの取得結果を記録できませんでした code=${error.code ?? "?"}`);
   return statuses;
@@ -671,7 +767,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           }
           const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), ...(e.fields ? { fields: e.fields } : {}), sourceName: s.name, attempts: 0, hints, listSeenAt: now.toISOString() } };
           const dueAt = hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null);
-          const base = { household_id: householdId, source_id: s.id, dedupe_key: key, source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), content_hash: sha(`${e.title}|${e.context}`), list_hash: hash, due_at: dueAt, last_checked_at: now.toISOString(), discovered_run_id: runId };
+          const base = { household_id: householdId, source_id: s.id, dedupe_key: key, source_url: e.url.slice(0, 500), title: safeSlice(e.title.length >= 10 ? e.title : safeSliceEnd(e.context, 80) || e.title || e.url, 200), content_hash: sha(`${e.title}|${e.context}`), list_hash: hash, due_at: dueAt, last_checked_at: now.toISOString(), discovered_run_id: runId };
           // 一覧の表示だけで除外できるもの(締切済み・対象外の地域)は、AI読み取りの前に除外する。候補としては保存し、次回以降は再判定しない
           const why = preScreenFromList(hints, cond, now);
           if (why) {
@@ -681,8 +777,12 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           if (rows.length >= MAX_NEW_PER_SOURCE * 3) break;
         }
         for (let i = 0; i < unchangedIds.length; i += 100) await db.from("collection_candidates").update({ last_checked_at: now.toISOString() }).in("id", unchangedIds.slice(i, i + 100));
-        const ins2 = rows.length ? await db.from("collection_candidates").upsert(rows as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true }).select("id") : { data: [] as { id: string }[] };
-        const added = ins2.data?.length ?? 0;
+        const saveRes = await saveCandidateRows(db, rows);
+        const added = saveRes.saved;
+        if (saveRes.failed > 0) {
+          errors++;
+          notices.push(`「${s.name}」: 候補の保存に失敗した項目が${saveRes.failed}件あります`);
+        }
         newCount += added;
         // 新規発見は「候補を初めて保存した件数」。同じ候補を何度取得しても加算されない。初回の取り込みは通常の新着と区別する
         const initial = s.last_success_at === null;
@@ -727,7 +827,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           await db.from("collection_sources").update({ x_user_id: u.id }).eq("id", s.id);
         }
         xCalls++;
-        const r = await deps.xClient.userPosts(userId, s.x_username!, { sinceId: s.x_since_id, max: want });
+        const r = await deps.xClient.userPosts(userId, s.x_username!, { sinceId: s.x_since_id, max: want, startTime: new Date(now.getTime() - X_FIRST_FETCH_DAYS * 86_400_000).toISOString() });
         if (!r.ok) {
           await touch(s, { status: "error", error_message: r.message });
           reports.push({ sourceId: s.id, name: s.name, status: "error", message: r.message, items: 0, newCount: 0 });
@@ -735,24 +835,42 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           if (r.code === "credits_depleted" || r.code === "unauthorized" || r.code === "rate_limited") notices.push(r.message);
           continue;
         }
-        xBilled += r.posts.length;
+        // 引用元の投稿も読み取りの対象になるため、課金の見積りに数える
+        xBilled += r.posts.length + (r.posts as XPost[]).filter((p) => p.quoted).length;
+        // 各段階で何件が次へ進んだかを数える（取得できた＝成功、とは扱わない）
+        const funnel = emptyFunnel();
+        funnel.fetched = r.posts.length;
         const rows: Record<string, unknown>[] = [];
         for (const p of r.posts as XPost[]) {
-          const rel = judgeRelevance(p.text, { fromPokemonList: false });
-          const hasImg = p.images.length > 0;
-          // 画像だけの告知にも対応する: 本文がポケモンカードに言及するか、画像つきで抽選の言及がある投稿を対象にする
-          const likely = rel.relevant || (hasImg && looksLikeLottery(p.text) && rel.uncertain);
-          if (!likely) continue;
-          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: p.text.slice(0, 80), context: "", sourceName: s.name, attempts: 0, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt } } };
-          rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: p.text.slice(0, 80).replace(/\n/g, " ") || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
+          if (p.images.length > 0 || (p.quoted?.images.length ?? 0) > 0) funnel.withImages++;
+          if (p.quoted) funnel.withQuote++;
+          if (p.links.length > 0) funnel.withLinks++;
+          // 本文のキーワードだけで画像・引用つきの投稿を落とさない（Stage 6B）。他のTCG・無関係な長文・古い投稿だけ解析しない
+          const j = judgeXPost({ text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, quoted: p.quoted ?? null }, now);
+          if (!j.pass) {
+            funnel.skipped[j.skip]++;
+            continue;
+          }
+          funnel.passed[j.basis]++;
+          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
+          rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: safeSlice(p.text.replace(/\n/g, " "), 80) || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
         }
-        const ins3 = rows.length ? await db.from("collection_candidates").upsert(rows as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true }).select("id") : { data: [] as { id: string }[] };
-        const added = ins3.data?.length ?? 0;
+        const saveRes = await saveCandidateRows(db, rows);
+        funnel.saved = saveRes.saved;
+        funnel.saveFailed = saveRes.failed;
+        funnel.existing = rows.length - saveRes.saved - saveRes.failed;
+        const added = saveRes.saved;
         newCount += added;
         await bumpStats(db, householdId, now, { [s.last_success_at === null ? "discovered_initial" : "discovered_new"]: added });
-        // 取得した投稿はすべて候補として保存済みなので、次回は続きから取得する
-        await touch(s, { status: "ok", error_message: null, last_success_at: now.toISOString(), last_item_count: r.posts.length, last_new_count: added, ...(r.newestId ? { x_since_id: r.newestId } : {}) });
-        reports.push({ sourceId: s.id, name: s.name, status: "ok", message: `投稿${r.posts.length}件を取得、新しい候補${added}件`, items: r.posts.length, newCount: added });
+        // 保存できなかった投稿があるときは失敗として記録する（取得した件数だけで成功にしない）
+        const summaryLine = funnelLine(funnel);
+        const failedSave = saveRes.failed > 0;
+        if (failedSave) {
+          errors++;
+          notices.push(`「${s.name}」: 候補の保存に失敗した投稿が${saveRes.failed}件あります`);
+        }
+        await touch(s, { status: failedSave ? "error" : "ok", error_message: failedSave ? `候補の保存に失敗した投稿があります（${saveRes.failed}件）` : null, ...(failedSave ? {} : { last_success_at: now.toISOString() }), last_item_count: r.posts.length, last_new_count: added, ...(r.newestId ? { x_since_id: r.newestId } : {}) });
+        reports.push({ sourceId: s.id, name: s.name, status: failedSave ? "error" : "ok", message: summaryLine, items: r.posts.length, newCount: added, funnel });
       }
     }
 
@@ -849,6 +967,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   let fails = ctx.settings.consecutive_failures ?? 0;
   const lease = 150;
   const rules = await activeExclusions(db, householdId);
+  deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   let budgetHit = false;
   const triaged = await triageQueue(deps, ctx.cond);
   out.screened += triaged;
