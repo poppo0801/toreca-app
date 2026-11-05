@@ -595,6 +595,12 @@ export function planLotteries(read: ReadLottery, snap: LotterySnapshot, decision
         resultEndDate: finalRec.result_end ?? "",
         procedureStart: flexFromParts(finalRec.procedure_start ?? "", finalRec.procedure_start_time ?? ""),
         procedureDeadline: flexFromParts(finalRec.procedure_end ?? "", finalRec.procedure_end_time ?? ""),
+        // 購入と受取を分けた期間・抽選の種類・有効期限は、ファイルで変えない限り既存の値を保つ（取り込みで初期値に戻さない）
+        procedureSplit: finalRec.procedure_split === "true",
+        receiveStart: fx("receive_start"),
+        receiveDeadline: flexFromParts(finalRec.receive_end ?? "", finalRec.receive_end_time ?? ""),
+        lotteryKind: (finalRec.lottery_kind || "normal") as "normal",
+        validUntil: finalRec.valid_until ?? "",
         receiveMethod: finalRec.receive_method as "store",
         applyMethod: finalRec.apply_method as "web",
         conditionsText: finalRec.req_note ?? "",

@@ -21,6 +21,7 @@ import {
   LOGIC_LABELS,
   LOTTERY_COLUMNS,
   MANAGED_LABELS,
+  KIND_LABELS,
   MODE_LABEL,
   RECEIVE_LABELS,
   TARGET_LABELS,
@@ -81,6 +82,9 @@ export function parseCell(key: string, raw: string): Parsed<string> {
     case "result_end":
     case "procedure_start":
     case "procedure_end":
+    case "receive_start":
+    case "receive_end":
+    case "valid_until":
     case "req_period_from":
     case "req_period_to":
       return parseDate(v, label);
@@ -89,6 +93,8 @@ export function parseCell(key: string, raw: string): Parsed<string> {
     case "result_start_time":
     case "procedure_start_time":
     case "procedure_end_time":
+    case "receive_start_time":
+    case "receive_end_time":
       return parseTime(v, label);
     case "announce_methods": {
       const r = parseCodeList(v, label, ANNOUNCE_LABEL_DEFS);
@@ -144,6 +150,10 @@ export function parseCell(key: string, raw: string): Parsed<string> {
       if (r.ok && r.value === "closed") return err("受付終了は応募締切から自動で判定されるため、指定できません（受付中のままにして、締切日を入力してください）");
       return r;
     }
+    case "lottery_kind":
+      return choiceCode(v, label, KIND_LABELS);
+    case "procedure_split":
+      return v === "○" || v === "〇" || nameKey(v) === "true" ? ok("true") : v === "×" || nameKey(v) === "false" ? ok("false") : err(`${label}は ○ か × で入力してください`);
     case "managed":
       return v === "○" || v === "〇" || nameKey(v) === "true" ? ok("true") : v === "×" || nameKey(v) === "false" ? ok("false") : err(`${label}は ○ か × で入力してください`);
     case "memo":
@@ -200,6 +210,8 @@ export function lotteryToRecord(l: Lottery, ctx: DbRecordCtx): LotteryRecord {
   const rs = pair(l.resultDate);
   const ps = pair(l.procedureStart);
   const pe = pair(l.procedureDeadline);
+  const rcs = pair(l.receiveStart ?? { precision: "unknown" });
+  const rce = pair(l.receiveDeadline ?? { precision: "unknown" });
   const d = l.requirementDetails ?? {};
   return {
     lottery_id: l.id,
@@ -237,6 +249,13 @@ export function lotteryToRecord(l: Lottery, ctx: DbRecordCtx): LotteryRecord {
     procedure_start_time: ps.time,
     procedure_end: pe.date,
     procedure_end_time: pe.time,
+    procedure_split: l.procedureSplit ? "true" : "false",
+    receive_start: rcs.date,
+    receive_start_time: rcs.time,
+    receive_end: rce.date,
+    receive_end_time: rce.time,
+    lottery_kind: l.kind ?? "normal",
+    valid_until: l.validUntil ?? "",
     multi_mode: l.multiMode,
     event_state: l.eventState,
     managed: ctx.managed(l.id) ? "true" : "false",
@@ -264,6 +283,8 @@ export function recordToLabels(r: LotteryRecord): Record<string, string> {
     multi_mode: lab(r.multi_mode ?? "", MODE_LABEL),
     event_state: lab(r.event_state ?? "", EVENT_LABELS),
     managed: r.managed ? (MANAGED_LABELS[r.managed] ?? r.managed) : "",
+    procedure_split: r.procedure_split ? (MANAGED_LABELS[r.procedure_split] ?? r.procedure_split) : "",
+    lottery_kind: lab(r.lottery_kind ?? "", KIND_LABELS),
   };
 }
 

@@ -33,6 +33,7 @@ export const RESULT_LABELS: Record<string, string> = { pending: "未確認", won
 export const FULFILLMENT_LABELS: Record<string, string> = { none: "なし", procedure_done: "手続き済み", purchased: "購入済み" };
 export const LOGIC_LABELS: Record<string, string> = { and: "すべて必要", or: "いずれか" };
 export const TARGET_LABELS: Record<string, string> = Object.fromEntries(ANNOUNCE_TARGETS.map((t) => [t.code, t.label]));
+export const KIND_LABELS: Record<string, string> = { normal: "通常抽選", ongoing: "継続抽選", invite: "招待制販売" };
 export const MANAGED_LABELS: Record<string, string> = { true: "○", false: "×" };
 export const SKIP_LABELS: Record<string, string> = { true: "スルー", false: "解除" };
 
@@ -79,6 +80,13 @@ export const LOTTERY_COLUMNS: readonly ColumnDef[] = [
   L("event_state", "抽選ステータス", "受付前 / 受付中 / 中止 / 延期（受付終了は期限から自動で判定されるため、指定できません）", 12),
   L("managed", "管理対象", "○ = ★管理対象 / × = 管理対象外", 10),
   L("memo", "備考", "2000文字まで", 28, { clearable: true }),
+  L("procedure_split", "購入と受取を分ける", "○ = 購入期間（上の「購入・受取」列）と受取期間（右の「受取」列）を分ける / × = 同じ期間。空欄は変更しません", 12),
+  L("receive_start", "受取開始日", "購入と受取を分けるときだけ。YYYY-MM-DD", 12, { clearable: true }),
+  L("receive_start_time", "受取開始時刻", "HH:MM。不明なら空欄", 10, { clearable: true }),
+  L("receive_end", "受取終了日", "購入と受取を分けるときだけ。YYYY-MM-DD", 12, { clearable: true }),
+  L("receive_end_time", "受取終了時刻", "HH:MM。不明なら空欄", 10, { clearable: true }),
+  L("lottery_kind", "抽選の種類", "通常抽選 / 継続抽選 / 招待制販売。空欄は変更しません", 12),
+  L("valid_until", "有効期限", "継続抽選・招待制販売のときだけ。YYYY-MM-DD。無期限とは仮定しません", 12, { clearable: true }),
   L("source_urls", "情報源URL", `複数は ${LIST_SEPARATOR} で区切る（10件まで）`, 36, { clearable: true }),
 ];
 

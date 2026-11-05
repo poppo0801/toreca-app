@@ -17,6 +17,7 @@ import {
   MAX_CHILD_ROWS,
   MAX_LOTTERY_ROWS,
   MODE_LABEL,
+  KIND_LABELS,
   RESULT_LABELS,
   SKIP_LABELS,
   UNIT_LABELS,
@@ -102,7 +103,7 @@ export async function readLotteryWorkbook(buf: Buffer): Promise<ReadResult<ReadL
 }
 
 // ---------------------------------------------------------------- 書き出し
-const TEXT_KEYS = new Set(["lottery_id", "import_key", "chain_id", "store_no", "item_id", "application_id", "profile_id", "apply_start", "apply_start_time", "apply_deadline", "apply_deadline_time", "result_start", "result_start_time", "result_end", "procedure_start", "procedure_start_time", "procedure_end", "procedure_end_time", "applied_on", "applied_time", "confirmed_on", "req_period_from", "req_period_to"]);
+const TEXT_KEYS = new Set(["lottery_id", "import_key", "chain_id", "store_no", "item_id", "application_id", "profile_id", "apply_start", "apply_start_time", "apply_deadline", "apply_deadline_time", "result_start", "result_start_time", "result_end", "procedure_start", "procedure_start_time", "procedure_end", "procedure_end_time", "receive_start", "receive_start_time", "receive_end", "receive_end_time", "valid_until", "applied_on", "applied_time", "confirmed_on", "req_period_from", "req_period_to"]);
 
 function dataSheet(wb: ExcelJS.Workbook, name: string, defs: readonly ColumnDef[], rows: Record<string, string>[]) {
   const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 1, xSplit: 0 }] });
@@ -174,6 +175,8 @@ function addValidations(l: ExcelJS.Worksheet, i: ExcelJS.Worksheet, a: ExcelJS.W
   addList(l, LOTTERY_COLUMNS, "multi_mode", Object.values(MODE_LABEL));
   addList(l, LOTTERY_COLUMNS, "event_state", ["受付前", "受付中", "中止", "延期"]);
   addList(l, LOTTERY_COLUMNS, "managed", ["○", "×"]);
+  addList(l, LOTTERY_COLUMNS, "procedure_split", ["○", "×"]);
+  addList(l, LOTTERY_COLUMNS, "lottery_kind", Object.values(KIND_LABELS));
   addList(i, ITEM_COLUMNS, "unit", Object.values(UNIT_LABELS));
   addList(a, APP_COLUMNS, "apply_status", Object.values(APPLY_STATUS_LABELS));
   addList(a, APP_COLUMNS, "result", Object.values(RESULT_LABELS));
