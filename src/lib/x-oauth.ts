@@ -46,8 +46,10 @@ export function resolveRedirectUri(env: string | undefined): string {
 
 // ---------------------------------------------------------------- 暗号化（AES-256-GCM）
 function keyOf(raw: string | undefined): Buffer {
-  const k = Buffer.from((raw ?? "").trim(), "base64");
-  if (k.length !== 32) throw new Error("X_OAUTH_ENCRYPTION_KEY が未設定、または base64 の32バイトではありません");
+  const v = (raw ?? "").trim();
+  // base64（32バイト）のほか、16進64文字（openssl rand -hex 32）も受け付ける
+  const k = /^[0-9a-fA-F]{64}$/.test(v) ? Buffer.from(v, "hex") : Buffer.from(v, "base64");
+  if (k.length !== 32) throw new Error("X_OAUTH_ENCRYPTION_KEY が未設定、または32バイト（base64／16進64文字）ではありません");
   return k;
 }
 export const hasEncryptionKey = (raw: string | undefined) => {

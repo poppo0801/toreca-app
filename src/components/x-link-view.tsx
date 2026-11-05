@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 export interface XLinkInfo {
   /** サーバーの環境変数（Client ID / Secret / 暗号化キー）がそろっているか */
   configured: boolean;
+  /** 未設定・不正な環境変数の名前（値は含めない） */
+  missing: string[];
   link: { username: string; status: "active" | "needs_reauth"; autoSync: boolean; lastSyncedAt: string | null; lastResult: string; lastError: string; initialDone: boolean } | null;
   /** 収集設定の「X APIを使う」 */
   xEnabled: boolean;
@@ -75,7 +77,7 @@ export function XLinkView({ info, result, message }: { info: XLinkInfo; result: 
             </Button>
           ) : (
             <p className="rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-xs" data-testid="x-link-unconfigured">
-              サーバーの環境変数（X_OAUTH_CLIENT_ID / X_OAUTH_CLIENT_SECRET / X_OAUTH_ENCRYPTION_KEY）が未設定のため、連携できません。
+              次の環境変数が未設定または不正のため、連携できません: {info.missing.join(" / ")}
             </p>
           )}
         </section>

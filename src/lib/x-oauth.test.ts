@@ -85,3 +85,12 @@ describe("Stage 6I: トークン応答・更新・認証エラー", () => {
     expect(needsRefresh(new Date(NOW.getTime() + 600_000), NOW)).toBe(false);
   });
 });
+
+describe("Stage 6I: 暗号化キーの形式", () => {
+  it("16進64文字も使える。短い・不正な値は拒否する", () => {
+    const hex = "ab".repeat(32);
+    expect(hasEncryptionKey(hex)).toBe(true);
+    expect(decryptSecret(encryptSecret("s", hex), hex)).toBe("s");
+    expect(hasEncryptionKey("ab".repeat(16))).toBe(false);
+  });
+});

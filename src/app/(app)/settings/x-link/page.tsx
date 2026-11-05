@@ -36,6 +36,7 @@ export default async function XLinkPage({ searchParams }: { searchParams: Promis
   const cfg = oauthConfigStatus();
   const info: XLinkInfo = {
     configured: cfg.clientId && cfg.clientSecret && cfg.encryptionKey,
+    missing: [!cfg.clientId && "X_OAUTH_CLIENT_ID", !cfg.clientSecret && "X_OAUTH_CLIENT_SECRET", !cfg.encryptionKey && "X_OAUTH_ENCRYPTION_KEY（32バイトのbase64または16進64文字）"].filter((v): v is string => !!v),
     link: l ? { username: l.x_username, status: l.status, autoSync: l.auto_sync, lastSyncedAt: l.last_synced_at, lastResult: l.last_sync_result, lastError: l.last_error, initialDone: !!l.initial_synced_at } : null,
     xEnabled: !!setRes.data?.x_enabled,
     budgetJpy: setRes.data?.x_monthly_budget_jpy ?? 0,

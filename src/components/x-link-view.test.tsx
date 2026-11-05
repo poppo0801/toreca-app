@@ -14,7 +14,7 @@ import { XLinkView, type XLinkInfo } from "@/components/x-link-view";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const base: XLinkInfo = { configured: true, link: null, xEnabled: true, budgetJpy: 1000, bookmarkPosts: 12, bookmarkCostJpy: 15, totalCostJpy: 30 };
+const base: XLinkInfo = { configured: true, missing: [], link: null, xEnabled: true, budgetJpy: 1000, bookmarkPosts: 12, bookmarkCostJpy: 15, totalCostJpy: 30 };
 const linked = (over: Partial<NonNullable<XLinkInfo["link"]>> = {}): XLinkInfo => ({ ...base, link: { username: "my_x_acct", status: "active", autoSync: false, lastSyncedAt: null, lastResult: "", lastError: "", initialDone: false, ...over } });
 
 let host: HTMLElement;
@@ -45,7 +45,7 @@ describe("Stage 6I: Xアカウント連携の画面", () => {
     expect(q("x-link-auto")).toBeNull();
   });
   it("サーバーの環境変数が未設定なら連携ボタンを出さず、理由を表示する（値は表示しない）", () => {
-    render({ ...base, configured: false });
+    render({ ...base, configured: false, missing: ["X_OAUTH_CLIENT_ID"] });
     expect(q("x-link-connect")).toBeNull();
     expect(q("x-link-unconfigured")?.textContent).toContain("X_OAUTH_CLIENT_ID");
   });
