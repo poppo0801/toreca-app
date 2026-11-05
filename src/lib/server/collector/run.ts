@@ -6,7 +6,7 @@ import { remainingPosts, X_COST_PER_POST_JPY, type QuotedPost, type XPost } from
 import { isReady } from "@/lib/collector/ready";
 import { extractPageText } from "@/lib/ai/page-text";
 import { PROMPT_VERSION, type LotteryExtractor } from "@/lib/ai/provider";
-import { buildDraft, findDuplicates } from "@/lib/lottery-match";
+import { buildDraft, findDuplicates, urlIdentity } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
 import { extractFromRequest, runExtraction, type ExtractResult } from "@/lib/server/lottery-extract-service";
@@ -25,14 +25,17 @@ import { emptyFunnel, funnelLine, judgeXPost, type XFunnel } from "@/lib/collect
 import type { ImageStats } from "@/lib/server/collector/x-rich";
 import { listInfoFromQueued, rebuildQueued, type AiReason } from "@/lib/collector/queued";
 import { dueSources, runResultOf, type AttemptStatus } from "@/lib/collector/schedule";
-import { decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
+import { lowInfoOverride, decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
 import { activeExclusions, altPlanFor, recordAltSuccess, recordHardSource } from "@/lib/server/collector/sources-health";
 import { loadXLinks } from "@/lib/server/collector/x-accounts";
 import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from "@/lib/collector/x-accounts";
 import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
-import { diffTracking, inheritTracking, matchTracked, type Tracking } from "@/lib/collector/tracking";
+import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
-import { loadTracked } from "@/lib/server/collector/tracked";
+import { assessCompleteness } from "@/lib/collector/completeness";
+import { classifySource, conflictLabels, FIELD_LABEL, mergeSides, provenanceFor, type FieldSource, type SourceContext } from "@/lib/collector/fields";
+import { isSupplement, matchOpen, matchSupplement, type OpenLite } from "@/lib/collector/supplement";
+import { loadOpen, loadSourceCtx } from "@/lib/server/collector/open";
 import type { RequirementTag } from "@/lib/lottery-taxonomy";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
@@ -83,6 +86,8 @@ export interface CollectDeps {
   scheduled?: { slotDate: string; sourceIds: string[] };
   /** 利用者が登録した公式Xアカウントの対応づけ（解析の開始時に読み込む） */
   xLinks?: Map<string, XLink>;
+  /** 情報源の分類に使う文脈（解析の開始時に読み込む） */
+  sourceCtx?: SourceContext;
 }
 
 export interface SourceReport {
@@ -143,7 +148,7 @@ interface QueuedPayload {
     /** 一覧のカードの構造から読み取れた店舗名・商品名 */
     fields?: { store?: string; product?: string };
     sourceName: string;
-    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; quoted?: QuotedPost };
+    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; quoted?: QuotedPost; replyToId?: string };
     /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
     imageStats?: ImageStats;
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
@@ -558,6 +563,44 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   if (q.viaList && q.altSkipped) await recordAltSuccess(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, source: "list_text" });
   else if (q.viaList) await recordHardSource(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, chainName: input.chain.name, storeName: input.store.name, failKind: q.viaKind ?? "robots", alt: { source: "list_text", ok: true } });
   // 収集元の除外ルール（利用者が指定した店舗・系列）に一致したら登録しない。理由は残す
+  // ---- 複数情報源の項目単位の統合（Stage 6D）。保存済みの解析結果だけを使い、AIは呼ばない
+  const sctx = (deps.sourceCtx ??= await loadSourceCtx(db, deps.householdId).catch(() => ({ officialAccounts: new Set<string>(), aggregatorAccounts: new Set<string>(), listHosts: new Set(["pokeso.jp", "torecabiyori.com"]) })));
+  const sc = classifySource(q.url, sctx);
+  const postId = q.post?.id ?? sc.postId;
+  const quotedId = q.post?.quoted?.id;
+  const mySource: FieldSource = { url: q.url, kind: q.viaList ? "list_site" : sc.kind, origin: quotedId ? `x:${quotedId}` : postId ? `x:${postId}` : q.viaList ? `list:${q.url}` : `u:${urlIdentity(q.url) ?? q.url}`, at: nowIso, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
+  let myFields = provenanceFor(input, mySource);
+  const openAll = await loadOpen(db, deps.householdId, sctx).catch((): OpenLite[] => []);
+  let relatedIds: string[] = [];
+  let old: OpenLite | null = null;
+  let mergeLog: Record<string, unknown> | null = null;
+  if (isSupplement(input)) {
+    // 補足投稿（応募条件・発表方法だけの投稿）: 引用元・共通URL・同じ公式アカウント×系列×時刻で対象が一意に特定できるときだけ補完する
+    const sm = matchSupplement(openAll, { input, postId, quotedId, replyToId: q.post?.replyToId, account: (q.post?.username ?? sc.account ?? "").toLowerCase() || undefined, postedAt: q.post?.createdAt || nowIso, urls: [q.url, ...(input.sourceUrls ?? [])] }, c.id);
+    relatedIds = sm.related;
+    if (sm.target) {
+      const tgt = sm.target;
+      const m = mergeSides({ input: tgt.input, summary: tgt.summary, fields: tgt.fields, source: tgt.source }, { input, summary: draft.summary, fields: myFields, source: mySource });
+      const tRow = (await db.from("collection_candidates").select("draft,triage").eq("id", tgt.id).maybeSingle()).data;
+      const tDraft = (tRow?.draft as Record<string, unknown> | null) ?? {};
+      const tAssess = assessCompleteness(m.input, m.summary, { today: jstDayString(deps.now), conflict: conflictLabels(m.fields).length > 0 ? `情報源間で食い違う項目: ${conflictLabels(m.fields).join("・")}` : null, candidates: (tDraft.candidates as never) ?? undefined, modePending: !!tDraft.modePending });
+      const logEntry = { at: nowIso, from: q.url, kind: "supplement", signal: sm.signal, filled: m.filled, updated: m.updated, conflicts: m.conflicts };
+      await db.from("collection_candidates").update({ draft: deepClean({ ...tDraft, input: m.input, summary: m.summary, fields: m.fields, assessment: tAssess, mergeLog: [...((tDraft.mergeLog as unknown[]) ?? []), logEntry].slice(-20) }) as never, ...(tRow?.triage === "auto_retry" ? { next_run_at: nowIso } : {}) }).eq("id", tgt.id);
+      await finish("skipped", { status: "excluded", triage: "auto_exclude", triage_reason: "補足投稿を統合", reasons: [`補足投稿を、同じ抽選の候補（${tgt.id.slice(0, 6)}）へ統合しました（${{ quote: "引用元・返信元", url: "共通の応募URL", account: "同じ公式アカウント・系列・時刻" }[sm.signal ?? "quote"]}で特定。補った項目: ${m.filled.map((k) => FIELD_LABEL[k]).join("・") || "なし"}）`], draft: { input, summary: draft.summary, fields: myFields, mergedInto: tgt.id, supplement: true }}, { excluded: 1 });
+      return { usedAi: true, registered: false, aiFailed: false };
+    }
+  } else {
+    const om = matchOpen(openAll, input, c.id);
+    relatedIds = om.related;
+    if (om.match) {
+      old = om.match;
+      const m = mergeSides({ input, summary: draft.summary, fields: myFields, source: mySource }, { input: old.input, summary: old.summary, fields: old.fields, source: old.source });
+      Object.assign(input, m.input);
+      draft.summary = m.summary;
+      myFields = m.fields;
+      mergeLog = { at: nowIso, from: old.source.url, fromId: old.id, kind: "same_lottery", filled: m.filled, updated: m.updated, conflicts: m.conflicts };
+    }
+  }
   const exRule = matchExclusion(rules, { storeId: input.store.id, chainId: input.chain.id, url: q.url });
   if (exRule && (exRule.scope === "store" || exRule.scope === "chain")) {
     await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "収集元の除外ルールに一致", reasons: [`収集元の除外ルール（${exRule.label || exRule.scope}）に一致したため登録しませんでした`], draft: { input, summary: draft.summary, confirmedAt: nowIso } as unknown as Json, resolved_at: nowIso, completed_at: nowIso, ...acct, ...clear }).eq("id", c.id);
@@ -575,17 +618,15 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const isNotice = stage === "teaser" || stage === "partial";
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
   const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w));
-  const conflict = conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : null;
+  const fieldConflicts = conflictLabels(myFields);
+  const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目があります: ${fieldConflicts.join("・")}` : conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : null;
   // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）。
   // 別の情報源が同じ抽選を告知した場合（片方にだけ受付開始日がある等、読み取れた項目が違っても）、同じ抽選として追跡を引き継ぐ
-  const trackedList = input.chain.name.trim() && !(ev.verdict === "exclude") ? await loadTracked(db, deps.householdId).catch(() => []) : [];
-  const matched = matchTracked(trackedList, input, c.id);
-  const old = matched.match;
   // 具体的な系列がある受付前・詳細未発表の抽選（または追跡中の予告の続報で、まだ登録できないもの）だけを追跡する
-  const wantTrack = cond.trackUpcoming && !!input.chain.name.trim() && wording && (ev.verdict === "upcoming" || isNotice || (stage === "upcoming" && !ready) || (!!old && !ready));
+  const wantTrack = cond.trackUpcoming && !!input.chain.name.trim() && wording && (ev.verdict === "upcoming" || isNotice || (stage === "upcoming" && !ready) || (!!old?.tracking && !ready));
   const startDate = input.applyStart.precision !== "unknown" && input.applyStart.date ? input.applyStart.date : null;
   const trackingEntries = old ? diffTracking(old.input, input, nowIso, q.url) : [];
-  const trackingObj: Tracking | null = wantTrack || old ? { ...inheritTracking(old?.tracking ?? null, nowIso, q.url, startDate, trackingEntries), ...(matched.ambiguous.length > 0 ? { related: matched.ambiguous } : {}) } : null;
+  const trackingObj: Tracking | null = wantTrack || old?.tracking ? { ...inheritTracking(old?.tracking ?? null, nowIso, q.url, startDate, trackingEntries), ...(relatedIds.length > 0 ? { related: relatedIds } : {}) } : null;
   // 系列に手動で登録した条件（Stage 5R）との違い。手動条件は書き換えず、確認用に残す
   const regKinds = (data.chainConditions ?? []).filter((cc) => cc.chainId === input.chain.id).map((cc) => cc.kind);
   const cDiff = input.chain.id ? conditionDiff((input.requirementTags ?? []) as RequirementTag[], regKinds) : null;
@@ -599,7 +640,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       : { status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "続報の候補へ統合", reasons: [outcome === "tracking" ? `続報の候補（${q.url}）へ統合しました。同じ抽選として追跡を続けます` : "続報で収集条件の対象外と判断されました"], manual_state: null, resolved_at: nowIso, completed_at: nowIso };
     await db.from("collection_candidates").update(deepClean(patch) as never).eq("id", old.id);
   };
-  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}) } as unknown as Json;
+  const assess = assessCompleteness(input, draft.summary, { today: jstDayString(deps.now), conflict, candidates: draft.candidates, modePending: draft.modePending });
+  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}), fields: myFields, assessment: assess, ...(relatedIds.length > 0 ? { related: relatedIds } : {}), ...(mergeLog ? { mergeLog: [mergeLog] } : {}) } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）
@@ -688,7 +730,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // ---- 登録できなかった候補: 自動再調査（保留）／要手動確認／自動除外に振り分ける（不明な項目を理由に、すぐ確認待ちへ送らない）
   const gaps = reasons.length ? reasons : ["内容を確認してください"];
   const dueAt = due ? new Date(due.due_at) : c.due_at ? new Date(c.due_at) : null;
-  const hd = decideHold({ now: deps.now, dueAt, gaps, holdCount: c.hold_count ?? 0, failKind: q.viaKind ?? null, altTried: !!q.viaList, important: !!q.memoId });
+  // 情報充実度 D・E は、要手動確認へ送らず、低優先度の自動追跡・再調査にとどめる（利用者の判断が要るもの・締切が近いものを除く）
+  const hd = lowInfoOverride(decideHold({ now: deps.now, dueAt, gaps, holdCount: c.hold_count ?? 0, failKind: q.viaKind ?? null, altTried: !!q.viaList, important: !!q.memoId }), assess.rank, dueAt, deps.now);
   if (old && hd.triage !== "auto_exclude") await supersede("tracking");
   if (hd.triage === "auto_exclude") {
     await finish("skipped", { status: "excluded", fail_kind: "expired", reasons: [hd.reason, ...gaps.slice(0, 3)], draft: stored, ...triagePatch(hd, c, deps.now), ...due }, { excluded: 1 });

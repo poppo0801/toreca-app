@@ -255,3 +255,16 @@ export function feedbackTarget(code: string): { target: "source_rule" | "product
       return { target: "none", note: "記録のみ" };
   }
 }
+
+/**
+ * 低情報量（情報充実度 D・E）の候補を、要手動確認へ送らず、低優先度の自動追跡・再調査にとどめる（Stage 6D）。
+ *  - 要手動確認へ移すのは、利用者の判断が要るもの（商品マスター未登録・矛盾）と、締切が近い（24時間以内）ものだけ。情報が少ないというだけでは通知しない
+ *  - 低情報量という理由だけで自動除外はしない（受付終了・明確な対象外は従来どおり除外）
+ */
+export function lowInfoOverride(hd: HoldDecision, rank: "A" | "B" | "C" | "D" | "E" | undefined, dueAt: Date | null, now: Date): HoldDecision {
+  if (hd.triage !== "manual" || (rank !== "D" && rank !== "E")) return hd;
+  if (hd.reason.startsWith(PRODUCT_UNREGISTERED) || /利用者の判断が必要/.test(hd.reason)) return hd;
+  const left = dueAt ? dueAt.getTime() - now.getTime() : null;
+  if (left !== null && left <= URGENT_HOURS * H) return hd; // 締切が近い: 警告として手動確認に残す
+  return { triage: "auto_retry", reason: rank === "E" ? "識別できる情報が少ないため、低優先度で追跡・再調査を続けます" : "情報が少ないため、自動追跡・再調査を続けます（要手動確認にはしません）", nextMs: 24 * H, urgency: hd.urgency };
+}

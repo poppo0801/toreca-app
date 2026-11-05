@@ -31,6 +31,9 @@ export interface StoredDraft {
   update?: unknown;
   /** 抽選予告として追跡中（Stage 6C） */
   tracking?: { startDate?: string | null } | null;
+  /** 項目別の出典（Stage 6D）。state=conflict の項目があれば、登録せず確認待ちに残す */
+  fields?: Record<string, { state?: string } | undefined>;
+  assessment?: { rank?: string };
 }
 
 export interface CandidateLite {
@@ -172,10 +175,13 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
   const soon = days !== null && days <= 3 ? 0 : 1;
   const hasWarnings = (stored.warnings ?? []).length > 0;
 
-  if (ready && ev.verdict === "match" && !hasWarnings) {
+  const hasConflict = Object.values(stored.fields ?? {}).some((f) => f?.state === "conflict");
+  if (ready && ev.verdict === "match" && !hasWarnings && !hasConflict) {
     return { ...base, cls: rm.improved ? "B" : "A", action: "register", reasons: [rm.improved ? "新しいマスター照合で系列・店舗・商品を確実に特定できたため、AI再解析なしで登録しました" : "情報が十分で既存の抽選と重複しないため登録しました"], priority: soon === 0 ? 1 : rm.improved ? 2 : 4, missing: [] };
   }
 
+  // 情報源間で食い違う項目がある: 自動では確定せず、確認待ちに残す（情報は揃っていても矛盾あり）
+  if (hasConflict) return { ...base, cls: "D", action: "keep", reasons: ["情報源間で食い違う項目があります。確認してから登録してください", ...missing].slice(0, 6), priority: 4, missing };
   // 追跡中の抽選予告（受付前・詳細未発表）: 受付開始前の除外・AI再解析・手動確認へ送らず、追跡を続ける。受付が始まって登録条件を満たせば上で登録される
   if (ev.verdict === "upcoming" || stored.tracking) {
     return { ...base, cls: "D", action: "keep", reasons: [ev.verdict === "upcoming" ? "受付前の抽選として追跡中です" : "抽選予告として追跡中です", ...missing].slice(0, 6), priority: 5, missing };

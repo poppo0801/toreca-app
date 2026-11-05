@@ -1,7 +1,7 @@
 import "server-only";
 import { hashNormalized } from "@/lib/collector/queue";
 import { rebuildQueued } from "@/lib/collector/queued";
-import { decideHold, needsImageRetry, triagePatch } from "@/lib/collector/triage";
+import { decideHold, lowInfoOverride, needsImageRetry, triagePatch } from "@/lib/collector/triage";
 import type { FailKind } from "@/lib/collector/queue";
 import { extractPageText } from "@/lib/ai/page-text";
 import { fetchRespectingRobots } from "@/lib/server/safe-fetch";
@@ -75,7 +75,9 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
       continue;
     }
     // 3) 保留を続けるか、要手動確認か
-    const hd = decideHold({ now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: (c.reasons ?? []).slice(0, 8), holdCount: c.hold_count ?? 0, failKind: (c.fail_kind as FailKind | null) ?? null, altTried: altTriedOf(c.draft), important: !!c.memo_id, tracking: trackingOf(c.draft) });
+    const hd0 = decideHold({ now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: (c.reasons ?? []).slice(0, 8), holdCount: c.hold_count ?? 0, failKind: (c.fail_kind as FailKind | null) ?? null, altTried: altTriedOf(c.draft), important: !!c.memo_id, tracking: trackingOf(c.draft) });
+    // 情報充実度 D・E は、要手動確認へ送らず低優先度の追跡にとどめる（利用者の判断が要るもの・締切が近いものを除く）
+    const hd = lowInfoOverride(hd0, (c.draft as { assessment?: { rank?: "A" | "B" | "C" | "D" | "E" } } | null)?.assessment?.rank, c.due_at ? new Date(c.due_at) : null, now);
     if (hd.triage === "auto_exclude") {
       await db.from("collection_candidates").update({ ...patch, status: "excluded", job_state: "skipped", fail_kind: "expired", reasons: [hd.reason], resolved_at: nowIso, completed_at: nowIso, ...triagePatch(hd, c, now) }).eq("id", c.id);
       await bumpStats(db, householdId, now, { excluded: 1 });
