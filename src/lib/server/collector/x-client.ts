@@ -8,10 +8,10 @@ import { sniffImage } from "@/lib/server/image-sniff";
  * 呼び出しの前に、利用予算の確認を必ず行うこと（呼び出し側 run.ts の責務）。
  */
 
-const BASE = "https://api.x.com/2";
+export const X_API_BASE = "https://api.x.com/2";
 /** 取得する項目。note_tweet=長文の全文／引用元の投稿（本文・画像・投稿者）を展開して返してもらう */
-const TWEET_FIELDS = "created_at,entities,attachments,referenced_tweets,author_id,note_tweet";
-const EXPANSIONS = "attachments.media_keys,author_id,referenced_tweets.id,referenced_tweets.id.author_id,referenced_tweets.id.attachments.media_keys";
+export const TWEET_FIELDS = "created_at,entities,attachments,referenced_tweets,author_id,note_tweet";
+export const EXPANSIONS = "attachments.media_keys,author_id,referenced_tweets.id,referenced_tweets.id.author_id,referenced_tweets.id.attachments.media_keys";
 
 export type XResult<T> = ({ ok: true } & T) | { ok: false; code: XApiErrorCode; message: string };
 
@@ -32,7 +32,7 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 10_000);
     try {
-      const res = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${t}`, Accept: "application/json" }, signal: ctl.signal, redirect: "error", cache: "no-store" });
+      const res = await fetch(`${X_API_BASE}${path}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${t}`, Accept: "application/json" }, signal: ctl.signal, redirect: "error", cache: "no-store" });
       let json: unknown = null;
       try {
         json = await res.json();

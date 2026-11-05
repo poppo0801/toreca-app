@@ -7,6 +7,7 @@ import { enrichFromListings } from "@/lib/server/collector/enrich";
 import { runLowInfoPass, runMergePass } from "@/lib/server/collector/merge-pass";
 import { runHoldPass } from "@/lib/server/collector/hold";
 import { planScheduledCollection } from "@/lib/server/collector/schedule";
+import { runBookmarkCron } from "@/lib/server/collector/bookmarks";
 import { processGeocodeBatch } from "@/lib/server/geocode-service";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
@@ -32,6 +33,8 @@ async function handle(req: NextRequest) {
   const geo = await processGeocodeBatch(db, { limit: 6 }).catch(() => null);
 
   const now = new Date();
+  // Xブックマークの同期: 利用者が連携して自動収集をONにしたときだけ（既定OFF）。X APIの月額予算の範囲内で、12時間おきに少量を読む。失敗しても他の処理は止めない
+  const bookmarks = await runBookmarkCron(db, now).catch(() => null);
   const { data: targets } = await db.from("collection_settings").select("household_id,schedule_enabled,schedule_hour_jst,worker_enabled").or("schedule_enabled.eq.true,worker_enabled.eq.true");
   const summary: { household: number; collected: number; worked: number; idle: number }[] = [];
   let collected = 0;
@@ -69,7 +72,7 @@ async function handle(req: NextRequest) {
     }
   }
   summary.push({ household: targets?.length ?? 0, collected, worked, idle });
-  return NextResponse.json({ ok: true, ...summary[0], geocoded: geo?.ok ?? 0 });
+  return NextResponse.json({ ok: true, ...summary[0], geocoded: geo?.ok ?? 0, bookmarks: bookmarks?.synced ?? 0 });
 }
 
 export const GET = handle;

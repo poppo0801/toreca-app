@@ -33,6 +33,7 @@ export function SettingsView() {
             <MenuLink href="/settings/masters" title="マスター管理" testId="menu-masters" />
             <MenuLink href="/settings/lottery-data" title="抽選データ管理" testId="menu-lottery-data" />
             <MenuLink href="/settings/collection" title="抽選情報の自動収集" testId="menu-collection" />
+            <MenuLink href="/settings/x-link" title="Xアカウント連携" testId="menu-x-link" />
             <MenuLink href="/settings/rules" title="応募ルール・スルー" testId="menu-rules" />
           </>
         ) : (

@@ -91,17 +91,24 @@ export async function enrichXPost(
 const jstMonthStart = (now: Date) => new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(now)}-01T00:00:00+09:00`).toISOString();
 const jstMonthFirstDay = (now: Date) => `${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(now)}-01`;
 
-/** X API（有料）を使ってよいか: 利用者が有効にし、月額予算が残っていて、キーがある。今月の使用量は自動収集・手動取得の合計 */
-export async function xApiAllowance(db: Db, householdId: string, client: XClient | null, now = new Date()): Promise<{ allowed: boolean; reason: string; remaining: number }> {
-  if (!client) return { allowed: false, reason: "X APIのキーが未設定のため、本文のみを取得しました。添付画像とリンク先は解析できていません", remaining: 0 };
-  const { data: s } = await db.from("collection_settings").select("x_enabled,x_monthly_budget_jpy").eq("household_id", householdId).maybeSingle();
-  if (!s?.x_enabled) return { allowed: false, reason: "X APIの利用が無効のため、本文のみを取得しました。添付画像とリンク先は解析できていません", remaining: 0 };
+/** 今月のX API(有料)の利用可否と残り件数。有効・予算・今月の使用量(自動収集・手動取得・ブックマーク同期の合計)から求める */
+export async function xBudgetLeft(db: Db, householdId: string, now = new Date()): Promise<{ enabled: boolean; remaining: number; maxPostsPerRun: number }> {
+  const { data: s } = await db.from("collection_settings").select("x_enabled,x_monthly_budget_jpy,x_max_posts_per_run").eq("household_id", householdId).maybeSingle();
+  if (!s?.x_enabled) return { enabled: false, remaining: 0, maxPostsPerRun: 0 };
   const [runs, manual] = await Promise.all([
     db.from("collection_runs").select("x_posts").eq("household_id", householdId).gte("started_at", jstMonthStart(now)),
     db.from("collection_daily_stats").select("x_posts_manual").eq("household_id", householdId).gte("day", jstMonthFirstDay(now)),
   ]);
   const used = (runs.data ?? []).reduce((a, r) => a + r.x_posts, 0) + (manual.data ?? []).reduce((a, r) => a + r.x_posts_manual, 0);
-  const remaining = remainingPosts({ monthPosts: used, budgetJpy: s.x_monthly_budget_jpy });
+  return { enabled: true, remaining: remainingPosts({ monthPosts: used, budgetJpy: s.x_monthly_budget_jpy }), maxPostsPerRun: s.x_max_posts_per_run };
+}
+
+/** X API（有料）を使ってよいか: 利用者が有効にし、月額予算が残っていて、キーがある。今月の使用量は自動収集・手動取得の合計 */
+export async function xApiAllowance(db: Db, householdId: string, client: XClient | null, now = new Date()): Promise<{ allowed: boolean; reason: string; remaining: number }> {
+  if (!client) return { allowed: false, reason: "X APIのキーが未設定のため、本文のみを取得しました。添付画像とリンク先は解析できていません", remaining: 0 };
+  const b = await xBudgetLeft(db, householdId, now);
+  if (!b.enabled) return { allowed: false, reason: "X APIの利用が無効のため、本文のみを取得しました。添付画像とリンク先は解析できていません", remaining: 0 };
+  const remaining = b.remaining;
   if (remaining < 1) return { allowed: false, reason: "X APIの月額予算に達している（または0円の）ため、本文のみを取得しました。添付画像とリンク先は解析できていません", remaining: 0 };
   return { allowed: true, reason: "", remaining };
 }

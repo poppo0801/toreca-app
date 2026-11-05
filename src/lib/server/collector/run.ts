@@ -158,6 +158,8 @@ interface QueuedPayload {
     imageStats?: ImageStats;
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
     relevanceBasis?: string;
+    /** 利用者のXブックマーク由来（Stage 6I。収集元ではなく、利用者が選んだ投稿） */
+    bookmark?: boolean;
     /** 取得の経路（X API／公開oEmbed） */
     xVia?: "api" | "oembed";
     /** 保存済みの画像が取得できず、X APIで投稿を取り直した（1回だけ） */
