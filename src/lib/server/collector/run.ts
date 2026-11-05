@@ -563,6 +563,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   if (q.viaList && q.altSkipped) await recordAltSuccess(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, source: "list_text" });
   else if (q.viaList) await recordHardSource(db, deps.householdId, deps.now, { url: c.source_url ?? q.url, chainId: input.chain.id, storeId: input.store.id, chainName: input.chain.name, storeName: input.store.name, failKind: q.viaKind ?? "robots", alt: { source: "list_text", ok: true } });
   // 収集元の除外ルール（利用者が指定した店舗・系列）に一致したら登録しない。理由は残す
+  // 抽選の実施を示す文言があるか（「新商品が発売される」だけの告知を、抽選予告として追跡・統合しない）
+  const wording = hasLotteryWording([q.post?.text, q.post?.quoted?.text, q.card, q.context, q.title, result.extraction.announcementMethod, result.extraction.notes, result.extraction.conditionsText, result.extraction.verificationText, ...Object.values(draft.evidence).map((e) => e?.quote)]);
   // ---- 複数情報源の項目単位の統合（Stage 6D）。保存済みの解析結果だけを使い、AIは呼ばない
   const sctx = (deps.sourceCtx ??= await loadSourceCtx(db, deps.householdId).catch(() => ({ officialAccounts: new Set<string>(), aggregatorAccounts: new Set<string>(), listHosts: new Set(["pokeso.jp", "torecabiyori.com"]) })));
   const sc = classifySource(q.url, sctx);
@@ -589,7 +591,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       await finish("skipped", { status: "excluded", triage: "auto_exclude", triage_reason: "補足投稿を統合", reasons: [`補足投稿を、同じ抽選の候補（${tgt.id.slice(0, 6)}）へ統合しました（${{ quote: "引用元・返信元", url: "共通の応募URL", account: "同じ公式アカウント・系列・時刻" }[sm.signal ?? "quote"]}で特定。補った項目: ${m.filled.map((k) => FIELD_LABEL[k]).join("・") || "なし"}）`], draft: { input, summary: draft.summary, fields: myFields, mergedInto: tgt.id, supplement: true }}, { excluded: 1 });
       return { usedAi: true, registered: false, aiFailed: false };
     }
-  } else {
+  } else if (wording || (input.applyDeadline.precision !== "unknown" && !!input.applyDeadline.date)) {
     const om = matchOpen(openAll, input, c.id);
     relatedIds = om.related;
     if (om.match) {
@@ -614,7 +616,6 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const stage = classifyStage(input, jstDayString(deps.now));
   // ---- 抽選予告の追跡（Stage 6C）
   // 抽選の実施を示す文言があるか（「新商品が発売される」だけの告知を、抽選予告として追跡しない）
-  const wording = hasLotteryWording([q.post?.text, q.post?.quoted?.text, q.card, q.context, q.title, result.extraction.announcementMethod, result.extraction.notes, result.extraction.conditionsText, result.extraction.verificationText, ...Object.values(draft.evidence).map((e) => e?.quote)]);
   const isNotice = stage === "teaser" || stage === "partial";
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
   const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w));

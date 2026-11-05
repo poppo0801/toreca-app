@@ -281,9 +281,12 @@ export function mergeSides(carrier: Side, other: Side): MergeResult {
     }
     // 違う値
     if (cp?.manual) continue; // 手動で確定した項目は上書きしない
-    if (sameSource(csrc, osrc) && osrc.at > csrc.at) {
-      copyField(k, other.input, input, other.summary, summary);
-      fields[k] = { value: ov.slice(0, 120), source: osrc, state: isOfficial(osrc.kind) ? "confirmed" : "unverified", origins: [osrc.origin] };
+    if (sameSource(csrc, osrc)) {
+      // 同じ情報源（同じアカウント・ホスト）の情報は、新しい方が更新後の値。矛盾としない
+      if (osrc.at > csrc.at) {
+        copyField(k, other.input, input, other.summary, summary);
+        fields[k] = { value: ov.slice(0, 120), source: osrc, state: isOfficial(osrc.kind) ? "confirmed" : "unverified", origins: [osrc.origin] };
+      }
       updated.push(k);
       continue;
     }

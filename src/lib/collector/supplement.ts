@@ -66,7 +66,8 @@ export function matchOpen(list: OpenLite[], next: LotteryInput, selfId: string):
     if (!nameKnown(next) || !sameChain(o.input, next)) continue; // 系列が分からない・違うものは対象にしない
     if (!sharesProduct(o.input, next)) continue;
     if (!storeCompatible(o.input, next)) continue;
-    if (datesDiffer(o.input, next)) {
+    // 追跡中の予告は日付が未確定・変更されうるので、日付の違いだけでは別の抽選としない（続報の更新として扱う）。それ以外は別の抽選回の可能性
+    if (!o.tracking && datesDiffer(o.input, next)) {
       related.push(o.id); // 同じ系列・商品でも、日付が違う＝別の抽選回の可能性。統合せず関連候補に
       continue;
     }
