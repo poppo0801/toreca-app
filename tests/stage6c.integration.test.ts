@@ -182,6 +182,22 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
     expect((await cand("a2")).status).toBe("pending");
   });
 
+  it("8b) 別の情報源が同じ抽選を告知し、読み取れた項目が違っても（片方に受付開始日が無くても）、同じ抽選として追跡を引き継ぐ（本番のホビーゾーンの事例）", async () => {
+    plan = { chain: "ホビー系列6C", product: "6C商品", store: "", start: jst(8, 0), deadline: jst(10, 21) };
+    await add("h1", "ホビー系列6Cの店頭で6C商品の抽選を実施します。応募期間は店頭POPで掲示（抽選応募）");
+    await run();
+    expect(dr(await cand("h1")).tracking?.startDate).toBe(ymd(jst(8, 0)));
+    plan = { chain: "ホビー系列6C", product: "6C商品", store: "", deadline: jst(10, 21) }; // 受付開始日を読み取れなかった別の投稿
+    await add("h2", "ホビー系列6Cより6C商品の抽選が発表。応募期間は店頭POPで掲示（抽選応募）");
+    await run();
+    const second = await cand("h2");
+    expect(second.triage).toBe("auto_retry");
+    expect(dr(second).tracking?.startDate).toBe(ymd(jst(8, 0))); // 受付開始予定を引き継ぐ
+    expect(dr(second).tracking?.sources.map((s) => s.url)).toEqual([U("h1"), U("h2")]);
+    expect((await cand("h1")).status).toBe("excluded"); // 同じ抽選として統合（二重に追跡しない）
+    expect((await lots()).length).toBe(1); // 応募可能な抽選としては登録されない（既存の1件のみ）
+  });
+
   // ------------------------------------------------------------ 設定との整合
   it("9) 追跡OFF＋現在応募可能のみ: 受付前は従来どおり除外。『受付前も含む』: 詳細確定の受付前抽選は通常条件で登録される", async () => {
     plan = { chain: "テスト玩具6C", product: "6C商品", store: "本店", start: jst(3, 10), deadline: jst(7, 23, 59) };

@@ -576,12 +576,13 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
   const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w));
   const conflict = conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : null;
-  // 具体的な系列がある受付前・詳細未発表の抽選だけを追跡する
-  const wantTrack = cond.trackUpcoming && !!input.chain.name.trim() && wording && (ev.verdict === "upcoming" || isNotice || (stage === "upcoming" && !ready));
-  // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）
-  const trackedList = isNotice || stage === "upcoming" || ev.verdict === "upcoming" || ready ? await loadTracked(db, deps.householdId).catch(() => []) : [];
+  // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）。
+  // 別の情報源が同じ抽選を告知した場合（片方にだけ受付開始日がある等、読み取れた項目が違っても）、同じ抽選として追跡を引き継ぐ
+  const trackedList = input.chain.name.trim() && !(ev.verdict === "exclude") ? await loadTracked(db, deps.householdId).catch(() => []) : [];
   const matched = matchTracked(trackedList, input, c.id);
   const old = matched.match;
+  // 具体的な系列がある受付前・詳細未発表の抽選（または追跡中の予告の続報で、まだ登録できないもの）だけを追跡する
+  const wantTrack = cond.trackUpcoming && !!input.chain.name.trim() && wording && (ev.verdict === "upcoming" || isNotice || (stage === "upcoming" && !ready) || (!!old && !ready));
   const startDate = input.applyStart.precision !== "unknown" && input.applyStart.date ? input.applyStart.date : null;
   const trackingEntries = old ? diffTracking(old.input, input, nowIso, q.url) : [];
   const trackingObj: Tracking | null = wantTrack || old ? { ...inheritTracking(old?.tracking ?? null, nowIso, q.url, startDate, trackingEntries), ...(matched.ambiguous.length > 0 ? { related: matched.ambiguous } : {}) } : null;
