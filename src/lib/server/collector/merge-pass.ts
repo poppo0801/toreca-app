@@ -34,6 +34,8 @@ export interface MergeReport {
   conflictCount: number;
   rankBefore: Record<string, number>;
   rankAfter: Record<string, number>;
+  /** 現在の確認待ち・保留中の候補ごとの情報充実度（調査用。短縮ID） */
+  rows: { id: string; rank: string; missing: string[]; conflict: string | null; stage: string; chain: string }[];
   /** 統合後の再評価の結果（execute のときだけ） */
   reeval?: { registered: number; duplicate: number; excluded: number; review: number } | null;
 }
@@ -108,6 +110,10 @@ export async function runMergePass(deps: CollectDeps, opts: { execute: boolean; 
     conflictCount: plans.reduce((a, p) => a + p.conflicts.length, 0),
     rankBefore,
     rankAfter,
+    rows: all.map((o) => {
+      const a = assessCompleteness(o.input, o.summary, { today, conflict: conflictLabels(o.fields).length > 0 ? "矛盾" : null });
+      return { id: o.id, rank: a.rank, missing: a.missing, conflict: a.conflict, stage: a.stage, chain: o.input.chain.name };
+    }),
   };
   if (!opts.execute || plans.length === 0) return report;
   if (opts.ids) {
