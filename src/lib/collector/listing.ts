@@ -4,7 +4,7 @@
  * サイトごとの違いはアダプターで吸収し、構造が変わって取れなくなったときは0件として扱う（取れたことにしない）。
  */
 
-import { OTHER_TCG, POKEMON_TCG } from "@/lib/collector/category";
+import { OTHER_TCG, POKEMON_STRICT, POKEMON_TCG } from "@/lib/collector/category";
 export type AdapterId = "pokeso" | "torecabiyori" | "generic";
 
 export interface ListingEntry {
@@ -207,7 +207,7 @@ export function judgeRelevance(text: string, opts: { fromPokemonList?: boolean }
   const t = text.normalize("NFKC");
   const pk = POKEMON.test(t);
   const other = OTHER.test(t);
-  if (other && !pk) return { relevant: false, uncertain: false, reason: "ポケモンカード以外のTCGの告知です" };
+  if (other && !POKEMON_STRICT.test(t)) return { relevant: false, uncertain: false, reason: "ポケモンカード以外のTCGの告知です" };
   if (pk && LOTTERY.test(t)) return { relevant: true, uncertain: false, reason: "" };
   if (pk) return { relevant: true, uncertain: true, reason: "抽選の言及が見当たりません" };
   if (opts.fromPokemonList) return { relevant: true, uncertain: true, reason: "" };

@@ -145,3 +145,13 @@ describe("Stage 6H: X APIの応答からプロフィールを読む", () => {
   });
 });
 
+
+describe("Stage 6H: 他TCGの『拡張パック』（共通の語）だけでポケモンカードとみなさない", () => {
+  it("ONE PIECEの拡張パックは除外。ポケモンカードの語と併記されていれば混在として残す", () => {
+    expect(judgeTcg(["ONE PIECEカードゲーム 拡張パック 神の支配"]).category).toBe("other");
+    expect(judgeTcg(["ワンピース ヒロインズエディションVol.2"]).category).toBe("other");
+    expect(judgeTcg(["ポケモンカード 拡張パック", "ONE PIECEカードゲーム 拡張パック"]).category).toBe("mixed");
+    expect(judgeRelevance("ホビーステーション ONE PIECEカードゲーム 拡張パック 抽選", {}).relevant).toBe(false);
+    expect(judgeTcg(["拡張パック 抽選"]).category).toBe("unknown");
+  });
+});

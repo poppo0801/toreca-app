@@ -7,14 +7,17 @@ import type { LotteryInput } from "@/lib/lottery-input";
 
 export const POKEMON_TCG = /ポケモンカード|ポケカ|ポケモン\s*(TCG|カード)|Pok[eé]mon\s*(TCG|Card)|拡張パック|ハイクラスパック|強化拡張パック|スタートデッキ|スターターセット|exスペシャル|スペシャルセット/i;
 
+/** ポケモンカードだと言える語（「拡張パック」などは他TCGにもあるため含めない。他TCGとの混在の判定に使う） */
+export const POKEMON_STRICT = /ポケモン|ポケカ|Pok[eé]mon/i;
+
 export const OTHER_TCG =
-  /遊戯王|遊★戯★王|\bOCG\b|ワンピース\s*カード|ワンピカード|ワンピースTCG|ONE\s*PIECE\s*(CARD|カード|TCG)|ONE\s*PIECE|デュエル・?マスターズ|デュエマ|ヴァイスシュヴァルツ|Weiß|MTG|マジック[：:・]?ザ・?ギャザリング|ドラゴンボール(スーパー)?カード|ドラゴンボールフュージョン|ガンダムカード|ユニオンアリーナ|バトルスピリッツ|バトスピ|ヴァンガード|ディズニー.*カード|Lorcana|ホロライブ.*カード|シャドウバース|ビルディバイド|カードファイト|アニメ.*カードゲーム|\b(OP|EB|PRB)-?\d{2}\b/i;
+  /遊戯王|遊★戯★王|\bOCG\b|ワンピース|ワンピカード|ワンピースTCG|ONE\s*PIECE\s*(CARD|カード|TCG)|ONE\s*PIECE|デュエル・?マスターズ|デュエマ|ヴァイスシュヴァルツ|Weiß|MTG|マジック[：:・]?ザ・?ギャザリング|ドラゴンボール(スーパー)?カード|ドラゴンボールフュージョン|ガンダムカード|ユニオンアリーナ|バトルスピリッツ|バトスピ|ヴァンガード|ディズニー.*カード|Lorcana|ホロライブ.*カード|シャドウバース|ビルディバイド|カードファイト|アニメ.*カードゲーム|\b(OP|EB|PRB)-?\d{2}\b/i;
 
 export type TcgCategory = "pokemon" | "other" | "mixed" | "unknown";
 
 export function judgeTcg(texts: (string | null | undefined)[]): { category: TcgCategory; other: string } {
   const t = texts.filter((x): x is string => !!x).join("\n").normalize("NFKC");
-  const pk = POKEMON_TCG.test(t);
+  const pk = POKEMON_STRICT.test(t);
   const om = OTHER_TCG.exec(t);
   if (om && pk) return { category: "mixed", other: om[0] };
   if (om) return { category: "other", other: om[0] };
@@ -39,7 +42,7 @@ export function otherTcgItemIndexes(items: { product: { name: string } }[]): num
   if (items.length < 2) return [];
   const flags = items.map((i) => {
     const n = i.product.name.normalize("NFKC");
-    return OTHER_TCG.test(n) && !POKEMON_TCG.test(n);
+    return OTHER_TCG.test(n) && !POKEMON_STRICT.test(n);
   });
   const others = flags.flatMap((f, k) => (f ? [k] : []));
   return others.length === 0 || others.length === items.length ? [] : others;
