@@ -114,7 +114,22 @@ export function detectApplyChannels(input: Pick<LotteryInput, "applyMethod" | "r
 
 const receiveKind = (m: LotteryInput["receiveMethod"]): ReceiveKind => m;
 
-export function evaluateCandidate(input: LotteryInput, cond: CollectionConditions, ctx: EvalContext): Evaluation {
+/**
+ * 複数地域の表記（「愛知・岐阜・三重」「大阪府/兵庫県」など）から、収集対象の都道府県を探す。
+ * 対象の都道府県を含んでいればその都道府県を、含まなければ元の表記を返す（地域を推測しない）。県・府の語尾の省略（「大阪」「兵庫」）も同じ県として扱う。
+ */
+export function resolveTargetPrefecture(raw: string, targets: readonly string[]): string {
+  const s = raw.trim();
+  if (!s || targets.includes(s)) return s;
+  const parts = s.split(/[・、,，／/\s]+/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2 && !targets.some((tp) => tp.replace(/[都道府県]$/, "") === s)) return s;
+  const short = (x: string) => x.replace(/[都道府県]$/, "");
+  const hit = targets.find((tp) => parts.some((x) => short(x) === short(tp)));
+  return hit ?? s;
+}
+
+export function evaluateCandidate(input: LotteryInput, cond: CollectionConditions, rawCtx: EvalContext): Evaluation {
+  const ctx: EvalContext = { ...rawCtx, prefecture: resolveTargetPrefecture(rawCtx.prefecture, cond.prefectures) };
   const excluded: string[] = [];
   const review: string[] = [];
   const notes: string[] = [];

@@ -6,6 +6,10 @@ import { isXHost } from "@/lib/server/x-source";
 import { applyCandidateUpdate, ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
 import { saveCollectionSettings } from "@/lib/server/collector/settings";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { archiveReasonOf, isReevaluable } from "@/lib/collector/archive";
+import { runReevaluation } from "@/lib/server/collector/reevaluate";
+import type { Db } from "@/lib/server/lottery-service";
 import { excludeCandidates, requeueCandidates, undoExclude } from "@/lib/server/collector/review-actions";
 import { rebuildQueued } from "@/lib/collector/queued";
 import { learnAliases, planAliasLearning, type LearnInput } from "@/lib/server/collector/learn";
@@ -16,6 +20,9 @@ import { PREFECTURE_LIST } from "@/lib/geo";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/** 一括再評価の実行中の世帯（二重実行の防止） */
+const reevalBusy = new Set<string>();
 
 const json = (body: Record<string, unknown>, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
@@ -75,6 +82,10 @@ const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("unlinkXAccount"), id: uuid }),
   z.object({ action: z.literal("deleteSource"), id: uuid }),
   z.object({ action: z.literal("saveSettings"), settings: settingsInput }),
+  // 一括再評価（Stage 6G）: plan=対象の確認（DBは変更しない）/ run=指定した候補だけ最新のロジックで再評価（AI・X APIは使わない）/ unarchive=アーカイブ済みを確認待ちへ戻して再評価できるようにする
+  z.object({ action: z.literal("reevalPlan") }),
+  z.object({ action: z.literal("reevalRun"), ids: z.array(uuid).min(1).max(20) }),
+  z.object({ action: z.literal("unarchive"), ids: z.array(uuid).min(1).max(100) }),
 ]);
 
 /** 収集元の入力を検証して保存用の行にする。Webは公開のhttps URLだけ(内部ネットワーク・資格情報つきURLは拒否) */
@@ -268,6 +279,34 @@ export async function POST(request: NextRequest) {
       await db.from("collection_candidates").update({ source_id: null }).eq("source_id", b.id);
       const { error } = await db.from("collection_sources").delete().eq("id", b.id);
       return error ? json({ ok: false, error: "削除に失敗しました" }, 500) : json({ ok: true });
+    }
+    case "reevalPlan":
+    case "reevalRun": {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !key) return json({ ok: false, error: "サーバーの設定が不足しています" }, 500);
+      // 世帯の所属は上で確認済み。登録・更新の書き込みはサービス権限で行う（定期実行と同じ経路）
+      const svc = createServiceClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as Db;
+      const deps = { db: svc, householdId, trigger: "manual" as const, now: new Date(), actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
+      // 二重実行の防止（同じサーバー上で再評価が実行中なら受け付けない。再評価は候補ごとに冪等で、中断しても残りから再開できる）
+      if (reevalBusy.has(householdId)) return json({ ok: false, error: "再評価を実行中です。完了してからもう一度お試しください" }, 409);
+      reevalBusy.add(householdId);
+      let out;
+      try {
+        out = await runReevaluation(deps, b.action === "reevalPlan" ? { execute: false, aiMax: 0 } : { execute: true, aiMax: 0, ids: b.ids });
+      } finally {
+        reevalBusy.delete(householdId);
+      }
+      if (!out.ok) return json({ ok: false, error: out.message }, 500);
+      return json({ ok: true, execute: out.execute, before: out.before, after: out.after, counts: out.counts, byClass: out.byClass, rows: out.rows.map((r) => ({ id: r.id, cls: r.cls, outcome: r.outcome, reason: r.reason })) });
+    }
+    case "unarchive": {
+      const { data, error } = await db.from("collection_candidates").select("id,status,reasons,draft").in("id", b.ids).in("status", ["excluded"]);
+      if (error) return json({ ok: false, error: "更新に失敗しました" }, 500);
+      const ok = (data ?? []).filter((r) => isReevaluable(archiveReasonOf({ status: r.status, reasons: r.reasons })) && Boolean((r.draft as { input?: unknown } | null)?.input)).map((r) => r.id);
+      if (ok.length === 0) return json({ ok: false, error: "再評価できる候補がありません（解析済みの地域対象外・自動除外だけ戻せます）" }, 422);
+      const up = await db.from("collection_candidates").update({ status: "pending", job_state: "review", reasons: ["アーカイブから再評価"], resolved_at: null }).in("id", ok).eq("status", "excluded").select("id");
+      return up.error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true, restored: (up.data ?? []).length, skipped: b.ids.length - ok.length });
     }
     case "saveSettings": {
       const s = b.settings;

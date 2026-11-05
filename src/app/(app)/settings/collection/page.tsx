@@ -1,6 +1,8 @@
 import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
+import { CollectionMaintenance } from "@/components/collection-maintenance";
+import { archiveCounts, archiveReasonOf, isArchived, isReevaluable } from "@/lib/collector/archive";
 import { ManualReviewList } from "@/components/manual-review";
 import { ExclusionRules, HardSources, type ExclusionView, type HardSourceView } from "@/components/source-controls";
 import { loadManualGroups } from "@/lib/server/collector/manual-items";
@@ -65,6 +67,14 @@ export default async function CollectionPage() {
     cnt().in("job_state", ["pending", "retry", "processing"]).gt("due_at", now.toISOString()).lte("due_at", endOfToday),
     db.from("collection_candidates").select("completed_at").not("completed_at", "is", null).order("completed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
+  // 除外・重複の候補のアーカイブ（Stage 6G）: 通常の一覧・件数から隠す。削除はしない
+  const exRows = (await db.from("collection_candidates").select("id,status,reasons,resolved_at,draft").in("status", ["excluded", "duplicate"]).limit(3000)).data ?? [];
+  const archivable = exRows.map((r) => ({ status: r.status, reasons: r.reasons ?? [], resolved_at: r.resolved_at }));
+  const archivedIds = new Set(exRows.filter((r, i) => isArchived(archivable[i], now)).map((r) => r.id));
+  const archive = {
+    ...archiveCounts(archivable, now),
+    reevaluableIds: exRows.filter((r, i) => archivedIds.has(r.id) && isReevaluable(archiveReasonOf(archivable[i])) && Boolean((r.draft as { input?: unknown } | null)?.input)).map((r) => r.id),
+  };
   const metricRows = await db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000);
   const metrics = computeMetrics(metricRows.data ?? [], now);
   // 整合性チェック（Stage 6A）: AI解析の利用ログと日別統計の差、異常な予算予約、直近の定期収集の結果
@@ -86,8 +96,9 @@ export default async function CollectionPage() {
   const importantSet = appData ? importantChains(appData) : new Set<string>();
   const candidates = [lReview, lQueued, lReg, lEx, lDup, lFail]
     .flatMap((r) => r.data ?? [])
+    .filter((c) => !archivedIds.has(c.id))
     .map((c) => ({ ...c, assess: appData && c.job_state === "review" ? assessRow({ draft: c.draft, due_at: c.due_at, source_url: c.source_url, memo_id: (c as { memo_id?: string | null }).memo_id }, appData, now, importantSet, conditionsFromRow(settings.data as unknown as Record<string, unknown>)) : null }));
-  const counts = { pending: nReview.count ?? 0, queued: nQueued.count ?? 0, auto_registered: nReg.count ?? 0, excluded: nEx.count ?? 0, duplicate: nDup.count ?? 0, failed: nFail.count ?? 0 };
+  const counts = { pending: nReview.count ?? 0, queued: nQueued.count ?? 0, auto_registered: nReg.count ?? 0, excluded: Math.max(0, (nEx.count ?? 0) - exRows.filter((r) => archivedIds.has(r.id) && r.status === "excluded").length), duplicate: Math.max(0, (nDup.count ?? 0) - exRows.filter((r) => archivedIds.has(r.id) && r.status === "duplicate").length), failed: nFail.count ?? 0 };
   const xPosts = (monthRuns.data ?? []).reduce((a, r) => a + r.x_posts, 0);
   // 設定を読み込めなかったときは、初期値で画面を作らない（初期値のまま保存して、既存の設定を上書きしないため）
   if (settings.error || !settings.data) return <p className="text-sm text-danger" role="alert">自動収集の設定を読み込めませんでした。通信を確認して、画面を再読み込みしてください（設定は変更されていません）。</p>;
@@ -170,7 +181,8 @@ export default async function CollectionPage() {
         aiConfigured={Boolean(process.env.ANTHROPIC_API_KEY?.trim()) || process.env.AI_PROVIDER === "mock"}
         usage={{ xPosts, xCostJpy: estimateCostJpy(xPosts), aiCalls: budget.calls, newAuto: newCount.count ?? 0 }}
       />
-      <div className="mt-3">
+      <div className="mt-3 space-y-3">
+        <CollectionMaintenance review={nReview.count ?? 0} archive={archive} />
         <Block no="⑤" title="収集元の管理" testId="sources" summary={`除外${(exclusions.data ?? []).filter((r) => r.active).length}件・取得困難${(hardSources.data ?? []).length}件`}>
           <div className="space-y-2">
             <p className="text-xs font-medium">除外中の収集元</p>
