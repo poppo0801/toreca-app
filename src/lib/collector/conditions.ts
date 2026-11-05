@@ -128,8 +128,23 @@ export function resolveTargetPrefecture(raw: string, targets: readonly string[])
   return hit ?? s;
 }
 
+/**
+ * 店舗名に含まれる明示的な地域名（「千葉中央店」「大阪梅田店」など）から都道府県を読む。地域が別の情報で分からないときだけ使う。
+ * 地域名が含まれない店舗名は推測しない（空を返す）。複数の地域名が含まれて曖昧な場合も空。
+ */
+const REGION_NAME_HINTS: [string, string][] = [
+  ["兵庫", "兵庫県"], ["大阪", "大阪府"], ["京都", "京都府"], ["東京", "東京都"], ["神奈川", "神奈川県"], ["千葉", "千葉県"], ["埼玉", "埼玉県"],
+  ["北海道", "北海道"], ["愛知", "愛知県"], ["奈良", "奈良県"], ["滋賀", "滋賀県"], ["和歌山", "和歌山県"], ["福岡", "福岡県"], ["宮城", "宮城県"], ["広島", "広島県"],
+];
+export function prefectureFromStoreName(name: string): string {
+  const s = name.normalize("NFKC");
+  const hits = REGION_NAME_HINTS.filter(([k]) => s.includes(k)).map(([, v]) => v);
+  return new Set(hits).size === 1 ? hits[0] : "";
+}
+
 export function evaluateCandidate(input: LotteryInput, cond: CollectionConditions, rawCtx: EvalContext): Evaluation {
-  const ctx: EvalContext = { ...rawCtx, prefecture: resolveTargetPrefecture(rawCtx.prefecture, cond.prefectures) };
+  const hinted = rawCtx.prefecture || (input.receiveMethod === "shipping" ? "" : prefectureFromStoreName(input.store?.name ?? ""));
+  const ctx: EvalContext = { ...rawCtx, prefecture: resolveTargetPrefecture(hinted, cond.prefectures) };
   const excluded: string[] = [];
   const review: string[] = [];
   const notes: string[] = [];

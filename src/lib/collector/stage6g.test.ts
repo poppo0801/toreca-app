@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { archiveCounts, archiveReasonOf, isArchived } from "@/lib/collector/archive";
-import { evaluateCandidate, resolveTargetPrefecture, normalizeConditions } from "@/lib/collector/conditions";
+import { evaluateCandidate, prefectureFromStoreName, resolveTargetPrefecture, normalizeConditions } from "@/lib/collector/conditions";
 import type { LotteryInput } from "@/lib/lottery-input";
 
 const NOW = new Date("2026-11-05T03:00:00Z");
@@ -63,5 +63,24 @@ describe("Stage 6G: 除外済み候補のアーカイブ", () => {
     const c = archiveCounts([row("duplicate", [], null), row("excluded", ["対象外の地域です（東京都）"], null), row("excluded", ["利用者が除外しました"], ago(1))], NOW);
     expect(c.total).toBe(2);
     expect(c.byReason).toMatchObject({ duplicate: 1, region: 1, manual: 0 });
+  });
+});
+
+describe("Stage 6G: 店舗名の明示的な地域名", () => {
+  it("店舗名に地域名が1つだけ含まれるときだけ都道府県を読む。含まれない・曖昧なら空（推測しない）", () => {
+    expect(prefectureFromStoreName("千葉中央店")).toBe("千葉県");
+    expect(prefectureFromStoreName("大阪梅田店")).toBe("大阪府");
+    expect(prefectureFromStoreName("イオンモール成田店")).toBe("");
+    expect(prefectureFromStoreName("ヨコハマ本店")).toBe("");
+    expect(prefectureFromStoreName("京都・大阪店")).toBe("");
+    expect(prefectureFromStoreName("")).toBe("");
+  });
+  const cond = normalizeConditions({ prefectures: KANSAI, includeOnline: true });
+  const mk = (store: string) => ({ applyDeadline: { precision: "date_only", date: "2026-11-20", time: "" }, applyStart: { precision: "unknown", date: "", time: "" }, receiveMethod: "store", applyMethod: "web", requirementTags: [], sourceUrls: [], items: [], store: { id: null, name: store, prefecture: "" } }) as unknown as LotteryInput;
+  it("店舗名から関東と分かる店頭抽選は対象外、関西は対象、地域が読めないものは確認に回す", () => {
+    const ev = (s: string) => evaluateCandidate(mk(s), cond, { prefecture: "", storeKind: "physical", distanceKm: null, now: NOW }).verdict;
+    expect(ev("千葉中央店")).toBe("exclude");
+    expect(ev("大阪梅田店")).toBe("match");
+    expect(ev("成田店")).toBe("review");
   });
 });
