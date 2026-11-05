@@ -25,15 +25,22 @@ describe.skipIf(!dbTestsEnabled)("Stage 6G: 取得した相場", () => {
     u2 = b.db;
     hid1 = (await u1.rpc("bootstrap_household")).data as string;
     await u2.rpc("bootstrap_household");
-    const r = await x(u1).rpc("save_card_with_holding", { p: { card: { name: "テストex", card_number: "001/100", set_code: "TS1", rarity: "SAR" }, holding: { quantity: 1, unit_price_yen: 1000 } }, p_actor: null });
+    const r = await x(u1).rpc("save_card_with_holding", { p: { card: { name: "テストex", card_number: `${Date.now() % 1000000}/100`, set_code: "TS1", rarity: "SAR" }, holding: { quantity: 1, unit_price_yen: 1000 } }, p_actor: null });
+    if (r.error) throw new Error("save_card: " + JSON.stringify(r.error));
     cardId = r.data as string;
   });
   afterAll(async () => {
+    // テスト世帯の削除関数は相場の表を知らないため、先にこの世帯の相場の行を消してから世帯ごと削除する
+    if (hid1) {
+      await admin.from("card_market_prices" as never).delete().eq("household_id", hid1);
+      await admin.from("card_market_links" as never).delete().eq("household_id", hid1);
+    }
     await cleanupTestUsers(admin, ids);
   });
 
   it("販売・買取を別に保存でき、同じカード×区分は上書き（upsert）で1行のまま。手動の参考相場には触れない", async () => {
-    expect((await x(u1).from("card_market_prices").upsert([row(), row({ kind: "buyback", median_yen: 44000, low_yen: 44000, high_yen: 44000, sample_count: 1 })], { onConflict: "card_id,kind" })).error).toBeNull();
+    const first = await x(u1).from("card_market_prices").upsert([row(), row({ kind: "buyback", median_yen: 44000, low_yen: 44000, high_yen: 44000, sample_count: 1 })], { onConflict: "card_id,kind" });
+    expect(first.error, JSON.stringify(first.error) + " cardId=" + cardId).toBeNull();
     expect((await x(u1).from("card_market_prices").upsert([row({ median_yen: 57000 })], { onConflict: "card_id,kind" })).error).toBeNull();
     const rows = (await x(u1).from("card_market_prices").select("kind,median_yen,sample_count").eq("card_id", cardId).order("kind")).data;
     expect(rows).toEqual([
