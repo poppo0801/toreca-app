@@ -287,6 +287,7 @@ export type Database = {
       }
       ai_extraction_logs: {
         Row: {
+          actor_kind: string
           created_at: string
           engine: string
           extraction: Json | null
@@ -299,9 +300,11 @@ export type Database = {
           prompt_version: string | null
           source_host: string | null
           status: string
-          user_id: string
+          trigger_reason: string | null
+          user_id: string | null
         }
         Insert: {
+          actor_kind?: string
           created_at?: string
           engine: string
           extraction?: Json | null
@@ -314,9 +317,11 @@ export type Database = {
           prompt_version?: string | null
           source_host?: string | null
           status: string
-          user_id?: string
+          trigger_reason?: string | null
+          user_id?: string | null
         }
         Update: {
+          actor_kind?: string
           created_at?: string
           engine?: string
           extraction?: Json | null
@@ -329,7 +334,8 @@ export type Database = {
           prompt_version?: string | null
           source_host?: string | null
           status?: string
-          user_id?: string
+          trigger_reason?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -1713,6 +1719,7 @@ export type Database = {
         Row: {
           ai_calls: number
           ai_failed: number
+          ai_log_failures: number
           ai_success: number
           changed: number
           cost_jpy: number
@@ -1736,6 +1743,7 @@ export type Database = {
         Insert: {
           ai_calls?: number
           ai_failed?: number
+          ai_log_failures?: number
           ai_success?: number
           changed?: number
           cost_jpy?: number
@@ -1759,6 +1767,7 @@ export type Database = {
         Update: {
           ai_calls?: number
           ai_failed?: number
+          ai_log_failures?: number
           ai_success?: number
           changed?: number
           cost_jpy?: number
@@ -2118,11 +2127,17 @@ export type Database = {
           finished_at: string | null
           household_id: string
           id: string
+          items_found: number
           new_count: number
           phase: string
           processed_count: number
           registered_count: number
+          result: string | null
           skipped_count: number
+          slot_date: string | null
+          sources_failed: number
+          sources_ok: number
+          sources_total: number
           started_at: string
           status: string
           stop_reason: string | null
@@ -2139,11 +2154,17 @@ export type Database = {
           finished_at?: string | null
           household_id: string
           id?: string
+          items_found?: number
           new_count?: number
           phase?: string
           processed_count?: number
           registered_count?: number
+          result?: string | null
           skipped_count?: number
+          slot_date?: string | null
+          sources_failed?: number
+          sources_ok?: number
+          sources_total?: number
           started_at?: string
           status?: string
           stop_reason?: string | null
@@ -2160,11 +2181,17 @@ export type Database = {
           finished_at?: string | null
           household_id?: string
           id?: string
+          items_found?: number
           new_count?: number
           phase?: string
           processed_count?: number
           registered_count?: number
+          result?: string | null
           skipped_count?: number
+          slot_date?: string | null
+          sources_failed?: number
+          sources_ok?: number
+          sources_total?: number
           started_at?: string
           status?: string
           stop_reason?: string | null
@@ -2284,6 +2311,56 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "collection_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_source_attempts: {
+        Row: {
+          created_at: string
+          household_id: string
+          id: string
+          items: number
+          message: string
+          new_count: number
+          run_id: string | null
+          slot_date: string | null
+          source_id: string
+          status: string
+          trigger: string
+        }
+        Insert: {
+          created_at?: string
+          household_id: string
+          id?: string
+          items?: number
+          message?: string
+          new_count?: number
+          run_id?: string | null
+          slot_date?: string | null
+          source_id: string
+          status: string
+          trigger: string
+        }
+        Update: {
+          created_at?: string
+          household_id?: string
+          id?: string
+          items?: number
+          message?: string
+          new_count?: number
+          run_id?: string | null
+          slot_date?: string | null
+          source_id?: string
+          status?: string
+          trigger?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_source_attempts_household_id_fkey"
             columns: ["household_id"]
             isOneToOne: false
             referencedRelation: "households"
@@ -4912,6 +4989,7 @@ export type Database = {
       }
       collect_cron_disable: { Args: never; Returns: boolean }
       collect_cron_enable: { Args: { p_schedule?: string }; Returns: number }
+      collection_integrity: { Args: { p_household: string }; Returns: Json }
       copy_profile_settings: {
         Args: {
           p_actor: string

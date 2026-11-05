@@ -212,9 +212,13 @@ export interface HealthInput {
   budgetBlocked?: boolean;
   /** 本日締切で未処理の候補 */
   dueTodayQueued?: number;
+  /** 直近2日の整合性: AI解析の利用ログ件数と日別統計の呼び出し回数、異常な予算予約の数、今日のログ保存失敗 */
+  integrity?: { logs2d: number; statsCalls2d: number; abnormalReservations: number; logFailuresToday: number };
+  /** 直近の定期収集（スロット指定の収集）の結果 */
+  lastScheduled?: { at: Date; result: "complete" | "partial" | "failed" | "empty" | null; sourcesOk: number; sourcesFailed: number; items: number } | null;
 }
 export interface HealthWarning {
-  code: "due_today" | "budget" | "paused" | "worker_stalled" | "queue_stuck" | "failures_surge" | "source_stale" | "collect_stale";
+  code: "ai_log_gap" | "reservation_stuck" | "scheduled_failed" | "scheduled_zero" | "due_today" | "budget" | "paused" | "worker_stalled" | "queue_stuck" | "failures_surge" | "source_stale" | "collect_stale";
   message: string;
 }
 export function healthWarnings(h: HealthInput): HealthWarning[] {
@@ -232,6 +236,17 @@ export function healthWarnings(h: HealthInput): HealthWarning[] {
     if (s.consecutiveFailures >= 3 || (s.lastSuccessAt && mins(s.lastSuccessAt) > 3 * 24 * 60)) out.push({ code: "source_stale", message: `「${s.name}」の取得が成功していません（最新の情報ではない可能性があります）` });
   }
   if (h.scheduleEnabled && mins(h.lastCollectAt) > 36 * 60) out.push({ code: "collect_stale", message: "定期収集が36時間以上実行されていません" });
+  const ig = h.integrity;
+  if (ig) {
+    // 自動収集のAI呼び出し（日別統計）に対して、利用ログが明らかに少ない。手動の解析は利用ログだけに入るため、ログが多い分には異常としない
+    if (ig.logFailuresToday > 0 || (ig.statsCalls2d >= 5 && ig.logs2d < ig.statsCalls2d * 0.8)) out.push({ code: "ai_log_gap", message: "AI解析の利用ログが一部保存されていません。費用は日別統計を基準に管理しています" });
+    if (ig.abnormalReservations > 0) out.push({ code: "reservation_stuck", message: `AI予算の予約が異常に残っています（${ig.abnormalReservations}件）` });
+  }
+  const ls = h.lastScheduled;
+  if (h.scheduleEnabled && ls && mins(ls.at) < 36 * 60) {
+    if (ls.result === "failed" || ls.result === "partial") out.push({ code: "scheduled_failed", message: `定期収集で取得できなかった収集元があります（${ls.sourcesFailed}件。間隔をおいて再試行します）` });
+    else if (ls.result === "empty" || (ls.result === "complete" && ls.sourcesOk > 0 && ls.items === 0)) out.push({ code: "scheduled_zero", message: "定期収集は実行されましたが、取得件数が0件でした。収集元の状態を確認してください" });
+  }
   return out;
 }
 

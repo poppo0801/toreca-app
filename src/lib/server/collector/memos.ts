@@ -182,7 +182,7 @@ export async function runMemoPass(
         } else if (hash === m.lastContentHash) {
           detail = "参考URLに変化はありません（再解析はしません）";
         } else {
-          const queued = { kind: "web_page", url: m.referenceUrl, title: `優先収集メモ: ${[m.chainName, ...m.productNames].filter(Boolean).join(" ").slice(0, 60)}`, context: text.slice(0, 600), sourceName: "優先収集メモ", attempts: 0, memoId: m.id, changed: true };
+          const queued = { kind: "web_page", url: m.referenceUrl, title: `優先収集メモ: ${[m.chainName, ...m.productNames].filter(Boolean).join(" ").slice(0, 60)}`, context: text.slice(0, 600), sourceName: "優先収集メモ", attempts: 0, memoId: m.id, changed: true, reason: "memo_reference" };
           const { data: ins } = await db
             .from("collection_candidates")
             .upsert({ household_id: householdId, dedupe_key: `memo:${m.id}:${hash.slice(0, 16)}`, source_url: m.referenceUrl, title: queued.title, content_hash: hash, status: "pending", job_state: "pending", reasons: ["優先収集メモの参考URL（解析待ち）"], draft: { queued } as unknown as Json, memo_id: m.id, next_run_at: new Date(now.getTime() - BOOST_AGE_MS).toISOString(), last_checked_at: now.toISOString() } as never, { onConflict: "household_id,dedupe_key", ignoreDuplicates: true })

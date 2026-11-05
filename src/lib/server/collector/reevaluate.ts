@@ -1,6 +1,7 @@
 import "server-only";
 import { judge, isXCandidate, type CandidateLite, type Judgement, type ReevalClass, type StoredDraft } from "@/lib/collector/reevaluate";
 import { isReady } from "@/lib/collector/ready";
+import { rebuildQueued } from "@/lib/collector/queued";
 import { aiAllowance, conditionsFromRow, processQueue, type CollectDeps } from "@/lib/server/collector/run";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service";
@@ -194,7 +195,8 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
         const prior = (c.draft as object | null) ?? {};
         const m = mark(c, j, isXCandidate(c) ? "x_image" : "refetch");
         // 既存の「再解析」と同じキュー（取得済みの内容は残したまま、同じ候補を解析待ちに戻す）。変更を検出した再解析として、一覧の事前除外は通さない
-        const queued = { kind: c.dedupe_key.startsWith("x:") || isXCandidate(c) ? "x_oembed" : "web_page", url: c.source_url ?? "", title: c.title, context: "", sourceName: "確認待ちの再評価", attempts: 0, changed: true };
+        // 一覧のカード・店舗/商品・ヒント・文脈は引き継ぐ
+        const queued = rebuildQueued(prior, { kind: c.dedupe_key.startsWith("x:") || isXCandidate(c) ? "x_oembed" : "web_page", url: c.source_url ?? "", sourceName: "確認待ちの再評価", reason: isXCandidate(c) ? "image_refetch" : "reevaluate", changed: true, fallbackTitle: c.title });
         await db.from("collection_candidates").update({ job_state: "pending", status: "pending", attempts: 0, next_run_at: null, reasons: ["再評価: 追加取得・再解析待ち"], draft: { ...prior, queued, reeval: m } as never, lease_until: null, locked_by: null }).eq("id", c.id);
       }
       const q = await processQueue(deps, { settings, cond, data, aiLeft: aiN, timeLeft, perBatch: 4 });

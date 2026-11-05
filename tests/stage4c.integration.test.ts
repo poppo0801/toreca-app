@@ -69,7 +69,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
 
   const setSettings = (patch: Record<string, unknown>) => u1.from("collection_settings").update(patch as never).eq("household_id", hid);
   const sourceOf = async (name: string) => (await u1.from("collection_sources").select("*").eq("name", name).single()).data!;
-  const cands = async () => (await u1.from("collection_candidates").select("dedupe_key,status,reasons,lottery_id,draft").order("created_at")).data!;
+  const cands = async () => (await u1.from("collection_candidates").select("dedupe_key,status,job_state,reasons,lottery_id,draft").order("created_at")).data!;
   const lotteries = async () => (await u1.from("lotteries").select("id,source_kind,is_new,source_urls,updated_at")).data ?? [];
 
   beforeAll(async () => {
@@ -237,8 +237,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
     const pokeso = await sourceOf("pokeso");
     await u1.from("collection_sources").update({ enabled: true }).eq("id", pokeso.id);
     // 別の店舗の告知（新しい抽選）を、サービスロールの接続（ログインなし）で収集
-    // 定期実行は取得間隔(既定24時間)を守る: 直近に取得した収集元は飛ばし、間隔が過ぎたものだけ実行する
-    const skipped = await runCollection(deps({ db: admin as unknown as Db, trigger: "cron", actor: null, canRegister: false, list: () => ok("https://pokeso.jp/chusen", html("<a href=\"https://shop-d.example.invalid/lottery/d0\">ポケモンカード 抽選 受付中</a>")), onlySourceIds: [pokeso.id] }));
+    // 定期実行は、定期収集のスロットで指定された収集元だけを取得する（Stage 6A。手動収集の last_attempt_at には左右されない）
+    const skipped = await runCollection(deps({ db: admin as unknown as Db, trigger: "cron", actor: null, canRegister: false, scheduled: { slotDate: "2026-01-01", sourceIds: [] }, list: () => ok("https://pokeso.jp/chusen", html("<a href=\"https://shop-d.example.invalid/lottery/d0\">ポケモンカード 抽選 受付中</a>")), onlySourceIds: [pokeso.id] }));
     expect(skipped.ok && skipped.sources).toHaveLength(0);
     await u1.from("collection_sources").update({ last_attempt_at: "2020-01-01T00:00:00Z" }).eq("id", pokeso.id);
     const lotsBefore = (await lotteries()).length;
@@ -257,6 +257,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
     // 既存の抽選と重複しないよう、商品名だけ別の（架空の）新商品に変えたAI結果を返す
     const base = getExtractor({ AI_PROVIDER: "mock" })!;
     const variant = { engine: base.engine, extract: async (req: Parameters<typeof base.extract>[0]) => { const o = await base.extract(req); const raw = JSON.parse(JSON.stringify(o.raw)) as { products: { name: string }[] }; raw.products[0].name = "架空の新商品ZZ"; return { ...o, raw }; } } as typeof base;
+    // 商品マスターに無い商品は自動登録しない（Stage 5Y）。この試験は登録関数の検証なので、商品を先にマスターへ登録しておく
+    await u1.from("products").insert({ household_id: hid, official_name: "架空の新商品ZZ", packs_per_box: 20 });
     const before = (await lotteries()).length;
     const r1 = await runCollection(deps({ db: admin as unknown as Db, trigger: "cron", actor: null, canRegister: false, serviceRegister: true, extractor: variant, list, onlySourceIds: [pokeso.id] }));
     expect(r1.ok).toBe(true);
@@ -325,7 +327,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: 自動収集", () => {
     expect(r3.ok && r3.aiCalls).toBe(0);
     expect(pagesFetched).toHaveLength(0);
     c = await cands();
-    expect(c.filter((x) => (x.draft as { queued?: unknown } | null)?.queued && x.status === "pending")).toHaveLength(0);
+    // 解析待ち（pending/retry/processing）は残らない。確認待ち（review）の草稿は、保留の再調査のために queued を保持する（Stage 5T）
+    expect(c.filter((x) => ["pending", "retry", "processing"].includes(x.job_state))).toHaveLength(0);
     await setSettings({ max_ai_per_run: 8 });
   });
 

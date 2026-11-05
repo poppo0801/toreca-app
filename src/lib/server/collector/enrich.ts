@@ -87,7 +87,7 @@ export async function enrichFromListings(deps: CollectDeps, opts: { max: number 
           triage: null,
           manual_state: null,
           reasons: ["一覧のカード全体の文章から再解析待ち"],
-          draft: { ...prior, queued: { ...q, card: e.card, ...(e.fields ? { fields: e.fields } : {}), changed: true, cardChecked: true } } as never,
+          draft: { ...prior, queued: { ...q, card: e.card, ...(e.fields ? { fields: e.fields } : {}), changed: true, cardChecked: true, reason: "card_enrich", listSeenAt: deps.now.toISOString() } } as never,
         })
         .eq("id", r.id);
       out.enriched++;

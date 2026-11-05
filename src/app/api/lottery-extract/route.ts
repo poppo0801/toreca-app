@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
   if (supabase && householdId && extractor && extractor.engine === "anthropic") {
     const since = (ms: number) => new Date(Date.now() - ms).toISOString();
     const [h, d] = await Promise.all([
-      supabase.from("ai_extraction_logs").select("id", { count: "exact", head: true }).gte("created_at", since(3600_000)).neq("status", "not_configured"),
-      supabase.from("ai_extraction_logs").select("id", { count: "exact", head: true }).gte("created_at", since(86400_000)).neq("status", "not_configured"),
+      supabase.from("ai_extraction_logs").select("id", { count: "exact", head: true }).gte("created_at", since(3600_000)).neq("status", "not_configured").neq("actor_kind", "system"),
+      supabase.from("ai_extraction_logs").select("id", { count: "exact", head: true }).gte("created_at", since(86400_000)).neq("status", "not_configured").neq("actor_kind", "system"),
     ]);
     if ((h.count ?? 0) >= HOURLY_LIMIT || (d.count ?? 0) >= DAILY_LIMIT) {
       return NextResponse.json({ ok: false, kind, code: "rate_limited", message: "AI読み取りの利用回数の上限に達しました。しばらくしてからお試しください（手動登録は引き続き使えます）" }, { status: 429 });

@@ -19,6 +19,8 @@ import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
+import { listInfoFromQueued, rebuildQueued, type AiReason } from "@/lib/collector/queued";
+import { dueSources, runResultOf, type AttemptStatus } from "@/lib/collector/schedule";
 import { decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
 import { activeExclusions, recordHardSource } from "@/lib/server/collector/sources-health";
 import { lotteryRow } from "@/lib/lottery-payload";
@@ -64,6 +66,8 @@ export interface CollectDeps {
   usdJpy?: number;
   /** 指定した収集元だけ実行する */
   onlySourceIds?: string[];
+  /** 定期収集のスロット。指定すると、その収集元だけを取得し、取得結果を定期収集の記録として残す（手動収集の履歴とは独立） */
+  scheduled?: { slotDate: string; sourceIds: string[] };
 }
 
 export interface SourceReport {
@@ -136,6 +140,10 @@ interface QueuedPayload {
     viaKind?: FailKind;
     /** 優先収集メモに関連する候補 */
     memoId?: string;
+    /** AI解析の実行理由（内部ログ） */
+    reason?: AiReason;
+    /** 一覧から card/fields/hints を取得した時刻 */
+    listSeenAt?: string;
   };
 }
 
@@ -182,7 +190,7 @@ export function conditionsFromRow(row: Record<string, unknown>): CollectionCondi
   });
 }
 
-type StatKey = "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "provisional_registered" | "failed_jobs" | "x_posts_manual" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining";
+type StatKey = "ai_log_failures" | "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "provisional_registered" | "failed_jobs" | "x_posts_manual" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining";
 export type StatDelta = Partial<Record<StatKey, number>>;
 
 /** 日別統計(日本時間の日付)への原子的な加算。統計の失敗で本処理を止めない */
@@ -193,7 +201,7 @@ export async function bumpStats(db: Db, householdId: string, now: Date, delta: S
 }
 
 /** AI読み取りの利用記録（既存の費用管理と同じテーブル）と、日別統計（回数・成功/失敗・トークン・費用）。入力した本文・画像そのものは保存しない */
-async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string): Promise<number> {
+async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string, reason: AiReason = "initial"): Promise<number> {
   const usedAi = result.ok || result.code !== "fetch_failed";
   let cost = 0;
   if (usedAi) {
@@ -204,8 +212,11 @@ async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string
     await bumpStats(deps.db, deps.householdId, deps.now, { ai_calls: 1, ai_success: valid ? 1 : 0, ai_failed: valid ? 0 : 1, input_tokens: input, output_tokens: output, cost_jpy: Math.round(cost * 10000) / 10000 });
   }
   const status = result.ok ? (result.extraction.applyDeadline.precision === "unknown" || result.extraction.items.length === 0 ? "partial" : "ok") : result.code === "rate_limited" ? "rate_limited" : result.code === "fetch_failed" ? "fetch_failed" : "failed";
-  await deps.db.from("ai_extraction_logs").insert({
+  // システム実行（cron・ワーカー。ログインなし）は user_id なし＋actor_kind=system。利用者の手動実行は従来どおり利用者として記録する
+  const system = !deps.canRegister;
+  const row = {
     household_id: deps.householdId,
+    trigger_reason: reason,
     kind: result.kind,
     engine: result.ok ? result.engine : (result.engine ?? "none"),
     status,
@@ -215,7 +226,15 @@ async function logAi(deps: CollectDeps, result: ExtractResult, sourceUrl: string
     model: result.engine === "anthropic" ? (result.model ?? null) : null,
     prompt_version: result.ok ? result.promptVersion : PROMPT_VERSION,
     extraction: result.ok ? (result.extraction as unknown as Json) : null,
-  });
+  };
+  let ins = await deps.db.from("ai_extraction_logs").insert({ ...row, actor_kind: system ? "system" : "user", ...(system ? { user_id: null } : {}) } as never);
+  // ログイン中の利用者の接続で動いている場合（システム行は書けない=RLS）は、利用者の実行として保存する
+  if (ins.error?.code === "42501" && system) ins = await deps.db.from("ai_extraction_logs").insert({ ...row, actor_kind: "user" } as never);
+  // 保存の失敗を見逃さない: 原因を記録し（秘密・本文は含めない）、日別統計に失敗件数を残す。費用は日別統計側にも記録済みなので予算の判定は過少にならない
+  if (ins.error && usedAi) {
+    console.error(`[ai-log] ai_extraction_logs の保存に失敗しました code=${ins.error.code ?? "?"} actor=${system ? "system" : "user"} reason=${reason}`);
+    await bumpStats(deps.db, deps.householdId, deps.now, { ai_log_failures: 1 });
+  }
   return cost;
 }
 
@@ -394,7 +413,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     }
   };
 
-  const callCost = await logAi(deps, result, q.url).catch(() => 0);
+  const callCost = await logAi(deps, result, q.url, q.reason ?? "initial").catch(() => 0);
   if (result.ok || result.code !== "fetch_failed") acct = { ai_calls: (c.ai_calls ?? 0) + 1, cost_jpy: Math.round(((Number(c.cost_jpy) || 0) + callCost) * 10000) / 10000 };
   if (!result.ok) {
     if (result.code === "not_lottery" || result.code === "nothing_found") {
@@ -449,7 +468,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
   const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
   const { ready, missing, provisional } = isReady(draft, input);
-  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine } as unknown as Json;
+  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso) } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）
@@ -460,7 +479,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       const deadlineDate = input.applyDeadline.date || "";
       const key = `${c.dedupe_key.split("#")[0]}#${deadlineDate}`.slice(0, 500);
       await db.from("collection_candidates").upsert(
-        { household_id: deps.householdId, source_id: c.source_id, dedupe_key: key, source_url: c.source_url, title: c.title, status: "pending", job_state: "pending", reasons: ["新しい抽選回（解析待ち）"], draft: { queued: { ...q, changed: false, newRound: true, attempts: 0 } } as unknown as Json } as never,
+        { household_id: deps.householdId, source_id: c.source_id, dedupe_key: key, source_url: c.source_url, title: c.title, status: "pending", job_state: "pending", reasons: ["新しい抽選回（解析待ち）"], draft: { queued: { ...q, changed: false, newRound: true, attempts: 0, reason: "new_round" as AiReason } } as unknown as Json } as never,
         { onConflict: "household_id,dedupe_key", ignoreDuplicates: true },
       );
       await finish("completed", { reasons: ["再確認: 新しい抽選回が始まったため、別の抽選として扱います"], draft: c.draft, kind: "new" }, { discovered_new: 1 });
@@ -521,6 +540,20 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   return { usedAi: true, registered: false, aiFailed: false };
 }
 
+/** 収集元ごとの取得結果の記録。記録の失敗で本処理は止めないが、原因はログに残す */
+async function recordAttempts(deps: CollectDeps, runId: string, reports: SourceReport[]): Promise<AttemptStatus[]> {
+  const statuses: AttemptStatus[] = reports.map((r) => {
+    if (r.status === "ok" || r.status === "blocked" || r.status === "needs_setup" || r.status === "disabled" || r.status === "not_configured") return r.status;
+    // X API の月額予算に達している状態は、待っても変わらないので再試行しない
+    return /予算/.test(r.message) ? "budget" : "error";
+  });
+  if (reports.length === 0) return statuses;
+  const rows = reports.map((r, i) => ({ household_id: deps.householdId, run_id: runId, source_id: r.sourceId, trigger: deps.trigger, slot_date: deps.scheduled?.slotDate ?? null, status: statuses[i], items: r.items, new_count: r.newCount, message: r.message.slice(0, 300) }));
+  const { error } = await deps.db.from("collection_source_attempts").insert(rows as never);
+  if (error) console.error(`[collect] 収集元ごとの取得結果を記録できませんでした code=${error.code ?? "?"}`);
+  return statuses;
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   let t: ReturnType<typeof setTimeout>;
   return Promise.race([p, new Promise<T>((resolve) => (t = setTimeout(() => resolve(onTimeout()), ms)))]).finally(() => clearTimeout(t));
@@ -561,9 +594,8 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
     if (!settings) throw new Error("settings");
     const cond = conditionsFromRow(settings as unknown as Record<string, unknown>);
     let sources = ((srcRes.data ?? []) as unknown as SourceRow[]).filter((s) => s.enabled && (!deps.onlySourceIds || deps.onlySourceIds.includes(s.id)));
-    if (deps.trigger === "cron") {
-      sources = sources.filter((s) => !s.last_attempt_at || now.getTime() - new Date(s.last_attempt_at).getTime() >= s.interval_hours * 3600_000 - 5 * 60_000);
-    }
+    // 定期収集は、スロットで未取得の収集元だけ（手動収集の last_attempt_at には左右されない）
+    if (deps.scheduled) sources = sources.filter((s) => deps.scheduled!.sourceIds.includes(s.id));
     const data = await loadAppData(db, householdId);
     // AI読み取りは、1回の上限・月額予算（予約つき）・1時間の速度制限を守る。日次の件数上限はない
     const allow = await aiAllowance(deps, settings.max_ai_per_run);
@@ -630,14 +662,14 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
               const reopen = (live && shouldReanalyzeOnListChange(old.due_at, newDue)) || (old.job_state === "skipped" && !preScreenFromList(hints, cond, now) && !(old.draft as { input?: unknown } | null)?.input);
               const patch: Record<string, unknown> = { list_hash: hash, content_hash: sha(`${e.title}|${e.context}`), last_checked_at: now.toISOString(), last_changed_at: now.toISOString(), change_count: old.change_count + 1, due_at: hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null) };
               if (reopen && old.job_state !== "pending" && old.job_state !== "processing") {
-                const payload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), ...(e.fields ? { fields: e.fields } : {}), sourceName: s.name, attempts: 0, hints, changed: true } };
+                const payload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), ...(e.fields ? { fields: e.fields } : {}), sourceName: s.name, attempts: 0, hints, changed: true, reason: "list_change" as AiReason, listSeenAt: now.toISOString() } };
                 Object.assign(patch, { job_state: "pending", status: old.job_state === "skipped" ? "pending" : old.status, kind: old.lottery_id ? "update" : "new", attempts: 0, next_run_at: null, reasons: ["内容の変更を検出しました（再解析待ち）"], draft: { ...((old.draft as object | null) ?? {}), ...payload } });
               }
               await db.from("collection_candidates").update(patch as never).eq("id", old.id);
             }
             continue;
           }
-          const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), ...(e.fields ? { fields: e.fields } : {}), sourceName: s.name, attempts: 0, hints } };
+          const payload: QueuedPayload = { queued: { kind: e.kind === "x_post" ? "x_oembed" : "web_page", url: e.url, title: e.title, context: e.context, ...(e.card ? { card: e.card } : {}), ...(e.fields ? { fields: e.fields } : {}), sourceName: s.name, attempts: 0, hints, listSeenAt: now.toISOString() } };
           const dueAt = hints.deadlineIso ?? (hints.deadlineDate ? `${hints.deadlineDate}T23:59:00+09:00` : null);
           const base = { household_id: householdId, source_id: s.id, dedupe_key: key, source_url: e.url.slice(0, 500), title: (e.title.length >= 10 ? e.title : e.context.slice(-80) || e.title || e.url).slice(0, 200), content_hash: sha(`${e.title}|${e.context}`), list_hash: hash, due_at: dueAt, last_checked_at: now.toISOString(), discovered_run_id: runId };
           // 一覧の表示だけで除外できるもの(締切済み・対象外の地域)は、AI読み取りの前に除外する。候補としては保存し、次回以降は再判定しない
@@ -724,6 +756,10 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
       }
     }
 
+    // 収集元ごとの取得結果を記録する（Cron が起動したことと、実際に取得できたことを区別する）
+    const attemptStatuses = await recordAttempts(deps, runId, reports);
+    const itemsFound = reports.reduce((a, r) => a + r.items, 0);
+
     // ------------------------------------------------ 解析(キュー): 手動実行でも、定期ワーカーと同じ処理(原子的な取得・優先順位・再試行)を使う
     // 優先収集メモの照合（既存の抽選・候補・参考URL）。該当する解析待ちを先に処理できるよう、キューの処理の前に行う
     await runMemoPass(deps, { data }).catch(() => undefined);
@@ -740,11 +776,17 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
     const pendingRes = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["pending", "retry", "processing"]);
     await db
       .from("collection_runs")
-      .update({ status: "done", finished_at: new Date().toISOString(), web_fetched: webFetched, x_posts: xBilled, x_calls: xCalls, ai_calls: aiCalls, new_count: newCount, registered_count: registered, error_count: errors, processed_count: q.processed, changed_count: changed, skipped_count: screened + q.skipped, stop_reason: q.stopReason?.slice(0, 120) ?? null, summary: reports as unknown as Json })
+      .update({ status: "done", finished_at: new Date().toISOString(), slot_date: deps.scheduled?.slotDate ?? null, result: runResultOf(attemptStatuses), sources_total: reports.length, sources_ok: attemptStatuses.filter((s) => s === "ok").length, sources_failed: attemptStatuses.filter((s) => !["ok", "disabled", "not_configured", "budget"].includes(s)).length, items_found: itemsFound, web_fetched: webFetched, x_posts: xBilled, x_calls: xCalls, ai_calls: aiCalls, new_count: newCount, registered_count: registered, error_count: errors, processed_count: q.processed, changed_count: changed, skipped_count: screened + q.skipped, stop_reason: q.stopReason?.slice(0, 120) ?? null, summary: reports as unknown as Json })
       .eq("id", runId);
     return { ok: true, runId, aiCalls, xCalls, xPosts: xBilled, newCount, screened, queued: leftover, registered, errors, pending: pendingRes.count ?? 0, sources: reports, notices };
   } catch {
-    await db.from("collection_runs").update({ status: "failed", finished_at: new Date().toISOString(), error_count: errors + 1, summary: reports as unknown as Json }).eq("id", runId);
+    // 定期収集で取得結果が記録される前に失敗した収集元は、失敗として記録する（記録が無いままだと数分おきに再実行され続けるため）
+    if (deps.scheduled) {
+      const done = new Set(reports.map((r) => r.sourceId));
+      const missing: SourceReport[] = deps.scheduled.sourceIds.filter((id) => !done.has(id)).map((id) => ({ sourceId: id, name: "", status: "error", message: "収集処理でエラーが発生しました", items: 0, newCount: 0 }));
+      await recordAttempts(deps, runId, missing).catch(() => undefined);
+    }
+    await db.from("collection_runs").update({ status: "failed", finished_at: new Date().toISOString(), slot_date: deps.scheduled?.slotDate ?? null, result: "failed", error_count: errors + 1, summary: reports as unknown as Json }).eq("id", runId);
     return { ok: false, code: "error", message: "収集中にエラーが発生しました" };
   }
 }
@@ -968,7 +1010,8 @@ export async function recheckPages(deps: CollectDeps, opts: { max: number; reche
           Object.assign(patch, { job_state: "review", kind: "update", status: "pending", last_changed_at: now.toISOString(), reasons: [`状態: 受付中 → 中止（告知に「${cancel}」）`], draft: { ...prevDraft, update: { changes: [{ key: "eventState", label: "状態", before: "受付中", after: "中止" }], baseUpdatedAt: base.updated_at } } });
         }
       } else {
-        const q = { kind: "web_page", url: c.source_url, title: "", context: "", sourceName: "再確認", attempts: 0, changed: true };
+        // 取得済みの一覧の情報（カード・店舗/商品・ヒント）は引き継ぐ。本文の更新は一覧の情報を上書きしない
+        const q = rebuildQueued(prevDraft, { kind: "web_page", url: c.source_url, sourceName: "再確認", reason: "page_update", changed: true });
         Object.assign(patch, { job_state: "pending", kind: c.lottery_id ? "update" : "new", status: c.status === "auto_registered" || c.status === "duplicate" ? c.status : "pending", attempts: 0, next_run_at: null, last_changed_at: now.toISOString(), reasons: ["告知ページの内容の変更を検出しました（再解析待ち）"], draft: { ...prevDraft, queued: q } });
       }
     }

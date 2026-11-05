@@ -5,6 +5,7 @@ import { lotteryInputSchema } from "@/lib/lottery-input";
 import { isXHost } from "@/lib/server/x-source";
 import { applyCandidateUpdate, ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
+import { rebuildQueued } from "@/lib/collector/queued";
 import { learnAliases, planAliasLearning, type LearnInput } from "@/lib/server/collector/learn";
 import { checkUrl } from "@/lib/server/safe-fetch";
 import { isSupabaseMode } from "@/lib/supabase/env";
@@ -157,7 +158,8 @@ export async function POST(request: NextRequest) {
       const { data: c } = await db.from("collection_candidates").select("id,draft,status,source_url,dedupe_key,title").eq("id", b.id).maybeSingle();
       if (!c || c.status === "auto_registered" || !c.source_url) return json({ ok: false, error: "再解析できる候補ではありません" }, 422);
       const prior = (c.draft as object | null) ?? {};
-      const queued = { kind: c.dedupe_key.startsWith("x:") ? "x_oembed" : "web_page", url: c.source_url, title: c.title, context: "", sourceName: "再解析", attempts: 0, changed: true };
+      // 一覧のカード・店舗/商品・ヒント・文脈は引き継ぐ（取得制限のページは一覧の情報が唯一の手掛かり）
+      const queued = rebuildQueued(prior, { kind: c.dedupe_key.startsWith("x:") ? "x_oembed" : "web_page", url: c.source_url, sourceName: "再解析", reason: "manual_reanalyze", changed: true, fallbackTitle: c.title });
       const { error } = await db.from("collection_candidates").update({ job_state: "pending", status: "pending", attempts: 0, next_run_at: null, reasons: ["再解析待ち"], draft: { ...prior, queued } as never, lease_until: null, locked_by: null }).eq("id", b.id);
       return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
     }

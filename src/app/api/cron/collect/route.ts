@@ -1,11 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { getExtractor } from "@/lib/ai/provider";
-import { collectDue } from "@/lib/collector/queue";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
 import { runCollection, runWorker } from "@/lib/server/collector/run";
 import { enrichFromListings } from "@/lib/server/collector/enrich";
 import { runHoldPass } from "@/lib/server/collector/hold";
+import { planScheduledCollection } from "@/lib/server/collector/schedule";
 import { processGeocodeBatch } from "@/lib/server/geocode-service";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
@@ -39,9 +39,10 @@ async function handle(req: NextRequest) {
   for (const t of targets ?? []) {
     const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
     if (t.schedule_enabled) {
-      const last = await db.from("collection_runs").select("started_at").eq("household_id", t.household_id).eq("phase", "collect").eq("status", "done").order("started_at", { ascending: false }).limit(1).maybeSingle();
-      if (collectDue(now, t.schedule_hour_jst, last.data ? new Date(last.data.started_at) : null)) {
-        const out = await runCollection(base);
+      // 手動収集の履歴とは独立に、今日の定期収集のスロットで未取得の収集元だけを取得する（失敗した収集元は間隔をおいて再試行）
+      const plan = await planScheduledCollection(db, t.household_id, now, t.schedule_hour_jst);
+      if (plan && plan.due.length > 0) {
+        const out = await runCollection({ ...base, scheduled: { slotDate: plan.slotDate, sourceIds: plan.due } });
         if (out.ok) {
           collected++;
           continue; // 収集と最初のバッチでこの呼び出しの時間を使う。続きは次の呼び出しのワーカーが引き継ぐ

@@ -1,5 +1,6 @@
 import "server-only";
 import { hashNormalized } from "@/lib/collector/queue";
+import { rebuildQueued } from "@/lib/collector/queued";
 import { decideHold, needsImageRetry, triagePatch } from "@/lib/collector/triage";
 import { extractPageText } from "@/lib/ai/page-text";
 import { fetchRespectingRobots } from "@/lib/server/safe-fetch";
@@ -54,7 +55,8 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
     }
     if (reanalyze) {
       const prior = (c.draft as Record<string, unknown> | null) ?? {};
-      const q = { ...((prior.queued as object | undefined) ?? { kind: "web_page", url: c.source_url ?? "", title: "", context: "", sourceName: "再調査", attempts: 0 }), changed: true };
+      // 取得済みの一覧の情報（カード・店舗/商品・ヒント・文脈）は、queued が無くなっていても listInfo から引き継ぐ
+      const q = rebuildQueued(prior, { kind: "web_page", url: c.source_url ?? "", sourceName: "再調査", reason: "auto_recheck", changed: true });
       await db.from("collection_candidates").update({ ...patch, job_state: "pending", attempts: 0, next_run_at: null, reasons: ["再調査: 告知ページの内容が変わったため、再解析待ち"], draft: { ...prior, queued: q } as never }).eq("id", c.id);
       out.reanalyze++;
       continue;

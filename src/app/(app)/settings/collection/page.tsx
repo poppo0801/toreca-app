@@ -65,6 +65,13 @@ export default async function CollectionPage() {
   ]);
   const metricRows = await db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000);
   const metrics = computeMetrics(metricRows.data ?? [], now);
+  // 整合性チェック（Stage 6A）: AI解析の利用ログと日別統計の差、異常な予算予約、直近の定期収集の結果
+  const hhId = (settings.data as { household_id?: string } | null)?.household_id ?? "";
+  const [integrityRes, lastSched] = await Promise.all([
+    hhId ? db.rpc("collection_integrity", { p_household: hhId }) : Promise.resolve({ data: null }),
+    db.from("collection_runs").select("started_at,result,sources_ok,sources_failed,items_found").not("slot_date", "is", null).order("started_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const ig = integrityRes.data as { logs_2d?: number; stats_calls_2d?: number; abnormal_reservations?: number } | null;
   const [manualGroups, exclusions, hardSources] = await Promise.all([
     loadManualGroups(db as never, now),
     db.from("collection_exclusions").select("id,scope,key,label,reason_code,reason_note,active,created_at,released_at").order("created_at", { ascending: false }).limit(200),
@@ -98,6 +105,8 @@ export default async function CollectionPage() {
     lastCollectAt,
     budgetBlocked: budget.blocked,
     dueTodayQueued: dueToday.count ?? 0,
+    integrity: ig ? { logs2d: ig.logs_2d ?? 0, statsCalls2d: ig.stats_calls_2d ?? 0, abnormalReservations: ig.abnormal_reservations ?? 0, logFailuresToday: (todayRow as { ai_log_failures?: number } | undefined)?.ai_log_failures ?? 0 } : undefined,
+    lastScheduled: lastSched.data ? { at: new Date(lastSched.data.started_at), result: lastSched.data.result as "complete" | "partial" | "failed" | "empty" | null, sourcesOk: lastSched.data.sources_ok, sourcesFailed: lastSched.data.sources_failed, items: lastSched.data.items_found } : null,
   });
   const state: HealthView["state"] = (running.count ?? 0) > 0 ? "running" : paused ? "paused" : budget.blocked && counts.queued > 0 ? "budget" : counts.queued > 0 ? "waiting" : "ok";
   const health: HealthView = {
