@@ -154,7 +154,10 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
 
   // ---- 商品のTCG種別（ポケモンカード以外は対象外。種別が不明なだけでは除外しない。複数TCGの案内はポケモンカードを残す）
   const tcg = judgeTcg([...(ctx.texts ?? []), ...productNamesOf(input)]);
-  if (tcg.category === "other") excluded.push(otherTcgReason(tcg.other));
+  // 解析した商品がすべて他TCGなら、周囲の文（引用元など）にポケモンカードの語があっても、登録する商品はポケモンカードではない
+  const prodNames = productNamesOf(input);
+  const allOther = prodNames.length > 0 && prodNames.every((n) => judgeTcg([n]).category === "other");
+  if (tcg.category === "other" || allOther) excluded.push(otherTcgReason(tcg.other || judgeTcg(prodNames).other));
   else if (tcg.category === "mixed") notes.push("複数のTCGを案内する告知です（ポケモンカードの情報だけを対象にします）");
 
   // ---- 受付状況

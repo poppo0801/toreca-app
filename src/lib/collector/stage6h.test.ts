@@ -155,3 +155,13 @@ describe("Stage 6H: 他TCGの『拡張パック』（共通の語）だけでポ
     expect(judgeTcg(["拡張パック 抽選"]).category).toBe("unknown");
   });
 });
+
+describe("Stage 6H: 商品がすべて他TCGなら、周囲の文にポケモンカードの語があっても除外", () => {
+  const cond = normalizeConditions({ prefectures: ["大阪府"], includeOnline: true });
+  const base = { applyDeadline: { precision: "date_only", date: "2026-11-20", time: "" }, applyStart: { precision: "unknown", date: "", time: "" }, receiveMethod: "store", applyMethod: "web", requirementTags: [], sourceUrls: [] } as unknown as LotteryInput;
+  it("まとめの引用元などに『ポケカ』があっても、ONE PIECEの商品だけなら除外。ポケモンカードの商品が残るなら除外しない", () => {
+    const ev = (names: string[]) => evaluateCandidate({ ...base, items: names.map((n) => ({ product: { id: null, name: n } })) } as unknown as LotteryInput, cond, { prefecture: "大阪府", storeKind: "physical", distanceKm: null, now: new Date("2026-11-05T03:00:00Z"), texts: ["ポケカ抽選まとめ"] });
+    expect(ev(["ONE PIECEカードゲーム 拡張パック 神の支配"]).verdict).toBe("exclude");
+    expect(ev(["ONE PIECEカードゲーム 拡張パック", "拡張パック「テスト」"]).verdict).toBe("match");
+  });
+});
