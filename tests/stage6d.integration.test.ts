@@ -8,7 +8,7 @@ import { DEFAULT_CONDITIONS } from "@/lib/collector/conditions";
 import { loadAppData, type Db } from "@/lib/server/lottery-service";
 import { processQueue, type CollectDeps } from "@/lib/server/collector/run";
 import { runHoldPass } from "@/lib/server/collector/hold";
-import { runMergePass } from "@/lib/server/collector/merge-pass";
+import { runLowInfoPass, runMergePass } from "@/lib/server/collector/merge-pass";
 import { excludeCandidates, requeueCandidates, undoExclude, USER_EXCLUDED } from "@/lib/server/collector/review-actions";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
@@ -283,5 +283,29 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     expect((await candBy(U("mp3"))).status).toBe("pending");
     // AIは呼ばない
     expect((await sys.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", hid)).count).toBe(aiBefore);
+  });
+
+  it("10) 低情報量（D・E）で要手動確認の候補は低優先度の追跡へ移す。ただし締切が近い・商品マスター未登録・矛盾のあるものは要手動確認のまま。除外はしない", async () => {
+    const none2 = { precision: "unknown", date: "", time: "" };
+    const base = { chain: { id: null, name: "低情報系列6D" }, store: { id: null, name: "", prefecture: "" }, items: [{ product: { id: null, name: "低情報商品" }, quantity: 1, unit: "box" }], multiMode: "single", applyStart: none2, applyDeadline: none2, resultDate: none2, procedureStart: none2, procedureDeadline: none2, receiveMethod: "unknown", applyMethod: "unknown", conditionsText: "", verificationText: "", announcementMethod: "", announcementMethods: [], requirementTags: [], sourceUrls: [], memo: "" };
+    const dl = (d: ReturnType<typeof jst>) => ({ precision: "date_only", date: `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`, time: "" });
+    const mk = (n: string, input: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: U(n), source_url: U(n), title: n, status: "pending", job_state: "review", kind: "new", triage: "manual", manual_state: "open", manual_reason: "情報不足", triage_reason: "自動で再調査を繰り返しましたが、必要な情報を取得できませんでした", reasons: ["情報不足"], draft: { input, summary: { chain: "none", store: "none", items: [{ name: "x", kind: "none", matchedName: null }] }, ...((extra.draft as object) ?? {}) }, ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "draft")) } as never);
+    await mk("lo-d", { ...base, chain: { id: null, name: "低情報系列D6D" } }); // 系列と商品だけ → D
+    await mk("lo-e", { ...base, chain: { id: null, name: "" }, items: [{ product: { id: null, name: "" }, quantity: 1, unit: "box" }] }); // 何も無い → E
+    await mk("lo-urgent", { ...base, chain: { id: null, name: "低情報系列U6D" }, applyDeadline: dl(jst(0, 0)) }, {}); // 本日締切（締切は分かるが応募先が無い=C。Dでも本日なら残す）
+    await mk("lo-unreg", { ...base, chain: { id: null, name: "低情報系列R6D" } }, { triage_reason: "商品マスターに未登録の商品です（商品確認待ち）。商品を確認してください" });
+    const dry = await runLowInfoPass(deps(), { execute: false });
+    expect(dry.moved.map((m) => m.rank).sort()).toEqual(["D", "E"]);
+    expect((await candBy(U("lo-d"))).triage).toBe("manual"); // 調査のみ: 変更しない
+    const done = await runLowInfoPass(deps(), { execute: true });
+    expect(done.moved).toHaveLength(2);
+    for (const n of ["lo-d", "lo-e"]) {
+      const c = await candBy(U(n));
+      expect(c.triage).toBe("auto_retry");
+      expect(c.status).toBe("pending"); // 除外はしない
+    }
+    expect((await candBy(U("lo-urgent"))).triage).toBe("manual");
+    expect((await candBy(U("lo-unreg"))).triage).toBe("manual");
   });
 });

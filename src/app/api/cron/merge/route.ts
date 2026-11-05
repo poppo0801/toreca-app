@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getExtractor } from "@/lib/ai/provider";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
-import { runMergePass } from "@/lib/server/collector/merge-pass";
+import { runLowInfoPass, runMergePass } from "@/lib/server/collector/merge-pass";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -15,6 +15,8 @@ const body = z.object({
   execute: z.boolean().default(false),
   /** 指定した候補が関わる統合だけを適用する（少数件での検証用） */
   ids: z.array(z.uuid()).max(100).optional(),
+  /** true: 低情報量（D・E）で要手動確認の候補を、低優先度の自動追跡へ移す（既定は統合のみ） */
+  lowInfo: z.boolean().default(false),
 });
 
 /**
@@ -31,6 +33,8 @@ export async function POST(req: NextRequest) {
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as Db;
   const { data: hh } = await db.from("collection_settings").select("household_id").limit(2);
   if (!hh || hh.length !== 1) return NextResponse.json({ error: "household not found or ambiguous" }, { status: 409 });
+  const base = { db, householdId: hh[0].household_id, trigger: "manual" as const, now: new Date(), actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
+  if (parsed.data.lowInfo) return NextResponse.json({ ok: true, lowInfo: await runLowInfoPass(base, { execute: parsed.data.execute }) });
   const report = await runMergePass({ db, householdId: hh[0].household_id, trigger: "manual", now: new Date(), actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() }, { execute: parsed.data.execute, ids: parsed.data.ids });
   return NextResponse.json({ ok: true, ...report });
 }

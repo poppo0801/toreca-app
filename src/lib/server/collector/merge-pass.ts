@@ -154,3 +154,46 @@ export async function runMergePass(deps: CollectDeps, opts: { execute: boolean; 
   report.reeval = re && re.ok ? { registered: re.counts.registered ?? 0, duplicate: re.counts.duplicate ?? 0, excluded: (re.counts.excluded_past ?? 0) + (re.counts.excluded_offtarget ?? 0), review: re.counts.review ?? 0 } : null;
   return report;
 }
+
+/**
+ * 低情報量（情報充実度 D・E）で要手動確認になっている候補を、低優先度の自動追跡・再調査へ移す（Stage 6D）。
+ * 移さないもの: 商品マスター未登録・情報源間の矛盾（利用者の判断が要る）、締切が24時間以内、受付終了。
+ * 低情報量という理由だけで除外はしない。移した候補は、次回の再調査で情報が増えれば、ランクが上がる。
+ */
+export async function runLowInfoPass(deps: CollectDeps, opts: { execute: boolean }): Promise<{ candidates: number; moved: { id: string; rank: string }[]; kept: number }> {
+  const { db, householdId, now } = deps;
+  const today = jstDateString(now);
+  const sctx = await loadSourceCtx(db, householdId);
+  const all = await loadOpen(db, householdId, sctx);
+  const manual = (await db.from("collection_candidates").select("id,triage,manual_state,reasons,triage_reason,due_at").eq("household_id", householdId).eq("status", "pending").eq("job_state", "review").eq("triage", "manual").eq("manual_state", "open").limit(300)).data ?? [];
+  const byId = new Map(all.map((o) => [o.id, o]));
+  const moved: { id: string; rank: string }[] = [];
+  let kept = 0;
+  for (const m of manual) {
+    const o = byId.get(m.id);
+    if (!o) {
+      kept++;
+      continue;
+    }
+    const a = assessCompleteness(o.input, o.summary, { today });
+    const text = `${m.triage_reason ?? ""} ${(m.reasons ?? []).join(" ")}`;
+    const dl = o.input.applyDeadline;
+    const dueAt = dl.precision !== "unknown" && dl.date ? new Date(`${dl.date}T${dl.precision === "date_time" && dl.time ? dl.time : "23:59"}:00+09:00`) : m.due_at ? new Date(m.due_at) : null;
+    const urgent = !!dueAt && dueAt.getTime() - now.getTime() <= 24 * 3600_000;
+    const conflict = conflictLabels(o.fields).length > 0;
+    if ((a.rank !== "D" && a.rank !== "E") || urgent || conflict || /商品マスターに未登録|利用者の判断|矛盾/.test(text)) {
+      kept++;
+      continue;
+    }
+    moved.push({ id: m.id, rank: a.rank });
+  }
+  if (opts.execute) {
+    for (const mv of moved) {
+      await db
+        .from("collection_candidates")
+        .update({ triage: "auto_retry", triage_reason: mv.rank === "E" ? "識別できる情報が少ないため、低優先度で追跡・再調査を続けます" : "情報が少ないため、自動追跡・再調査を続けます（要手動確認にはしません）", manual_state: null, manual_reason: "", next_run_at: new Date(now.getTime() + 3600_000).toISOString() } as never)
+        .eq("id", mv.id);
+    }
+  }
+  return { candidates: manual.length, moved, kept };
+}
