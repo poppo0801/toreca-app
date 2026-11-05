@@ -8,6 +8,8 @@ import { DEFAULT_CONDITIONS } from "@/lib/collector/conditions";
 import { loadAppData, type Db } from "@/lib/server/lottery-service";
 import { processQueue, type CollectDeps } from "@/lib/server/collector/run";
 import { runHoldPass } from "@/lib/server/collector/hold";
+import { runMergePass } from "@/lib/server/collector/merge-pass";
+import { excludeCandidates, requeueCandidates, undoExclude, USER_EXCLUDED } from "@/lib/server/collector/review-actions";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
 const NOW = new Date();
@@ -194,5 +196,92 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     expect(a.status).not.toBe("excluded");
     expect(b.status).not.toBe("excluded");
     expect(dr(b).mergeLog).toBeUndefined();
+  });
+
+  // ------------------------------------------------------------ 確認待ちの除外・取り消し・一括操作（データ保護）
+  it("7) 一覧からの除外は、その候補だけを物理削除せずに除外し、取り消しで直前の状態に戻る。収集元の除外ルールは作らない。登録済みの候補は除外できない", async () => {
+    const ids: string[] = [];
+    for (const n of ["ex1", "ex2", "ex3"]) {
+      const r = await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: U(n), source_url: U(n), title: n, status: "pending", job_state: "review", triage: "auto_retry", triage_reason: "保留", reasons: ["店舗を確実に特定できません"], draft: { input: { chain: { id: null, name: "x" } }, listInfo: { title: "t", context: "c", card: "カード本文", seenAt: "2026-11-01T00:00:00Z" } } } as never).select("id").single();
+      ids.push(r.data!.id);
+    }
+    const reg = await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: U("ex-reg"), source_url: U("ex-reg"), title: "r", status: "auto_registered", job_state: "completed", reasons: ["登録済み"] } as never).select("id").single();
+    const lotsBefore = (await lots()).length;
+    const rulesBefore = (await sys.from("collection_exclusions").select("id").eq("household_id", hid)).data ?? [];
+
+    const r1 = await excludeCandidates(sys, [ids[0]]);
+    expect(r1).toMatchObject({ ok: true, excluded: 1, failed: 0 });
+    const c1 = await candBy(U("ex1"));
+    expect(c1.status).toBe("excluded");
+    expect(c1.reasons).toEqual([USER_EXCLUDED]);
+    expect((c1.draft as { listInfo?: unknown }).listInfo).toBeTruthy(); // 取得済みの情報は残る（物理削除しない）
+    const ok = r1.ok ? r1.prev : [];
+    // 取り消し: 直前の状態（保留・理由）へ戻る
+    expect(await undoExclude(sys, ok)).toEqual({ restored: 1, failed: 0 });
+    const back = await candBy(U("ex1"));
+    expect(back).toMatchObject({ status: "pending", job_state: "review", triage: "auto_retry" });
+    expect(back.reasons).toEqual(["店舗を確実に特定できません"]);
+    // 他の処理で除外された候補（利用者の除外ではない）は、取り消しで触らない
+    await sys.from("collection_candidates").update({ status: "excluded", job_state: "skipped", reasons: ["受付終了のため自動で除外しました"] }).eq("id", ids[2]);
+    expect(await undoExclude(sys, [{ id: ids[2], prev: { status: "pending", job_state: "review", reasons: ["x"] } }])).toEqual({ restored: 0, failed: 1 });
+    expect((await candBy(U("ex3"))).status).toBe("excluded");
+    // 一括除外: 選択した候補だけ。登録済みは対象外（失敗として数える）
+    const rb = await excludeCandidates(sys, [ids[1], reg.data!.id]);
+    expect(rb).toMatchObject({ ok: true, excluded: 1, failed: 1 });
+    expect((await candBy(U("ex-reg"))).status).toBe("auto_registered");
+    expect((await candBy(U("ex2"))).status).toBe("excluded");
+    // データ保護: 抽選・収集元の除外ルールは変わらない
+    expect((await lots()).length).toBe(lotsBefore);
+    expect(((await sys.from("collection_exclusions").select("id").eq("household_id", hid)).data ?? []).length).toBe(rulesBefore.length);
+  });
+
+  it("8) 一括再調査: 選択した候補を再調査待ちに戻し、取得済みの一覧情報・X投稿情報を引き継ぐ。成功・失敗の件数を返す", async () => {
+    const x = await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: "x:911000090", source_url: "https://x.com/q6d_official/status/911000090", x_post_id: "911000090", title: "t", status: "pending", job_state: "review", reasons: ["x"], draft: { xpost: { id: "911000090", username: "q6d_official", createdAt: NOW.toISOString(), text: "本文", images: ["https://pbs.twimg.com/a.png"], links: [], fetchedAt: NOW.toISOString() } } } as never).select("id").single();
+    const noUrl = await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: U("nourl"), source_url: null, title: "t", status: "pending", job_state: "review", reasons: ["x"] } as never).select("id").single();
+    const r = await requeueCandidates(sys, [x.data!.id, noUrl.data!.id]);
+    expect(r).toEqual({ requeued: 1, failed: 1 });
+    const c = await candBy("x:911000090");
+    expect(c.job_state).toBe("pending");
+    const q = (c.draft as { queued?: { kind?: string; post?: { images?: string[] }; reason?: string } }).queued;
+    expect(q?.kind).toBe("x_post"); // 保存済みの投稿を使う（X APIで再取得しない）
+    expect(q?.post?.images).toEqual(["https://pbs.twimg.com/a.png"]);
+    expect(q?.reason).toBe("manual_reanalyze");
+  });
+
+  it("9) 既存候補への適用（統合パス）: 調査のみでは変更せず、実行すると同じ抽選の候補を項目単位で統合し、別店舗・日付の違う候補は統合せず関連候補にする。AIは呼ばない", async () => {
+    // 既存の保留候補（旧い解析結果。項目別の出典は無い）を3件用意: 同じ抽選の2件（情報が分散）と、別店舗の1件
+    const draftOf = (o: Record<string, unknown>) => ({ summary: { chain: "exact", store: "none", items: [{ name: "x", kind: "exact", matchedName: "x" }] }, confirmedAt: NOW.toISOString(), ...o });
+    const base = { chain: { id: null, name: "統合パス系列6D" }, items: [{ product: { id: null, name: "パス商品" }, quantity: 1, unit: "box" }], multiMode: "single", applyStart: { precision: "unknown", date: "", time: "" }, resultDate: { precision: "unknown", date: "", time: "" }, procedureStart: { precision: "unknown", date: "", time: "" }, procedureDeadline: { precision: "unknown", date: "", time: "" }, receiveMethod: "unknown", applyMethod: "unknown", conditionsText: "", verificationText: "", announcementMethod: "", announcementMethods: [], requirementTags: [], sourceUrls: [], memo: "" };
+    const dl = (d: ReturnType<typeof jst>) => ({ precision: "date_only", date: `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`, time: "" });
+    const none2 = { precision: "unknown", date: "", time: "" };
+    const mk = (n: string, input: Record<string, unknown>) =>
+      sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: U(n), source_url: U(n), title: n, status: "pending", job_state: "review", kind: "new", triage: "auto_retry", triage_reason: "保留", reasons: ["不足"], next_run_at: new Date(NOW.getTime() + 3600_000).toISOString(), draft: draftOf({ input }) } as never);
+    await mk("mp1", { ...base, store: { id: null, name: "パス店", prefecture: "" }, applyDeadline: dl(jst(6, 0)), applyDeadline_: 0, conditionsText: "会員登録が必要" }); // 締切・条件がある
+    await mk("mp2", { ...base, store: { id: null, name: "パス店", prefecture: "" }, applyDeadline: none2, applyMethod: "web", resultDate: dl(jst(9, 0)) }); // 応募方法・当選発表がある（締切が無い）
+    await mk("mp3", { ...base, store: { id: null, name: "別店舗", prefecture: "" }, applyDeadline: dl(jst(6, 0)) }); // 別店舗
+    const aiBefore = (await sys.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", hid)).count;
+
+    const dry = await runMergePass(deps(), { execute: false });
+    expect(dry.plans.filter((p) => p.kind === "same_lottery")).toHaveLength(1);
+    expect(dry.plans[0].filled.length).toBeGreaterThan(0);
+    expect((await candBy(U("mp2"))).status).toBe("pending"); // 調査のみ: 変更しない
+
+    const done = await runMergePass(deps(), { execute: true });
+    const merged = done.plans.find((p) => p.kind === "same_lottery")!;
+    const carrier = (await sys.from("collection_candidates").select("id,draft,status").eq("id", merged.carrierId).single()).data!;
+    const other = (await sys.from("collection_candidates").select("id,status,reasons,draft").eq("id", merged.otherId).single()).data!;
+    const inp = (carrier.draft as D).input!;
+    expect(inp.applyMethod).toBe("web"); // 応募方法（mp2由来）
+    expect(inp.applyDeadline.date).toBeTruthy(); // 応募締切（mp1由来）
+    expect(inp.conditionsText).toContain("会員登録");
+    expect(other.status).toBe("excluded"); // 統合済み（削除しない）
+    expect(other.reasons[0]).toContain("統合");
+    expect((other.draft as D).mergedInto).toBe(carrier.id);
+    expect(dr(carrier).mergeLog?.[0]).toMatchObject({ kind: "same_lottery" });
+    expect(dr(carrier).assessment).toBeTruthy();
+    // 別店舗の候補は統合されない
+    expect((await candBy(U("mp3"))).status).toBe("pending");
+    // AIは呼ばない
+    expect((await sys.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", hid)).count).toBe(aiBefore);
   });
 });

@@ -5,7 +5,7 @@ import { lotteryInputSchema } from "@/lib/lottery-input";
 import { isXHost } from "@/lib/server/x-source";
 import { applyCandidateUpdate, ensureCollectionDefaults, registerCandidate, runCollection } from "@/lib/server/collector/run";
 import { createXClient } from "@/lib/server/collector/x-client";
-import type { Db } from "@/lib/server/lottery-service";
+import { excludeCandidates, requeueCandidates, undoExclude } from "@/lib/server/collector/review-actions";
 import { rebuildQueued } from "@/lib/collector/queued";
 import { learnAliases, planAliasLearning, type LearnInput } from "@/lib/server/collector/learn";
 import { checkUrl } from "@/lib/server/safe-fetch";
@@ -48,13 +48,6 @@ const settingsInput = z.object({
   workerBatch: z.number().int().min(1).max(20),
   recheckHours: z.number().int().min(1).max(168),
 });
-
-/** 利用者の操作で除外した候補の印（取り消しで戻せるのは、この印の付いたものだけ） */
-const USER_EXCLUDED = "利用者が除外しました";
-async function snapshotForExclude(db: Db, ids: string[]): Promise<{ id: string; prev: Record<string, unknown> }[]> {
-  const { data } = await db.from("collection_candidates").select("id,status,job_state,triage,triage_reason,manual_state,reasons,resolved_at,completed_at,next_run_at").in("id", ids).neq("status", "auto_registered");
-  return (data ?? []).map((r) => ({ id: r.id, prev: { status: r.status, job_state: r.job_state, triage: r.triage, triage_reason: r.triage_reason ?? "", manual_state: r.manual_state, reasons: r.reasons, resolved_at: r.resolved_at, completed_at: r.completed_at, next_run_at: r.next_run_at } }));
-}
 
 const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("run"), actor: z.uuid().nullable().optional(), sourceId: uuid.optional() }),
@@ -161,35 +154,12 @@ export async function POST(request: NextRequest) {
       return json({ ok: true, registered: ok, failed: failed.length, firstError: failed[0] ?? null });
     }
     case "bulkExclude": {
-      // 選択した候補だけを除外する（収集元全体の除外ルールは作らない）。成功・失敗の件数と、取り消し用の直前の状態を返す
-      const prev = await snapshotForExclude(db, b.ids);
-      const { data, error } = await db
-        .from("collection_candidates")
-        .update({ status: "excluded", job_state: "skipped", reasons: [USER_EXCLUDED], resolved_at: new Date().toISOString(), lease_until: null, locked_by: null })
-        .in("id", b.ids)
-        .neq("status", "auto_registered")
-        .select("id");
-      if (error) return json({ ok: false, error: "更新に失敗しました" }, 500);
-      const done = new Set((data ?? []).map((r) => r.id));
-      return json({ ok: true, excluded: done.size, failed: b.ids.length - done.size, prev: prev.filter((x) => done.has(x.id)) });
+      const r = await excludeCandidates(db, b.ids);
+      return r.ok ? json({ ok: true, excluded: r.excluded, failed: r.failed, prev: r.prev }) : json({ ok: false, error: "更新に失敗しました" }, 500);
     }
     case "bulkReanalyze": {
-      // 選択した候補を再調査（再解析待ち）に戻す。一覧のカード・保存済みのX投稿情報は引き継ぐ。結果は成功・失敗の件数で返す
-      let ok = 0;
-      let failed = 0;
-      for (const id of b.ids) {
-        const { data: c } = await db.from("collection_candidates").select("id,draft,status,source_url,dedupe_key,title").eq("id", id).maybeSingle();
-        if (!c || c.status === "auto_registered" || !c.source_url) {
-          failed++;
-          continue;
-        }
-        const prior = (c.draft as object | null) ?? {};
-        const queued = rebuildQueued(prior, { kind: c.dedupe_key.startsWith("x:") ? "x_oembed" : "web_page", url: c.source_url, sourceName: "再調査", reason: "manual_reanalyze", changed: true, fallbackTitle: c.title });
-        const { error } = await db.from("collection_candidates").update({ job_state: "pending", status: "pending", attempts: 0, next_run_at: null, reasons: ["再調査待ち"], draft: { ...prior, queued } as never, lease_until: null, locked_by: null }).eq("id", id);
-        if (error) failed++;
-        else ok++;
-      }
-      return json({ ok: ok > 0 || failed === 0, requeued: ok, failed });
+      const r = await requeueCandidates(db, b.ids);
+      return json({ ok: r.requeued > 0 || r.failed === 0, ...r });
     }
     case "reanalyze": {
       // 再解析: 取得済みの内容は削除せず、同じ候補をキューに戻す（AIの利用上限・予算の範囲で、ワーカーが解析する）
@@ -236,31 +206,14 @@ export async function POST(request: NextRequest) {
       return error ? json({ ok: false, error: "更新に失敗しました" }, 500) : json({ ok: true });
     }
     case "exclude": {
-      // この候補だけを除外する（収集元全体の除外ルールは作らない）。物理削除はせず、直前の状態を返して取り消せるようにする
-      const prev = await snapshotForExclude(db, [b.id]);
-      const { data, error } = await db
-        .from("collection_candidates")
-        .update({ status: "excluded", job_state: "skipped", reasons: [USER_EXCLUDED], resolved_at: new Date().toISOString(), lease_until: null, locked_by: null })
-        .eq("id", b.id)
-        .neq("status", "auto_registered")
-        .select("id");
-      if (error) return json({ ok: false, error: "更新に失敗しました" }, 500);
-      if ((data ?? []).length === 0) return json({ ok: false, error: "除外できませんでした（登録済みの候補は除外できません）" }, 422);
-      return json({ ok: true, excluded: 1, prev });
+      const r = await excludeCandidates(db, [b.id]);
+      if (!r.ok) return json({ ok: false, error: "更新に失敗しました" }, 500);
+      if (r.excluded === 0) return json({ ok: false, error: "除外できませんでした（登録済みの候補は除外できません）" }, 422);
+      return json({ ok: true, excluded: 1, prev: r.prev });
     }
     case "undoExclude": {
-      let restored = 0;
-      let failed = 0;
-      for (const it of b.items) {
-        const p = it.prev as Record<string, unknown>;
-        const allowed = ["status", "job_state", "triage", "triage_reason", "manual_state", "reasons", "resolved_at", "completed_at", "next_run_at"];
-        const patch = Object.fromEntries(Object.entries(p).filter(([k]) => allowed.includes(k)));
-        // 利用者が除外した候補だけを戻す（他の処理で変わった候補には触れない）
-        const { data, error } = await db.from("collection_candidates").update(patch as never).eq("id", it.id).eq("status", "excluded").contains("reasons", [USER_EXCLUDED]).select("id");
-        if (error || (data ?? []).length === 0) failed++;
-        else restored++;
-      }
-      return restored > 0 || failed === 0 ? json({ ok: true, restored, failed }) : json({ ok: false, error: "元に戻せませんでした" }, 422);
+      const r = await undoExclude(db, b.items as never);
+      return r.restored > 0 || r.failed === 0 ? json({ ok: true, ...r }) : json({ ok: false, error: "元に戻せませんでした" }, 422);
     }
     case "restore": {
       // 除外を取り消す: 解析済みの内容があれば確認待ちに、無ければ（一覧の表示だけで除外したもの）解析待ちに戻す。解析前の絞り込みは通さず、解析する
