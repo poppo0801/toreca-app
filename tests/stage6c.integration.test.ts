@@ -124,7 +124,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
     await add("t3", "テスト玩具6C本店で6C商品の抽選受付中です。応募はこちら");
     await run();
     const c = await cand("t3");
-    expect(c.status, JSON.stringify({ r: c.reasons, f: Object.entries((c.draft as any).fields ?? {}).filter(([, v]: any) => v.state === "conflict").map(([k, v]: any) => [k, v.value, v.alt?.value]) })).toBe("auto_registered");
+    expect(c.status, JSON.stringify(c.reasons)).toBe("auto_registered");
     const lotsNow = await lots();
     expect(lotsNow).toHaveLength(1);
     expect(c.lottery_id).toBe(lotsNow[0].id);
