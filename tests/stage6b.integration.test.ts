@@ -182,6 +182,35 @@ describe.skipIf(!dbTestsEnabled)("Stage 6B", () => {
     expect((d.secondary ?? []).join()).toContain("@q6b_official");
   });
 
+  // ------------------------------------------------------------ オンライン抽選の二重登録（本番で確認した不具合）
+  it("オンライン抽選（店舗名なし→店舗「オンライン」）は、別々の解析でも二重登録しない", async () => {
+    await u1.from("stores").insert({ household_id: hid, chain_id: chainId, name: "オンライン", prefecture: "", sales_kind: "online_only" });
+    await u1.from("products").insert({ household_id: hid, official_name: "架空オンライン商品6B", packs_per_box: 20 });
+    const online = {
+      engine: "mock" as const,
+      extract: async (r: never) => {
+        const o = await getExtractor({ AI_PROVIDER: "mock" })!.extract(r);
+        const raw = JSON.parse(JSON.stringify(o.raw)) as { chain_name: string; store_name: string; receive_method: string; products: { name: string }[] };
+        raw.chain_name = "テスト玩具";
+        raw.store_name = "";
+        raw.receive_method = "shipping";
+        raw.products[0].name = "架空オンライン商品6B";
+        return { ...o, raw };
+      },
+    };
+    const add = (n: string) => sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: `https://q6b-online.example.invalid/${n}`, source_url: `https://q6b-online.example.invalid/${n}`, title: n, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: `https://q6b-online.example.invalid/${n}`, title: "【抽選】オンライン", context: "オンライン抽選 11/28まで", card: "架空オンライン商品6B 抽選受付 通販 応募締切あり", sourceName: "pokeso", attempts: 0 } } as never });
+    const runAuto = async () => processQueue(deps({ extractor: online as never, fetchPage: async () => ({ ok: false, code: "robots", message: "robots" }) }), { settings: { auto_register: true }, cond: { ...DEFAULT_CONDITIONS, statusMode: "open_or_before" }, data: await loadAppData(sys, hid), aiLeft: 5, timeLeft: () => 50_000, perBatch: 4 });
+    await add("o1");
+    await runAuto();
+    await add("o2");
+    await runAuto(); // 別の実行（本番では5分おきのワーカー）
+    const o1 = await cand("https://q6b-online.example.invalid/o1");
+    expect(o1.status, JSON.stringify(o1.reasons)).toBe("auto_registered");
+    expect((await cand("https://q6b-online.example.invalid/o2")).status).toBe("duplicate");
+    const lots = (await sys.from("lotteries").select("id").eq("household_id", hid)).data ?? [];
+    expect(lots).toHaveLength(1);
+  });
+
   // ------------------------------------------------------------ 取得制限の代替
   it("取得制限が確定している応募サービスは、同じURLへ再アクセスせず最初から一覧の文章で読み取る。条件を満たさないときは従来どおり取得する", async () => {
     const host = "q6b-limited.example.invalid";

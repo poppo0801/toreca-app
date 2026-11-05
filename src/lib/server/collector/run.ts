@@ -6,7 +6,7 @@ import { remainingPosts, X_COST_PER_POST_JPY, type QuotedPost, type XPost } from
 import { isReady } from "@/lib/collector/ready";
 import { extractPageText } from "@/lib/ai/page-text";
 import { PROMPT_VERSION, type LotteryExtractor } from "@/lib/ai/provider";
-import { buildDraft } from "@/lib/lottery-match";
+import { buildDraft, findDuplicates } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
 import { extractFromRequest, runExtraction, type ExtractResult } from "@/lib/server/lottery-extract-service";
@@ -540,6 +540,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   } else if (!input.store.name.trim() && input.receiveMethod === "shipping") {
     input.store = { id: null, name: "オンライン", prefecture: "" };
   }
+  // 店舗名「オンライン」を補ったあとで重複を判定し直す（buildDraft の時点では店舗が未確定で重複候補が空になり、同じオンライン抽選が二重登録されていた）
+  draft.duplicates = findDuplicates(input, data.lotteries, q.url);
   if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
     const note = "二次情報（まとめサイトの一覧・公式アカウントの対応づけ）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
