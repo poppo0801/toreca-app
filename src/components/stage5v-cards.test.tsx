@@ -151,7 +151,7 @@ describe("プロフィール別の応募状況の色", () => {
     const marks = qa('[data-testid="apply-status"] [data-status]');
     expect(marks.length).toBeGreaterThan(0);
     for (const m of marks) {
-      const dim = m.className.includes("opacity-50");
+      const dim = m.className.includes("opacity-[0.36]");
       if (m.getAttribute("data-status") === "applied") expect(dim).toBe(false);
       else if (m.getAttribute("data-status") !== "needs_review") expect(dim).toBe(true);
     }

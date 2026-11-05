@@ -203,22 +203,27 @@
 }
 
 /*
- * ハイレアカードの光沢・ホログラム（Stage 6F）。レアリティで強さを変える（data-tier: 1=AR / 2=SR系 / 3=SAR・UR・HR・SSR）。
- *  - ::before = 虹色のホログラム（位置は --mx/--my で、触れた・傾けた位置に追従）／::after = 斜めの光の反射（スイープ）
- *  - 文字・イラストは隠さない（pointer-events なし・加算系の合成・不透明度は控えめ）。変形はしない（transform/opacity/background-position のみで軽量）
- *  - 上位ティアだけゆっくり常時きらめく。動きを減らす設定では、アニメーションをやめて静止した薄いホログラムにする
+ * ハイレアカードの光沢・ホログラム（Stage 6F → 6H で色再現を優先する方式に変更）。レアリティで強さを変える（data-tier: 1=AR / 2=SR系 / 3=SAR・UR・HR・SSR）。
+ *  - カード全体を白く覆わない: 静止時は常設の被せ物を置かない（画像本来の色・明度・コントラストを維持）。光は触れた位置の周囲にだけ出す
+ *  - ::before = 虹色の細い筋（soft-light合成。画像の濃淡を保ったまま色味だけが乗る）。触れた位置（--mx/--my）の周囲に円形のマスクで限定
+ *  - ::after = 斜めの反射の筋（細い帯2本）。位置は --mx に追従し、触れていない間は上位ティアだけ数秒おきに1回走る
+ *  - 文字・イラストは隠さない（pointer-events なし）。変形はしない（transform なし。opacity/background-position/mask のみで軽量）
+ *  - 動きを減らす設定では、アニメーションをやめる（触れた位置の光は残る）
  */
 .card-shine {
   position: relative;
-  --shine-holo: 0.22;
-  --shine-glint: 0.45;
+  --shine-holo: 0.5;
+  --shine-glint: 0.5;
+  /* 光の及ぶ範囲（カードの幅・高さに対する割合）。指の周囲だけで、カード全体には及ばない */
+  --shine-rx: 34%;
+  --shine-ry: 24%;
   --mx: 50%;
   --my: 40%;
   isolation: isolate;
 }
-.card-shine[data-tier="1"] { --shine-holo: 0.14; --shine-glint: 0.34; }
-.card-shine[data-tier="2"] { --shine-holo: 0.24; --shine-glint: 0.5; }
-.card-shine[data-tier="3"] { --shine-holo: 0.36; --shine-glint: 0.65; }
+.card-shine[data-tier="1"] { --shine-holo: 0.45; --shine-glint: 0.34; --shine-rx: 28%; --shine-ry: 20%; }
+.card-shine[data-tier="2"] { --shine-holo: 0.6; --shine-glint: 0.5; --shine-rx: 34%; --shine-ry: 24%; }
+.card-shine[data-tier="3"] { --shine-holo: 0.8; --shine-glint: 0.66; --shine-rx: 40%; --shine-ry: 28%; }
 .card-shine::before,
 .card-shine::after {
   content: "";
@@ -228,61 +233,69 @@
   border-radius: inherit;
 }
 .card-shine::before {
-  background:
-    radial-gradient(circle at var(--mx) var(--my), rgb(255 255 255 / 0.55), transparent 38%),
-    linear-gradient(115deg, rgb(255 80 160 / 0.7), rgb(255 200 60 / 0.7) 22%, rgb(80 230 140 / 0.7) 44%, rgb(70 170 255 / 0.7) 66%, rgb(190 110 255 / 0.7) 88%);
-  background-size: 100% 100%, 260% 260%;
-  background-position: 0 0, var(--mx) var(--my);
-  mix-blend-mode: color-dodge;
-  opacity: var(--shine-holo);
-  transition: opacity 0.25s ease-out;
+  background: repeating-linear-gradient(115deg, rgb(255 70 150) 0%, rgb(255 190 60) 6%, rgb(70 230 140) 12%, rgb(60 170 255) 18%, rgb(190 100 255) 24%, rgb(255 70 150) 30%);
+  background-size: 220% 220%;
+  background-position: var(--mx) var(--my);
+  -webkit-mask-image: radial-gradient(ellipse var(--shine-rx) var(--shine-ry) at var(--mx) var(--my), #000 0%, rgb(0 0 0 / 0.5) 55%, transparent 100%);
+  mask-image: radial-gradient(ellipse var(--shine-rx) var(--shine-ry) at var(--mx) var(--my), #000 0%, rgb(0 0 0 / 0.5) 55%, transparent 100%);
+  mix-blend-mode: soft-light;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
 }
 .card-shine::after {
-  background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / var(--shine-glint)) 45%, rgb(255 225 160 / calc(var(--shine-glint) * 0.8)) 52%, transparent 68%);
-  background-size: 250% 100%;
-  background-position: 130% 0;
-  opacity: 0;
+  background:
+    linear-gradient(115deg, transparent calc(var(--mx) - 9%), rgb(255 255 255 / var(--shine-glint)) var(--mx), transparent calc(var(--mx) + 9%)),
+    linear-gradient(115deg, transparent calc(var(--mx) + 12%), rgb(255 232 170 / calc(var(--shine-glint) * 0.7)) calc(var(--mx) + 15%), transparent calc(var(--mx) + 19%));
+  -webkit-mask-image: radial-gradient(ellipse calc(var(--shine-rx) * 1.5) calc(var(--shine-ry) * 1.8) at var(--mx) var(--my), #000 0%, transparent 100%);
+  mask-image: radial-gradient(ellipse calc(var(--shine-rx) * 1.5) calc(var(--shine-ry) * 1.8) at var(--mx) var(--my), #000 0%, transparent 100%);
   mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
 }
+/* 触れている間だけ光る（ホバー・押下・なぞっている間） */
 .card-shine:hover::before,
 .card-shine:active::before,
-.card-shine[data-touch="1"]::before {
-  opacity: calc(var(--shine-holo) * 1.7);
-}
+.card-shine[data-touch="1"]::before { opacity: var(--shine-holo); }
 .card-shine:hover::after,
-.card-shine:active::after {
-  opacity: 1;
-  animation: card-shine-sweep 0.9s ease-out both;
-}
+.card-shine:active::after,
+.card-shine[data-touch="1"]::after { opacity: 1; }
+/* 一度だけ見せる（詳細を開いたとき）: 細い筋が1回走る */
 .card-shine-once::after {
   opacity: 1;
+  background: linear-gradient(115deg, transparent 38%, rgb(255 255 255 / var(--shine-glint)) 46%, rgb(255 225 160 / calc(var(--shine-glint) * 0.7)) 52%, transparent 60%);
+  background-size: 250% 100%;
+  background-position: 130% 0;
+  -webkit-mask-image: none;
+  mask-image: none;
   animation: card-shine-sweep 1.2s ease-out 0.25s both;
 }
-.card-shine[data-tier="2"]::after,
-.card-shine[data-tier="3"]::after {
-  /* 上位ティア: 数秒おきに光が走る（常時の負荷を避けるため、間隔を長く取る） */
+/* 上位ティア: 数秒おきに細い光が1回走る（静止している間の大半は何も乗らない） */
+.card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
+.card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after {
   opacity: 1;
-  animation: card-shine-sweep 5.5s ease-in-out 1s infinite;
-}
-.card-shine[data-tier="3"]::before {
-  animation: card-holo-drift 7s ease-in-out infinite alternate;
+  background: linear-gradient(115deg, transparent 40%, rgb(255 255 255 / calc(var(--shine-glint) * 0.7)) 47%, rgb(255 225 160 / calc(var(--shine-glint) * 0.5)) 52%, transparent 58%);
+  background-size: 250% 100%;
+  background-position: 130% 0;
+  -webkit-mask-image: none;
+  mask-image: none;
+  animation: card-shine-sweep 6s ease-in-out 1.5s infinite;
 }
 @keyframes card-shine-sweep {
   0% { background-position: 130% 0; }
-  22%, 100% { background-position: -30% 0; }
-}
-@keyframes card-holo-drift {
-  from { background-position: 0 0, 10% 20%; }
-  to { background-position: 0 0, 90% 80%; }
+  16%, 100% { background-position: -30% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .card-shine::before,
   .card-shine::after,
-  .card-shine-once::after {
+  .card-shine-once::after,
+  .card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
+  .card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after {
     animation: none !important;
     transition: none;
   }
-  .card-shine::after { opacity: 0; }
+  .card-shine-once::after,
+  .card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
+  .card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after { opacity: 0; }
 }
 
 /* Undo通知の進捗バー: 残り時間に合わせて左から右へ伸びる（動きを減らす設定でも、バーは静止せず時間経過を示す） */

@@ -2078,6 +2078,7 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   // 処理状況の表示（解析待ち・確認待ち・失敗・除外が分かる）と、ワーカー（バックグラウンド継続）の設定。初期は無効
   await expect(page.getByTestId("health")).toContainText("解析待ち 0");
   await expect(page.getByTestId("health-state")).toHaveAttribute("data-state", "ok");
+  await page.getByTestId("candidates-toggle").click();
   await expect(page.getByTestId("cand-tab-queued")).toBeVisible();
   // 運用状況: 日次上限の既定は100件、月額予算の既定は3,000円。新規発見・AI解析・登録は別の数字
   await expect(page.getByTestId("ops-ai")).toContainText("0／100件");

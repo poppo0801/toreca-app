@@ -57,6 +57,18 @@ export function ManualItemSummary({ it }: { it: ManualItem }) {
   );
 }
 
+/**
+ * 一覧の高さを約3件分に制限し、一覧の中だけ縦にスクロールする（見出し・件数は外に固定）。
+ * overscroll-contain で、一覧の端まで来ても画面全体のスクロールへ連鎖させない。
+ */
+export function ScrollList({ children }: { children: React.ReactNode }) {
+  return (
+    <ul className="max-h-[13.5rem] touch-pan-y space-y-2 overflow-y-auto overscroll-contain pr-0.5 [-webkit-overflow-scrolling:touch]" tabIndex={0} aria-label="候補の一覧（内部でスクロールします）" data-testid="manual-scroll">
+      {children}
+    </ul>
+  );
+}
+
 function Fold({ title, count, children, testid }: { title: string; count: number; children: React.ReactNode; testid: string }) {
   if (count <= 0) return null;
   return (
@@ -185,18 +197,18 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
       {now.length > 0 && (
         <div className="space-y-1" data-testid="manual-now">
           <p className="text-xs font-medium text-muted-foreground">今すぐ確認</p>
-          <ul className="space-y-2">{now.map((it) => row(it, true))}</ul>
+          <ScrollList>{now.map((it) => row(it, true))}</ScrollList>
         </div>
       )}
       <Fold title="締切に余裕あり・締切不明（急ぎません）" count={later.length} testid="manual-later">
-        <ul className="space-y-2">{later.map((it) => row(it, true))}</ul>
+        <ScrollList>{later.map((it) => row(it, true))}</ScrollList>
       </Fold>
       <Fold title="自動再調査中（対応不要）" count={groups.retryingCount} testid="manual-retrying">
-        <ul className="space-y-2">{groups.retrying.map((it) => row(it, false))}</ul>
+        <ScrollList>{groups.retrying.map((it) => row(it, false))}</ScrollList>
         {groups.retryingCount > groups.retrying.length && <p className="text-xs text-muted-foreground">ほか{groups.retryingCount - groups.retrying.length}件</p>}
       </Fold>
       <Fold title="終了・対象外・対応済み（直近）" count={groups.closed.length} testid="manual-closed">
-        <ul className="space-y-2">{groups.closed.map((it) => row(it, false))}</ul>
+        <ScrollList>{groups.closed.map((it) => row(it, false))}</ScrollList>
       </Fold>
     </section>
   );

@@ -1,4 +1,6 @@
 import { deadlinePassed, evaluateCandidate, type CollectionConditions } from "@/lib/collector/conditions";
+import { tcgTextsOf } from "@/lib/collector/category";
+import { prefectureOf } from "@/lib/geo";
 import { findDuplicates, matchChain, matchProduct, matchStore, type LotteryDraft, type MatchKind } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
@@ -166,7 +168,9 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
 
   const store = data.stores.find((s) => s.id === input.store.id);
   const dist = store ? storeDistance(data, store) : null;
-  const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now });
+  const dr = stored as unknown as { listInfo?: { title?: string; card?: string; context?: string }; xpost?: { text?: string; quoted?: { text?: string } } };
+  const texts = tcgTextsOf({ title: c.title, card: dr.listInfo?.card, context: dr.listInfo?.context, postText: dr.xpost?.text, quotedText: dr.xpost?.quoted?.text });
+  const ev = evaluateCandidate(input, cond, { texts, prefecture: store?.prefecture || (store?.address ? (prefectureOf(store.address) ?? "") : "") || input.store.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now });
   if (ev.verdict === "exclude") return { ...base, cls: "F", action: "exclude", reasons: [`収集条件の対象外です（${ev.reasons.join("・")}）`], priority: 6, missing: [] };
 
   const draftLike = { input, summary: rm.summary, candidates: rm.candidates, modePending: !!stored.modePending } as unknown as LotteryDraft;

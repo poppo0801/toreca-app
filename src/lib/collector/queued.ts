@@ -90,7 +90,7 @@ export function storedPostOf(draft: unknown, now: Date = new Date()): Obj | null
   if (!s || typeof s.id !== "string") return null;
   const age = (now.getTime() - new Date(String(s.fetchedAt ?? "")).getTime()) / 86_400_000;
   if (!Number.isFinite(age) || age > XPOST_REUSE_DAYS) return null;
-  return { id: s.id, text: s.text ?? "", images: s.images ?? [], links: s.links ?? [], createdAt: s.createdAt ?? "", username: s.username ?? "", ...(isObj(s.quoted) ? { quoted: s.quoted } : {}) };
+  return { id: s.id, text: s.text ?? "", images: s.images ?? [], links: s.links ?? [], createdAt: s.createdAt ?? "", username: s.username ?? "", ...(isObj(s.profile) ? { profile: s.profile } : {}), ...(isObj(s.quoted) ? { quoted: s.quoted } : {}) };
 }
 
 export interface RebuildBase {

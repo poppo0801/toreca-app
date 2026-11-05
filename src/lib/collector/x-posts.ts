@@ -21,13 +21,23 @@ export interface XPost {
   refs: { type: string; id: string }[];
   /** 投稿者のアカウント名（取得できたとき） */
   username?: string;
+  /** 投稿者のプロフィール（表示名・所在地・自己紹介。店舗の特定に使う。取得できたときだけ） */
+  profile?: XProfile;
   /** 引用している投稿（APIが展開して返したとき）。まとめアカウントは公式の投稿を引用して紹介することが多い */
   quoted?: QuotedPost;
+}
+
+/** X投稿者のプロフィール（公開情報）。公式の店舗アカウントは、表示名に系列・店舗名、所在地欄に住所が書かれていることが多い */
+export interface XProfile {
+  name: string;
+  location: string;
+  description: string;
 }
 
 export interface QuotedPost {
   id: string;
   username: string;
+  profile?: XProfile;
   text: string;
   createdAt: string;
   images: string[];
@@ -55,11 +65,15 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 /** 投稿の一覧応答 → 投稿。不正な要素は捨てる。username は投稿URLの組み立てに使う */
 export function parseXPosts(json: unknown, username: string): XPost[] {
   if (!json || typeof json !== "object") return [];
-  const j = json as { data?: RawTweet[]; includes?: { media?: RawMedia[]; tweets?: RawTweet[]; users?: { id?: unknown; username?: unknown }[] } };
+  const j = json as { data?: RawTweet[]; includes?: { media?: RawMedia[]; tweets?: RawTweet[]; users?: { id?: unknown; username?: unknown; name?: unknown; location?: unknown; description?: unknown }[] } };
   const media = new Map<string, RawMedia>();
   for (const m of j.includes?.media ?? []) if (typeof m.media_key === "string") media.set(m.media_key, m);
   const users = new Map<string, string>();
-  for (const u of j.includes?.users ?? []) if (typeof u.id === "string" && typeof u.username === "string") users.set(u.id, u.username);
+  const profiles = new Map<string, XProfile>();
+  for (const u of j.includes?.users ?? []) {
+    if (typeof u.id === "string" && typeof u.username === "string") users.set(u.id, u.username);
+    if (typeof u.id === "string" && (typeof u.name === "string" || typeof u.location === "string")) profiles.set(u.id, { name: str(u.name).slice(0, 80), location: str(u.location).slice(0, 100), description: str(u.description).slice(0, 300) });
+  }
   const included = new Map<string, RawTweet>();
   for (const it of j.includes?.tweets ?? []) if (typeof it.id === "string") included.set(it.id, it);
 
@@ -89,7 +103,7 @@ export function parseXPosts(json: unknown, username: string): XPost[] {
     const q = (t.referenced_tweets ?? []).find((r) => r.type === "quoted");
     const qt = q && typeof q.id === "string" ? included.get(q.id) : undefined;
     const quoted: QuotedPost | undefined = qt
-      ? { id: str(qt.id), username: users.get(str(qt.author_id)) ?? "", text: fullText(qt), createdAt: str(qt.created_at), images: imagesOf(qt), links: linksOf(qt) }
+      ? { id: str(qt.id), username: users.get(str(qt.author_id)) ?? "", ...(profiles.has(str(qt.author_id)) ? { profile: profiles.get(str(qt.author_id)) } : {}), text: fullText(qt), createdAt: str(qt.created_at), images: imagesOf(qt), links: linksOf(qt) }
       : undefined;
     out.push({
       id,
@@ -98,6 +112,7 @@ export function parseXPosts(json: unknown, username: string): XPost[] {
       authorId: str(t.author_id),
       url: `https://x.com/${username}/status/${id}`,
       username: users.get(str(t.author_id)) || username,
+      ...(profiles.has(str(t.author_id)) ? { profile: profiles.get(str(t.author_id)) } : {}),
       images: imagesOf(t),
       links: linksOf(t),
       refs: (t.referenced_tweets ?? []).flatMap((r) => (typeof r.type === "string" && /^\d{1,25}$/.test(str(r.id)) ? [{ type: r.type, id: str(r.id) }] : [])),

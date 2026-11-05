@@ -31,7 +31,7 @@ export function useShine(rarity: string, enabled: boolean, opts: { once?: boolea
   };
   return {
     className: cn("card-shine", opts.once && "card-shine-once"),
-    props: { "data-tier": tier, onPointerMove: move, onPointerLeave: leave, onPointerUp: leave, onPointerCancel: leave, style: undefined as CSSProperties | undefined },
+    props: { "data-tier": tier, onPointerDown: move, onPointerMove: move, onPointerLeave: leave, onPointerUp: leave, onPointerCancel: leave, style: undefined as CSSProperties | undefined },
   };
 }
 

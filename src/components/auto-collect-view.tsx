@@ -987,8 +987,7 @@ export function AutoCollectView({
         </div>
       </Block>
 
-      <section id="candidates" className="scroll-mt-24 space-y-2 rounded-lg border p-3 text-sm" data-testid="candidates">
-        <h2 className="font-semibold">収集候補</h2>
+      <Block no="⑤" title="収集候補" testId="candidates" forceOpen={hashOpen === "candidates"} summary={`候補${counts.pending}件・要確認${candidates.filter((c) => c.job_state === "review" && c.kind !== "update").length}件`}>
         <div role="tablist" aria-label="候補の種類" className="grid grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5 sm:grid-cols-6">
           {CAND_TABS.map((t) => (
             <button key={t.value} role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)} className={cn("min-h-9 rounded-md px-0 text-[11px] font-medium leading-tight", tab === t.value ? "bg-primary text-primary-foreground" : "hover:bg-card")} data-testid={`cand-tab-${t.value}`}>
@@ -1064,11 +1063,6 @@ export function AutoCollectView({
                     </span>
                   )}
                   <span className="min-w-0 flex-1">{d ? `${d.chain?.name ?? ""} ${d.store?.name ?? ""} ${d.items?.[0]?.product.name ?? ""}`.trim() || c.title : c.title}</span>
-                  {c.job_state === "review" && c.kind !== "update" && (
-                    <button type="button" className="inline-flex min-h-8 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium text-muted-foreground" disabled={busy !== null} onClick={() => void quickExclude(c)} aria-label="この候補を除外" data-testid="cand-quick-exclude">
-                      除外
-                    </button>
-                  )}
                 </p>
                 {c.assess && (
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" data-testid="cand-assess">
@@ -1153,6 +1147,11 @@ export function AutoCollectView({
                       編集して登録
                     </Button>
                   )}
+                  {c.job_state === "review" && c.kind !== "update" && (
+                    <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void quickExclude(c)} aria-label="この候補を除外" data-testid="cand-quick-exclude">
+                      除外
+                    </Button>
+                  )}
                   {c.source_url && (
                     <a href={c.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center text-info underline" data-testid="cand-source">
                       元の情報
@@ -1198,7 +1197,7 @@ export function AutoCollectView({
           })}
           {shown.length === 0 && <li className="py-2 text-xs text-muted-foreground">該当する候補はありません。</li>}
         </ul>
-      </section>
+      </Block>
 
       {nextEdit && !editing && (
         <p className="flex items-center gap-2 text-xs" data-testid="next-candidate">

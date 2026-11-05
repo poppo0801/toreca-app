@@ -231,20 +231,22 @@ function LotteryBoardInner() {
                 type="button"
                 aria-selected={selected}
                 onClick={() => selectTab(t.value)}
-                className={cn("min-h-9 rounded-md px-0 text-xs font-medium leading-tight", selected ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}
+                className={cn("min-h-10 rounded-md px-0 py-0.5 text-xs font-medium leading-tight", selected ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")}
               >
-                {/* 1行に収める: 名前（赤丸は文字のすぐ右上）・件数・新着の小さなバッジ。タブの高さは変えない */}
-                <span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">
+                {/* 2行: 上段=名前（赤丸は文字のすぐ右上）／下段=件数（新着のバッジは件数の右）。全タブで同じ高さ・位置にそろえる */}
+                <span className="flex flex-col items-center justify-center whitespace-nowrap">
                   <span className={cn("relative", dot && "ml-1.5")}>
                     {t.label}
                     {dot && <span data-testid={`tab-dot-${t.value}`} aria-label="未対応あり" className="absolute -left-2 -top-1 size-2 rounded-full bg-danger ring-1 ring-white" />}
                   </span>
-                  <span className="text-[11px] tabular-nums opacity-80">{count}</span>
-                  {t.value === "all" && newCount > 0 && (
-                    <span data-testid="tab-new" aria-label={`新着${newCount}件`} className="rounded-full bg-info px-1 text-[10px] font-bold leading-4 text-white tabular-nums">
-                      {newCount}
-                    </span>
-                  )}
+                  <span className="inline-flex h-4 items-center gap-0.5 text-[11px] tabular-nums" data-testid={`tab-count-${t.value}`}>
+                    <span className="opacity-80">{count}</span>
+                    {t.value === "all" && newCount > 0 && (
+                      <span data-testid="tab-new" aria-label={`新着${newCount}件`} className="rounded-full bg-info px-1 text-[10px] font-bold leading-4 text-white tabular-nums">
+                        {newCount}
+                      </span>
+                    )}
+                  </span>
                 </span>
               </button>
             );

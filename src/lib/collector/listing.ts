@@ -4,6 +4,7 @@
  * サイトごとの違いはアダプターで吸収し、構造が変わって取れなくなったときは0件として扱う（取れたことにしない）。
  */
 
+import { OTHER_TCG, POKEMON_TCG } from "@/lib/collector/category";
 export type AdapterId = "pokeso" | "torecabiyori" | "generic";
 
 export interface ListingEntry {
@@ -190,8 +191,8 @@ export function parseListing(adapter: AdapterId, html: string, baseUrl: string):
 }
 
 // ---------------------------------------------------------------- 関連判定（ルールベース。AIを呼ぶ前の絞り込み）
-const POKEMON = /ポケモンカード|ポケカ|ポケモン\s*(TCG|カード)|Pok[eé]mon\s*(TCG|Card)|拡張パック|ハイクラスパック|強化拡張パック|スタートデッキ|スターターセット|exスペシャル|スペシャルセット/i;
-const OTHER_TCG = /遊戯王|遊★戯★王|ワンピースカード|ONE\s*PIECE\s*CARD|デュエル・?マスターズ|デュエマ|ヴァイスシュヴァルツ|Weiß|MTG|マジック[：:・]?ザ・?ギャザリング|ドラゴンボール(スーパー)?カード|ガンダムカード|ユニオンアリーナ|バトルスピリッツ|ヴァンガード|ディズニー.*カード|Lorcana|ホロライブ.*カード/i;
+const POKEMON = POKEMON_TCG;
+const OTHER = OTHER_TCG;
 const LOTTERY = /抽選|応募|受付|予約|販売|招待|エントリー|当選|申込|申し込み/;
 
 export interface Relevance {
@@ -205,7 +206,7 @@ export interface Relevance {
 export function judgeRelevance(text: string, opts: { fromPokemonList?: boolean } = {}): Relevance {
   const t = text.normalize("NFKC");
   const pk = POKEMON.test(t);
-  const other = OTHER_TCG.test(t);
+  const other = OTHER.test(t);
   if (other && !pk) return { relevant: false, uncertain: false, reason: "ポケモンカード以外のTCGの告知です" };
   if (pk && LOTTERY.test(t)) return { relevant: true, uncertain: false, reason: "" };
   if (pk) return { relevant: true, uncertain: true, reason: "抽選の言及が見当たりません" };

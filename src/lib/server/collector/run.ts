@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { normalizeConditions, evaluateCandidate, preScreenFromList, type CollectionConditions } from "@/lib/collector/conditions";
 import { judgeRelevance, normalizeUrl, parseListHints, parseListing, looksLikeLottery, type AdapterId, type ListHints, type ListingEntry } from "@/lib/collector/listing";
-import { remainingPosts, X_COST_PER_POST_JPY, type QuotedPost, type XPost } from "@/lib/collector/x-posts";
+import { remainingPosts, X_COST_PER_POST_JPY, type QuotedPost, type XPost, type XProfile } from "@/lib/collector/x-posts";
 import { isReady } from "@/lib/collector/ready";
 import { extractPageText } from "@/lib/ai/page-text";
 import { PROMPT_VERSION, type LotteryExtractor } from "@/lib/ai/provider";
@@ -27,7 +27,10 @@ import { listInfoFromQueued, rebuildQueued, type AiReason } from "@/lib/collecto
 import { dueSources, runResultOf, type AttemptStatus } from "@/lib/collector/schedule";
 import { lowInfoOverride, decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
 import { activeExclusions, altPlanFor, recordAltSuccess, recordHardSource } from "@/lib/server/collector/sources-health";
-import { loadXLinks } from "@/lib/server/collector/x-accounts";
+import { loadXIdentities, loadXLinks, saveXIdentity } from "@/lib/server/collector/x-accounts";
+import { identifyAccount, identityHint, type AccountIdentity, type SavedIdentity } from "@/lib/collector/store-identity";
+import { otherTcgItemIndexes, productNamesOf, tcgTextsOf } from "@/lib/collector/category";
+import { PREFECTURE_LIST, prefectureOf } from "@/lib/geo";
 import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from "@/lib/collector/x-accounts";
 import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
 import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
@@ -86,6 +89,8 @@ export interface CollectDeps {
   scheduled?: { slotDate: string; sourceIds: string[] };
   /** 利用者が登録した公式Xアカウントの対応づけ（解析の開始時に読み込む） */
   xLinks?: Map<string, XLink>;
+  /** 確認済みのXアカウントと店舗の対応（自動で読み取ったもの。解析の開始時に読み込む） */
+  xIdentities?: Map<string, SavedIdentity>;
   /** 情報源の分類に使う文脈（解析の開始時に読み込む） */
   sourceCtx?: SourceContext;
 }
@@ -148,7 +153,7 @@ interface QueuedPayload {
     /** 一覧のカードの構造から読み取れた店舗名・商品名 */
     fields?: { store?: string; product?: string };
     sourceName: string;
-    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; quoted?: QuotedPost; replyToId?: string };
+    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
     /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
     imageStats?: ImageStats;
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
@@ -372,11 +377,12 @@ function xpostSnapshot(q: QueuedPayload["queued"], evidence: Partial<Record<stri
   return {
     id: p.id,
     username: p.username ?? "",
+    ...(p.profile ? { profile: p.profile } : {}),
     createdAt: p.createdAt,
     text: safeSlice(p.text, 4000),
     images: p.images.slice(0, 8),
     links: p.links.slice(0, 5),
-    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 2000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
+    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, ...(p.quoted.profile ? { profile: p.quoted.profile } : {}), createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 2000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
     fetchedAt: nowIso,
     via: q.xVia ?? null,
     basis: q.relevanceBasis ?? null,
@@ -459,6 +465,36 @@ interface Outcome {
   aiFailed: boolean;
 }
 
+/**
+ * 投稿者のXアカウント（表示名・プロフィール）から系列・店舗・所在地を特定する（Stage 6H）。
+ * まとめアカウントの投稿は引用元（公式）の投稿者を対象にする。特定できた対応は保存し、次回以降に再利用する。特定できなければ null。
+ */
+async function identifyPostAuthor(deps: CollectDeps, data: AppData, q: QueuedPayload["queued"], author: string | null): Promise<AccountIdentity | null> {
+  const post = q.post;
+  const ids = (deps.xIdentities ??= await loadXIdentities(deps.db, deps.householdId));
+  const run = (username: string, profile: XProfile | undefined) => identifyAccount({ username, profile, chains: data.chains, stores: data.stores, saved: ids.get(username) ?? null });
+  const isAgg = (u: string) => !!deps.sourceCtx?.aggregatorAccounts && [...deps.sourceCtx.aggregatorAccounts].some((a) => a.toLowerCase() === u);
+  let id = author && !isAgg(author) ? run(author, post?.profile) : null;
+  const quotedUser = post?.quoted?.username ? normUsername(post.quoted.username) : "";
+  if ((!id || id.kind === "aggregator" || id.kind === "unknown") && quotedUser && !isAgg(quotedUser)) {
+    const qi = run(quotedUser, post?.quoted?.profile);
+    if (qi.kind === "store" || qi.kind === "chain") id = qi;
+  }
+  if (!id || (id.kind !== "store" && id.kind !== "chain")) return null;
+  if (id.storeBasis !== "saved" && (await saveXIdentity(deps.db, deps.householdId, id, ids.get(id.username)))) {
+    ids.set(id.username, { username: id.username, chainName: id.chainName, storeName: id.storeName, chainId: id.chainId, storeId: id.storeId, prefecture: id.prefecture, basis: id.prefectureBasis || "name" });
+  }
+  return id;
+}
+
+/** 登録した抽選の店舗の都道府県が空のとき、確実な根拠のある都道府県だけを補う（既に入っている値は変えない） */
+async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Promise<void> {
+  if (!pref || !PREFECTURE_LIST.includes(pref)) return;
+  const { data } = await db.from("lotteries").select("store_id").eq("id", lotteryId).maybeSingle();
+  if (!data?.store_id) return;
+  await db.from("stores").update({ prefecture: pref }).eq("id", data.store_id).eq("prefecture", "").neq("sales_kind", "online_only");
+}
+
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
 async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = []): Promise<Outcome> {
   const { db } = deps;
@@ -523,13 +559,25 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
 
   // 公式Xアカウントの対応づけ（利用者が登録したものだけ）。告知から読み取れなかった系列/店舗だけを補い、食い違いは上書きせず注意にする
   const author = q.post?.username ? normUsername(q.post.username) : usernameFromPostUrl(q.url);
-  const hint = author ? applyAccountHint(result.extraction, deps.xLinks?.get(author), data) : null;
-  const draft = buildDraft(hint?.extraction ?? result.extraction, data, { sourceUrl: q.url });
+  // Xアカウントの表示名・プロフィールから、系列・店舗・所在地を特定する（Stage 6H）。まとめアカウントの投稿は、引用元（公式）の投稿者を見る。告知から読み取れた項目は上書きしない
+  const idn = await identifyPostAuthor(deps, data, q, author);
+  const idHint = idn ? identityHint(result.extraction, idn) : null;
+  const baseEx = idHint ? { ...result.extraction, chainName: idHint.chainName, storeName: idHint.storeName, prefecture: idHint.prefecture } : result.extraction;
+  const hint = author ? applyAccountHint(baseEx, deps.xLinks?.get(author), data) : null;
+  const draft = buildDraft(hint?.extraction ?? baseEx, data, { sourceUrl: q.url });
   if (hint && hint.warnings.length > 0) draft.warnings.push(...hint.warnings);
+  if (idn && idn.notes.length > 0 && idn.storeBasis === "ambiguous") draft.warnings.push(...idn.notes);
   // 自動収集は★管理対象にせず、応募記録も作らない
   const input: LotteryInput = { ...draft.input, isManaged: false, applications: [], sourceUrls: [...new Set([...(draft.input.sourceUrls ?? []), q.url])].slice(0, 10) };
   // ---- 読み取れなかった項目を、まとめサイトの一覧の表示（二次情報）で補う。補った項目は根拠として明示し、確定情報とは区別する
-  const secondary: string[] = [...(hint?.used ?? [])];
+  const secondary: string[] = [...(hint?.used ?? []), ...(idHint?.used ?? [])];
+  // 複数のTCGを案内する投稿では、ポケモンカード以外の明細を外す（ポケモンカードの明細が残るときだけ）
+  const dropIdx = new Set(otherTcgItemIndexes(input.items));
+  if (dropIdx.size > 0) {
+    input.items = input.items.filter((_, i) => !dropIdx.has(i));
+    draft.summary.items = draft.summary.items.filter((_, i) => !dropIdx.has(i));
+    secondary.push("ポケモンカード以外の商品を除いた明細");
+  }
   const lh = q.hints;
   if (input.applyDeadline.precision === "unknown" && lh?.deadlineIso) {
     input.applyDeadline = { ...isoToFlex(lh.deadlineIso) };
@@ -611,7 +659,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   const dist = store ? storeDistance(data, store) : null;
   // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
-  const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
+  const knownPref = store?.prefecture || (store?.address ? (prefectureOf(store.address) ?? "") : "") || input.store.prefecture || lh?.prefecture || "";
+  const texts = tcgTextsOf({ title: q.title, card: q.card, context: q.context, postText: q.post?.text, quotedText: q.post?.quoted?.text, products: productNamesOf(input) });
+  const ev = evaluateCandidate(input, cond, { texts, prefecture: knownPref, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
   const { ready, missing, provisional } = isReady(draft, input);
   const stage = classifyStage(input, jstDayString(deps.now));
   // ---- 抽選予告の追跡（Stage 6C）
@@ -716,6 +766,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする
         await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto" }).eq("id", saved.value.id);
+        // 店舗の都道府県が空のままにならないよう、確実な根拠のある都道府県だけを補う（既に入っている値は変えない）
+        await fillStorePrefecture(db, saved.value.id, input.receiveMethod === "shipping" ? "" : knownPref);
         const storedReg = trackingObj ? ({ ...(stored as object), tracking: { ...trackingObj, promotedAt: nowIso, promotedLotteryId: saved.value.id } } as unknown as Json) : stored;
         await supersede("registered", saved.value.id);
         await finish("completed", { status: "auto_registered", triage: "auto_register", triage_reason: "条件に一致し、情報が十分なため自動登録", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: storedReg, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
@@ -958,7 +1010,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
             continue;
           }
           funnel.passed[j.basis]++;
-          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
+          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
           rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: safeSlice(p.text.replace(/\n/g, " "), 80) || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
         }
         const saveRes = await saveCandidateRows(db, rows);
@@ -1074,6 +1126,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   const lease = 150;
   const rules = await activeExclusions(db, householdId);
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
+  deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;
   const triaged = await triageQueue(deps, ctx.cond);
   out.screened += triaged;

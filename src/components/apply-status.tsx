@@ -69,7 +69,7 @@ export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; class
             data-status={m.status}
             data-result={m.result}
             data-account={m.accountId}
-            className={cn("inline-flex items-center gap-0.5", mine && "rounded-full bg-muted/70 pr-1", m.status !== "applied" && m.status !== "needs_review" && "opacity-50")}
+            className={cn("inline-flex items-center gap-0.5", mine && "rounded-full bg-muted/70 pr-1", m.status !== "applied" && m.status !== "needs_review" && "opacity-[0.36]")}
           >
             <ProfileAvatar profile={owner} size="xs" className={cn("size-[18px] text-[9px]", m.status !== "applied" && "grayscale")} />
             {m.status === "applied" && m.result === "won" ? (

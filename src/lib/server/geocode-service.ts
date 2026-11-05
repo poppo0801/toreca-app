@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { prefectureOf } from "@/lib/geo";
 import { buildQuery, isCompleteAddress, MAX_GEO_ATTEMPTS, pickCandidate, type GeoHit } from "@/lib/geocode";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -92,7 +93,9 @@ export async function processGeocodeBatch(db: Db, opts: { limit?: number; fetche
       out.failed++;
       continue;
     }
-    await update({ latitude: Number(pick.hit.lat.toFixed(6)), longitude: Number(pick.hit.lng.toFixed(6)), geo_status: "ok", geo_address: address, geo_attempts: 0, geo_error: null });
+    // 都道府県が空の店舗には、地図の検索結果（住所の先頭の都道府県）から補う。既に入っている値は変えない
+    const pref = s.prefecture ? null : prefectureOf(pick.hit.title);
+    await update({ latitude: Number(pick.hit.lat.toFixed(6)), longitude: Number(pick.hit.lng.toFixed(6)), geo_status: "ok", geo_address: address, geo_attempts: 0, geo_error: null, ...(pref ? { prefecture: pref } : {}) });
     out.ok++;
   }
   return out;

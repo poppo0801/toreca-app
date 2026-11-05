@@ -3,6 +3,7 @@
  * 判定は「合う（match）／除外（exclude）／要確認（review）」の3つ。分からない情報を「合う」に倒さない。
  */
 import type { LotteryInput } from "@/lib/lottery-input";
+import { judgeTcg, otherTcgReason, productNamesOf } from "@/lib/collector/category";
 import { HIDDEN_REQUIREMENT_TAGS, placeInfo, type RequirementTag, type StoreKind } from "@/lib/lottery-taxonomy";
 
 export const DEFAULT_PREFECTURES = ["兵庫県", "大阪府", "京都府", "東京都", "千葉県", "神奈川県"] as const;
@@ -75,6 +76,8 @@ export interface EvalContext {
   /** 自宅からの直線距離(km)。位置が不明なら null（0kmにしない） */
   distanceKm: number | null;
   now: Date;
+  /** 商品のTCG種別の判定に使う文字列（題名・本文・商品名）。指定しなければ商品名だけで判定する */
+  texts?: string[];
 }
 
 const JST = "Asia/Tokyo";
@@ -148,6 +151,11 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
   const excluded: string[] = [];
   const review: string[] = [];
   const notes: string[] = [];
+
+  // ---- 商品のTCG種別（ポケモンカード以外は対象外。種別が不明なだけでは除外しない。複数TCGの案内はポケモンカードを残す）
+  const tcg = judgeTcg([...(ctx.texts ?? []), ...productNamesOf(input)]);
+  if (tcg.category === "other") excluded.push(otherTcgReason(tcg.other));
+  else if (tcg.category === "mixed") notes.push("複数のTCGを案内する告知です（ポケモンカードの情報だけを対象にします）");
 
   // ---- 受付状況
   const ended = deadlinePassed(input.applyDeadline, ctx.now);

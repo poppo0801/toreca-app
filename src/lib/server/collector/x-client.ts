@@ -1,5 +1,5 @@
 import "server-only";
-import { classifyXError, parseXPosts, type XApiErrorCode, type XPost } from "@/lib/collector/x-posts";
+import { classifyXError, parseXPosts, type XApiErrorCode, type XPost, type XProfile } from "@/lib/collector/x-posts";
 import { sniffImage } from "@/lib/server/image-sniff";
 
 /**
@@ -17,6 +17,8 @@ export type XResult<T> = ({ ok: true } & T) | { ok: false; code: XApiErrorCode; 
 
 export interface XClient {
   lookupUser(username: string): Promise<XResult<{ id: string; username: string }>>;
+  /** アカウントのプロフィール（表示名・所在地・自己紹介）。店舗の特定に使う。1アカウントぶんの従量課金 */
+  lookupProfile?(username: string): Promise<XResult<{ id: string; username: string; profile: XProfile }>>;
   userPosts(userId: string, username: string, opts: { sinceId?: string | null; max: number; startTime?: string | null }): Promise<XResult<{ posts: XPost[]; newestId: string | null }>>;
   /** 投稿URLから投稿を1件取得する（単件・一括・共有の解析用。取得した投稿1件ぶんの従量課金） */
   getPost(id: string, username: string): Promise<XResult<{ post: XPost }>>;
@@ -55,10 +57,21 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
       const why = String(d.errors?.[0]?.detail ?? "").slice(0, 120);
       return { ok: false, code: /suspended/i.test(why) ? "suspended" : "not_found", message: `アカウントを取得できませんでした${why ? `（${why}）` : ""}` };
     },
+    async lookupProfile(username) {
+      const r = await get(`/users/by/username/${encodeURIComponent(username)}`, { "user.fields": "id,username,name,location,description" });
+      if (!r.ok) return r;
+      const d = (r.json as { data?: { id?: unknown; username?: unknown; name?: unknown; location?: unknown; description?: unknown }; errors?: { detail?: unknown }[] }) ?? {};
+      if (typeof d.data?.id === "string" && /^d{1,25}$/.test(d.data.id)) {
+        const s = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : "");
+        return { ok: true, id: d.data.id, username: typeof d.data.username === "string" ? d.data.username : username, profile: { name: s(d.data.name, 80), location: s(d.data.location, 100), description: s(d.data.description, 300) } };
+      }
+      const why = String(d.errors?.[0]?.detail ?? "").slice(0, 120);
+      return { ok: false, code: /suspended/i.test(why) ? "suspended" : "not_found", message: `アカウントを取得できませんでした${why ? `（${why}）` : ""}` };
+    },
     async getPost(id, username) {
       const r = await get(`/tweets/${encodeURIComponent(id)}`, {
         "tweet.fields": TWEET_FIELDS,
-        "user.fields": "username",
+        "user.fields": "username,name,location,description",
         expansions: EXPANSIONS,
         "media.fields": "type,url",
       });
@@ -71,7 +84,7 @@ export function createXClient(token: string | undefined = process.env.X_BEARER_T
       const params: Record<string, string> = {
         max_results: String(Math.min(100, Math.max(5, opts.max))),
         "tweet.fields": TWEET_FIELDS,
-        "user.fields": "username",
+        "user.fields": "username,name,location,description",
         expansions: EXPANSIONS,
         "media.fields": "type,url",
         exclude: "retweets,replies",

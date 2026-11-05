@@ -136,9 +136,16 @@ export function CollectionView() {
     <div className="space-y-3" data-testid="collection">
       <div className={PAGE_HEADING_ROW}>
         <PageHeading navId="collection">コレクション</PageHeading>
-        <Button size="sm" onClick={() => setForm({ kind: "new" })} data-testid="add-card">
-          ＋カード登録
-        </Button>
+        {/* 右上: [相場更新][＋カード登録]。スマホでも押しやすい高さ（40px）にする */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button size="sm" variant="outline" className="h-10 gap-1 px-2.5" onClick={() => setShowMarket(true)} data-testid="market-update-open">
+            <TrendingUp className="size-4" aria-hidden="true" />
+            相場更新
+          </Button>
+          <Button size="sm" className="h-10 px-3" onClick={() => setForm({ kind: "new" })} data-testid="add-card">
+            ＋カード登録
+          </Button>
+        </div>
       </div>
 
       {data && (
@@ -205,9 +212,6 @@ export function CollectionView() {
               </button>
               <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="fx-toggle" onClick={() => (setShowMenu(false), void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), fx: !prefs.fx } }))}>
                 <Sparkles className="size-4" /> 演出 {prefs.fx ? "ON" : "OFF"}
-              </button>
-              <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="market-update-open" onClick={() => (setShowMenu(false), setShowMarket(true))}>
-                <TrendingUp className="size-4" /> 相場を一括更新
               </button>
               {filters.favOnly && favs.length > 1 && (
                 <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="reorder-toggle" onClick={() => (setShowMenu(false), setReorder((v) => !v))}>
