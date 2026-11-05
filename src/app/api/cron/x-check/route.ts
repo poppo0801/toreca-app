@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
   const analyze = sp.get("analyze") === "1";
   const maxPosts = Math.min(MAX_POSTS_LIMIT, Math.max(1, Number(sp.get("max")) || DEFAULT_POSTS));
   const analyzeMax = Math.min(4, Math.max(1, Number(sp.get("analyzeMax")) || 2));
+  // 何件目の解析対象から解析するか（60秒の実行時間内で、複数回に分けて別の投稿を検証するため）。解析しない投稿は画像のダウンロードもしない
+  const analyzeFrom = Math.max(0, Number(sp.get("analyzeFrom")) || 0);
+  let passSeen = 0;
   const requested = (sp.get("users") ?? ALLOWED.join(",")).split(",").map((s) => s.trim());
   const users = ALLOWED.filter((u) => requested.some((r) => r.toLowerCase() === u.toLowerCase()));
   const extractor = analyze ? getExtractor() : null;
@@ -54,7 +57,10 @@ export async function POST(req: NextRequest) {
     for (const p of r.posts.slice(0, maxPosts)) {
       fetched++;
       const j = judgeXPost({ text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, quoted: p.quoted ?? null }, now);
-      const rich = await enrichXPost(p, {});
+      const wouldAnalyze = !!extractor && j.pass && (p.images.length > 0 || (p.quoted?.images.length ?? 0) > 0 || p.links.length > 0 || !!p.quoted);
+      const inWindow = wouldAnalyze && passSeen >= analyzeFrom && analyzed < analyzeMax;
+      if (j.pass) passSeen++;
+      const rich = inWindow || !extractor ? await enrichXPost(p, {}) : { text: p.text, images: [], linkedPage: false, imagesUsed: 0, stats: { found: p.images.length + (p.quoted?.images.length ?? 0), fetched: 0, sent: 0 }, quotedUsed: false };
       const item: Record<string, unknown> = {
         id: p.id,
         createdAt: p.createdAt,
@@ -70,7 +76,7 @@ export async function POST(req: NextRequest) {
         judge: j.pass ? { pass: true, basis: j.basis } : { pass: false, skip: j.skip },
         textHead: p.text.slice(0, 60).replace(/\s+/g, " "),
       };
-      if (extractor && analyzed < analyzeMax && j.pass && (rich.images.length > 0 || rich.linkedPage || p.quoted)) {
+      if (extractor && inWindow && (rich.images.length > 0 || rich.linkedPage || p.quoted)) {
         analyzed++;
         const kind = rich.images.length > 0 ? "image" : "x_url";
         const res = await extractFromRequest({ kind, text: rich.text, images: rich.images.length ? rich.images : undefined, sourceUrl: p.url, postedOn: p.createdAt.slice(0, 10), now }, kind, extractor, now, []);
