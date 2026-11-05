@@ -300,3 +300,19 @@ export function shineTier(rarity: string): 0 | 1 | 2 | 3 {
   if (["SR", "CSR", "CHR", "BWR", "ACE"].includes(r)) return 2;
   return r === "AR" ? 1 : 0;
 }
+
+/** 取得した相場（ポケカ価格比較のCSV。手動の参考相場とは別に保持。Stage 6G） */
+export interface MarketPriceRow {
+  cardId: string;
+  kind: "sale" | "buyback";
+  medianYen: number;
+  lowYen: number;
+  highYen: number;
+  sampleCount: number;
+  outlierCount: number;
+  shops: { shop: string; price: number; condition: string; url: string; scrapedAt: string }[];
+  source: string;
+  sourceUrl: string | null;
+  csvUpdatedAt: string | null;
+  fetchedAt: string;
+}

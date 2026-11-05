@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { isAllowedCondition } from "@/lib/card-condition";
 import { cardInputSchema, holdingInputSchema, priceInputSchema, type CardInput, type HoldingInput, type PriceInput } from "@/lib/collection-input";
-import type { CardRow, FavoriteRow, HoldingRow, PriceRow } from "@/lib/collection";
+import type { CardRow, FavoriteRow, HoldingRow, MarketPriceRow, PriceRow } from "@/lib/collection";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -34,6 +34,8 @@ export interface CollectionData {
   cards: CardRow[];
   holdings: HoldingRow[];
   prices: PriceRow[];
+  /** 取得した相場（手動の参考相場とは別） */
+  market: MarketPriceRow[];
   favorites: FavoriteRow[];
   /** サムネイルの保存先 → 期限つきURL */
   thumbUrls: Record<string, string>;
@@ -42,11 +44,12 @@ export interface CollectionData {
 export async function loadCollectionAction(): Promise<R<{ data: CollectionData }>> {
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const [c, h, p, f] = await Promise.all([
+  const [c, h, p, f, mk] = await Promise.all([
     any(db).from("card_masters").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(5000),
     any(db).from("card_holdings").select("*").is("archived_at", null).limit(20000),
     any(db).from("card_prices").select("*").order("confirmed_on", { ascending: false }).limit(20000),
     any(db).from("card_favorites").select("profile_id,card_id,rank").limit(20000),
+    any(db).from("card_market_prices").select("*").limit(20000),
   ]);
   if (c.error || h.error || p.error || f.error) return fail("コレクションを取得できませんでした");
   const cards: CardRow[] = c.data.map((r: Record<string, unknown>) => ({
@@ -91,6 +94,23 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
       sourceUrl: (r.source_url as string) ?? null,
       createdAt: r.created_at as string,
     }));
+  // 取得した相場の表が無い・読めない場合も、コレクション自体は表示する
+  const market: MarketPriceRow[] = mk.error
+    ? []
+    : (mk.data as Record<string, unknown>[]).map((r) => ({
+        cardId: r.card_id as string,
+        kind: r.kind as "sale" | "buyback",
+        medianYen: r.median_yen as number,
+        lowYen: r.low_yen as number,
+        highYen: r.high_yen as number,
+        sampleCount: r.sample_count as number,
+        outlierCount: (r.outlier_count as number) ?? 0,
+        shops: (r.shops as MarketPriceRow["shops"]) ?? [],
+        source: (r.source as string) ?? "",
+        sourceUrl: (r.source_url as string) ?? null,
+        csvUpdatedAt: (r.csv_updated_at as string) ?? null,
+        fetchedAt: r.fetched_at as string,
+      }));
   const favorites: FavoriteRow[] = f.data.map((r: Record<string, unknown>) => ({ profileId: r.profile_id as string, cardId: r.card_id as string, rank: r.rank as number }));
   // サムネイルだけを期限つきURLにする（詳細用の大きい画像は、開いたときに個別に取得する）
   const paths = [...new Set(cards.map((x) => x.thumbPath).filter((x): x is string => !!x))];
@@ -99,7 +119,7 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
     const { data: signed } = await db.storage.from("card-images").createSignedUrls(paths.slice(i, i + 200), THUMB_TTL);
     for (const s of signed ?? []) if (s.path && s.signedUrl) thumbUrls[s.path] = s.signedUrl;
   }
-  return { ok: true, data: { cards, holdings, prices, favorites, thumbUrls } };
+  return { ok: true, data: { cards, holdings, prices, market, favorites, thumbUrls } };
 }
 
 /** 詳細表示用の大きい画像のURL（自世帯のパスだけ） */

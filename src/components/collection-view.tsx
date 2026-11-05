@@ -1,7 +1,7 @@
 "use client";
 
 import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
-import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Search, SlidersHorizontal, Sparkles, Star, TrendingUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { loadCollectionAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
@@ -10,6 +10,7 @@ import { CardBulkDialog, BULK_MAX_IMAGES } from "@/components/card-bulk";
 import { CardDetailSheet } from "@/components/card-detail-sheet";
 import { CardFormDialog, type CardFormMode } from "@/components/card-form";
 import { Button } from "@/components/ui/button";
+import { MarketUpdateDialog } from "@/components/market-update";
 import { ShineButton } from "@/components/shine";
 import { breakdown, DEFAULT_FILTERS, filterCards, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs } from "@/lib/profile-settings";
@@ -47,6 +48,7 @@ export function CollectionView() {
   const [showStats, setShowStats] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showMarket, setShowMarket] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [form, setForm] = useState<CardFormMode | null>(null);
   const [bulk, setBulk] = useState<File[] | null>(null);
@@ -204,6 +206,9 @@ export function CollectionView() {
               <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="fx-toggle" onClick={() => (setShowMenu(false), void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), fx: !prefs.fx } }))}>
                 <Sparkles className="size-4" /> 演出 {prefs.fx ? "ON" : "OFF"}
               </button>
+              <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="market-update-open" onClick={() => (setShowMenu(false), setShowMarket(true))}>
+                <TrendingUp className="size-4" /> 相場を一括更新
+              </button>
               {filters.favOnly && favs.length > 1 && (
                 <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="reorder-toggle" onClick={() => (setShowMenu(false), setReorder((v) => !v))}>
                   <ArrowUp className="size-4" /> {reorder ? "並び替えを終える" : "お気に入りを並び替え"}
@@ -330,10 +335,12 @@ export function CollectionView() {
         </Button>
       )}
 
+      {showMarket && data && <MarketUpdateDialog open onOpenChange={setShowMarket} cardCount={data.cards.length} market={data.market} onDone={() => void load()} />}
       {opened && data && (
         <CardDetailSheet
           card={opened}
           prices={data.prices}
+          market={data.market}
           allCards={data.cards}
           thumbUrl={data.thumbUrls[opened.thumbPath ?? ""] ?? null}
           favorite={opened.favRank !== null}

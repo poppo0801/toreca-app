@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useShine } from "@/components/shine";
 import { conditionOptions, initialCondition, normalizeGrade } from "@/lib/card-condition";
-import { type CardRow, type CardSummaryRow, type HoldingRow, type PriceRow } from "@/lib/collection";
+import { type CardRow, type CardSummaryRow, type HoldingRow, type MarketPriceRow, type PriceRow } from "@/lib/collection";
 import { parseYen } from "@/lib/collection-input";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +25,7 @@ const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" })
 export function CardDetailSheet({
   card,
   prices,
+  market,
   allCards,
   thumbUrl,
   favorite,
@@ -36,6 +37,8 @@ export function CardDetailSheet({
 }: {
   card: CardSummaryRow;
   prices: PriceRow[];
+  /** 取得した相場（ポケカ価格比較のCSV。手動の参考相場とは別） */
+  market: MarketPriceRow[];
   allCards: CardRow[];
   thumbUrl: string | null;
   favorite: boolean;
@@ -119,6 +122,7 @@ export function CardDetailSheet({
               <Item label="販売参考との差額" value={signed(card.saleDiff)} testId="diff-sale" />
               <Item label="買取参考との差額" value={signed(card.buybackDiff)} testId="diff-buyback" />
             </dl>
+            <MarketBlock rows={market.filter((m) => m.cardId === card.id)} />
             <p className="-mt-2 text-[11px] text-muted-foreground">参考相場は確定した売却額ではありません（状態により変わります）。差額は購入価格が全枚数分そろい、相場が設定されているときだけ計算します。</p>
 
             <section aria-labelledby="hold-title" className="space-y-1.5">
@@ -261,13 +265,33 @@ export function CardDetailSheet({
   );
 }
 
-function Item({ label, value, testId }: { label: string; value: string; testId?: string }) {
+function Item({ label, value, testId }: { label: string; value: React.ReactNode; testId?: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] text-muted-foreground">{label}</dt>
       <dd className="break-words" data-testid={testId}>
         {value}
       </dd>
+    </div>
+  );
+}
+
+/** 取得した相場（販売・買取）。件数が1件のときは明示する。状態による補正はしない */
+function MarketBlock({ rows }: { rows: MarketPriceRow[] }) {
+  const sale = rows.find((r) => r.kind === "sale");
+  const buy = rows.find((r) => r.kind === "buyback");
+  const fetched = rows.reduce<string | null>((a, r) => (!a || r.fetchedAt > a ? r.fetchedAt : a), null);
+  const line = (r: MarketPriceRow | undefined, edge: "low" | "high") =>
+    r ? `${yen(r.medianYen)}（${edge === "low" ? "最安" : "最高"} ${yen(edge === "low" ? r.lowYen : r.highYen)}・${r.sampleCount === 1 ? "参考データ1件" : `${r.sampleCount}店舗`}）` : "未取得";
+  return (
+    <div className="space-y-1" data-testid="market-block">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border p-3 text-sm" aria-label="取得した相場">
+        <Item label="販売相場（取得）" value={line(sale, "low")} testId="market-sale" />
+        <Item label="買取相場（取得）" value={line(buy, "high")} testId="market-buy" />
+        <Item label="最終取得" value={fetched ? new Date(fetched).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"} />
+        <Item label="参照サイト" value={rows[0] ? <a href={rows[0].sourceUrl ?? "https://card.pricebest.jp/data/"} target="_blank" rel="noopener noreferrer" className="underline">{rows[0].source || "ポケカ価格比較"}</a> : "—"} />
+      </dl>
+      {(sale || buy) && <p className="text-[11px] text-muted-foreground">店舗の公開価格の中央値です。状態（A+〜C）による補正はしていません。実際の取引価格や査定額とは異なります。</p>}
     </div>
   );
 }
