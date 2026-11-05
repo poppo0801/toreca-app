@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
+import { useEditRequest } from "@/components/edit-request";
 import { LotteryFormDialog } from "@/components/lottery-form";
+import { SwipeRow } from "@/components/swipe-row";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { LotteryDraft } from "@/lib/lottery-match";
@@ -373,6 +375,22 @@ export function AutoCollectView({
   const [productQ, setProductQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CandidateView | null>(null);
+  // 「要手動確認」から渡された候補の編集フォームを、収集候補の一覧を経由せずに直接開く（解析済みの内容をそのまま反映）
+  const editReq = useEditRequest();
+  const editReqId = editReq?.id ?? null;
+  useEffect(() => {
+    if (!editReqId) return;
+    const c = candidates.find((x) => x.id === editReqId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 要手動確認からの編集要求を受けてフォームを開く
+    if (c?.draft?.input) setEditing(c);
+    editReq?.clear();
+    // 要求が来たときだけ（候補の一覧の更新では開き直さない）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editReqId]);
+  // スワイプで除外した候補は、通信の結果を待たずに一覧から外す（保存に失敗したら戻す）。ページ切替: 1ページ10件（15件にも切替可）
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [pageSize, setPageSize] = useState<10 | 15>(10);
+  const [pageState, setPageState] = useState({ key: "", page: 0 });
   // 確認待ちの絞り込み・並び順（初期は対応優先度順）、即時除外の取り消し、一括除外の確認、登録後に開く次の候補
   const [rankFilter, setRankFilter] = useState<"all" | Rank>("all");
   const [sortKey, setSortKey] = useState<SortKey>("priority");
@@ -466,6 +484,30 @@ export function AutoCollectView({
   const quickExclude = async (c: CandidateView) => {
     const r = await act("qx" + c.id, { action: "exclude", id: c.id }, () => "除外しました");
     if (r.ok) showUndo(c.assess ? `${c.draft?.input?.chain?.name ?? ""} ${c.draft?.input?.store?.name ?? ""}`.trim() || "候補" : "候補", (r.prev as { id: string; prev: Record<string, unknown> }[] | undefined) ?? []);
+  };
+  const visible = shown.filter((c) => !hiddenIds.has(c.id));
+  // 絞り込み・並び順・件数/ページを変えたときは1ページ目へ。編集・除外のあとは、可能な限り今のページに留まる（最後のページが空になったら一つ前へ）
+  const pageKey = `${tab}|${rankFilter}|${sortKey}|${pageSize}`;
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  const curPage = Math.min(pageState.key === pageKey ? pageState.page : 0, totalPages - 1);
+  const pageRows = visible.slice(curPage * pageSize, (curPage + 1) * pageSize);
+  const goPage = (p: number) => setPageState({ key: pageKey, page: Math.max(0, Math.min(totalPages - 1, p)) });
+  // 一覧に残っている（まだサーバー側の更新が届いていない）非表示分だけ、確認待ちの件数から引く
+  const hiddenPending = candidates.filter((c) => hiddenIds.has(c.id) && c.job_state === "review").length;
+  const countOf = (v: (typeof CAND_TABS)[number]["value"]) => (v === "pending" ? Math.max(0, counts.pending - hiddenPending) : counts[v]);
+  const swipeExclude = (c: CandidateView) => {
+    setHiddenIds((h) => new Set(h).add(c.id));
+    void call({ action: "exclude", id: c.id }).then((r) => {
+      if (r.ok) router.refresh();
+      else {
+        setHiddenIds((h) => {
+          const n = new Set(h);
+          n.delete(c.id);
+          return n;
+        });
+        setMsg({ ok: false, text: `除外できませんでした: ${r.error ?? "失敗しました"}` });
+      }
+    });
   };
   const readyCount = candidates.filter((c) => js2(c) === "review" && c.draft?.ready && c.draft.verdict === "match" && c.kind !== "update").length;
   const prefShown = showAllPref ? PREFECTURE_LIST : PREFECTURE_LIST.filter((p) => s.prefectures.includes(p));
@@ -987,18 +1029,18 @@ export function AutoCollectView({
         </div>
       </Block>
 
-      <Block no="⑤" title="収集候補" testId="candidates" forceOpen={hashOpen === "candidates"} summary={`候補${counts.pending}件・要確認${candidates.filter((c) => c.job_state === "review" && c.kind !== "update").length}件`}>
+      <Block no="⑤" title="収集候補" testId="candidates" forceOpen={hashOpen === "candidates"} summary={`候補${countOf("pending")}件・要確認${candidates.filter((c) => c.job_state === "review" && c.kind !== "update" && !hiddenIds.has(c.id)).length}件`}>
         <div role="tablist" aria-label="候補の種類" className="grid grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5 sm:grid-cols-6">
           {CAND_TABS.map((t) => (
             <button key={t.value} role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)} className={cn("min-h-9 rounded-md px-0 text-[11px] font-medium leading-tight", tab === t.value ? "bg-primary text-primary-foreground" : "hover:bg-card")} data-testid={`cand-tab-${t.value}`}>
               {t.label}
-              <span className="ml-0.5 opacity-80" data-testid={`cand-count-${t.value}`}>{counts[t.value]}</span>
+              <span className="ml-0.5 opacity-80" data-testid={`cand-count-${t.value}`}>{countOf(t.value)}</span>
             </button>
           ))}
         </div>
         {tab === "pending" && list.some((c) => c.job_state === "review" && c.kind !== "update") && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="bulk-bar">
-            <Button size="sm" variant="outline" onClick={() => setSel(new Set(shown.filter((c) => c.job_state === "review" && c.kind !== "update").map((c) => c.id)))} data-testid="bulk-all">
+            <Button size="sm" variant="outline" onClick={() => setSel(new Set(pageRows.filter((c) => c.job_state === "review" && c.kind !== "update").map((c) => c.id)))} data-testid="bulk-all">
               すべて選択
             </Button>
             <Button size="sm" variant="outline" disabled={sel.size === 0} onClick={() => setSel(new Set())}>
@@ -1046,13 +1088,16 @@ export function AutoCollectView({
           </div>
         )}
         <ul className="divide-y">
-          {shown.map((c) => {
+          {pageRows.map((c) => {
             const d = c.draft?.input;
+            const swipeable = c.job_state === "review" && c.kind !== "update";
             const queuedOnly = ["pending", "retry", "processing"].includes(c.job_state ?? "");
             const topics = reviewTopics(c);
             const uniqueReasons = [...new Set(c.reasons)];
             return (
-              <li key={c.id} className="space-y-1 py-2 text-xs" data-testid="candidate-row">
+              <li key={c.id} className="text-xs" data-testid="candidate-row">
+                <SwipeRow onRight={swipeable && d ? () => setEditing(c) : undefined} onLeft={swipeable ? () => swipeExclude(c) : undefined} rightLabel="編集" leftLabel="除外">
+                <div className="space-y-1 py-2">
                 <p className="flex items-start gap-1.5 font-medium">
                   {c.job_state === "review" && c.kind !== "update" && (
                     <input type="checkbox" className="mt-0.5 size-4 shrink-0" checked={sel.has(c.id)} onChange={() => toggleSel(c.id)} aria-label="選択" data-testid="cand-select" />
@@ -1192,11 +1237,30 @@ export function AutoCollectView({
                     </details>
                   )}
                 </div>
+                </div>
+                </SwipeRow>
               </li>
             );
           })}
-          {shown.length === 0 && <li className="py-2 text-xs text-muted-foreground">該当する候補はありません。</li>}
+          {visible.length === 0 && <li className="py-2 text-xs text-muted-foreground">該当する候補はありません。</li>}
         </ul>
+        {visible.length > 0 && (visible.length > pageSize || pageSize === 15) && (
+          <nav className="flex items-center justify-between gap-2 text-xs" aria-label="ページ切替" data-testid="cand-pager">
+            <Button size="sm" variant="outline" className="min-h-9" disabled={curPage === 0} onClick={() => goPage(curPage - 1)} data-testid="page-prev">
+              前へ
+            </Button>
+            <span className="flex items-center gap-2 tabular-nums" data-testid="page-info">
+              {curPage + 1} / {totalPages} ページ
+              <select aria-label="1ページの件数" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) === 15 ? 15 : 10)} className="min-h-8 rounded-md border bg-card px-1" data-testid="page-size">
+                <option value={10}>10件</option>
+                <option value={15}>15件</option>
+              </select>
+            </span>
+            <Button size="sm" variant="outline" className="min-h-9" disabled={curPage >= totalPages - 1} onClick={() => goPage(curPage + 1)} data-testid="page-next">
+              次へ
+            </Button>
+          </nav>
+        )}
       </Block>
 
       {nextEdit && !editing && (
@@ -1230,8 +1294,8 @@ export function AutoCollectView({
           onSaved={(lotteryId) => {
             const id = editing.id;
             // 登録後は次の確認候補を開きやすくする（処理済みの候補は一覧から消える）。失敗したときは成功したように見せない
-            const rest = shown.filter((x) => x.id !== id && x.job_state === "review" && x.kind !== "update" && x.draft?.input);
-            const nxt = nextAfter(shown.filter((x) => x.id === id || rest.some((y) => y.id === x.id)), id);
+            const rest = visible.filter((x) => x.id !== id && x.job_state === "review" && x.kind !== "update" && x.draft?.input);
+            const nxt = nextAfter(visible.filter((x) => x.id === id || rest.some((y) => y.id === x.id)), id);
             setEditing(null);
             if (lotteryId) {
               void act("mr" + id, { action: "markRegistered", id, lotteryId }, () => "登録しました").then((r) => r.ok && setNextEdit(nxt && nxt.id !== id ? nxt : null));

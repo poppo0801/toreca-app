@@ -2,6 +2,7 @@ import { PageHeading } from "@/components/page-heading";
 import Link from "next/link";
 import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
 import { CollectionMaintenance } from "@/components/collection-maintenance";
+import { EditRequestProvider } from "@/components/edit-request";
 import { archiveCounts, archiveReasonOf, isArchived, isReevaluable } from "@/lib/collector/archive";
 import { ManualReviewList } from "@/components/manual-review";
 import { ExclusionRules, HardSources, type ExclusionView, type HardSourceView } from "@/components/source-controls";
@@ -161,7 +162,8 @@ export default async function CollectionPage() {
         </Link>
       </p>
       <PageHeading navId="settings" className="mb-3">抽選情報の自動収集</PageHeading>
-      {/* 要手動確認（システムが解決できなかった案件）。優先収集メモとは別の一覧 */}
+      {/* 要手動確認（システムが解決できなかった案件）。優先収集メモとは別の一覧。ここから候補の編集フォームを直接開く */}
+      <EditRequestProvider>
       <div className="mb-3">
         <ManualReviewList groups={manualGroups} />
       </div>
@@ -181,6 +183,7 @@ export default async function CollectionPage() {
         aiConfigured={Boolean(process.env.ANTHROPIC_API_KEY?.trim()) || process.env.AI_PROVIDER === "mock"}
         usage={{ xPosts, xCostJpy: estimateCostJpy(xPosts), aiCalls: budget.calls, newAuto: newCount.count ?? 0 }}
       />
+      </EditRequestProvider>
       <div className="mt-3 space-y-3">
         <CollectionMaintenance review={nReview.count ?? 0} archive={archive} />
         <Block no="⑤" title="収集元の管理" testId="sources" summary={`除外${(exclusions.data ?? []).filter((r) => r.active).length}件・取得困難${(hardSources.data ?? []).length}件`}>

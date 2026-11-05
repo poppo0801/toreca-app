@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronDown, ExternalLink } from "lucide-react";
 import { manualDismissAction, manualDoneAction, manualRecheckAction } from "@/app/(app)/settings/collection/manual-actions";
+import { useEditRequest } from "@/components/edit-request";
+import { SwipeRow } from "@/components/swipe-row";
 import { Button } from "@/components/ui/button";
 import { manualHeadline, type ManualItem } from "@/lib/collector/manual-items";
 import { EXCLUSION_REASONS, type ExclusionReasonCode } from "@/lib/collector/triage";
@@ -93,6 +95,25 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
   const [dismissing, setDismissing] = useState<string | null>(null);
   const [code, setCode] = useState<ExclusionReasonCode>("out_of_scope_product");
   const [text, setText] = useState("");
+  // 編集フォームを直接開く（収集候補の一覧へ移動しない）。スワイプで除外した行は、通信の結果を待たずに一覧から外す
+  const edit = useEditRequest();
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+
+  /** スワイプで除外: すぐに一覧から外し（件数も更新）、保存に失敗したら行を戻してエラーを出す。候補は物理削除せず、収集元の除外ルールも作らない */
+  const swipeExclude = (it: ManualItem) => {
+    setHidden((h) => new Set(h).add(it.id));
+    void manualDismissAction(it.id, "other", "スワイプで除外").then((r) => {
+      if (r.ok) router.refresh();
+      else {
+        setHidden((h) => {
+          const n = new Set(h);
+          n.delete(it.id);
+          return n;
+        });
+        setMsg(`除外できませんでした: ${r.error ?? "失敗しました"}`);
+      }
+    });
+  };
 
   const run = async (key: string, fn: () => Promise<{ ok: boolean; error?: string }>, done: string) => {
     setBusy(key);
@@ -102,14 +123,15 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
     if (r.ok) router.refresh();
   };
 
-  const now = groups.open.filter((i) => i.group === "now");
-  const later = groups.open.filter((i) => i.group === "later");
+  const now = groups.open.filter((i) => i.group === "now" && !hidden.has(i.id));
+  const later = groups.open.filter((i) => i.group === "later" && !hidden.has(i.id));
   if (groups.open.length === 0 && groups.retryingCount === 0 && groups.closed.length === 0) return null;
 
   const row = (it: ManualItem, actions: boolean) => {
     const opened = openId === it.id;
-    return (
-      <li key={it.id} className="space-y-1.5 rounded-md bg-muted/40 p-2" data-testid="manual-row">
+    const canEdit = it.editable && !!edit;
+    const body = (
+      <div className="space-y-1.5 bg-muted/40 p-2">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <ManualItemSummary it={it} />
@@ -144,11 +166,16 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
                   元情報を確認 <ExternalLink className="size-3" aria-hidden="true" />
                 </a>
               )}
-              {it.editable && (
-                <Link href="/settings/collection#candidates" className="flex min-h-8 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground" data-testid="manual-edit">
-                  編集して登録
-                </Link>
-              )}
+              {it.editable &&
+                (edit ? (
+                  <Button size="sm" className="min-h-8 px-2.5 text-xs" onClick={() => edit.request(it.id)} data-testid="manual-edit">
+                    編集して登録
+                  </Button>
+                ) : (
+                  <Link href="/settings/collection#candidates" className="flex min-h-8 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground" data-testid="manual-edit">
+                    編集して登録
+                  </Link>
+                ))}
               <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run(`r${it.id}`, () => manualRecheckAction(it.id), "再調査を予約しました（次回のワーカーで確認します）")} data-testid="manual-recheck">
                 再調査
               </Button>
@@ -175,6 +202,17 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
               </div>
             )}
           </div>
+        )}
+      </div>
+    );
+    return (
+      <li key={it.id} className="overflow-hidden rounded-md" data-testid="manual-row">
+        {actions ? (
+          <SwipeRow onRight={canEdit ? () => edit!.request(it.id) : undefined} onLeft={() => swipeExclude(it)} rightLabel="編集" leftLabel="除外">
+            {body}
+          </SwipeRow>
+        ) : (
+          body
         )}
       </li>
     );

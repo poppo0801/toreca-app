@@ -78,7 +78,7 @@ describe("要手動確認のポップアップ（取得不可の赤い警告）"
     expect(dialog.textContent).toContain("系列A / 店舗A");
     expect(dialog.textContent).toContain("公式ページ取得不可");
     expect(q("manual-source")!.getAttribute("href")).toBe("https://shop.example.invalid/a");
-    expect(q("run-notice-manual")).not.toBeNull();
+    expect(q("run-notice-confirm")).not.toBeNull(); // 確認する（要手動確認の一覧へ）
   });
   it("収集結果が無くても、未対応の取得不可があれば知らせる。閉じても対応済みにはならない（通知・設定に残る）", async () => {
     manual = items;
