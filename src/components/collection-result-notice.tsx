@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useApp } from "@/components/app-provider";
 import { ackRunNoticesAction, getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
 import { ManualBanner, ManualItemSummary } from "@/components/manual-review";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -47,13 +48,17 @@ export function RunStateLabel({ s }: { s: RunSummary }) {
  * 起動時の収集結果ポップアップ。新しい結果（新規登録・確認が必要な候補・取得エラー）があるときだけ、1回表示する。
  * 確認（閉じる・移動）した結果は繰り返し表示しない。処理中の結果は「処理中」と表示し、確認済みにはしない。
  * 履歴は通知（ベル）と、設定の自動収集から確認できる。
+ * 表示対象は、収集設定に固定IDで指定されたプロフィール（はとむぎ）だけ。他のプロフィールでは取得も表示もしない（判定はサーバー側）。
+ * ボタンは「確認する」（要手動確認の一覧へ）と「閉じる」だけ。確認済みの記録は表示と同時に非同期で行い、画面遷移を待たせない。
  */
 export function CollectionResultNotice() {
+  const router = useRouter();
+  const { profile } = useApp();
   const [notice, setNotice] = useState<{ s: RunSummary | null; ackIds: string[]; manual: ManualItem[] } | null>(null);
 
   useEffect(() => {
     let live = true;
-    void getRunNoticesAction().then((r) => {
+    void getRunNoticesAction(profile.id).then((r) => {
       if (!live) return;
       const store = (k: string): string => {
         try {
@@ -86,16 +91,22 @@ export function CollectionResultNotice() {
         put(MANUAL_SEEN_KEY, sig);
         manual = open;
       }
-      if (run || manual.length > 0) setNotice({ s: run, ackIds: run ? r.ackIds : [], manual });
+      if (run || manual.length > 0) {
+        setNotice({ s: run, ackIds: run ? r.ackIds : [], manual });
+        // 確認済みの記録は表示した時点で行う。ボタンを押した後に実行すると、サーバー処理の完了待ちで画面遷移が遅れる
+        if (run && r.ackIds.length > 0) void ackRunNoticesAction(r.ackIds);
+      }
     });
     return () => {
       live = false;
     };
-  }, []);
+  }, [profile.id]);
 
-  const close = () => {
-    if (notice && notice.ackIds.length > 0) void ackRunNoticesAction(notice.ackIds);
+  const close = () => setNotice(null);
+  /** 確認する: ポップアップをすぐ閉じて、要手動確認の一覧へ移る（移動先の読み込みは移動後に表示する） */
+  const confirm = () => {
     setNotice(null);
+    router.push("/settings/collection#manual");
   };
   if (!notice) return null;
   const s = notice.s;
@@ -131,30 +142,13 @@ export function CollectionResultNotice() {
             対象外 {s.excluded}件・重複 {s.duplicates}件・AI費用 約{s.costJpy}円
           </p>
         )}
-        <div className="flex flex-wrap justify-end gap-1.5 pt-1">
-          <button type="button" onClick={close} className="min-h-9 rounded-md px-3 text-sm text-muted-foreground hover:bg-muted" data-testid="run-notice-close">
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={close} className="min-h-10 rounded-md px-4 text-sm text-muted-foreground hover:bg-muted" data-testid="run-notice-close">
             閉じる
           </button>
-          {notice.manual.length > 0 && (
-            <Link href="/settings/collection#manual" onClick={close} className="flex min-h-9 items-center rounded-md bg-danger px-3 text-sm text-white" data-testid="run-notice-manual">
-              要手動確認の一覧へ
-            </Link>
-          )}
-          {s && (
-          <Link href="/settings/collection#history" onClick={close} className="flex min-h-9 items-center rounded-md border px-3 text-sm hover:bg-muted" data-testid="run-notice-detail">
-            詳細
-          </Link>
-          )}
-          {s && s.autoRegistered > 0 && (
-            <Link href="/lotteries" onClick={close} className="flex min-h-9 items-center rounded-md border px-3 text-sm hover:bg-muted" data-testid="run-notice-lotteries">
-              登録された抽選
-            </Link>
-          )}
-          {s && s.review > 0 && (
-            <Link href="/settings/collection#candidates" onClick={close} className="flex min-h-9 items-center rounded-md bg-primary px-3 text-sm text-primary-foreground" data-testid="run-notice-review">
-              確認待ちへ
-            </Link>
-          )}
+          <button type="button" onClick={confirm} className="min-h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" data-testid="run-notice-confirm">
+            確認する
+          </button>
         </div>
       </DialogContent>
     </Dialog>

@@ -24,11 +24,8 @@ async function AuthGate({ children }: { children: React.ReactNode }) {
     await supabase.rpc("ensure_profile_accounts");
   }
   return (
-    <>
-      <AppShell>{children}</AppShell>
-      {/* 自動収集の結果。新しい結果があるときだけ、起動時に1回表示する（AppShellの配置は変えない） */}
-      {isSupabaseMode && <CollectionResultNotice />}
-    </>
+    // 自動収集の結果の通知は、現在のプロフィールを知る必要があるため AppShell のプロバイダー内に重ねる（レイアウトは変えない）
+    <AppShell overlay={isSupabaseMode ? <CollectionResultNotice /> : null}>{children}</AppShell>
   );
 }
 

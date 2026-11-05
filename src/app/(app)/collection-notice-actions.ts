@@ -7,12 +7,20 @@ import { ackRuns, loadRunNotices, type RunNotices } from "@/lib/server/collector
 
 const EMPTY: RunNotices = { summaries: [], notice: null, ackIds: [], manual: [] };
 
-/** 起動時の収集結果の通知と、直近の収集の履歴（デモモード・未ログインでは空） */
-export async function getRunNoticesAction(): Promise<RunNotices> {
+/**
+ * 起動時の収集結果の通知と、直近の収集の履歴（デモモード・未ログインでは空）。
+ * 起動時ポップアップの対象は、収集設定に固定IDで指定されたプロフィール（collection_settings.result_notice_profile_id）だけ。
+ * 表示名ではなくIDで判定するので、名前を変えても対象は変わらない。対象外のプロフィールには何も返さない（通常の設定画面・ベルの履歴は別の経路で見られる）。
+ */
+export async function getRunNoticesAction(activeProfileId?: string): Promise<RunNotices> {
   try {
+    if (!activeProfileId || !z.uuid().safeParse(activeProfileId).success) return EMPTY;
     const db = (await createClient()) as unknown as Db;
     const { data: auth } = await db.auth.getUser();
     if (!auth.user) return EMPTY;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい列は生成型に無い
+    const { data: s } = await (db as any).from("collection_settings").select("result_notice_profile_id").limit(1).maybeSingle();
+    if (!s || s.result_notice_profile_id !== activeProfileId) return EMPTY;
     return await loadRunNotices(db, auth.user.id);
   } catch {
     return EMPTY;

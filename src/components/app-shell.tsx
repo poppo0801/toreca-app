@@ -252,11 +252,12 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, overlay }: { children: React.ReactNode; /** 画面の上に重ねる通知（起動時の収集結果など）。配置は持たない */ overlay?: React.ReactNode }) {
   return (
     <AppProvider>
       <AiJobsProvider>
         <Shell>{children}</Shell>
+        {overlay}
       </AiJobsProvider>
     </AppProvider>
   );

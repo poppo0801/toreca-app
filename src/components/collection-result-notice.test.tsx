@@ -8,8 +8,18 @@ let notice: RunSummary | null = null;
 let ackIds: string[] = [];
 const manual: unknown[] = [];
 const ack = vi.fn(async (..._a: unknown[]) => ({ ok: true }));
+/** 起動時ポップアップの対象プロフィール（固定ID）。サーバー側の判定を模して、対象外のプロフィールには何も返さない */
+const TARGET = "00000000-0000-4000-8000-0000000000aa";
+let activeProfile = TARGET;
+const push = vi.fn();
+const asked: (string | undefined)[] = [];
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: () => undefined }) }));
+vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: activeProfile } }) }));
 vi.mock("@/app/(app)/collection-notice-actions", () => ({
-  getRunNoticesAction: async () => ({ summaries, notice, ackIds, manual }),
+  getRunNoticesAction: async (id?: string) => {
+    asked.push(id);
+    return id === TARGET ? { summaries, notice, ackIds, manual } : { summaries: [], notice: null, ackIds: [], manual: [] };
+  },
   ackRunNoticesAction: (...a: unknown[]) => ack(...a),
 }));
 
@@ -26,6 +36,9 @@ const sum = (cands: { status?: string; job_state: string }[], over: Partial<{ id
 
 beforeEach(() => {
   ack.mockClear();
+  push.mockClear();
+  asked.length = 0;
+  activeProfile = TARGET;
   window.sessionStorage.clear();
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -50,12 +63,39 @@ describe("起動時の収集結果ポップアップ", () => {
     expect(q("run-確認待ち")!.textContent).toBe("2件");
     expect(q("run-取得失敗")!.textContent).toBe("1件");
     expect(q("run-processing")).toBeNull();
-    expect(q("run-notice-review")).not.toBeNull(); // 確認待ちへ
-    expect(q("run-notice-lotteries")).not.toBeNull(); // 登録された抽選
-    expect(q("run-notice-detail")).not.toBeNull();
-    await act(async () => q("run-notice-close")!.click());
+    // ボタンは「確認する」「閉じる」の2つだけ（詳細・登録された抽選・確認待ちへ などは出さない）
+    expect([...q("run-notice")!.querySelectorAll("button, a")].map((e) => e.textContent?.trim()).filter((t) => t !== "Close" && t !== "")).toEqual(["閉じる", "確認する"]);
+    expect(q("run-notice-review")).toBeNull();
+    expect(q("run-notice-lotteries")).toBeNull();
+    expect(q("run-notice-detail")).toBeNull();
+    // 確認済みの記録は表示時に行う（ボタン操作の後ではない）
     expect(ack).toHaveBeenCalledWith(ackIds);
+    await act(async () => q("run-notice-close")!.click());
     expect(q("run-notice")).toBeNull();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("確認する: ポップアップをすぐ閉じ、要手動確認の一覧へ直接移動する（サーバー処理を待たない）", async () => {
+    notice = sum([{ job_state: "review" }]);
+    ackIds = [notice.runId];
+    await act(async () => root.render(createElement(CollectionResultNotice)));
+    await flush();
+    ack.mockClear();
+    await act(async () => q("run-notice-confirm")!.click());
+    expect(q("run-notice")).toBeNull();
+    expect(push).toHaveBeenCalledWith("/settings/collection#manual");
+    expect(ack).not.toHaveBeenCalled(); // 遷移の後に追加のサーバー処理を走らせない
+  });
+
+  it("対象のプロフィール(固定ID)以外では表示しない。プロフィール名ではなくIDで判定する", async () => {
+    notice = sum([{ job_state: "review" }]);
+    ackIds = [notice.runId];
+    activeProfile = "00000000-0000-4000-8000-0000000000bb";
+    await act(async () => root.render(createElement(CollectionResultNotice)));
+    await flush();
+    expect(asked).toEqual(["00000000-0000-4000-8000-0000000000bb"]);
+    expect(q("run-notice")).toBeNull();
+    expect(ack).not.toHaveBeenCalled();
   });
 
   it("同じ起動中は再表示しない（セッション内で1回）", async () => {
