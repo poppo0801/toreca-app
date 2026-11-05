@@ -8,6 +8,12 @@ import { fetchRespectingRobots } from "@/lib/server/safe-fetch";
 import { runReevaluation } from "@/lib/server/collector/reevaluate";
 import { bumpStats, type CollectDeps } from "@/lib/server/collector/run";
 
+/** 抽選予告として追跡中か（解析時に草稿へ記録している）。追跡中は回数・締切の近さを理由に要手動確認へ移さない */
+function trackingOf(draft: unknown): { startDate: string | null; lastNewsAt: string } | null {
+  const tr = (draft as { tracking?: { startDate?: string | null; lastNewsAt?: string } } | null)?.tracking;
+  return tr?.lastNewsAt ? { startDate: tr.startDate ?? null, lastNewsAt: tr.lastNewsAt } : null;
+}
+
 /** 代替の取得方法（一覧の文章）で読み取り済みか。解析時に草稿へ記録している（保留判定で「代替でも不可」を早く判断するため） */
 function altTriedOf(draft: unknown): boolean {
   const d = draft as { viaList?: boolean; queued?: { viaList?: boolean } } | null;
@@ -69,7 +75,7 @@ export async function runHoldPass(deps: CollectDeps, opts: { max: number; timeLe
       continue;
     }
     // 3) 保留を続けるか、要手動確認か
-    const hd = decideHold({ now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: (c.reasons ?? []).slice(0, 8), holdCount: c.hold_count ?? 0, failKind: (c.fail_kind as FailKind | null) ?? null, altTried: altTriedOf(c.draft), important: !!c.memo_id });
+    const hd = decideHold({ now, dueAt: c.due_at ? new Date(c.due_at) : null, gaps: (c.reasons ?? []).slice(0, 8), holdCount: c.hold_count ?? 0, failKind: (c.fail_kind as FailKind | null) ?? null, altTried: altTriedOf(c.draft), important: !!c.memo_id, tracking: trackingOf(c.draft) });
     if (hd.triage === "auto_exclude") {
       await db.from("collection_candidates").update({ ...patch, status: "excluded", job_state: "skipped", fail_kind: "expired", reasons: [hd.reason], resolved_at: nowIso, completed_at: nowIso, ...triagePatch(hd, c, now) }).eq("id", c.id);
       await bumpStats(db, householdId, now, { excluded: 1 });

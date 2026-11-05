@@ -62,6 +62,8 @@ export async function POST(req: NextRequest) {
         imagesFound: rich.stats.found,
         imagesFetched: rich.stats.fetched,
         imagePartsSent: rich.stats.sent,
+        // 公開CDN（pbs.twimg.com）の画像URL。抽出結果を実際の画像と突き合わせて精度を検証するために返す（秘密を含まない）
+        imageUrls: [...p.images, ...(p.quoted?.images ?? [])].slice(0, 12),
         quoted: p.quoted ? { user: p.quoted.username, textChars: p.quoted.text.length, images: p.quoted.images.length, links: p.quoted.links.length } : null,
         links: p.links.length,
         linkedPageFetched: rich.linkedPage,
@@ -91,6 +93,9 @@ export async function POST(req: NextRequest) {
               receiveMethod: e.receiveMethod,
               applyMethod: e.applyMethod,
               applyUrl: e.applyUrl,
+              conditionsText: e.conditionsText.slice(0, 200),
+              verificationText: e.verificationText.slice(0, 120),
+              warnings: e.warnings.slice(0, 4),
             },
             extractedFromImage: fromImage,
             evidenceSources: Object.fromEntries(Object.entries(e.evidence).map(([k, v]) => [k, v?.source ?? ""])),

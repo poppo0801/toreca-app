@@ -46,6 +46,8 @@ export interface SettingsView {
   product_mode: "all" | "include" | "exclude";
   product_ids: string[];
   status_mode: "open" | "open_or_before";
+  /** 受付前の抽選予告も追跡する（既定ON） */
+  track_upcoming: boolean;
   auto_register: boolean;
   schedule_enabled: boolean;
   schedule_hour_jst: number;
@@ -369,7 +371,7 @@ export function AutoCollectView({
       action: "saveSettings",
       settings: {
         prefectures: s.prefectures, includeOnline: s.include_online, maxDistanceKm: s.max_distance_km, applyMethods: s.apply_methods, receiveMethods: s.receive_methods,
-        reqInclude: s.req_include, reqExclude: s.req_exclude, productMode: s.product_mode, productIds: s.product_ids, statusMode: s.status_mode, autoRegister: s.auto_register,
+        reqInclude: s.req_include, reqExclude: s.req_exclude, productMode: s.product_mode, productIds: s.product_ids, statusMode: s.status_mode, trackUpcoming: s.track_upcoming !== false, autoRegister: s.auto_register,
         scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, recheckHours: s.recheck_hours,
       },
     });
@@ -451,6 +453,16 @@ export function AutoCollectView({
               </Chip>
               <Chip on={s.status_mode === "open_or_before"} onClick={() => setS({ ...s, status_mode: "open_or_before" })}>
                 受付前も含む
+              </Chip>
+            </div>
+          </SetRow>
+          <SetRow label="受付前の抽選予告" tip="「現在応募可能のみ」のときも、受付前・詳細未発表の抽選を破棄せず、受付が始まるまで追跡します（応募可能としては表示しません）。続報が見つかれば同じ抽選として更新します。">
+            <div className="flex flex-wrap gap-1.5">
+              <Chip on={s.track_upcoming !== false} onClick={() => setS({ ...s, track_upcoming: true })}>
+                追跡する
+              </Chip>
+              <Chip on={s.track_upcoming === false} onClick={() => setS({ ...s, track_upcoming: false })}>
+                追跡しない
               </Chip>
             </div>
           </SetRow>

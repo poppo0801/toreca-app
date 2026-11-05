@@ -2234,6 +2234,7 @@ export type Database = {
           schedule_hour_jst: number
           set_name: string
           status_mode: string
+          track_upcoming: boolean
           updated_at: string
           worker_batch: number
           worker_daily_ai_limit: number
@@ -2266,6 +2267,7 @@ export type Database = {
           schedule_hour_jst?: number
           set_name?: string
           status_mode?: string
+          track_upcoming?: boolean
           updated_at?: string
           worker_batch?: number
           worker_daily_ai_limit?: number
@@ -2298,6 +2300,7 @@ export type Database = {
           schedule_hour_jst?: number
           set_name?: string
           status_mode?: string
+          track_upcoming?: boolean
           updated_at?: string
           worker_batch?: number
           worker_daily_ai_limit?: number

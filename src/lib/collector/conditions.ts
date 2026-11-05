@@ -42,6 +42,8 @@ export interface CollectionConditions {
   productIds: string[];
   /** open=現在応募可能のみ / open_or_before=受付前も含む */
   statusMode: "open" | "open_or_before";
+  /** 受付前の抽選予告も追跡する（Stage 6C）。「現在応募可能のみ」のときも、受付前の抽選を破棄せず、受付が始まるまで追跡候補として保持する（応募可能として登録・表示はしない） */
+  trackUpcoming: boolean;
 }
 
 export const DEFAULT_CONDITIONS: CollectionConditions = {
@@ -55,9 +57,11 @@ export const DEFAULT_CONDITIONS: CollectionConditions = {
   productMode: "all",
   productIds: [],
   statusMode: "open",
+  trackUpcoming: true,
 };
 
-export type Verdict = "match" | "exclude" | "review";
+/** upcoming=受付前（現在応募可能のみの設定）。破棄せず追跡する */
+export type Verdict = "match" | "exclude" | "review" | "upcoming";
 export interface Evaluation {
   verdict: Verdict;
   /** 画面に出す理由（除外・要確認の根拠、合う場合の補足） */
@@ -119,7 +123,12 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
   const ended = deadlinePassed(input.applyDeadline, ctx.now);
   if (ended === true) excluded.push("応募締切を過ぎています");
   else if (ended === null) review.push("応募締切が不明です（受付中とは判断できません）");
-  if (cond.statusMode === "open" && startInFuture(input.applyStart, ctx.now) === true) excluded.push("まだ応募開始前です");
+  let upcoming = false;
+  if (cond.statusMode === "open" && startInFuture(input.applyStart, ctx.now) === true) {
+    // 受付前。追跡する設定なら破棄せず、受付が始まるまで保持する（他の条件で除外されるものは除外のまま）
+    if (cond.trackUpcoming) upcoming = true;
+    else excluded.push("まだ応募開始前です");
+  }
 
   // ---- 地域・受取方法
   const recv = receiveKind(input.receiveMethod);
@@ -176,6 +185,7 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
   }
 
   if (excluded.length > 0) return { verdict: "exclude", reasons: excluded };
+  if (upcoming) return { verdict: "upcoming", reasons: ["受付前の抽選です（受付が始まるまで追跡します）", ...review, ...notes] };
   if (review.length > 0) return { verdict: "review", reasons: [...review, ...notes] };
   return { verdict: "match", reasons: notes };
 }
@@ -196,6 +206,7 @@ export function normalizeConditions(raw: Partial<Record<string, unknown>>): Coll
     productMode: raw.productMode === "include" || raw.productMode === "exclude" ? raw.productMode : "all",
     productIds: strs(raw.productIds),
     statusMode: raw.statusMode === "open_or_before" ? "open_or_before" : "open",
+    trackUpcoming: raw.trackUpcoming !== false,
   };
 }
 

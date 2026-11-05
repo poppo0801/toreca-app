@@ -448,7 +448,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     appliedAt: "",
   };
 
-  const duplicates = findDuplicates(input, data.lotteries, opts.sourceUrl);
+  const duplicates = findDuplicates(input, data.lotteries, opts.sourceUrl, data);
   const evidence: LotteryDraft["evidence"] = {};
   for (const [k, ev] of Object.entries(ex.evidence ?? {})) {
     if (!ev || !ev.quote) continue;
@@ -469,20 +469,64 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   };
 }
 
-/** 同じ抽選を二重登録しないための候補検出（同じ店舗・同じ商品を含む・締切が同日／情報源が同じ） */
-export function findDuplicates(input: LotteryInput, lotteries: Lottery[], sourceUrl?: string): DraftDuplicate[] {
-  const chainId = input.chain.id;
-  const storeId = input.store.id;
-  if (!chainId || !storeId) return [];
+/** 系列名の比較用キー。「通販」「オンライン」などの販売形態の語、法人格を除く（「駿河屋」と「駿河屋通販」を同じ系列として扱う） */
+export function chainKey(name: string): string {
+  return normName(name)
+    .replace(/株式会社|有限会社|\(株\)|（株）/g, "")
+    .replace(/(オンラインショップ|オンラインストア|オンライン|通販部|通販|公式|ショップ|ストア)$/g, "");
+}
+
+/** 店舗名が、店舗ではなく販売・受取の形態を表すか（「オンライン」「通販」など）。これらの語だけで店舗を確定させない */
+export const isOnlineLikeName = (name: string) => /^(オンライン|通販|ネット通販|ネットショップ|オンラインストア|オンラインショップ|公式オンライン|公式通販|web|ウェブ)$/i.test(normName(name));
+
+/**
+ * 情報源URLの同一性を表すキー。X投稿は投稿ID（投稿者名が違っても同じ投稿）、Googleフォームはフォームの識別子、その他は検索条件・追跡パラメータを除いたURL。
+ * 同じキーを持つ情報源は、同じ告知を指している。
+ */
+export function urlIdentity(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  const x = /^\/[A-Za-z0-9_]{1,15}\/status\/(\d{5,25})/.exec(u.pathname);
+  if ((host === "x.com" || host === "twitter.com") && x) return `x:${x[1]}`;
+  const g = /^\/forms\/d\/e\/([A-Za-z0-9_-]{10,})/.exec(u.pathname);
+  if (host === "docs.google.com" && g) return `gform:${g[1]}`;
+  if (host === "t.co") return `url:${host}${u.pathname}`;
+  return `url:${host}${u.pathname.replace(/\/+$/, "")}`;
+}
+
+/**
+ * 同じ抽選を二重登録しないための候補検出。
+ * 系列が同じ（ID、または「通販」等の語を除いた名称が同じ）・同じ商品を含む・店舗が同じ（または双方が「オンライン」等の販売形態）が前提で、
+ *   情報源が同じ（同じ投稿・同じ応募フォーム・同じURL）または応募締切が同日 → 同一（high）／締切が不明 → 要確認（medium）。
+ * 商品と締切日だけが一致する別の店舗・別の系列の抽選は、同一にしない。
+ */
+export function findDuplicates(input: LotteryInput, lotteries: Lottery[], sourceUrl?: string, master?: { chains: Chain[]; stores: Store[] }): DraftDuplicate[] {
+  const chainName = input.chain.name || (master?.chains.find((c) => c.id === input.chain.id)?.name ?? "");
+  if (!input.chain.id && !chainName.trim()) return [];
+  const storeOf = (id: string | null) => (id ? master?.stores.find((s) => s.id === id) : undefined);
+  const myStore = storeOf(input.store.id);
+  const myOnline = isOnlineLikeName(input.store.name || myStore?.name || "") || myStore?.salesKind === "online_only";
+  if (!input.store.id && !myOnline) return [];
   const productIds = new Set(input.items.map((i) => i.product.id).filter((x): x is string => !!x));
   if (productIds.size === 0) return [];
   const myDeadline = input.applyDeadline.precision === "unknown" ? null : input.applyDeadline.date;
-  const urls = new Set([sourceUrl, ...(input.sourceUrls ?? [])].filter((u): u is string => !!u));
+  const myKeys = new Set([sourceUrl, ...(input.sourceUrls ?? [])].filter((u): u is string => !!u).flatMap((u) => [urlIdentity(u), u]).filter((k): k is string => !!k));
   const out: DraftDuplicate[] = [];
   for (const l of lotteries) {
-    if (l.chainId !== chainId || l.storeId !== storeId) continue;
+    const lStore = storeOf(l.storeId);
+    const lChainName = master?.chains.find((c) => c.id === l.chainId)?.name ?? "";
+    const sameChain = l.chainId === input.chain.id || (!!lChainName && !!chainName.trim() && chainKey(lChainName) === chainKey(chainName));
+    if (!sameChain) continue;
+    const lOnline = lStore ? isOnlineLikeName(lStore.name) || lStore.salesKind === "online_only" : false;
+    const sameStore = (!!input.store.id && l.storeId === input.store.id) || (myOnline && lOnline);
+    if (!sameStore) continue;
     if (!l.items.some((i) => productIds.has(i.productId))) continue;
-    const sameUrl = l.sourceUrls.some((u) => urls.has(u));
+    const sameUrl = l.sourceUrls.some((u) => myKeys.has(u) || (urlIdentity(u) !== null && myKeys.has(urlIdentity(u) as string)));
     const theirDeadline = flexToJstDate(l.applyDeadline);
     const sameDay = myDeadline !== null && theirDeadline === myDeadline;
     const unknownEither = myDeadline === null || theirDeadline === null;

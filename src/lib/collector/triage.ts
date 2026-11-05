@@ -66,6 +66,22 @@ export interface HoldInput {
   altTried: boolean;
   /** 優先収集メモに一致、または★管理対象の系列 */
   important: boolean;
+  /** 抽選予告として追跡中（具体的な系列がある受付前・詳細未発表の抽選）。回数や締切の近さだけを理由に要手動確認へ移さない */
+  tracking?: { startDate: string | null; lastNewsAt: string } | null;
+}
+
+/** 続報が無いまま追跡を続ける上限（日）。これを過ぎた予告は自動で終了する（履歴は残す） */
+export const TRACKING_STALE_DAYS = 60;
+
+/** 追跡中の予告の次回調査までの間隔。受付開始が近いほど短くする（優先度を上げる） */
+export function trackingIntervalMs(startDate: string | null, now: Date): number {
+  if (!startDate) return 12 * H;
+  const start = new Date(`${startDate}T00:00:00+09:00`).getTime();
+  const left = start - now.getTime();
+  if (left <= 0) return 30 * MIN; // 受付開始日になった: 続報・本登録の判定をすぐ行う
+  if (left <= 48 * H) return 2 * H;
+  if (left <= 7 * 24 * H) return 6 * H;
+  return 12 * H;
 }
 export interface HoldDecision {
   triage: Triage;
@@ -82,6 +98,11 @@ export function decideHold(h: HoldInput): HoldDecision {
   // 商品マスター未登録は再調査で解決しない。利用者が商品を確認する（既存商品の選択・新規登録・除外）
   if (h.gaps.some((g) => g.startsWith(PRODUCT_UNREGISTERED))) return { triage: "manual", reason: `${PRODUCT_UNREGISTERED}。商品を確認してください`, nextMs: null, urgency };
   const classes = h.gaps.map(classifyGap);
+  if (h.tracking && !classes.includes("user")) {
+    const idle = (h.now.getTime() - new Date(h.tracking.lastNewsAt).getTime()) / (24 * H);
+    if (Number.isFinite(idle) && idle > TRACKING_STALE_DAYS) return { triage: "auto_exclude", reason: `抽選予告の続報が${TRACKING_STALE_DAYS}日以上ないため、追跡を終了しました`, nextMs: null, urgency };
+    return { triage: "auto_retry", reason: "抽選予告として追跡しています（続報があれば同じ抽選として更新します）", nextMs: trackingIntervalMs(h.tracking.startDate, h.now), urgency };
+  }
   if (classes.includes("user")) return { triage: "manual", reason: `利用者の判断が必要です: ${h.gaps.find((g) => classifyGap(g) === "user")}`, nextMs: null, urgency };
   const left = h.dueAt ? h.dueAt.getTime() - h.now.getTime() : null;
   const urgentMs = (h.important ? URGENT_HOURS_IMPORTANT : URGENT_HOURS) * H;

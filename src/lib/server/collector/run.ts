@@ -29,7 +29,11 @@ import { decideHold, hostOf, hostRole, matchExclusion, triagePatch, type Exclusi
 import { activeExclusions, altPlanFor, recordAltSuccess, recordHardSource } from "@/lib/server/collector/sources-health";
 import { loadXLinks } from "@/lib/server/collector/x-accounts";
 import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from "@/lib/collector/x-accounts";
-import { classifyStage, STAGE_LABEL } from "@/lib/collector/stage";
+import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
+import { diffTracking, inheritTracking, matchTracked, type Tracking } from "@/lib/collector/tracking";
+import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
+import { loadTracked } from "@/lib/server/collector/tracked";
+import type { RequirementTag } from "@/lib/lottery-taxonomy";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
@@ -210,6 +214,7 @@ export function conditionsFromRow(row: Record<string, unknown>): CollectionCondi
     productMode: row.product_mode,
     productIds: row.product_ids,
     statusMode: row.status_mode,
+    trackUpcoming: row.track_upcoming,
   });
 }
 
@@ -541,7 +546,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     input.store = { id: null, name: "オンライン", prefecture: "" };
   }
   // 店舗名「オンライン」を補ったあとで重複を判定し直す（buildDraft の時点では店舗が未確定で重複候補が空になり、同じオンライン抽選が二重登録されていた）
-  draft.duplicates = findDuplicates(input, data.lotteries, q.url);
+  draft.duplicates = findDuplicates(input, data.lotteries, q.url, data);
   if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
     const note = "二次情報（まとめサイトの一覧・公式アカウントの対応づけ）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
@@ -564,7 +569,36 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const ev = evaluateCandidate(input, cond, { prefecture: store?.prefecture || input.store.prefecture || lh?.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
   const { ready, missing, provisional } = isReady(draft, input);
   const stage = classifyStage(input, jstDayString(deps.now));
-  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso) } as unknown as Json;
+  // ---- 抽選予告の追跡（Stage 6C）
+  // 抽選の実施を示す文言があるか（「新商品が発売される」だけの告知を、抽選予告として追跡しない）
+  const wording = hasLotteryWording([q.post?.text, q.post?.quoted?.text, q.card, q.context, q.title, result.extraction.announcementMethod, result.extraction.notes, result.extraction.conditionsText, result.extraction.verificationText, ...Object.values(draft.evidence).map((e) => e?.quote)]);
+  const isNotice = stage === "teaser" || stage === "partial";
+  // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
+  const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w));
+  const conflict = conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : null;
+  // 具体的な系列がある受付前・詳細未発表の抽選だけを追跡する
+  const wantTrack = cond.trackUpcoming && !!input.chain.name.trim() && wording && (ev.verdict === "upcoming" || isNotice || (stage === "upcoming" && !ready));
+  // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）
+  const trackedList = isNotice || stage === "upcoming" || ev.verdict === "upcoming" || ready ? await loadTracked(db, deps.householdId).catch(() => []) : [];
+  const matched = matchTracked(trackedList, input, c.id);
+  const old = matched.match;
+  const startDate = input.applyStart.precision !== "unknown" && input.applyStart.date ? input.applyStart.date : null;
+  const trackingEntries = old ? diffTracking(old.input, input, nowIso, q.url) : [];
+  const trackingObj: Tracking | null = wantTrack || old ? { ...inheritTracking(old?.tracking ?? null, nowIso, q.url, startDate, trackingEntries), ...(matched.ambiguous.length > 0 ? { related: matched.ambiguous } : {}) } : null;
+  // 系列に手動で登録した条件（Stage 5R）との違い。手動条件は書き換えず、確認用に残す
+  const regKinds = (data.chainConditions ?? []).filter((cc) => cc.chainId === input.chain.id).map((cc) => cc.kind);
+  const cDiff = input.chain.id ? conditionDiff((input.requirementTags ?? []) as RequirementTag[], regKinds) : null;
+  if (cDiff && regKinds.length > 0) draft.flags.conditions = [draft.flags.conditions, conditionDiffText(cDiff)].filter(Boolean).join(" / ");
+  // 続報で元の予告の候補が不要になったときの整理（元の候補は削除せず、結果を記録して残す）
+  const supersede = async (outcome: "registered" | "duplicate" | "tracking" | "excluded", lotteryId?: string) => {
+    if (!old) return;
+    const done = outcome === "registered" || outcome === "duplicate";
+    const patch = done
+      ? { status: "duplicate", job_state: "completed", lottery_id: lotteryId ?? null, triage: "auto_exclude", triage_reason: "続報により同じ抽選として整理", reasons: [outcome === "registered" ? `続報（${q.url}）で正式な抽選として登録されました` : "続報が登録済みの抽選と同じ内容でした"], manual_state: null, resolved_at: nowIso, completed_at: nowIso }
+      : { status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "続報の候補へ統合", reasons: [outcome === "tracking" ? `続報の候補（${q.url}）へ統合しました。同じ抽選として追跡を続けます` : "続報で収集条件の対象外と判断されました"], manual_state: null, resolved_at: nowIso, completed_at: nowIso };
+    await db.from("collection_candidates").update(deepClean(patch) as never).eq("id", old.id);
+  };
+  const stored = { input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}) } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）
@@ -600,23 +634,47 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const high = dups.find((d) => d.level === "high");
   if (high) {
     const added = await appendSourceUrl(db, high.lotteryId, q.url);
+    await supersede("duplicate", high.lotteryId);
     await finish("completed", { status: "duplicate", lottery_id: high.lotteryId, reasons: [high.reason, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due }, { duplicates: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   if (ev.verdict === "exclude") {
+    await supersede("excluded");
     await finish("skipped", { status: "excluded", reasons: ev.reasons, draft: stored, ...due }, { excluded: 1 });
+    return { usedAi: true, registered: false, aiFailed: false };
+  }
+  // 予告・一部判明の告知に、抽選の文言が無い（新商品の発売予定などの告知）ときは、抽選予告として扱わない
+  if (isNotice && !wording) {
+    await finish("skipped", { status: "excluded", reasons: ["抽選の予告ではなく、発売予定などの告知と判断しました（抽選・応募に関する文言がありません）"], draft: stored, ...due }, { excluded: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   // 受付前の予告は除外しない。詳細が確定していれば通常の登録対象、未発表なら再調査として保持する
   const stageGap = !ready && (stage === "teaser" || stage === "partial") ? [`${STAGE_LABEL[stage]}: 応募の日時が未発表または不明です`] : [];
-  const reasons = [...stageGap, ...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
-  if (ev.verdict === "match" && ready && dups.length === 0) {
+  const reasons = [...(conflict ? [conflict] : []), ...stageGap, ...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
+  const canRegisterNow = ev.verdict === "match" && ready && dups.length === 0 && !conflict;
+  // 追跡する予告（受付前・詳細未発表）: 要手動確認へ送らず、続報を待って保持する。受付開始が近いほど短い間隔で再確認する
+  if (wantTrack && !canRegisterNow) {
+    const dueAtT = due ? new Date(due.due_at) : null;
+    const hdT = decideHold({ now: deps.now, dueAt: dueAtT, gaps: reasons.length ? reasons : ["内容を確認してください"], holdCount: c.hold_count ?? 0, failKind: null, altTried: !!q.viaList, important: !!q.memoId, tracking: trackingObj ? { startDate: trackingObj.startDate, lastNewsAt: trackingObj.lastNewsAt } : null });
+    if (hdT.triage === "auto_exclude") {
+      await supersede("excluded");
+      await finish("skipped", { status: "excluded", reasons: [hdT.reason], draft: stored, ...triagePatch(hdT, c, deps.now), ...due }, { excluded: 1 });
+    } else {
+      await supersede("tracking");
+      const head = ev.verdict === "upcoming" ? `受付前の抽選として追跡しています（受付開始: ${startDate ?? "未発表"}）` : `${STAGE_LABEL[stage]}として追跡しています`;
+      await finish("review", { status: "pending", reasons: [head, ...reasons.filter((r) => !r.startsWith(STAGE_LABEL[stage]))].slice(0, 10), draft: { ...(stored as object), queued: { ...q, changed: false } } as unknown as Json, ...triagePatch(hdT, c, deps.now), ...due }, { review_added: 1 });
+    }
+    return { usedAi: true, registered: false, aiFailed: false };
+  }
+  if (canRegisterNow) {
     if (autoRegister && (deps.canRegister || deps.serviceRegister)) {
       const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister });
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする
         await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto" }).eq("id", saved.value.id);
-        await finish("completed", { status: "auto_registered", triage: "auto_register", triage_reason: "条件に一致し、情報が十分なため自動登録", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: stored, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
+        const storedReg = trackingObj ? ({ ...(stored as object), tracking: { ...trackingObj, promotedAt: nowIso, promotedLotteryId: saved.value.id } } as unknown as Json) : stored;
+        await supersede("registered", saved.value.id);
+        await finish("completed", { status: "auto_registered", triage: "auto_register", triage_reason: "条件に一致し、情報が十分なため自動登録", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: storedReg, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
         return { usedAi: true, registered: true, aiFailed: false };
       }
       // 登録の失敗はシステム側で解決できない → 要手動確認
@@ -630,6 +688,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const gaps = reasons.length ? reasons : ["内容を確認してください"];
   const dueAt = due ? new Date(due.due_at) : c.due_at ? new Date(c.due_at) : null;
   const hd = decideHold({ now: deps.now, dueAt, gaps, holdCount: c.hold_count ?? 0, failKind: q.viaKind ?? null, altTried: !!q.viaList, important: !!q.memoId });
+  if (old && hd.triage !== "auto_exclude") await supersede("tracking");
   if (hd.triage === "auto_exclude") {
     await finish("skipped", { status: "excluded", fail_kind: "expired", reasons: [hd.reason, ...gaps.slice(0, 3)], draft: stored, ...triagePatch(hd, c, deps.now), ...due }, { excluded: 1 });
   } else {

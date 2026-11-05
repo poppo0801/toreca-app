@@ -35,11 +35,12 @@ describe("収集条件の初期値", () => {
 });
 
 describe("受付状況（日時を補完しない）", () => {
-  it("受付中は一致。締切を過ぎたら除外。受付前は既定で除外、設定で含められる", () => {
+  it("受付中は一致。締切を過ぎたら除外。受付前は（追跡しない設定なら）除外、追跡する設定なら破棄せず追跡、「受付前も含む」なら登録対象", () => {
     expect(ev({}).verdict).toBe("match");
     expect(ev({ applyDeadline: { precision: "date_time", date: "2027-01-10", time: "10:00" } }).verdict).toBe("exclude");
     const future = { applyStart: { precision: "date_only" as const, date: "2027-02-01", time: "" } };
-    expect(ev(future).verdict).toBe("exclude");
+    expect(ev(future, { trackUpcoming: false }).verdict).toBe("exclude");
+    expect(ev(future).verdict).toBe("upcoming"); // 追跡する設定（既定）: 破棄せず、受付が始まるまで保持する（応募可能としては扱わない）
     expect(ev(future, { statusMode: "open_or_before" }).verdict).toBe("match");
   });
   it("締切が不明なら『受付中』とせず要確認。日付のみの締切は当日中は有効（23:59を補わない）", () => {

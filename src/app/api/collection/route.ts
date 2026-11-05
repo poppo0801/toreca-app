@@ -35,6 +35,7 @@ const settingsInput = z.object({
   productMode: z.enum(["all", "include", "exclude"]),
   productIds: z.array(uuid).max(200),
   statusMode: z.enum(["open", "open_or_before"]),
+  trackUpcoming: z.boolean().default(true),
   autoRegister: z.boolean(),
   scheduleEnabled: z.boolean(),
   scheduleHourJst: z.number().int().min(0).max(23),
@@ -269,7 +270,7 @@ export async function POST(request: NextRequest) {
         .from("collection_settings")
         .update({
           prefectures: s.prefectures, include_online: s.includeOnline, max_distance_km: s.maxDistanceKm, apply_methods: s.applyMethods, receive_methods: s.receiveMethods,
-          req_include: s.reqInclude, req_exclude: s.reqExclude, product_mode: s.productMode, product_ids: s.productIds, status_mode: s.statusMode, auto_register: s.autoRegister,
+          req_include: s.reqInclude, req_exclude: s.reqExclude, product_mode: s.productMode, product_ids: s.productIds, status_mode: s.statusMode, track_upcoming: s.trackUpcoming, auto_register: s.autoRegister,
           schedule_enabled: s.scheduleEnabled, schedule_hour_jst: s.scheduleHourJst, x_enabled: s.xEnabled, x_monthly_budget_jpy: s.xMonthlyBudgetJpy, x_max_posts_per_run: s.xMaxPostsPerRun,
           max_ai_per_run: s.maxAiPerRun, worker_enabled: s.workerEnabled, worker_batch: s.workerBatch, recheck_hours: s.recheckHours, updated_at: new Date().toISOString(),
         })

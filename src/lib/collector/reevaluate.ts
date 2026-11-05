@@ -29,6 +29,8 @@ export interface StoredDraft {
   evidence?: unknown;
   secondary?: string[];
   update?: unknown;
+  /** 抽選予告として追跡中（Stage 6C） */
+  tracking?: { startDate?: string | null } | null;
 }
 
 export interface CandidateLite {
@@ -151,7 +153,7 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
   const base = { rematched: rm, deadline, improved: rm.improved } as const;
 
   // 既存の抽選との重複（確実な一致のみ）
-  const dups = findDuplicates(input, data.lotteries, c.source_url ?? undefined);
+  const dups = findDuplicates(input, data.lotteries, c.source_url ?? undefined, data);
   const high = dups.find((d) => d.level === "high");
   if (high) return { ...base, cls: "F", action: "duplicate", reasons: [`既存の抽選と一致します（${high.reason}）`], priority: 6, duplicateOf: { lotteryId: high.lotteryId, reason: high.reason }, missing: [] };
 
@@ -174,6 +176,10 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
     return { ...base, cls: rm.improved ? "B" : "A", action: "register", reasons: [rm.improved ? "新しいマスター照合で系列・店舗・商品を確実に特定できたため、AI再解析なしで登録しました" : "情報が十分で既存の抽選と重複しないため登録しました"], priority: soon === 0 ? 1 : rm.improved ? 2 : 4, missing: [] };
   }
 
+  // 追跡中の抽選予告（受付前・詳細未発表）: 受付開始前の除外・AI再解析・手動確認へ送らず、追跡を続ける。受付が始まって登録条件を満たせば上で登録される
+  if (ev.verdict === "upcoming" || stored.tracking) {
+    return { ...base, cls: "D", action: "keep", reasons: [ev.verdict === "upcoming" ? "受付前の抽選として追跡中です" : "抽選予告として追跡中です", ...missing].slice(0, 6), priority: 5, missing };
+  }
   // 照合の失敗だけが理由（締切などの情報は十分）→ B（AI再解析はしない。照合が改善していなければそのまま確認待ち）
   const matchOnly = missing.length > 0 && missing.every((m) => /特定できません|判別できません/.test(m)) && input.applyDeadline.precision !== "unknown";
   if (matchOnly) return { ...base, cls: "B", action: "keep", reasons: missing, priority: soon === 0 ? 1 : 2, missing };
