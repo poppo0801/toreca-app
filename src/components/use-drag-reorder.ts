@@ -80,7 +80,7 @@ export function useDragReorder({
       el.style.transition = "none";
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       requestAnimationFrame(() => {
-        el.style.transition = "transform 160ms ease-out";
+        el.style.transition = "transform 340ms cubic-bezier(0.25, 0.8, 0.3, 1)";
         el.style.transform = "";
       });
     }
@@ -119,7 +119,7 @@ export function useDragReorder({
     const root = document.getElementById(scrollRootId);
     if (root) {
       const b = root.getBoundingClientRect();
-      const dy = s.y < b.top + EDGE_PX ? -Math.ceil((b.top + EDGE_PX - s.y) / 6) : s.y > b.bottom - EDGE_PX ? Math.ceil((s.y - (b.bottom - EDGE_PX)) / 6) : 0;
+      const dy = s.y < b.top + EDGE_PX ? -Math.ceil((b.top + EDGE_PX - s.y) / 12) : s.y > b.bottom - EDGE_PX ? Math.ceil((s.y - (b.bottom - EDGE_PX)) / 12) : 0;
       if (dy !== 0) root.scrollTop += dy;
     }
     place(s);
