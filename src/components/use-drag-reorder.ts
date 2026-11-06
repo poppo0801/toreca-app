@@ -138,11 +138,24 @@ export function useDragReorder({
       window.removeEventListener("pointercancel", h.cancel);
     }
     const wasActive = s.active;
-    s.el.style.transform = "";
-    s.el.style.transition = "";
-    s.el.style.zIndex = "";
-    s.el.style.willChange = "";
-    s.el.removeAttribute("data-dragging");
+    const el = s.el;
+    el.removeAttribute("data-dragging");
+    if (wasActive) {
+      // 離した位置から、移動先の枠へカードがそのまま滑って収まる（瞬時に飛ばない）。終わったら後始末
+      el.style.transition = "transform 420ms cubic-bezier(0.22, 0.7, 0.25, 1)";
+      el.style.transform = "";
+      window.setTimeout(() => {
+        if (el.getAttribute("data-dragging")) return; // すぐ次のドラッグが始まっていたら触らない
+        el.style.transition = "";
+        el.style.zIndex = "";
+        el.style.willChange = "";
+      }, 460);
+    } else {
+      el.style.transform = "";
+      el.style.transition = "";
+      el.style.zIndex = "";
+      el.style.willChange = "";
+    }
     session.current = null;
     setDragId(null);
     if (wasActive) {
