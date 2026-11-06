@@ -39,6 +39,11 @@ export interface ApplyExitApi {
   cancel: (lotteryId: string) => void;
   /** 退出の処理中か（保存後に表示対象のままだった場合は、処理が取り消されて false になる） */
   active: (lotteryId: string) => boolean;
+  /**
+   * 詳細パネルを開いている間、そのカードを一覧に残す（パネルはカードの一部のため、結果の記録などでカードがタブから外れても閉じない）。
+   * 閉じたとき、タブから外れていれば通常の退出アニメーションで見送る
+   */
+  pin: (lotteryId: string, on: boolean) => void;
 }
 
 const Ctx = createContext<ApplyExitApi | null>(null);
@@ -64,6 +69,7 @@ interface Entry {
 export function useApplyExitController({ enabled, resetKey, isShown }: { enabled: boolean; resetKey: string; isShown: (id: string) => boolean }) {
   const [phases, setPhases] = useState<Record<string, ExitPhase>>({});
   const [dirs, setDirs] = useState<Record<string, ExitDir>>({});
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(new Set());
   const entries = useRef(new Map<string, Entry>());
   const keyRef = useRef(resetKey);
   const shownRef = useRef(isShown);
@@ -153,9 +159,23 @@ export function useApplyExitController({ enabled, resetKey, isShown }: { enabled
       },
       cancel: (id) => drop(id),
       active: (id) => entries.current.has(id),
+      pin: (id, on) => {
+        setPinned((p) => {
+          if (p.has(id) === on) return p;
+          const n = new Set(p);
+          if (on) n.add(id);
+          else n.delete(id);
+          return n;
+        });
+        // 閉じたとき、まだ表示対象ならそのまま、外れていれば退出アニメーション（待機なし）
+        if (!on) {
+          const h = (api as ApplyExitApi).begin(id, { waitMs: 0 });
+          h.ok();
+        }
+      },
     };
   }, [drop]);
 
-  const keepIds = useMemo(() => new Set(Object.keys(phases)), [phases]);
+  const keepIds = useMemo(() => new Set([...Object.keys(phases), ...pinned]), [phases, pinned]);
   return { phases, dirs, keepIds, api };
 }

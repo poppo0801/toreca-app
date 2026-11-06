@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AtSign, CalendarCheck, Clock, Globe, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, type LucideIcon } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { EXIT_STAR_WAIT_MS, useApplyExit } from "@/components/apply-exit";
@@ -130,6 +130,13 @@ export function LotteryCard({
   const detailMode = view === "detail";
   const display = settings.cardDisplay ?? data.settings?.cardDisplay ?? DEFAULT_CARD_DISPLAY;
   const [open, setOpen] = useState(false);
+  // 詳細パネルを開いている間は、結果の記録などでカードが今のタブから外れても一覧に残す（パネルが閉じないように）。閉じたら外れていれば見送る
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open === wasOpen.current) return;
+    wasOpen.current = open;
+    exit?.pin(lottery.id, open);
+  }, [open, exit, lottery.id]);
   const [confirmOff, setConfirmOff] = useState(false);
   const scrollY = useRef(0);
 

@@ -195,7 +195,7 @@ describe("カードのスワイプ操作", () => {
 describe("Stage 6L: スワイプの退出アニメーション（★と共通）", () => {
   const exitApi = () => {
     const handle = { ok: vi.fn(), fail: vi.fn() };
-    const api: ApplyExitApi = { begin: vi.fn(() => handle), cancel: vi.fn(), active: vi.fn(() => true) };
+    const api: ApplyExitApi = { begin: vi.fn(() => handle), cancel: vi.fn(), active: vi.fn(() => true), pin: vi.fn() };
     return { api, handle };
   };
   const mountWithExit = (api: ApplyExitApi, tab: "all" | "managed") => {
