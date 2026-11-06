@@ -1,8 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AtSign, CalendarCheck, Clock, Globe, Gift, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, type LucideIcon } from "lucide-react";
+import { AtSign, CalendarCheck, Clock, Globe, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, Wallet, type LucideIcon } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { useViewScope } from "@/components/user-scope";
 import { FitLine } from "@/components/fit-line";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
 import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
@@ -25,7 +26,7 @@ import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
 import { WonRow } from "@/components/won-actions";
 import { displayPeriod, wonPeriodRows, myApplication, resultDayText, resultStage, wonProgress } from "@/lib/lottery-flow";
-import { scopedApplications, scopeSet } from "@/lib/profile-link";
+import { scopedApplications } from "@/lib/profile-link";
 import { scrollToTop, scrollTopOf } from "@/lib/app-scroll";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
@@ -61,21 +62,32 @@ function ProductLine({ name, quantity, extra, className }: { name: string; quant
  * プロフィール別の応募状況は表示専用。応募の操作は現在のプロフィール専用のボタンだけで行う。
  */
 
-/** 期間1行（購入=買い物袋 / 受取=プレゼントボックス）。日付の途中で折り返さない */
+/** 期間のアイコン: 購入=財布（支払い）／受取=買い物袋。簡易・詳細・各タブで共通 */
+function PeriodIcon({ label }: { label: "購入" | "受取" }) {
+  const cls = "size-[1.15em] shrink-0 text-muted-foreground";
+  return label === "受取" ? <ShoppingBag className={cls} aria-hidden="true" data-icon="receive" /> : <Wallet className={cls} aria-hidden="true" data-icon="purchase" />;
+}
+
+/** 期間1行。日付の途中で折り返さない */
 function PeriodLine({ label, text }: { label: "購入" | "受取"; text: string | null }) {
   return (
     <FitLine innerProps={{ "data-testid": "period", "data-kind": label, title: `${label}期間`, "aria-label": `${label}期間 ${text ?? "未定"}` }}>
-      {label === "受取" ? <Gift className="size-[1.15em] shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-[1.15em] shrink-0 text-muted-foreground" aria-hidden="true" />}
+      <PeriodIcon label={label} />
       <span className={text ? "" : "text-muted-foreground"}>{text ?? "未定"}</span>
     </FitLine>
   );
 }
 
 /** 期間の1項目（アイコン＋日付）。2種類の日時を同じ1行に並べるときに使う（折り返さない） */
+/** 一覧では年・曜日を省く（例: 11/7(土)〜11/9(月) → 11/7〜11/9）。詳細画面は正確な日付をそのまま出す */
+export function compactPeriodText(t: string | null): string | null {
+  return t ? t.replace(/[(（][日月火水木金土][)）]/g, "") : t;
+}
+
 function PeriodItem({ label, text }: { label: "購入" | "受取"; text: string | null }) {
   return (
     <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="period" data-kind={label} title={`${label}期間`} aria-label={`${label}期間 ${text ?? "未定"}`}>
-      {label === "受取" ? <Gift className="size-[1.15em] shrink-0 text-muted-foreground" aria-hidden="true" /> : <ShoppingBag className="size-[1.15em] shrink-0 text-muted-foreground" aria-hidden="true" />}
+      <PeriodIcon label={label} />
       <span className={text ? "" : "text-muted-foreground"}>{text ?? "未定"}</span>
     </span>
   );
@@ -99,6 +111,7 @@ export function LotteryCard({
   highlighted?: boolean;
 }) {
   const { data, now, profile, actions, settings } = useApp();
+  const viewScope = useViewScope();
   const detailMode = view === "detail";
   const display = settings.cardDisplay ?? data.settings?.cardDisplay ?? DEFAULT_CARD_DISPLAY;
   const [open, setOpen] = useState(false);
@@ -143,7 +156,7 @@ export function LotteryCard({
   // 応募済みタブは発表日基準、当選タブは次の手続き（購入/受取）の期限を主役にする
   const mineApp = myApplication(data, lottery.id, profile.id);
   // 当選タブの期間表示は、現在のユーザー＋紐づくサブの当選から（自分が当選していれば自分を優先。購入・受取が済んでいない当選を先に）
-  const wonScoped = wonTab ? scopedApplications(data, lottery.id, scopeSet(data.profiles, profile.id)).filter((a) => a.result === "won") : [];
+  const wonScoped = wonTab ? scopedApplications(data, lottery.id, viewScope).filter((a) => a.result === "won") : [];
   const wonApp = wonTab ? (mineApp?.result === "won" ? mineApp : wonScoped.find((a) => a.fulfillment !== "purchased") ?? wonScoped[0]) : undefined;
   const won = wonApp ? wonProgress(lottery, wonApp, now) : null;
   const stage = appliedTab ? resultStage(lottery, now) : null;
@@ -172,7 +185,7 @@ export function LotteryCard({
             type="button"
             onClick={toggleStar}
             aria-pressed={managed}
-            aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
+            aria-label={managed ? "要チェック（★）をOFFにする" : "要チェック（★）にする"}
             data-testid="card-star"
             className="absolute left-0 top-0 z-10 flex size-8 items-center justify-center rounded-full"
           >
@@ -210,7 +223,7 @@ export function LotteryCard({
                   /* 当選: 購入・受取の期間（状態「期限超過」などは下段の操作エリアに1回だけ表示する） */
                   <span className="flex flex-col gap-y-0.5" data-testid="won-periods">
                     {wonRows.map((r) => (
-                      <PeriodLine key={r.label} label={r.label} text={r.text} />
+                      <PeriodLine key={r.label} label={r.label} text={compactPeriodText(r.text)} />
                     ))}
                   </span>
                 ) : finished ? (
@@ -255,7 +268,7 @@ export function LotteryCard({
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
               {/* 日時は2種類あっても同じ1行に並べる（FitLineが実測し、余白→字間→行全体の文字サイズの順に詰める） */}
               <span className="block w-full min-w-0 text-[11px]" data-testid="card-dates">
-                <FitLine innerProps={{ className: "gap-3", "data-testid": "date-row" }}>
+                <FitLine wrap={appliedTab || wonTab} innerProps={{ className: "gap-x-3 gap-y-0.5", "data-testid": "date-row" }}>
                   {appliedTab ? (
                     <>
                       {/* 応募済み: 当落発表日（発表期間）＋購入期間（分離していれば受取期間）。応募締切はカードに出さない（詳細で確認できる） */}
@@ -263,10 +276,10 @@ export function LotteryCard({
                         <CalendarCheck className="size-[1.15em] shrink-0" aria-hidden="true" />
                         {resultDayText(lottery, now)}
                       </span>
-                      <PeriodItem label={periodInfo.label} text={periodInfo.text} />
+                      <PeriodItem label={periodInfo.label} text={compactPeriodText(periodInfo.text)} />
                     </>
                   ) : wonTab && won ? (
-                    wonRows.map((r) => <PeriodItem key={r.label} label={r.label} text={r.text} />)
+                    wonRows.map((r) => <PeriodItem key={r.label} label={r.label} text={compactPeriodText(r.text)} />)
                   ) : (
                     <>
                       {display.deadline && (
@@ -311,7 +324,7 @@ export function LotteryCard({
                   {event === "postponed" && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
                   {notice === "unconfirmed" && !appliedTab && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
                   {notice === "in_period" && !appliedTab && <Chip className="text-info">発表期間中</Chip>}
-                  {!managed && <Chip className="text-muted-foreground">管理対象外</Chip>}
+                  {!managed && <Chip className="text-muted-foreground">要チェック外</Chip>}
                   {skipSource && <Chip className="text-muted-foreground">{{ lottery: "今回スルー", store: "店舗スルー中", chain: "系列スルー中" }[skipSource]}</Chip>}
                   {!skipSource && skipException && <Chip className="text-muted-foreground">スルー例外</Chip>}
                 </span>
@@ -323,7 +336,7 @@ export function LotteryCard({
               type="button"
               onClick={toggleStar}
               aria-pressed={managed}
-              aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
+              aria-label={managed ? "要チェック（★）をOFFにする" : "要チェック（★）にする"}
               data-testid="card-star"
               className="absolute left-0 top-0 flex size-9 items-center justify-center rounded-full"
             >
@@ -365,8 +378,8 @@ export function LotteryCard({
       <LotteryDetailSheet lottery={lottery} open={open} onOpenChange={onOpenChange} />
       <Dialog open={confirmOff} onOpenChange={setConfirmOff}>
         <DialogContent>
-          <DialogTitle>管理対象（★）をOFFにしますか？</DialogTitle>
-          <DialogDescription>★をOFFにすると「★管理対象」一覧から外れます。応募・当選・購入の履歴は消えません。「全情報」からいつでも戻せます。</DialogDescription>
+          <DialogTitle>要チェック（★）をOFFにしますか？</DialogTitle>
+          <DialogDescription>★をOFFにすると「要チェック」一覧から外れます。応募・当選・購入の履歴は消えません。「全情報」からいつでも戻せます。</DialogDescription>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setConfirmOff(false)}>
               キャンセル

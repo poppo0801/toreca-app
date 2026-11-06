@@ -100,7 +100,7 @@ describe("カードのスワイプ操作", () => {
     await act(async () => {});
     expect(actions.setManaged).toHaveBeenCalledWith("L4", true);
     const toast = document.body.querySelector('[data-testid="undo-toast"]')!;
-    expect(toast.textContent).toContain("管理対象に追加しました");
+    expect(toast.textContent).toContain("要チェックに追加しました");
     expect(document.body.querySelector('[data-testid="undo-progress"]')).not.toBeNull();
     await act(async () => {
       (toast.querySelector("button") as HTMLButtonElement).click();

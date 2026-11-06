@@ -14,7 +14,7 @@ export type SkipView = "normal" | "include" | "only";
 
 /**
  * 状態の絞り込み（現在選択中のプロフィール基準）。
- *  default=受付中かつ未応募（全情報・★管理対象の既定）/ open=受付中 / closed=受付終了 / unapplied=未応募 / applied=応募済み / won=当選 / lost=落選 / any=すべて。
+ *  default=受付中かつ未応募（全情報・要チェックの既定）/ open=受付中 / closed=受付終了 / unapplied=未応募 / applied=応募済み / won=当選 / lost=落選 / any=すべて。
  * 応募・当落は現在のプロフィールのものだけで判定する（他のプロフィールが応募済みでも、現在のプロフィールが未応募なら未応募）。
  */
 export type StatusFilter = "default" | "open" | "closed" | "unapplied" | "applied" | "won" | "lost" | "any";
@@ -51,7 +51,7 @@ export const DEFAULT_FILTERS: Filters = {
   sort: "deadline",
 };
 
-/** タブごとの既定の絞り込み。全情報・★管理対象は「受付中かつ未応募」、応募済み・当選タブは状態で絞らない */
+/** タブごとの既定の絞り込み。全情報・要チェックは「受付中かつ未応募」、応募済み・当選タブは状態で絞らない */
 export function defaultFiltersFor(tab: Tab): Filters {
   return tab === "all" || tab === "managed" ? DEFAULT_FILTERS : { ...DEFAULT_FILTERS, status: "any" };
 }
@@ -102,7 +102,7 @@ export function eventStateOf(lottery: Lottery, now: Date): Lottery["eventState"]
 
 /**
  * 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。受付の終了・応募済みの除外は「状態」の絞り込みで行う。
- * 応募済み・当選は scope（現在のユーザー＋紐づくサブ）の応募だけで判定する。全情報・★管理対象は世帯共通（scope に依存しない）。
+ * 応募済み・当選は scope（現在のユーザー＋紐づくサブ）の応募だけで判定する。全情報・要チェックは世帯共通（scope に依存しない）。
  */
 export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date, scope?: ReadonlySet<string>): boolean {
   void _now;
@@ -193,7 +193,7 @@ function wonRank(data: AppData, l: Lottery, now: Date, profileId?: string, scope
 }
 
 /**
- * スルーはプロフィール別。全タブ（全情報・★管理対象・応募済み・当選）で、既定で「自分がスルーした抽選」を一覧から外す（他のプロフィールには影響しない）。
+ * スルーはプロフィール別。全タブ（全情報・要チェック・応募済み・当選）で、既定で「自分がスルーした抽選」を一覧から外す（他のプロフィールには影響しない）。
  * 応募・当選・購入・受取の記録は消さず、絞り込みで「含む／のみ」にすれば表示できる。全情報タブの「スルーのみ」はその絞り込み自体が表示対象を決めるため、ここでは外さない。
  * profileId を渡さない場合（集計用途など）はスルーで絞らない。
  */
@@ -233,11 +233,12 @@ export function matchStatus(data: AppData, lottery: Lottery, status: StatusFilte
   }
 }
 
-export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string, keepIds?: ReadonlySet<string>): Lottery[] {
-  // 「受付中・未応募」の既定は全情報・★管理対象のもの。応募済み・当選タブでは、状態を指定していなければ絞らない
+export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, profileId?: string, keepIds?: ReadonlySet<string>, scopeOverride?: ReadonlySet<string>): Lottery[] {
+  // 「受付中・未応募」の既定は全情報・要チェックのもの。応募済み・当選タブでは、状態を指定していなければ絞らない
   const status: StatusFilter = f.status === "default" && (tab === "applied" || tab === "won") ? "any" : f.status;
   // 応募済み・当選タブの表示範囲: 現在のユーザー＋紐づくサブ（profileId を渡さない集計用途は全員分）
-  const scope = profileId ? scopeSet(data.profiles, profileId) : undefined;
+  // 利用者が対象ユーザーを切り替えたとき（scopeOverride）はそれを使う。既定は現在のユーザー＋紐づくサブ
+  const scope = scopeOverride ?? (profileId ? scopeSet(data.profiles, profileId) : undefined);
   const list = data.lotteries.filter(
     (l) =>
       inTab(data, l, tab, now, scope) &&

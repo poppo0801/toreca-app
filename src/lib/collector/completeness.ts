@@ -137,7 +137,7 @@ export interface PriorityCtx {
   now: Date;
   dueAt: Date | null;
   stage: LotteryStage;
-  /** ★管理対象の系列 */
+  /** 要チェックの系列 */
   importantChain?: boolean;
   /** 優先収集メモに一致 */
   memoMatched?: boolean;

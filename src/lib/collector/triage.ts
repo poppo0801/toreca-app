@@ -18,7 +18,7 @@ const HOLD_INTERVALS = [30 * MIN, 2 * H, 6 * H, 12 * H, 24 * H, 24 * H];
 export const MAX_HOLD = HOLD_INTERVALS.length;
 /** 締切の何時間前までに解決しなければ、規定回数に達していなくても手動確認へ移すか */
 export const URGENT_HOURS = 24;
-/** ★管理対象の系列・優先収集メモに一致する候補は、より早めに知らせる */
+/** 要チェックの系列・優先収集メモに一致する候補は、より早めに知らせる */
 export const URGENT_HOURS_IMPORTANT = 48;
 
 export function holdIntervalMs(holdCount: number): number {
@@ -64,7 +64,7 @@ export interface HoldInput {
   failKind: FailKind | null;
   /** 別の許可された情報源で取得を試して、必要な情報が得られなかった */
   altTried: boolean;
-  /** 優先収集メモに一致、または★管理対象の系列 */
+  /** 優先収集メモに一致、または要チェックの系列 */
   important: boolean;
   /** 抽選予告として追跡中（具体的な系列がある受付前・詳細未発表の抽選）。回数や締切の近さだけを理由に要手動確認へ移さない */
   tracking?: { startDate: string | null; lastNewsAt: string } | null;

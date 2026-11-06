@@ -10,7 +10,7 @@ import { useBusy } from "@/lib/use-busy";
 import type { Lottery } from "@/types/domain";
 
 /**
- * 継続抽選・招待制販売の状態変更（詳細画面）。リセット・失効が確定したときだけ、手動で応募を解除して再応募の候補（★管理対象）に戻す。
+ * 継続抽選・招待制販売の状態変更（詳細画面）。リセット・失効が確定したときだけ、手動で応募を解除して再応募の候補（要チェック）に戻す。
  * 当選・招待の到着は通常の「当選」で記録する（当選タブへ移る）。リセットが確定していない間は応募状態を勝手に解除しない。
  */
 export function OngoingOps({ lottery }: { lottery: Lottery }) {
@@ -37,7 +37,7 @@ export function OngoingOps({ lottery }: { lottery: Lottery }) {
         <DialogContent>
           <DialogTitle>{word}を記録しますか？</DialogTitle>
           <DialogDescription>
-            {profile.label}の応募を取り消して、再応募の候補（★管理対象）に戻します。これまでの応募・当選の履歴は消えません。リセットや失効が確定しているときだけ記録してください。
+            {profile.label}の応募を取り消して、再応募の候補（要チェック）に戻します。これまでの応募・当選の履歴は消えません。リセットや失効が確定しているときだけ記録してください。
           </DialogDescription>
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild>

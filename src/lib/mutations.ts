@@ -63,7 +63,7 @@ export function setManaged(
   };
 }
 
-/** 応募済み・当選にした抽選は★管理対象にする（Stage 5Y）。既に★なら何もしない。取消・落選・購入済みでも自動では外さない */
+/** 応募済み・当選にした抽選は要チェックにする（Stage 5Y）。既に★なら何もしない。取消・落選・購入済みでも自動では外さない */
 function ensureManaged(data: AppData, actorProfileId: string, lotteryId: string, at: Date): AppData {
   return data.management.find((m) => m.lotteryId === lotteryId)?.isManaged ? data : setManaged(data, actorProfileId, lotteryId, true, at);
 }

@@ -6,8 +6,8 @@ import type { AppData, Lottery } from "@/types/domain";
 
 /**
  * タブごとのスワイプ操作の割り当てと、実行前の判定（純関数）。
- *   全情報:       右 → ★管理対象に追加   左 → 今回のみスルー
- *   ★管理対象:   右 → 応募済みに変更     左 → ★管理対象から解除
+ *   全情報:       右 → 要チェックに追加   左 → 今回のみスルー
+ *   要チェック:   右 → 応募済みに変更     左 → 要チェックから解除
  *   応募済み:     右 → 当選              左 → 落選
  *   当選:         右 → 受取済み          左 → 操作なし
  * 実際の更新は既存の状態管理(actions)をそのまま使う。ここでは「いまその操作をしてよいか」と確認の要否だけを決める。
@@ -55,10 +55,10 @@ export function leavesListOnCommit(op: SwipeOp, tab: Tab): boolean {
 export type SwipeTone = "primary" | "success" | "muted" | "warn";
 
 export const OP_META: Record<SwipeOp, { hint: string; done: string; tone: SwipeTone }> = {
-  add_managed: { hint: "★ 管理対象に追加", done: "管理対象に追加しました", tone: "primary" },
+  add_managed: { hint: "★ 要チェックに追加", done: "要チェックに追加しました", tone: "primary" },
   skip_once: { hint: "今回はスルー", done: "今回はスルーしました", tone: "muted" },
   mark_applied: { hint: "応募済みにする", done: "応募済みにしました", tone: "primary" },
-  unmanage: { hint: "★ 管理対象から解除", done: "管理対象から解除しました", tone: "muted" },
+  unmanage: { hint: "★ 要チェックから解除", done: "要チェックから解除しました", tone: "muted" },
   result_won: { hint: "当選", done: "当選として記録しました", tone: "success" },
   result_lost: { hint: "落選", done: "落選として記録しました", tone: "muted" },
   receive: { hint: "受取済み", done: "受取済みとして記録しました", tone: "success" },
@@ -98,9 +98,9 @@ export function planSwipe(
 
   switch (op) {
     case "add_managed":
-      return isManaged(data, lottery.id) ? { kind: "blocked", message: "すでに管理対象です" } : { kind: "run", op };
+      return isManaged(data, lottery.id) ? { kind: "blocked", message: "すでに要チェックです" } : { kind: "run", op };
     case "unmanage":
-      return isManaged(data, lottery.id) ? { kind: "run", op } : { kind: "blocked", message: "管理対象ではありません" };
+      return isManaged(data, lottery.id) ? { kind: "run", op } : { kind: "blocked", message: "要チェックではありません" };
     case "skip_once":
       return isSkippedBy(data, profileId, lottery) ? { kind: "blocked", message: "すでにスルー中です" } : { kind: "run", op };
     case "mark_applied": {

@@ -39,16 +39,16 @@ async function switchProfile(page: Page, label: string) {
 }
 
 test("★OFFは確認ダイアログを挟み、キャンセルでは状態が変わらない", async ({ page }) => {
-  const tab = page.getByRole("tab", { name: /★管理対象/ });
+  const tab = page.getByRole("tab", { name: /要チェック/ });
   const before = await tab.innerText();
   const card = page.locator('[data-lottery-id="L1"]');
-  await card.getByRole("button", { name: /管理対象（★）をOFF/ }).click();
+  await card.getByRole("button", { name: /要チェック（★）をOFF/ }).click();
   await expect(page.getByRole("dialog")).toContainText("履歴は消えません");
   await page.getByRole("button", { name: "キャンセル" }).click();
   await expect(card).toBeVisible();
   expect(await tab.innerText()).toBe(before);
 
-  await card.getByRole("button", { name: /管理対象（★）をOFF/ }).click();
+  await card.getByRole("button", { name: /要チェック（★）をOFF/ }).click();
   await page.getByRole("button", { name: "★をOFFにする" }).click();
   await expect(card).toHaveCount(0);
   // 全情報には残り、★に戻せる
@@ -69,12 +69,12 @@ test("ヘッダーは現在のユーザーだけを表示し、タップで切�
   await expect(page.locator("header").getByTestId("current-profile")).toHaveText("B");
 });
 
-test("見出しと登録ボタンは1行。説明文は無く、タブは 全情報→★管理対象→応募済み→当選 の順で初期は★管理対象", async ({ page }) => {
+test("見出しと登録ボタンは1行。説明文は無く、タブは 全情報→要チェック→応募済み→当選 の順で初期は要チェック", async ({ page }) => {
   await expect(page.getByText("家族共通の抽選情報です。")).toHaveCount(0);
   const tabs = page.getByRole("tab");
   const names = (await tabs.allInnerTexts()).map((t) => t.replace(/\s*\d+(\s+\d+)?\s*$/, "").trim());
-  expect(names).toEqual(["全情報", "★管理対象", "応募済み", "当選"]);
-  await expect(page.getByRole("tab", { name: /★管理対象/ })).toHaveAttribute("aria-selected", "true");
+  expect(names).toEqual(["全情報", "要チェック", "応募済み", "当選"]);
+  await expect(page.getByRole("tab", { name: /要チェック/ })).toHaveAttribute("aria-selected", "true");
   // モックでは登録ボタンの代わりにデモ表示。見出しと同じ行にある
   const h1 = page.getByRole("heading", { name: "抽選管理" });
   const note = page.getByText("デモデータ（保存されません）");
@@ -124,7 +124,7 @@ test("スルー表示フィルター: 通常は自分のスルーを除き、含
   const skipSelect = page.getByLabel("スルー表示");
   await expect(skipSelect).toHaveValue("normal");
   await page.keyboard.press("Escape");
-  const countOf = async () => Number((await page.getByRole("tab", { name: /★管理対象/ }).innerText()).match(/(\d+)\s*$/)![1]);
+  const countOf = async () => Number((await page.getByRole("tab", { name: /要チェック/ }).innerText()).match(/(\d+)\s*$/)![1]);
   const normal = await page.getByTestId("lottery-card").count();
   await pickFilter(page, "スルー表示", "include");
   const include = await page.getByTestId("lottery-card").count();
@@ -176,7 +176,7 @@ test("タブ・詳細・マトリクスを切り替えられる", async ({ page 
   await expect(page.getByTestId("lottery-card").first()).toContainText("結果未確認");
   await page.getByRole("tab", { name: /当選/ }).click();
   await expect(page.getByRole("button", { name: "受取を記録" }).first()).toBeVisible();
-  await page.getByRole("tab", { name: /★管理対象/ }).click();
+  await page.getByRole("tab", { name: /要チェック/ }).click();
   // 既定は詳細表示。シンプルにするとコンパクトな1行カード（★・小さな画像・店名・商品名・自分の応募状態）になる
   await expect(page.getByTestId("card-simple")).toHaveCount(0);
   await page.getByRole("button", { name: "シンプル表示にする" }).click();
@@ -705,7 +705,7 @@ test.describe("設定とナビゲーション", () => {
     await expect(card.getByLabel("ユーザー別の応募状況")).toHaveCount(0); // 全員分の状態は出さない
     await expect(card.getByTestId("my-apply")).toHaveCount(1); // 現在のユーザーの応募操作だけ
     await expect(card.getByTestId("card-deadline")).toBeVisible(); // 締切は一覧でも出す
-    await expect(card.getByRole("button", { name: /管理対象（★）をOFF/ })).toBeVisible();
+    await expect(card.getByRole("button", { name: /要チェック（★）をOFF/ })).toBeVisible();
   });
 });
 
@@ -1202,7 +1202,7 @@ test.describe("Stage 5K 追加: ライトの色の質感", () => {
     const far = page.getByTestId("deadline-badge").filter({ hasText: /あと([3-9]|d{2,})日/ }).first();
     if (await far.count()) expect(await css(far, "color")).toBe(await varColor("--info"));
     // ★: 縁取りの色が塗りと同じ（別色の縁取りなし）
-    const star = page.locator('[data-lottery-id="L1"]').getByRole("button", { name: /管理対象（★）/ }).locator("svg").first();
+    const star = page.locator('[data-lottery-id="L1"]').getByRole("button", { name: /要チェック（★）/ }).locator("svg").first();
     const [f, s] = await star.evaluate((e) => [getComputedStyle(e).fill, getComputedStyle(e).stroke]);
     expect(f).toBe(s);
   });
@@ -1266,7 +1266,7 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     await expect(mine.locator("span").first()).toBeVisible(); // プロフィールのアバター
   });
 
-  test("★管理対象は既定で「受付中・未応募」。応募直後は約1秒そのまま表示し、右へ約0.55秒でスライド（フェードアウト）してから一覧が詰まる", async ({ page }) => {
+  test("要チェックは既定で「受付中・未応募」。応募直後は約1秒そのまま表示し、右へ約0.55秒でスライド（フェードアウト）してから一覧が詰まる", async ({ page }) => {
     const c = card(page, "L4");
     await expect(c).toBeVisible();
     // 退場の段階（wait → sliding → collapsing）を記録する。スライドは約0.55秒、そのあと0.35秒で一覧が詰まる
@@ -1368,7 +1368,7 @@ test.describe("Stage 4C: NEW表示", () => {
     // 新着(L5)はAがスルー中の店舗のため、通常表示ではAの一覧とバッジに含めない（スルー表示は全タブ共通）。スルーしていないBで確認する
     await switchProfile(page, "B");
     const badge = page.getByRole("tab", { name: /全情報/ }).getByTestId("tab-new");
-    await expect(badge).toHaveText("1"); // 「NEW」の文字は出さず、小さな件数バッジだけ
+    await expect(badge).toHaveText("新1"); // 「NEW」の文字は出さず、小さな件数バッジだけ
     await expect(page.getByRole("tab", { name: /全情報/ })).not.toContainText("NEW");
     // 新着の抽選のカードにはNEW。受付開始日ではなく、把握した日時で決まる印
     await page.getByRole("tab", { name: /全情報/ }).click();
@@ -1407,8 +1407,8 @@ test.describe("Stage 5P: 状態絞り込み・タブ・カード・サブユー�
     await expect(card(page, "L2")).toBeVisible();
   });
 
-  test("★管理対象では、★が付いていない抽選は状態を「すべて」にしても表示しない。系列など他の条件と組み合わせられる", async ({ page }) => {
-    await page.getByRole("tab", { name: /★管理対象/ }).click();
+  test("要チェックでは、★が付いていない抽選は状態を「すべて」にしても表示しない。系列など他の条件と組み合わせられる", async ({ page }) => {
+    await page.getByRole("tab", { name: /要チェック/ }).click();
     await status(page, "any");
     await expect(card(page, "L5")).toHaveCount(0); // ★なし
     await expect(card(page, "L6")).toBeVisible(); // ★あり・受付終了
@@ -1589,7 +1589,7 @@ test.describe("Stage 5Z 日付の1行表示", () => {
           await expect(toggle).toHaveAttribute("aria-pressed", String(detail));
           await page.waitForTimeout(350);
         }
-        for (const tab of [/全情報/, /★管理対象/, /応募済み/, /当選/]) {
+        for (const tab of [/全情報/, /要チェック/, /応募済み/, /当選/]) {
           await page.getByRole("tab", { name: tab }).click();
           await page.evaluate(() => {
             for (const e of document.querySelectorAll<HTMLElement>('[data-testid="store-name"]')) e.textContent = "とても長い系列名の長い長い店舗名 ○○駅前ショッピングセンター店 本館2階";

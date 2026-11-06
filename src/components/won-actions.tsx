@@ -7,7 +7,8 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { hasSeparateSteps, wonProgress } from "@/lib/lottery-flow";
-import { ownerIdOf, scopedApplications, scopeSet } from "@/lib/profile-link";
+import { useViewScope } from "@/components/user-scope";
+import { ownerIdOf, scopedApplications } from "@/lib/profile-link";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Application, Lottery } from "@/types/domain";
@@ -131,7 +132,7 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
  */
 export function WonRow({ lottery }: { lottery: Lottery }) {
   const { data, now, profile } = useApp();
-  const scope = scopeSet(data.profiles, profile.id);
+  const scope = useViewScope();
   const idx = (a: Application) => data.profiles.findIndex((p) => p.id === ownerIdOf(data, a));
   const wonApps = scopedApplications(data, lottery.id, scope)
     .filter((a) => a.result === "won")

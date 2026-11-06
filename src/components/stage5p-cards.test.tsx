@@ -56,7 +56,8 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), procedureSplit: false });
     mount("L2", "applied");
     expect(text('[data-testid="result-day"]')).toBe("11/3(火)");
-    expect(text('[data-testid="period"]')).toBe("11/4(水)〜11/6(金)");
+    // 応募済みタブの一覧では年・曜日を省く（Stage 6K。詳細画面では曜日つきの正確な日付）
+    expect(text('[data-testid="period"]')).toBe("11/4〜11/6");
     expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("購入");
     expect(q('[data-testid="period"] svg')).not.toBeNull();
     expect(host.textContent).not.toContain("締切");
@@ -69,7 +70,7 @@ describe("応募済みタブのカード（日付・ボタン）", () => {
   it("購入・受取が分かれた抽選は右側に受取期間を出す", () => {
     patchLottery("L2", { resultDate: dateOnly("2026-11-03"), procedureSplit: true, procedureStart: dateOnly("2026-11-04"), procedureDeadline: dateOnly("2026-11-06"), receiveStart: dateOnly("2026-11-05"), receiveDeadline: dateOnly("2026-11-08") });
     mount("L2", "applied");
-    expect(text('[data-testid="period"]')).toBe("11/5(木)〜11/8(日)");
+    expect(text('[data-testid="period"]')).toBe("11/5〜11/8");
     expect(q('[data-testid="period"]')!.getAttribute("data-kind")).toBe("受取");
   });
   it("期間が未設定なら「未定」（応募締切を代用しない）。発表日が不明ならカウントダウンを出さない", () => {

@@ -7,6 +7,29 @@
 export const KANSAI3: readonly string[] = ["兵庫県", "大阪府", "京都府"];
 export const KANSAI_KANTO6: readonly string[] = [...KANSAI3, "東京都", "神奈川県", "千葉県"];
 
+/** 全47都道府県を地域別に整理したもの（地域フィルターの選択画面用。表示用の分類で、データの有無に依存しない） */
+export const REGION_GROUPS: readonly { name: string; prefectures: readonly string[] }[] = [
+  { name: "北海道・東北", prefectures: ["北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"] },
+  { name: "関東", prefectures: ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"] },
+  { name: "中部", prefectures: ["新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県", "静岡県", "愛知県"] },
+  { name: "近畿", prefectures: ["三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"] },
+  { name: "中国・四国", prefectures: ["鳥取県", "島根県", "岡山県", "広島県", "山口県", "徳島県", "香川県", "愛媛県", "高知県"] },
+  { name: "九州・沖縄", prefectures: ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県"] },
+];
+export const ALL_PREFECTURES: readonly string[] = REGION_GROUPS.flatMap((g) => g.prefectures);
+
+/** 「何も選ばない」状態を表す印（選択が空 = すべて、と区別するため）。どの都道府県にも一致しない */
+export const NO_PREFECTURE = "__none__";
+
+/** 選択の要約（ボタン表示用）。空 = すべて */
+export function regionSummary(all: readonly string[]): string {
+  const selected = all.filter((p) => p !== NO_PREFECTURE);
+  if (all.length > 0 && selected.length === 0) return "未選択";
+  if (selected.length === 0 || selected.length >= ALL_PREFECTURES.length) return "すべて";
+  if (selected.length <= 3) return selected.join("・");
+  return `${selected.length}都道府県`;
+}
+
 export type RegionMode = "kansai3" | "kanto6" | "all" | "custom";
 export const REGION_LABEL: Record<RegionMode, string> = { kansai3: "関西3県", kanto6: "関西＋関東6都府県", all: "すべて", custom: "カスタム" };
 

@@ -3,7 +3,7 @@ import type { Tab } from "@/lib/lottery-view";
 
 const ROWS: { tab: Tab; label: string }[] = [
   { tab: "all", label: "全情報" },
-  { tab: "managed", label: "★管理対象" },
+  { tab: "managed", label: "要チェック" },
   { tab: "applied", label: "応募済み" },
   { tab: "won", label: "当選" },
 ];

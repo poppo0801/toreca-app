@@ -165,7 +165,7 @@ export function planNotifications(
       const url = "/lotteries";
       const base = { profileId: profile.id, lotteryId: l.id, url, tag: `lottery:${l.id}` };
 
-      // ---- 応募締切（★管理対象で、このプロフィールに未応募のアカウントがあるときだけ）
+      // ---- 応募締切（要チェックで、このプロフィールに未応募のアカウントがあるときだけ）
       if (isManaged(data, l.id) && effectiveEventState(l, now) === "open") {
         const missing = myAccounts.filter((a) => judgeAccount(data, l, a, now).status === "eligible_unapplied");
         if (missing.length > 0) {

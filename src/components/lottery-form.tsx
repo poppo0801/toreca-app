@@ -1147,7 +1147,7 @@ export function LotteryFormDialog({
                   <legend className="px-1 text-[13px] font-medium">応募状況（過去の抽選はここで登録）</legend>
                   <label className="flex min-h-9 items-center gap-2 text-sm">
                     <input type="checkbox" checked={v.isManaged ?? true} onChange={(e) => set("isManaged", e.target.checked)} className="size-4" />
-                    管理対象（★）にする
+                    要チェック（★）にする
                   </label>
                   {v.multiMode === "choose_one" ? (
                     <p className="text-xs text-muted-foreground">希望商品を選んで応募する方式では、登録後にカード上でユーザーごとに希望商品を選択して応募を記録します。</p>

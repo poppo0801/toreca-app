@@ -30,24 +30,25 @@ import {
   type StatusFilter,
   type Tab,
 } from "@/lib/lottery-view";
-import { isSkippedBy, profileSeesLottery } from "@/lib/eligibility";
 import { tabDots } from "@/lib/notifications";
 import { useTapGate } from "@/lib/tap-guard";
 import { KANSAI3, loadRegion, REGION_LABEL, regionMode, saveRegion, validateRegion } from "@/lib/region-filter";
 import { readPref, readSession, writePref, writeSession } from "@/services/local-device-store";
 import { cn } from "@/lib/utils";
+import { UserScopeProvider } from "@/components/user-scope";
+import { DEFAULT_USER_SCOPE, loadUserScope, resolveUserScope, saveUserScope, type UserScopePref } from "@/lib/user-scope";
 
-/** 並びは 全情報 → ★管理対象 → 応募済み → 当選。初期表示は★管理対象 */
+/** 並びは 全情報 → 要チェック → 応募済み → 当選。初期表示は要チェック */
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "全情報" },
-  { value: "managed", label: "★管理対象" },
+  { value: "managed", label: "要チェック" },
   { value: "applied", label: "応募済み" },
   { value: "won", label: "当選" },
 ];
 
 const VIEW = ["list", "matrix"] as const;
 
-/** 状態の絞り込みの選択肢（現在のプロフィール基準）。「受付中・未応募」は全情報・★管理対象だけの既定 */
+/** 状態の絞り込みの選択肢（現在のプロフィール基準）。「受付中・未応募」は全情報・要チェックだけの既定 */
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "default", label: "状態: 受付中・未応募" },
   { value: "open", label: "状態: 受付中" },
@@ -115,6 +116,13 @@ function LotteryBoardInner() {
   const [legend, setLegend] = useState(false);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
+  // 応募済み・当選タブの対象ユーザー（端末ごと・プロフィールごとに記憶）。既定は自分＋紐づくサブ
+  const [userScope, setUserScope] = useState<UserScopePref>(DEFAULT_USER_SCOPE);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末ローカル設定の復元（プロフィールを切り替えたら、そのプロフィールの設定へ）
+    setUserScope(loadUserScope(profile.id));
+  }, [profile.id]);
+  const viewScope = useMemo(() => resolveUserScope(data.profiles, profile.id, userScope), [data.profiles, profile.id, userScope]);
 
   // 端末別の表示設定と、このタブでの前回のタブ・フィルターを復元（Providerがマウント後に描画するのでSSR差異なし）
   useEffect(() => {
@@ -160,7 +168,7 @@ function LotteryBoardInner() {
   }, [focusId]);
 
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
-  // タブを切り替えたとき、状態の絞り込みはそのタブの既定へ戻す（全情報と★管理対象は同じ既定なので、選んだ状態を保つ）
+  // タブを切り替えたとき、状態の絞り込みはそのタブの既定へ戻す（全情報と要チェックは同じ既定なので、選んだ状態を保つ）
   const selectTab = (next: Tab) => {
     const before = defaultFiltersFor(tab).status;
     const after = defaultFiltersFor(next).status;
@@ -168,24 +176,26 @@ function LotteryBoardInner() {
     setTab(next);
   };
 
-  // 応募直後のカードを一定時間だけ残して退場させる（★管理対象で「応募済みを含まない」のとき、一覧表示のみ）
+  // 応募直後のカードを一定時間だけ残して退場させる（要チェックで「応募済みを含まない」のとき、一覧表示のみ）
   // 応募した抽選が状態の絞り込みで外れるとき（未応募を見ているとき）だけ、退場アニメーションで見送る
   const hidesApplied = (tab === "managed" || tab === "all") && (filters.status === "default" || filters.status === "unapplied");
   const exit = useApplyExitController({ enabled: hidesApplied && view === "list", resetKey: `${profile.id}|${tab}|${filters.status}|${view}` });
-  const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds), [data, tab, filters, now, profile.id, exit.keepIds]);
-  // トレマネが新規に把握した（まだ詳細を確認していない）抽選の件数。自動収集で追加された抽選もここに含まれる
-  const newCount = useMemo(() => data.lotteries.filter((l) => l.isNew && profileSeesLottery(data, profile.id, l) && !isSkippedBy(data, profile.id, l)).length, [data, profile.id]);
+  const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds, viewScope), [data, tab, filters, now, profile.id, exit.keepIds, viewScope]);
+  // 新着 = 全情報タブに出ている抽選（件数と同じ集合: 既定の絞り込み・スルー除外）のうち、まだ詳細を確認していないもの。必ず件数以下になる（Stage 6K）。
+  // 以前は絞り込み前の全抽選から数えていたため、受付終了・応募済みの新着が混ざって件数を超えていた
+  const newCount = useMemo(() => selectLotteries(data, "all", defaultFiltersFor("all"), now, profile.id).filter((l) => l.isNew).length, [data, now, profile.id]);
   const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
   const showSkip = true;
   const statusDefault = defaultFiltersFor(tab).status;
   // 詳細フィルターで条件を変えている数（検索語は検索欄に出ているので含めない）
   const baseFilters = { ...defaultFiltersFor(tab), prefectures: region };
-  const activeCount = countActiveFilters(filters, baseFilters, { tab, showSkip });
+  const activeCount = countActiveFilters(filters, baseFilters, { tab, showSkip, userScope });
   const filterKey = JSON.stringify(filters);
   const hasFilter = activeCount > 0 || filters.query.trim() !== "";
 
   return (
+    <UserScopeProvider pref={userScope}>
     <div>
       {/* 固定領域: 見出し＋タブ。この下の検索・フィルター・カードだけがスクロールする */}
       <div className="sticky top-[var(--header-h)] z-20 -mx-3 space-y-1.5 border-b bg-background px-3 pb-1.5 md:-mx-6 md:px-6">
@@ -221,7 +231,7 @@ function LotteryBoardInner() {
         </div>
         <div role="tablist" aria-label="抽選の表示切替" className="grid grid-cols-4 rounded-lg bg-muted p-0.5">
           {TABS.map((t) => {
-            const count = selectLotteries(data, t.value, defaultFiltersFor(t.value), now, profile.id).length;
+            const count = selectLotteries(data, t.value, defaultFiltersFor(t.value), now, profile.id, undefined, viewScope).length;
             const selected = tab === t.value;
             const dot = (t.value === "applied" && dots.appliedDot) || (t.value === "won" && dots.wonDot);
             return (
@@ -242,8 +252,8 @@ function LotteryBoardInner() {
                   <span className="inline-flex h-4 items-center gap-0.5 text-[11px] tabular-nums" data-testid={`tab-count-${t.value}`}>
                     <span className="opacity-80">{count}</span>
                     {t.value === "all" && newCount > 0 && (
-                      <span data-testid="tab-new" aria-label={`新着${newCount}件`} className="rounded-full bg-info px-1 text-[10px] font-bold leading-4 text-white tabular-nums">
-                        {newCount}
+                      <span data-testid="tab-new" aria-label={`新着${newCount}件（表示中のうち未確認）`} className="rounded-full bg-info px-1 text-[10px] font-bold leading-4 text-white tabular-nums">
+                        新{newCount}
                       </span>
                     )}
                   </span>
@@ -334,6 +344,12 @@ function LotteryBoardInner() {
             showSkip={showSkip}
             statusOptions={STATUS_OPTIONS.filter((o) => o.value !== "default" || statusDefault === "default")}
             prefectures={prefectures}
+            userScope={userScope}
+            selfId={profile.id}
+            onUserScope={(v) => {
+              setUserScope(v);
+              saveUserScope(profile.id, v);
+            }}
             onApply={(f) => {
               setFilters(f);
               setRegion(f.prefectures);
@@ -396,5 +412,6 @@ function LotteryBoardInner() {
         )}
       </div>
     </div>
+    </UserScopeProvider>
   );
 }

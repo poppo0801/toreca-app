@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
       return r.ok ? json({ ok: true, applied: r.applied }) : json({ ok: false, error: r.message }, 422);
     }
     case "bulkRegister": {
-      // 選んだ確認待ちの候補をまとめて登録する（1件ずつ登録し、失敗した件数を返す。★管理対象にせず、応募記録は作らない）
+      // 選んだ確認待ちの候補をまとめて登録する（1件ずつ登録し、失敗した件数を返す。要チェックにせず、応募記録は作らない）
       let ok = 0;
       const failed: string[] = [];
       for (const id of b.ids) {

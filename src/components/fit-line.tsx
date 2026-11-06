@@ -17,7 +17,7 @@ export function fitFontSize(needed: number, available: number, basePx: number, m
   return Math.max(minPx, Math.floor(basePx * (available / needed) * 10) / 10);
 }
 
-export function FitLine({ children, className, innerProps, ...rest }: { children: ReactNode; className?: string; innerProps?: HTMLAttributes<HTMLSpanElement> & { "data-testid"?: string; "data-kind"?: string } } & Omit<HTMLAttributes<HTMLSpanElement>, "children" | "className">) {
+export function FitLine({ children, className, innerProps, wrap = false, ...rest }: { children: ReactNode; className?: string; /** true のときは縮小せず、収まらない項目を次の行へ折り返す（項目の途中では折り返さない） */ wrap?: boolean; innerProps?: HTMLAttributes<HTMLSpanElement> & { "data-testid"?: string; "data-kind"?: string } } & Omit<HTMLAttributes<HTMLSpanElement>, "children" | "className">) {
   const outer = useRef<HTMLSpanElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
 
@@ -25,6 +25,7 @@ export function FitLine({ children, className, innerProps, ...rest }: { children
     const o = outer.current;
     const i = inner.current;
     if (!o || !i) return;
+    if (wrap) return;
     i.style.fontSize = "";
     i.dataset.tight = "0";
     const avail = o.clientWidth;
@@ -33,7 +34,7 @@ export function FitLine({ children, className, innerProps, ...rest }: { children
     if (i.scrollWidth <= avail) return;
     const base = parseFloat(getComputedStyle(i).fontSize) || 12;
     i.style.fontSize = `${fitFontSize(i.scrollWidth, avail, base)}px`;
-  }, []);
+  }, [wrap]);
   // 描画のたびに実測し、親の幅が変わったとき（回転・分割表示・フォント読み込み）にも測り直す
   useLayoutEffect(() => measure());
   useLayoutEffect(() => {
@@ -46,7 +47,7 @@ export function FitLine({ children, className, innerProps, ...rest }: { children
   const { className: innerClass, ...innerRest } = innerProps ?? {};
   return (
     <span ref={outer} className={cn("block w-full min-w-0 max-w-full", className)} {...rest}>
-      <span ref={inner} data-tight="0" className={cn("inline-flex items-center gap-1 whitespace-nowrap data-[tight=1]:gap-0.5 data-[tight=1]:tracking-tighter", innerClass)} {...innerRest}>
+      <span ref={inner} data-tight="0" className={cn(wrap ? "flex flex-wrap items-center gap-1" : "inline-flex items-center gap-1 whitespace-nowrap data-[tight=1]:gap-0.5 data-[tight=1]:tracking-tighter", innerClass)} {...innerRest}>
         {children}
       </span>
     </span>

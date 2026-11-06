@@ -19,7 +19,8 @@ import { OngoingOps } from "@/components/ongoing-ops";
 import { PastApplyRecorder } from "@/components/past-apply-recorder";
 import { WonRecordButtons } from "@/components/won-actions";
 import { KIND_LABEL, kindOf, myApplication, wonProgress } from "@/lib/lottery-flow";
-import { canOperateOwner, ownerIdOf, scopedApplications, scopeSet } from "@/lib/profile-link";
+import { useViewScope } from "@/components/user-scope";
+import { canOperateOwner, ownerIdOf, scopedApplications } from "@/lib/profile-link";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
@@ -65,6 +66,7 @@ function Unconfirmed({ show }: { show: boolean }) {
  */
 export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: Lottery; open: boolean; onOpenChange: (v: boolean) => void }) {
   const { data, now, profile, actions, persistent, reload } = useApp();
+  const viewScope = useViewScope();
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -96,7 +98,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const skipException = hasSkipException(data, profile.id, lottery);
   const mineApp = myApplication(data, lottery.id, profile.id);
   // 当選の購入・受取の記録は、現在のユーザーと紐づくサブの当選が対象（記録は応募の所有者に保存される）
-  const scopedWon = scopedApplications(data, lottery.id, scopeSet(data.profiles, profile.id)).filter((a) => a.result === "won");
+  const scopedWon = scopedApplications(data, lottery.id, viewScope).filter((a) => a.result === "won");
   const rules = effectiveRules(data, lottery);
   const hasMyScopeSkip = data.skipRules.some((r) => r.profileId === profile.id && r.scope === "lottery" && r.scopeId === lottery.id);
   /** 現在のプロフィールの系列単位のスルー（設定 > 応募ルールのスルー一覧と同じもの） */
@@ -128,7 +130,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               type="button"
               onClick={() => (managed ? setConfirmOff(true) : actions.setManaged(lottery.id, true))}
               aria-pressed={managed}
-              aria-label={managed ? "管理対象（★）をOFFにする" : "管理対象（★）にする"}
+              aria-label={managed ? "要チェック（★）をOFFにする" : "要チェック（★）にする"}
               className="flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"
             >
               <Star className={cn("size-5", managed ? "fill-primary stroke-primary" : "stroke-muted-foreground")} aria-hidden="true" />
@@ -169,7 +171,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 {EVENT_LABEL[event] && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
                 {notice === "unconfirmed" && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
                 {notice === "in_period" && <Chip className="text-info">発表期間中</Chip>}
-                {!managed && <Chip className="text-muted-foreground">管理対象外</Chip>}
+                {!managed && <Chip className="text-muted-foreground">要チェック外</Chip>}
               </div>
             </section>
 
@@ -484,8 +486,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
       </Dialog>
       <Dialog open={confirmOff} onOpenChange={setConfirmOff}>
         <DialogContent>
-          <DialogTitle>管理対象（★）をOFFにしますか？</DialogTitle>
-          <DialogDescription>★をOFFにすると「★管理対象」一覧から外れます。応募・当選・購入の履歴は消えません。「全情報」からいつでも戻せます。</DialogDescription>
+          <DialogTitle>要チェック（★）をOFFにしますか？</DialogTitle>
+          <DialogDescription>★をOFFにすると「要チェック」一覧から外れます。応募・当選・購入の履歴は消えません。「全情報」からいつでも戻せます。</DialogDescription>
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild>
               <Button variant="outline">キャンセル</Button>

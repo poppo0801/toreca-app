@@ -66,15 +66,15 @@ describe("日付表示のコンパクト化（5V）", () => {
 });
 
 describe("購入期間・受取期間のアイコン", () => {
-  it("購入=買い物袋 / 受取=プレゼントボックス（別のアイコン）。同じ情報は同じアイコン", () => {
+  it("購入=財布 / 受取=買い物袋（別のアイコン）。同じ情報は同じアイコン", () => {
     patch("L1", { procedureSplit: false });
     mount("L1", "all");
     const buy = q('[data-testid="period"][data-kind="購入"] svg')!;
-    expect(buy.getAttribute("class")).toContain("lucide-shopping-bag");
+    expect(buy.getAttribute("class")).toContain("lucide-wallet");
     patch("L1", { procedureSplit: true, receiveStart: dateOnly("2026-11-08"), receiveDeadline: dateOnly("2026-11-10") });
     mount("L1", "all");
     const recv = q('[data-testid="period"][data-kind="受取"] svg')!;
-    expect(recv.getAttribute("class")).toContain("lucide-gift");
+    expect(recv.getAttribute("class")).toContain("lucide-shopping-bag");
     expect(recv.getAttribute("class")).not.toBe(buy.getAttribute("class"));
   });
 });

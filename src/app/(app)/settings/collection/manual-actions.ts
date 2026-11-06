@@ -86,7 +86,7 @@ export async function excludeLotteryAction(lotteryId: string, code: ExclusionRea
   const apps = await c.db.from("applications").select("id", { count: "exact", head: true }).eq("lottery_id", lotteryId);
   if ((apps.count ?? 0) > 0) return { ok: false, error: "応募・当落の履歴があるため除外できません（履歴を保持します）" };
   const mgmt = await c.db.from("lottery_management").select("lottery_id", { count: "exact", head: true }).eq("lottery_id", lotteryId);
-  if ((mgmt.count ?? 0) > 0) return { ok: false, error: "★管理対象のため除外できません。先に管理対象を外してください" };
+  if ((mgmt.count ?? 0) > 0) return { ok: false, error: "要チェックのため除外できません。先に要チェックを外してください" };
   const { error: e1 } = await c.db.from("lotteries").update({ exclusion_reason_code: p.data.code, exclusion_reason_note: p.data.text }).eq("id", lotteryId);
   if (e1) return { ok: false, error: "更新できませんでした" };
   const r = await archiveLottery(c.db, lotteryId, p.data.actor);

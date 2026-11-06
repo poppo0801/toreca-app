@@ -100,7 +100,7 @@ export function assessRow(row: Row, data: AppData, now: Date, important: Set<str
   };
 }
 
-/** ★管理対象の系列（管理中の抽選がある系列） */
+/** 要チェックの系列（管理中の抽選がある系列） */
 export function importantChains(data: AppData): Set<string> {
   const managed = new Set(data.management.filter((m) => m.isManaged).map((m) => m.lotteryId));
   return new Set(data.lotteries.filter((l) => managed.has(l.id)).map((l) => l.chainId));

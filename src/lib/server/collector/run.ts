@@ -47,7 +47,7 @@ import type { AppData } from "@/types/domain";
 /**
  * 抽選情報の自動収集（Stage 4C）。
  *   収集元 → 告知リンク/X投稿 → 関連判定(ルール) → AI読み取り(既存の共通処理) → 収集条件 → マスター照合 → 重複検出 → 候補/自動登録
- * - 自動収集は★管理対象にしない・応募記録を作らない・既存抽選の確定情報を書き換えない（重複時は情報源URLの追加のみ）
+ * - 自動収集は要チェックにしない・応募記録を作らない・既存抽選の確定情報を書き換えない（重複時は情報源URLの追加のみ）
  * - 手動実行は利用者のログインで登録。定期実行(service_role)は、service_role専用の登録関数(save_lottery_tx_as)で、条件に一致し情報が十分な抽選だけを自動登録する
  * - AI・X APIは上限(1回あたり/月額予算/既存のAI利用上限)の範囲内でのみ呼ぶ。上限を超える分は次回に回す(キュー)
  */
@@ -569,7 +569,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const draft = buildDraft(hint?.extraction ?? baseEx, data, { sourceUrl: q.url });
   if (hint && hint.warnings.length > 0) draft.warnings.push(...hint.warnings);
   if (idn && idn.notes.length > 0 && idn.storeBasis === "ambiguous") draft.warnings.push(...idn.notes);
-  // 自動収集は★管理対象にせず、応募記録も作らない
+  // 自動収集は要チェックにせず、応募記録も作らない
   const input: LotteryInput = { ...draft.input, isManaged: false, applications: [], sourceUrls: [...new Set([...(draft.input.sourceUrls ?? []), q.url])].slice(0, 10) };
   // ---- 読み取れなかった項目を、まとめサイトの一覧の表示（二次情報）で補う。補った項目は根拠として明示し、確定情報とは区別する
   const secondary: string[] = [...(hint?.used ?? []), ...(idHint?.used ?? [])];
@@ -1402,7 +1402,7 @@ export async function applyCandidateUpdate(db: Db, candidateId: string): Promise
   return { ok: true, applied: Object.keys(patch).length };
 }
 
-/** 確認待ちの候補を登録する(利用者のログインで実行)。★管理対象にせず、応募記録は作らない。入力は画面で修正された内容を使える */
+/** 確認待ちの候補を登録する(利用者のログインで実行)。要チェックにせず、応募記録は作らない。入力は画面で修正された内容を使える */
 export async function registerCandidate(db: Db, householdId: string, actor: string | null, candidateId: string, override?: LotteryInput): Promise<{ ok: true; lotteryId: string } | { ok: false; message: string }> {
   const { data: c } = await db.from("collection_candidates").select("id,draft,status,source_url").eq("id", candidateId).maybeSingle();
   if (!c) return { ok: false, message: "候補が見つかりません" };

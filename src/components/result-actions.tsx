@@ -6,7 +6,8 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { needsResultConfirm, resultCountdown } from "@/lib/lottery-flow";
-import { ownerIdOf, scopedApplications, scopeSet } from "@/lib/profile-link";
+import { useViewScope } from "@/components/user-scope";
+import { ownerIdOf, scopedApplications } from "@/lib/profile-link";
 import { useBusy } from "@/lib/use-busy";
 import { cn } from "@/lib/utils";
 import type { Application, Lottery } from "@/types/domain";
@@ -42,7 +43,7 @@ export function ResultCountdownBadge({ lottery, className }: { lottery: Lottery;
  */
 export function ResultButtons({ lottery, compact = false, onOpenDetail }: { lottery: Lottery; compact?: boolean; onOpenDetail?: () => void }) {
   const { data, profile } = useApp();
-  const scope = scopeSet(data.profiles, profile.id);
+  const scope = useViewScope();
   const apps = scopedApplications(data, lottery.id, scope).sort((a, b) => Number(ownerIdOf(data, b) === profile.id) - Number(ownerIdOf(data, a) === profile.id));
   if (apps.length === 0) return <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">未応募</span>;
   if (apps.length === 1) return <ResultRow lottery={lottery} app={apps[0]} compact={compact} onOpenDetail={onOpenDetail} labeled={ownerIdOf(data, apps[0]) !== profile.id} />;

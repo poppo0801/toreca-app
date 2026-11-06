@@ -176,11 +176,11 @@ export function LotteryDataView({ history }: { history: LotteryImportHistoryRow[
                 </select>
               </label>
               <label>
-                管理対象
+                要チェック
                 <select className={sel} value={f.managed} onChange={(e) => set("managed", e.target.value as ExportFilters["managed"])}>
                   <option value="all">全情報</option>
-                  <option value="managed">★管理対象</option>
-                  <option value="unmanaged">管理対象外</option>
+                  <option value="managed">要チェック</option>
+                  <option value="unmanaged">要チェック外</option>
                 </select>
               </label>
               <label>

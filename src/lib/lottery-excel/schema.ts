@@ -78,7 +78,7 @@ export const LOTTERY_COLUMNS: readonly ColumnDef[] = [
   L("procedure_end_time", "購入・受取終了時刻", "HH:MM。不明なら空欄", 10, { clearable: true }),
   L("multi_mode", "抽選方式", "単一商品 / B 商品ごとに当落 / C 当選は1商品まで / D 希望の1つを選んで応募。取り込みで勝手に変わりません", 22),
   L("event_state", "抽選ステータス", "受付前 / 受付中 / 中止 / 延期（受付終了は期限から自動で判定されるため、指定できません）", 12),
-  L("managed", "管理対象", "○ = ★管理対象 / × = 管理対象外", 10),
+  L("managed", "管理対象", "○ = 要チェック / × = 要チェック外", 10),
   L("memo", "備考", "2000文字まで", 28, { clearable: true }),
   L("procedure_split", "購入と受取を分ける", "○ = 購入期間（上の「購入・受取」列）と受取期間（右の「受取」列）を分ける / × = 同じ期間。空欄は変更しません", 12),
   L("receive_start", "受取開始日", "購入と受取を分けるときだけ。YYYY-MM-DD", 12, { clearable: true }),

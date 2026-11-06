@@ -61,7 +61,7 @@ export function RulesView() {
       <Section title="スルー">
         <p className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
           <ProfileAvatar profile={profile} size="sm" />
-          プロフィール「{profile.label}」のスルーです。他のプロフィールには影響せず、★管理対象とも別です。常時スルーにした抽選も、抽選ごとに「今回だけ解除」できます。
+          プロフィール「{profile.label}」のスルーです。他のプロフィールには影響せず、要チェックとも別です。常時スルーにした抽選も、抽選ごとに「今回だけ解除」できます。
         </p>
         <ul className="space-y-1" aria-label="スルー一覧">
           {mySkips.length === 0 && <li className="text-sm text-muted-foreground">スルーの設定はありません。</li>}

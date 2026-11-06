@@ -683,7 +683,7 @@ export function AutoCollectView({
               )}
             </div>
           </details>
-          <SetRow label="自動登録" tip="★管理対象・応募記録は作りません。既存の手動登録の内容は上書きしません。">
+          <SetRow label="自動登録" tip="要チェック・応募記録は作りません。既存の手動登録の内容は上書きしません。">
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" className="size-4" checked={s.auto_register} onChange={(e) => setS({ ...s, auto_register: e.target.checked })} />
               <span>条件に合い情報が十分な抽選を「全情報」へ自動登録</span>
@@ -1225,7 +1225,7 @@ export function AutoCollectView({
                       </summary>
                       <div className="absolute right-0 z-10 mt-1 flex w-40 flex-col gap-1 rounded-md border bg-card p-1.5 shadow-md">
                         {c.job_state === "review" && d && (
-                          <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("r" + c.id, { action: "register", id: c.id, actor: profile.id }, () => "登録しました（全情報に追加。★管理対象ではありません）")} data-testid="cand-register">
+                          <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void act("r" + c.id, { action: "register", id: c.id, actor: profile.id }, () => "登録しました（全情報に追加。要チェックではありません）")} data-testid="cand-register">
                             そのまま登録
                           </Button>
                         )}

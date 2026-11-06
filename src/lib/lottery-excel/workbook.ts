@@ -255,12 +255,12 @@ const inRange = (day: string, from: string, to: string) => {
 /** 絞り込み条件の説明（画面とファイルの「出力情報」に同じ文を出す） */
 export function describeFilters(f: ExportFilters, data: Pick<AppData, "profiles" | "products" | "chains" | "stores">): string[] {
   const out: string[] = [];
-  const L = { reception: { all: "", before: "受付前", open: "受付中", closed: "受付終了" }, apply: { all: "", unapplied: "未応募", applied: "応募済み", skipped: "スルー" }, result: { all: "", won: "当選", lost: "落選", unconfirmed: "結果未確認" }, managed: { all: "", managed: "★管理対象", unmanaged: "管理対象外" } } as const;
+  const L = { reception: { all: "", before: "受付前", open: "受付中", closed: "受付終了" }, apply: { all: "", unapplied: "未応募", applied: "応募済み", skipped: "スルー" }, result: { all: "", won: "当選", lost: "落選", unconfirmed: "結果未確認" }, managed: { all: "", managed: "要チェック", unmanaged: "要チェック外" } } as const;
   if (f.reception !== "all") out.push(`受付状況: ${L.reception[f.reception]}`);
   const who = f.profileIds.length > 0 ? f.profileIds.map((id) => data.profiles.find((p) => p.id === id)?.label ?? "").join("・") : "いずれかのプロフィール";
   if (f.apply !== "all") out.push(`応募状況: ${L.apply[f.apply]}（${who}）`);
   if (f.result !== "all") out.push(`当落結果: ${L.result[f.result]}（${who}）`);
-  if (f.managed !== "all") out.push(`管理対象: ${L.managed[f.managed]}`);
+  if (f.managed !== "all") out.push(`要チェック: ${L.managed[f.managed]}`);
   if (f.productIds.length) out.push(`商品: ${f.productIds.map((id) => data.products.find((p) => p.id === id)?.officialName ?? "").join("・")}`);
   if (f.chainIds.length) out.push(`系列: ${f.chainIds.map((id) => data.chains.find((p) => p.id === id)?.name ?? "").join("・")}`);
   if (f.storeIds.length) out.push(`店舗: ${f.storeIds.map((id) => data.stores.find((p) => p.id === id)?.name ?? "").join("・")}`);

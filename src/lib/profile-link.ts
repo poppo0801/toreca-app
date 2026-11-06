@@ -5,10 +5,10 @@ import type { AppData, Application, Profile } from "@/types/domain";
  *  - メイン: 自分＋自分に紐づくサブ（A に C が紐づくなら A は A＋C）
  *  - サブ: 自分だけ（C は C のみ）
  *  - 紐づいていないサブ・他のメインの履歴は混ぜない
- * 「全情報」「★管理対象」は世帯共通で、この範囲の影響を受けない。
+ * 「全情報」「要チェック」は世帯共通で、この範囲の影響を受けない。
  */
 
-type ProfileLite = Pick<Profile, "id" | "kind" | "linkedMainId" | "active" | "label">;
+export type ProfileLite = Pick<Profile, "id" | "kind" | "linkedMainId" | "active" | "label">;
 
 export const isMain = (p: Pick<Profile, "kind">) => p.kind !== "sub";
 

@@ -164,8 +164,8 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await dialog.getByRole("button", { name: "保存" }).click();
   await expect(dialog).toHaveCount(0);
 
-  // 期限切れの管理対象は「★管理対象」から自動整理され、当選タブ・全情報に残る
-  await expect(page.getByRole("tab", { name: /★管理対象/ })).toContainText("0");
+  // 期限切れの管理対象は「要チェック」から自動整理され、当選タブ・全情報に残る
+  await expect(page.getByRole("tab", { name: /要チェック/ })).toContainText("0");
   await page.getByRole("tab", { name: /当選/ }).click();
   const card = page.getByTestId("lottery-card").first();
   await expect(card).toContainText("E2E電機 E2E店");
@@ -321,7 +321,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
   await page.getByRole("button", { name: "解除する" }).click();
   await expect(page.getByTestId("notification-badge")).toHaveText("1");
 
-  // スルー: 店舗単位で追加 → ベルから消え、★管理対象の通常表示からも外れる。★自体は変わらない
+  // スルー: 店舗単位で追加 → ベルから消え、要チェックの通常表示からも外れる。★自体は変わらない
   await page.goto("/settings/rules");
   await page.getByLabel("スルーの単位").selectOption("store");
   await page.getByLabel("スルーする対象").selectOption({ label: "E2E電機 E2E店" });
