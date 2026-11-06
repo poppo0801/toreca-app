@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isAllowedCondition } from "@/lib/card-condition";
 import { cardInputSchema, holdingInputSchema, priceInputSchema, type CardInput, type HoldingInput, type PriceInput } from "@/lib/collection-input";
 import type { CardRow, FavoriteRow, HoldingRow, MarketPriceRow, PriceRow } from "@/lib/collection";
+import { DEFAULT_MULTIPLIERS, validateMultipliers, type ConditionMultipliers } from "@/lib/condition-value";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -39,17 +40,20 @@ export interface CollectionData {
   favorites: FavoriteRow[];
   /** サムネイルの保存先 → 期限つきURL */
   thumbUrls: Record<string, string>;
+  /** 状態別の評価倍率（%）。未設定の世帯は既定値 */
+  multipliers: ConditionMultipliers;
 }
 
 export async function loadCollectionAction(): Promise<R<{ data: CollectionData }>> {
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const [c, h, p, f, mk] = await Promise.all([
+  const [c, h, p, f, mk, cm] = await Promise.all([
     any(db).from("card_masters").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(5000),
     any(db).from("card_holdings").select("*").is("archived_at", null).limit(20000),
     any(db).from("card_prices").select("*").order("confirmed_on", { ascending: false }).limit(20000),
     any(db).from("card_favorites").select("profile_id,card_id,rank").limit(20000),
     any(db).from("card_market_prices").select("*").limit(20000),
+    any(db).from("condition_multipliers").select("a_pct,b_pct,c_pct").maybeSingle(),
   ]);
   if (c.error || h.error || p.error || f.error) return fail("コレクションを取得できませんでした");
   const cards: CardRow[] = c.data.map((r: Record<string, unknown>) => ({
@@ -100,6 +104,7 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
     : (mk.data as Record<string, unknown>[]).map((r) => ({
         cardId: r.card_id as string,
         kind: r.kind as "sale" | "buyback",
+        conditionGrade: ((r.condition_grade as string) ?? "A") as "A" | "B" | "C",
         medianYen: r.median_yen as number,
         lowYen: r.low_yen as number,
         highYen: r.high_yen as number,
@@ -119,7 +124,8 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
     const { data: signed } = await db.storage.from("card-images").createSignedUrls(paths.slice(i, i + 200), THUMB_TTL);
     for (const s of signed ?? []) if (s.path && s.signedUrl) thumbUrls[s.path] = s.signedUrl;
   }
-  return { ok: true, data: { cards, holdings, prices, market, favorites, thumbUrls } };
+  const multipliers: ConditionMultipliers = !cm.error && cm.data ? { A: cm.data.a_pct, B: cm.data.b_pct, C: cm.data.c_pct } : DEFAULT_MULTIPLIERS;
+  return { ok: true, data: { cards, holdings, prices, market, favorites, thumbUrls, multipliers } };
 }
 
 /** 詳細表示用の大きい画像のURL（自世帯のパスだけ） */
@@ -317,4 +323,21 @@ export async function reorderFavoritesAction(profileId: string, cardIds: string[
     rank++;
   }
   return { ok: true };
+}
+
+/** 状態別の評価倍率（%）を保存する。基準相場・取得相場・手動価格は変更しない（評価額の計算にだけ使う） */
+export async function saveConditionMultipliersAction(input: unknown): Promise<R<{ multipliers: ConditionMultipliers }>> {
+  const m = validateMultipliers(input);
+  if (!m) return fail("倍率は1〜200の整数（%）で入力してください");
+  const db = await ctx();
+  if (!db) return fail("ログインが必要です");
+  const { data: hh } = await any(db).from("card_masters").select("household_id").limit(1).maybeSingle();
+  let householdId = hh?.household_id as string | undefined;
+  if (!householdId) {
+    const { data: p } = await any(db).from("profiles").select("household_id").limit(1).maybeSingle();
+    householdId = p?.household_id as string | undefined;
+  }
+  if (!householdId) return fail("世帯を特定できませんでした");
+  const { error } = await any(db).from("condition_multipliers").upsert({ household_id: householdId, a_pct: m.A, b_pct: m.B, c_pct: m.C, updated_at: new Date().toISOString() }, { onConflict: "household_id" });
+  return error ? fail("保存できませんでした") : { ok: true, multipliers: m };
 }

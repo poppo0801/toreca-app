@@ -100,18 +100,20 @@ export async function updateMarketPricesAction(opts: { csvText?: string; cardId?
   const csvAt = parsed.value.updatedAt ? new Date(parsed.value.updatedAt).toISOString() : null;
   const fetchedAt = new Date().toISOString();
   const upserts: Record<string, unknown>[] = [];
-  const addStat = (r: CardMarketResult, kind: "sale" | "buyback") => {
-    const s = kind === "sale" ? r.sale : r.buyback;
+  const addStat = (r: CardMarketResult, kind: "sale" | "buyback", grade: "A" | "B" | "C" = "A") => {
+    const s = grade !== "A" ? r.saleGrades?.[grade] : kind === "sale" ? r.sale : r.buyback;
     if (!s) return;
-    upserts.push({ household_id: hh.get(r.cardId), card_id: r.cardId, kind, median_yen: s.medianYen, low_yen: s.lowYen, high_yen: s.highYen, sample_count: s.samples, outlier_count: s.outliers, shops: s.shops.slice(0, 12), source: MARKET_SOURCE_NAME, source_url: MARKET_SOURCE_URL, csv_updated_at: csvAt, fetched_at: fetchedAt, match_key: r.matchKey ?? "" });
+    upserts.push({ household_id: hh.get(r.cardId), card_id: r.cardId, kind, condition_grade: grade, median_yen: s.medianYen, low_yen: s.lowYen, high_yen: s.highYen, sample_count: s.samples, outlier_count: s.outliers, shops: s.shops.slice(0, 12), source: MARKET_SOURCE_NAME, source_url: MARKET_SOURCE_URL, csv_updated_at: csvAt, fetched_at: fetchedAt, match_key: r.matchKey ?? "" });
   };
   for (const r of results) {
     if (r.status !== "updated") continue;
     addStat(r, "sale");
     addStat(r, "buyback");
+    addStat(r, "sale", "B");
+    addStat(r, "sale", "C");
   }
   if (upserts.length > 0) {
-    const { error } = await any(db).from("card_market_prices").upsert(upserts, { onConflict: "card_id,kind" });
+    const { error } = await any(db).from("card_market_prices").upsert(upserts, { onConflict: "card_id,kind,condition_grade" });
     if (error) return fail("相場の保存に失敗しました。既存の価格は変更していません");
   }
   const nameOf = new Map(cards.map((x) => [x.id, x.name]));

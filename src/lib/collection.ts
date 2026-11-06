@@ -5,6 +5,8 @@
  *  - 参考相場は確定した売却額ではない（状態により変わる）。実際の収入・収支には計上しない。
  */
 
+import { DEFAULT_MULTIPLIERS, valuate, type ConditionMultipliers, type GradeLine, type ValuationGrade } from "@/lib/condition-value";
+
 export interface CardRow {
   id: string;
   name: string;
@@ -58,9 +60,16 @@ export interface CardSummaryRow extends CardRow {
   costUnknownQty: number;
   sale: PriceRow | null;
   buyback: PriceRow | null;
-  /** 所持枚数×参考相場。相場が未設定なら null（0円にしない） */
+  /** 所持枚数×参考相場（状態補正後の評価額）。相場が未設定なら null（0円にしない） */
   saleValue: number | null;
   buybackValue: number | null;
+  /** 状態補正をしない基準相場×所持枚数（補正後の評価額と区別して持つ） */
+  saleBaseValue: number | null;
+  buybackBaseValue: number | null;
+  /** 状態補正の内訳（販売／買取）。状態未設定の枚数は A（基準そのまま）として計算し、その枚数を示す */
+  saleLines: GradeLine[];
+  buybackLines: GradeLine[];
+  conditionUnsetQty: number;
   /** 並び替え・集計の「参考価値」。販売参考があればそれ、なければ買取参考 */
   refValue: number | null;
   /** 購入額との差額（参考相場 − 購入額）。購入価格が全枚数分そろっていて、相場もあるときだけ */
@@ -80,7 +89,20 @@ export function latestPrice(prices: PriceRow[], kind: PriceRow["kind"]): PriceRo
   return best;
 }
 
-export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices: PriceRow[], favorites: FavoriteRow[], profileId: string | null): CardSummaryRow[] {
+export interface SummarizeOptions {
+  /** 状態別の倍率（%）。省略時は既定（A100/B85/C65） */
+  multipliers?: ConditionMultipliers;
+  /** 取得した状態別の実際の販売相場（あれば倍率より優先）。取得元の価格データは変更しない */
+  market?: MarketPriceRow[];
+}
+
+export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices: PriceRow[], favorites: FavoriteRow[], profileId: string | null, opts: SummarizeOptions = {}): CardSummaryRow[] {
+  const mult = opts.multipliers ?? DEFAULT_MULTIPLIERS;
+  const actualSale = new Map<string, Partial<Record<ValuationGrade, number>>>();
+  for (const m of opts.market ?? []) {
+    if (m.kind !== "sale" || !m.conditionGrade || m.conditionGrade === "A") continue;
+    actualSale.set(m.cardId, { ...(actualSale.get(m.cardId) ?? {}), [m.conditionGrade]: m.medianYen });
+  }
   const byCardH = new Map<string, HoldingRow[]>();
   for (const h of holdings) byCardH.set(h.cardId, [...(byCardH.get(h.cardId) ?? []), h]);
   const byCardP = new Map<string, PriceRow[]>();
@@ -95,8 +117,12 @@ export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices:
     const ps = byCardP.get(c.id) ?? [];
     const sale = latestPrice(ps, "sale");
     const buyback = latestPrice(ps, "buyback");
-    const saleValue = sale ? sale.amountYen * qty : null;
-    const buybackValue = buyback ? buyback.amountYen * qty : null;
+    const hv = hs.map((h) => ({ qty: h.quantity, condition: h.condition }));
+    // 販売は状態別の実際の相場があればそれを優先、なければ基準相場×倍率。買取の状態別相場は取得できないので、常に基準相場×倍率
+    const sv = valuate(hv, sale ? sale.amountYen : null, mult, actualSale.get(c.id));
+    const bv = valuate(hv, buyback ? buyback.amountYen : null, mult);
+    const saleValue = sv.value;
+    const buybackValue = bv.value;
     const costComplete = costTotal !== null && costUnknownQty === 0;
     return {
       ...c,
@@ -108,6 +134,11 @@ export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices:
       buyback,
       saleValue,
       buybackValue,
+      saleBaseValue: sv.baseValue,
+      buybackBaseValue: bv.baseValue,
+      saleLines: sv.lines,
+      buybackLines: bv.lines,
+      conditionUnsetQty: sv.unsetQty,
       refValue: saleValue ?? buybackValue,
       saleDiff: costComplete && saleValue !== null ? saleValue - (costTotal as number) : null,
       buybackDiff: costComplete && buybackValue !== null ? buybackValue - (costTotal as number) : null,
@@ -305,6 +336,8 @@ export function shineTier(rarity: string): 0 | 1 | 2 | 3 {
 export interface MarketPriceRow {
   cardId: string;
   kind: "sale" | "buyback";
+  /** 価格が対象とする状態の区分（A=従来の集計。B/C=状態B/Cの実際の販売相場） */
+  conditionGrade?: "A" | "B" | "C";
   medianYen: number;
   lowYen: number;
   highYen: number;

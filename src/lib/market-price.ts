@@ -194,6 +194,8 @@ export interface PriceStat {
 const SELL_CONDITIONS = new Set(["", "状態A", "状態A-"]);
 /** 買取価格に使う状態（シングルは通常、状態の記載なし） */
 const BUY_CONDITIONS = new Set(["", "状態A", "状態A-"]);
+/** 状態別の販売相場（Stage 6K）。CSVに状態B・状態Cの掲載があるときだけ、実際の相場として別に集計する（無ければ作らない） */
+const GRADE_SELL_CONDITIONS: Record<"B" | "C", Set<string>> = { B: new Set(["状態B"]), C: new Set(["状態C"]) };
 
 const median = (a: number[]) => {
   const s = [...a].sort((x, y) => x - y);
@@ -205,8 +207,9 @@ const median = (a: number[]) => {
  * 販売・買取を別々に集計する。販売は「在庫あり」かつ対象の状態だけ。同じ店舗の複数行は最も安い（販売）／最も高い（買取）1件。
  * 参考価格は中央値。最安販売価格・最高買取価格も返す。3件以上で中央値の5倍超／5分の1未満は外れ値として集計から外す（機械的に採用しない）。
  */
-export function aggregate(rows: MarketRow[], kind: "sell" | "buy"): PriceStat | null {
-  const okCond = kind === "sell" ? SELL_CONDITIONS : BUY_CONDITIONS;
+export function aggregate(rows: MarketRow[], kind: "sell" | "buy", grade: "A" | "B" | "C" = "A"): PriceStat | null {
+  const okCond = grade !== "A" ? GRADE_SELL_CONDITIONS[grade] : kind === "sell" ? SELL_CONDITIONS : BUY_CONDITIONS;
+  if (grade !== "A" && kind !== "sell") return null;
   const mine = rows.filter((r) => r.kind === kind);
   const usable = mine.filter((r) => (kind === "buy" || r.inStock) && okCond.has(r.condition) && !/中古/.test(r.condition));
   // 店舗ごとに1件（販売=最安／買取=最高）
@@ -246,6 +249,8 @@ export interface CardMarketResult {
   reason?: string;
   sale: PriceStat | null;
   buyback: PriceStat | null;
+  /** 状態B・Cの実際の販売相場（CSVに掲載があるときだけ） */
+  saleGrades?: Partial<Record<"B" | "C", PriceStat>>;
   matchKey?: string;
   variants?: { key: string; name: string; rarity: string }[];
 }
@@ -270,7 +275,12 @@ export function computeMarket(cards: CardForMarket[], csv: ParsedCsv, links: Rec
     if (m.status === "matched") {
       const sale = aggregate(m.variant.rows, "sell");
       const buyback = aggregate(m.variant.rows, "buy");
-      results.push(sale || buyback ? { cardId: c.id, status: "updated", sale, buyback, matchKey: m.variant.key } : { cardId: c.id, status: "no_price", reason: "掲載はありますが、売切・対象外の状態のみで集計できる価格がありません", sale: null, buyback: null, matchKey: m.variant.key });
+      const saleGrades: CardMarketResult["saleGrades"] = {};
+      for (const g of ["B", "C"] as const) {
+        const s = aggregate(m.variant.rows, "sell", g);
+        if (s) saleGrades[g] = s;
+      }
+      results.push(sale || buyback ? { cardId: c.id, status: "updated", sale, buyback, saleGrades, matchKey: m.variant.key } : { cardId: c.id, status: "no_price", reason: "掲載はありますが、売切・対象外の状態のみで集計できる価格がありません", sale: null, buyback: null, matchKey: m.variant.key });
     } else if (m.status === "ambiguous") results.push({ cardId: c.id, status: "ambiguous", reason: m.reason, sale: null, buyback: null, variants: m.variants.map((v) => ({ key: v.key, name: v.name, rarity: v.rarity })) });
     else if (m.status === "insufficient") results.push({ cardId: c.id, status: "insufficient", reason: m.reason, sale: null, buyback: null });
     else results.push({ cardId: c.id, status: "unlisted", sale: null, buyback: null });

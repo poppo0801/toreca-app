@@ -39,9 +39,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 6G: 取得した相場", () => {
   });
 
   it("販売・買取を別に保存でき、同じカード×区分は上書き（upsert）で1行のまま。手動の参考相場には触れない", async () => {
-    const first = await x(u1).from("card_market_prices").upsert([row(), row({ kind: "buyback", median_yen: 44000, low_yen: 44000, high_yen: 44000, sample_count: 1 })], { onConflict: "card_id,kind" });
+    const first = await x(u1).from("card_market_prices").upsert([row(), row({ kind: "buyback", median_yen: 44000, low_yen: 44000, high_yen: 44000, sample_count: 1 })], { onConflict: "card_id,kind,condition_grade" });
     expect(first.error, JSON.stringify(first.error) + " cardId=" + cardId).toBeNull();
-    expect((await x(u1).from("card_market_prices").upsert([row({ median_yen: 57000 })], { onConflict: "card_id,kind" })).error).toBeNull();
+    expect((await x(u1).from("card_market_prices").upsert([row({ median_yen: 57000 })], { onConflict: "card_id,kind,condition_grade" })).error).toBeNull();
     const rows = (await x(u1).from("card_market_prices").select("kind,median_yen,sample_count").eq("card_id", cardId).order("kind")).data;
     expect(rows).toEqual([
       { kind: "buyback", median_yen: 44000, sample_count: 1 },

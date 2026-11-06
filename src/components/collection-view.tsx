@@ -1,7 +1,7 @@
 "use client";
 
 import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
-import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Search, SlidersHorizontal, Sparkles, Star, TrendingUp } from "lucide-react";
+import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star, TrendingUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { loadCollectionAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
@@ -10,7 +10,10 @@ import { CardBulkDialog, BULK_MAX_IMAGES } from "@/components/card-bulk";
 import { CardDetailSheet } from "@/components/card-detail-sheet";
 import { CardFormDialog, type CardFormMode } from "@/components/card-form";
 import { Button } from "@/components/ui/button";
+import { ConditionMultipliersDialog } from "@/components/condition-multipliers-dialog";
 import { MarketUpdateDialog } from "@/components/market-update";
+import { useDragReorder } from "@/components/use-drag-reorder";
+import { applyOrder, mergeFavoriteOrder } from "@/lib/reorder";
 import { ShineButton } from "@/components/shine";
 import { breakdown, DEFAULT_FILTERS, filterCards, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs } from "@/lib/profile-settings";
@@ -49,6 +52,9 @@ export function CollectionView() {
   const [showSearch, setShowSearch] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showMarket, setShowMarket] = useState(false);
+  const [showMult, setShowMult] = useState(false);
+  /** 一時的な並び（ドラッグ）。お気に入り以外では並び順・絞り込みを変えた時点で解除し、保存しない */
+  const [tempOrder, setTempOrder] = useState<string[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [form, setForm] = useState<CardFormMode | null>(null);
   const [bulk, setBulk] = useState<File[] | null>(null);
@@ -88,12 +94,13 @@ export function CollectionView() {
     });
   }, [params, data]);
 
-  const rows = useMemo(() => (data ? summarizeCards(data.cards, data.holdings, data.prices, data.favorites, profile.id) : []), [data, profile.id]);
+  const rows = useMemo(() => (data ? summarizeCards(data.cards, data.holdings, data.prices, data.favorites, profile.id, { multipliers: data.multipliers, market: data.market }) : []), [data, profile.id]);
   const shown = useMemo(() => sortCards(filterCards(rows, filters), sort), [rows, filters, sort]);
   const totals = useMemo(() => totalsOf(rows), [rows]);
   const rarities = useMemo(() => [...new Set(rows.map((r) => r.rarity).filter(Boolean))].sort(), [rows]);
   const products = useMemo(() => [...new Set(rows.map((r) => r.productName).filter(Boolean))].sort(), [rows]);
-  const visible = shown.slice(0, limit);
+  const ordered = useMemo(() => applyOrder(shown, tempOrder), [shown, tempOrder]);
+  const visible = ordered.slice(0, limit);
   const activeFilters = [filters.rarity, filters.product, filters.qty !== "all", filters.priced !== "all", filters.image !== "all"].filter(Boolean).length;
 
   // 続きを読み込む（一覧の末尾が見えたら60件ずつ増やす）
@@ -107,6 +114,8 @@ export function CollectionView() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 条件が変わったら先頭から
     setLimit(PAGE);
+    // 並び順・絞り込みを変えたら、一時的なドラッグの並びは解除する（保存されるのはお気に入り順だけ）
+    setTempOrder(null);
   }, [filters, sort]);
 
   const toggleFav = async (id: string, on: boolean) => {
@@ -115,6 +124,26 @@ export function CollectionView() {
     if (!r.ok) setError(r.error);
     void load();
   };
+
+  // 長押しドラッグ: お気に入り表示（お気に入り順）では保存、それ以外は一時的な並び替え
+  const persistDrag = filters.favOnly && (sort === "default" || sort === "fav");
+  const dragFull = (ids: string[]) => [...ids, ...ordered.map((r) => r.id).filter((id) => !ids.includes(id))];
+  const drag = useDragReorder({
+    enabled: !reorder && visible.length > 1,
+    ids: visible.map((r) => r.id),
+    onMove: (ids) => setTempOrder(dragFull(ids)),
+    onDrop: (ids) => {
+      if (!persistDrag) return;
+      const mine = data ? data.favorites.filter((f) => f.profileId === profile.id).sort((a, b) => a.rank - b.rank).map((f) => f.cardId) : [];
+      const merged = mergeFavoriteOrder(mine, dragFull(ids));
+      setData((d) => (d ? { ...d, favorites: d.favorites.map((f) => (f.profileId === profile.id && merged.includes(f.cardId) ? { ...f, rank: merged.indexOf(f.cardId) } : f)) } : d));
+      setTempOrder(null);
+      void reorderFavoritesAction(profile.id, merged).then((r) => {
+        if (!r.ok) setError(r.error);
+        void load();
+      });
+    },
+  });
 
   const opened = rows.find((r) => r.id === openId) ?? null;
   const favs = shown.filter((r) => r.favRank !== null);
@@ -213,6 +242,9 @@ export function CollectionView() {
               <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="fx-toggle" onClick={() => (setShowMenu(false), void saveSettings({ collection: { ...normalizeCollectionPrefs(prefs), fx: !prefs.fx } }))}>
                 <Sparkles className="size-4" /> 演出 {prefs.fx ? "ON" : "OFF"}
               </button>
+              <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="mult-open" onClick={() => (setShowMenu(false), setShowMult(true))}>
+                <Percent className="size-4" /> 状態別の評価倍率
+              </button>
               {filters.favOnly && favs.length > 1 && (
                 <button role="menuitem" type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted" data-testid="reorder-toggle" onClick={() => (setShowMenu(false), setReorder((v) => !v))}>
                   <ArrowUp className="size-4" /> {reorder ? "並び替えを終える" : "お気に入りを並び替え"}
@@ -291,9 +323,9 @@ export function CollectionView() {
           ))}
         </ul>
       ) : prefs.view === "grid" ? (
-        <ul key={animKey} className={cn("grid gap-2", COLS_CLASS[prefs.cols])} data-testid="card-grid" data-cols={prefs.cols}>
+        <ul key={animKey} className={cn("grid gap-2", COLS_CLASS[prefs.cols])} data-testid="card-grid" data-cols={prefs.cols} data-drag-persist={persistDrag ? "1" : "0"}>
           {visible.map((r, i) => (
-            <li key={r.id} className={cn("relative [contain-intrinsic-size:auto_9rem] [content-visibility:auto]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-tile">
+            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_9rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-tile">
               <ShineButton rarity={r.rarity} enabled={prefs.fx} onClick={() => setOpenId(r.id)} aria-label={`${r.name} ${r.rarity}の詳細を開く`} className="relative block w-full overflow-hidden rounded-lg">
                 <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="aspect-[5/7] w-full" />
               </ShineButton>
@@ -313,7 +345,7 @@ export function CollectionView() {
       ) : (
         <ul key={animKey} className="space-y-1.5" data-testid="card-list">
           {visible.map((r, i) => (
-            <li key={r.id} className={cn("relative [contain-intrinsic-size:auto_4.5rem] [content-visibility:auto]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-row">
+            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-row">
               <button type="button" onClick={() => setOpenId(r.id)} className="flex w-full items-center gap-2.5 rounded-xl border bg-card p-2 pr-10 text-left active:bg-muted/60">
                 <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="h-14 w-10" />
                 <span className="min-w-0 flex-1">
@@ -333,12 +365,13 @@ export function CollectionView() {
         </ul>
       )}
       <div ref={sentinel} aria-hidden="true" />
-      {visible.length < shown.length && (
+      {visible.length < ordered.length && (
         <Button variant="outline" className="w-full" onClick={() => setLimit((n) => n + PAGE)}>
-          もっと見る（{visible.length}/{shown.length}）
+          もっと見る（{visible.length}/{ordered.length}）
         </Button>
       )}
 
+      {showMult && data && <ConditionMultipliersDialog open onOpenChange={setShowMult} value={data.multipliers} onSaved={(m) => setData((d) => (d ? { ...d, multipliers: m } : d))} />}
       {showMarket && data && <MarketUpdateDialog open onOpenChange={setShowMarket} cardCount={data.cards.length} market={data.market} onDone={() => void load()} />}
       {opened && data && (
         <CardDetailSheet

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useShine } from "@/components/shine";
 import { conditionOptions, initialCondition, normalizeGrade } from "@/lib/card-condition";
+import { GRADE_DESCRIPTION } from "@/lib/condition-value";
 import { type CardRow, type CardSummaryRow, type HoldingRow, type MarketPriceRow, type PriceRow } from "@/lib/collection";
 import { parseYen } from "@/lib/collection-input";
 import { cn } from "@/lib/utils";
@@ -122,6 +123,7 @@ export function CardDetailSheet({
               <Item label="販売参考との差額" value={signed(card.saleDiff)} testId="diff-sale" />
               <Item label="買取参考との差額" value={signed(card.buybackDiff)} testId="diff-buyback" />
             </dl>
+            <ValuationBlock card={card} />
             <MarketBlock rows={market.filter((m) => m.cardId === card.id)} />
             <p className="-mt-2 text-[11px] text-muted-foreground">参考相場は確定した売却額ではありません（状態により変わります）。差額は購入価格が全枚数分そろい、相場が設定されているときだけ計算します。</p>
 
@@ -277,7 +279,38 @@ function Item({ label, value, testId }: { label: string; value: React.ReactNode;
 }
 
 /** 取得した相場（販売・買取）。件数が1件のときは明示する。状態による補正はしない */
-function MarketBlock({ rows }: { rows: MarketPriceRow[] }) {
+/** 状態別の評価額: 基準相場（補正前）と、状態補正後の評価額を区別して表示する。取得元・手動の相場そのものは変えない */
+function ValuationBlock({ card }: { card: CardSummaryRow }) {
+  const rows = [
+    { key: "sale", label: "販売", base: card.saleBaseValue, adjusted: card.saleValue, lines: card.saleLines },
+    { key: "buyback", label: "買取", base: card.buybackBaseValue, adjusted: card.buybackValue, lines: card.buybackLines },
+  ].filter((r) => r.adjusted !== null && card.qty > 0);
+  if (rows.length === 0) return null;
+  return (
+    <div className="space-y-1 rounded-lg border p-3 text-sm" data-testid="valuation-block">
+      <p className="text-[13px] font-bold">状態別の評価額（所持{card.qty}枚）</p>
+      {rows.map((r) => (
+        <div key={r.key} className="space-y-0.5" data-testid={`valuation-${r.key}`}>
+          <p className="flex justify-between gap-2 text-xs text-muted-foreground">
+            <span>{r.label}・基準相場（補正前）</span>
+            <span className="tabular-nums" data-testid={`valuation-${r.key}-base`}>{yen(r.base ?? 0)}</span>
+          </p>
+          <p className="flex justify-between gap-2">
+            <span>{r.label}・評価額（状態補正後）</span>
+            <span className="font-bold tabular-nums" data-testid={`valuation-${r.key}-adjusted`}>{yen(r.adjusted ?? 0)}</span>
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {r.lines.map((l) => `${l.grade}（${GRADE_DESCRIPTION[l.grade]}）${l.qty}枚×${yen(l.unitYen)}${l.source === "market" ? "（状態別の取得相場）" : l.pct === 100 ? "" : `（基準×${l.pct}%）`}`).join(" ／ ")}
+          </p>
+        </div>
+      ))}
+      {card.conditionUnsetQty > 0 && <p className="text-[11px] text-warn" data-testid="valuation-unset">状態が未設定の{card.conditionUnsetQty}枚は、A（補正なし）として計算しています。</p>}
+    </div>
+  );
+}
+
+function MarketBlock({ rows: all }: { rows: MarketPriceRow[] }) {
+  const rows = all.filter((r) => (r.conditionGrade ?? "A") === "A");
   const sale = rows.find((r) => r.kind === "sale");
   const buy = rows.find((r) => r.kind === "buyback");
   const fetched = rows.reduce<string | null>((a, r) => (!a || r.fetchedAt > a ? r.fetchedAt : a), null);
@@ -291,7 +324,7 @@ function MarketBlock({ rows }: { rows: MarketPriceRow[] }) {
         <Item label="最終取得" value={fetched ? new Date(fetched).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"} />
         <Item label="参照サイト" value={rows[0] ? <a href={rows[0].sourceUrl ?? "https://card.pricebest.jp/data/"} target="_blank" rel="noopener noreferrer" className="underline">{rows[0].source || "ポケカ価格比較"}</a> : "—"} />
       </dl>
-      {(sale || buy) && <p className="text-[11px] text-muted-foreground">店舗の公開価格の中央値です。状態（A+〜C）による補正はしていません。実際の取引価格や査定額とは異なります。</p>}
+      {(sale || buy) && <p className="text-[11px] text-muted-foreground">店舗の公開価格の中央値（状態A基準）です。補正前の基準相場で、状態別の評価額は上の欄に出します。実際の取引価格や査定額とは異なります。</p>}
     </div>
   );
 }
