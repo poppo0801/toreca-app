@@ -136,8 +136,25 @@
 .app-root {
   position: fixed;
   inset: 0;
+  /* html の背景を standalone で変えるため、画面の面は入れ物が持つ */
+  background: var(--background);
 }
-/* Stage 6L: 6K の standalone 用 lvh 固定は実機で「メニューの下半分が隠れる」結果になったため外した（推測での補正）。実機の診断値で再設計する。 */
+/*
+ * Stage 6L（実機の実験で確認）: iOS 18.4 のホーム画面アプリは、描画できる範囲が innerHeight(793) で止まり、
+ * 画面の下 59px（100lvh=852 との差）には要素を描けない（lvh基準の帯は793で切れ、それより下の帯は見えない）。
+ * 見えるのは html の背景（canvas）だけ。そこで standalone のときだけ次の2点を行う（JS・測定・タイマーなし）:
+ *  1. html の背景をメニューと同じ色にして、メニューの下（描けない領域）がメニューの続きに見える
+ *  2. メニューの下余白から、描けない領域の分(100lvh-100dvh)を引く。Safe Area(ホームバー)は描けない領域の中にあるため、
+ *     二重に余白を取らない。表示領域が正常な端末では 100lvh-100dvh=0 で、従来どおりの余白になる
+ */
+@media (display-mode: standalone) {
+  html {
+    background: var(--header);
+  }
+  .app-nav {
+    padding-bottom: max(0.25rem, calc(env(safe-area-inset-bottom) - 0.5rem - (100lvh - 100dvh)));
+  }
+}
 
 /*
  * 日付・日時の入力（iOS）。iOS の日付入力は appearance を外した固定高さの欄で、内側の値の表示部(::-webkit-date-and-time-value)が上寄せになり、
