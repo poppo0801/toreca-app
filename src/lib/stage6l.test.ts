@@ -5,8 +5,10 @@ import { resolveUserScope, DEFAULT_USER_SCOPE } from "@/lib/user-scope";
 import * as m from "@/lib/mutations";
 import { checkChainAliases } from "@/lib/chain-alias";
 import { matchChain } from "@/lib/lottery-match";
-import { EMPTY_FLEX, lotteryInputSchema } from "@/lib/lottery-input";
+import { EMPTY_FLEX, lotteryInputSchema, type LotteryInput } from "@/lib/lottery-input";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
+import { applySupplement, buildSupplement } from "@/lib/ai-supplement";
+import type { LotteryDraft } from "@/lib/lottery-match";
 import type { AppData, Chain } from "@/types/domain";
 
 const NOW = new Date("2026-10-26T03:00:00Z");
@@ -155,5 +157,89 @@ describe("Stage 6L: 店舗なしでの抽選登録", () => {
     const data: AppData = { ...d, lotteries: [...d.lotteries, l] };
     const ids = TABS.flatMap((t) => selectLotteries(data, t, anyFilter(t), NOW, "pA").map((x) => x.id));
     expect(ids.filter((x) => x === "L-no-store")).toHaveLength(1);
+  });
+});
+
+describe("Stage 6L: AIによる不足情報の補完（差分の確認）", () => {
+  const fx = { precision: "date_time" as const, date: "2026-11-20", time: "23:59" };
+  const none = { precision: "unknown" as const, date: "", time: "" };
+  const current = (over: Partial<LotteryInput> = {}): LotteryInput => ({
+    chain: { id: "123e4567-e89b-42d3-a456-426614174000", name: "" },
+    store: { id: null, name: "", prefecture: "" },
+    campaignId: null,
+    newCampaign: null,
+    items: [{ product: { id: "123e4567-e89b-42d3-a456-426614174001", name: "" }, quantity: 1, unit: "box" }],
+    applyStart: none,
+    applyDeadline: none,
+    resultDate: none,
+    procedureStart: none,
+    procedureDeadline: none,
+    receiveMethod: "unknown",
+    applyMethod: "unknown",
+    conditionsText: "",
+    verificationText: "",
+    announcementMethod: "",
+    announcementUrl: "",
+    sourceUrls: [],
+    eventState: "open",
+    limitBasis: "unknown",
+    limitMaxCount: 1,
+    memo: "",
+    ...over,
+  });
+  const draftOf = (input: Partial<LotteryInput>, evidence: Record<string, { quote: string; verified: boolean | null }> = {}): LotteryDraft =>
+    ({ input: current(input), flags: {}, modePending: false, duplicates: [], warnings: [], evidence, generalNotes: [], candidates: { chain: [], store: [], items: [] }, summary: { chain: "none", store: "none", items: [] } }) as unknown as LotteryDraft;
+
+  it("空欄への補完は fill（初期は選択）、既存と食い違う項目は diff（初期は選択なし）。同じ値は候補にしない", () => {
+    const cur = current({ applyDeadline: { precision: "date_time", date: "2026-11-10", time: "23:59" }, applyMethod: "web", conditionsText: "会員のみ" });
+    const items = buildSupplement(
+      cur,
+      draftOf(
+        { applyDeadline: fx, applyStart: { precision: "date_only", date: "2026-11-01", time: "" }, applyMethod: "web", conditionsText: "過去の購入履歴が必要", verificationText: "本人確認書類を提示" },
+        { applyStart: { quote: "11/1から応募開始", verified: true } },
+      ),
+    );
+    const by = Object.fromEntries(items.map((i) => [i.key, i]));
+    expect(by.applyStart.kind).toBe("fill");
+    expect(by.applyStart.evidence).toBe("11/1から応募開始");
+    expect(by.applyDeadline.kind).toBe("diff"); // 11/10 と 11/20 の食い違い
+    expect(by.applyDeadline.current).toContain("2026/11/10");
+    expect(by.verificationText.kind).toBe("fill");
+    expect(by.conditionsText.kind).toBe("diff"); // 文章は置き換えず追記
+    expect(by.conditionsText.patch.conditionsText).toBe("会員のみ\n過去の購入履歴が必要");
+    expect(by.applyMethod).toBeUndefined(); // 同じ値
+  });
+
+  it("日付のみ → 同じ日の日時は補完（時刻を足すだけ）。画像で読めなかった項目は候補にならない（推測で確定しない）", () => {
+    const cur = current({ applyDeadline: { precision: "date_only", date: "2026-11-20", time: "" } });
+    const items = buildSupplement(cur, draftOf({ applyDeadline: fx }));
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ key: "applyDeadline", kind: "fill" });
+    expect(buildSupplement(cur, draftOf({}))).toEqual([]); // 何も読み取れなければ候補なし
+  });
+
+  it("既存の正しい情報は消えない: 選ばなかった項目・読み取れなかった項目は、そのまま残る", () => {
+    const cur = current({ applyDeadline: { precision: "date_time", date: "2026-11-10", time: "23:59" }, conditionsText: "会員のみ", memo: "既存のメモ" });
+    const items = buildSupplement(cur, draftOf({ applyDeadline: fx, verificationText: "本人確認書類を提示" }));
+    const fills = items.filter((i) => i.kind === "fill");
+    const next = applySupplement(cur, fills, { source: "画像", today: "2026-11-06" });
+    expect(next.applyDeadline).toEqual(cur.applyDeadline); // 食い違いは選んでいないので変わらない
+    expect(next.conditionsText).toBe("会員のみ");
+    expect(next.verificationText).toBe("本人確認書類を提示");
+  });
+
+  it("反映した項目と読み取り元は、メモの末尾に記録する（出典）。何も選ばなければ変更なし", () => {
+    const cur = current({ memo: "既存のメモ" });
+    const items = buildSupplement(cur, draftOf({ applyStart: { precision: "date_only", date: "2026-11-01", time: "" } }));
+    const next = applySupplement(cur, items, { source: "画像", today: "2026-11-06" });
+    expect(next.memo).toBe("既存のメモ\nAI補完（画像・2026-11-06）: 応募開始");
+    expect(applySupplement(cur, [], { source: "画像", today: "2026-11-06" })).toBe(cur);
+  });
+
+  it("未確認の初期値（応募方法・受取方法）は空欄と同じに扱い、補完の対象にする", () => {
+    const cur = current({ applyMethod: "web" });
+    const d = draftOf({ applyMethod: "app" });
+    expect(buildSupplement(cur, d)[0]).toMatchObject({ key: "applyMethod", kind: "diff" });
+    expect(buildSupplement(cur, d, { defaults: new Set(["applyMethod"]) })[0]).toMatchObject({ key: "applyMethod", kind: "fill" });
   });
 });

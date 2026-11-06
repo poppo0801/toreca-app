@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ListPlus, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { AiImportDialog } from "@/components/ai-import-dialog";
+import { AiSupplementDialog } from "@/components/ai-supplement-dialog";
 import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
@@ -357,6 +358,8 @@ export function LotteryFormDialog({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false); // 状態の更新より前に続けて送信されても、保存を1回だけにする
   const [aiOpen, setAiOpen] = useState(false);
+  // 編集画面の「AIで情報を補完」（画像から読み取り、差分を確認して選んだ項目だけ反映する）
+  const [supOpen, setSupOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
   const showPeriod = periodOpen || !!v.resultEndDate;
   const [detailsOpen, setDetailsOpen] = useState(() => initial.input.multiMode !== "single");
@@ -662,6 +665,11 @@ export function LotteryFormDialog({
 
           <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
             <SheetBody className="space-y-3 border-t pt-3">
+              {isEdit && (
+                <Button type="button" variant="outline" size="sm" className="min-h-10 w-full" onClick={() => setSupOpen(true)} data-testid="ai-supplement-open">
+                  <Sparkles className="size-4 text-primary-ink" aria-hidden="true" /> AIで情報を補完
+                </Button>
+              )}
               {!isEdit && (
                 <div className="space-y-1">
                   <div className="grid grid-cols-2 gap-2">
@@ -1236,6 +1244,25 @@ export function LotteryFormDialog({
           </form>
         </SheetContent>
         {aiOpen && <AiImportDialog open onOpenChange={setAiOpen} onApply={applyDraft} />}
+        {supOpen && (
+          <AiSupplementDialog
+            open
+            onOpenChange={setSupOpen}
+            current={v}
+            defaults={new Set(DEFAULTABLE.filter((k) => sources[k] === "default"))}
+            hint={[data.chains.find((c) => c.id === v.chain.id)?.name ?? v.chain.name, data.stores.find((s) => s.id === v.store.id)?.name ?? v.store.name, ...v.items.map((it) => data.products.find((p) => p.id === it.product.id)?.officialName ?? it.product.name)].map((s) => s.trim()).filter(Boolean).join(" / ")}
+            onApply={(next) => {
+              setV(next);
+              setUrlsText(next.sourceUrls.join("\n"));
+              // AIが補完した区分は「AI」、それ以外の出典は変えない
+              setSources((s) => {
+                const n = { ...s };
+                for (const k of DEFAULTABLE) if (next[k] !== v[k]) n[k] = "ai";
+                return n;
+              });
+            }}
+          />
+        )}
       </Sheet>
 
       {/* 最小化中: 抽選一覧を見ながら、タップまたは上へのスワイプで入力を再開できる */}

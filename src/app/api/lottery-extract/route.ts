@@ -59,7 +59,8 @@ export async function POST(request: NextRequest) {
       if (!mediaType) return bad("PNG・JPEG・WebP・GIFの画像のみ読み取れます");
       images.push({ mediaType, base64: buf.toString("base64") });
     }
-    input = { kind, images };
+    const hint = String(form.get("hint") ?? "").slice(0, 500);
+    input = { kind, images, ...(hint ? { hint } : {}) };
   } else {
     return bad("入力の種類が不正です");
   }

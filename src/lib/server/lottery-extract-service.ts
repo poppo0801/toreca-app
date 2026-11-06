@@ -20,7 +20,7 @@ export type XRichInput =
 
 export type ExtractInput =
   | { kind: "text"; text: string }
-  | { kind: "image"; images: NonNullable<ExtractRequest["images"]> }
+  | { kind: "image"; images: NonNullable<ExtractRequest["images"]>; /** 編集画面の補完: 既存の登録内容のうち対象を特定する短い手がかり（系列・店舗・商品名）。読み取りの対象は画像 */ hint?: string }
   | { kind: "url"; url: string }
   | { kind: "x_url"; url: string };
 
@@ -99,7 +99,7 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
       if (!split.ok) return { ok: false, kind, code: "empty_input", message: split.message };
       if (split.images.length > MAX_IMAGES) return { ok: false, kind, code: "empty_input", message: `画像は${MAX_IMAGES}枚までです` };
       notices.push(...split.notices);
-      req = { kind, images: split.images, now: deps.now };
+      req = { kind, images: split.images, text: input.hint?.trim() ? input.hint.trim().slice(0, 500) : undefined, now: deps.now };
       break;
     }
     case "url":
