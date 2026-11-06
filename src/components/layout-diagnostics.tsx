@@ -224,6 +224,9 @@ export function LayoutDiagnostics() {
             >
               消去
             </button>
+            <a href="/viewport-lab" className="inline-flex min-h-9 items-center rounded-md border px-3">
+              実験ページ
+            </a>
             <button
               type="button"
               onClick={() => {
