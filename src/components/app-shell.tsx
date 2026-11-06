@@ -8,7 +8,6 @@ import { Ellipsis, Settings } from "lucide-react";
 import { AiJobsProvider } from "@/components/ai-jobs-provider";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { BrandLogo } from "@/components/brand-logo";
-import { LayoutDiagnostics, useDiagEnabled } from "@/components/layout-diagnostics";
 import { NotificationBell } from "@/components/notification-bell";
 import { iconOf } from "@/components/page-heading";
 import { ProfileChip } from "@/components/profile-switcher";
@@ -82,7 +81,6 @@ function Shell({ children }: { children: React.ReactNode }) {
   const { profile, notice, dismissNotice, settings } = useApp();
   const [more, setMore] = useState(false);
   useKeyboardInset();
-  const diag = useDiagEnabled(); // 明示的な診断モードでだけ true（通常は常に false）
   useProfileTheme();
   const nav = resolveNav(settings.nav);
   const all = availableNav();
@@ -172,7 +170,6 @@ function Shell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </nav>
-        {diag && <LayoutDiagnostics />}
         <Sheet open={more} onOpenChange={setMore}>
           <SheetContent data-testid="more-sheet" aria-describedby="more-desc">
             <div className="px-4 pb-2">
