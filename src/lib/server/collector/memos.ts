@@ -1,6 +1,6 @@
 import "server-only";
 import { deadlinePassed } from "@/lib/collector/conditions";
-import { isMemoOpen, memoDue, memoMatchesText, memoStale, memoTargets, validateMemoInput, type MemoInput, type MemoRow, type MemoState } from "@/lib/collector/memos";
+import { isMemoOpen, memoDue, memoMatchesText, memoStale, memoTargets, type MemoRow, type MemoState } from "@/lib/collector/memos";
 import { classifyFailure, FAIL_KIND_LABEL, hashNormalized, lotteryFlex } from "@/lib/collector/queue";
 import { extractPageText } from "@/lib/ai/page-text";
 import { loadAppData, type Db } from "@/lib/server/lottery-service";
@@ -8,7 +8,10 @@ import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-f
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
 
-/** 優先収集メモのDBアクセスと、収集時の照合（Stage 5S-A）。メモ自体は削除せず、状態で履歴を残す */
+/**
+ * 優先収集メモの収集時の照合（Stage 5S-A）。Stage 6L で、メモの手動登録・一覧のUIと登録の操作は廃止した（X のブックマーク取得が通常の収集候補として追跡するため）。
+ * 既存のメモ（DB）は削除せず、調査中のものだけここで引き続き照合する。メモ自体は削除せず、状態で履歴を残す。
+ */
 
 type DbRow = {
   id: string; chain_id: string | null; chain_name: string; store_id: string | null; store_name: string; product_ids: string[]; product_names: string[];
@@ -26,30 +29,6 @@ export const toMemo = (r: DbRow): MemoRow => ({
 export async function listMemos(db: Db): Promise<MemoRow[]> {
   const { data } = await db.from("collection_memos").select(COLS).order("created_at", { ascending: false }).limit(200);
   return ((data ?? []) as unknown as DbRow[]).map(toMemo);
-}
-
-export async function createMemo(db: Db, householdId: string, profileId: string | null, input: MemoInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  const v = validateMemoInput(input);
-  if (!v.ok) return v;
-  const i = v.value;
-  const { data, error } = await db
-    .from("collection_memos")
-    .insert({
-      household_id: householdId, chain_id: i.chainId, chain_name: i.chainId ? "" : i.chainName, store_id: i.storeId, store_name: i.storeId ? "" : i.storeName,
-      product_ids: i.productIds, product_names: i.productNames, reference_url: i.referenceUrl || null, note: i.note, announced_start: i.announcedStart || null, priority: i.priority,
-      created_by_profile_id: profileId,
-    } as never)
-    .select("id")
-    .single();
-  if (error || !data) return { ok: false, error: "メモを保存できませんでした" };
-  return { ok: true, id: data.id };
-}
-
-/** 取り下げ（履歴として残す）・再開。調査中などへの自動遷移は runMemoPass だけが行う */
-export async function setMemoState(db: Db, id: string, state: "withdrawn" | "unsurveyed"): Promise<boolean> {
-  const patch = state === "withdrawn" ? { state, state_detail: "取り下げました" } : { state, state_detail: "再開しました", fetch_state: "ok", check_count: 0, last_checked_at: null };
-  const { error } = await db.from("collection_memos").update(patch as never).eq("id", id);
-  return !error;
 }
 
 export interface MemoPassReport {

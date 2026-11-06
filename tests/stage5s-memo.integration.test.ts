@@ -6,7 +6,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EMPTY_FLEX } from "@/lib/lottery-input";
-import { createMemo, listMemos, runMemoPass, setMemoState } from "@/lib/server/collector/memos";
+import type { MemoState } from "@/lib/collector/memos";
+import { listMemos, runMemoPass } from "@/lib/server/collector/memos";
 import type { Db } from "@/lib/server/lottery-service";
 import type { SafeFetchResult } from "@/lib/server/safe-fetch";
 import { saveLegacy as saveLottery, type LegacyInput } from "./helpers/legacy";
@@ -17,7 +18,9 @@ const ymd = (d: number) => new Date(NOW.getTime() + d * 86_400_000 + 9 * 3600_00
 const page = (text: string): SafeFetchResult => ({ ok: true, finalUrl: "https://m.example.invalid/a", status: 200, contentType: "text/html", body: `<html><body><p>${text}</p></body></html>`, truncated: false });
 const BASE = { chainId: null, chainName: "", storeId: null, storeName: "", productIds: [] as string[], productNames: [] as string[], referenceUrl: "", note: "", announcedStart: "", priority: "normal" as const };
 
-describe.skipIf(!dbTestsEnabled)("Stage 5S-A: 優先収集メモ", () => {
+type MemoSeed = { chainId: string | null; chainName: string; storeId: string | null; storeName: string; productIds: string[]; productNames: string[]; referenceUrl: string; note: string; announcedStart: string; priority: "normal" | "high" };
+
+describe.skipIf(!dbTestsEnabled)("Stage 5S-A: 優先収集メモ（既存メモの照合。登録の操作は Stage 6L で廃止）", () => {
   const admin = adminClient();
   const userIds: string[] = [];
   let u1: Db;
@@ -30,6 +33,17 @@ describe.skipIf(!dbTestsEnabled)("Stage 5S-A: 優先収集メモ", () => {
   let fetchResult: SafeFetchResult = page("");
   const deps = () => ({ db: u1, householdId: hid, now: NOW, fetchPage: async () => { fetches++; return fetchResult; } });
   const memo = async (id: string) => (await listMemos(u1)).find((m) => m.id === id)!;
+  // 既存のメモ（廃止前に登録されたもの）を再現する
+  const createMemo = async (db: Db, household: string, by: string | null, i: MemoSeed): Promise<{ ok: true; id: string } | { ok: false }> => {
+    if (!i.chainId && !i.chainName.trim() && i.productIds.length === 0 && i.productNames.length === 0) return { ok: false };
+    const { data, error } = await db
+      .from("collection_memos")
+      .insert({ household_id: household, chain_id: i.chainId, chain_name: i.chainId ? "" : i.chainName, store_id: i.storeId, store_name: i.storeId ? "" : i.storeName, product_ids: i.productIds, product_names: i.productNames, reference_url: i.referenceUrl || null, note: i.note, announced_start: i.announcedStart || null, priority: i.priority, created_by_profile_id: by } as never)
+      .select("id")
+      .single();
+    return error || !data ? { ok: false } : { ok: true, id: data.id };
+  };
+  const setMemoState = async (db: Db, id: string, state: MemoState) => !(await db.from("collection_memos").update({ state, state_detail: "取り下げました" } as never).eq("id", id)).error;
 
   beforeAll(async () => {
     const a = await signInTestUser(admin, "s5sm", 1);

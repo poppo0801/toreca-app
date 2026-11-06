@@ -1,24 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createMockData } from "@/data/mock";
-import { isMemoOpen, memoDue, memoMatchesText, memoStale, memoTargets, recheckIntervalHours, validateMemoInput, type MemoInput, type MemoRow } from "@/lib/collector/memos";
+import { isMemoOpen, memoDue, memoMatchesText, memoStale, memoTargets, recheckIntervalHours, type MemoRow } from "@/lib/collector/memos";
 
 const NOW = new Date("2026-11-04T03:00:00Z");
 const d = createMockData(NOW);
-const input = (o: Partial<MemoInput> = {}): MemoInput => ({ chainId: null, chainName: "", storeId: null, storeName: "", productIds: [], productNames: [], referenceUrl: "", note: "", announcedStart: "", priority: "normal", ...o });
 const row = (o: Partial<MemoRow> = {}): MemoRow => ({ id: "m", chainId: null, chainName: "", storeId: null, storeName: "", productIds: [], productNames: [], referenceUrl: null, note: "", announcedStart: null, priority: "normal", state: "unsurveyed", stateDetail: "", fetchState: "ok", checkCount: 0, lastCheckedAt: null, lastContentHash: null, foundCandidateId: null, lotteryId: null, createdAt: "2026-11-01T00:00:00Z", ...o });
-
-describe("優先収集メモの入力検証", () => {
-  it("系列＋商品だけで保存できる。系列も商品も無ければ拒否", () => {
-    expect(validateMemoInput(input({ chainId: d.chains[0].id, productIds: [d.products[0].id] })).ok).toBe(true);
-    expect(validateMemoInput(input({ productNames: ["未登録の新商品"] })).ok).toBe(true); // 未登録の名称は仮名称として保存
-    expect(validateMemoInput(input({ note: "メモだけ" })).ok).toBe(false);
-  });
-  it("参考URLは http(s) のみ。開始日の形式も検証する", () => {
-    expect(validateMemoInput(input({ chainName: "X", referenceUrl: "javascript:alert(1)" })).ok).toBe(false);
-    expect(validateMemoInput(input({ chainName: "X", referenceUrl: "https://example.invalid/a" })).ok).toBe(true);
-    expect(validateMemoInput(input({ chainName: "X", announcedStart: "11/5" })).ok).toBe(false);
-  });
-});
 
 describe("メモと文章の照合", () => {
   const chain = d.chains[0];

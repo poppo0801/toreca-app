@@ -2,7 +2,7 @@ import { productKey } from "@/lib/lottery-match";
 import { normName } from "@/lib/norm";
 import type { Chain, Product } from "@/types/domain";
 
-/** 優先収集メモ（世帯共通の収集依頼）。系列＋商品だけでも保存でき、次回以降の収集で優先して調査する */
+/** 優先収集メモ（世帯共通の収集依頼）。Stage 6L で登録の画面は廃止。既存のメモは、次回以降の収集で引き続き照合する */
 export const MEMO_STATES = ["unsurveyed", "surveying", "found", "insufficient", "registered", "expired", "withdrawn"] as const;
 export type MemoState = (typeof MEMO_STATES)[number];
 export const MEMO_STATE_LABEL: Record<MemoState, string> = {
@@ -11,19 +11,6 @@ export const MEMO_STATE_LABEL: Record<MemoState, string> = {
 /** 調査を続ける状態（登録済み・終了・取り下げは履歴として残す） */
 export const MEMO_OPEN_STATES: readonly MemoState[] = ["unsurveyed", "surveying", "found", "insufficient"];
 export const isMemoOpen = (s: MemoState) => MEMO_OPEN_STATES.includes(s);
-
-export interface MemoInput {
-  chainId: string | null;
-  chainName: string;
-  storeId: string | null;
-  storeName: string;
-  productIds: string[];
-  productNames: string[];
-  referenceUrl: string;
-  note: string;
-  announcedStart: string; // YYYY-MM-DD or ""
-  priority: "normal" | "high";
-}
 
 export interface MemoRow {
   id: string;
@@ -46,19 +33,6 @@ export interface MemoRow {
   foundCandidateId: string | null;
   lotteryId: string | null;
   createdAt: string;
-}
-
-/** 入力の検証。系列か商品のどちらか（名称だけでも可）が必要。参考URLは http(s) のみ */
-export function validateMemoInput(i: MemoInput): { ok: true; value: MemoInput } | { ok: false; error: string } {
-  const productNames = i.productNames.map((s) => s.trim()).filter(Boolean).slice(0, 10);
-  const chainName = i.chainName.trim().slice(0, 80);
-  if (!i.chainId && !chainName && i.productIds.length === 0 && productNames.length === 0) return { ok: false, error: "系列か商品のどちらかを選んでください" };
-  const url = i.referenceUrl.trim();
-  if (url && !/^https?:\/\/[^\s]+$/i.test(url)) return { ok: false, error: "参考URLは http(s) から始まるURLを入力してください" };
-  if (url.length > 500) return { ok: false, error: "参考URLが長すぎます" };
-  if (i.announcedStart && !/^\d{4}-\d{2}-\d{2}$/.test(i.announcedStart)) return { ok: false, error: "開始日の形式が正しくありません" };
-  if (i.note.length > 1000) return { ok: false, error: "メモは1000文字までです" };
-  return { ok: true, value: { ...i, chainName, productNames, productIds: i.productIds.slice(0, 10), storeName: i.storeName.trim().slice(0, 80), referenceUrl: url, note: i.note.trim(), priority: i.priority === "high" ? "high" : "normal" } };
 }
 
 export interface MemoTargets {

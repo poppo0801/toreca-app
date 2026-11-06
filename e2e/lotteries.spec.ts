@@ -1597,24 +1597,19 @@ test.describe("Stage 5Z 日付の1行表示", () => {
   });
 });
 
-test.describe("優先収集メモの入口", () => {
-  test("＋登録は抽選情報の登録を直接開く。メモのアイコンは＋登録の左にあり、優先収集メモの登録を開く。320pxでもはみ出さない", async ({ page }) => {
+test.describe("優先収集メモの廃止（Stage 6L）", () => {
+  test("メモのアイコンは無く、＋登録は抽選情報の登録を直接開く。320pxでもはみ出さない", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 740 });
-    const memo = page.getByTestId("memo-open");
+    await expect(page.getByTestId("memo-open")).toHaveCount(0);
+    await expect(page.getByLabel("優先収集メモを登録")).toHaveCount(0);
     const reg = page.getByTestId("register");
-    // モックはデモデータ（保存されない）のため＋登録は出ない場合がある。出るときだけ配置と動作を確認する
+    // モックはデモデータ（保存されない）のため＋登録は出ない場合がある。出るときだけ動作を確認する
     if ((await reg.count()) === 0) {
       test.skip(true, "デモデータでは＋登録を表示しない");
       return;
     }
-    const mb = (await memo.boundingBox())!;
     const rb = (await reg.boundingBox())!;
-    expect(mb.x + mb.width).toBeLessThanOrEqual(rb.x + 1);
-    expect(Math.abs(mb.y - rb.y)).toBeLessThan(12);
     expect(rb.x + rb.width).toBeLessThanOrEqual(320);
-    await memo.click();
-    await expect(page.getByTestId("memo-chain")).toBeVisible();
-    await page.keyboard.press("Escape");
     await reg.click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByTestId("register-chooser")).toHaveCount(0);
