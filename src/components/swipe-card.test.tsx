@@ -19,6 +19,7 @@ vi.mock("@/components/app-provider", () => ({
   useApp: () => ({ data, now: NOW, profile: data.profiles[0], actions, persistent: true }),
 }));
 
+import { ApplyExitProvider, type ApplyExitApi } from "@/components/apply-exit";
 import { SwipeCard } from "@/components/swipe-card";
 import { UndoToastProvider } from "@/components/undo-toast";
 
@@ -188,5 +189,52 @@ describe("カードのスワイプ操作", () => {
       (document.body.querySelector('[data-testid="undo-toast"] button') as HTMLButtonElement).click();
     });
     expect(document.body.querySelector('[data-testid="undo-toast"]')!.textContent).toContain("元に戻せません");
+  });
+});
+
+describe("Stage 6L: スワイプの退出アニメーション（★と共通）", () => {
+  const exitApi = () => {
+    const handle = { ok: vi.fn(), fail: vi.fn() };
+    const api: ApplyExitApi = { begin: vi.fn(() => handle), cancel: vi.fn(), active: vi.fn(() => true) };
+    return { api, handle };
+  };
+  const mountWithExit = (api: ApplyExitApi, tab: "all" | "managed") => {
+    const lottery = data.lotteries.find((l) => l.id === "L4")!;
+    act(() => {
+      root.render(
+        <UndoToastProvider>
+          <ApplyExitProvider value={api}>
+            <SwipeCard lottery={lottery} tab={tab}>
+              <span>カード</span>
+            </SwipeCard>
+          </ApplyExitProvider>
+        </UndoToastProvider>,
+      );
+    });
+  };
+  it("確定すると指の向きへ画面外まで滑り（透明にするだけではない）、保存を待たずに退出を始め、成功したら退出を続ける", async () => {
+    const { api, handle } = exitApi();
+    mountWithExit(api, "all");
+    drag(120, 4);
+    expect(api.begin).toHaveBeenCalledWith("L4", { dir: "right", waitMs: 0, slid: true });
+    const inner = card().querySelector<HTMLElement>("[data-leaving]")!;
+    expect(inner.style.transform).toBe("translateX(110%)");
+    expect(inner.style.opacity).toBe(""); // フェードだけで消さない
+    await act(async () => {});
+    expect(handle.ok).toHaveBeenCalledTimes(1);
+    expect(handle.fail).not.toHaveBeenCalled();
+  });
+  it("保存に失敗したら退出を取り消し、カードを元の位置へ戻す（表示を復元）", async () => {
+    const { api, handle } = exitApi();
+    actions.setManaged.mockResolvedValueOnce({ ok: false, error: "通信に失敗しました" } as never);
+    mountWithExit(api, "all");
+    drag(120, 4);
+    await act(async () => {});
+    expect(handle.fail).toHaveBeenCalledTimes(1);
+    expect(handle.ok).not.toHaveBeenCalled();
+    await act(async () => {
+      vi.advanceTimersByTime(60);
+    });
+    expect(card().querySelector<HTMLElement>("[data-leaving]")).toBeNull(); // 向きの指定が外れて、元の位置へ戻る
   });
 });

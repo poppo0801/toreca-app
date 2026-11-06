@@ -69,30 +69,30 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
   const fail = useCallback((message: string) => toast.show({ message, tone: "error" }), [toast]);
 
   /** 状態を変える本体。成功したらUndo付きの通知を出す。busy 中は何もしない（通信中の重複操作を防ぐ） */
-  const run = useCallback(
+  const okRef = useRef(false);
+  const exec = useCallback(
     async (op: SwipeOp, extra: { itemId?: string; result?: "won" | "lost" } = {}) => {
-      if (busy.current) return false as boolean;
+      if (busy.current) return;
       busy.current = true;
-      let success = false;
       try {
         const done = OP_META[op].done;
         switch (op) {
           case "add_managed": {
             const r = await actions.setManaged(lottery.id, true);
             if (!r.ok) return fail(r.error);
-            success = true;
+            okRef.current = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setManaged(lottery.id, false); return u.ok ? true : u.error; } });
           }
           case "unmanage": {
             const r = await actions.setManaged(lottery.id, false);
             if (!r.ok) return fail(r.error);
-            success = true;
+            okRef.current = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setManaged(lottery.id, true); return u.ok ? true : u.error; } });
           }
           case "skip_once": {
             const r = await actions.setLotterySkip(lottery.id, true);
             if (!r.ok) return fail(r.error);
-            success = true;
+            okRef.current = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setLotterySkip(lottery.id, false); return u.ok ? true : u.error; } });
           }
           case "mark_applied": {
@@ -100,7 +100,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
             if (c.kind !== "apply") return fail("応募済みにできません");
             const r = await actions.setApplied(lottery.id, c.accountId, true, extra.itemId ?? null);
             if (!r.ok) return fail(r.error);
-            success = true;
+            okRef.current = true;
             return toast.show({
               message: done,
               undo: async () => {
@@ -118,7 +118,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
             const r = await actions.setResult(app.id, result);
             if (!r.ok) return fail(r.error);
             // 取り消しは「結果未確認(pending)」へ戻す
-            success = true;
+            okRef.current = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setResult(app.id, "pending"); return u.ok ? true : u.error; } });
           }
           case "receive": {
@@ -127,16 +127,24 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
             const prev = app.fulfillment === "procedure_done" ? "procedure_done" : "none";
             const r = await actions.setFulfillment(app.id, "purchased");
             if (!r.ok) return fail(r.error);
-            success = true;
+            okRef.current = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.revertFulfillment(app.id, prev); return u.ok ? true : u.error; } });
           }
         }
       } finally {
         busy.current = false;
       }
-      return success;
     },
     [actions, data, exit, fail, lottery, now, profile.id, toast],
+  );
+  /** 実行して、状態が変わったか（成功したか）を返す。★・スワイプの共通の退出アニメーションが、成否で続ける／戻すを決める */
+  const run = useCallback(
+    async (op: SwipeOp, extra: { itemId?: string; result?: "won" | "lost" } = {}): Promise<boolean> => {
+      okRef.current = false;
+      await exec(op, extra);
+      return okRef.current;
+    },
+    [exec],
   );
 
   const commit = useCallback(
