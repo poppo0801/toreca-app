@@ -128,11 +128,25 @@ test("コレクション: 長押しドラッグで並び替え。お気に入り
     await page.getByLabel("検索").click();
     await page.getByLabel("コレクションを検索").fill("6Kカード");
     await page.getByTestId("fav-filter").click();
-    const order = async () => (await page.getByTestId("card-tile").evaluateAll((els) => els.map((e) => e.querySelector("button")?.getAttribute("aria-label") ?? ""))).map((s) => s.replace(/ SR.*/, ""));
+    // 並びは見た目の順（上→下・左→右）。並び替え中は DOM のノードを動かさず CSS の order だけを変える
+    const settle = () => page.waitForTimeout(900); // 入れ替えの移動アニメーション（約0.6秒）が終わるまで待ってから位置を読む
+    const order = async () => {
+      await settle();
+      return (
+        await page.getByTestId("card-tile").evaluateAll((els) =>
+          els
+            .map((e) => ({ r: e.getBoundingClientRect(), label: e.querySelector("button")?.getAttribute("aria-label") ?? "" }))
+            .sort((a, b) => Math.round(a.r.top) - Math.round(b.r.top) || a.r.left - b.r.left)
+            .map((x) => x.label),
+        )
+      ).map((s) => s.replace(/ SR.*/, ""));
+    };
     await expect.poll(order).toEqual(names.map((n) => n));
 
     const cdp = await page.context().newCDPSession(page);
     const tiles = page.getByTestId("card-tile");
+    // 並び替えでカードが作り直されない（消えて再出現しない）ことの確認用の目印
+    await tiles.evaluateAll((els) => els.forEach((e, i) => ((e as HTMLElement).dataset.probe = String(i))));
     const b0 = (await tiles.nth(0).boundingBox())!;
     const b2 = (await tiles.nth(2).boundingBox())!;
     await longPressDrag(cdp, { x: b0.x + b0.width / 2, y: b0.y + b0.height / 2 }, { x: b2.x + b2.width / 2, y: b2.y + b2.height / 2 });
@@ -140,6 +154,7 @@ test("コレクション: 長押しドラッグで並び替え。お気に入り
     expect(moved[0]).not.toBe(names[0]); // 先頭だった「あ」が動いた
     expect(moved).toHaveLength(3);
     await expect(page.getByTestId("card-tile")).toHaveCount(3);
+    await expect(page.locator("[data-probe]")).toHaveCount(3); // 3枚とも同じ要素のまま（アンマウント・再生成されない）
 
     // お気に入り表示では保存される: 再読み込みしても同じ並び
     await page.waitForTimeout(800);

@@ -101,6 +101,18 @@ export function CollectionView() {
   const products = useMemo(() => [...new Set(rows.map((r) => r.productName).filter(Boolean))].sort(), [rows]);
   const ordered = useMemo(() => applyOrder(shown, tempOrder), [shown, tempOrder]);
   const visible = ordered.slice(0, limit);
+  // 並び替え中も DOM の順序は動かさず、見た目の順序だけ CSS の order で変える。
+  // DOM のノードを移動（再挿入）するとブラウザが CSS アニメーション（光沢・フェードイン）をやり直し、カードが消えて現れるように見えるため
+  const posOf = useMemo(() => new Map(visible.map((r, i) => [r.id, i])), [visible]);
+  const domRows = useMemo(() => (tempOrder ? shown.filter((r) => posOf.has(r.id)) : visible), [tempOrder, shown, posOf, visible]);
+  // 順次フェードインは一覧を表示し直した直後だけ。そのあとの並び替えや再描画では再生しない
+  const [fadeOn, setFadeOn] = useState(true);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 一覧を作り直したとき（key が変わったとき）だけ再生する
+    setFadeOn(true);
+    const t = window.setTimeout(() => setFadeOn(false), 1100);
+    return () => window.clearTimeout(t);
+  }, [animKey]);
   const activeFilters = [filters.rarity, filters.product, filters.qty !== "all", filters.priced !== "all", filters.image !== "all"].filter(Boolean).length;
 
   // 続きを読み込む（一覧の末尾が見えたら60件ずつ増やす）
@@ -324,8 +336,8 @@ export function CollectionView() {
         </ul>
       ) : prefs.view === "grid" ? (
         <ul key={animKey} className={cn("grid gap-2", COLS_CLASS[prefs.cols])} data-testid="card-grid" data-cols={prefs.cols} data-drag-persist={persistDrag ? "1" : "0"}>
-          {visible.map((r, i) => (
-            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_9rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-tile">
+          {domRows.map((r, i) => (
+            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_9rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && fadeOn && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24), order: posOf.get(r.id) }} data-testid="card-tile">
               <ShineButton rarity={r.rarity} enabled={prefs.fx} onClick={() => setOpenId(r.id)} aria-label={`${r.name} ${r.rarity}の詳細を開く`} className="relative block w-full overflow-hidden rounded-lg">
                 <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="aspect-[5/7] w-full" />
               </ShineButton>
@@ -343,9 +355,9 @@ export function CollectionView() {
           ))}
         </ul>
       ) : (
-        <ul key={animKey} className="space-y-1.5" data-testid="card-list">
-          {visible.map((r, i) => (
-            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24) }} data-testid="card-row">
+        <ul key={animKey} className="flex flex-col gap-1.5" data-testid="card-list">
+          {domRows.map((r, i) => (
+            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && fadeOn && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24), order: posOf.get(r.id) }} data-testid="card-row">
               <button type="button" onClick={() => setOpenId(r.id)} className="flex w-full items-center gap-2.5 rounded-xl border bg-card p-2 pr-10 text-left active:bg-muted/60">
                 <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="h-14 w-10" />
                 <span className="min-w-0 flex-1">
