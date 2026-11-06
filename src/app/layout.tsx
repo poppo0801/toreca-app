@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     apple: { url: "/icons/v2/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
   },
   // 起動画面: iOS がホーム画面アプリを起動してから最初のHTMLが届くまで（サーバーの起動待ちを含む）、黒い画面ではなくロゴの画面を出す
-  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "black-translucent", startupImage: startupImages() },
+  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "default", startupImage: startupImages() },
 };
 
 export const viewport: Viewport = {

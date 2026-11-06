@@ -148,9 +148,6 @@
  *     二重に余白を取らない。表示領域が正常な端末では 100lvh-100dvh=0 で、従来どおりの余白になる
  */
 @media (display-mode: standalone) {
-  html {
-    background: var(--header);
-  }
   .app-nav {
     padding-bottom: max(0.25rem, calc(env(safe-area-inset-bottom) - 0.5rem - (100lvh - 100dvh)));
   }
