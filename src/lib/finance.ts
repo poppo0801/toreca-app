@@ -1,4 +1,5 @@
 import { jstDateString } from "@/lib/datetime";
+import { categoryOf, isCardPurchase } from "@/lib/expense-category";
 import type { AppData, FlexibleDate, ItemUnit, Product, PurchaseUnit, Purchase, Sale } from "@/types/domain";
 
 /**
@@ -19,6 +20,8 @@ export interface LedgerEntry {
   /** 金額。未入力の支出は null */
   amount: number | null;
   sellerProfileId?: string;
+  /** 支出の品目区分（収入は未設定） */
+  category?: string;
 }
 
 export function flexToJstDate(v: FlexibleDate): string | null {
@@ -60,6 +63,8 @@ export function purchaseTitle(data: AppData, p: Purchase): string {
   if (!first) return "購入";
   const name = productName(data, first.productId, first.productLabel);
   const more = p.items.length > 1 ? ` ほか${p.items.length - 1}件` : "";
+  // 経費は数量・単位を出さない（金額中心）
+  if (!categoryOf(p.category).quantity) return `${name}${more}`;
   return `${name} ${first.quantity}${UNIT_LABEL[first.unit]}${more}`;
 }
 
@@ -69,14 +74,16 @@ export function purchaseStoreName(data: AppData, p: Purchase): string {
   return p.storeLabel ?? "店舗未設定";
 }
 
-export function ledgerEntries(data: AppData, ym: string, filter: LedgerFilter, sellerId: string | "all" = "all"): LedgerEntry[] {
+export function ledgerEntries(data: AppData, ym: string, filter: LedgerFilter, sellerId: string | "all" = "all", category: string | "all" = "all"): LedgerEntry[] {
   const out: LedgerEntry[] = [];
   if (filter !== "income") {
     for (const p of data.purchases) {
       const date = flexToJstDate(p.purchasedOn);
       if (!date || ymOf(date) !== ym) continue;
+      if (category !== "all" && (p.category ?? "pokemon_card") !== category) continue;
       const { total, unknown } = purchaseTotal(p);
       out.push({
+        category: p.category ?? "pokemon_card",
         kind: "expense",
         id: p.id,
         date,
@@ -86,7 +93,8 @@ export function ledgerEntries(data: AppData, ym: string, filter: LedgerFilter, s
       });
     }
   }
-  if (filter !== "expense") {
+  // 品目で絞るときは支出だけ（収入には品目がない）
+  if (filter !== "expense" && category === "all") {
     for (const s of data.sales) {
       if (ymOf(s.soldOn) !== ym) continue;
       if (sellerId !== "all" && s.sellerProfileId !== sellerId) continue;
@@ -110,20 +118,26 @@ export interface MonthSummary {
   net: number;
   /** 金額が未入力の購入明細の数（支出に含まれない） */
   expenseUnknown: number;
+  /** 品目別の支出（合計 expense と一致する） */
+  byCategory: { category: string; label: string; amount: number }[];
 }
 
 export function monthSummary(data: AppData, ym: string): MonthSummary {
   let expense = 0;
   let expenseUnknown = 0;
+  const cats = new Map<string, number>();
   for (const p of data.purchases) {
     const date = flexToJstDate(p.purchasedOn);
     if (!date || ymOf(date) !== ym) continue;
     const t = purchaseTotal(p);
     expense += t.total;
     expenseUnknown += t.unknown;
+    const c = p.category ?? "pokemon_card";
+    cats.set(c, (cats.get(c) ?? 0) + t.total);
   }
+  const byCategory = [...cats.entries()].map(([category, amount]) => ({ category, label: categoryOf(category).label, amount }));
   const income = data.sales.filter((s) => ymOf(s.soldOn) === ym).reduce((sum, s) => sum + s.amount, 0);
-  return { expense, income, net: income - expense, expenseUnknown };
+  return { expense, income, net: income - expense, expenseUnknown, byCategory };
 }
 
 // ------------------------------------------------------------------ 金額の仮計算
@@ -164,6 +178,7 @@ export function remainingCostQty(data: AppData, purchaseItemId: string, excludeS
 export function costCandidates(data: AppData, excludeSaleId?: string): CostCandidate[] {
   const out: CostCandidate[] = [];
   for (const p of data.purchases) {
+    if (!isCardPurchase(p)) continue; // 売却の原価に使えるのはカードの購入だけ
     for (const i of p.items) {
       if (!i.id) continue;
       const remaining = remainingCostQty(data, i.id, excludeSaleId);
@@ -272,6 +287,7 @@ export function productPurchaseStats(data: AppData, year: number): ProductPurcha
   for (const p of data.purchases) {
     const date = flexToJstDate(p.purchasedOn);
     if (!date || !date.startsWith(`${year}-`)) continue;
+    if (!isCardPurchase(p)) continue;
     for (const it of p.items) {
       if (!it.productId) continue;
       const r = row(it.productId);

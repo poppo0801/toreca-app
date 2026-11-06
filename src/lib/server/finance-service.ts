@@ -1,4 +1,5 @@
 import { expenseSchema, saleSchema, type ExpenseInput, type SaleInput } from "@/lib/finance-input";
+import { categoryOf } from "@/lib/expense-category";
 import { normName } from "@/lib/norm";
 import { mapDbError, type Db, type ServiceResult } from "@/lib/server/lottery-service";
 import { z } from "zod";
@@ -48,8 +49,10 @@ export async function saveExpense(
   const v = parsed.data;
   if (id !== null && !uuid.safeParse(id).success) return fail("リクエストが不正です");
 
+  const cat = categoryOf(v.category);
   const storeId = await matchStore(db, v.store);
   const header = {
+    category: cat.id,
     store_id: storeId,
     store_label: storeId ? null : v.store.name || null,
     purchased_date: v.date,
@@ -76,12 +79,13 @@ export async function saveExpense(
 
   const keep: string[] = [];
   for (const item of v.items) {
-    const productId = await matchProduct(db, item.product);
+    // 商品マスターと連携するのはポケモンカードだけ。周辺グッズ・経費は自由入力のまま（マスターには紐づけない）
+    const productId = cat.master ? await matchProduct(db, item.product) : null;
     const row = {
       product_id: productId,
       product_label: productId ? null : item.product.name,
-      quantity: item.quantity,
-      unit: item.unit,
+      quantity: cat.quantity ? item.quantity : 1,
+      unit: cat.quantity ? item.unit : "piece",
       amount_paid: item.amountPaid,
       updated_by_profile_id: actor,
     };

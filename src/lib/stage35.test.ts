@@ -216,7 +216,7 @@ describe("収支: 月次集計と金額の仮計算", () => {
       ],
       [sale("s1", "2026-10-15", 8000, "pA"), sale("s2", "2026-11-01", 1000, "pA")],
     );
-    expect(monthSummary(d, "2026-10")).toEqual({ expense: 5400, income: 8000, net: 2600, expenseUnknown: 1 });
+    expect(monthSummary(d, "2026-10")).toMatchObject({ expense: 5400, income: 8000, net: 2600, expenseUnknown: 1 });
     expect(monthSummary(d, "2026-09").expense).toBe(9999);
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");

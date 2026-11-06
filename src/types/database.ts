@@ -4214,6 +4214,7 @@ export type Database = {
       }
       purchases: {
         Row: {
+          category: string
           application_id: string | null
           archived_at: string | null
           buyer_profile_id: string | null
@@ -4232,6 +4233,7 @@ export type Database = {
           updated_by_profile_id: string | null
         }
         Insert: {
+          category?: string
           application_id?: string | null
           archived_at?: string | null
           buyer_profile_id?: string | null
@@ -4250,6 +4252,7 @@ export type Database = {
           updated_by_profile_id?: string | null
         }
         Update: {
+          category?: string
           application_id?: string | null
           archived_at?: string | null
           buyer_profile_id?: string | null

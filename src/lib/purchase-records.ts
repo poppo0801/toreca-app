@@ -1,3 +1,4 @@
+import { isCardPurchase } from "@/lib/expense-category";
 import { flexToJstDate, productName, purchaseTotal, UNIT_LABEL } from "@/lib/finance";
 import type { AppData, Purchase, PurchaseItem, PurchaseUnit } from "@/types/domain";
 
@@ -32,8 +33,10 @@ export function inPeriod(date: string | null, p: Period): boolean {
 
 /** 条件に合う購入。商品で絞るときは、その商品を含む購入だけを対象にする */
 export function filterPurchases(data: AppData, f: PurchaseFilter): Purchase[] {
+  // 購入実績はポケモンカードの購入だけ（周辺グッズ・経費は収支にだけ計上し、BOX数・枚数には含めない）
   return data.purchases
     .filter((p) => {
+      if (!isCardPurchase(p)) return false;
       if (!inPeriod(flexToJstDate(p.purchasedOn), f.period)) return false;
       if (f.storeId && p.storeId !== f.storeId) return false;
       if (f.productId && !p.items.some((i) => i.productId === f.productId)) return false;

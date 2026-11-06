@@ -1,4 +1,5 @@
 import { jstDateString } from "@/lib/datetime";
+import { isCardPurchase } from "@/lib/expense-category";
 import type { RequirementTag } from "@/lib/lottery-taxonomy";
 import type { AppData, FlexibleDate, Lottery } from "@/types/domain";
 
@@ -124,7 +125,8 @@ export interface PurchaseFact {
 const flexDate = (d: FlexibleDate): string | null => (d.precision === "date_only" ? d.date : d.precision === "date_time" ? jstDateString(new Date(d.at)) : null);
 
 export function purchaseFacts(data: AppData): PurchaseFact[] {
-  return data.purchases.map((p) => {
+  // 購入条件（過去の購入実績）の対象はポケモンカードの購入だけ。周辺グッズ・経費は含めない
+  return data.purchases.filter(isCardPurchase).map((p) => {
     const app = p.applicationId ? data.applications.find((a) => a.id === p.applicationId) : undefined;
     const lottery = app ? data.lotteries.find((l) => l.id === app.lotteryId) : undefined;
     const store = p.storeId ? data.stores.find((s) => s.id === p.storeId) : undefined;

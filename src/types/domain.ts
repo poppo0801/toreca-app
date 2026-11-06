@@ -330,6 +330,8 @@ export interface Purchase {
   source: "lottery" | "manual" | "import";
   /** 抽選外の購入を記録したプロフィール（資格判定の購入者。抽選からの購入は応募アカウントのプロフィール） */
   buyerProfileId?: string | null;
+  /** 品目区分（pokemon_card / goods / expense …。未設定はポケモンカード。Stage 6K） */
+  category?: string;
   items: PurchaseItem[];
   note: string;
 }

@@ -11,6 +11,7 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { SaleDialog } from "@/components/sale-dialog";
 import { Button } from "@/components/ui/button";
 import { jstDateString } from "@/lib/datetime";
+import { categoryOf, EXPENSE_CATEGORIES } from "@/lib/expense-category";
 import { ledgerEntries, monthSummary, shiftMonth, type LedgerFilter } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 
@@ -72,12 +73,13 @@ export function FinanceView() {
   const [ym, setYm] = useState(() => jstDateString(new Date()).slice(0, 7));
   const [filter, setFilter] = useState<LedgerFilter>("all");
   const [seller, setSeller] = useState<string>("all");
+  const [category, setCategory] = useState<string>("all");
   const [expense, setExpense] = useState<{ id: string | null } | null>(null);
   const [sale, setSale] = useState<{ id: string | null } | null>(null);
   const [picking, setPicking] = useState(false);
 
   const summary = useMemo(() => monthSummary(data, ym), [data, ym]);
-  const entries = useMemo(() => ledgerEntries(data, ym, filter, filter === "income" ? seller : "all"), [data, ym, filter, seller]);
+  const entries = useMemo(() => ledgerEntries(data, ym, filter, filter === "income" ? seller : "all", filter === "income" ? "all" : category), [data, ym, filter, seller, category]);
   const groups = useMemo(() => {
     const m = new Map<string, typeof entries>();
     for (const e of entries) m.set(e.date ?? "", [...(m.get(e.date ?? "") ?? []), e]);
@@ -154,6 +156,21 @@ export function FinanceView() {
         ))}
       </div>
 
+      {filter !== "income" && (
+        <div className="flex gap-1.5 overflow-x-auto" role="group" aria-label="品目で絞り込み" data-testid="category-filter">
+          {[{ id: "all", label: "全品目" }, ...EXPENSE_CATEGORIES.map((c) => ({ id: c.id, label: c.label }))].map((o) => (
+            <button key={o.id} type="button" aria-pressed={category === o.id} onClick={() => setCategory(o.id)} data-testid={`cat-${o.id}`} className={cn("h-9 shrink-0 rounded-full border px-3 text-xs", category === o.id ? "border-primary bg-primary text-primary-foreground" : "bg-input")}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {summary.byCategory.length > 1 && filter !== "income" && (
+        <p className="text-[11px] text-muted-foreground" data-testid="sum-by-category">
+          支出の内訳: {summary.byCategory.map((c) => `${c.label} ${yen(c.amount)}`).join(" ／ ")}
+        </p>
+      )}
+
       {filter === "income" && (
         <div className="flex gap-1.5 overflow-x-auto" role="group" aria-label="売却名義人で絞り込み">
           {[{ id: "all", label: "全員" }, ...data.profiles.filter((p) => p.active !== false).map((p) => ({ id: p.id, label: p.label }))].map((o) => (
@@ -191,6 +208,7 @@ export function FinanceView() {
                         <span className="block truncate text-sm">{e.title}</span>
                         <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
                           {seller && <ProfileAvatar profile={seller} size="xs" />}
+                          {e.kind === "expense" && e.category && e.category !== "pokemon_card" && <span className="shrink-0 rounded-full border px-1.5 text-[10px] text-foreground" data-testid="row-category">{categoryOf(e.category).label}</span>}
                           {e.sub}
                         </span>
                       </span>

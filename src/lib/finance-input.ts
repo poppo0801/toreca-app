@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_EXPENSE_CATEGORY, EXPENSE_CATEGORY_IDS } from "@/lib/expense-category";
 
 /** 収支入力の定義（クライアントの事前検証とサーバー検証で共用）。不明は null/空で保存し、推測で埋めない。 */
 
@@ -20,6 +21,8 @@ export const expenseItemSchema = z.object({
 });
 
 export const expenseSchema = z.object({
+  /** 品目区分。未指定は従来どおりポケモンカード */
+  category: z.enum(EXPENSE_CATEGORY_IDS).default(DEFAULT_EXPENSE_CATEGORY),
   date: dateStr,
   store: ref,
   channel: z.enum(["store", "shipping", "online", "other"]),

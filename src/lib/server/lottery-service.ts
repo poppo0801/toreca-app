@@ -440,6 +440,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       channel: p.channel as "store" | "shipping" | "online" | "other",
       source: p.source_kind as "lottery" | "manual" | "import",
       buyerProfileId: p.buyer_profile_id,
+      category: (p as { category?: string }).category ?? "pokemon_card",
       note: p.note,
       items: pitems
         .filter((i) => i.purchase_id === p.id)
@@ -923,7 +924,7 @@ async function setItemResultsCore(
 
 
 /**
- * 応募済み・当選にした抽選は、★管理対象にする（Stage 5Y）。既に★なら何もしない（冪等・上書きしない）。
+ * 応募済み・当選にした抽選は、要チェックにする（Stage 5Y）。既に★なら何もしない（冪等・上書きしない）。
  * 応募の取消・落選・購入済み・受取済みでも★は自動では外さない（利用者が手動で外す）。★は抽選の設定で、プロフィール別の応募・当落とは独立。
  * ★の付与に失敗しても、応募・当落の記録は成功のまま（★は後から手動で付けられる）。
  */
