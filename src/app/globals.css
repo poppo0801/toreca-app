@@ -127,6 +127,56 @@
   padding-right: env(safe-area-inset-right);
 }
 
+/*
+ * アプリ全体の入れ物。通常は表示領域いっぱい（inset: 0）。
+ * iOS のホーム画面アプリは起動直後、レイアウト上の表示領域(innerHeight / dvh)が実際の画面よりSafe Area(上)の分だけ低い
+ * （実機診断: innerHeight=793 / 100vh=852）。inset:0 のままだと入れ物が793pxで止まり、下部メニューの下に約59pxの空白が出る（Stage 6J の不具合）。
+ * standalone のときだけ、画面の大きい方の高さ(lvh/vh)に固定する。測定や補正は使わず、表示領域が後で直っても同じ値になる。
+ */
+.app-root {
+  position: fixed;
+  inset: 0;
+}
+@media (display-mode: standalone) {
+  .app-root {
+    bottom: auto;
+    height: 100vh;
+  }
+  @supports (height: 100lvh) {
+    .app-root {
+      height: 100lvh;
+    }
+  }
+}
+
+/*
+ * 日付・日時の入力（iOS）。iOS の日付入力は appearance を外した固定高さの欄で、内側の値の表示部(::-webkit-date-and-time-value)が上寄せになり、
+ * 文字が欄の上へずれる。欄を flex にして内側を縦中央にそろえる（全フォーム共通。個別の高さ指定は各欄のクラス）。
+ */
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="time"] {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  line-height: normal;
+}
+input[type="date"]::-webkit-date-and-time-value,
+input[type="datetime-local"]::-webkit-date-and-time-value,
+input[type="month"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value {
+  min-height: 1.5em;
+  margin: 0;
+  text-align: left;
+  line-height: 1.5;
+}
+input[type="date"]::-webkit-datetime-edit,
+input[type="datetime-local"]::-webkit-datetime-edit {
+  padding: 0;
+  line-height: 1.5;
+}
+
 @layer base {
   /* 最初の描画前・オーバースクロール時にも、テーマの背景色になる（黒い画面を残さない） */
   html {
@@ -198,7 +248,7 @@
   }
 }
 .card-fade {
-  animation: card-fade 0.26s ease-out both;
+  animation: card-fade 0.26s ease-out backwards;
   animation-delay: calc(var(--i, 0) * 22ms);
 }
 
@@ -253,12 +303,14 @@
   transition: opacity 0.2s ease-out;
 }
 /* 触れている間だけ光る（ホバー・押下・なぞっている間） */
-.card-shine:hover::before,
 .card-shine:active::before,
 .card-shine[data-touch="1"]::before { opacity: var(--shine-holo); }
-.card-shine:hover::after,
 .card-shine:active::after,
 .card-shine[data-touch="1"]::after { opacity: 1; }
+@media (hover: hover) {
+  .card-shine:hover::before { opacity: var(--shine-holo); }
+  .card-shine:hover::after { opacity: 1; }
+}
 /* 一度だけ見せる（詳細を開いたとき）: 細い筋が1回走る */
 .card-shine-once::after {
   opacity: 1;
@@ -270,8 +322,8 @@
   animation: card-shine-sweep 1.2s ease-out 0.25s both;
 }
 /* 上位ティア: 数秒おきに細い光が1回走る（静止している間の大半は何も乗らない）。間隔はレアリティで変える（SAR/URほど短い）。画面外のカードは止める */
-.card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
-.card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after {
+.card-shine[data-tier="2"]:not([data-touch="1"])::after,
+.card-shine[data-tier="3"]:not([data-touch="1"])::after {
   opacity: 1;
   background: linear-gradient(115deg, transparent 40%, rgb(255 255 255 / calc(var(--shine-glint) * 0.7)) 47%, rgb(255 225 160 / calc(var(--shine-glint) * 0.5)) 52%, transparent 58%);
   background-size: 250% 100%;
@@ -279,6 +331,18 @@
   -webkit-mask-image: none;
   mask-image: none;
   animation: card-shine-sweep var(--shine-cycle, 3.6s) ease-in-out 1s infinite;
+}
+/* ホバーできる端末では、マウスを載せている間は定期的な光を止めてポインタ追従に切り替える（タッチ端末は :hover が残るので対象外） */
+@media (hover: hover) {
+  .card-shine[data-tier="2"]:hover::after,
+  .card-shine[data-tier="3"]:hover::after {
+    animation: none;
+    background: none;
+    -webkit-mask-image: radial-gradient(ellipse calc(var(--shine-rx) * 1.5) calc(var(--shine-ry) * 1.8) at var(--mx) var(--my), #000 0%, transparent 100%);
+    mask-image: radial-gradient(ellipse calc(var(--shine-rx) * 1.5) calc(var(--shine-ry) * 1.8) at var(--mx) var(--my), #000 0%, transparent 100%);
+    background-image: radial-gradient(ellipse at var(--mx) var(--my), rgb(255 255 255 / var(--shine-glint)), transparent 70%);
+    background-size: auto;
+  }
 }
 .card-shine[data-tier="2"] { --shine-cycle: 3.8s; }
 .card-shine[data-tier="3"] { --shine-cycle: 3s; }
@@ -292,14 +356,14 @@
   .card-shine::before,
   .card-shine::after,
   .card-shine-once::after,
-  .card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
-  .card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after {
+  .card-shine[data-tier="2"]:not([data-touch="1"])::after,
+  .card-shine[data-tier="3"]:not([data-touch="1"])::after {
     animation: none !important;
     transition: none;
   }
   .card-shine-once::after,
-  .card-shine[data-tier="2"]:not([data-touch="1"]):not(:hover)::after,
-  .card-shine[data-tier="3"]:not([data-touch="1"]):not(:hover)::after { opacity: 0; }
+  .card-shine[data-tier="2"]:not([data-touch="1"])::after,
+  .card-shine[data-tier="3"]:not([data-touch="1"])::after { opacity: 0; }
 }
 
 /* Undo通知の進捗バー: 残り時間に合わせて左から右へ伸びる（動きを減らす設定でも、バーは静止せず時間経過を示す） */

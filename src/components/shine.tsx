@@ -37,7 +37,10 @@ export function useShine(rarity: string, enabled: boolean, opts: { once?: boolea
       el.dataset.touch = "1";
     });
   };
+  // 触れ終わったら、保留中の位置更新も取り消して「触れている」状態を確実に外す（詳細を開く・閉じるで状態が残ると、定期的な光が止まったままになる）
   const leave = (e: PointerEvent<HTMLElement>) => {
+    if (raf.current) cancelAnimationFrame(raf.current);
+    raf.current = 0;
     delete e.currentTarget.dataset.touch;
   };
   return {

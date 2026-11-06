@@ -41,8 +41,12 @@ export async function signIn(_prev: LoginState, formData: FormData): Promise<Log
   redirect(safeNext(formData.get("next")));
 }
 
+/**
+ * ログアウトは操作した端末だけ。supabase.auth.signOut() の既定は scope:"global"（そのユーザーの全端末のセッションを失効）で、
+ * 夫婦で同じアカウントを使うと片方のログアウトでもう片方が再ログインを求められていた（Stage 6K）。
+ */
 export async function signOut() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" });
   redirect("/login");
 }

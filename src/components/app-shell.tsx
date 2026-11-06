@@ -107,7 +107,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     // 画面全体を固定の入れ物にして（上下左右を表示領域に固定）、中のスクロール領域だけを動かす。下部メニューは固定配置ではなく入れ物の最下段なので、
     // 表示領域の測定・補正に頼らず、常に表示領域の下端に接する（docs/stage6j-viewport.md）
-    <div className="fixed inset-0 flex flex-col md:flex-row" data-testid="app-root">
+    <div className="app-root flex flex-col md:flex-row" data-testid="app-root">
       {/* PC: 左ナビ（利用できるすべての機能。ユーザー切替・通知・設定はヘッダー） */}
       <aside className="hidden w-52 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-header p-4 md:flex">
         <BrandLogo className="px-1 pt-1" />
