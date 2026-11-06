@@ -233,3 +233,21 @@ describe("Stage 6K: ログアウトは操作した端末だけ", () => {
     vi.doUnmock("next/navigation");
   });
 });
+
+describe("Stage 6L: 応募済みにしても、他のユーザーの要チェックからは消えない", () => {
+  it("要チェックは世帯共通の印。応募したユーザーの一覧だけ（未応募の既定）から外れ、他のユーザーには残る。印そのものは変わらない", () => {
+    const data = createMockData(NOW);
+    const f = defaultFiltersFor("managed");
+    const idsFor = (p: string) => selectLotteries(data, "managed", f, NOW, p).map((l) => l.id);
+    const target = idsFor("pA").find((id) => idsFor("pB").includes(id));
+    expect(target).toBeTruthy();
+    const base = data.applications[0];
+    const after: AppData = { ...data, applications: [...data.applications, { ...base, id: "t-6l", lotteryId: target!, accountId: "a-c1", state: "applied", result: "pending" }] };
+    const idsAfter = (p: string) => selectLotteries(after, "managed", f, NOW, p).map((l) => l.id);
+    expect(idsAfter("pA")).not.toContain(target); // 応募した本人の「未応募」の一覧からは外れる
+    expect(idsAfter("pB")).toContain(target); // 他のユーザーの要チェックには残る
+    expect(after.management.find((m) => m.lotteryId === target)?.isManaged).toBe(true); // 要チェックの印は変わらない
+    // 状態の絞り込みを「すべて」にすれば、応募したユーザーの要チェックにも残る
+    expect(selectLotteries(after, "managed", { ...f, status: "any" }, NOW, "pA").map((l) => l.id)).toContain(target);
+  });
+});

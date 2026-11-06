@@ -29,7 +29,7 @@
   --p-purple: #7e22ce;
   --p-pink: #be185d;
   --p-teal: #0f766e;
-  /* 固定ヘッダーの高さ（上部の線2px+本体2.5rem+下線1px+Safe Area）。その下に固定する要素の位置に使う */
+  /* 固定ヘッダーの高さ（本体2.5rem+下のオレンジの線3px+Safe Area）。その下に固定する要素の位置に使う */
   --header-h: calc(2.5rem + 3px + env(safe-area-inset-top));
 }
 

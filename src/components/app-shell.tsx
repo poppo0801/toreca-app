@@ -118,7 +118,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザー・設定（歯車）。ステータスバー/Dynamic Island分は Safe Area で確保 */}
-        <header className="relative z-30 shrink-0 border-b border-t-2 border-t-primary bg-header pt-safe px-safe shadow-card">
+        <header className="relative z-30 shrink-0 border-b-[3px] border-b-primary bg-header pt-safe px-safe shadow-card">
           <div className="flex h-10 items-center justify-between px-3">
             <BrandLogo className="md:hidden" />
             <span className="hidden md:block" />
