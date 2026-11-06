@@ -76,6 +76,11 @@ function take(label: string): Snap {
     const top = y > 0 ? document.elementFromPoint(r.left + r.width / 2, y) : null;
     if (top && !nav.contains(top)) navCoveredBy = `${top.tagName.toLowerCase()}${top.getAttribute("data-testid") ? `[${top.getAttribute("data-testid")}]` : ""}`;
   }
+  const rootEl = document.querySelector<HTMLElement>('[data-testid="app-root"]');
+  const rr = rootEl?.getBoundingClientRect();
+  const rootInfo = rootEl && rr ? { top: rr.top, bottom: rr.bottom, cssHeight: getComputedStyle(rootEl).height } : null;
+  const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 1);
+  const bottomHit = hit ? `${hit.tagName.toLowerCase()}${hit.getAttribute("data-testid") ? `[${hit.getAttribute("data-testid")}]` : ""}` : null;
   const sheetEl = document.querySelector<HTMLElement>('[role="dialog"][data-state="open"]');
   const vbottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
   const sheetGap = sheetEl ? Math.round((vbottom - sheetEl.getBoundingClientRect().bottom) * 10) / 10 : null;
@@ -97,6 +102,8 @@ function take(label: string): Snap {
     vpGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--vp-gap")) || 0,
     standalone: window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
     nav: navInfo,
+    root: rootInfo,
+    bottomHit,
     gridBottom: grid ? grid.getBoundingClientRect().bottom : null,
     fixedBreakers: breakers,
     kbInset: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--kb-inset")) || 0,

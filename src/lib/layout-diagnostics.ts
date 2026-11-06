@@ -30,6 +30,10 @@ export interface Snap {
   /** 補正値 --vp-gap(px)。0 は補正なし */
   vpGap: number;
   nav: null | { top: number; bottom: number; height: number; padBottom: number; cssBottom: string; cssHeight: string; cssPaddingBottom: string; position: string };
+  /** アプリ全体の入れ物(app-root)の上端・下端・CSS上の高さ。下端が innerH より大きければ入れ物が表示領域からはみ出している */
+  root?: null | { top: number; bottom: number; cssHeight: string };
+  /** html の背景色の下に見える範囲の確認用: 画面の最下端の点(innerH-1)にある要素 */
+  bottomHit?: string | null;
   /** 内側(grid)の下端。nav.bottom との差が padBottom と合うか見る */
   gridBottom: number | null;
   /** fixed の基準を変える祖先（transform / filter / will-change / contain / perspective を持つもの） */
@@ -91,6 +95,7 @@ export function formatSnap(s: Snap): string {
       `  gridBottom=${f(s.gridBottom)} gapBottom=${f(g)} → ${VERDICT_TEXT[verdict(s)]}`,
     );
   } else lines.push("  nav なし");
+  if (s.root) lines.push(`  root top=${f(s.root.top)} bottom=${f(s.root.bottom)} cssH=${s.root.cssHeight} (bottom-innerH=${f(s.root.bottom - s.innerH)}) bottomHit=${s.bottomHit ?? "-"}`);
   if (s.kbInset || s.navCoveredBy || s.sheetGap !== undefined && s.sheetGap !== null) lines.push(`  kbInset=${s.kbInset ?? 0} navCoveredBy=${s.navCoveredBy ?? "-"} sheetGap=${s.sheetGap ?? "-"}`);
   if (s.fixedBreakers.length > 0) lines.push(`  fixed基準を変える祖先: ${s.fixedBreakers.join(" | ")}`);
   return lines.join("\n");

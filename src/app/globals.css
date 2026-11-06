@@ -137,17 +137,7 @@
   position: fixed;
   inset: 0;
 }
-@media (display-mode: standalone) {
-  .app-root {
-    bottom: auto;
-    height: 100vh;
-  }
-  @supports (height: 100lvh) {
-    .app-root {
-      height: 100lvh;
-    }
-  }
-}
+/* Stage 6L: 6K の standalone 用 lvh 固定は実機で「メニューの下半分が隠れる」結果になったため外した（推測での補正）。実機の診断値で再設計する。 */
 
 /*
  * 日付・日時の入力（iOS）。iOS の日付入力は appearance を外した固定高さの欄で、内側の値の表示部(::-webkit-date-and-time-value)が上寄せになり、
