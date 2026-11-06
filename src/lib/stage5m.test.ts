@@ -93,10 +93,12 @@ describe("状態の絞り込み（全情報・★管理対象の既定は受付�
     expect(ids(applied, "managed", {}, "pB")).toContain("L4"); // Bは未応募
   });
   it("受付終了の抽選は既定で除外され、「受付終了」「すべて」で表示される。全情報も同じ", () => {
-    const d = managed(createMockData(NOW));
-    const closed = d.lotteries.filter((l) => effectiveEventState(l, NOW) === "closed").map((l) => l.id);
+    const base = createMockData(NOW);
+    const closed = base.lotteries.filter((l) => effectiveEventState(l, NOW) === "closed").map((l) => l.id);
     expect(closed.length).toBeGreaterThan(0);
     for (const tab of ["managed", "all"] as const) {
+      // 同じ抽選は1つのタブにだけ出るので、要チェックは全件を★に、全情報は★なし・応募なしにして確かめる
+      const d: AppData = tab === "managed" ? { ...managed(base), applications: [] } : { ...base, management: [], applications: [] };
       for (const id of closed) expect(ids(d, tab, {})).not.toContain(id);
       for (const id of closed) expect(ids(d, tab, { status: "closed" })).toContain(id);
       for (const id of closed) expect(ids(d, tab, { status: "any" })).toContain(id);
@@ -105,7 +107,7 @@ describe("状態の絞り込み（全情報・★管理対象の既定は受付�
   it("「応募済み」「当選」「落選」は現在のプロフィールの応募で判定する", () => {
     const d = managed(createMockData(NOW));
     const applied = m.setApplied(d, "pA", "L4", "a-c3", true, NOW);
-    expect(ids(applied, "managed", { status: "applied" }, "pA")).toContain("L4");
+    expect(ids(applied, "applied", { status: "applied" }, "pA")).toContain("L4"); // 応募した本人は応募済みタブ
     expect(ids(applied, "managed", { status: "applied" }, "pB")).not.toContain("L4");
     expect(ids(applied, "managed", { status: "unapplied" }, "pB")).toContain("L4");
     expect(ids(applied, "managed", { status: "won" }, "pA")).not.toContain("L4");
@@ -115,14 +117,16 @@ describe("状態の絞り込み（全情報・★管理対象の既定は受付�
     const d = createMockData(NOW);
     const none: AppData = { ...d, management: [] };
     expect(ids(none, "managed", { status: "any" })).toEqual([]);
-    expect(ids(none, "all", { status: "any", skip: "include" }).length).toBe(d.lotteries.length);
+    // 4つのタブは重複せず、合わせると全抽選になる（同じ抽選は1つのタブにだけ出る）
+    const sum = (["won", "applied", "managed", "all"] as const).reduce((n, t) => n + ids(none, t, { status: "any", skip: "include" }).length, 0);
+    expect(sum).toBe(d.lotteries.length);
   });
   it("応募済み・当選タブでは既定のままでも状態で絞らない。他の条件（系列）とも組み合わせられる", () => {
     const applied = m.setApplied(managed(createMockData(NOW)), "pA", "L4", "a-c3", true, NOW);
     expect(ids(applied, "applied", {})).toContain("L4");
     const chainOfL4 = applied.lotteries.find((l) => l.id === "L4")!.chainId;
-    expect(ids(applied, "managed", { status: "any", chainId: chainOfL4 })).toContain("L4");
-    expect(ids(applied, "managed", { status: "any", chainId: "no-such-chain" })).toEqual([]);
+    expect(ids(applied, "applied", { status: "any", chainId: chainOfL4 })).toContain("L4");
+    expect(ids(applied, "applied", { status: "any", chainId: "no-such-chain" })).toEqual([]);
   });
   it("退場アニメーション中のカードは一覧に残り、解除すると未応募で表示される", () => {
     const applied = m.setApplied(managed(createMockData(NOW)), "pA", "L4", "a-c3", true, NOW);

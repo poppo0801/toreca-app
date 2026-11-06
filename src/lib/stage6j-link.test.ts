@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { selectAcrossTabs } from "@/lib/test-all-tabs";
 import { createMockData } from "@/data/mock";
 import { canOperateOwner, linkCandidates, linkedSubIds, ownerIdOf, scopedApplications, scopeProfileIds, validateLink } from "@/lib/profile-link";
 import { defaultFiltersFor, selectLotteries } from "@/lib/lottery-view";
@@ -86,7 +87,7 @@ describe("Stage 6J: メイン／サブの紐づけと表示範囲", () => {
       expect(selectLotteries(d, tab, defaultFiltersFor(tab), NOW, "pA").map((l) => l.id)).toEqual(selectLotteries(plain, tab, defaultFiltersFor(tab), NOW, "pA").map((l) => l.id));
     }
     // Cは系列c1のみ表示（c2以降は見えない）
-    const cAll = selectLotteries(d, "all", { ...defaultFiltersFor("all"), status: "any", skip: "include" }, NOW, "pC");
+    const cAll = selectAcrossTabs(d, { ...defaultFiltersFor("all"), status: "any", skip: "include" }, NOW, "pC");
     expect(cAll.length).toBeGreaterThan(0);
     expect(cAll.every((l) => l.chainId === "c1")).toBe(true);
     // Aの応募済みタブにも、Cが対象外の系列の抽選にCの応募があっても出ない（対象外の系列は元々応募できない）

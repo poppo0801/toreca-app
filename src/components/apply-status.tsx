@@ -103,19 +103,19 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
   const run = (applied: boolean, itemId?: string) =>
     runBusy(async () => {
       setError(null);
-      if (applied) exit?.hold(lottery.id);
+      const handle = applied ? exit?.begin(lottery.id) : undefined;
       let res: Awaited<ReturnType<typeof actions.setApplied>>;
       try {
         res = await actions.setApplied(lottery.id, control.accountId, applied, itemId);
       } catch (e) {
-        if (applied) exit?.release(lottery.id); // 通信エラーなどでカードを残したままにしない
+        handle?.fail(); // 通信エラーなどでカードを残したままにしない
         throw e;
       }
       if (res && !res.ok) {
         setError(res.error);
-        if (applied) exit?.release(lottery.id);
-      } else if (applied) exit?.onApplied(lottery.id, profile.id);
-      else exit?.onUnapplied(lottery.id);
+        handle?.fail();
+      } else if (applied) handle?.ok();
+      else exit?.cancel(lottery.id);
     });
 
   if (control.kind === "blocked") {

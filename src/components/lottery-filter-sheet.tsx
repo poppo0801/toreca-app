@@ -266,7 +266,6 @@ export function FilterSheet({
               onChange={(v) => set("allFilter", v as AllFilter)}
               options={[
                 { value: "any", label: "すべて" },
-                { value: "unmanaged", label: "要チェック外" },
                 { value: "skipped", label: "スルーのみ" },
               ]}
               testId="f-all"

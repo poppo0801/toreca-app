@@ -34,21 +34,21 @@ export const SWIPE_MAP: Record<Tab, { right?: SwipeOp; left?: SwipeOp }> = {
 };
 
 /**
- * 確定したあと、カードを一覧から外す可能性が高い操作（指を離した位置から同じ方向へ流れてフェードアウトする）。
- * 応募済みへの変更は専用の退場アニメーション（apply-exit）が担当し、★追加はカードが一覧に残るので、ここには含めない。
+ * 確定したあと、カードが今のタブから外れる操作（Stage 6L: 同じ抽選は1つのタブにだけ出るため、タブをまたぐ操作はほぼすべて）。
+ * 指を離した位置から同じ向きへ画面外まで滑り、下のカードが詰まる。実際に外れなかった場合は元の位置へ戻る（退出アニメーション側で判定）。
  */
-export function leavesListOnCommit(op: SwipeOp, tab: Tab): boolean {
+export function leavesTabOnCommit(op: SwipeOp, tab: Tab): boolean {
   switch (op) {
-    case "unmanage":
-    case "skip_once":
+    case "add_managed": // 全情報 → 要チェック
+    case "unmanage": // 要チェック → 全情報
+    case "skip_once": // 今回のみスルー
+    case "mark_applied": // 要チェック → 応募済み
       return true;
-    case "result_won":
-    case "result_lost":
+    case "result_won": // 応募済み → 当選
+    case "result_lost": // 応募済み → （結果待ちでなくなる）
       return tab === "applied";
     case "receive":
       return tab === "won";
-    default:
-      return false;
   }
 }
 

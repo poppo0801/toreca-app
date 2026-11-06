@@ -208,17 +208,30 @@ input[type="datetime-local"]::-webkit-datetime-edit {
   }
 }
 
-/* 応募済みにしたカードの退場: 右へ滑らかにスライドしながらフェードアウトし、幅の6割ほど動いた時点（時間の60%）で完全に透明になる */
-@keyframes apply-exit-slide {
+/* カードの退出（★・応募・スワイプ共通）: 横へ画面外までスライドする。フェードだけで消さず、終わりの手前でだけ薄くする */
+@keyframes apply-exit-slide-right {
   0% {
     transform: translateX(0);
     opacity: 1;
   }
-  60% {
-    opacity: 0;
+  75% {
+    opacity: 1;
   }
   100% {
-    transform: translateX(100%);
+    transform: translateX(110%);
+    opacity: 0;
+  }
+}
+@keyframes apply-exit-slide-left {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-110%);
     opacity: 0;
   }
 }

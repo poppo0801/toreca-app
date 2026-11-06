@@ -101,23 +101,46 @@ export function eventStateOf(lottery: Lottery, now: Date): Lottery["eventState"]
 }
 
 /**
- * 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。受付の終了・応募済みの除外は「状態」の絞り込みで行う。
- * 応募済み・当選は scope（現在のユーザー＋紐づくサブ）の応募だけで判定する。全情報・要チェックは世帯共通（scope に依存しない）。
+ * 抽選が属するタブ（優先順位: 当選 → 応募済み → 要チェック → 全情報）。同じ抽選は原則どれか1つのタブにだけ出る（Stage 6L）。
+ *  - 当選:     scope に当選記録がある
+ *  - 応募済み: scope に結果待ちの応募があり（通常の抽選）、当選タブの対象でない
+ *  - 要チェック: ★管理対象で、当選・応募済みの対象でない
+ *  - 全情報:   上の3つのどれでもない
+ * scope は現在のユーザー＋紐づくサブ（利用者が「全ユーザー」「ユーザー指定」に切り替えたときはそれ）。
+ * 他のユーザーの応募は scope に入らない限り、本人の全情報・要チェックの分類を変えない。★は世帯共通、応募・当選はユーザー別の記録。
+ * 継続抽選・招待制販売は「継続中の抽選」に分けて表示するため、応募済みタブには含めない（要チェック／全情報のまま、状態の絞り込みで未応募のものだけ出る）。
+ * 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。
  */
+export function tabOf(data: AppData, lottery: Lottery, scope?: ReadonlySet<string>): Tab {
+  if (hasWon(data, lottery.id, scope)) return "won";
+  if (hasPendingResult(data, lottery.id, scope) && kindOf(lottery) === "normal") return "applied";
+  return isManaged(data, lottery.id) ? "managed" : "all";
+}
+
+/**
+ * 自動テスト専用: ブラウザの window.__tcgFlatTabs が true のとき、旧仕様（タブが重なる）で判定する。
+ * 抽選カードの表示（レイアウト・日付・アイコンなど）を確かめる既存のE2Eが、同じ抽選を全タブから開けるようにするためで、本番では設定されない。
+ * タブの分類そのものは、このフラグを使わないテスト（e2e/stage6l.spec.ts・単体テスト）で確認する。
+ */
+function flatTabsForTest(): boolean {
+  return typeof window !== "undefined" && (window as unknown as { __tcgFlatTabs?: boolean }).__tcgFlatTabs === true;
+}
+
 export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date, scope?: ReadonlySet<string>): boolean {
   void _now;
-  switch (tab) {
-    case "managed":
-      // ★が付いている抽選だけ（★なしは表示しない）
-      return isManaged(data, lottery.id);
-    case "applied":
-      // 継続抽選・招待制販売は「継続中の抽選」に分けて表示する（応募済みタブの件数・一覧には含めない）
-      return hasPendingResult(data, lottery.id, scope) && kindOf(lottery) === "normal";
-    case "won":
-      return hasWon(data, lottery.id, scope);
-    case "all":
-      return true;
+  if (flatTabsForTest()) {
+    switch (tab) {
+      case "managed":
+        return isManaged(data, lottery.id);
+      case "applied":
+        return hasPendingResult(data, lottery.id, scope) && kindOf(lottery) === "normal";
+      case "won":
+        return hasWon(data, lottery.id, scope);
+      case "all":
+        return true;
+    }
   }
+  return tabOf(data, lottery, scope) === tab;
 }
 
 function matchFilters(data: AppData, lottery: Lottery, f: Filters): boolean {
@@ -241,7 +264,7 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, 
   const scope = scopeOverride ?? (profileId ? scopeSet(data.profiles, profileId) : undefined);
   const list = data.lotteries.filter(
     (l) =>
-      inTab(data, l, tab, now, scope) &&
+      (keepIds?.has(l.id) || inTab(data, l, tab, now, scope)) && // 退場アニメーション中のカードは、分類が変わっても残す
       matchFilters(data, l, f) &&
       matchSkipView(data, l, f, tab, profileId) &&
       matchStatus(data, l, status, now, profileId, keepIds) &&

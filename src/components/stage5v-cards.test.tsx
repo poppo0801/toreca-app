@@ -70,7 +70,8 @@ describe("購入期間・受取期間のアイコン", () => {
     patch("L1", { procedureSplit: false });
     mount("L1", "all");
     const buy = q('[data-testid="period"][data-kind="購入"] svg')!;
-    expect(buy.getAttribute("class")).toContain("lucide-wallet");
+    expect(buy.getAttribute("data-icon")).toBe("purchase"); // 丸に￥（共通SVG）
+    expect(buy.querySelector("circle")).not.toBeNull();
     patch("L1", { procedureSplit: true, receiveStart: dateOnly("2026-11-08"), receiveDeadline: dateOnly("2026-11-10") });
     mount("L1", "all");
     const recv = q('[data-testid="period"][data-kind="受取"] svg')!;

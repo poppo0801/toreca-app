@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, ReceiptText } from "lucide-react";
+import { ChartColumn, ChevronLeft, ChevronRight, ListFilter } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ExpenseDialog } from "@/components/expense-dialog";
 import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
@@ -64,6 +64,39 @@ function MonthPicker({ ym, onPick, onClose }: { ym: string; onPick: (v: string) 
   );
 }
 
+/** 絞り込み（品目・売却名義人）。選ぶとすぐ一覧へ反映され、「クリア」で全件に戻す */
+function FinanceFilterDialog({ income, category, seller, sellers, onCategory, onSeller, onClose }: { income: boolean; category: string; seller: string; sellers: { id: string; label: string }[]; onCategory: (v: string) => void; onSeller: (v: string) => void; onClose: () => void }) {
+  const options = income ? [{ id: "all", label: "全員" }, ...sellers] : [{ id: "all", label: "全品目" }, ...EXPENSE_CATEGORIES.map((c) => ({ id: c.id, label: c.label }))];
+  const value = income ? seller : category;
+  const set = income ? onSeller : onCategory;
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent data-testid="finance-filter">
+        <DialogTitle>絞り込み</DialogTitle>
+        <DialogDescription className="sr-only">品目または売却名義人で一覧を絞り込みます</DialogDescription>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">{income ? "売却名義人" : "品目"}</p>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={income ? "売却名義人で絞り込み" : "品目で絞り込み"} data-testid="category-filter">
+            {options.map((o) => (
+              <button key={o.id} type="button" aria-pressed={value === o.id} onClick={() => set(o.id)} data-testid={`cat-${o.id}`} className={cn("h-9 rounded-full border px-3 text-xs", value === o.id ? "border-primary bg-primary text-primary-foreground" : "bg-input")}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-between gap-2 pt-2">
+            <Button variant="outline" size="sm" disabled={value === "all"} onClick={() => set("all")} data-testid="finance-filter-clear">
+              クリア
+            </Button>
+            <Button size="sm" onClick={onClose} data-testid="finance-filter-done">
+              閉じる
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * 収支管理。初期表示は当月。支出は購入記録、収入は売却記録から作られるため、抽選の購入済みや購入実績と同じデータを見ている
  * （収支明細と購入実績を別々に持たないので二重計上されない）。
@@ -77,6 +110,9 @@ export function FinanceView() {
   const [expense, setExpense] = useState<{ id: string | null } | null>(null);
   const [sale, setSale] = useState<{ id: string | null } | null>(null);
   const [picking, setPicking] = useState(false);
+  const [filtering, setFiltering] = useState(false);
+  // 適用中の絞り込み: 支出/すべては品目、収入は売却名義人
+  const activeFilters = (filter === "income" ? (seller !== "all" ? 1 : 0) : category !== "all" ? 1 : 0);
 
   const summary = useMemo(() => monthSummary(data, ym), [data, ym]);
   const entries = useMemo(() => ledgerEntries(data, ym, filter, filter === "income" ? seller : "all", filter === "income" ? "all" : category), [data, ym, filter, seller, category]);
@@ -92,8 +128,8 @@ export function FinanceView() {
       <div className={PAGE_HEADING_ROW}>
         <PageHeading navId="finance">収支</PageHeading>
         <div className="flex items-center gap-1.5">
-          <Link href="/purchases" aria-label="購入履歴を見る" data-testid="to-purchases" className="flex size-9 items-center justify-center rounded-md hover:bg-muted">
-            <ReceiptText className="size-[18px]" aria-hidden="true" />
+          <Link href="/finance/analysis" aria-label="年間売却実績・収益分析" data-testid="to-analysis" className="flex size-9 items-center justify-center rounded-md hover:bg-muted">
+            <ChartColumn className="size-[18px]" aria-hidden="true" />
           </Link>
           {persistent && (
             <>
@@ -141,50 +177,38 @@ export function FinanceView() {
         <p className="text-xs text-muted-foreground">金額が未入力の購入が{summary.expenseUnknown}件あります（支出には含まれていません）。</p>
       )}
 
-      <div role="tablist" aria-label="収支の種類" className="grid grid-cols-3 rounded-lg bg-muted p-0.5">
-        {TABS.map((t) => (
-          <button
-            key={t.value}
-            role="tab"
-            type="button"
-            aria-selected={filter === t.value}
-            onClick={() => setFilter(t.value)}
-            className={cn("min-h-10 rounded-md text-[13px] font-medium", filter === t.value ? "bg-primary text-primary-foreground" : "hover:bg-card")}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {filter !== "income" && (
-        <div className="flex gap-1.5 overflow-x-auto" role="group" aria-label="品目で絞り込み" data-testid="category-filter">
-          {[{ id: "all", label: "全品目" }, ...EXPENSE_CATEGORIES.map((c) => ({ id: c.id, label: c.label }))].map((o) => (
-            <button key={o.id} type="button" aria-pressed={category === o.id} onClick={() => setCategory(o.id)} data-testid={`cat-${o.id}`} className={cn("h-9 shrink-0 rounded-full border px-3 text-xs", category === o.id ? "border-primary bg-primary text-primary-foreground" : "bg-input")}>
-              {o.label}
+      <div className="flex items-center gap-1.5">
+        <div role="tablist" aria-label="収支の種類" className="grid min-w-0 flex-1 grid-cols-3 rounded-lg bg-muted p-0.5">
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              role="tab"
+              type="button"
+              aria-selected={filter === t.value}
+              onClick={() => setFilter(t.value)}
+              className={cn("min-h-10 rounded-md text-[13px] font-medium", filter === t.value ? "bg-primary text-primary-foreground" : "hover:bg-card")}
+            >
+              {t.label}
             </button>
           ))}
         </div>
-      )}
+        <button
+          type="button"
+          onClick={() => setFiltering(true)}
+          aria-label={activeFilters > 0 ? `絞り込み（${activeFilters}件適用中）` : "絞り込み"}
+          data-testid="finance-filter-open"
+          data-active={activeFilters > 0 ? "1" : "0"}
+          className={cn("relative flex size-11 shrink-0 items-center justify-center rounded-lg border", activeFilters > 0 ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-muted")}
+        >
+          <ListFilter className="size-[18px]" aria-hidden="true" />
+          {activeFilters > 0 && <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">{activeFilters}</span>}
+        </button>
+      </div>
+
       {summary.byCategory.length > 1 && filter !== "income" && (
         <p className="text-[11px] text-muted-foreground" data-testid="sum-by-category">
           支出の内訳: {summary.byCategory.map((c) => `${c.label} ${yen(c.amount)}`).join(" ／ ")}
         </p>
-      )}
-
-      {filter === "income" && (
-        <div className="flex gap-1.5 overflow-x-auto" role="group" aria-label="売却名義人で絞り込み">
-          {[{ id: "all", label: "全員" }, ...data.profiles.filter((p) => p.active !== false).map((p) => ({ id: p.id, label: p.label }))].map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              aria-pressed={seller === o.id}
-              onClick={() => setSeller(o.id)}
-              className={cn("h-9 shrink-0 rounded-full border px-3 text-xs", seller === o.id ? "border-primary bg-primary text-primary-foreground" : "bg-input")}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
       )}
 
       <ul className="space-y-2" data-testid="ledger-list" aria-label="取引一覧">
@@ -225,12 +249,17 @@ export function FinanceView() {
       </ul>
       {entries.length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">この月の取引はありません。</p>}
 
-      <nav aria-label="関連ページ" className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-sm">
-        <Link href="/finance/analysis" className="underline underline-offset-2">
-          年間売却実績・収益分析
-        </Link>
-      </nav>
-
+      {filtering && (
+        <FinanceFilterDialog
+          income={filter === "income"}
+          category={category}
+          seller={seller}
+          sellers={data.profiles.filter((p) => p.active !== false).map((p) => ({ id: p.id, label: p.label }))}
+          onCategory={setCategory}
+          onSeller={setSeller}
+          onClose={() => setFiltering(false)}
+        />
+      )}
       {picking && <MonthPicker ym={ym} onPick={(v) => { setYm(v); setPicking(false); }} onClose={() => setPicking(false)} />}
       {expense && (
         <ExpenseDialog

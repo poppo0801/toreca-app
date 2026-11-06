@@ -233,6 +233,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   // 収入タブ: 売却名義人で絞り込み（初期値は全員）
   await page.getByRole("tab", { name: "収入" }).click();
   await expect(page.getByTestId("ledger-row")).toHaveCount(1);
+  await page.getByTestId("finance-filter-open").click();
   await page.getByRole("group", { name: "売却名義人で絞り込み" }).getByRole("button", { name: "A", exact: true }).click();
   await expect(page.getByTestId("ledger-row")).toHaveCount(0);
   await page.getByRole("group", { name: "売却名義人で絞り込み" }).getByRole("button", { name: "B", exact: true }).click();

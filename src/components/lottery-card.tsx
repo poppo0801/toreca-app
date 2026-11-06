@@ -1,8 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AtSign, CalendarCheck, Clock, Globe, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, Wallet, type LucideIcon } from "lucide-react";
+import { AtSign, CalendarCheck, Clock, Globe, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, type LucideIcon } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { EXIT_STAR_WAIT_MS, useApplyExit } from "@/components/apply-exit";
 import { useViewScope } from "@/components/user-scope";
 import { FitLine } from "@/components/fit-line";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
@@ -62,10 +63,23 @@ function ProductLine({ name, quantity, extra, className }: { name: string; quant
  * プロフィール別の応募状況は表示専用。応募の操作は現在のプロフィール専用のボタンだけで行う。
  */
 
-/** 期間のアイコン: 購入=財布（支払い）／受取=買い物袋。簡易・詳細・各タブで共通 */
+/** 丸の中に￥（購入）。Lucide に該当が無いので共通のSVG。線幅・サイズは Lucide のアイコンに合わせる（24x24・線幅2・丸め端） */
+export function YenCircleIcon({ className, ...rest }: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...rest}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8.5 7.5 12 12l3.5-4.5" />
+      <path d="M12 12v5" />
+      <path d="M9 12.5h6" />
+      <path d="M9 15h6" />
+    </svg>
+  );
+}
+
+/** 期間のアイコン: 購入=丸に￥／受取=買い物袋。簡易・詳細・各タブで共通 */
 function PeriodIcon({ label }: { label: "購入" | "受取" }) {
   const cls = "size-[1.15em] shrink-0 text-muted-foreground";
-  return label === "受取" ? <ShoppingBag className={cls} aria-hidden="true" data-icon="receive" /> : <Wallet className={cls} aria-hidden="true" data-icon="purchase" />;
+  return label === "受取" ? <ShoppingBag className={cls} aria-hidden="true" data-icon="receive" /> : <YenCircleIcon className={cls} aria-hidden="true" data-icon="purchase" />;
 }
 
 /** 期間1行。日付の途中で折り返さない */
@@ -111,6 +125,7 @@ export function LotteryCard({
   highlighted?: boolean;
 }) {
   const { data, now, profile, actions, settings } = useApp();
+  const exit = useApplyExit();
   const viewScope = useViewScope();
   const detailMode = view === "detail";
   const display = settings.cardDisplay ?? data.settings?.cardDisplay ?? DEFAULT_CARD_DISPLAY;
@@ -146,9 +161,21 @@ export function LotteryCard({
     setOpen(v);
     if (!v) requestAnimationFrame(() => scrollToTop(scrollY.current));
   };
+  /** ★の切り替え。今のタブから外れる場合は、短い反応のあと横へスライドして消え、下のカードが詰まる（共通の退出アニメーション） */
+  const setStar = async (v: boolean) => {
+    const handle = exit?.begin(lottery.id, { waitMs: EXIT_STAR_WAIT_MS });
+    try {
+      const r = await actions.setManaged(lottery.id, v);
+      if (r.ok) handle?.ok();
+      else handle?.fail();
+    } catch (e) {
+      handle?.fail();
+      throw e;
+    }
+  };
   const toggleStar = () => {
     if (managed) setConfirmOff(true); // ★OFFは確認ダイアログ
-    else actions.setManaged(lottery.id, true);
+    else void setStar(true);
   };
 
   const appliedTab = tab === "applied";
@@ -387,7 +414,7 @@ export function LotteryCard({
             <Button
               variant="danger"
               onClick={() => {
-                actions.setManaged(lottery.id, false);
+                void setStar(false);
                 setConfirmOff(false);
               }}
             >

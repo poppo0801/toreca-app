@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }, testInfo) => {
+  // 抽選カードの表示を確かめる既存のテストは、旧仕様（タブが重なる）で同じ抽選を全タブから開く。タブの分類は e2e/stage6l.spec.ts で確認する
+  await page.addInitScript(() => { (window as unknown as { __tcgFlatTabs: boolean }).__tcgFlatTabs = true; });
   // 既存のテストは応募済み・受付終了のカードも一覧で確認するため、状態の絞り込みを「すべて」にしておく（Stage 5M・5Pのテストは既定のまま）
   const keepDefault = (t: string) => t.includes("Stage 5M") || t.includes("Stage 5P");
   if (!testInfo.title.includes("検索は1行") && !keepDefault(testInfo.title) && !testInfo.titlePath.some(keepDefault)) {
@@ -311,8 +313,14 @@ test("収支ページ: 当月表示・月移動・タブ切替・分析ページ
   await page.getByRole("button", { name: "次の月" }).click();
   expect(await label.innerText()).toBe(before);
   for (const t of ["すべて", "支出", "収入"]) await page.getByRole("tab", { name: t }).click();
-  // 収入タブには売却名義人の絞り込み
+  // 収入タブには売却名義人の絞り込み（行ではなく、絞り込みアイコンの画面の中）
+  await expect(page.getByRole("group", { name: "売却名義人で絞り込み" })).toHaveCount(0);
+  await page.getByTestId("finance-filter-open").click();
   await expect(page.getByRole("group", { name: "売却名義人で絞り込み" })).toBeVisible();
+  await page.getByTestId("finance-filter-done").click();
+  // 収入・支出・すべてを切り替えても、収支ページに文字リンク・購入履歴のアイコンは無い
+  await expect(page.getByTestId("to-purchases")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "関連ページ" })).toHaveCount(0);
   await page.getByRole("link", { name: "年間売却実績・収益分析" }).click();
   await expect(page).toHaveURL(/\/finance\/analysis$/);
   await expect(page.getByTestId("annual-total")).toContainText("家族全体の合計");
@@ -1233,10 +1241,10 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     await expect(mine.locator("span").first()).toBeVisible(); // プロフィールのアバター
   });
 
-  test("要チェックは既定で「受付中・未応募」。応募直後は約1秒そのまま表示し、右へ約0.55秒でスライド（フェードアウト）してから一覧が詰まる", async ({ page }) => {
+  test("要チェックは既定で「受付中・未応募」。応募直後は約0.6秒そのまま表示し、右へ約0.32秒でスライドしてから一覧が詰まる", async ({ page }) => {
     const c = card(page, "L4");
     await expect(c).toBeVisible();
-    // 退場の段階（wait → sliding → collapsing）を記録する。スライドは約0.55秒、そのあと0.35秒で一覧が詰まる
+    // 退出の段階（hold → sliding → collapsing）を記録する。待機約0.6秒 → スライド約0.32秒 → 約0.28秒で一覧が詰まる
     await page.evaluate(() => {
       const w = window as unknown as { __exits: string[] };
       w.__exits = [];
@@ -1245,23 +1253,24 @@ test.describe("Stage 5M: 抽選UI改善", () => {
     const t0 = Date.now();
     await c.getByTestId("my-apply").click();
     await expect(c.getByTestId("my-apply")).toHaveAttribute("data-state", "applied");
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(250);
     await expect(c).toBeVisible();
-    await expect(c.locator("xpath=ancestor::li[1]")).toHaveAttribute("data-exit", "wait");
+    await expect(c.locator("xpath=ancestor::li[1]")).toHaveAttribute("data-exit", "hold");
     // スライド中: 高さは変えず、カードはまだ画面にあり、右へ動いている途中（残像が右端に残らない）
-    await expect(c.locator("xpath=ancestor::li[1]")).toHaveAttribute("data-exit", "sliding", { timeout: 3000 });
+    // スライドは約0.32秒と短いので、フレームごとに監視して捉える
+    await page.waitForFunction(() => document.querySelector('[data-lottery-id="L4"]')?.closest("li")?.getAttribute("data-exit") === "sliding", null, { polling: "raf", timeout: 3000 });
     const slideStart = Date.now();
     const li = c.locator("xpath=ancestor::li[1]");
     const h0 = (await li.boundingBox())!.height;
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(100);
     expect(Math.abs((await li.boundingBox())!.height - h0)).toBeLessThanOrEqual(1); // スライド中は一覧を詰めない
     const midX = (await c.boundingBox())!.x;
     expect(midX).toBeGreaterThan(0); // 少し動いている（移動中）
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true); // 横スクロールが出ない
     await expect(c).toHaveCount(0, { timeout: 4000 });
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(1000 + 550); // 保持1秒＋スライド0.55秒のあとに消える
-    expect(Date.now() - slideStart).toBeGreaterThanOrEqual(700); // スライド＋詰める時間（一瞬で消えない）
-    expect(await page.evaluate(() => (window as unknown as { __exits: string[] }).__exits)).toEqual(expect.arrayContaining(["hold", "wait", "sliding", "collapsing"]));
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(600 + 320); // 待機0.6秒＋スライド0.32秒のあとに消える
+    expect(Date.now() - slideStart).toBeGreaterThanOrEqual(450); // スライド＋詰める時間（一瞬で消えない）
+    expect(await page.evaluate(() => (window as unknown as { __exits: string[] }).__exits)).toEqual(expect.arrayContaining(["hold", "sliding", "collapsing"]));
     // 応募済みタブには表示される（他のタブの表示は変わらない）
     await page.getByRole("tab", { name: /応募済み/ }).click();
     await expect(card(page, "L4")).toBeVisible();
@@ -1497,7 +1506,7 @@ test.describe("Stage 5Q: 見出し・収支の年月選択・シンプルカー�
     await page.getByRole("button", { name: "3月" }).click();
     const y = new Date().getFullYear() - 1;
     await expect(page.getByTestId("month-label")).toHaveText(`${y}年3月`);
-    await expect(page.getByTestId("to-purchases")).toHaveAttribute("href", "/purchases");
+    await expect(page.getByTestId("to-analysis")).toHaveAttribute("href", "/finance/analysis");
     await expect(page.getByRole("link", { name: /当選/ })).toHaveCount(0);
   });
 

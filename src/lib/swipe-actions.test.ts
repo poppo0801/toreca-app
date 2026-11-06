@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createMockData } from "@/data/mock";
 import { dateOnly, jstDateString } from "@/lib/datetime";
 import * as m from "@/lib/mutations";
-import { leavesListOnCommit, opFor, planSwipe, SWIPE_MAP, SWIPE_OPS_ENABLED } from "@/lib/swipe-actions";
+import { leavesTabOnCommit, opFor, planSwipe, SWIPE_MAP, SWIPE_OPS_ENABLED } from "@/lib/swipe-actions";
 import type { AppData, Lottery } from "@/types/domain";
 
 const NOW = new Date("2026-10-26T03:00:00Z"); // JST 12:00
@@ -105,14 +105,14 @@ describe("当選タブ", () => {
   });
 });
 
-describe("leavesListOnCommit（確定後に同じ方向へ流れて消える操作）", () => {
+describe("leavesTabOnCommit（確定後に同じ方向へ流れて消える操作）", () => {
   it("一覧から外れる操作だけ true。応募済み（専用の退場）・★追加は false", () => {
-    expect(leavesListOnCommit("unmanage", "managed")).toBe(true);
-    expect(leavesListOnCommit("skip_once", "all")).toBe(true);
-    expect(leavesListOnCommit("result_won", "applied")).toBe(true);
-    expect(leavesListOnCommit("result_lost", "applied")).toBe(true);
-    expect(leavesListOnCommit("receive", "won")).toBe(true);
-    expect(leavesListOnCommit("mark_applied", "managed")).toBe(false);
-    expect(leavesListOnCommit("add_managed", "all")).toBe(false);
+    expect(leavesTabOnCommit("unmanage", "managed")).toBe(true);
+    expect(leavesTabOnCommit("skip_once", "all")).toBe(true);
+    expect(leavesTabOnCommit("result_won", "applied")).toBe(true);
+    expect(leavesTabOnCommit("result_lost", "applied")).toBe(true);
+    expect(leavesTabOnCommit("receive", "won")).toBe(true);
+    expect(leavesTabOnCommit("mark_applied", "managed")).toBe(true); // 要チェック → 応募済み（タブが変わる）
+    expect(leavesTabOnCommit("add_managed", "all")).toBe(true); // 全情報 → 要チェック（Stage 6L: 同じ抽選は1つのタブにだけ出る）
   });
 });

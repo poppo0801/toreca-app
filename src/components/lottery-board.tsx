@@ -176,10 +176,13 @@ function LotteryBoardInner() {
     setTab(next);
   };
 
-  // 応募直後のカードを一定時間だけ残して退場させる（要チェックで「応募済みを含まない」のとき、一覧表示のみ）
-  // 応募した抽選が状態の絞り込みで外れるとき（未応募を見ているとき）だけ、退場アニメーションで見送る
-  const hidesApplied = (tab === "managed" || tab === "all") && (filters.status === "default" || filters.status === "unapplied");
-  const exit = useApplyExitController({ enabled: hidesApplied && view === "list", resetKey: `${profile.id}|${tab}|${filters.status}|${view}` });
+  // ★・応募・スワイプで今のタブから外れるカードは、共通の退出アニメーションで見送る（一覧表示のみ）。
+  // 保存後も今のタブ・絞り込みに残るカードは、そのまま残す（isShown で判定）
+  const exit = useApplyExitController({
+    enabled: view === "list",
+    resetKey: `${profile.id}|${tab}|${filters.status}|${view}`,
+    isShown: (id) => selectLotteries(data, tab, filters, now, profile.id, undefined, viewScope).some((l) => l.id === id),
+  });
   const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds, viewScope), [data, tab, filters, now, profile.id, exit.keepIds, viewScope]);
   // 新着 = 全情報タブに出ている抽選（件数と同じ集合: 既定の絞り込み・スルー除外）のうち、まだ詳細を確認していないもの。必ず件数以下になる（Stage 6K）。
   // 以前は絞り込み前の全抽選から数えていたため、受付終了・応募済みの新着が混ざって件数を超えていた
@@ -368,16 +371,17 @@ function LotteryBoardInner() {
               {lotteries.map((l) => {
                 const phase = exit.phases[l.id];
                 const sliding = phase === "sliding";
+                const dir = exit.dirs[l.id] ?? "right";
                 const collapsing = phase === "collapsing";
                 return (
                   <li
                     key={l.id}
                     data-exit={phase}
-                    // 高さを詰める（collapsing）のは、スライド＋フェードが終わって完全に消えたあと。スライド中は高さを変えない
-                    className={cn("grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,margin] duration-[350ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
+                    // 高さを詰める（collapsing）のは、横へのスライドが終わって画面外へ出たあと。スライド中は高さを変えない
+                    className={cn("grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,margin] duration-[280ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
                     style={collapsing ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
                   >
-                    <div className={cn("min-h-0 min-w-0", collapsing && "overflow-hidden", sliding && "animate-[apply-exit-slide_0.55s_cubic-bezier(0.4,0,0.6,1)_forwards] motion-reduce:animate-none")}>
+                    <div className={cn("min-h-0 min-w-0", collapsing && "overflow-hidden", sliding && (dir === "left" ? "animate-[apply-exit-slide-left_0.32s_cubic-bezier(0.4,0,1,1)_forwards]" : "animate-[apply-exit-slide-right_0.32s_cubic-bezier(0.4,0,1,1)_forwards]"), "motion-reduce:animate-none")}>
                       <SwipeCard lottery={l} tab={tab}>
                         <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
                       </SwipeCard>

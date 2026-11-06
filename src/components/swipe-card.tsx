@@ -11,7 +11,7 @@ import { myApplication } from "@/lib/lottery-flow";
 import { applyControlFor } from "@/lib/lottery-summary";
 import { formatItem, type Tab } from "@/lib/lottery-view";
 import { classifyAxis, commitDirection, pullOffset, SWIPE, type SwipeDirection } from "@/lib/swipe";
-import { leavesListOnCommit, OP_META, opFor, planSwipe, type SwipeOp, type SwipeTone } from "@/lib/swipe-actions";
+import { leavesTabOnCommit, OP_META, opFor, planSwipe, type SwipeOp, type SwipeTone } from "@/lib/swipe-actions";
 import { readPref } from "@/services/local-device-store";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
@@ -71,41 +71,41 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
   /** 状態を変える本体。成功したらUndo付きの通知を出す。busy 中は何もしない（通信中の重複操作を防ぐ） */
   const run = useCallback(
     async (op: SwipeOp, extra: { itemId?: string; result?: "won" | "lost" } = {}) => {
-      if (busy.current) return;
+      if (busy.current) return false as boolean;
       busy.current = true;
+      let success = false;
       try {
         const done = OP_META[op].done;
         switch (op) {
           case "add_managed": {
             const r = await actions.setManaged(lottery.id, true);
             if (!r.ok) return fail(r.error);
+            success = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setManaged(lottery.id, false); return u.ok ? true : u.error; } });
           }
           case "unmanage": {
             const r = await actions.setManaged(lottery.id, false);
             if (!r.ok) return fail(r.error);
+            success = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setManaged(lottery.id, true); return u.ok ? true : u.error; } });
           }
           case "skip_once": {
             const r = await actions.setLotterySkip(lottery.id, true);
             if (!r.ok) return fail(r.error);
+            success = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setLotterySkip(lottery.id, false); return u.ok ? true : u.error; } });
           }
           case "mark_applied": {
             const c = applyControlFor(data, lottery, profile.id, now);
             if (c.kind !== "apply") return fail("応募済みにできません");
-            exit?.hold(lottery.id);
             const r = await actions.setApplied(lottery.id, c.accountId, true, extra.itemId ?? null);
-            if (!r.ok) {
-              exit?.release(lottery.id);
-              return fail(r.error);
-            }
-            exit?.onApplied(lottery.id, profile.id);
+            if (!r.ok) return fail(r.error);
+            success = true;
             return toast.show({
               message: done,
               undo: async () => {
                 const u = await actions.setApplied(lottery.id, c.accountId, false);
-                if (u.ok) exit?.onUnapplied(lottery.id);
+                if (u.ok) exit?.cancel(lottery.id);
                 return u.ok ? true : u.error;
               },
             });
@@ -118,6 +118,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
             const r = await actions.setResult(app.id, result);
             if (!r.ok) return fail(r.error);
             // 取り消しは「結果未確認(pending)」へ戻す
+            success = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.setResult(app.id, "pending"); return u.ok ? true : u.error; } });
           }
           case "receive": {
@@ -126,12 +127,14 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
             const prev = app.fulfillment === "procedure_done" ? "procedure_done" : "none";
             const r = await actions.setFulfillment(app.id, "purchased");
             if (!r.ok) return fail(r.error);
+            success = true;
             return toast.show({ message: done, undo: async () => { const u = await actions.revertFulfillment(app.id, prev); return u.ok ? true : u.error; } });
           }
         }
       } finally {
         busy.current = false;
       }
+      return success;
     },
     [actions, data, exit, fail, lottery, now, profile.id, toast],
   );
@@ -149,13 +152,18 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
         case "open-detail":
           return toast.show({ message: plan.message, tone: "error" });
         case "run": {
-          const leaves = leavesListOnCommit(plan.op, tab);
+          // 今のタブから外れる操作: 指を離した位置から同じ向きへカードが画面外まで滑り、保存を待たずに下のカードが詰まる（★の退出と共通）。
+          // 保存に失敗したら、カードを元の位置へ戻す。外れなかった場合（絞り込みで残るなど）も戻る
+          const leaves = leavesTabOnCommit(plan.op, tab);
+          const handle = leaves ? exit?.begin(lottery.id, { dir, waitMs: 0, slid: true }) : undefined;
           if (leaves) setLeaving(dir);
-          return void run(plan.op).finally(() => {
-            // 一覧に残った（失敗した・絞り込みで外れなかった）場合は、状態を反映して自然に元の位置へ戻す
+          return void run(plan.op).then((ok) => {
+            if (ok) handle?.ok();
+            else handle?.fail();
             if (!leaves) return;
             if (leaveTimer.current) window.clearTimeout(leaveTimer.current);
-            leaveTimer.current = window.setTimeout(() => setLeaving(null), 260);
+            // 失敗した／保存後もこのタブに残る場合は、カードを元の位置へ戻す（退出が続いている間は戻さない）
+            leaveTimer.current = window.setTimeout(() => (!ok || !exit?.active(lottery.id)) && setLeaving(null), ok ? 160 : 30);
           });
         }
         case "confirm":
@@ -166,7 +174,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           return setDialog({ kind: "choose-fulfillment" });
       }
     },
-    [data, lottery, now, profile.id, run, tab, toast],
+    [data, exit, lottery, now, profile.id, run, tab, toast],
   );
 
   // ---- ジェスチャ
@@ -249,9 +257,8 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
       )}
       <div
         style={{
-          transform: leaving ? `translateX(${leaving === "right" ? 45 : -45}%)` : offset ? `translateX(${offset}px)` : undefined,
-          opacity: leaving ? 0 : undefined,
-          transition: dragging ? "none" : leaving ? "transform 220ms ease-out, opacity 220ms ease-out" : "transform 180ms ease-out, opacity 180ms ease-out",
+          transform: leaving ? `translateX(${leaving === "right" ? 110 : -110}%)` : offset ? `translateX(${offset}px)` : undefined,
+          transition: dragging ? "none" : leaving ? "transform 260ms cubic-bezier(0.4, 0, 1, 1)" : "transform 180ms ease-out",
         }}
         data-leaving={leaving ?? undefined}
         className="relative"

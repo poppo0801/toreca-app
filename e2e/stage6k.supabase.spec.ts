@@ -79,6 +79,7 @@ test("品目: 経費を登録すると収支に反映され、購入実績（BOX
   const row = page.getByTestId("ledger-row").filter({ hasText: "6K駐車場代" });
   await expect(row).toBeVisible();
   await expect(row.getByTestId("row-category")).toHaveText("経費");
+  await page.getByTestId("finance-filter-open").click();
   await page.getByTestId("cat-expense").click();
   await expect(page.getByTestId("ledger-row")).toHaveCount(await page.getByTestId("ledger-row").count());
   await page.goto("/purchases");

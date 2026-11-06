@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { selectAcrossTabs } from "@/lib/test-all-tabs";
 import { createMockData } from "@/data/mock";
 import { announceShort } from "@/lib/lottery-taxonomy";
 import { DEFAULT_FILTERS, matchesQuery, selectLotteries } from "@/lib/lottery-view";
@@ -45,7 +46,7 @@ describe("絞り込み: 店舗・応募方法", () => {
   it("店舗と応募方法を他の条件と組み合わせて絞り込める", () => {
     const d = base();
     const l = d.lotteries.find((x) => x.applyMethod === "web")!;
-    const all = (f: Partial<typeof DEFAULT_FILTERS>) => selectLotteries(d, "all", { ...DEFAULT_FILTERS, status: "any", ...f }, NOW, d.profiles[0].id).map((x) => x.id);
+    const all = (f: Partial<typeof DEFAULT_FILTERS>) => selectAcrossTabs(d, { ...DEFAULT_FILTERS, status: "any", ...f }, NOW, d.profiles[0].id).map((x) => x.id);
     expect(all({ storeId: l.storeId })).toContain(l.id);
     expect(all({ storeId: l.storeId }).every((id) => d.lotteries.find((x) => x.id === id)!.storeId === l.storeId)).toBe(true);
     expect(all({ applyMethod: "web" }).every((id) => d.lotteries.find((x) => x.id === id)!.applyMethod === "web")).toBe(true);
