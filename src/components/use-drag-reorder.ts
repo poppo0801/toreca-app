@@ -80,7 +80,7 @@ export function useDragReorder({
       el.style.transition = "none";
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       requestAnimationFrame(() => {
-        el.style.transition = "transform 340ms cubic-bezier(0.25, 0.8, 0.3, 1)";
+        el.style.transition = "transform 620ms cubic-bezier(0.22, 0.7, 0.25, 1)";
         el.style.transform = "";
       });
     }
