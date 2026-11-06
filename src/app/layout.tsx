@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "next-themes";
 import { APP_DESCRIPTION, APP_NAME, APP_SUBTITLE } from "@/lib/brand";
+import { ThemeColorMeta } from "@/components/theme-color-meta";
 import { startupImages } from "@/lib/startup-images";
 import "./globals.css";
 
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ja" suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <ThemeColorMeta />
           {children}
         </ThemeProvider>
       </body>
