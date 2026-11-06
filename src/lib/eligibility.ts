@@ -60,11 +60,12 @@ export function hasSkipException(data: AppData, profileId: string, lottery: Lott
  * プロフィールの対象範囲。blocked は常に除外。
  * 許可リスト方式: 許可された系列または店舗のみ対象。許可の指定が何もなければ全体が対象。
  */
-export function inProfileScope(profile: Profile, chainId: string, storeId: string): boolean {
-  if (profile.blockedChainIds.includes(chainId) || profile.blockedStoreIds.includes(storeId)) return false;
+/** 店舗なしの抽選（storeId=null。系列だけで登録）は、系列の対象・除外だけで判定する（店舗単位の指定には当てはまらない） */
+export function inProfileScope(profile: Profile, chainId: string, storeId: string | null): boolean {
+  if (profile.blockedChainIds.includes(chainId) || (storeId !== null && profile.blockedStoreIds.includes(storeId))) return false;
   const allowMode = profile.allowedChainIds !== null || profile.allowedStoreIds.length > 0;
   if (!allowMode) return true;
-  return !!profile.allowedChainIds?.includes(chainId) || profile.allowedStoreIds.includes(storeId);
+  return !!profile.allowedChainIds?.includes(chainId) || (storeId !== null && profile.allowedStoreIds.includes(storeId));
 }
 
 // ------------------------------------------------------------------ 応募制限

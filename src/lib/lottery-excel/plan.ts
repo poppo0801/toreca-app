@@ -306,8 +306,8 @@ export function planLotteries(read: ReadLottery, snap: LotterySnapshot, decision
   const managedOf = (id: string) => data.management.find((m) => m.lotteryId === id)?.isManaged ?? true;
   const recCtx = {
     chainName: (id: string) => data.chains.find((c) => c.id === id)?.name ?? "",
-    storeName: (id: string) => data.stores.find((s) => s.id === id)?.name ?? "",
-    storeNo: (id: string) => snap.storeNos[id] ?? "",
+    storeName: (id: string | null) => (id ? data.stores.find((s) => s.id === id)?.name ?? "" : ""),
+    storeNo: (id: string | null) => (id ? snap.storeNos[id] ?? "" : ""),
     managed: managedOf,
   };
 
@@ -440,7 +440,7 @@ export function planLotteries(read: ReadLottery, snap: LotterySnapshot, decision
     let store: ReturnType<typeof resolveStore> = null;
     if (base && !chainCellId && !chainCellName && !cellOf("store_no") && !cellOf("store")) {
       chain = { id: base.chainId, name: recCtx.chainName(base.chainId), state: "ok" };
-      store = { id: base.storeId, name: recCtx.storeName(base.storeId), state: "ok", chainId: base.chainId };
+      store = base.storeId ? { id: base.storeId, name: recCtx.storeName(base.storeId), state: "ok", chainId: base.chainId } : null;
     } else {
       chain = resolveChain(ctx, chainCellId, chainCellName, rowKeyLabel, badL);
       store = resolveStore(ctx, chain ?? { id: null, name: "", state: "ok" }, cellOf("store_no"), cellOf("store"), rowKeyLabel, badL);
@@ -449,11 +449,11 @@ export function planLotteries(read: ReadLottery, snap: LotterySnapshot, decision
       if (base) {
         // 既存の抽選の系列・店舗を空欄のまま変えない
         if (!chain && !chainCellId && !chainCellName) chain = { id: base.chainId, name: recCtx.chainName(base.chainId), state: "ok" };
-        if (!store && !cellOf("store_no") && !cellOf("store")) store = { id: base.storeId, name: recCtx.storeName(base.storeId), state: "ok", chainId: base.chainId };
+        if (!store && !cellOf("store_no") && !cellOf("store") && base.storeId) store = { id: base.storeId, name: recCtx.storeName(base.storeId), state: "ok", chainId: base.chainId };
       }
     }
     if (!chain && !errors.length) badL(COL_LABEL.chain, "系列名（または系列ID）が必要です");
-    if (!store && !errors.length) badL(COL_LABEL.store, "店舗名（または店舗ID）が必要です");
+    // 店舗の列が空でもよい（店舗なし＝系列だけで登録する抽選）。空でないのに照合できなかった場合は、照合の段階でエラーにしている
     if (base && chain?.id && chain.id !== base.chainId) badL(COL_LABEL.chain, "既存の抽選の系列は変更できません");
     if (base && store?.id && store.id !== base.storeId && chain?.id === base.chainId) {
       // 店舗の変更は別の抽選になるため、既存の抽選では受け付けない（他店舗への複製は画面から行う）
@@ -584,7 +584,7 @@ export function planLotteries(read: ReadLottery, snap: LotterySnapshot, decision
       });
       const input: LotteryInput = {
         chain: { id: chain.id, name: chain.name },
-        store: { id: store.id, name: store.name, prefecture: "" },
+        store: { id: store?.id ?? null, name: store?.name ?? "", prefecture: "" },
         multiMode: finalRec.multi_mode as "single",
         campaignId: base?.campaignId ?? null,
         newCampaign: null,

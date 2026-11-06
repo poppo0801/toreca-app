@@ -2870,7 +2870,7 @@ export type Database = {
           result_precision: string
           source_kind: string
           source_urls: string[]
-          store_id: string
+          store_id: string | null
           unconfirmed_fields: string[]
           updated_at: string
           updated_by_profile_id: string | null
@@ -2933,7 +2933,7 @@ export type Database = {
           result_precision?: string
           source_kind?: string
           source_urls?: string[]
-          store_id: string
+          store_id: string | null
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -2996,7 +2996,7 @@ export type Database = {
           result_precision?: string
           source_kind?: string
           source_urls?: string[]
-          store_id?: string
+          store_id?: string | null
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null

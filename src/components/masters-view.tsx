@@ -392,6 +392,11 @@ function MasterItem({
             {badges}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
+          {entity.key === "chains" && rows.chain_aliases.some((a) => a.chain_id === row.id) && (
+            <p className="truncate text-xs text-muted-foreground" data-testid="chain-alias-list">
+              別名: {rows.chain_aliases.filter((a) => a.chain_id === row.id).map((a) => String(a.alias)).join("・")}
+            </p>
+          )}
           {entity.key === "stores" && (
             <p className="flex flex-wrap items-center gap-x-2 text-xs" data-testid="store-place">
               {dist ? (
@@ -488,6 +493,16 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [geo, setGeo] = useState<{ busy: boolean; candidates: GeoCandidate[]; error: string | null }>({ busy: false, candidates: [], error: null });
+  // 系列の別名（例: 正式名称「晴れる屋2」・別名「ハレツー」）。同じ系列として照合・集計される
+  const currentAliases = () => (entity.key === "chains" && record ? rows.chain_aliases.filter((a) => a.chain_id === record.id).map((a) => String(a.alias)) : []);
+  const [aliases, setAliases] = useState<string[]>(currentAliases);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const addAlias = () => {
+    const v = aliasDraft.trim();
+    if (!v) return;
+    if (!aliases.some((a) => normName(a) === normName(v))) setAliases((l) => [...l, v]);
+    setAliasDraft("");
+  };
 
   const lookup = async () => {
     setGeo({ busy: true, candidates: [], error: null });
@@ -499,7 +514,7 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
     e.preventDefault();
     setError(null);
     start(async () => {
-      const res: ActionResult = await saveRecord(entity.key, record?.id ?? null, profile.id, values);
+      const res: ActionResult = await saveRecord(entity.key, record?.id ?? null, profile.id, values, entity.key === "chains" ? aliases : undefined);
       if (res.ok) {
         setOpen(false);
         if (!record) setValues(initial());
@@ -513,6 +528,8 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
       <span
         onClick={() => {
           setValues(initial());
+          setAliases(currentAliases());
+          setAliasDraft("");
           setError(null);
           setOpen(true);
         }}
@@ -533,6 +550,42 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
                 <FieldInput field={f} rows={rows} value={values[f.name] ?? ""} onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))} />
               </label>
             ))}
+            {entity.key === "chains" && (
+              <div className="space-y-1.5 text-sm" data-testid="chain-aliases">
+                <p>別名（略称・別表記。任意）</p>
+                {aliases.length > 0 && (
+                  <ul className="flex flex-wrap gap-1.5" aria-label="別名">
+                    {aliases.map((a) => (
+                      <li key={a} className="flex items-center gap-1 rounded-full border bg-input py-0.5 pl-2.5 pr-1 text-xs">
+                        {a}
+                        <button type="button" onClick={() => setAliases((l) => l.filter((x) => x !== a))} aria-label={`別名「${a}」を削除`} className="flex size-6 items-center justify-center rounded-full hover:bg-muted">
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex gap-1.5">
+                  <input
+                    value={aliasDraft}
+                    onChange={(e) => setAliasDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addAlias();
+                      }
+                    }}
+                    maxLength={80}
+                    aria-label="別名を入力"
+                    placeholder="例: ハレツー"
+                    className="h-10 min-w-0 flex-1 rounded-md border bg-input px-2 text-base"
+                  />
+                  <Button type="button" variant="outline" onClick={addAlias} disabled={!aliasDraft.trim()} data-testid="chain-alias-add">
+                    追加
+                  </Button>
+                </div>
+              </div>
+            )}
             {entity.key === "stores" && (
               <div className="space-y-1.5 rounded-md border p-2" data-testid="store-geocode">
                 <p className="flex items-center gap-1 text-[11px] text-muted-foreground">

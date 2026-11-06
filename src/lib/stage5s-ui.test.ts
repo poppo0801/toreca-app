@@ -45,12 +45,13 @@ describe("横断検索（商品・系列・店舗とそれぞれの別名）", (
 describe("絞り込み: 店舗・応募方法", () => {
   it("店舗と応募方法を他の条件と組み合わせて絞り込める", () => {
     const d = base();
-    const l = d.lotteries.find((x) => x.applyMethod === "web")!;
+    const l = d.lotteries.find((x) => x.applyMethod === "web" && x.storeId)!;
+    const sid = l.storeId as string;
     const all = (f: Partial<typeof DEFAULT_FILTERS>) => selectAcrossTabs(d, { ...DEFAULT_FILTERS, status: "any", ...f }, NOW, d.profiles[0].id).map((x) => x.id);
-    expect(all({ storeId: l.storeId })).toContain(l.id);
-    expect(all({ storeId: l.storeId }).every((id) => d.lotteries.find((x) => x.id === id)!.storeId === l.storeId)).toBe(true);
+    expect(all({ storeId: sid })).toContain(l.id);
+    expect(all({ storeId: sid }).every((id) => d.lotteries.find((x) => x.id === id)!.storeId === sid)).toBe(true);
     expect(all({ applyMethod: "web" }).every((id) => d.lotteries.find((x) => x.id === id)!.applyMethod === "web")).toBe(true);
-    expect(all({ storeId: l.storeId, applyMethod: l.applyMethod === "web" ? "app" : "web" })).not.toContain(l.id);
+    expect(all({ storeId: sid, applyMethod: l.applyMethod === "web" ? "app" : "web" })).not.toContain(l.id);
   });
 });
 

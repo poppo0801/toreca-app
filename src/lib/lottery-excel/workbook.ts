@@ -287,7 +287,7 @@ export function filterLotteries(data: AppData, f: ExportFilters, now: Date): Lot
         if (f.managed === "managed" ? !m : m) return false;
       }
       if (f.chainIds.length && !f.chainIds.includes(l.chainId)) return false;
-      if (f.storeIds.length && !f.storeIds.includes(l.storeId)) return false;
+      if (f.storeIds.length && !(l.storeId && f.storeIds.includes(l.storeId))) return false;
       if (f.productIds.length && !l.items.some((i) => f.productIds.includes(i.productId))) return false;
       if (!inRange(dayOf(l.applyStart), f.applyFrom, f.applyTo)) return false;
       if (!inRange(dayOf(l.applyDeadline), f.deadlineFrom, f.deadlineTo)) return false;
@@ -325,8 +325,8 @@ export async function buildLotteryExport(snap: LotterySnapshot, f: ExportFilters
   guide(wb, "export");
   const recCtx = {
     chainName: (id: string) => data.chains.find((c) => c.id === id)?.name ?? "",
-    storeName: (id: string) => data.stores.find((s) => s.id === id)?.name ?? "",
-    storeNo: (id: string) => snap.storeNos[id] ?? "",
+    storeName: (id: string | null) => (id ? data.stores.find((s) => s.id === id)?.name ?? "" : ""),
+    storeNo: (id: string | null) => (id ? snap.storeNos[id] ?? "" : ""),
     managed: (id: string) => data.management.find((m) => m.lotteryId === id)?.isManaged ?? true,
   };
   const lrows = chosen.map((l) => recordToLabels(lotteryToRecord(l, recCtx)));

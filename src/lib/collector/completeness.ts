@@ -46,7 +46,8 @@ export function assessCompleteness(input: LotteryInput, summary: Summary, ctx: {
   const chainNamed = !!(input.chain.id || input.chain.name.trim());
   const storeName = input.store.name.trim();
   const online = input.receiveMethod === "shipping" || isOnlineLikeName(storeName);
-  const storeKnown = !!(input.store.id || storeName) || online;
+  // 店舗が空でも、意図して「店舗なし（系列のみ）」とした下書き（noStore）は読み取り漏れではない。空のままで noStore でないものは「未読取」
+  const storeKnown = !!(input.store.id || storeName) || online || input.noStore === true;
   const productNamed = input.items.some((i) => !!(i.product.id || i.product.name.trim()));
   const deadlineKnown = known(input.applyDeadline);
   const applyKnown = (input.applyMethod && input.applyMethod !== "unknown") || !!applyUrlOf(input) || !!input.announcementUrl;

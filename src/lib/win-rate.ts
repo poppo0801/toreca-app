@@ -130,8 +130,10 @@ export function computeWinStats(data: AppData, scope: WinScope): WinStats {
     const owner = data.profiles.find((p) => p.id === acc.profileId);
     add(row(profiles, acc.profileId, owner?.label ?? "（不明）"), o);
     add(row(chains, l.chainId, data.chains.find((c) => c.id === l.chainId)?.name ?? "（不明）"), o);
-    const store = data.stores.find((s) => s.id === l.storeId);
-    add(row(stores, l.storeId, `${data.chains.find((c) => c.id === l.chainId)?.name ?? ""} ${store?.name ?? "（不明）"}`.trim()), o);
+    // 店舗なし（系列だけで登録した抽選）は、系列ごとの「店舗なし」にまとめる。店舗が不明な抽選とは別
+    const store = l.storeId ? data.stores.find((s) => s.id === l.storeId) : undefined;
+    const chainName = data.chains.find((c) => c.id === l.chainId)?.name ?? "";
+    add(row(stores, l.storeId ?? `no-store:${l.chainId}`, l.storeId ? `${chainName} ${store?.name ?? "（不明）"}`.trim() : `${chainName}（店舗なし）`.trim()), o);
 
     const items = itemOutcomes(l, a);
     for (const it of items) add(row(products, it.productId, data.products.find((p) => p.id === it.productId)?.officialName ?? "商品未登録"), it.outcome);

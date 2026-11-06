@@ -194,8 +194,8 @@ export function newRecord(): LotteryRecord {
 
 export interface DbRecordCtx {
   chainName: (chainId: string) => string;
-  storeName: (storeId: string) => string;
-  storeNo: (storeId: string) => string;
+  storeName: (storeId: string | null) => string;
+  storeNo: (storeId: string | null) => string;
   managed: (lotteryId: string) => boolean;
 }
 

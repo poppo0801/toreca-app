@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { z } from "zod";
-import { buildSchema, ENTITIES, ENTITY_KEYS, toDbValues } from "@/lib/masters";
+import { buildSchema, ENTITIES, ENTITY_KEYS, normalizeAlias, toDbValues } from "@/lib/masters";
+import { checkChainAliases } from "@/lib/chain-alias";
 import { createClient } from "@/lib/supabase/server";
 import { processGeocodeBatch, requeueFailedGeocoding } from "@/lib/server/geocode-service";
 import type { Db } from "@/lib/server/lottery-service";
@@ -48,6 +49,8 @@ export async function saveRecord(
   idRaw: string | null,
   actorRaw: string | null,
   values: Record<string, unknown>,
+  /** 系列の別名（chains のときだけ使う。指定すると、保存後の別名がこの一覧になる） */
+  aliasesRaw?: string[],
 ): Promise<ActionResult> {
   const key = entityKeySchema.safeParse(entityKeyRaw);
   const actor = actorSchema.safeParse(actorRaw);
@@ -62,6 +65,16 @@ export async function saveRecord(
   if (!ctx) return fail("ログインが必要です");
 
   const dbValues = toDbValues(entity, parsed.data as Record<string, unknown>);
+  // 系列の別名: 保存の前に、他の系列の名称・別名との衝突を確認する（衝突があれば系列も保存しない）
+  let aliasPlan: string[] | null = null;
+  if (entity.key === "chains" && aliasesRaw !== undefined) {
+    const list = z.array(z.string().max(200)).max(50).safeParse(aliasesRaw);
+    if (!list.success) return fail("別名の形式が正しくありません");
+    const [{ data: cs }, { data: as }] = await Promise.all([ctx.supabase.from("chains").select("id,name"), ctx.supabase.from("chain_aliases").select("chain_id,alias")]);
+    const checked = checkChainAliases(id ? id.data! : null, String(dbValues.name ?? ""), list.data, cs ?? [], (as ?? []).map((a) => ({ chainId: a.chain_id, alias: a.alias })));
+    if (checked.problems.length > 0) return fail(checked.problems[0].message);
+    aliasPlan = checked.values;
+  }
   // 店舗の位置は緯度と経度が両方あるときだけ有効（片方だけでは距離を計算できない）
   if (entity.key === "stores" && (dbValues.latitude == null) !== (dbValues.longitude == null)) return fail("緯度と経度は両方入力してください（住所から位置を取得することもできます）");
   // 資格はアカウントと同じ系列の条件にだけ紐づけられる（chain_id はアカウントから補完。複合FKで不一致はDBが拒否）
@@ -78,6 +91,30 @@ export async function saveRecord(
     ? await table.update(row).eq("id", id.data!)
     : await table.insert({ ...row, household_id: ctx.householdId });
   if (error) return dbError(error);
+
+  // 系列の別名を保存後の一覧に合わせる（追加・削除）。系列の保存とは別の操作のため、失敗したときは別名だけ保存できなかったと伝える
+  if (entity.key === "chains" && aliasPlan) {
+    let chainId = id ? id.data! : null;
+    if (!chainId) {
+      const { data: created } = await ctx.supabase.from("chains").select("id").eq("name", String(dbValues.name)).eq("household_id", ctx.householdId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      chainId = created?.id ?? null;
+    }
+    if (chainId) {
+      const { data: cur } = await ctx.supabase.from("chain_aliases").select("id,alias,normalized_alias").eq("chain_id", chainId);
+      const want = new Map(aliasPlan.map((a) => [normalizeAlias(a), a]));
+      const remove = (cur ?? []).filter((r) => !want.has(r.normalized_alias)).map((r) => r.id);
+      const have = new Set((cur ?? []).map((r) => r.normalized_alias));
+      const add = [...want.entries()].filter(([k]) => !have.has(k)).map(([k, a]) => ({ household_id: ctx.householdId, chain_id: chainId as string, alias: a, normalized_alias: k, updated_by_profile_id: actor.data }));
+      if (remove.length > 0) {
+        const { error: dErr } = await ctx.supabase.from("chain_aliases").delete().in("id", remove);
+        if (dErr) return fail("系列は保存しましたが、別名を保存できませんでした。もう一度お試しください");
+      }
+      if (add.length > 0) {
+        const { error: iErr } = await ctx.supabase.from("chain_aliases").insert(add);
+        if (iErr) return fail(iErr.code === "23505" ? "別名が他の系列の別名と重複しています" : "系列は保存しましたが、別名を保存できませんでした。もう一度お試しください");
+      }
+    }
+  }
 
   // 店舗の住所を登録・変更したら、保存とは別に（応答のあとで）位置情報を取得する。失敗しても保存には影響せず、定期処理が再試行する
   if (entity.key === "stores") after(() => processGeocodeBatch(ctx.supabase as unknown as Db, { limit: 3 }).then(() => undefined, () => undefined));

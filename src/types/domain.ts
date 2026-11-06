@@ -218,7 +218,7 @@ export interface Lottery {
   id: string;
   campaignId?: string;
   chainId: string;
-  storeId: string;
+  storeId: string | null;
   items: LotteryItem[];
   multiMode: MultiMode;
   applyStart: FlexibleDate;

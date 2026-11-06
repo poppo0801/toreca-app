@@ -44,7 +44,8 @@ export function buildLotteryPayload(input: z.output<typeof lotteryInputSchema>, 
   return {
     id,
     chain: { id: input.chain.id, name: input.chain.name },
-    store: { id: input.store.id, name: input.store.name, prefecture: input.store.prefecture },
+    // 店舗が空なら null（店舗なし）。サーバーはダミーの店舗を作らず store_id を NULL で保存する
+    store: input.store.id || input.store.name.trim() ? { id: input.store.id, name: input.store.name, prefecture: input.store.prefecture } : null,
     campaign: {
       id: input.campaignId,
       new: input.newCampaign ? { name: input.newCampaign.name, store_rule: input.newCampaign.storeRule } : null,

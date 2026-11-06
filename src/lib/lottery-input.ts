@@ -81,7 +81,12 @@ const itemSchema = z.object({
 
 export const lotteryInputSchema = z.object({
   chain: masterRef("系列", 80),
-  store: masterRef("店舗", 80).and(z.object({ prefecture: z.string().trim().max(10).default("") })),
+  /**
+   * 店舗は任意。空（id=null・名称なし）は「店舗なし」で、系列だけで抽選を登録する（単独店舗の系列・オンラインストアなど）。ダミーの店舗は作らない。
+   * 自動収集の下書きでは、空の店舗は「読み取れていない」（要確認）として扱う。意図して店舗なしにしたときは noStore を立てる。
+   */
+  store: z.object({ id: z.uuid().nullable(), name: z.string().trim().max(80, "店舗は80文字以内で入力してください") }).and(z.object({ prefecture: z.string().trim().max(10).default("") })),
+  noStore: z.boolean().optional(),
   multiMode: z.enum(MULTI_MODES).default("single"),
   campaignId: z.uuid().nullable(),
   newCampaign: z
