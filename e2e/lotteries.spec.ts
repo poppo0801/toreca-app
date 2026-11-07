@@ -339,8 +339,27 @@ test.describe("レイアウト（Safe Area・固定メニュー）", () => {
     expect(css).toContain("env(safe-area-inset-top)");
 
     const vp = page.viewportSize()!;
-    if (vp.width >= 768) return; // 下部ナビはモバイルのみ
-    const nav = page.locator("nav[aria-label='メイン']").last();
+    if (vp.width >= 768) {
+      // PC（Stage 6P）: 左サイドメニューは無く、モバイルと同じ入れ物の最下段に下部メニューを置く。アイコン＋名称で全機能を並べ、コンテンツを隠さない
+      await expect(page.locator("aside")).toHaveCount(0);
+      await expect(page.getByTestId("bottom-nav")).toBeHidden();
+      const pc = page.getByTestId("bottom-nav-pc");
+      await expect(pc).toBeVisible();
+      const links = pc.getByRole("link");
+      expect(await links.count()).toBeGreaterThanOrEqual(5);
+      expect(await links.count()).toBeLessThanOrEqual(8);
+      for (const l of await links.all()) {
+        await expect(l.locator("svg")).toHaveCount(1);
+        expect(((await l.textContent()) ?? "").trim().length).toBeGreaterThan(0);
+      }
+      const box = (await pc.boundingBox())!;
+      expect(Math.abs(box.y + box.height - vp.height)).toBeLessThanOrEqual(1); // 画面の下端に接する
+      await page.evaluate(() => { const s = document.getElementById("app-scroll")!; s.scrollTo(0, s.scrollHeight); });
+      const lastCard = (await page.getByTestId("lottery-card").last().boundingBox())!;
+      expect(lastCard.y + lastCard.height).toBeLessThanOrEqual(box.y + 1);
+      return;
+    }
+    const nav = page.getByTestId("bottom-nav");
     // ナビの操作行（3.25rem）は余白を除いてコンパクト
     const row = (await nav.locator("> div").boundingBox())!;
     expect(row.height).toBeLessThanOrEqual(56);

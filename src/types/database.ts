@@ -4302,6 +4302,53 @@ export type Database = {
           },
         ]
       }
+      product_merge_history: {
+        Row: {
+          counts: Json
+          from_code: string
+          from_name: string
+          from_product_id: string
+          household_id: string
+          id: string
+          into_name: string
+          into_product_id: string
+          merged_at: string
+          merged_by_profile_id: string | null
+        }
+        Insert: {
+          counts?: Json
+          from_code?: string
+          from_name?: string
+          from_product_id: string
+          household_id: string
+          id?: string
+          into_name?: string
+          into_product_id: string
+          merged_at?: string
+          merged_by_profile_id?: string | null
+        }
+        Update: {
+          counts?: Json
+          from_code?: string
+          from_name?: string
+          from_product_id?: string
+          household_id?: string
+          id?: string
+          into_name?: string
+          into_product_id?: string
+          merged_at?: string
+          merged_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_merge_history_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_prices: {
         Row: {
           amount_yen: number
@@ -5966,6 +6013,18 @@ export type Database = {
         }
         Returns: undefined
       }
+      box_reclassify: {
+        Args: {
+          p_actor: string
+          p_from: string
+          p_lot: string
+          p_note?: string
+          p_op: string
+          p_qty: number
+          p_to: string
+        }
+        Returns: undefined
+      }
       box_revert_op: {
         Args: { p_actor: string; p_household: string; p_op: string }
         Returns: undefined
@@ -6115,6 +6174,7 @@ export type Database = {
         Returns: undefined
       }
       current_household_id: { Args: never; Returns: string }
+      delete_product: { Args: { p_id: string }; Returns: undefined }
       ensure_profile_accounts: { Args: never; Returns: number }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }
       get_home_address: { Args: never; Returns: string }
@@ -6141,6 +6201,15 @@ export type Database = {
         Returns: undefined
       }
       merge_chains: { Args: { p_from: string; p_into: string }; Returns: Json }
+      merge_products: {
+        Args: {
+          p_actor: string
+          p_execute?: boolean
+          p_from: string
+          p_into: string
+        }
+        Returns: Json
+      }
       next_management_no: {
         Args: { p_household: string; p_kind: string }
         Returns: string
@@ -6160,6 +6229,7 @@ export type Database = {
           scheduled: boolean
         }[]
       }
+      product_reference_counts: { Args: { p_id: string }; Returns: Json }
       purge_test_households: {
         Args: never
         Returns: {

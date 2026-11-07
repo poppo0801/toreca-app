@@ -186,7 +186,10 @@ test("店舗選択式の抽選: 応募済みにする操作で応募店舗を選
   await expect.poll(async () => (await a.from("applications").select("applied_store_name,applied_store_prefecture,state").eq("lottery_id", lot)).data?.[0]).toMatchObject({ applied_store_name: "6N三宮店", applied_store_prefecture: "兵庫県", state: "applied" });
 
   // 詳細: 「応募時に店舗選択」の表示と、応募店舗。変更できる
-  await card.click();
+  // 応募済みにしたカードは未応募の一覧から退場するため、読み込み直して「応募済み」から開く
+  await page.reload();
+  await page.getByRole("tab", { name: /応募済み/ }).click();
+  await page.getByTestId("lottery-card").filter({ hasText: "6N選択式商品" }).first().click();
   const sheet = page.getByTestId("lottery-detail-sheet");
   await expect(sheet.getByTestId("store-select-badge")).toHaveText("応募時に店舗選択");
   await expect(sheet.getByTestId("applied-store").first()).toContainText("6N三宮店");

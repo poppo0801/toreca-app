@@ -435,7 +435,7 @@ function Thumb({ r, url, size }: { r: CardSummaryRow; url: string | null; size: 
     <span className={cn("flex items-center justify-center overflow-hidden rounded-lg bg-muted", size)} data-testid="card-thumb">
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element -- 期限つきURLのサムネイル
-        <img src={url} alt={r.name} loading="lazy" decoding="async" className="h-full w-full object-contain" />
+        <img src={url} alt={r.name} loading="lazy" decoding="async" draggable={false} className="pointer-events-none h-full w-full select-none object-contain [-webkit-touch-callout:none] [-webkit-user-drag:none]" />
       ) : (
         <span className="line-clamp-4 px-1 text-center text-[10px] leading-tight text-muted-foreground">{r.name}</span>
       )}

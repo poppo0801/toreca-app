@@ -113,8 +113,9 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
       if (old) URL.revokeObjectURL(old);
       return URL.createObjectURL(small);
     });
-    // 画像があってAI読み取りがONのときだけ解析する。OFFなら手入力（解析しない）
-    if (!holdingOnly && aiOn) await analyze(small);
+    // 新規登録で、画像があってAI読み取りがONのときだけ解析する。OFFなら手入力（解析しない）。
+    // 登録済みのカードの画像変更は画像だけを差し替える（AIは呼ばず、カード名・番号・レアリティ・状態などは変えない）
+    if (!holdingOnly && !edit && aiOn) await analyze(small);
   };
 
   const pick = (list: FileList | null) => {

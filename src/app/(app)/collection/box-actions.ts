@@ -6,6 +6,7 @@ import {
   addBoxPrices,
   addManualBox,
   adjustBox,
+  reclassifyBox,
   importPurchaseItem,
   loadBoxCollection,
   loadProductStock,
@@ -63,6 +64,10 @@ export async function addManualBoxAction(input: ManualBoxInput, actor: string | 
 export async function adjustBoxAction(input: Parameters<typeof adjustBox>[1], actor: string | null) {
   const c = await ctx();
   return c ? done(await adjustBox(c.db, input, actor)) : NEED_LOGIN;
+}
+export async function reclassifyBoxAction(input: Parameters<typeof reclassifyBox>[1], actor: string | null) {
+  const c = await ctx();
+  return c ? done(await reclassifyBox(c.db, input, actor)) : NEED_LOGIN;
 }
 export async function updateBoxLotAction(input: Parameters<typeof updateBoxLot>[1], actor: string | null) {
   const c = await ctx();

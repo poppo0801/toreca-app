@@ -145,6 +145,6 @@ describe("BOXコレクションの表示", () => {
     expect(states.textContent).toContain("シュリンクあり");
     expect(states.textContent).toContain("2BOX");
     expect(states.textContent).toContain("8,500円"); // シュリンクなしは基準×85%
-    expect(document.querySelector('[data-testid="state-unknown"]')!.textContent).toContain("基準相場（状態未確認）");
+    expect(document.querySelector('[data-testid="state-unknown"]')!.textContent).toContain("基準相場（シュリンク状態を考慮しない）");
   });
 });

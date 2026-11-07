@@ -112,7 +112,7 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
                   一部のBOXだけの集計です: 購入時点の価格が未取得 {totals.purchaseMissingQty}BOX・買取相場が未取得 {totals.buybackMissingQty}BOX（未取得は0円とせず、計算に含めていません）。
                 </p>
               )}
-              {totals.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">状態未確認の{totals.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
+              {totals.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">シュリンク状態「－」の{totals.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
             </div>
           )}
         </section>

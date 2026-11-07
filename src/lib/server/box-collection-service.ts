@@ -170,6 +170,19 @@ export async function adjustBox(db: Db, raw: z.input<typeof adjustSchema>, actor
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
 
+const reclassifySchema = z.object({ lotId: uuid, from: state, to: state, quantity: z.number().int().min(1).max(9999), opId: uuid, note: z.string().trim().max(150).default("") });
+/**
+ * 登録済みBOXのシュリンク状態の変更（Stage 6P）。ロットの元の状態から数量を引いて新しい状態へ足す（履歴に2行を追記）。
+ * 所有数の合計・購入/受取/売却の履歴は変わらない。同じ操作IDの再送は何もしない。
+ */
+export async function reclassifyBox(db: Db, raw: z.input<typeof reclassifySchema>, actor: string | null): Promise<ServiceResult> {
+  const p = reclassifySchema.safeParse(raw);
+  if (!p.success) return fail(p.error.issues[0]?.message ?? "入力内容を確認してください");
+  if (p.data.from === p.data.to) return fail("変更前と変更後の状態が同じです");
+  const { error } = await any(db).rpc("box_reclassify", { p_lot: p.data.lotId, p_from: p.data.from, p_to: p.data.to, p_qty: p.data.quantity, p_actor: actor, p_op: p.data.opId, p_note: p.data.note });
+  return error ? fail(mapDbError(error)) : ok(undefined);
+}
+
 const lotSchema = z.object({
   lotId: uuid,
   acquiredOn: date.nullable(),

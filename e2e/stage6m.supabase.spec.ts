@@ -88,6 +88,7 @@ test("コレクション: カード／BOXの切替。BOXの手動登録・集計
   // 2商品目: 状態未確認1BOX
   await page.getByTestId("add-card").click();
   const f2 = page.getByTestId("box-form");
+  await f2.getByLabel("シュリンク状態").selectOption("unknown"); // 初期値は「シュリンクあり」（Stage 6P）
   await f2.getByLabel("BOXの商品").fill("6Mステラミラクル");
   await f2.getByRole("option", { name: /6Mステラミラクル/ }).click();
   await f2.getByLabel("実際の購入価格").fill("7000");

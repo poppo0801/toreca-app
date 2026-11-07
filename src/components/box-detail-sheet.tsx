@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { addBoxPricesAction, adjustBoxAction, openBoxesAction, revertBoxOpAction, updateBoxLotAction } from "@/app/(app)/collection/box-actions";
+import { addBoxPricesAction, adjustBoxAction, openBoxesAction, reclassifyBoxAction, revertBoxOpAction, updateBoxLotAction } from "@/app/(app)/collection/box-actions";
 import { useApp } from "@/components/app-provider";
 import { CountInput } from "@/components/count-input";
 import { ProductThumb } from "@/components/product-image";
@@ -28,7 +28,7 @@ import type { ShrinkState } from "@/types/domain";
 const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
 const yen = (n: number | null) => (n === null ? "未取得" : `${n.toLocaleString("ja-JP")}円`);
 const md = (d: string | null) => (d ? d.slice(5).replace("-", "/") : "—");
-const BASIS: Record<string, string> = { actual: "状態別の相場", adjusted: "基準相場×補正", base: "基準相場（状態未確認）", none: "相場未取得" };
+const BASIS: Record<string, string> = { actual: "状態別の相場", adjusted: "基準相場×補正", base: "基準相場（シュリンク状態を考慮しない）", none: "相場未取得" };
 const KIND: Record<BoxMovementRow["kind"], string> = { purchase: "購入", receive: "受取", sale: "売却", open: "開封", adjust: "調整" };
 const err = (e: string | null) =>
   e ? (
@@ -42,7 +42,7 @@ const parseYen = (s: string): number | null | undefined => {
   return /^\d{1,9}$/.test(t) ? Number(t) : undefined;
 };
 
-type Sub = "open" | "adjust" | "price" | { lot: BoxLotRow } | null;
+type Sub = "open" | "adjust" | "state" | "price" | { lot: BoxLotRow } | null;
 
 /**
  * BOXの詳細（下から開くパネル）。状態別の数量と評価、購入ロット（実購入価格・購入時点の市場相場）、在庫の履歴。
@@ -128,7 +128,7 @@ export function BoxDetailSheet({
                 {row.purchaseMissingQty > 0 && `（${row.purchaseMissingQty}BOXは価格未取得）`} ／ 買取 {yen(row.buybackTotal)}
                 {row.buybackMissingQty > 0 && `（${row.buybackMissingQty}BOXは相場未取得）`}。参考評価で、買取の保証額ではありません。
               </p>
-              {row.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">状態未確認の{row.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
+              {row.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">シュリンク状態「－」の{row.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
             </section>
 
             <div className="flex flex-wrap gap-2" data-testid="box-ops">
@@ -137,6 +137,9 @@ export function BoxDetailSheet({
               </Button>
               <Button size="sm" variant="outline" onClick={() => setSub("price")} data-testid="box-price-btn">
                 相場を入力
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setSub("state")} data-testid="box-state-btn">
+                シュリンク状態を変更
               </Button>
               <Button size="sm" variant="outline" onClick={() => setSub("adjust")} data-testid="box-adjust-btn">
                 数量を調整
@@ -205,6 +208,7 @@ export function BoxDetailSheet({
       </Sheet>
 
       {sub === "open" && <OpenDialog row={row} onClose={() => setSub(null)} onDone={changed} />}
+      {sub === "state" && <StateDialog row={row} onClose={() => setSub(null)} onDone={changed} />}
       {sub === "adjust" && <AdjustDialog row={row} onClose={() => setSub(null)} onDone={changed} />}
       {sub === "price" && <ProductPriceDialog row={row} latest={latest} onClose={() => setSub(null)} onDone={changed} />}
       {sub && typeof sub === "object" && <LotDialog lot={sub.lot} onClose={() => setSub(null)} onDone={changed} />}
@@ -348,6 +352,98 @@ function AdjustDialog({ row, onClose, onDone }: { row: BoxSummaryRow; onClose: (
       </div>
       {err(error)}
       <Actions busy={busy} onSave={() => void save()} label="調整する" disabled={!lotId} />
+    </Shell>
+  );
+}
+
+/**
+ * 登録済みBOXのシュリンク状態の変更（Stage 6P）。対象のロット（購入）を選び、元の状態から新しい状態へ移す数量を指定する。
+ * 所有数の合計は変わらず、購入・受取・売却の履歴は残る（変更は履歴に追記され、取り消せる）。評価額は新しい状態の相場で再計算される。
+ * 受取で記録した実際の状態と違う状態にするときは、その旨を表示し、メモを残せる。
+ */
+function StateDialog({ row, onClose, onDone }: { row: BoxSummaryRow; onClose: () => void; onDone: () => void }) {
+  const { profile } = useApp();
+  const [lotId, setLotId] = useState(row.lots[0]?.lot.id ?? "");
+  const lot = row.lots.find((l) => l.lot.id === lotId);
+  const fromChoices = BOX_STATES.filter((s) => (lot?.counts[s] ?? 0) > 0);
+  const [from, setFrom] = useState<ShrinkState>(fromChoices[0] ?? "unknown");
+  const [to, setTo] = useState<ShrinkState>("shrink");
+  const [qty, setQty] = useState(lot?.counts[from] ?? 1);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [opId] = useState(() => crypto.randomUUID());
+  const pickLot = (id: string) => {
+    setLotId(id);
+    const l = row.lots.find((x) => x.lot.id === id);
+    const f = BOX_STATES.find((s) => (l?.counts[s] ?? 0) > 0) ?? "unknown";
+    setFrom(f);
+    setQty(l?.counts[f] ?? 1);
+  };
+  const available = lot?.counts[from] ?? 0;
+  const fromReceipt = lot?.lot.sourceKind === "purchase" && from !== "unknown";
+
+  const save = async () => {
+    if (!lotId) return;
+    if (from === to) return setError("変更前と変更後の状態が同じです");
+    if (qty < 1 || qty > available) return setError(`このロットの${BOX_STATE_LABEL[from]}は${available}BOXです。1〜${available}の範囲で入力してください`);
+    setBusy(true);
+    const r = await reclassifyBoxAction({ lotId, from, to, quantity: qty, opId, note }, profile.id);
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    onDone();
+  };
+  return (
+    <Shell title="シュリンク状態を変更" desc="所有数は変わりません。購入・受取・売却の履歴は残り、この変更も履歴に記録されます。" testid="box-state-dialog" onClose={onClose}>
+      <div className="mt-2 space-y-2">
+        <label className="block text-sm">
+          対象のロット（購入）
+          <select aria-label="対象のロット" value={lotId} onChange={(e) => pickLot(e.target.value)} className={field}>
+            {row.lots.map(({ lot: l, counts }) => (
+              <option key={l.id} value={l.id}>
+                {[l.acquiredOn?.replaceAll("-", "/") ?? "購入日不明", l.storeLabel, `計${counts.shrink + counts.no_shrink + counts.unknown}BOX`].filter(Boolean).join(" ・ ")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="grid grid-cols-[1fr_1fr_4.5rem] gap-2">
+          <label className="text-sm">
+            変更前
+            <select aria-label="変更前の状態" value={from} onChange={(e) => { const f = e.target.value as ShrinkState; setFrom(f); setQty(lot?.counts[f] ?? 1); }} className={field}>
+              {fromChoices.map((s) => (
+                <option key={s} value={s}>
+                  {BOX_STATE_LABEL[s]}（{lot?.counts[s]}BOX）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            変更後
+            <select aria-label="変更後の状態" value={to} onChange={(e) => setTo(e.target.value as ShrinkState)} className={field}>
+              {BOX_STATES.map((s) => (
+                <option key={s} value={s}>
+                  {BOX_STATE_LABEL[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            数量
+            <CountInput aria-label="変更する数量" emptyValue={0} value={qty} onChange={setQty} className={`${field} text-center`} />
+          </label>
+        </div>
+        {fromReceipt && from !== to && (
+          <p className="text-[11px] text-warn" role="status" data-testid="box-state-receipt-note">
+            受取で記録した状態（{BOX_STATE_LABEL[from]}）と異なる状態にします。受取の記録はそのまま残り、この変更が履歴に追記されます。
+          </p>
+        )}
+        <label className="block text-sm">
+          メモ（任意）
+          <input type="text" aria-label="変更のメモ" maxLength={150} value={note} onChange={(e) => setNote(e.target.value)} className={field} />
+        </label>
+      </div>
+      {err(error)}
+      <Actions busy={busy} onSave={() => void save()} label="変更する" disabled={!lotId || fromChoices.length === 0} />
     </Shell>
   );
 }

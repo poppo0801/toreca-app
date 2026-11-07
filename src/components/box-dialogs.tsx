@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   addBoxPricesAction,
   addManualBoxAction,
@@ -8,6 +8,7 @@ import {
   saveBoxSettingsAction,
 } from "@/app/(app)/collection/box-actions";
 import { useApp } from "@/components/app-provider";
+import { ChainStoreFields, type ChainStoreValue } from "@/components/chain-store-fields";
 import { CountInput } from "@/components/count-input";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { ProductThumb } from "@/components/product-image";
@@ -63,11 +64,29 @@ const err = (e: string | null) =>
 export function BoxFormDialog({ onClose, onSaved, onSwitchKind }: { onClose: () => void; onSaved: () => void; /** 上部の「カード／BOX」でカードが選ばれた */ onSwitchKind?: () => void }) {
   const { data, profile } = useApp();
   const [product, setProduct] = useState<MasterRef>({ id: null, name: "" });
-  const [state, setState] = useState<ShrinkState>("unknown");
+  // 新規登録のシュリンク状態は「シュリンクあり」が初期値（既存BOXの状態は変えない）
+  const [state, setState] = useState<ShrinkState>("shrink");
   const [qty, setQty] = useState(1);
   const [date, setDate] = useState(() => jstToday(new Date()));
-  const [store, setStore] = useState("");
+  const [cs, setCs] = useState<ChainStoreValue>({ chain: { id: null, name: "" }, store: { id: null, name: "" } });
+  const store = [cs.chain.name.trim(), cs.store.name.trim()].filter(Boolean).join(" ").slice(0, 80);
+  /** 定価から自動入力した購入価格（利用者が書き換えた後は上書きしない） */
+  const autoPrice = useRef<string | null>(null);
   const [actual, setActual] = useState("");
+  const chooseProduct = (ref: MasterRef) => {
+    setProduct(ref);
+    if (!ref.id) return;
+    const list = data.products.find((p) => p.id === ref.id)?.listPriceBox;
+    const untouched = actual.trim() === "" || actual === autoPrice.current;
+    if (!untouched) return; // 手入力した購入価格は上書きしない
+    if (list != null && list > 0) {
+      autoPrice.current = String(list);
+      setActual(String(list));
+    } else if (actual === autoPrice.current) {
+      autoPrice.current = null;
+      setActual(""); // 定価が不明な商品に変えたときは、前の商品の定価を残さない
+    }
+  };
   const [market, setMarket] = useState("");
   const [marketSource, setMarketSource] = useState("");
   const [marketDate, setMarketDate] = useState("");
@@ -118,7 +137,7 @@ export function BoxFormDialog({ onClose, onSaved, onSwitchKind }: { onClose: () 
         <div className="space-y-2.5">
           <div className="text-sm">
             商品
-            <MasterCombobox label="BOXの商品" value={product} options={options} onChange={setProduct} />
+            <MasterCombobox label="BOXの商品" value={product} options={options} onChange={chooseProduct} />
             {hasPurchase && (
               <p className="mt-1 text-[11px] text-warn" role="status" data-testid="box-dup-hint">
                 この商品のBOXの購入記録があります。購入記録の分は自動で反映されるため、同じBOXを手動で登録すると二重になります（過去の購入記録は、一覧のメニュー「購入記録から取り込む」から）。
@@ -141,16 +160,11 @@ export function BoxFormDialog({ onClose, onSaved, onSwitchKind }: { onClose: () 
               <CountInput aria-label="BOXの数量" emptyValue={0} value={qty} onChange={setQty} className={`${field} text-center`} />
             </label>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-sm">
-              購入日
-              <input type="date" aria-label="購入日" value={date} onChange={(e) => setDate(e.target.value)} className={field} />
-            </label>
-            <label className="text-sm">
-              購入元（店舗名）
-              <input type="text" aria-label="購入元" maxLength={80} value={store} onChange={(e) => setStore(e.target.value)} className={field} />
-            </label>
-          </div>
+          <label className="block text-sm">
+            購入日
+            <input type="date" aria-label="購入日" value={date} onChange={(e) => setDate(e.target.value)} className={field} />
+          </label>
+          <ChainStoreFields value={cs} onChange={setCs} chainLabel="購入元の系列" storeLabel="購入元の店舗" />
           <label className="block text-sm">
             実際の購入価格（1BOXあたり・円）
             <input type="text" inputMode="numeric" aria-label="実際の購入価格" placeholder="不明は空欄" value={actual} onChange={(e) => setActual(e.target.value)} className={field} />
@@ -308,7 +322,7 @@ export function BoxMultipliersDialog({ value, onClose, onSaved }: { value: BoxSe
               <span>%</span>
             </li>
           ))}
-          <li className="text-[11px] text-muted-foreground">状態未確認は基準相場のまま表示し、未確認であることを示します。</li>
+          <li className="text-[11px] text-muted-foreground">シュリンク状態「－」は、あり・なしのどちらとも推測せず基準相場で評価します。</li>
         </ul>
         {err(error)}
         <div className="mt-3 flex items-center justify-between gap-2">

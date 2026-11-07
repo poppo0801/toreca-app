@@ -87,7 +87,25 @@ export function CollectionHub() {
   return (
     <div className="space-y-3" data-testid="collection-hub" data-tab={tab}>
       <div className={PAGE_HEADING_ROW}>
-        <PageHeading navId="collection">コレクション</PageHeading>
+        <div className="flex min-w-0 items-center gap-3">
+          <PageHeading navId="collection">コレクション</PageHeading>
+          {/* PC: クリックで切り替える（スマホは左右スワイプ。同じ状態 tab を使う） */}
+          <div role="tablist" aria-label="コレクションの種類" className="hidden items-center gap-0.5 rounded-lg border p-0.5 md:flex" data-testid="collection-switch">
+            {(["card", "box"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={tab === k}
+                onClick={() => setTab(k)}
+                className={cn("min-h-8 rounded-md px-3 text-sm font-medium transition-colors", tab === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+                data-testid={`collection-switch-${k}`}
+              >
+                {k === "card" ? "カード" : "BOX"}
+              </button>
+            ))}
+          </div>
+        </div>
         {/* 右上: [相場更新][登録]。表示中のページ（カード／BOX）に対して働く。スマホでも押しやすい高さ（40px） */}
         <div className="flex shrink-0 items-center gap-1.5">
           <Button size="sm" variant="outline" className="h-10 gap-1 px-2.5" onClick={() => (tab === "card" ? cardRef.current?.openMarket() : boxRef.current?.openPrices())} data-testid="market-update-open">

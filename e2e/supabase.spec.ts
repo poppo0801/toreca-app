@@ -641,6 +641,8 @@ test("商品マスター: 検索・絞り込み、セット構成の登録、画
   // 自分自身は構成に追加できない（候補に出ない）
   await expect(page.getByLabel("構成に追加する商品").locator("option", { hasText: "E2Eセット商品" })).toHaveCount(0);
   await page.keyboard.press("Escape");
+  // 「⋯」メニューは開いたままだと次の行の上に重なる（Stage 6P でメニューの項目が増えた）ので閉じる
+  await setRow.getByTestId("row-menu").evaluate((el) => ((el as HTMLDetailsElement).open = false));
 
   // 画像の表示調整: 画像を入れてから倍率・位置を保存でき、再読込後も保持される
   const compRow = page.getByTestId("master-row").filter({ hasText: "E2E構成商品" });

@@ -27,6 +27,8 @@ export function useShine(rarity: string, enabled: boolean, opts: { once?: boolea
   const move = (e: PointerEvent<HTMLElement>) => {
     const el = e.currentTarget;
     const { clientX, clientY } = e;
+    // 並び替え（長押しドラッグ）中は触れた状態にしない（終わったあとに残って光が止まるのを防ぐ）
+    if (typeof document !== "undefined" && document.querySelector("[data-dragging]")) return;
     if (raf.current) return;
     raf.current = requestAnimationFrame(() => {
       raf.current = 0;

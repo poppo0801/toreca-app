@@ -74,7 +74,7 @@ export function boxHintLabel(h: { hint: BoxShrinkHint; fromLottery: boolean }): 
 
 // ---------------------------------------------------------------- 受取時の実際の状態
 
-export const SHRINK_LABEL: Record<ShrinkState, string> = { shrink: "シュリンクあり", no_shrink: "シュリンクなし", unknown: "その他・不明" };
+export const SHRINK_LABEL: Record<ShrinkState, string> = { shrink: "シュリンクあり", no_shrink: "シュリンクなし", unknown: "－" };
 export const SHRINK_STATES: ShrinkState[] = ["shrink", "no_shrink", "unknown"];
 
 export interface ReceiptState {

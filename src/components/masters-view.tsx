@@ -7,6 +7,7 @@ import { useApp } from "@/components/app-provider";
 import { ChainLogo } from "@/components/chain-logo";
 import { ChainLogoButton } from "@/components/chain-logo-manager";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
+import { ProductDeleteButton, ProductMergeButton } from "@/components/product-merge-dialog";
 import { SetCompositionButton } from "@/components/product-set-dialog";
 import { normName } from "@/lib/norm";
 import { Button } from "@/components/ui/button";
@@ -417,6 +418,8 @@ function MasterItem({
           {entity.key === "products" && (
             <RowMenu label={`${title}のその他の操作`}>
               <SetCompositionButton productId={row.id} name={String(row.official_name)} />
+              <ProductMergeButton productId={row.id} name={String(row.official_name)} />
+              <ProductDeleteButton productId={row.id} name={String(row.official_name)} />
             </RowMenu>
           )}
           {/* 系列・店舗・商品の非表示は「表示管理」から一括で行う（個別のボタンは出さない） */}

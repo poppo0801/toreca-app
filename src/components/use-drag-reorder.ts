@@ -8,6 +8,9 @@ import { moveItem } from "@/lib/reorder";
  *  - 長押し（既定 380ms）でドラッグ開始。それまでに指が動いたら縦スクロールとして扱い、何もしない（誤操作防止）
  *  - ドラッグ中は指に追従し、重なったカードの位置へ並びが入れ替わる（入れ替わるカードは滑らかに移動）。画面の端ではスクロール領域を自動スクロール
  *  - 離すと確定（onDrop）。ドラッグ直後のクリック（詳細表示）は抑止する
+
+ * iPhone の長押し（Stage 6P）: 長押しの長さに上限は無い。iOS は長く押し続けると pointercancel を送って以後のポインターイベントを止めることがあるため、
+ * ドラッグ中（active）の pointercancel では解除せず、touchmove / touchend / touchcancel で追従と確定を続ける。指を離す（touchend/touchcancel/pointerup）まで解除しない。
  * 並び順そのものは呼び出し側が持ち、このフックは onMove(新しい並び) を呼ぶだけ（カードの情報は変更しない）。
  *
  * 入れ替えの判定は、カードの「あるべき位置（アニメーション中の見た目の移動を除いた位置）」で行う。
@@ -15,6 +18,27 @@ import { moveItem } from "@/lib/reorder";
  * 行ったり来たりを繰り返してしまう。さらに、入れ替えた直後の相手とは、指がそのカードの上から離れるまで再び入れ替えない。
  */
 export const LONG_PRESS_MS = 380;
+
+/**
+ * 並び替え後の光の演出の復旧（Stage 6P）。ドラッグ中・並び替え中は、指の下のカードが入れ替わっても pointerleave が届かず、
+ * 触れた状態（data-touch=1）が残って定期的な光が止まったままになる。残りを外し、画面外判定（data-offscreen）も位置から決め直す。
+ */
+export function resetShineState(root: HTMLElement | null): void {
+  if (!root || typeof window === "undefined") return;
+  const run = () => {
+    const box = document.getElementById("app-scroll")?.getBoundingClientRect();
+    root.querySelectorAll<HTMLElement>(".card-shine").forEach((el) => {
+      delete el.dataset.touch;
+      const r = el.getBoundingClientRect();
+      const vis = r.bottom > (box?.top ?? 0) && r.top < (box?.bottom ?? window.innerHeight) && r.right > 0 && r.left < window.innerWidth;
+      el.dataset.offscreen = vis ? "0" : "1";
+    });
+  };
+  run();
+  // 直後に届く保留中の更新や、移動のアニメーションの終わりのあとにも確実にやり直す
+  requestAnimationFrame(() => requestAnimationFrame(run));
+  window.setTimeout(run, 700);
+}
 const MOVE_TOLERANCE_PX = 10;
 const EDGE_PX = 72;
 
@@ -60,7 +84,7 @@ export function useDragReorder({
   const session = useRef<Session | null>(null);
   const rects = useRef<Map<string, DOMRect> | null>(null);
   const container = useRef<HTMLElement | null>(null);
-  const handlers = useRef<{ move: (e: PointerEvent) => void; up: (e: PointerEvent) => void; cancel: (e: PointerEvent) => void } | null>(null);
+  const handlers = useRef<{ move: (e: PointerEvent) => void; up: (e: PointerEvent) => void; cancel: (e: PointerEvent) => void; tmove: (e: TouchEvent) => void; tend: (e: TouchEvent) => void; tcancel: (e: TouchEvent) => void } | null>(null);
 
   useEffect(() => {
     idsRef.current = ids;
@@ -164,6 +188,9 @@ export function useDragReorder({
       window.removeEventListener("pointermove", h.move);
       window.removeEventListener("pointerup", h.up);
       window.removeEventListener("pointercancel", h.cancel);
+      window.removeEventListener("touchmove", h.tmove);
+      window.removeEventListener("touchend", h.tend);
+      window.removeEventListener("touchcancel", h.tcancel);
     }
     const wasActive = s.active;
     const el = s.el;
@@ -186,6 +213,8 @@ export function useDragReorder({
     }
     session.current = null;
     setDragId(null);
+    // 並び替えのあと、光の演出が止まったままのカードが出ないよう、触れた状態の残りを外して画面内判定をやり直す
+    resetShineState(container.current);
     if (wasActive) {
       // ドラッグ直後に出る click（詳細を開く）を一度だけ止める
       const stop = (e: Event) => {
@@ -201,8 +230,11 @@ export function useDragReorder({
   const onMoveEvent = (e: PointerEvent) => {
     const s = session.current;
     if (!s || e.pointerId !== s.pointerId) return;
-    s.x = e.clientX;
-    s.y = e.clientY;
+    moveTo(s, e.clientX, e.clientY);
+  };
+  const moveTo = (s: Session, x: number, y: number) => {
+    s.x = x;
+    s.y = y;
     if (!s.active) {
       if (Math.hypot(s.x - s.startX, s.y - s.startY) > MOVE_TOLERANCE_PX) finish(false); // 長押しの前に動いた = スクロール
       return;
@@ -232,14 +264,39 @@ export function useDragReorder({
           const r = el.getBoundingClientRect();
           const s: Session = { id, el, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, grabDX: e.clientX - r.left, grabDY: e.clientY - r.top, tx: 0, ty: 0, active: false, lock: null, timer: 0, raf: 0, pointerId: e.pointerId };
           session.current = s;
+          const touch = e.pointerType === "touch";
           handlers.current = {
             move: onMoveEvent,
             up: (ev) => session.current && ev.pointerId === session.current.pointerId && finish(true),
-            cancel: (ev) => session.current && ev.pointerId === session.current.pointerId && finish(false),
+            // iOS が長押しの途中で pointercancel を送っても、ドラッグ中なら解除しない（指を離すまで続ける。touchend/touchcancel で確定）
+            cancel: (ev) => {
+              const cur = session.current;
+              if (!cur || ev.pointerId !== cur.pointerId) return;
+              if (cur.active && touch) return;
+              finish(false);
+            },
+            tmove: (ev) => {
+              const cur = session.current;
+              if (!cur || ev.touches.length !== 1) return;
+              moveTo(cur, ev.touches[0].clientX, ev.touches[0].clientY);
+            },
+            tend: () => {
+              const cur = session.current;
+              if (cur) finish(cur.active);
+            },
+            tcancel: () => {
+              const cur = session.current;
+              if (cur) finish(cur.active);
+            },
           };
           window.addEventListener("pointermove", handlers.current.move);
           window.addEventListener("pointerup", handlers.current.up);
           window.addEventListener("pointercancel", handlers.current.cancel);
+          if (touch) {
+            window.addEventListener("touchmove", handlers.current.tmove, { passive: true });
+            window.addEventListener("touchend", handlers.current.tend);
+            window.addEventListener("touchcancel", handlers.current.tcancel);
+          }
           s.timer = window.setTimeout(() => {
             if (session.current !== s) return;
             s.active = true;
@@ -268,6 +325,9 @@ export function useDragReorder({
         window.removeEventListener("pointermove", h.move);
         window.removeEventListener("pointerup", h.up);
         window.removeEventListener("pointercancel", h.cancel);
+        window.removeEventListener("touchmove", h.tmove);
+        window.removeEventListener("touchend", h.tend);
+        window.removeEventListener("touchcancel", h.tcancel);
       }
       session.current = null;
     },

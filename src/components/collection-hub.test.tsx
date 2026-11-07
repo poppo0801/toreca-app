@@ -60,15 +60,25 @@ function swipe(from: [number, number], to: [number, number], target: Element = q
 }
 
 describe("コレクションのカード／BOX切替", () => {
-  it("初期はカード。切替ボタンは無く、スワイプだけで切り替わる", () => {
+  it("PC用の切替ボタンはCSSでスマホ幅では非表示（md未満）。スワイプでも切り替わり、同じ状態を使う", () => {
     expect(tab()).toBe("card");
     swipe([300, 200], [150, 205]);
     expect(tab()).toBe("box");
     expect(q("collection-tabs")).toBeNull();
-    expect(host.querySelector("[role=tab]")).toBeNull();
+    // PC用の切替（hidden md:flex）。スワイプで変えた状態が切替ボタンの選択表示にも反映される
+    expect(q("collection-switch")!.className).toContain("hidden");
+    expect(q("collection-switch-box").getAttribute("aria-selected")).toBe("true");
+    expect(q("collection-switch-card").getAttribute("aria-selected")).toBe("false");
     expect(q("collection-panel-card").getAttribute("aria-hidden")).toBe("true");
     expect(q("collection-panel-box").getAttribute("aria-hidden")).toBe("false");
     swipe([100, 200], [260, 190]);
+    expect(tab()).toBe("card");
+  });
+  it("PCの切替ボタンのクリックで、カード／BOXが切り替わる", () => {
+    act(() => q("collection-switch-box").click());
+    expect(tab()).toBe("box");
+    expect(q("collection-panel-box").getAttribute("aria-hidden")).toBe("false");
+    act(() => q("collection-switch-card").click());
     expect(tab()).toBe("card");
   });
   it("左右のスワイプで切り替わる。向きが合わないスワイプは何も起きない", () => {

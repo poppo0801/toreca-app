@@ -6,6 +6,7 @@ import { unitForProduct, unitOptions } from "@/lib/product-kind";
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { ChainStoreFields } from "@/components/chain-store-fields";
 import { FuelCalc } from "@/components/fuel-calc";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { Button } from "@/components/ui/button";
@@ -65,28 +66,6 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
   /** 受取時のシュリンク状態を記録中の明細（行の番号） */
   const [receiptItem, setReceiptItem] = useState<number | null>(null);
 
-  const chainOptions = useMemo(() => data.chains.filter((c) => !c.archived || c.id === chainRef.id).map((c) => ({ id: c.id, name: c.name })), [data.chains, chainRef.id]);
-  // 店舗は、選んだ系列に紐づく店舗から選ぶ（系列が未選択のときは全店舗）
-  const storeOptions = useMemo(
-    () => data.stores.filter((s) => (!s.archived || s.id === store?.id) && (!chainRef.id || s.chainId === chainRef.id)).map((s) => ({ id: s.id, name: s.name, hint: chainRef.id ? undefined : data.chains.find((c) => c.id === s.chainId)?.name })),
-    [data.stores, data.chains, store?.id, chainRef.id],
-  );
-  const changeChain = (next: MasterRef) => {
-    setChainRef(next);
-    // 選んでいた店舗が別の系列のものなら外す
-    if (storeRef.id) {
-      const st = data.stores.find((x) => x.id === storeRef.id);
-      if (st && next.id && st.chainId !== next.id) setStoreRef({ id: null, name: "" });
-    }
-  };
-  const changeStore = (next: MasterRef) => {
-    setStoreRef(next);
-    const st = next.id ? data.stores.find((x) => x.id === next.id) : undefined;
-    if (st && st.chainId !== chainRef.id) {
-      const c = data.chains.find((x) => x.id === st.chainId);
-      if (c) setChainRef({ id: c.id, name: c.name });
-    }
-  };
   /** ガソリン代モードの前の経費の内容（OFFに戻したときに復元する） */
   const [beforeFuel, setBeforeFuel] = useState<string | null>(null);
   const productOptions = useMemo(
@@ -195,16 +174,7 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
             </label>
             )}
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div className="text-sm">
-              {cat.master ? "系列" : "系列（任意）"}
-              <MasterCombobox label="系列" value={chainRef} options={chainOptions} onChange={changeChain} placeholder="系列を検索または入力" />
-            </div>
-            <div className="text-sm">
-              店舗（任意）
-              <MasterCombobox label="購入店舗" value={storeRef} options={storeOptions} onChange={changeStore} placeholder="店舗を検索または入力" />
-            </div>
-          </div>
+          <ChainStoreFields value={{ chain: chainRef, store: storeRef }} onChange={(v) => (setChainRef(v.chain), setStoreRef(v.store))} />
           {cat.id === "expense" && !fromLottery && (
             <FuelCalc
               chain={chainRef}

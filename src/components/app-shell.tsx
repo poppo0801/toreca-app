@@ -105,21 +105,12 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     // 画面全体を固定の入れ物にして（上下左右を表示領域に固定）、中のスクロール領域だけを動かす。下部メニューは固定配置ではなく入れ物の最下段なので、
     // 表示領域の測定・補正に頼らず、常に表示領域の下端に接する（docs/stage6j-viewport.md）
-    <div className="app-root flex flex-col md:flex-row" data-testid="app-root">
-      {/* PC: 左ナビ（利用できるすべての機能。ユーザー切替・通知・設定はヘッダー） */}
-      <aside className="hidden w-52 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-header p-4 md:flex">
-        <BrandLogo className="px-1 pt-1" />
-        <nav aria-label="メイン" className="flex flex-col gap-1">
-          {all.map((n) => link(n, "flex min-h-10 items-center gap-2 rounded-md px-3 text-sm", "bg-primary text-primary-foreground", "hover:bg-muted", "size-4"))}
-        </nav>
-      </aside>
-
+    <div className="app-root flex flex-col" data-testid="app-root">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* 上部ヘッダー: アプリ名(小)・通知ベル・現在のユーザー・設定（歯車）。ステータスバー/Dynamic Island分は Safe Area で確保 */}
         <header className="relative z-30 shrink-0 border-b-[3px] border-b-primary bg-header pt-safe px-safe shadow-card">
           <div className="flex h-10 items-center justify-between px-3">
-            <BrandLogo className="md:hidden" />
-            <span className="hidden md:block" />
+            <BrandLogo />
             <div className="flex items-center gap-0.5">
               <Link
                 href="/settings"
@@ -168,6 +159,12 @@ function Shell({ children }: { children: React.ReactNode }) {
                 その他
               </button>
             )}
+          </div>
+        </nav>
+        {/* PC: 同じ下部メニュー（入れ物の最下段）に、利用できるすべての機能をアイコン＋名称で並べる（左サイドメニューは廃止）。位置の仕組みはモバイルと共通 */}
+        <nav aria-label="メイン" data-testid="bottom-nav-pc" className="app-nav relative z-30 hidden shrink-0 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:block">
+          <div className="mx-auto flex h-14 max-w-5xl items-stretch justify-center px-3">
+            {all.map((n) => link(n, "flex min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs hover:bg-muted/60", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
           </div>
         </nav>
         <Sheet open={more} onOpenChange={setMore}>

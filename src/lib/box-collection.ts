@@ -4,12 +4,12 @@ import type { ShrinkState } from "@/types/domain";
  * BOXコレクションの集計・評価・並び替え（純関数）。DBには在庫の履歴・購入ロット・相場が入っており、ここでは表示用に計算する。
  *  - 購入（評価額）: 購入時点の市場相場があればそれ、なければ実購入価格。どちらも無いロットは「未取得」（0円とはみなさない）
  *  - 買取: 現在の参考買取相場。状態別の実際の相場があればそれを優先し、なければ基準相場×補正倍率（シュリンクあり100%・なし85%が初期値）。
- *    状態未確認は基準相場そのままで、未確認であることを示す。相場が無い商品は「未取得」で、取得済みとして表示しない
+ *    状態「－」は基準相場そのままで、未確認であることを示す。相場が無い商品は「未取得」で、取得済みとして表示しない
  *  - 参考評価であり、買取の保証額ではない
  */
 
 export const BOX_STATES: ShrinkState[] = ["shrink", "no_shrink", "unknown"];
-export const BOX_STATE_LABEL: Record<ShrinkState, string> = { shrink: "シュリンクあり", no_shrink: "シュリンクなし", unknown: "状態未確認" };
+export const BOX_STATE_LABEL: Record<ShrinkState, string> = { shrink: "シュリンクあり", no_shrink: "シュリンクなし", unknown: "－" };
 
 export interface BoxLotRow {
   id: string;
