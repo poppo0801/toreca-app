@@ -2232,6 +2232,7 @@ export type Database = {
           req_include: string[]
           schedule_enabled: boolean
           schedule_hour_jst: number
+          schedule_hour2_jst: number | null
           set_name: string
           status_mode: string
           track_upcoming: boolean
@@ -2265,6 +2266,7 @@ export type Database = {
           req_include?: string[]
           schedule_enabled?: boolean
           schedule_hour_jst?: number
+          schedule_hour2_jst?: number | null
           set_name?: string
           status_mode?: string
           track_upcoming?: boolean
@@ -2298,6 +2300,7 @@ export type Database = {
           req_include?: string[]
           schedule_enabled?: boolean
           schedule_hour_jst?: number
+          schedule_hour2_jst?: number | null
           set_name?: string
           status_mode?: string
           track_upcoming?: boolean

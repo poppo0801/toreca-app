@@ -216,7 +216,7 @@ describe("Stage 6L: スワイプの退出アニメーション（★と共通）
     const { api, handle } = exitApi();
     mountWithExit(api, "all");
     drag(120, 4);
-    expect(api.begin).toHaveBeenCalledWith("L4", { dir: "right", waitMs: 0, slid: true });
+    expect(api.begin).toHaveBeenCalledWith("L4", { dir: "right", waitMs: 160, slid: true });
     const inner = card().querySelector<HTMLElement>("[data-leaving]")!;
     expect(inner.style.transform).toBe("translateX(110%)");
     expect(inner.style.opacity).toBe(""); // フェードだけで消さない

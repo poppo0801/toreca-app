@@ -73,16 +73,22 @@ export function isNoteworthy(s: RunSummary): boolean {
   return s.autoRegistered > 0 || s.review > 0 || s.failed > 0;
 }
 
+/** 処理中のまま、この時間を過ぎた実行は最終結果として扱う（解析が止まっていても通知が永久に出ないことを防ぐ） */
+const PROCESSING_GIVE_UP_MS = 3 * 3600_000;
+
 /**
- * 起動時のポップアップの対象を選ぶ。確認済みの実行は出さない。完了した最新の注目すべき実行を1つ返す
- * （処理中の実行は、完了前の数字を最終結果として扱わないため「処理中」として別に返す）。
+ * 起動時のポップアップの対象を選ぶ。定期収集（6時・18時など）の「最新の1回」だけを対象にし、以前の結果は出さない。
+ *  - 最新の定期収集が確認済みなら何も出さない（アプリを開くたびには出ない。各回の収集後、最初に開いたときの1回だけ）
+ *  - 解析の途中（処理中）は途中経過を最終結果として出さず、完了を待つ（確認済みにもしない）
+ *  - 表示した・または表示する価値が無いと判断した実行と、それ以前の未確認の実行はまとめて確認済みにする
  */
-export function pickNotice(summaries: RunSummary[], acked: ReadonlySet<string>): { show: RunSummary | null; ackIds: string[] } {
-  const fresh = summaries.filter((s) => !acked.has(s.runId) && !s.legacy).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  const complete = fresh.find((s) => s.state === "complete" && isNoteworthy(s));
-  if (complete) return { show: complete, ackIds: fresh.filter((s) => s.state !== "processing" && s.startedAt <= complete.startedAt).map((s) => s.runId) };
-  const processing = fresh.find((s) => s.state === "processing" && (s.discovered > 0 || s.autoRegistered > 0));
-  return { show: processing ?? null, ackIds: [] };
+export function pickNotice(summaries: RunSummary[], acked: ReadonlySet<string>, nowMs: number = Date.now()): { show: RunSummary | null; ackIds: string[] } {
+  const cron = summaries.filter((s) => s.trigger === "cron" && !s.legacy).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const latest = cron[0];
+  if (!latest || acked.has(latest.runId)) return { show: null, ackIds: [] };
+  if (latest.state === "processing" && nowMs - new Date(latest.startedAt).getTime() < PROCESSING_GIVE_UP_MS) return { show: null, ackIds: [] };
+  const ackIds = cron.filter((s) => !acked.has(s.runId) && s.startedAt <= latest.startedAt).map((s) => s.runId);
+  return { show: isNoteworthy(latest) ? latest : null, ackIds };
 }
 
 export const triggerLabel = (t: "manual" | "cron") => (t === "cron" ? "定期" : "手動");

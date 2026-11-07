@@ -199,7 +199,7 @@ describe("Stage 6K: 長押しドラッグ並び替え", () => {
     ["a", "b", "c"].forEach((id, i) => rect(q(`[data-testid="it-${id}"]`)!, i * 40));
     const a = q('[data-testid="it-a"]')!;
     const b = q('[data-testid="it-b"]')!;
-    document.elementsFromPoint = () => [b];
+    void b;
     act(() => void a.dispatchEvent(ev("pointerdown", 10, 10)));
     await act(async () => void vi.advanceTimersByTime(80));
     expect(a.getAttribute("data-dragging")).toBe("1");
@@ -210,13 +210,42 @@ describe("Stage 6K: 長押しドラッグ並び替え", () => {
     expect(a.hasAttribute("data-dragging")).toBe(false);
     vi.useRealTimers();
   });
+  it("入れ替わった直後のカードが移動のアニメーション中で指の下に残っていても、すぐ入れ替え直さない（行ったり来たりしない）", async () => {
+    vi.useFakeTimers();
+    const onMoves: string[][] = [];
+    function Spy() {
+      const [ids, setIds] = useState(["a", "b", "c"]);
+      const drag = useDragReorder({ enabled: true, ids, onMove: (n) => { onMoves.push(n); setIds(n); }, onDrop: () => undefined, longPressMs: 50 });
+      return createElement("ul", { "data-testid": "list" }, ids.map((id) => createElement("li", { key: id, ...drag.bind(id), "data-testid": `it-${id}` }, id)));
+    }
+    // jsdom には DOMMatrix が無いので、translate(x, y) だけ読める代用品を使う
+    class FakeMatrix { m41 = 0; m42 = 0; constructor(t: string) { const m = /translate(([-d.]+)px,s*([-d.]+)px)/.exec(t); if (m) { this.m41 = Number(m[1]); this.m42 = Number(m[2]); } } }
+    (globalThis as { DOMMatrix?: unknown }).DOMMatrix = FakeMatrix;
+    mount(createElement(Spy));
+    const [a, b] = ["a", "b"].map((id) => q(`[data-testid="it-${id}"]`)!);
+    // b の見た目の位置はまだ指の下（top 40）。あるべき位置は top 0（translate(0px, 40px) 分だけずれている）
+    ["a", "b", "c"].forEach((id, i) => rect(q(`[data-testid="it-${id}"]`)!, i * 40));
+    act(() => void a.dispatchEvent(ev("pointerdown", 10, 10)));
+    await act(async () => void vi.advanceTimersByTime(80));
+    act(() => void window.dispatchEvent(ev("pointermove", 12, 55))); // b の上へ → 入れ替わる
+    expect(onMoves).toHaveLength(1);
+    // 入れ替え後: b のあるべき位置は top 0。見た目は translate で top 40 に残っている
+    rect(b, 40);
+    b.style.transform = "translate(0px, 40px)";
+    rect(a, 0);
+    act(() => void window.dispatchEvent(ev("pointermove", 12, 56)));
+    act(() => void window.dispatchEvent(ev("pointermove", 12, 57)));
+    expect(onMoves).toHaveLength(1); // 見た目の位置の b に反応して入れ替え直さない
+    act(() => void window.dispatchEvent(ev("pointerup", 12, 57)));
+    delete (globalThis as { DOMMatrix?: unknown }).DOMMatrix;
+    vi.useRealTimers();
+  });
   it("ドラッグ直後のクリック（詳細表示）は止める", async () => {
     vi.useFakeTimers();
     mount(createElement(List, { onDrop: () => undefined }));
     const a = q('[data-testid="it-a"]')!;
     const click = vi.fn();
     a.addEventListener("click", click);
-    document.elementsFromPoint = () => [];
     act(() => void a.dispatchEvent(ev("pointerdown", 10, 10)));
     await act(async () => void vi.advanceTimersByTime(80));
     act(() => void window.dispatchEvent(ev("pointerup", 10, 10)));

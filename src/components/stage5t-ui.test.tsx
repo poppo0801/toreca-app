@@ -62,51 +62,22 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("要手動確認のポップアップ（取得不可の赤い警告）", () => {
-  it("取得不可があれば最上部に赤い警告。理由・締切・元情報を並べ、通常の件数表より上に置く", async () => {
+describe("起動時ポップアップに要手動確認は出さない", () => {
+  it("取得不可があっても、起動時のポップアップには出さない（通知・設定の自動収集で確認する）。収集結果だけを出す", async () => {
     manual = items;
     notice = { runId: "r1", trigger: "cron", startedAt: "2026-11-04T21:00:00Z", state: "complete", legacy: false, discovered: 5, analyzed: 5, autoRegistered: 2, review: 1, failed: 0, excluded: 0, duplicates: 0, waiting: 0, costJpy: 0 };
     await act(async () => root.render(createElement(CollectionResultNotice)));
     await flush();
-    const dialog = q("run-notice")!;
-    expect(q("manual-banner")!.textContent).toBe("要手動確認：2件");
-    expect(q("manual-banner")!.getAttribute("role")).toBe("alert");
-    // 赤い警告は、解析件数・登録件数（run-counts）より前にある
-    const all = [...dialog.querySelectorAll("[data-testid]")].map((e) => e.getAttribute("data-testid"));
-    expect(all.indexOf("manual-banner")).toBeLessThan(all.indexOf("run-counts"));
-    expect(qa("manual-item")).toHaveLength(2);
-    expect(dialog.textContent).toContain("系列A / 店舗A");
-    expect(dialog.textContent).toContain("公式ページ取得不可");
-    expect(q("manual-source")!.getAttribute("href")).toBe("https://shop.example.invalid/a");
+    expect(q("run-notice")).not.toBeNull();
+    expect(q("manual-banner")).toBeNull();
+    expect(qa("manual-item")).toHaveLength(0);
     expect(q("run-notice-confirm")).not.toBeNull(); // 確認する（要手動確認の一覧へ）
   });
-  it("収集結果が無くても、未対応の取得不可があれば知らせる。閉じても対応済みにはならない（通知・設定に残る）", async () => {
+  it("収集結果が無ければ、取得不可があってもポップアップは出ない", async () => {
     manual = items;
     await act(async () => root.render(createElement(CollectionResultNotice)));
     await flush();
-    expect(q("manual-banner")).not.toBeNull();
-    expect(q("run-counts")).toBeNull();
-    await act(async () => q("run-notice-close")!.click());
     expect(q("run-notice")).toBeNull();
-  });
-  it("同じ案件の集合では、同じ起動中に繰り返し表示しない", async () => {
-    manual = items;
-    await act(async () => root.render(createElement(CollectionResultNotice)));
-    await flush();
-    await act(async () => q("run-notice-close")!.click());
-    act(() => root.unmount());
-    root = createRoot(host);
-    await act(async () => root.render(createElement(CollectionResultNotice)));
-    await flush();
-    expect(q("run-notice")).toBeNull();
-  });
-  it("取得不可が無ければ、赤い警告は出ない", async () => {
-    manual = [];
-    notice = { runId: "r1", trigger: "cron", startedAt: "2026-11-04T21:00:00Z", state: "complete", legacy: false, discovered: 5, analyzed: 5, autoRegistered: 2, review: 0, failed: 0, excluded: 0, duplicates: 0, waiting: 0, costJpy: 0 };
-    await act(async () => root.render(createElement(CollectionResultNotice)));
-    await flush();
-    expect(q("manual-banner")).toBeNull();
-    expect(q("run-notice")).not.toBeNull();
   });
 });
 

@@ -2045,8 +2045,9 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   // 初期条件: 6都府県・通販あり・現在応募可能・定期実行とX APIは無効・予算0円
   await expect(page.getByTestId("pref-chips")).toContainText("兵庫県");
   await expect(page.getByTestId("pref-chips")).toContainText("神奈川県");
-  await expect(page.getByTestId("pref-chips").getByRole("button", { pressed: true })).toHaveCount(6);
+  await expect(page.getByTestId("pref-chips").getByRole("button", { pressed: true })).toHaveCount(7); // 6都府県 + 「関西＋関東6都府県」のプリセット（選択中）
   await expect(page.getByTestId("schedule-enabled")).not.toBeChecked();
+  await expect(page.getByTestId("schedule-hour2")).toHaveValue(""); // 2回目の実行時刻は未設定（1日1回）。選べば1日2回
   await expect(page.getByTestId("x-enabled")).not.toBeChecked();
   await expect(page.getByLabel("X APIの月額予算(円)")).toHaveValue("0");
   await expect(page.getByTestId("x-state")).toContainText("APIキー（X_BEARER_TOKEN）");

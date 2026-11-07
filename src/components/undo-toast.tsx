@@ -1,11 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 /**
  * 画面上部に浮かせる短い通知（Undo付き）。スワイプ操作の結果を知らせ、約3秒のあいだ「元に戻す」を押せる。
  *  ・position: fixed なので、見出しやカードを押し下げない。ノッチ・Dynamic Island・セーフエリアの内側に出す。
+ *  ・body 直下に描画する。スクロール領域（main。iOS では -webkit-overflow-scrolling で独立した重なりの階層になる）の中に置くと、固定ヘッダーの裏に隠れて下の端しか見えなくなる。
  *  ・下部の細い進捗バーが、残り時間に合わせて左から右へ伸びる（アニメーションは CSS。動きを減らす設定でもバーは出す）。
  *  ・新しい操作が来たら通知を差し替える。「元に戻す」は常に今表示している操作だけを取り消す（取り違えない）。
  *  ・元に戻すが失敗したら、失敗を知らせる通知に切り替える（成功したように見せない）。
@@ -42,6 +44,11 @@ export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { chi
   const [toast, setToast] = useState<ToastState | null>(null);
   const seq = useRef(0);
   const timer = useRef<number | null>(null);
+  const host = useSyncExternalStore(
+    () => () => undefined,
+    () => document.body,
+    () => null,
+  );
 
   const clear = useCallback(() => {
     if (timer.current !== null) window.clearTimeout(timer.current);
@@ -84,7 +91,7 @@ export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { chi
   return (
     <Ctx.Provider value={api}>
       {children}
-      {toast && (
+      {toast && host && createPortal(
         <div
           // 画面上部に浮かせる。ノッチ・Dynamic Island・セーフエリアの内側（上端 + safe-area-inset-top）に置く
           className="pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-3"
@@ -117,7 +124,8 @@ export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { chi
               <span className="undo-progress block h-full origin-left bg-primary" style={{ animationDuration: `${toast.undo ? windowMs : Math.max(windowMs, 3500)}ms` }} data-testid="undo-progress" />
             </span>
           </div>
-        </div>
+        </div>,
+        host,
       )}
     </Ctx.Provider>
   );

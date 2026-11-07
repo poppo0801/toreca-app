@@ -352,13 +352,12 @@ export function LotteryCard({
                   </span>
                 )}
               </div>
-              {(event === "postponed" || notice || lottery.isNew || !managed || skipSource || skipException) && (
+              {(event === "postponed" || notice || lottery.isNew || skipSource || skipException) && (
                 <span className="flex flex-wrap gap-1">
                   {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}
                   {event === "postponed" && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
                   {notice === "unconfirmed" && !appliedTab && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
                   {notice === "in_period" && !appliedTab && <Chip className="text-info">発表期間中</Chip>}
-                  {!managed && <Chip className="text-muted-foreground">要チェック外</Chip>}
                   {skipSource && <Chip className="text-muted-foreground">{{ lottery: "今回スルー", store: "店舗スルー中", chain: "系列スルー中" }[skipSource]}</Chip>}
                   {!skipSource && skipException && <Chip className="text-muted-foreground">スルー例外</Chip>}
                 </span>

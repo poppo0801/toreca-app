@@ -252,7 +252,9 @@ test.describe("Stage 6J 画面", () => {
     const mine = profs!.find((p) => p.label === "A")!;
     const other = profs!.find((p) => p.label === "B")!;
     await seed(hid, 2, "manual", "n");
-    await a.from("collection_runs").insert({ household_id: hid, trigger: "cron", status: "done", started_at: new Date().toISOString(), finished_at: new Date().toISOString(), new_count: 2 } as never);
+    // 起動時に出るのは定期収集の最新の1回の結果（その収集で発見した候補の集計）。要手動確認の案件があっても、ポップアップには出さない
+    const runRow = await a.from("collection_runs").insert({ household_id: hid, trigger: "cron", phase: "collect", status: "done", started_at: new Date().toISOString(), finished_at: new Date().toISOString(), new_count: 2 } as never).select("id").single();
+    await a.from("collection_candidates").insert({ household_id: hid, dedupe_key: "https://n6j.example.invalid/run", source_url: "https://n6j.example.invalid/run", title: "e2e-run", status: "pending", job_state: "review", reasons: ["x"], discovered_run_id: runRow.data!.id } as never);
     const settings = async (id: string | null) => {
       const cur = await a.from("collection_settings").select("id").eq("household_id", hid).limit(1).maybeSingle();
       if (cur.data) await a.from("collection_settings").update({ result_notice_profile_id: id } as never).eq("id", cur.data.id);

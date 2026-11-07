@@ -48,6 +48,8 @@ const settingsInput = z.object({
   autoRegister: z.boolean(),
   scheduleEnabled: z.boolean(),
   scheduleHourJst: z.number().int().min(0).max(23),
+  /** 2回目の実行時刻（日本時間）。null=1日1回 */
+  scheduleHour2Jst: z.number().int().min(0).max(23).nullable().default(null),
   xEnabled: z.boolean(),
   xMonthlyBudgetJpy: z.number().int().min(0).max(1_000_000),
   xMaxPostsPerRun: z.number().int().min(1).max(100),

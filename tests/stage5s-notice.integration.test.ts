@@ -70,7 +70,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 5S-B: 収集結果の通知", () => {
     r = await loadRunNotices(u1, userId);
     const b2 = r.summaries.find((s) => s.runId === runB)!;
     expect(b2).toMatchObject({ state: "complete", autoRegistered: 1, waiting: 0, discovered: 2 });
-    expect(r.notice?.runId).toBe(runB); // より新しい完了済みの注目すべき収集
+    expect(r.notice?.runId).toBe(runA); // 通知するのは定期収集の最新の1回だけ。手動収集は（完了していても）通知しない
   });
 
   it("確認済みにすると繰り返し表示しない（自分の分だけ）。履歴は残る", async () => {
@@ -81,7 +81,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 5S-B: 収集結果の通知", () => {
     expect(after.summaries.length).toBeGreaterThanOrEqual(2); // 履歴は消えない
     // 別のユーザー（確認していない人）には表示される。確認記録は他人の名義では作れない
     const other = await loadRunNotices(u1, "00000000-0000-4000-8000-000000000000");
-    expect(other.notice?.runId).toBe(runB);
+    expect(other.notice?.runId).toBe(runA);
     const forged = await u1.from("collection_run_acks").insert({ run_id: runA, user_id: "00000000-0000-4000-8000-000000000000", household_id: hid } as never);
     expect(forged.error).not.toBeNull();
   });

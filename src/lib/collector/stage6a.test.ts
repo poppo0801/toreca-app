@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueSources, runResultOf, slotDateOf, type AttemptLite } from "@/lib/collector/schedule";
+import { currentSlot, dueSources, nextSlotAt, normalizeHours, runResultOf, slotDateOf, type AttemptLite } from "@/lib/collector/schedule";
 import { listInfoFromQueued, listInfoOf, rebuildQueued } from "@/lib/collector/queued";
 import { healthWarnings, type HealthInput } from "@/lib/collector/queue";
 import { monthBudget } from "@/lib/server/ai-budget";
@@ -32,7 +32,7 @@ describe("Stage 6A B1: 定期収集の判定（手動収集と独立）", () => 
     expect(dueSources(at("2026-11-04T21:31:00Z"), 6, ["a", "b"], attempts)).toMatchObject({ due: ["b"], done: ["a"] });
   });
   it("再試行には上限がある（無限に取得し続けない）", () => {
-    const many = Array.from({ length: 6 }, (_, i) => att("b", "error", `2026-11-04T2${i}:00:00Z`.replace("T26", "T21")));
+    const many = Array.from({ length: 6 }, (_, i) => att("b", "error", `2026-11-04T21:0${i}:00Z`));
     expect(dueSources(at("2026-11-05T03:00:00Z"), 6, ["b"], many).exhausted).toEqual(["b"]);
   });
   it("設定で停止中・予算上限は待っても変わらないので、そのスロットでは完了扱い（再試行しない）", () => {
@@ -43,6 +43,30 @@ describe("Stage 6A B1: 定期収集の判定（手動収集と独立）", () => 
   it("前日のスロットのまま6:00を迎えると、新しいスロットとして全収集元が対象になる", () => {
     const yesterday = [att("a", "ok", "2026-11-03T21:00:00Z", { slotDate: "2026-11-04" })];
     expect(dueSources(at("2026-11-04T21:00:30Z"), 6, ["a"], yesterday).due).toEqual(["a"]);
+  });
+  it("1日2回（6時と18時）: スロットは直近の実行時刻から。18時のスロットは6時の成功に影響されず、全収集元が対象になる", () => {
+    const am = [att("a", "ok", "2026-11-04T21:00:05Z"), att("b", "error", "2026-11-04T21:00:06Z")]; // 6:00 JST の実績
+    expect(slotDateOf(at("2026-11-05T08:59:00Z"), [6, 18])).toBe("2026-11-05"); // 17:59 JST
+    const pm = dueSources(at("2026-11-05T09:00:30Z"), [6, 18], ["a", "b"], am); // 18:00 JST
+    expect(pm.slotDate).toBe("2026-11-05");
+    expect(pm.slotStart.toISOString()).toBe("2026-11-05T09:00:00.000Z");
+    expect(pm.due).toEqual(["a", "b"]);
+    // 18時のスロットで a が成功したら、そのスロットでは再取得しない。同じ日の6時の記録は数えない
+    const done = dueSources(at("2026-11-05T09:30:00Z"), [6, 18], ["a", "b"], [...am, att("a", "ok", "2026-11-05T09:00:10Z")]);
+    expect(done.done).toEqual(["a"]);
+    expect(done.due).toEqual(["b"]);
+  });
+  it("1日2回: 6時前は前日18時のスロットのまま。18時の前は6時のスロット。時刻は順不同・重複・不正値を整える", () => {
+    expect(currentSlot(at("2026-11-04T20:00:00Z"), [18, 6, 6]).hour).toBe(18); // 5:00 JST
+    expect(currentSlot(at("2026-11-04T20:00:00Z"), [18, 6]).date).toBe("2026-11-04");
+    expect(currentSlot(at("2026-11-05T03:00:00Z"), [6, 18]).hour).toBe(6); // 12:00 JST
+    expect(normalizeHours([18, 6, 6, null, 24, 1.5])).toEqual([6, 18]);
+    expect(currentSlot(at("2026-11-05T03:00:00Z"), []).hour).toBe(6); // 未設定は既定の6時
+  });
+  it("次回の予定は、次の実行時刻（6時・18時のうち近い方）", () => {
+    expect(nextSlotAt(at("2026-11-05T03:00:00Z"), [6, 18]).toISOString()).toBe("2026-11-05T09:00:00.000Z"); // 12:00 → 18:00
+    expect(nextSlotAt(at("2026-11-05T10:00:00Z"), [6, 18]).toISOString()).toBe("2026-11-05T21:00:00.000Z"); // 19:00 → 翌6:00
+    expect(nextSlotAt(at("2026-11-05T10:00:00Z"), 6).toISOString()).toBe("2026-11-05T21:00:00.000Z");
   });
   it("結果: すべて成功=complete／一部失敗=partial／すべて失敗=failed／1件も取得していない=empty（正常完了にしない）", () => {
     expect(runResultOf(["ok", "ok"])).toBe("complete");

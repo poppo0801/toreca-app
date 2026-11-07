@@ -52,12 +52,26 @@ describe("起動時ポップアップの対象", () => {
     expect(p.show?.runId).toBe("new");
     expect(p.ackIds.sort()).toEqual(["new", "old"]);
   });
-  it("処理中の実行は「処理中」として返し、確認済みにはしない。旧形式は出さない", () => {
+  it("最新の定期収集の解析が途中なら出さず、確認済みにもしない（完了を待つ）。3時間を過ぎたら最終結果として扱う", () => {
     const proc = sum("p", "2026-11-04T21:00:00Z", [cand({ status: "auto_registered", job_state: "completed" }), cand({ job_state: "pending" })]);
-    const p = pickNotice([proc], new Set());
-    expect(p.show?.state).toBe("processing");
-    expect(p.ackIds).toEqual([]);
+    const t0 = Date.parse("2026-11-04T21:30:00Z");
+    expect(pickNotice([proc], new Set(), t0)).toEqual({ show: null, ackIds: [] });
+    expect(pickNotice([proc], new Set(), t0 + 3 * 3600_000).show?.runId).toBe("p");
+  });
+  it("対象は定期収集の最新の1回だけ。以前の結果・手動収集・旧形式は出さず、以前の未確認は確認済みにする", () => {
+    const old = sum("old", "2026-11-04T09:00:00Z", [cand()]);
+    const manual = sum("man", "2026-11-05T05:00:00Z", [cand()], { trigger: "manual" });
+    const latest = sum("new", "2026-11-04T21:00:00Z", [cand({ status: "excluded", job_state: "skipped" })]);
+    const p = pickNotice([old, manual, latest], new Set());
+    expect(p.show).toBeNull(); // 最新が注目すべき結果でなければ、古い結果にさかのぼって出さない
+    expect(p.ackIds.sort()).toEqual(["new", "old"]);
     expect(pickNotice([summarizeRun(run({ new_count: 5, registered_count: 1 }), [])], new Set()).show).toBeNull();
+  });
+  it("6時と18時の収集: 18時の収集後は、6時の結果が確認済みでも18時の結果を1回出す。確認済みなら出さない", () => {
+    const am = sum("am", "2026-11-06T21:00:00Z", [cand()]);
+    const pm = sum("pm", "2026-11-07T09:00:00Z", [cand()]);
+    expect(pickNotice([am, pm], new Set(["am"])).show?.runId).toBe("pm");
+    expect(pickNotice([am, pm], new Set(["am", "pm"])).show).toBeNull();
   });
   it("タイトルは日本時間の日時と実行の種類", () => {
     expect(runTitle({ trigger: "cron", startedAt: "2026-11-04T21:00:00Z" })).toBe("11/5 6:00の定期収集");

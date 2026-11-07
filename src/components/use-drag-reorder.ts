@@ -9,6 +9,10 @@ import { moveItem } from "@/lib/reorder";
  *  - ドラッグ中は指に追従し、重なったカードの位置へ並びが入れ替わる（入れ替わるカードは滑らかに移動）。画面の端ではスクロール領域を自動スクロール
  *  - 離すと確定（onDrop）。ドラッグ直後のクリック（詳細表示）は抑止する
  * 並び順そのものは呼び出し側が持ち、このフックは onMove(新しい並び) を呼ぶだけ（カードの情報は変更しない）。
+ *
+ * 入れ替えの判定は、カードの「あるべき位置（アニメーション中の見た目の移動を除いた位置）」で行う。
+ * 見た目の位置で判定すると、入れ替わった直後のカードがゆっくり移動している間も指の下に残り、すぐ元へ入れ替え直して
+ * 行ったり来たりを繰り返してしまう。さらに、入れ替えた直後の相手とは、指がそのカードの上から離れるまで再び入れ替えない。
  */
 export const LONG_PRESS_MS = 380;
 const MOVE_TOLERANCE_PX = 10;
@@ -26,6 +30,8 @@ interface Session {
   tx: number;
   ty: number;
   active: boolean;
+  /** 直前に入れ替えた相手。指がその上にある間は入れ替えを繰り返さない */
+  lock: string | null;
   timer: number;
   raf: number;
   pointerId: number;
@@ -105,10 +111,32 @@ export function useDragReorder({
     s.el.style.transform = `translate(${s.tx}px, ${s.ty}px) scale(1.04)`;
   };
 
+  /** カードのあるべき位置（移動のアニメーション中の translate を除く） */
+  const layoutRect = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    let dx = 0;
+    let dy = 0;
+    const t = typeof getComputedStyle === "function" ? getComputedStyle(el).transform : "";
+    if (t && t !== "none" && typeof DOMMatrix !== "undefined") {
+      try {
+        const m = new DOMMatrix(t);
+        dx = m.m41;
+        dy = m.m42;
+      } catch {
+        /* 読めなければ見た目の位置のまま */
+      }
+    }
+    return { left: r.left - dx, right: r.right - dx, top: r.top - dy, bottom: r.bottom - dy };
+  };
+
   const hit = (s: Session): string | null => {
-    for (const e of document.elementsFromPoint(s.x, s.y)) {
-      const t = (e as HTMLElement).closest?.("[data-drag-id]") as HTMLElement | null;
-      if (t && t.dataset.dragId !== s.id) return t.dataset.dragId as string;
+    const root = container.current;
+    if (!root) return null;
+    for (const el of root.querySelectorAll<HTMLElement>("[data-drag-id]")) {
+      const id = el.dataset.dragId as string;
+      if (id === s.id) continue;
+      const r = layoutRect(el);
+      if (s.x >= r.left && s.x <= r.right && s.y >= r.top && s.y <= r.bottom) return id;
     }
     return null;
   };
@@ -180,13 +208,15 @@ export function useDragReorder({
       return;
     }
     const over = hit(s);
-    if (!over) return;
+    if (over !== s.lock) s.lock = null; // 指が相手の上から離れたら、また入れ替えられる
+    if (!over || over === s.lock) return;
     const cur = idsRef.current;
     const next = moveItem(cur, s.id, cur.indexOf(over));
     if (next.join("|") === cur.join("|")) return;
     const m = new Map<string, DOMRect>();
     container.current?.querySelectorAll<HTMLElement>("[data-drag-id]").forEach((el) => m.set(el.dataset.dragId as string, el.getBoundingClientRect()));
     rects.current = m;
+    s.lock = over;
     idsRef.current = next;
     cb.current.onMove(next);
   };
@@ -200,7 +230,7 @@ export function useDragReorder({
           const el = e.currentTarget;
           container.current = el.parentElement;
           const r = el.getBoundingClientRect();
-          const s: Session = { id, el, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, grabDX: e.clientX - r.left, grabDY: e.clientY - r.top, tx: 0, ty: 0, active: false, timer: 0, raf: 0, pointerId: e.pointerId };
+          const s: Session = { id, el, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, grabDX: e.clientX - r.left, grabDY: e.clientY - r.top, tx: 0, ty: 0, active: false, lock: null, timer: 0, raf: 0, pointerId: e.pointerId };
           session.current = s;
           handlers.current = {
             move: onMoveEvent,

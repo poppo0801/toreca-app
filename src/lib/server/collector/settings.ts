@@ -16,6 +16,7 @@ export interface SettingsPayload {
   autoRegister: boolean;
   scheduleEnabled: boolean;
   scheduleHourJst: number;
+  scheduleHour2Jst?: number | null;
   xEnabled: boolean;
   xMonthlyBudgetJpy: number;
   xMaxPostsPerRun: number;
@@ -35,7 +36,7 @@ export async function saveCollectionSettings(db: Db, householdId: string, s: Set
     .update({
       prefectures: s.prefectures, include_online: s.includeOnline, max_distance_km: s.maxDistanceKm, apply_methods: s.applyMethods, receive_methods: s.receiveMethods,
       req_include: s.reqInclude, req_exclude: s.reqExclude, product_mode: s.productMode, product_ids: s.productIds, status_mode: s.statusMode, track_upcoming: s.trackUpcoming, auto_register: s.autoRegister,
-      schedule_enabled: s.scheduleEnabled, schedule_hour_jst: s.scheduleHourJst, x_enabled: s.xEnabled, x_monthly_budget_jpy: s.xMonthlyBudgetJpy, x_max_posts_per_run: s.xMaxPostsPerRun,
+      schedule_enabled: s.scheduleEnabled, schedule_hour_jst: s.scheduleHourJst, schedule_hour2_jst: s.scheduleHour2Jst === s.scheduleHourJst ? null : (s.scheduleHour2Jst ?? null), x_enabled: s.xEnabled, x_monthly_budget_jpy: s.xMonthlyBudgetJpy, x_max_posts_per_run: s.xMaxPostsPerRun,
       max_ai_per_run: s.maxAiPerRun, worker_enabled: s.workerEnabled, worker_batch: s.workerBatch, recheck_hours: s.recheckHours, updated_at: new Date().toISOString(),
     })
     .eq("household_id", householdId)

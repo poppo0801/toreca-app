@@ -163,7 +163,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           // 今のタブから外れる操作: 指を離した位置から同じ向きへカードが画面外まで滑り、保存を待たずに下のカードが詰まる（★の退出と共通）。
           // 保存に失敗したら、カードを元の位置へ戻す。外れなかった場合（絞り込みで残るなど）も戻る
           const leaves = leavesTabOnCommit(plan.op, tab);
-          const handle = leaves ? exit?.begin(lottery.id, { dir, waitMs: 0, slid: true }) : undefined;
+          const handle = leaves ? exit?.begin(lottery.id, { dir, waitMs: 160, slid: true }) : undefined;
           if (leaves) setLeaving(dir);
           return void run(plan.op).then((ok) => {
             if (ok) handle?.ok();
@@ -171,7 +171,13 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
             if (!leaves) return;
             if (leaveTimer.current) window.clearTimeout(leaveTimer.current);
             // 失敗した／保存後もこのタブに残る場合は、カードを元の位置へ戻す（退出が続いている間は戻さない）
-            leaveTimer.current = window.setTimeout(() => (!ok || !exit?.active(lottery.id)) && setLeaving(null), ok ? 160 : 30);
+            // 退出が続いている間は、終わるまで（最大約2秒）見張る。終わってもカードが残っていれば元の位置へ戻す
+            let left = 10;
+            const check = () => {
+              if (!ok || !exit?.active(lottery.id) || left-- <= 0) return setLeaving(null);
+              leaveTimer.current = window.setTimeout(check, 200);
+            };
+            leaveTimer.current = window.setTimeout(check, ok ? 160 : 30);
           });
         }
         case "confirm":
@@ -266,7 +272,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
       <div
         style={{
           transform: leaving ? `translateX(${leaving === "right" ? 110 : -110}%)` : offset ? `translateX(${offset}px)` : undefined,
-          transition: dragging ? "none" : leaving ? "transform 260ms cubic-bezier(0.4, 0, 1, 1)" : "transform 180ms ease-out",
+          transition: dragging ? "none" : leaving ? "transform 200ms cubic-bezier(0.4, 0, 1, 1)" : "transform 180ms ease-out",
         }}
         data-leaving={leaving ?? undefined}
         className="relative"

@@ -57,6 +57,8 @@ export interface SettingsView {
   auto_register: boolean;
   schedule_enabled: boolean;
   schedule_hour_jst: number;
+  /** 2回目の実行時刻（日本時間）。null/未設定=1日1回 */
+  schedule_hour2_jst?: number | null;
   x_enabled: boolean;
   x_monthly_budget_jpy: number;
   x_max_posts_per_run: number;
@@ -170,7 +172,7 @@ const CAND_TABS = [
 ] as const;
 
 /** 設定の比較用の値（保存する項目だけ。配列は順序に依存しない） */
-const SETTING_KEYS = ["prefectures", "include_online", "max_distance_km", "apply_methods", "receive_methods", "req_include", "req_exclude", "product_mode", "product_ids", "status_mode", "track_upcoming", "auto_register", "schedule_enabled", "schedule_hour_jst", "x_enabled", "x_monthly_budget_jpy", "x_max_posts_per_run", "max_ai_per_run", "worker_enabled", "worker_batch", "recheck_hours"] as const;
+const SETTING_KEYS = ["prefectures", "include_online", "max_distance_km", "apply_methods", "receive_methods", "req_include", "req_exclude", "product_mode", "product_ids", "status_mode", "track_upcoming", "auto_register", "schedule_enabled", "schedule_hour_jst", "schedule_hour2_jst", "x_enabled", "x_monthly_budget_jpy", "x_max_posts_per_run", "max_ai_per_run", "worker_enabled", "worker_batch", "recheck_hours"] as const;
 export function settingsKey(x: SettingsView): string {
   const rec = x as unknown as Record<string, unknown>;
   return JSON.stringify(SETTING_KEYS.map((k) => (Array.isArray(rec[k]) ? [...(rec[k] as unknown[])].sort() : (k === "track_upcoming" ? rec[k] !== false : (rec[k] ?? null)))));
@@ -435,7 +437,7 @@ export function AutoCollectView({
     const r = await act("save", { action: "saveSettings", settings: {
         prefectures: s.prefectures, includeOnline: s.include_online, maxDistanceKm: s.max_distance_km, applyMethods: s.apply_methods, receiveMethods: s.receive_methods,
         reqInclude: s.req_include, reqExclude: s.req_exclude, productMode: s.product_mode, productIds: s.product_ids, statusMode: s.status_mode, trackUpcoming: s.track_upcoming !== false, autoRegister: s.auto_register,
-        scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, recheckHours: s.recheck_hours,
+        scheduleEnabled: s.schedule_enabled, scheduleHourJst: s.schedule_hour_jst, scheduleHour2Jst: s.schedule_hour2_jst ?? null, xEnabled: s.x_enabled, xMonthlyBudgetJpy: s.x_monthly_budget_jpy, xMaxPostsPerRun: s.x_max_posts_per_run, maxAiPerRun: s.max_ai_per_run, workerEnabled: s.worker_enabled, workerBatch: s.worker_batch, recheckHours: s.recheck_hours,
       } }, () => "保存しました");
     if (r.ok && r.settings) {
       // 保存先で確認できた値を、保存済みの値として反映する
@@ -796,9 +798,18 @@ export function AutoCollectView({
             <label className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
               <input type="checkbox" className="size-4" checked={s.schedule_enabled} onChange={(e) => setS({ ...s, schedule_enabled: e.target.checked })} data-testid="schedule-enabled" />
               <span className="whitespace-nowrap">毎日</span>
-              <select className="h-8 rounded-md border bg-input px-1" value={s.schedule_hour_jst} onChange={(e) => setS({ ...s, schedule_hour_jst: Number(e.target.value) })} aria-label="実行時刻（日本時間）">
+              <select className="h-8 rounded-md border bg-input px-1" value={s.schedule_hour_jst} onChange={(e) => setS({ ...s, schedule_hour_jst: Number(e.target.value) })} aria-label="実行時刻（日本時間）" data-testid="schedule-hour">
                 {Array.from({ length: 24 }, (_, h) => (
                   <option key={h} value={h}>
+                    {h}:00
+                  </option>
+                ))}
+              </select>
+              <span className="whitespace-nowrap">と</span>
+              <select className="h-8 rounded-md border bg-input px-1" value={s.schedule_hour2_jst ?? ""} onChange={(e) => setS({ ...s, schedule_hour2_jst: e.target.value === "" ? null : Number(e.target.value) })} aria-label="2回目の実行時刻（日本時間）" data-testid="schedule-hour2">
+                <option value="">なし</option>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h} disabled={h === s.schedule_hour_jst}>
                     {h}:00
                   </option>
                 ))}

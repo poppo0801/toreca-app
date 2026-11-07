@@ -11,7 +11,8 @@ import { assessRow, importantChains } from "@/lib/collector/assess-row";
 import { loadAppData } from "@/lib/server/lottery-service";
 import { computeMetrics } from "@/lib/collector/metrics";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
-import { healthWarnings, jstDayString, nextCollectAt } from "@/lib/collector/queue";
+import { healthWarnings, jstDayString } from "@/lib/collector/queue";
+import { nextSlotAt } from "@/lib/collector/schedule";
 import { estimateCostJpy } from "@/lib/collector/x-posts";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { conditionsFromRow, ensureCollectionDefaults } from "@/lib/server/collector/run";
@@ -135,7 +136,7 @@ export default async function CollectionPage() {
     warnings: warnings.map((w) => w.message),
     lastCollectAt: lastCollectAt?.toISOString() ?? null,
     lastWorkerAt: lastWorkerAt?.toISOString() ?? null,
-    nextCollectAt: st.schedule_enabled ? nextCollectAt(now, st.schedule_hour_jst).toISOString() : null,
+    nextCollectAt: st.schedule_enabled ? nextSlotAt(now, [st.schedule_hour_jst, (st as { schedule_hour2_jst?: number | null }).schedule_hour2_jst]).toISOString() : null,
     processing: nProc.count ?? 0,
     pausedReason: paused ? st.paused_reason : null,
     workerDayUsed: dailyUsed,

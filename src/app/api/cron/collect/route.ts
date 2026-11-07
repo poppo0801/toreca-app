@@ -17,7 +17,7 @@ export const maxDuration = 60;
 
 /**
  * 自動収集の定期実行の入口。Supabase Cron(pg_cron + pg_net)が数分おきに `Authorization: Bearer $CRON_SECRET` 付きで呼ぶ。
- *  1) 定期収集が有効で、指定時刻(日本時間。既定6:00)を過ぎていて今日まだ収集していなければ、収集元を確認して新規・変更をキューに追加する
+ *  1) 定期収集が有効で、指定時刻(日本時間。1日1〜2回。例 6:00・18:00)を過ぎていて、その時刻のスロットでまだ収集していなければ、収集元を確認して新規・変更をキューに追加する
  *  2) 定期ワーカーが有効なら、解析待ちを優先順位順に小分けで解析する（解析待ちが無ければ何もせずすぐ終了する）
  * 1回の呼び出しは約60秒以内に終わる。残りは次の呼び出しが引き継ぐ（HTTPレスポンス後の処理には依存しない）。
  * 定期実行ではログインが無いため、候補の作成まで。抽選の自動登録は手動実行か候補画面で行う。
@@ -35,7 +35,7 @@ async function handle(req: NextRequest) {
   const now = new Date();
   // Xブックマークの同期: 利用者が連携して自動収集をONにしたときだけ（既定OFF）。X APIの月額予算の範囲内で、12時間おきに少量を読む。失敗しても他の処理は止めない
   const bookmarks = await runBookmarkCron(db, now).catch(() => null);
-  const { data: targets } = await db.from("collection_settings").select("household_id,schedule_enabled,schedule_hour_jst,worker_enabled").or("schedule_enabled.eq.true,worker_enabled.eq.true");
+  const { data: targets } = await db.from("collection_settings").select("household_id,schedule_enabled,schedule_hour_jst,schedule_hour2_jst,worker_enabled").or("schedule_enabled.eq.true,worker_enabled.eq.true");
   const summary: { household: number; collected: number; worked: number; idle: number }[] = [];
   let collected = 0;
   let worked = 0;
@@ -44,7 +44,7 @@ async function handle(req: NextRequest) {
     const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
     if (t.schedule_enabled) {
       // 手動収集の履歴とは独立に、今日の定期収集のスロットで未取得の収集元だけを取得する（失敗した収集元は間隔をおいて再試行）
-      const plan = await planScheduledCollection(db, t.household_id, now, t.schedule_hour_jst);
+      const plan = await planScheduledCollection(db, t.household_id, now, [t.schedule_hour_jst, t.schedule_hour2_jst]);
       if (plan && plan.due.length > 0) {
         const out = await runCollection({ ...base, scheduled: { slotDate: plan.slotDate, sourceIds: plan.due } });
         if (out.ok) {

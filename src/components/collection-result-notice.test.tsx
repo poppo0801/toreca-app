@@ -109,16 +109,24 @@ describe("起動時の収集結果ポップアップ", () => {
     expect(q("run-notice")).toBeNull();
   });
 
-  it("処理中の結果は「処理中」と表示し、途中経過であることを示す。確認済みにはしない", async () => {
-    notice = sum([{ status: "auto_registered", job_state: "completed" }, { job_state: "pending" }]);
-    ackIds = [];
+  it("表示しない結果（対象外だけの収集など）でも、確認済みにする。次に開いたときに古い結果を出さない", async () => {
+    notice = null;
+    ackIds = ["11111111-1111-4111-8111-111111111111"];
     await act(async () => root.render(createElement(CollectionResultNotice)));
     await flush();
-    expect(q("run-processing")).not.toBeNull();
-    expect(q("run-notice")!.textContent).toContain("途中経過");
-    expect(q("run-解析待ち")!.textContent).toBe("1件");
-    await act(async () => q("run-notice-close")!.click());
-    expect(ack).not.toHaveBeenCalled();
+    expect(q("run-notice")).toBeNull();
+    expect(ack).toHaveBeenCalledWith(ackIds);
+  });
+
+  it("要手動確認は起動時のポップアップに出さない（通知・設定の自動収集で確認する）", async () => {
+    notice = sum([{ job_state: "review" }]);
+    ackIds = [notice.runId];
+    manual.push({ id: "m1" });
+    await act(async () => root.render(createElement(CollectionResultNotice)));
+    await flush();
+    manual.length = 0;
+    expect(q("run-notice")).not.toBeNull();
+    expect(q("manual-notice-list")).toBeNull();
   });
 
   it("表示する結果が無ければ何も出さない", async () => {
