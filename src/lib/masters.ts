@@ -86,6 +86,18 @@ export const ENTITIES: Record<EntityKey, Entity> = {
       { name: "name", label: "系列名", type: "text", required: true, max: 80 },
       { name: "default_application_rule", label: "標準の応募ルール", type: "textarea", max: 1000 },
       { name: "memo", label: "メモ", type: "textarea", max: 2000 },
+      {
+        name: "box_shrink_hint",
+        label: "BOX販売形態（応募判断の目安。実際の受取状態ではありません）",
+        type: "select",
+        default: "",
+        options: [
+          { value: "", label: "不明・未設定" },
+          { value: "shrink", label: "シュリンクあり" },
+          { value: "no_shrink", label: "シュリンクなし" },
+          { value: "pack_only", label: "パックのみ" },
+        ],
+      },
     ],
   },
   stores: {
@@ -141,6 +153,18 @@ export const ENTITIES: Record<EntityKey, Entity> = {
       },
       { name: "list_price_box", label: "BOX定価・円（任意。収支の金額の仮計算に使用）", type: "number", min: 0, max: 10000000, step: 1 },
       { name: "list_price_pack", label: "パック定価・円（任意）", type: "number", min: 0, max: 10000000, step: 1 },
+      {
+        name: "product_kind",
+        label: "商品区分（数量の単位が変わります）",
+        type: "select",
+        default: "",
+        options: [{ value: "", label: "未分類（パック／BOX）" }, ...[
+          { value: "expansion_pack", label: "拡張パック（パック／BOX）" },
+          { value: "deck", label: "構築済みデッキ（個）" },
+          { value: "premium_set", label: "プレミアムセット（個）" },
+          { value: "other", label: "その他商品（個）" },
+        ]],
+      },
       { name: "category", label: "シリーズ・区分（例: 拡張パック、カードセット）", type: "text", max: 40 },
       { name: "release_date", label: "発売日（任意）", type: "date" },
       { name: "packs_per_box", label: "1BOX入数・パック（BOX販売の商品のみ。不明は空欄）", type: "number", min: 1, max: 500, step: 1 },
@@ -354,6 +378,9 @@ export function buildSchema(entity: Entity) {
 /** 商品コードのみ「空欄=NULL」（一意制約のため空文字を避ける） */
 export function toDbValues(entity: Entity, values: Record<string, unknown>): Record<string, unknown> {
   const out = { ...values };
+  // 未選択（空）は未設定(NULL)。推測で区分・販売形態を決めない
+  if (entity.key === "products" && out.product_kind === "") out.product_kind = null;
+  if (entity.key === "chains" && out.box_shrink_hint === "") out.box_shrink_hint = null;
   if (entity.key === "products") {
     // 任意のテキスト項目は空欄=未設定(NULL)。source_url は空文字だとDBの形式チェックに反する
     if (out.source_url === "") out.source_url = null;

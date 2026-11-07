@@ -25,6 +25,7 @@ import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, 
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
+import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
 import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
@@ -67,6 +68,8 @@ function Unconfirmed({ show }: { show: boolean }) {
 export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: Lottery; open: boolean; onOpenChange: (v: boolean) => void }) {
   const { data, now, profile, actions, persistent, reload } = useApp();
   const viewScope = useViewScope();
+  // BOX販売形態の目安（個別の抽選で確定していればそれを、なければ系列の目安）。実際の受取状態とは別
+  const boxHint = boxHintOf(lottery, data.chains.find((c) => c.id === lottery.chainId));
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -150,6 +153,11 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-bold leading-snug">{p?.officialName ?? "商品未登録"}</span>
+                        {it.unit === "box" && boxHint && (
+                          <span className="mt-0.5 inline-block rounded border px-1 text-[10px] leading-4 text-muted-foreground" data-testid="box-hint" title="応募判断の目安です。実際の受取状態とは限りません">
+                            {boxHintLabel(boxHint)}
+                          </span>
+                        )}
                         <span className="block text-xs text-muted-foreground">{formatQuantity(it, p)}</span>
                         {it.id && <ItemResultTags lottery={lottery} itemId={it.id} apps={apps} />}
                       </span>

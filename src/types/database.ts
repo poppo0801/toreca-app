@@ -871,6 +871,94 @@ export type Database = {
           },
         ]
       }
+      box_receipts: {
+        Row: {
+          chain_id: string | null
+          created_at: string
+          household_id: string
+          id: string
+          product_id: string | null
+          purchase_item_id: string
+          quantity: number
+          received_on: string
+          shrink_state: string
+          store_id: string | null
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          chain_id?: string | null
+          created_at?: string
+          household_id: string
+          id?: string
+          product_id?: string | null
+          purchase_item_id: string
+          quantity: number
+          received_on: string
+          shrink_state: string
+          store_id?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          chain_id?: string | null
+          created_at?: string
+          household_id?: string
+          id?: string
+          product_id?: string | null
+          purchase_item_id?: string
+          quantity?: number
+          received_on?: string
+          shrink_state?: string
+          store_id?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_receipts_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_receipts_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_receipts_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_receipts_purchase_item_id_household_id_fkey"
+            columns: ["purchase_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_items"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_receipts_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_receipts_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           chain_id: string
@@ -1055,6 +1143,117 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      card_market_links: {
+        Row: {
+          card_id: string
+          created_at: string
+          household_id: string
+          id: string
+          match_key: string
+        }
+        Insert: {
+          card_id: string
+          created_at?: string
+          household_id: string
+          id?: string
+          match_key: string
+        }
+        Update: {
+          card_id?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          match_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_market_links_card_id_household_id_fkey"
+            columns: ["card_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "card_masters"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_market_links_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      card_market_prices: {
+        Row: {
+          card_id: string
+          condition_grade: string
+          csv_updated_at: string | null
+          fetched_at: string
+          high_yen: number
+          household_id: string
+          id: string
+          kind: string
+          low_yen: number
+          match_key: string
+          median_yen: number
+          outlier_count: number
+          sample_count: number
+          shops: Json
+          source: string
+          source_url: string | null
+        }
+        Insert: {
+          card_id: string
+          condition_grade?: string
+          csv_updated_at?: string | null
+          fetched_at?: string
+          high_yen: number
+          household_id: string
+          id?: string
+          kind: string
+          low_yen: number
+          match_key?: string
+          median_yen: number
+          outlier_count?: number
+          sample_count: number
+          shops?: Json
+          source?: string
+          source_url?: string | null
+        }
+        Update: {
+          card_id?: string
+          condition_grade?: string
+          csv_updated_at?: string | null
+          fetched_at?: string
+          high_yen?: number
+          household_id?: string
+          id?: string
+          kind?: string
+          low_yen?: number
+          match_key?: string
+          median_yen?: number
+          outlier_count?: number
+          sample_count?: number
+          shops?: Json
+          source?: string
+          source_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_market_prices_card_id_household_id_fkey"
+            columns: ["card_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "card_masters"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_market_prices_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1477,6 +1676,7 @@ export type Database = {
       chains: {
         Row: {
           archived_at: string | null
+          box_shrink_hint: string | null
           brand_group: string | null
           created_at: string
           default_application_rule: string
@@ -1493,6 +1693,7 @@ export type Database = {
         }
         Insert: {
           archived_at?: string | null
+          box_shrink_hint?: string | null
           brand_group?: string | null
           created_at?: string
           default_application_rule?: string
@@ -1509,6 +1710,7 @@ export type Database = {
         }
         Update: {
           archived_at?: string | null
+          box_shrink_hint?: string | null
           brand_group?: string | null
           created_at?: string
           default_application_rule?: string
@@ -2230,6 +2432,7 @@ export type Database = {
           recheck_hours: number
           req_exclude: string[]
           req_include: string[]
+          result_notice_profile_id: string | null
           schedule_enabled: boolean
           schedule_hour_jst: number
           schedule_hour2_jst: number | null
@@ -2264,6 +2467,7 @@ export type Database = {
           recheck_hours?: number
           req_exclude?: string[]
           req_include?: string[]
+          result_notice_profile_id?: string | null
           schedule_enabled?: boolean
           schedule_hour_jst?: number
           schedule_hour2_jst?: number | null
@@ -2298,6 +2502,7 @@ export type Database = {
           recheck_hours?: number
           req_exclude?: string[]
           req_include?: string[]
+          result_notice_profile_id?: string | null
           schedule_enabled?: boolean
           schedule_hour_jst?: number
           schedule_hour2_jst?: number | null
@@ -2321,6 +2526,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "households"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_settings_notice_profile_fk"
+            columns: ["result_notice_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
           },
         ]
       }
@@ -2455,6 +2667,41 @@ export type Database = {
             foreignKeyName: "collection_sources_household_id_fkey"
             columns: ["household_id"]
             isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      condition_multipliers: {
+        Row: {
+          a_pct: number
+          b_pct: number
+          c_pct: number
+          household_id: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          a_pct?: number
+          b_pct?: number
+          c_pct?: number
+          household_id: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          a_pct?: number
+          b_pct?: number
+          c_pct?: number
+          household_id?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "condition_multipliers_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: true
             referencedRelation: "households"
             referencedColumns: ["id"]
           },
@@ -2831,6 +3078,7 @@ export type Database = {
           apply_start_date: string | null
           apply_start_precision: string
           archived_at: string | null
+          box_shrink_hint: string | null
           campaign_id: string | null
           chain_id: string
           conditions_text: string
@@ -2894,6 +3142,7 @@ export type Database = {
           apply_start_date?: string | null
           apply_start_precision?: string
           archived_at?: string | null
+          box_shrink_hint?: string | null
           campaign_id?: string | null
           chain_id: string
           conditions_text?: string
@@ -2936,7 +3185,7 @@ export type Database = {
           result_precision?: string
           source_kind?: string
           source_urls?: string[]
-          store_id: string | null
+          store_id?: string | null
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -2957,6 +3206,7 @@ export type Database = {
           apply_start_date?: string | null
           apply_start_precision?: string
           archived_at?: string | null
+          box_shrink_hint?: string | null
           campaign_id?: string | null
           chain_id?: string
           conditions_text?: string
@@ -3867,6 +4117,7 @@ export type Database = {
           product_code: string | null
           product_code_kind: string | null
           product_group: string | null
+          product_kind: string | null
           release_date: string | null
           sales_form: string | null
           source_url: string | null
@@ -3894,6 +4145,7 @@ export type Database = {
           product_code?: string | null
           product_code_kind?: string | null
           product_group?: string | null
+          product_kind?: string | null
           release_date?: string | null
           sales_form?: string | null
           source_url?: string | null
@@ -3921,6 +4173,7 @@ export type Database = {
           product_code?: string | null
           product_code_kind?: string | null
           product_group?: string | null
+          product_kind?: string | null
           release_date?: string | null
           sales_form?: string | null
           source_url?: string | null
@@ -4126,6 +4379,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "profiles_main_link_fk"
+            columns: ["main_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
             foreignKeyName: "profiles_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
@@ -4217,10 +4477,10 @@ export type Database = {
       }
       purchases: {
         Row: {
-          category: string
           application_id: string | null
           archived_at: string | null
           buyer_profile_id: string | null
+          category: string
           channel: string
           created_at: string
           household_id: string
@@ -4236,10 +4496,10 @@ export type Database = {
           updated_by_profile_id: string | null
         }
         Insert: {
-          category?: string
           application_id?: string | null
           archived_at?: string | null
           buyer_profile_id?: string | null
+          category?: string
           channel?: string
           created_at?: string
           household_id: string
@@ -4255,10 +4515,10 @@ export type Database = {
           updated_by_profile_id?: string | null
         }
         Update: {
-          category?: string
           application_id?: string | null
           archived_at?: string | null
           buyer_profile_id?: string | null
+          category?: string
           channel?: string
           created_at?: string
           household_id?: string
@@ -4871,6 +5131,73 @@ export type Database = {
           },
         ]
       }
+      x_account_identities: {
+        Row: {
+          basis: string
+          chain_id: string | null
+          chain_name: string
+          checked_at: string
+          created_at: string
+          display_name: string
+          household_id: string
+          id: string
+          prefecture: string
+          store_id: string | null
+          store_name: string
+          username: string
+        }
+        Insert: {
+          basis: string
+          chain_id?: string | null
+          chain_name?: string
+          checked_at?: string
+          created_at?: string
+          display_name?: string
+          household_id: string
+          id?: string
+          prefecture?: string
+          store_id?: string | null
+          store_name?: string
+          username: string
+        }
+        Update: {
+          basis?: string
+          chain_id?: string | null
+          chain_name?: string
+          checked_at?: string
+          created_at?: string
+          display_name?: string
+          household_id?: string
+          id?: string
+          prefecture?: string
+          store_id?: string | null
+          store_name?: string
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_account_identities_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "x_account_identities_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "x_account_identities_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       x_account_links: {
         Row: {
           chain_id: string | null
@@ -4926,6 +5253,138 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "stores"
             referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      x_bookmark_links: {
+        Row: {
+          auto_sync: boolean
+          connected_by: string | null
+          created_at: string
+          household_id: string
+          id: string
+          initial_synced_at: string | null
+          last_error: string
+          last_sync_result: string
+          last_synced_at: string | null
+          lease_until: string | null
+          newest_bookmark_id: string | null
+          scopes: string[]
+          status: string
+          updated_at: string
+          x_user_id: string
+          x_username: string
+        }
+        Insert: {
+          auto_sync?: boolean
+          connected_by?: string | null
+          created_at?: string
+          household_id: string
+          id?: string
+          initial_synced_at?: string | null
+          last_error?: string
+          last_sync_result?: string
+          last_synced_at?: string | null
+          lease_until?: string | null
+          newest_bookmark_id?: string | null
+          scopes?: string[]
+          status?: string
+          updated_at?: string
+          x_user_id: string
+          x_username: string
+        }
+        Update: {
+          auto_sync?: boolean
+          connected_by?: string | null
+          created_at?: string
+          household_id?: string
+          id?: string
+          initial_synced_at?: string | null
+          last_error?: string
+          last_sync_result?: string
+          last_synced_at?: string | null
+          lease_until?: string | null
+          newest_bookmark_id?: string | null
+          scopes?: string[]
+          status?: string
+          updated_at?: string
+          x_user_id?: string
+          x_username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_bookmark_links_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: true
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      x_oauth_states: {
+        Row: {
+          created_at: string
+          expires_at: string
+          household_id: string
+          state_hash: string
+          user_id: string
+          verifier_enc: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          household_id: string
+          state_hash: string
+          user_id: string
+          verifier_enc: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          household_id?: string
+          state_hash?: string
+          user_id?: string
+          verifier_enc?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_oauth_states_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      x_oauth_tokens: {
+        Row: {
+          access_token_enc: string
+          expires_at: string
+          link_id: string
+          refresh_token_enc: string
+          updated_at: string
+        }
+        Insert: {
+          access_token_enc: string
+          expires_at: string
+          link_id: string
+          refresh_token_enc?: string
+          updated_at?: string
+        }
+        Update: {
+          access_token_enc?: string
+          expires_at?: string
+          link_id?: string
+          refresh_token_enc?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_oauth_tokens_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: true
+            referencedRelation: "x_bookmark_links"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -5135,6 +5594,15 @@ export type Database = {
       rebind_push_subscription: {
         Args: { p_endpoint: string; p_profile: string }
         Returns: boolean
+      }
+      record_box_receipt: {
+        Args: {
+          p_actor: string
+          p_purchase_item_id: string
+          p_received_on: string
+          p_states: Json
+        }
+        Returns: undefined
       }
       refresh_ai_job: { Args: { p_job: string }; Returns: string }
       register_push_subscription: {

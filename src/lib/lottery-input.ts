@@ -76,7 +76,7 @@ const itemSchema = z.object({
   id: z.uuid().nullable().optional(),
   product: masterRef("商品", 120),
   quantity: z.number().int().min(1, "数量は1以上").max(9999),
-  unit: z.enum(["box", "pack", "set"]),
+  unit: z.enum(["box", "pack", "set", "piece"]),
 });
 
 export const lotteryInputSchema = z.object({

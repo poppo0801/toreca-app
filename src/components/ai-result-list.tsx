@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  * AI読み取り結果の項目別一覧（コンパクト）。項目名・値・状態（要確認／仮登録）だけを並べ、
  * 理由・原文の抜粋は印をタップしたときだけ展開する。抽出できなかった項目は「—」。日付のみの項目に時刻は補わない。
  */
-const UNIT = { box: "BOX", pack: "パック", set: "セット" } as const;
+const UNIT = { box: "BOX", pack: "パック", set: "セット", piece: "個" } as const;
 const APPLY = { web: "Web", store: "店頭", app: "アプリ", unknown: "" } as const;
 const RECEIVE = { store: "店頭", shipping: "発送", either: "店頭/発送", unknown: "" } as const;
 const LIMIT = { account: "1アカウントにつき", person: "1人につき", family: "1家族につき", address: "1住所につき", unknown: "" } as const;

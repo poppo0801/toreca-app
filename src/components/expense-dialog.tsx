@@ -1,5 +1,8 @@
 "use client";
 
+import { CountInput } from "@/components/count-input";
+import { BoxReceiptDialog } from "@/components/box-receipt-dialog";
+import { unitForProduct, unitOptions } from "@/lib/product-kind";
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
@@ -31,7 +34,7 @@ interface ItemState {
  * 抽選の当選から作られた購入も、日付・店舗・数量・金額をここで確認・修正できる。
  */
 export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean; onOpenChange: (v: boolean) => void; purchase: Purchase | null }) {
-  const { data, actions } = useApp();
+  const { data, actions, persistent } = useApp();
   const isEdit = purchase !== null;
   const store = purchase?.storeId ? data.stores.find((s) => s.id === purchase.storeId) : undefined;
   const [date, setDate] = useState(() => (purchase ? (flexToJstDate(purchase.purchasedOn) ?? "") : jstDateString(new Date())));
@@ -54,6 +57,8 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** 受取時のシュリンク状態を記録中の明細（行の番号） */
+  const [receiptItem, setReceiptItem] = useState<number | null>(null);
 
   const storeOptions = useMemo(
     () => data.stores.filter((s) => !s.archived || s.id === store?.id).map((s) => ({ id: s.id, name: s.name, hint: data.chains.find((c) => c.id === s.chainId)?.name })),
@@ -182,7 +187,7 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
                         value={it.product}
                         options={productOptions}
                         className="min-w-0 flex-1"
-                        onChange={(product) => patch(i, { product })}
+                        onChange={(product) => patch(i, { product, unit: product.id ? unitForProduct(data.products.find((p) => p.id === product.id), it.unit) : it.unit })}
                       />
                     ) : (
                       <input
@@ -204,21 +209,20 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {cat.quantity && (
-                    <input
-                      type="number"
-                      min={1}
-                      aria-label={`数量${i + 1}`}
-                      value={it.quantity}
-                      onChange={(e) => patch(i, { quantity: Number(e.target.value) })}
-                      className={`${field} mt-0 w-20`}
-                    />
+                    <CountInput aria-label={`数量${i + 1}`} value={it.quantity} onChange={(quantity) => patch(i, { quantity })} className={`${field} mt-0 w-20`} />
                     )}
                     {cat.master && <select aria-label={`単位${i + 1}`} value={it.unit} onChange={(e) => patch(i, { unit: e.target.value as ItemState["unit"] })} className={`${field} mt-0 w-28`}>
-                      <option value="box">BOX</option>
-                      <option value="pack">パック</option>
-                      <option value="set">セット</option>
-                      <option value="piece">個</option>
+                      {unitOptions(data.products.find((p) => p.id === it.product.id), it.unit).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
                     </select>}
+                    {persistent && it.id && it.unit === "box" && (
+                      <Button type="button" size="sm" variant="outline" className="mt-0 h-11" onClick={() => setReceiptItem(i)} data-testid="open-receipt">
+                        受取の状態
+                      </Button>
+                    )}
                     <input
                       type="number"
                       min={0}
@@ -277,6 +281,12 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
             </div>
           </div>
         </form>
+        {receiptItem !== null && items[receiptItem]?.id && (
+          <BoxReceiptDialog
+            items={[{ id: items[receiptItem].id as string, quantity: items[receiptItem].quantity, label: items[receiptItem].product.name || "BOX" }]}
+            onClose={() => setReceiptItem(null)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

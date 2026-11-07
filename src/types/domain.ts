@@ -23,9 +23,16 @@ export type LotteryKind = "normal" | "ongoing" | "invite";
 
 export type ReceiveMethod = "store" | "shipping" | "either" | "unknown";
 export type ApplyMethod = "web" | "store" | "app" | "unknown";
-export type ItemUnit = "box" | "pack" | "set";
-/** 購入・売却の数量単位。抽選の商品明細（ItemUnit）に加えて、単品の「個」を使える */
-export type PurchaseUnit = ItemUnit | "piece";
+/** 数量の単位。box/pack は拡張パック、piece(個) は構築済みデッキ・プレミアムセット・その他。set(セット)は旧データの単位で、変換せずそのまま扱う */
+export type ItemUnit = "box" | "pack" | "set" | "piece";
+/** 購入・売却の数量単位（抽選の商品明細と同じ） */
+export type PurchaseUnit = ItemUnit;
+/** 商品区分。未分類(null)は推測で分類しない */
+export type ProductKind = "expansion_pack" | "deck" | "premium_set" | "other";
+/** BOXの販売形態の目安（抽選に応募するかの参考。実際の受取状態ではない）。未設定・unknown は「不明・未設定」 */
+export type BoxShrinkHint = "shrink" | "no_shrink" | "pack_only" | "unknown";
+/** 受取時の実際のシュリンク状態 */
+export type ShrinkState = "shrink" | "no_shrink" | "unknown";
 export type SourceKind = "manual" | "x_parse" | "auto" | "import";
 
 export type ProfileColor = "blue" | "green" | "purple" | "pink" | "teal";
@@ -74,6 +81,8 @@ export interface Chain {
   brandGroup?: string | null;
   /** 運営区分: direct=直営 / other=その他 / unconfirmed=所属未確認 / 未設定=区分なし */
   operationKind?: "direct" | "other" | "unconfirmed" | null;
+  /** BOX販売形態の目安（系列ごと。抽選に応募するかの参考で、実際の受取状態ではない）。未設定は null */
+  boxShrinkHint?: BoxShrinkHint | null;
 }
 
 export interface Store {
@@ -124,6 +133,8 @@ export interface Product {
   sourceUrl?: string | null;
   /** pack_box=パック/BOX販売 / single_set=単品・セット等 / null=未判定 */
   salesForm?: "pack_box" | "single_set" | null;
+  /** 商品区分。未分類は null（数量の単位は拡張パック扱いのパック/BOXから選べる） */
+  productKind?: ProductKind | null;
   /** 商品画像（表示用の期限付きURL）。無い種類は未設定 → プレースホルダー */
   images?: Partial<Record<ProductImageKind, ProductImage>>;
   provisional?: boolean;
@@ -216,6 +227,8 @@ export interface LotteryItem {
 
 export interface Lottery {
   id: string;
+  /** この抽選のBOX販売形態（確定している場合のみ。あれば系列の目安より優先） */
+  boxShrinkHint?: BoxShrinkHint | null;
   campaignId?: string;
   chainId: string;
   storeId: string | null;
@@ -339,6 +352,8 @@ export interface Purchase {
 /** 売却(収入)。原価 costAmount=null は未設定で、0円とはみなさない。 */
 export interface Sale {
   id: string;
+  /** BOXの売却で減らす在庫の状態（Stage 6M）。null/未設定は在庫に反映しない */
+  boxState?: ShrinkState | null;
   soldOn: string;
   platform: string;
   productId: string | null;

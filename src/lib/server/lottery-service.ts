@@ -15,9 +15,12 @@ import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } fr
 import type { Database } from "@/types/database";
 import type {
   AppData,
+  BoxShrinkHint,
   EventState,
   FulfillmentStatus,
+  ItemUnit,
   MultiMode,
+  ProductKind,
   ProfileColor,
   ResultStatus,
 } from "@/types/domain";
@@ -322,7 +325,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         blockedStoreIds: mine.filter((r) => r.mode === "block" && r.store_id !== null).map((r) => r.store_id as string),
       };
     }),
-    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, logoSrc: c.logo_path && c.logo_sha256 ? chainLogoUrl(c.id, c.logo_sha256) : null, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
+    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, logoSrc: c.logo_path && c.logo_sha256 ? chainLogoUrl(c.id, c.logo_sha256) : null, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null, boxShrinkHint: (c.box_shrink_hint ?? null) as BoxShrinkHint | null, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
     stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null, salesKind: isStoreKind(s.sales_kind) ? s.sales_kind : "physical" })),
     products: products.map((p) => ({
       id: p.id,
@@ -337,6 +340,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       memo: p.memo,
       sourceUrl: p.source_url,
       salesForm: p.sales_form as "pack_box" | "single_set" | null,
+      productKind: (p.product_kind ?? null) as ProductKind | null,
       images: Object.fromEntries(
         productImages
           .filter((i) => i.product_id === p.id)
@@ -371,7 +375,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       items: items
         .filter((i) => i.lottery_id === l.id)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .map((i) => ({ id: i.id, productId: i.product_id, quantity: i.quantity, unit: i.unit as "box" | "pack" | "set" })),
+        .map((i) => ({ id: i.id, productId: i.product_id, quantity: i.quantity, unit: i.unit as ItemUnit })),
       multiMode: l.multi_mode as MultiMode,
       applyStart: dbToFlex(l.apply_start_precision, l.apply_start_date, l.apply_start_at),
       applyDeadline: dbToFlex(l.apply_deadline_precision, l.apply_deadline_date, l.apply_deadline_at),
@@ -404,6 +408,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       confirmedAt: l.confirmed_at ?? null,
       isNew: l.is_new,
       memo: l.memo,
+      boxShrinkHint: (l.box_shrink_hint ?? null) as BoxShrinkHint | null,
       createdAt: l.created_at,
       updatedAt: l.updated_at,
       unconfirmedFields: l.unconfirmed_fields ?? [],
@@ -444,7 +449,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       note: p.note,
       items: pitems
         .filter((i) => i.purchase_id === p.id)
-        .map((i) => ({ id: i.id, productId: i.product_id, productLabel: i.product_label, lotteryItemId: i.lottery_item_id, quantity: i.quantity, unit: i.unit as "box" | "pack" | "set", amountPaid: i.amount_paid })),
+        .map((i) => ({ id: i.id, productId: i.product_id, productLabel: i.product_label, lotteryItemId: i.lottery_item_id, quantity: i.quantity, unit: i.unit as ItemUnit, amountPaid: i.amount_paid })),
     })),
     sales: sales.map((x) => ({
       id: x.id,

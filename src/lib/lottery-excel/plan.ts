@@ -275,7 +275,7 @@ interface ItemDraft {
   id: string | null;
   product: Resolved;
   quantity: number;
-  unit: "box" | "pack" | "set";
+  unit: "box" | "pack" | "set" | "piece";
   /** 既存の明細（変更の有無の判定用） */
   existing?: { productId: string; quantity: number; unit: string };
 }

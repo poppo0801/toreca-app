@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Check } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { BoxReceiptDialog } from "@/components/box-receipt-dialog";
+import { productName } from "@/lib/finance";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { hasSeparateSteps, wonProgress } from "@/lib/lottery-flow";
@@ -28,11 +30,22 @@ const TONE: Record<string, string> = {
  *  - 通販・発送の抽選: 「購入を記録」「受取を記録」を並べて出し、押した方が「✓購入済」「✓受取済」に変わる（別々の状態）。
  * 購入記録は応募ごとに1件（受取済みにしたときに DB 関数が1件だけ作る。何度押しても二重計上しない）。期間前に押したときは確認する（履歴の補正は期間外でも可能）。
  */
+/** 受取の記録のあと、BOXの購入があればシュリンク状態の入力を促す（「あとで」で閉じられる。購入履歴の編集からも記録できる） */
+function ReceiptPrompt({ applicationId, onClose }: { applicationId: string; onClose: () => void }) {
+  const { data, persistent } = useApp();
+  if (!persistent) return null; // 保存先がない（デモ）ときは記録できない
+  const purchase = data.purchases.find((p) => p.applicationId === applicationId);
+  const items = (purchase?.items ?? []).filter((i) => i.unit === "box" && i.id).map((i) => ({ id: i.id as string, quantity: i.quantity, label: productName(data, i.productId, i.productLabel) }));
+  if (items.length === 0) return null;
+  return <BoxReceiptDialog items={items} onClose={onClose} />;
+}
+
 export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lottery; app: Application; ownerLabel?: string }) {
   const { now, actions } = useApp();
   const [busy, run] = useBusy();
   const [confirm, setConfirm] = useState<"purchase" | "receive" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [receiptFor, setReceiptFor] = useState<string | null>(null);
   const p = wonProgress(lottery, app, now);
   const split = hasSeparateSteps(lottery);
   const shipping = lottery.receiveMethod === "shipping";
@@ -42,6 +55,7 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
       setError(null);
       const res = await actions.setFulfillment(app.id, kind === "purchase" ? "procedure_done" : "purchased");
       if (!res.ok) setError(res.error);
+      else if (kind === "receive") setReceiptFor(app.id);
     });
   const press = (kind: "purchase" | "receive") => (p.status === "waiting_start" ? setConfirm(kind) : void exec(kind));
   const confirmDialog = (
@@ -103,6 +117,7 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
           </span>
         )}
         {confirmDialog}
+        {receiptFor && <ReceiptPrompt applicationId={receiptFor} onClose={() => setReceiptFor(null)} />}
       </>
     );
   }
@@ -121,6 +136,7 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
         </span>
       )}
       {confirmDialog}
+      {receiptFor && <ReceiptPrompt applicationId={receiptFor} onClose={() => setReceiptFor(null)} />}
     </>
   );
 }

@@ -8,6 +8,8 @@ import { AiSupplementDialog } from "@/components/ai-supplement-dialog";
 import { ProductThumb } from "@/components/product-image";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { CountInput } from "@/components/count-input";
+import { unitForProduct, unitOptions } from "@/lib/product-kind";
 import { ClearableDateInput, DateClearButton } from "@/components/ui/clearable-date";
 import { MasterCombobox, NewMasterBadge } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -451,6 +453,12 @@ export function LotteryFormDialog({
     () => data.products.filter((p) => !p.archived || v.items.some((i) => i.product.id === p.id)).map((p) => ({ id: p.id, name: p.officialName, hint: p.provisional ? "仮登録" : p.code || undefined, thumb: <ProductThumb product={p} heightClass="h-9" /> })),
     [data.products, v.items],
   );
+  /** 商品を選び直したとき、その商品区分で使えない単位は使える単位に直す（拡張パック＝パック／BOX、それ以外＝個） */
+  const withProduct = (x: LotteryInput["items"][number], product: { id: string | null; name: string }): LotteryInput["items"][number] => ({
+    ...x,
+    product,
+    unit: product.id ? unitForProduct(data.products.find((p) => p.id === product.id), x.unit) : x.unit,
+  });
   const campaigns = data.campaigns.filter((c) => c.chainId === v.chain.id);
   const profiles = data.profiles.filter((p) => p.active !== false);
   const multi = v.multiMode !== "single";
@@ -773,14 +781,13 @@ export function LotteryFormDialog({
                       value={it.product}
                       options={productOptions}
                       className="min-w-0"
-                      onChange={(product) => set("items", v.items.map((x, j) => (j === i ? { ...x, product } : x)))}
+                      onChange={(product) => set("items", v.items.map((x, j) => (j === i ? withProduct(x, product) : x)))}
                     />
-                    <input
-                      type="number"
-                      min={1}
+                    <CountInput
                       aria-label={`数量${i + 1}`}
                       value={it.quantity}
-                      onChange={(e) => set("items", v.items.map((x, j) => (j === i ? { ...x, quantity: Number(e.target.value) } : x)))}
+                      max={9999}
+                      onChange={(quantity) => set("items", v.items.map((x, j) => (j === i ? { ...x, quantity } : x)))}
                       className="mt-0 h-11 min-w-0 rounded-md border bg-input px-1 text-center text-sm"
                     />
                     <Select
@@ -788,11 +795,7 @@ export function LotteryFormDialog({
                       value={it.unit}
                       onChange={(unit) => set("items", v.items.map((x, j) => (j === i ? { ...x, unit } : x)))}
                       className="mt-0 h-11 px-1"
-                      options={[
-                        { value: "box", label: "BOX" },
-                        { value: "pack", label: "パック" },
-                        { value: "set", label: "セット" },
-                      ]}
+                      options={unitOptions(data.products.find((p) => p.id === it.product.id), it.unit)}
                     />
                     {v.items.length > 1 ? (
                       <Button
@@ -819,7 +822,7 @@ export function LotteryFormDialog({
                       key={`cand-${i}`}
                       label={`商品${i + 1}の候補`}
                       names={candidates.items[i].map((p) => p.officialName)}
-                      onPick={(k) => set("items", v.items.map((x, j) => (j === i ? { ...x, product: { id: candidates.items[i][k].id, name: candidates.items[i][k].officialName } } : x)))}
+                      onPick={(k) => set("items", v.items.map((x, j) => (j === i ? withProduct(x, { id: candidates.items[i][k].id, name: candidates.items[i][k].officialName }) : x)))}
                     />
                   ) : null,
                 )}
@@ -1052,7 +1055,7 @@ export function LotteryFormDialog({
                 </label>
                 <label className="text-sm">
                   <span className="text-[13px] font-medium">上限回数</span>
-                  <input type="number" min={1} max={99} value={v.limitMaxCount} onChange={(e) => set("limitMaxCount", Number(e.target.value))} className={cn(field, "text-center")} />
+                  <CountInput aria-label="上限回数" emptyValue={1} max={99} value={v.limitMaxCount} onChange={(n) => set("limitMaxCount", n)} className={cn(field, "text-center")} />
                 </label>
               </div>
               {flagPanel("limit")}

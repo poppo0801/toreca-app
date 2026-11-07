@@ -292,6 +292,7 @@ export function selectLotteries(data: AppData, tab: Tab, f: Filters, now: Date, 
 /** 数量のみの表記（カード用）。BOXは入数が確認できる商品だけパック換算を添える。 */
 export function formatQuantity(item: Pick<LotteryItem, "quantity" | "unit">, product: Product | undefined): string {
   if (item.unit === "set") return `${item.quantity}セット`;
+  if (item.unit === "piece") return `${item.quantity}個`;
   if (item.unit === "pack") return `${item.quantity}P`;
   const packs = product && !product.provisional && product.packsPerBox ? `(${item.quantity * product.packsPerBox}P)` : "";
   return `${item.quantity}BOX${packs}`;
@@ -301,6 +302,7 @@ export function formatQuantity(item: Pick<LotteryItem, "quantity" | "unit">, pro
 export function formatItem(item: Pick<LotteryItem, "quantity" | "unit">, product: Product | undefined): string {
   const name = product?.aliases[0] ?? product?.officialName ?? "商品未登録";
   if (item.unit === "set") return `${name} ×${item.quantity}セット`;
+  if (item.unit === "piece") return `${name} ×${item.quantity}個`;
   if (item.unit === "pack") return `${name} ${item.quantity}P`;
   // 仮登録の商品は入数が未確認のため、パック換算は表示しない（既定値を事実として見せない）
   const packs = product && !product.provisional && product.packsPerBox ? ` (${item.quantity * product.packsPerBox}P)` : "";

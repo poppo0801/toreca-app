@@ -1,5 +1,6 @@
 "use client";
 
+import { CountInput } from "@/components/count-input";
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
@@ -152,7 +153,7 @@ function ChainRules({ chainId, name, onSaved }: { chainId: string; name: string;
                 </option>
               ))}
             </select>
-            <input type="number" min={1} max={99} aria-label={`${name}のルール${i + 1}の上限回数`} value={r.maxCount} onChange={(e) => patch(i, { maxCount: Number(e.target.value) })} className={`${field} w-16`} />
+            <CountInput aria-label={`${name}のルール${i + 1}の上限回数`} emptyValue={1} max={99} value={r.maxCount} onChange={(maxCount) => patch(i, { maxCount })} className={`${field} w-16`} />
             <span className="text-xs">回まで</span>
             <select aria-label={`${name}のルール${i + 1}の通算範囲`} value={r.across} onChange={(e) => patch(i, { across: e.target.value as ChainRuleInput["across"] })} className={field}>
               <option value="lottery">この抽選内</option>

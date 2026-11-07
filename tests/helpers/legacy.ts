@@ -9,7 +9,7 @@ import { saveLottery, type Db, type ServiceResult } from "@/lib/server/lottery-s
 export interface LegacyInput extends Omit<LotteryInput, "chain" | "store" | "items" | "applications"> {
   chainId: string;
   storeId: string;
-  items: { id?: string | null; productId: string; quantity: number; unit: "box" | "pack" | "set" }[];
+  items: { id?: string | null; productId: string; quantity: number; unit: "box" | "pack" | "set" | "piece" }[];
   applications?: { accountId: string; status: "applied" | "won" | "lost" }[];
 }
 
