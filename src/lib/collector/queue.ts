@@ -16,6 +16,8 @@ export interface PriorityInput {
   nextRunAt: Date | null;
   /** 既存抽選の更新・直近2日以内に内容の変更を検出 */
   changed: boolean;
+  /** Xブックマーク由来（最優先） */
+  bookmark?: boolean;
 }
 
 const H = 3600_000;
@@ -28,7 +30,8 @@ export function priorityScore(p: PriorityInput): number {
   }
   const fresh = t - p.createdAt.getTime() < 24 * H ? 15 : 0;
   const aging = Math.min(60, Math.floor((t - (p.nextRunAt ?? p.createdAt).getTime()) / (6 * H)));
-  return base + (p.changed ? 25 : 0) + fresh + aging;
+  // Xブックマーク由来は最優先（DBの claim_collection_jobs と同じ加点）
+  return base + (p.changed ? 25 : 0) + fresh + aging + (p.bookmark ? 1000 : 0);
 }
 
 // ---------------------------------------------------------------- 再試行（指数バックオフ）

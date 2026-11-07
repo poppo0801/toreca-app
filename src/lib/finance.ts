@@ -71,6 +71,9 @@ export function purchaseTitle(data: AppData, p: Purchase): string {
 export function purchaseStoreName(data: AppData, p: Purchase): string {
   const store = p.storeId ? data.stores.find((s) => s.id === p.storeId) : undefined;
   if (store) return `${data.chains.find((c) => c.id === store.chainId)?.name ?? ""} ${store.name}`.trim();
+  // 店舗なし・未登録の店舗名: 系列があれば系列名を添える（Stage 6N）
+  const chain = p.chainId ? data.chains.find((c) => c.id === p.chainId)?.name : undefined;
+  if (chain) return [chain, p.storeLabel].filter(Boolean).join(" ");
   return p.storeLabel ?? "店舗未設定";
 }
 

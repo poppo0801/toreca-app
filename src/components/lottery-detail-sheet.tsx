@@ -26,6 +26,8 @@ import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
+import { AppliedStoreDialog } from "@/components/applied-store-dialog";
+import { appliedStoreLabel } from "@/lib/applied-store";
 import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
@@ -59,6 +61,40 @@ const DASH = <span className="text-muted-foreground">—</span>;
 function Unconfirmed({ show }: { show: boolean }) {
   if (!show) return null;
   return <span className="ml-1 rounded border border-dashed px-1 text-[10px] text-muted-foreground">初期値・未確認</span>;
+}
+
+/** 応募店舗（店舗選択式の抽選）。応募記録＝プロフィールごとの店舗。未設定は「店舗未設定」と明示し、応募後も変更できる */
+function AppliedStoreRow({ lottery, app, canEdit }: { lottery: Lottery; app: Application; canEdit: boolean }) {
+  const { actions } = useApp();
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const label = appliedStoreLabel(app.appliedStore);
+  return (
+    <span className="inline-flex items-center gap-1 text-xs" data-testid="applied-store">
+      <span className={label ? "" : "text-warn"}>{label ? `応募店舗: ${label}` : "店舗未設定"}</span>
+      {canEdit && (
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setEditing(true)} data-testid="applied-store-edit">
+          {label ? "変更" : "設定"}
+        </Button>
+      )}
+      {error && <span role="alert" className="text-danger">{error}</span>}
+      {editing && (
+        <AppliedStoreDialog
+          lottery={lottery}
+          initial={app.appliedStore ?? null}
+          title="応募店舗を変更"
+          allowUnset={false}
+          onClose={() => setEditing(false)}
+          onSubmit={async (store) => {
+            const r = await actions.setAppliedStore(app.id, store);
+            if (r && !r.ok) return setError(r.error);
+            setError(null);
+            setEditing(false);
+          }}
+        />
+      )}
+    </span>
+  );
 }
 
 /**
@@ -125,7 +161,12 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
           <div className="flex items-start gap-2 px-4 pb-2 pt-1">
             <div className="min-w-0 flex-1">
               <SheetTitle className="text-sm">
-                {chain?.name} {store?.name}
+                {chain?.name} {lottery.storeMode === "select_on_apply" ? "" : store?.name}
+                {lottery.storeMode === "select_on_apply" && (
+                  <span className="ml-1 rounded border border-info px-1 py-0.5 text-[10px] font-medium text-info" data-testid="store-select-badge">
+                    応募時に店舗選択
+                  </span>
+                )}
               </SheetTitle>
               <SheetDescription id="lottery-detail-desc">抽選の詳細</SheetDescription>
             </div>
@@ -335,6 +376,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                             <div className="flex flex-wrap items-center gap-2">
                               <ProfileAvatar profile={owner} size="sm" />
                               <span className="text-xs">{owner.label}</span>
+                              {lottery.storeMode === "select_on_apply" && <AppliedStoreRow lottery={lottery} app={a} canEdit={canOperateOwner(data.profiles, profile.id, owner.id)} />}
                               {lottery.multiMode === "single" ? (
                                 <>
                                   <span className="text-xs">{RESULT_LABEL[a.result]}</span>

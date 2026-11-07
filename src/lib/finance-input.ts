@@ -24,6 +24,8 @@ export const expenseSchema = z.object({
   /** 品目区分。未指定は従来どおりポケモンカード */
   category: z.enum(EXPENSE_CATEGORY_IDS).default(DEFAULT_EXPENSE_CATEGORY),
   date: dateStr,
+  /** 系列（Stage 6N）。未指定は従来どおり店舗から判断する */
+  chain: ref.optional(),
   store: ref,
   channel: z.enum(["store", "shipping", "online", "other"]),
   note: z.string().trim().max(1000),

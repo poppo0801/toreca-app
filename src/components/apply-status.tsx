@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { AppliedStoreDialog } from "@/components/applied-store-dialog";
+import type { StoreChoice } from "@/lib/applied-store";
 import { Check } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
@@ -93,6 +95,8 @@ export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; class
 export function MyApplyButton({ lottery, compact = false, className }: { lottery: Lottery; /** シンプル表示用: 文字なしの丸いボタン（✓=応募済み／－=未応募） */ compact?: boolean; className?: string }) {
   const { data, now, profile, actions } = useApp();
   const [choosing, setChoosing] = useState(false);
+  /** 応募時に店舗を選ぶ抽選: 店舗の選択中（商品を選ぶ抽選では、選んだ商品を保持） */
+  const [storing, setStoring] = useState<{ itemId?: string } | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [busy, runBusy] = useBusy();
   const [error, setError] = useState<string | null>(null);
@@ -100,13 +104,13 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
   const control = applyControlFor(data, lottery, profile.id, now);
   if (control.kind === "none") return null;
 
-  const run = (applied: boolean, itemId?: string) =>
+  const run = (applied: boolean, itemId?: string, store?: StoreChoice | null) =>
     runBusy(async () => {
       setError(null);
       const handle = applied ? exit?.begin(lottery.id) : undefined;
       let res: Awaited<ReturnType<typeof actions.setApplied>>;
       try {
-        res = await actions.setApplied(lottery.id, control.accountId, applied, itemId);
+        res = await actions.setApplied(lottery.id, control.accountId, applied, itemId, store === undefined ? undefined : { appliedStore: store });
       } catch (e) {
         handle?.fail(); // 通信エラーなどでカードを残したままにしない
         throw e;
@@ -139,6 +143,7 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         onClick={() => {
           if (applied) setConfirmUndo(true);
           else if (control.kind === "apply" && control.needsChoice) setChoosing(true);
+          else if (control.kind === "apply" && control.needsStore) setStoring({});
           else void run(true);
         }}
         className={cn(
@@ -168,7 +173,9 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
                   className="w-full justify-start"
                   onClick={async () => {
                     setChoosing(false);
-                    if (it.id) await run(true, it.id);
+                    if (!it.id) return;
+                    if (control.kind === "apply" && control.needsStore) setStoring({ itemId: it.id });
+                    else await run(true, it.id);
                   }}
                 >
                   {formatItem(it, data.products.find((p) => p.id === it.productId))}
@@ -178,6 +185,18 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
           </ul>
         </DialogContent>
       </Dialog>
+      {storing && (
+        <AppliedStoreDialog
+          lottery={lottery}
+          confirmLabel="応募済みにする"
+          onClose={() => setStoring(null)}
+          onSubmit={async (store) => {
+            const itemId = storing.itemId;
+            setStoring(null);
+            await run(true, itemId, store);
+          }}
+        />
+      )}
       <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
         <DialogContent>
           <DialogTitle>{profile.label}の応募済みを解除しますか？</DialogTitle>

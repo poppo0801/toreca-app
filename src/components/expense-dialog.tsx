@@ -6,12 +6,14 @@ import { unitForProduct, unitOptions } from "@/lib/product-kind";
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { FuelCalc } from "@/components/fuel-calc";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { jstDateString } from "@/lib/datetime";
 import { categoryOf, EXPENSE_CATEGORIES } from "@/lib/expense-category";
 import { flexToJstDate, suggestedAmount } from "@/lib/finance";
+import { FUEL_ITEM_NAME } from "@/lib/fuel";
 import { expenseSchema } from "@/lib/finance-input";
 import type { Purchase, PurchaseUnit } from "@/types/domain";
 
@@ -39,6 +41,9 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
   const store = purchase?.storeId ? data.stores.find((s) => s.id === purchase.storeId) : undefined;
   const [date, setDate] = useState(() => (purchase ? (flexToJstDate(purchase.purchasedOn) ?? "") : jstDateString(new Date())));
   const [storeRef, setStoreRef] = useState<MasterRef>(() => ({ id: store?.id ?? null, name: store?.name ?? purchase?.storeLabel ?? "" }));
+  // 系列＋店舗（Stage 6N）。旧データは店舗の系列から系列を判断する
+  const initialChain = data.chains.find((c) => c.id === (purchase?.chainId ?? store?.chainId));
+  const [chainRef, setChainRef] = useState<MasterRef>(() => ({ id: initialChain?.id ?? null, name: initialChain?.name ?? "" }));
   const [category, setCategory] = useState<string>(purchase?.category ?? "pokemon_card");
   const cat = categoryOf(category);
   const [channel, setChannel] = useState<"store" | "shipping" | "online" | "other">(purchase?.channel ?? "store");
@@ -60,10 +65,30 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
   /** 受取時のシュリンク状態を記録中の明細（行の番号） */
   const [receiptItem, setReceiptItem] = useState<number | null>(null);
 
+  const chainOptions = useMemo(() => data.chains.filter((c) => !c.archived || c.id === chainRef.id).map((c) => ({ id: c.id, name: c.name })), [data.chains, chainRef.id]);
+  // 店舗は、選んだ系列に紐づく店舗から選ぶ（系列が未選択のときは全店舗）
   const storeOptions = useMemo(
-    () => data.stores.filter((s) => !s.archived || s.id === store?.id).map((s) => ({ id: s.id, name: s.name, hint: data.chains.find((c) => c.id === s.chainId)?.name })),
-    [data.stores, data.chains, store?.id],
+    () => data.stores.filter((s) => (!s.archived || s.id === store?.id) && (!chainRef.id || s.chainId === chainRef.id)).map((s) => ({ id: s.id, name: s.name, hint: chainRef.id ? undefined : data.chains.find((c) => c.id === s.chainId)?.name })),
+    [data.stores, data.chains, store?.id, chainRef.id],
   );
+  const changeChain = (next: MasterRef) => {
+    setChainRef(next);
+    // 選んでいた店舗が別の系列のものなら外す
+    if (storeRef.id) {
+      const st = data.stores.find((x) => x.id === storeRef.id);
+      if (st && next.id && st.chainId !== next.id) setStoreRef({ id: null, name: "" });
+    }
+  };
+  const changeStore = (next: MasterRef) => {
+    setStoreRef(next);
+    const st = next.id ? data.stores.find((x) => x.id === next.id) : undefined;
+    if (st && st.chainId !== chainRef.id) {
+      const c = data.chains.find((x) => x.id === st.chainId);
+      if (c) setChainRef({ id: c.id, name: c.name });
+    }
+  };
+  /** ガソリン代モードの前の経費の内容（OFFに戻したときに復元する） */
+  const [beforeFuel, setBeforeFuel] = useState<string | null>(null);
   const productOptions = useMemo(
     () => data.products.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.officialName, hint: p.code || undefined })),
     [data.products],
@@ -100,6 +125,7 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
     const input = {
       category,
       date,
+      chain: chainRef,
       store: storeRef,
       channel,
       note,
@@ -169,10 +195,32 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
             </label>
             )}
           </div>
-          <div className="text-sm">
-            {cat.master ? "購入店舗（未登録の店舗名も入力できます）" : "支払先（任意）"}
-            <MasterCombobox label="購入店舗" value={storeRef} options={storeOptions} onChange={setStoreRef} placeholder="店舗を検索または入力" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="text-sm">
+              {cat.master ? "系列" : "系列（任意）"}
+              <MasterCombobox label="系列" value={chainRef} options={chainOptions} onChange={changeChain} placeholder="系列を検索または入力" />
+            </div>
+            <div className="text-sm">
+              店舗（任意）
+              <MasterCombobox label="購入店舗" value={storeRef} options={storeOptions} onChange={changeStore} placeholder="店舗を検索または入力" />
+            </div>
           </div>
+          {cat.id === "expense" && !fromLottery && (
+            <FuelCalc
+              chain={chainRef}
+              store={storeRef}
+              onToggle={(on) => {
+                if (on) {
+                  setBeforeFuel(items[0]?.product.name ?? "");
+                  patch(0, { product: { id: null, name: FUEL_ITEM_NAME } });
+                } else {
+                  patch(0, { product: { id: null, name: beforeFuel ?? "" } });
+                  setBeforeFuel(null);
+                }
+              }}
+              onCalc={(yen) => patch(0, { amount: String(yen), touched: true })}
+            />
+          )}
 
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">{cat.master ? "購入内容" : cat.id === "expense" ? "経費の内容" : "購入内容"}</legend>

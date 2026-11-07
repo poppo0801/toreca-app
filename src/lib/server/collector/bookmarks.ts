@@ -5,6 +5,7 @@ import { safeSlice } from "@/lib/text-safe";
 import { EXPANSIONS, TWEET_FIELDS, X_API_BASE } from "@/lib/server/collector/x-client";
 import { xBudgetLeft } from "@/lib/server/collector/x-rich";
 import { saveCandidateRows } from "@/lib/server/collector/save-rows";
+import { recordBookmarkPosts, refreshBookmarkStates, type BookmarkOutcome } from "@/lib/server/collector/bookmark-track";
 import { acquireLease, getAccessToken, loadLink, markNeedsReauth, oauthConfig, releaseLease, type OAuthConfig } from "@/lib/server/x-oauth-server";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -181,23 +182,31 @@ export async function runBookmarkSync(deps: BookmarkSyncDeps): Promise<BookmarkS
       const recent = initial ? collected.filter((p) => !p.createdAt || now.getTime() - new Date(p.createdAt).getTime() <= BOOKMARK_INITIAL_DAYS * 86_400_000) : collected;
       const known = await knownPostIds(db, householdId, recent);
       const rows: Record<string, unknown>[] = [];
+      // 投稿ごとの処理状況（x_bookmark_posts）に記録する。取得できたことと、抽選として登録できたことは別の状態で持つ
+      const track: { post: XPost; outcome: BookmarkOutcome; reason?: string }[] = [];
       for (const p of recent) {
         if (known.has(p.id)) {
           res.known++;
+          track.push({ post: p, outcome: "known" });
           continue;
         }
         // ポケモンカードの抽選に関係しない投稿（他TCG・無関係な長文・古い投稿）は解析しない
         const j = judgeXPost({ text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, quoted: p.quoted ?? null }, now);
         if (!j.pass) {
           res.irrelevant++;
+          track.push({ post: p, outcome: "irrelevant" });
           continue;
         }
-        const payload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: BOOKMARK_SOURCE_NAME, attempts: 0, listSeenAt: now.toISOString(), bookmark: true, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? "", ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
+        track.push({ post: p, outcome: "queued" });
+        const payload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: BOOKMARK_SOURCE_NAME, attempts: 0, listSeenAt: now.toISOString(), bookmark: true, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? "", ...(p.authorId ? { authorId: p.authorId } : {}), ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
         rows.push({ household_id: householdId, source_id: null, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: safeSlice(p.text.replace(/\n/g, " "), 80) || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち（Xブックマーク）"], draft: payload, last_checked_at: now.toISOString() });
       }
       const saved = await saveCandidateRows(db, rows);
       res.added = saved.saved;
       if (saved.failed > 0) failure = `候補の保存に失敗した投稿が${saved.failed}件あります`;
+      // 候補の保存に失敗した投稿は「未取得」（解析待ちとは区別。次回の同期で再び候補にできる）
+      await recordBookmarkPosts(db, householdId, track, now).catch(() => 0);
+      await refreshBookmarkStates(db, householdId, now).catch(() => 0);
     }
   } finally {
     // 利用量の記録（既存の月額集計 collection_runs.x_posts に含まれる）。読み取りが無かった呼び出しは記録しない

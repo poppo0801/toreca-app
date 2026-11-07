@@ -412,6 +412,8 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       isNew: l.is_new,
       memo: l.memo,
       boxShrinkHint: (l.box_shrink_hint ?? null) as BoxShrinkHint | null,
+      storeMode: (l.store_mode ?? "fixed") as "fixed" | "select_on_apply" | "none",
+      selectableStores: Array.isArray(l.selectable_stores) ? (l.selectable_stores as { name?: unknown; prefecture?: unknown }[]).flatMap((x) => (typeof x?.name === "string" && x.name ? [{ name: x.name, prefecture: typeof x.prefecture === "string" ? x.prefecture : "" }] : [])) : [],
       createdAt: l.created_at,
       updatedAt: l.updated_at,
       unconfirmedFields: l.unconfirmed_fields ?? [],
@@ -435,6 +437,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         result: a.result_status as ResultStatus,
         itemResults: Object.fromEntries(itemResults.filter((r) => r.application_id === a.id).map((r) => [r.lottery_item_id, r.result_status as ResultStatus])),
         selectedItemId: a.selected_item_id,
+        appliedStore: a.applied_store_id || a.applied_store_name ? { id: a.applied_store_id, name: a.applied_store_name, prefecture: a.applied_store_prefecture } : null,
         resultConfirmedAt: a.result_confirmed_at,
         fulfillment: a.fulfillment_status as FulfillmentStatus,
         createdAt: a.created_at,
@@ -442,6 +445,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     purchases: purchases.map((p) => ({
       id: p.id,
       applicationId: p.application_id,
+      chainId: (p as { chain_id?: string | null }).chain_id ?? null,
       storeId: p.store_id,
       storeLabel: p.store_label,
       purchasedOn: dbToFlex(p.purchased_at ? "date_time" : p.purchased_date ? "date_only" : "unknown", p.purchased_date, p.purchased_at),
@@ -588,6 +592,8 @@ export async function saveLottery(
       announcement_inferred: input.announcementInferred,
       requirement_tags: normalizeRequirementTags(input.requirementTags),
       requirement_logic: input.requirementLogic,
+      store_mode: input.storeMode,
+      selectable_stores: input.storeMode === "select_on_apply" && input.selectableStores.length > 0 ? input.selectableStores : null,
       requirement_details: sanitizeRequirementDetails(input.requirementDetails) as unknown as Database["public"]["Tables"]["lotteries"]["Update"]["requirement_details"],
     })
     .eq("id", data as string);
@@ -734,6 +740,28 @@ export async function setManaged(db: Db, householdId: string, lotteryId: string,
 export interface ApplyOptions {
   backfill?: boolean;
   appliedAt?: string | null;
+  /** 応募した店舗（店舗選択式の抽選。応募記録＝プロフィールごとに保存。Stage 6N） */
+  appliedStore?: AppliedStoreInput | null;
+}
+
+export interface AppliedStoreInput {
+  id: string | null;
+  name: string;
+  prefecture: string;
+}
+
+const appliedStoreSchema = z.object({ id: z.uuid().nullable(), name: z.string().trim().max(80), prefecture: z.string().trim().max(10).default("") });
+
+/** 応募店舗の列。店舗マスターを選んだときは名前・都道府県をマスターから補い、未設定は空にする */
+async function appliedStoreColumns(db: Db, chainId: string, raw: AppliedStoreInput | null | undefined): Promise<{ applied_store_id: string | null; applied_store_name: string; applied_store_prefecture: string } | null> {
+  if (raw === undefined || raw === null) return null;
+  const p = appliedStoreSchema.safeParse(raw);
+  if (!p.success) return null;
+  if (p.data.id) {
+    const { data } = await db.from("stores").select("id,name,prefecture,chain_id").eq("id", p.data.id).maybeSingle();
+    if (data && data.chain_id === chainId) return { applied_store_id: data.id, applied_store_name: data.name, applied_store_prefecture: data.prefecture ?? "" };
+  }
+  return { applied_store_id: null, applied_store_name: p.data.name, applied_store_prefecture: p.data.name ? p.data.prefecture : "" };
 }
 
 function backfillAppliedAt(opts: ApplyOptions): string | null {
@@ -758,6 +786,7 @@ async function setAppliedCore(
   if (selectedItemId !== null && !uuid.safeParse(selectedItemId).success) return fail("リクエストが不正です");
   const { data: mode } = await db.from("lotteries").select("multi_mode,chain_id").eq("id", lotteryId).maybeSingle();
   if (!mode) return fail("対象のデータが見つかりません");
+  const storeCols = applied ? await appliedStoreColumns(db, mode.chain_id, opts.appliedStore) : null;
   const denied = await subScopeError(db, actor, mode.chain_id);
   if (denied) return fail(denied);
   // 応募状態を変えられるのは、操作中のプロフィール自身のアカウントだけ（他のプロフィールの応募状況は閲覧のみ）
@@ -778,7 +807,7 @@ async function setAppliedCore(
     if (existing.state === state) return ok(undefined);
     const { error } = await db
       .from("applications")
-      .update({ state, ...(applied && selected ? { selected_item_id: selected } : {}), ...(applied && opts.backfill ? { applied_at: backfillAppliedAt(opts) } : {}), updated_by_profile_id: actor })
+      .update({ state, ...(storeCols ?? {}), ...(applied && selected ? { selected_item_id: selected } : {}), ...(applied && opts.backfill ? { applied_at: backfillAppliedAt(opts) } : {}), updated_by_profile_id: actor })
       .eq("id", existing.id);
     return error ? fail(mapDbError(error)) : ok(undefined);
   }
@@ -787,7 +816,7 @@ async function setAppliedCore(
   const { data: acc } = await db.from("service_accounts").select("chain_id,active").eq("id", accountId).maybeSingle();
   if (!lot || !acc || lot.chain_id !== acc.chain_id || !acc.active) return fail("この抽選に応募できるアカウントではありません");
   const { error } = await db.from("applications").insert({
-    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: opts.backfill ? backfillAppliedAt(opts) : nowIso(), state: "applied", selected_item_id: selected, updated_by_profile_id: actor,
+    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: opts.backfill ? backfillAppliedAt(opts) : nowIso(), state: "applied", selected_item_id: selected, updated_by_profile_id: actor, ...(storeCols ?? {}),
   });
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
@@ -955,6 +984,29 @@ export async function setApplied(db: Db, householdId: string, lotteryId: string,
   const r = await setAppliedCore(db, householdId, lotteryId, accountId, applied, actor, selectedItemId, opts);
   if (r.ok && applied) await autoManageLottery(db, lotteryId, actor).catch(() => undefined);
   return r;
+}
+
+/**
+ * 応募店舗の変更（店舗選択式の抽選。応募後も変更できる）。この応募記録（プロフィール）の店舗だけを変え、他のプロフィールの応募店舗には触れない。
+ * すでに作られた購入記録の店舗は変えない（受取時点の店舗を履歴として残す）。名前が空なら未設定に戻す。
+ */
+export async function setAppliedStore(db: Db, applicationId: string, store: AppliedStoreInput | null, actor: string | null): Promise<ServiceResult> {
+  if (!uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  const denied = await applicationAccessError(db, actor, applicationId);
+  if (denied) return fail(denied);
+  const { data: app } = await db.from("applications").select("id,service_account_id,lotteries(chain_id,store_mode)").eq("id", applicationId).maybeSingle();
+  // 変更できるのは自分（操作中のプロフィール）の応募だけ。他のプロフィールの応募店舗は変えられない
+  if (app && actor !== null) {
+    const { data: own } = await db.from("service_accounts").select("managed_by_profile_id").eq("id", app.service_account_id).maybeSingle();
+    if (!own || own.managed_by_profile_id !== actor) return fail("他のユーザーの応募店舗は変更できません");
+  }
+  const lot = app?.lotteries as { chain_id: string; store_mode: string } | { chain_id: string; store_mode: string }[] | null | undefined;
+  const l = Array.isArray(lot) ? lot[0] : lot;
+  if (!app || !l) return fail("対象のデータが見つかりません");
+  if (l.store_mode !== "select_on_apply") return fail("この抽選は応募時に店舗を選ぶ方式ではありません");
+  const cols = (await appliedStoreColumns(db, l.chain_id, store ?? { id: null, name: "", prefecture: "" })) ?? { applied_store_id: null, applied_store_name: "", applied_store_prefecture: "" };
+  const { error } = await db.from("applications").update({ ...cols, updated_by_profile_id: actor }).eq("id", applicationId);
+  return error ? fail(mapDbError(error)) : ok(undefined);
 }
 
 export async function setResult(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {

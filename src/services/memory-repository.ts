@@ -33,6 +33,9 @@ export class InMemoryRepository implements LotteryRepository {
     if (acc && acc.profileId !== actorId) return { ok: false as const, error: "他のユーザーの応募状況は変更できません" };
     return this.apply((d) => m.setApplied(d, actorId, lotteryId, accountId, applied, new Date(), opts));
   }
+  async setAppliedStore() {
+    return UNSUPPORTED;
+  }
   async setResult(actorId: string, applicationId: string, result: Parameters<typeof m.setResult>[3]) {
     return this.apply((d) => m.setResult(d, actorId, applicationId, result, new Date()));
   }

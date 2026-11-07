@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RowAssess } from "@/lib/collector/assess-row";
 import type { Rank } from "@/lib/collector/completeness";
 
+// 画面を開いたまま受付終了を迎えた候補を外す処理（Stage 6N）は、固定の日付の試験データでも動くよう時刻を固定する
+vi.mock("@/lib/use-minute-now", () => ({ useMinuteNow: () => new Date("2026-11-04T03:00:00Z") }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
 vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: "p1" }, reload: async () => null }) }));
 vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: () => null }));

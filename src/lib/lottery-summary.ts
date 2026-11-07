@@ -102,7 +102,7 @@ export function resultNotice(data: AppData, lottery: Lottery, now: Date): Result
 export type ApplyControl =
   | { kind: "none" }
   /** 応募していない。押すと現在のプロフィールだけが応募済みになる（choose_one は商品を選ぶ） */
-  | { kind: "apply"; accountId: string; needsChoice: boolean }
+  | { kind: "apply"; accountId: string; needsChoice: boolean; /** 応募時に店舗を選ぶ抽選（Stage 6N） */ needsStore: boolean }
   /** 応募済み。解除は確認つき。当落が確定していれば解除できない */
   | { kind: "applied"; accountId: string; canUndo: boolean }
   /** 応募できない状態（スルー・受付終了など）。状態名だけ見せる */
@@ -118,7 +118,7 @@ export function applyControlFor(data: AppData, lottery: Lottery, profileId: stri
     return { kind: "applied", accountId: acc.id, canUndo: !app || (app.result === "pending" && app.fulfillment === "none") };
   }
   if (j.status === "eligible_unapplied" || j.status === "needs_review") {
-    return { kind: "apply", accountId: acc.id, needsChoice: lottery.multiMode === "choose_one" };
+    return { kind: "apply", accountId: acc.id, needsChoice: lottery.multiMode === "choose_one", needsStore: lottery.storeMode === "select_on_apply" };
   }
   return { kind: "blocked", accountId: acc.id, label: markLabel({ status: j.status, result: "none", partial: false }) };
 }

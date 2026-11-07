@@ -182,7 +182,14 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
     if (kind === "unknown") review.push("受取方法が不明です");
     else if (!cond.receiveMethods.includes(kind)) excluded.push("受取方法が収集条件に合いません");
   }
-  if (onlineOnly) {
+  // 応募時に店舗を選ぶ抽選（Stage 6N）: 登録時点では店舗が決まらない。選べる店舗の都道府県が分かるときだけ地域で判定し、分からないときは除外しない
+  const selectStores = input.storeMode === "select_on_apply" ? (input.selectableStores ?? []) : null;
+  if (selectStores) {
+    const known = selectStores.map((s) => resolveTargetPrefecture(s.prefecture ?? "", cond.prefectures)).filter(Boolean);
+    if (known.some((p) => cond.prefectures.includes(p))) notes.push("応募時に店舗を選択します（対象地域の店舗があります）");
+    else if (selectStores.length > 0 && known.length === selectStores.length) excluded.push(`対象外の地域です（選べる店舗がすべて対象地域外: ${[...new Set(known)].join("・")}）`);
+    else notes.push("応募時に店舗を選択します（店舗の都道府県は未確認のため、地域では除外しません）");
+  } else if (onlineOnly) {
     if (!cond.includeOnline) excluded.push("通販・発送の抽選は収集しない設定です");
     else notes.push("通販・発送（全国対象。配送先の制限がないかは告知で確認してください）");
   } else if (recv === "unknown" && !(ctx.prefecture && cond.prefectures.includes(ctx.prefecture))) {

@@ -3,10 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bell } from "lucide-react";
-import { getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
+import { closeBookmarkAction, getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
 import { useApp } from "@/components/app-provider";
 import { RunCounts, RunStateLabel } from "@/components/collection-result-notice";
 import { ManualBanner, ManualItemSummary } from "@/components/manual-review";
+import { BookmarkRow } from "@/components/bookmark-list";
+import type { BookmarkView } from "@/lib/collector/bookmark-state";
+import { isApplicationClosed } from "@/lib/collector/closed";
+import { useMinuteNow } from "@/lib/use-minute-now";
 import type { ManualItem } from "@/lib/collector/manual-items";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
@@ -35,9 +39,14 @@ export function NotificationBell() {
   // 自動収集の結果の履歴（抽選の通知とは別の区画。通知を開いたときに読み込む）
   const [runs, setRuns] = useState<RunSummary[]>([]);
   // 要手動確認（自動収集で解決できなかった案件）。閉じたポップアップに関係なく、対応するまで通知に残す
-  const [manual, setManual] = useState<ManualItem[]>([]);
+  const [rawManual, setManual] = useState<ManualItem[]>([]);
+  // Xブックマークの未解決（取得失敗・情報不足・要手動確認）。解決するか、利用者が「対象外」「調査終了」を選ぶまで残す
+  const [bookmarks, setBookmarks] = useState<BookmarkView[]>([]);
+  // 画面を開いたまま受付終了を迎えた案件は、件数・バッジからも外す
+  const tick = useMinuteNow();
+  const manual = rawManual.filter((i) => !isApplicationClosed({ dueAt: i.dueAt }, tick));
   const alerts = useMemo(() => computeAlerts(data, profile.id, now), [data, profile.id, now]);
-  const count = alerts.length + manual.length;
+  const count = alerts.length + manual.length + bookmarks.length;
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末ローカルの既読状態の復元
@@ -57,11 +66,20 @@ export function NotificationBell() {
 
   useEffect(() => {
     let live = true;
-    void getRunNoticesAction().then((r) => live && setManual(r.manual ?? []));
+    void getRunNoticesAction(profile.id).then((r) => {
+      if (!live) return;
+      setManual(r.manual ?? []);
+      setBookmarks([...(r.bookmarks?.unresolved ?? []), ...(r.bookmarks?.fresh ?? []).filter((b) => b.unresolved)]);
+    });
     return () => {
       live = false;
     };
-  }, [open]);
+  }, [open, profile.id]);
+
+  const closeBookmark = async (id: string, kind: "excluded" | "investigation_ended") => {
+    const r = await closeBookmarkAction(id, kind);
+    if (r.ok) setBookmarks((s) => s.filter((b) => b.id !== id));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -128,6 +146,29 @@ export function NotificationBell() {
               <Link href="/settings/collection#manual" onClick={() => setOpen(false)} className="block text-right text-xs text-info underline" data-testid="manual-section-link">
                 要手動確認の一覧へ{manual.length > 6 ? `（ほか${manual.length - 6}件）` : ""}
               </Link>
+            </section>
+          )}
+          {bookmarks.length > 0 && (
+            <section className="mt-3 space-y-1.5" data-testid="bookmark-section">
+              <p className="text-sm font-semibold text-warn">⚠ 未解決のXブックマーク：{bookmarks.length}件</p>
+              <ul className="max-h-48 space-y-1.5 overflow-y-auto">
+                {bookmarks.map((b) => (
+                  <BookmarkRow
+                    key={b.id}
+                    b={b}
+                    actions={
+                      <span className="flex gap-1.5 pl-5">
+                        <button type="button" onClick={() => void closeBookmark(b.id, "excluded")} className="min-h-8 rounded-md border px-2 text-xs" data-testid="bookmark-exclude">
+                          対象外
+                        </button>
+                        <button type="button" onClick={() => void closeBookmark(b.id, "investigation_ended")} className="min-h-8 rounded-md border px-2 text-xs" data-testid="bookmark-end">
+                          調査終了
+                        </button>
+                      </span>
+                    }
+                  />
+                ))}
+              </ul>
             </section>
           )}
           <ul className="mt-3 space-y-1.5" data-testid="alerts-list">

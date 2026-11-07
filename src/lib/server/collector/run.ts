@@ -32,6 +32,9 @@ import { identifyAccount, identityHint, type AccountIdentity, type SavedIdentity
 import { otherTcgItemIndexes, productNamesOf, tcgTextsOf } from "@/lib/collector/category";
 import { PREFECTURE_LIST, prefectureOf } from "@/lib/geo";
 import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from "@/lib/collector/x-accounts";
+import { dropUsernameChain, resolveXChain } from "@/lib/collector/x-chain";
+import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
+import { detectStoreSelect } from "@/lib/collector/store-select";
 import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
 import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
@@ -153,7 +156,7 @@ interface QueuedPayload {
     /** 一覧のカードの構造から読み取れた店舗名・商品名 */
     fields?: { store?: string; product?: string };
     sourceName: string;
-    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
+    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; /** 投稿者の固定ID（アカウント名が変わっても同じ店舗として扱うため） */ authorId?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
     /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
     imageStats?: ImageStats;
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
@@ -474,16 +477,19 @@ interface Outcome {
 async function identifyPostAuthor(deps: CollectDeps, data: AppData, q: QueuedPayload["queued"], author: string | null): Promise<AccountIdentity | null> {
   const post = q.post;
   const ids = (deps.xIdentities ??= await loadXIdentities(deps.db, deps.householdId));
-  const run = (username: string, profile: XProfile | undefined) => identifyAccount({ username, profile, chains: data.chains, stores: data.stores, saved: ids.get(username) ?? null });
+  // 確定済みの対応は、アカウントID(固定)を最優先し、なければユーザー名で探す（Stage 6N）
+  const run = (username: string, profile: XProfile | undefined, uid?: string) => identifyAccount({ username, profile, chains: data.chains, stores: data.stores, saved: (uid ? ids.get(`id:${uid}`) : undefined) ?? ids.get(username) ?? null });
   const isAgg = (u: string) => !!deps.sourceCtx?.aggregatorAccounts && [...deps.sourceCtx.aggregatorAccounts].some((a) => a.toLowerCase() === u);
-  let id = author && !isAgg(author) ? run(author, post?.profile) : null;
+  let id = author && !isAgg(author) ? run(author, post?.profile, post?.authorId) : null;
   const quotedUser = post?.quoted?.username ? normUsername(post.quoted.username) : "";
   if ((!id || id.kind === "aggregator" || id.kind === "unknown") && quotedUser && !isAgg(quotedUser)) {
     const qi = run(quotedUser, post?.quoted?.profile);
     if (qi.kind === "store" || qi.kind === "chain") id = qi;
   }
   if (!id || (id.kind !== "store" && id.kind !== "chain")) return null;
-  if (id.storeBasis !== "saved" && (await saveXIdentity(deps.db, deps.householdId, id, ids.get(id.username)))) {
+  const uid = id.username === author ? post?.authorId : undefined;
+  if (id.storeBasis !== "saved" && (await saveXIdentity(deps.db, deps.householdId, id, ids.get(id.username), uid))) {
+    if (uid) ids.set(`id:${uid}`, { username: id.username, chainName: id.chainName, storeName: id.storeName, chainId: id.chainId, storeId: id.storeId, prefecture: id.prefecture, basis: id.prefectureBasis || "name" });
     ids.set(id.username, { username: id.username, chainName: id.chainName, storeName: id.storeName, chainId: id.chainId, storeId: id.storeId, prefecture: id.prefecture, basis: id.prefectureBasis || "name" });
   }
   return id;
@@ -563,16 +569,33 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const author = q.post?.username ? normUsername(q.post.username) : usernameFromPostUrl(q.url);
   // Xアカウントの表示名・プロフィールから、系列・店舗・所在地を特定する（Stage 6H）。まとめアカウントの投稿は、引用元（公式）の投稿者を見る。告知から読み取れた項目は上書きしない
   const idn = await identifyPostAuthor(deps, data, q, author);
-  const idHint = idn ? identityHint(result.extraction, idn) : null;
-  const baseEx = idHint ? { ...result.extraction, chainName: idHint.chainName, storeName: idHint.storeName, prefecture: idHint.prefecture } : result.extraction;
+  // Xユーザー名（@Rises_eStore など）をそのまま系列名にしない。表示名とマスター（正式名称・別名）で決め、特定できなければ空のまま確認待ちにする（Stage 6N）
+  const ex0 = author ? { ...result.extraction, chainName: dropUsernameChain(result.extraction.chainName, author, data.chains) } : result.extraction;
+  const idHint = idn ? identityHint(ex0, idn) : null;
+  let baseEx = idHint ? { ...ex0, chainName: idHint.chainName, storeName: idHint.storeName, prefecture: idHint.prefecture } : ex0;
+  const chainWarn: string[] = [];
+  if (author && !baseEx.chainName.trim()) {
+    const xc = resolveXChain({ extracted: "", username: author, displayName: q.post?.profile?.name ?? q.post?.quoted?.profile?.name ?? "", saved: deps.xIdentities?.get(author) ?? null, chains: data.chains });
+    if (xc.chainName) baseEx = { ...baseEx, chainName: xc.chainName };
+    else chainWarn.push(...xc.warnings);
+  }
   const hint = author ? applyAccountHint(baseEx, deps.xLinks?.get(author), data) : null;
   const draft = buildDraft(hint?.extraction ?? baseEx, data, { sourceUrl: q.url });
+  draft.warnings.push(...chainWarn);
   if (hint && hint.warnings.length > 0) draft.warnings.push(...hint.warnings);
   if (idn && idn.notes.length > 0 && idn.storeBasis === "ambiguous") draft.warnings.push(...idn.notes);
   // 自動収集は要チェックにせず、応募記録も作らない
   const input: LotteryInput = { ...draft.input, isManaged: false, applications: [], sourceUrls: [...new Set([...(draft.input.sourceUrls ?? []), q.url])].slice(0, 10) };
   // ---- 読み取れなかった項目を、まとめサイトの一覧の表示（二次情報）で補う。補った項目は根拠として明示し、確定情報とは区別する
   const secondary: string[] = [...(hint?.used ?? []), ...(idHint?.used ?? [])];
+  // 応募時に店舗を選ぶ抽選（トレカキャピタル・一部のLivePocketなど）: 店舗を決めず「応募時に店舗選択」として登録する（Stage 6N）
+  if (!input.store.id && (!input.store.name.trim() || input.store.name === SELECT_STORE_PLACEHOLDER) && detectStoreSelect({ texts: [q.title, q.context, q.card, q.post?.text, input.conditionsText], chainName: input.chain.name })) {
+    const ph = data.stores.find((s) => s.chainId === input.chain.id && s.name === SELECT_STORE_PLACEHOLDER);
+    input.storeMode = "select_on_apply";
+    input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
+    draft.summary.store = ph ? "exact" : "none";
+    secondary.push("応募時に店舗選択（店舗は応募者が応募時に選びます）");
+  }
   // 複数のTCGを案内する投稿では、ポケモンカード以外の明細を外す（ポケモンカードの明細が残るときだけ）
   const dropIdx = new Set(otherTcgItemIndexes(input.items));
   if (dropIdx.size > 0) {
@@ -1012,7 +1035,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
             continue;
           }
           funnel.passed[j.basis]++;
-          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
+          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.authorId ? { authorId: p.authorId } : {}), ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
           rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: safeSlice(p.text.replace(/\n/g, " "), 80) || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
         }
         const saveRes = await saveCandidateRows(db, rows);
@@ -1139,7 +1162,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
     const claimed = await db.rpc("claim_collection_jobs", { p_household: householdId, p_limit: want, p_worker: workerId, p_lease_seconds: lease, p_now: now.toISOString() });
     // RETURNING の順序は保証されないので、優先順位の高い順に並べ直す(DBの計算と同じ priorityScore)
     const jobs = ((claimed.data ?? []) as unknown as (CandidateRow & { due_at: string | null; next_run_at: string | null; last_changed_at: string | null })[])
-      .map((c) => ({ c, score: priorityScore({ now, dueAt: c.due_at ? new Date(c.due_at) : null, createdAt: new Date(c.created_at), nextRunAt: c.next_run_at ? new Date(c.next_run_at) : null, changed: c.kind === "update" || (c.last_changed_at ? now.getTime() - new Date(c.last_changed_at).getTime() < 2 * 86400_000 : false) }) }))
+      .map((c) => ({ c, score: priorityScore({ now, dueAt: c.due_at ? new Date(c.due_at) : null, createdAt: new Date(c.created_at), nextRunAt: c.next_run_at ? new Date(c.next_run_at) : null, changed: c.kind === "update" || (c.last_changed_at ? now.getTime() - new Date(c.last_changed_at).getTime() < 2 * 86400_000 : false), bookmark: (c.draft as { queued?: { bookmark?: boolean } } | null)?.queued?.bookmark === true }) }))
       .sort((x, y) => y.score - x.score || (x.c.due_at ?? "9").localeCompare(y.c.due_at ?? "9"))
       .map((x) => x.c as CandidateRow);
     if (jobs.length === 0) break;

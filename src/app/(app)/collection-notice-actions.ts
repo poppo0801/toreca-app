@@ -3,9 +3,10 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
-import { ackRuns, loadRunNotices, type RunNotices } from "@/lib/server/collector/run-notices";
+import { ackRuns, EMPTY_BOOKMARKS, loadRunNotices, type RunNotices } from "@/lib/server/collector/run-notices";
+import { closeBookmark, markBookmarksShown } from "@/lib/server/collector/bookmark-track";
 
-const EMPTY: RunNotices = { summaries: [], notice: null, ackIds: [], manual: [] };
+const EMPTY: RunNotices = { summaries: [], notice: null, ackIds: [], manual: [], bookmarks: EMPTY_BOOKMARKS };
 
 /**
  * 起動時の収集結果の通知と、直近の収集の履歴（デモモード・未ログインでは空）。
@@ -37,4 +38,28 @@ export async function ackRunNoticesAction(runIds: string[]): Promise<{ ok: boole
   if (!auth.user || !hid) return { ok: false };
   await ackRuns(db, hid, auth.user.id, ids.data);
   return { ok: true };
+}
+
+/** 起動時ポップアップに表示したブックマークを「表示済み」にする（再起動のたびに同じ新規として繰り返さない） */
+export async function ackBookmarksShownAction(ids: string[]): Promise<{ ok: boolean }> {
+  const p = z.array(z.uuid()).max(200).safeParse(ids);
+  if (!p.success) return { ok: false };
+  const db = (await createClient()) as unknown as Db;
+  const { data: auth } = await db.auth.getUser();
+  const hid = auth.user ? await currentHouseholdId(db) : null;
+  if (!auth.user || !hid) return { ok: false };
+  await markBookmarksShown(db, hid, p.data);
+  return { ok: true };
+}
+
+/** 利用者が「対象外」「調査終了」を選ぶ（未解決一覧から外れ、自動再調査も止まる。履歴は残る） */
+export async function closeBookmarkAction(id: string, kind: "excluded" | "investigation_ended"): Promise<{ ok: boolean; error?: string }> {
+  const p = z.object({ id: z.uuid(), kind: z.enum(["excluded", "investigation_ended"]) }).safeParse({ id, kind });
+  if (!p.success) return { ok: false, error: "リクエストが不正です" };
+  const db = (await createClient()) as unknown as Db;
+  const { data: auth } = await db.auth.getUser();
+  const hid = auth.user ? await currentHouseholdId(db) : null;
+  if (!auth.user || !hid) return { ok: false, error: "ログインが必要です" };
+  const ok = await closeBookmark(db, hid, p.data.id, p.data.kind);
+  return ok ? { ok: true } : { ok: false, error: "更新できませんでした" };
 }

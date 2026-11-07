@@ -6,6 +6,8 @@ import type { RowAssess } from "@/lib/collector/assess-row";
 import type { Rank } from "@/lib/collector/completeness";
 
 const dismiss = vi.fn(async (..._a: unknown[]) => ({ ok: true }) as { ok: boolean; error?: string });
+// 画面を開いたまま受付終了を迎えた候補を外す処理（Stage 6N）は、固定の日付の試験データでも動くよう時刻を固定する
+vi.mock("@/lib/use-minute-now", () => ({ useMinuteNow: () => new Date("2026-11-04T03:00:00Z") }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
 vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: "p1" }, reload: async () => null }) }));
 vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: (p: { restoreSignal?: number; prefill?: { draft?: { input?: { chain?: { name?: string } } } } }) => createElement("div", { "data-testid": "edit-form", "data-chain": p.prefill?.draft?.input?.chain?.name ?? "", "data-restore": String(p.restoreSignal ?? 0) }) }));

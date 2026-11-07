@@ -87,6 +87,10 @@ export const lotteryInputSchema = z.object({
    */
   store: z.object({ id: z.uuid().nullable(), name: z.string().trim().max(80, "店舗は80文字以内で入力してください") }).and(z.object({ prefecture: z.string().trim().max(10).default("") })),
   noStore: z.boolean().optional(),
+  /** 店舗の指定方式（Stage 6N）: fixed=店舗固定 / select_on_apply=応募時に店舗選択（応募者ごとに店舗を記録）/ none=店舗指定なし（通販など） */
+  storeMode: z.enum(["fixed", "select_on_apply", "none"]).default("fixed"),
+  /** 応募時に選べる店舗の一覧（取得できたときだけ。空は不明） */
+  selectableStores: z.array(z.object({ name: z.string().trim().min(1).max(80), prefecture: z.string().trim().max(10).default("") })).max(200).default([]),
   multiMode: z.enum(MULTI_MODES).default("single"),
   campaignId: z.uuid().nullable(),
   newCampaign: z

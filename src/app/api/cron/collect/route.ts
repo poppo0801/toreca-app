@@ -8,6 +8,7 @@ import { runLowInfoPass, runMergePass } from "@/lib/server/collector/merge-pass"
 import { runHoldPass } from "@/lib/server/collector/hold";
 import { planScheduledCollection } from "@/lib/server/collector/schedule";
 import { runBookmarkCron } from "@/lib/server/collector/bookmarks";
+import { bumpRetry, refreshBookmarkStates, unresolvedBookmarkCandidateIds } from "@/lib/server/collector/bookmark-track";
 import { processGeocodeBatch } from "@/lib/server/geocode-service";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
@@ -42,6 +43,18 @@ async function handle(req: NextRequest) {
   let idle = 0;
   for (const t of targets ?? []) {
     const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
+    // Xブックマーク由来の未解決は、収集・解析より先に補完を試みる（AI・X APIは呼ばない。保存済みの候補・既存の抽選・公式ページ由来の候補と照合）。
+    // 状態の更新で、登録済み・統合済み・受付終了を反映し、受付終了後は再調査を止める
+    try {
+      const due = await unresolvedBookmarkCandidateIds(db, t.household_id, now);
+      if (due.length > 0) {
+        await runMergePass({ ...base, trigger: "manual" as const }, { execute: true, ids: due }).catch(() => undefined);
+        await bumpRetry(db, t.household_id, due, now);
+      }
+      await refreshBookmarkStates(db, t.household_id, now);
+    } catch {
+      /* 補完に失敗しても収集は続ける */
+    }
     if (t.schedule_enabled) {
       // 手動収集の履歴とは独立に、今日の定期収集のスロットで未取得の収集元だけを取得する（失敗した収集元は間隔をおいて再試行）
       const plan = await planScheduledCollection(db, t.household_id, now, [t.schedule_hour_jst, t.schedule_hour2_jst]);

@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/app-provider";
-import { ackRunNoticesAction, getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
+import { ackBookmarksShownAction, ackRunNoticesAction, getRunNoticesAction } from "@/app/(app)/collection-notice-actions";
+import { BookmarkArea } from "@/components/bookmark-list";
+import type { BookmarkView } from "@/lib/collector/bookmark-state";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { cn } from "@/lib/utils";
@@ -52,6 +54,8 @@ export function CollectionResultNotice() {
   const router = useRouter();
   const { profile } = useApp();
   const [notice, setNotice] = useState<RunSummary | null>(null);
+  /** Xブックマーク（最上部の専用エリア）。新規は個別にすべて表示し、未解決は解決するまで残る */
+  const [bm, setBm] = useState<{ fresh: BookmarkView[]; unresolved: BookmarkView[]; syncIssue: string | null } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -59,14 +63,20 @@ export function CollectionResultNotice() {
       if (!live) return;
       // 確認済みの記録は表示した時点（表示しないと判断した古い結果も含む）で行う。ボタンを押した後だと、アプリを閉じただけで毎回出てしまう
       if (r.ackIds.length > 0) void ackRunNoticesAction(r.ackIds);
-      if (!r.notice) return;
+      const b = r.bookmarks;
+      const fresh = b?.fresh ?? [];
+      // ブックマークの新規が無く、収集結果も無ければ何も出さない（未解決だけの場合は、通知のベルに残る）
+      if (!r.notice && fresh.length === 0) return;
       // 同じ起動中の再描画では繰り返さない（確認済みの反映が間に合わない場合の保険）
+      const key = r.notice ? `${r.notice.runId}:${fresh.map((x) => x.id).join(",")}` : `bm:${fresh.map((x) => x.id).join(",")}`;
       try {
-        if (window.sessionStorage.getItem(SEEN_KEY) === r.notice.runId) return;
-        window.sessionStorage.setItem(SEEN_KEY, r.notice.runId);
+        if (window.sessionStorage.getItem(SEEN_KEY) === key) return;
+        window.sessionStorage.setItem(SEEN_KEY, key);
       } catch {
         /* 保存できなくても動作は継続 */
       }
+      if (b && b.shownIds.length > 0) void ackBookmarksShownAction(b.shownIds);
+      if (b) setBm({ fresh, unresolved: b.unresolved, syncIssue: b.syncIssue });
       setNotice(r.notice);
     });
     return () => {
@@ -74,24 +84,29 @@ export function CollectionResultNotice() {
     };
   }, [profile.id]);
 
-  const close = () => setNotice(null);
+  const close = () => {
+    setNotice(null);
+    setBm(null);
+  };
   /** 確認する: ポップアップをすぐ閉じて、要手動確認の一覧へ移る（移動先の読み込みは移動後に表示する） */
   const confirm = () => {
-    setNotice(null);
+    close();
     router.push("/settings/collection#manual");
   };
-  if (!notice) return null;
+  if (!notice && !bm) return null;
   const s = notice;
   return (
     <Dialog open onOpenChange={(v) => !v && close()}>
-      <DialogContent className="max-w-sm space-y-3" data-testid="run-notice">
+      <DialogContent className="max-h-[85dvh] max-w-sm space-y-3 overflow-y-auto" data-testid="run-notice">
+        {/* 最上部: Xブックマーク（収集結果より先に表示する） */}
+        {bm && <BookmarkArea fresh={bm.fresh} unresolved={bm.unresolved} syncIssue={bm.syncIssue} />}
         <DialogTitle className="flex items-center gap-2">
-          {runTitle(s)}
-          <RunStateLabel s={s} />
+          {s ? runTitle(s) : "Xブックマーク"}
+          {s && <RunStateLabel s={s} />}
         </DialogTitle>
         <DialogDescription className="sr-only">自動収集の結果の要約</DialogDescription>
-        <RunCounts s={s} />
-        {(s.excluded > 0 || s.duplicates > 0 || s.costJpy > 0) && (
+        {s && <RunCounts s={s} />}
+        {s && (s.excluded > 0 || s.duplicates > 0 || s.costJpy > 0) && (
           <p className="text-[11px] text-muted-foreground">
             対象外 {s.excluded}件・重複 {s.duplicates}件・AI費用 約{s.costJpy}円
           </p>

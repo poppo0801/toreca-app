@@ -26,6 +26,8 @@ export interface LotteryRepository {
   /** ユーザーの表示順（有効なユーザー全員をこの順に並べる）。応募・当落のデータには触れない */
   reorderProfiles(actorId: string, ids: string[]): Promise<Outcome>;
   setResult(actorId: string, applicationId: string, result: ResultStatus): Promise<Outcome>;
+  /** 応募店舗の変更（店舗選択式の抽選）。null で未設定に戻す */
+  setAppliedStore(actorId: string, applicationId: string, store: { id: string | null; name: string; prefecture: string } | null): Promise<Outcome>;
   setFulfillment(actorId: string, applicationId: string, fulfillment: FulfillmentStatus): Promise<Outcome>;
   /** 直前に記録した購入手続き／受取の取り消し（Undo用）。受取済みで自動作成された購入記録も戻す */
   revertFulfillment(actorId: string, applicationId: string, to: "none" | "procedure_done"): Promise<Outcome>;

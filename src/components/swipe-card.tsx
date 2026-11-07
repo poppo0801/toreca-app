@@ -6,6 +6,8 @@ import { useApp } from "@/components/app-provider";
 import { useApplyExit } from "@/components/apply-exit";
 import { useUndoToast } from "@/components/undo-toast";
 import { Button } from "@/components/ui/button";
+import { AppliedStoreDialog } from "@/components/applied-store-dialog";
+import type { StoreChoice } from "@/lib/applied-store";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { myApplication } from "@/lib/lottery-flow";
 import { applyControlFor } from "@/lib/lottery-summary";
@@ -35,7 +37,7 @@ function useSwipeEnabled(): boolean {
 }
 
 interface PendingDialog {
-  kind: "confirm" | "choose-item" | "choose-fulfillment";
+  kind: "confirm" | "choose-item" | "choose-store" | "choose-fulfillment";
   op?: SwipeOp;
 }
 
@@ -71,7 +73,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
   /** 状態を変える本体。成功したらUndo付きの通知を出す。busy 中は何もしない（通信中の重複操作を防ぐ） */
   const okRef = useRef(false);
   const exec = useCallback(
-    async (op: SwipeOp, extra: { itemId?: string; result?: "won" | "lost" } = {}) => {
+    async (op: SwipeOp, extra: { itemId?: string; result?: "won" | "lost"; store?: StoreChoice | null } = {}) => {
       if (busy.current) return;
       busy.current = true;
       try {
@@ -98,7 +100,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           case "mark_applied": {
             const c = applyControlFor(data, lottery, profile.id, now);
             if (c.kind !== "apply") return fail("応募済みにできません");
-            const r = await actions.setApplied(lottery.id, c.accountId, true, extra.itemId ?? null);
+            const r = await actions.setApplied(lottery.id, c.accountId, true, extra.itemId ?? null, extra.store === undefined ? undefined : { appliedStore: extra.store });
             if (!r.ok) return fail(r.error);
             okRef.current = true;
             return toast.show({
@@ -184,6 +186,8 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           return setDialog({ kind: "confirm", op: plan.op });
         case "choose-item":
           return setDialog({ kind: "choose-item" });
+        case "choose-store":
+          return setDialog({ kind: "choose-store" });
         case "choose-fulfillment":
           return setDialog({ kind: "choose-fulfillment" });
       }
@@ -294,7 +298,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
 }
 
 /** 確認が必要なスワイプのダイアログ（発表前の当落・希望商品の選択・購入/受取の選択） */
-function SwipeDialogs({ lottery, dialog, onClose, onRun }: { lottery: Lottery; dialog: PendingDialog | null; onClose: () => void; onRun: (op: SwipeOp, extra?: { itemId?: string }) => void }) {
+function SwipeDialogs({ lottery, dialog, onClose, onRun }: { lottery: Lottery; dialog: PendingDialog | null; onClose: () => void; onRun: (op: SwipeOp, extra?: { itemId?: string; store?: StoreChoice | null }) => void }) {
   const { data, profile, actions } = useApp();
   const toast = useUndoToast();
   const [busy, setBusy] = useState(false);
@@ -341,6 +345,7 @@ function SwipeDialogs({ lottery, dialog, onClose, onRun }: { lottery: Lottery; d
           </ul>
         </DialogContent>
       </Dialog>
+      {dialog?.kind === "choose-store" && <AppliedStoreDialog lottery={lottery} confirmLabel="応募済みにする" onClose={onClose} onSubmit={(store) => onRun("mark_applied", { store })} />}
       <Dialog open={dialog?.kind === "choose-fulfillment"} onOpenChange={(o) => !o && onClose()}>
         <DialogContent>
           <DialogTitle>何を記録しますか？</DialogTitle>

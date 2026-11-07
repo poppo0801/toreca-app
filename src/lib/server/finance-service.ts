@@ -28,13 +28,41 @@ async function matchProduct(db: Db, ref: { id: string | null; name: string }): P
   return byAlias?.product_id ?? null;
 }
 
-async function matchStore(db: Db, ref: { id: string | null; name: string }): Promise<string | null> {
+async function matchStore(db: Db, ref: { id: string | null; name: string }, chainId: string | null = null): Promise<string | null> {
   if (ref.id) return ref.id;
   const key = normName(ref.name);
   if (!key) return null;
-  const { data } = await db.from("stores").select("id,name").is("archived_at", null);
+  let q = db.from("stores").select("id,name,chain_id").is("archived_at", null);
+  if (chainId) q = q.eq("chain_id", chainId); // 選んだ系列の店舗に限る
+  const { data } = await q;
   const hits = (data ?? []).filter((s) => normName(s.name) === key);
   return hits.length === 1 ? hits[0].id : null; // 複数の系列に同名店舗がある場合は推測しない
+}
+
+/**
+ * 系列の決定（Stage 6N）。選択した系列を優先し、未選択のときは店舗マスターの系列を使う。
+ * 未登録の系列名は仮登録として追加する（既存の系列名・別名と一致するときは新規に作らない）。
+ */
+async function resolveChain(db: Db, householdId: string, chain: { id: string | null; name: string } | undefined, storeId: string | null): Promise<string | null> {
+  if (chain?.id) return chain.id;
+  const key = normName(chain?.name ?? "");
+  if (key) {
+    const [{ data: chains }, { data: aliases }] = await Promise.all([db.from("chains").select("id,name").is("archived_at", null), db.from("chain_aliases").select("chain_id,normalized_alias")]);
+    const byName = (chains ?? []).filter((c) => normName(c.name) === key);
+    const byAlias = (aliases ?? []).filter((a) => normName(a.normalized_alias) === key).map((a) => a.chain_id);
+    const hits = [...new Set([...byName.map((c) => c.id), ...byAlias])];
+    if (hits.length === 1) return hits[0];
+    if (hits.length === 0) {
+      const { data, error } = await db.from("chains").insert({ household_id: householdId, name: chain!.name.trim(), is_provisional: true }).select("id").single();
+      if (!error && data) return data.id;
+    }
+    return null; // 同名が複数あるときは決めない
+  }
+  if (storeId) {
+    const { data } = await db.from("stores").select("chain_id").eq("id", storeId).maybeSingle();
+    return data?.chain_id ?? null;
+  }
+  return null;
 }
 
 export async function saveExpense(
@@ -50,9 +78,13 @@ export async function saveExpense(
   if (id !== null && !uuid.safeParse(id).success) return fail("リクエストが不正です");
 
   const cat = categoryOf(v.category);
-  const storeId = await matchStore(db, v.store);
+  // 系列＋店舗（Stage 6N）。店舗は選んだ系列の店舗に限り、店舗名が空なら系列のみで保存する
+  const chainId = await resolveChain(db, householdId, v.chain, null);
+  const storeId = await matchStore(db, v.store, chainId);
+  const resolvedChain = chainId ?? (storeId ? await resolveChain(db, householdId, undefined, storeId) : null);
   const header = {
     category: cat.id,
+    chain_id: resolvedChain,
     store_id: storeId,
     store_label: storeId ? null : v.store.name || null,
     purchased_date: v.date,

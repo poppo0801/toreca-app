@@ -2,7 +2,8 @@ import "server-only";
 import { pickNotice, summarizeRun, type RunLite, type RunSummary } from "@/lib/collector/run-summary";
 import type { ManualItem } from "@/lib/collector/manual-items";
 import { loadManualItems } from "@/lib/server/collector/manual-items";
-import type { Db } from "@/lib/server/lottery-service";
+import { loadBookmarkPanel, type BookmarkPanel } from "@/lib/server/collector/bookmark-track";
+import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
 
 /** 収集結果の通知用の読み込み（Stage 5S-B）。既存の通知（ベル）と同じ画面に統合し、専用の通知システムは持たない */
 export interface RunNotices {
@@ -12,14 +13,20 @@ export interface RunNotices {
   ackIds: string[];
   /** 未対応の要手動確認（ポップアップを閉じても、対応するまで残る） */
   manual: ManualItem[];
+  /** Xブックマークの投稿ごとの処理状況（新規は起動時に個別表示、未解決は解決するまで残す） */
+  bookmarks: BookmarkPanel;
 }
+
+export const EMPTY_BOOKMARKS: BookmarkPanel = { fresh: [], unresolved: [], shownIds: [], syncIssue: null };
 
 const RUN_COLS = "id,trigger,status,started_at,finished_at,new_count,registered_count,ai_calls";
 
 export async function loadRunNotices(db: Db, userId: string | null, limit = 8): Promise<RunNotices> {
   const manual = await loadManualItems(db, new Date(), 60, true).catch(() => [] as ManualItem[]);
+  const hid = await currentHouseholdId(db).catch(() => null);
+  const bookmarks = hid ? await loadBookmarkPanel(db, hid).catch(() => EMPTY_BOOKMARKS) : EMPTY_BOOKMARKS;
   const runs = ((await db.from("collection_runs").select(RUN_COLS).eq("phase", "collect").order("started_at", { ascending: false }).limit(limit)).data ?? []) as unknown as RunLite[];
-  if (runs.length === 0) return { summaries: [], notice: null, ackIds: [], manual };
+  if (runs.length === 0) return { summaries: [], notice: null, ackIds: [], manual, bookmarks };
   const ids = runs.map((r) => r.id);
   const [cands, acks] = await Promise.all([
     db.from("collection_candidates").select("discovered_run_id,status,job_state,fail_kind,ai_calls,cost_jpy").in("discovered_run_id", ids).limit(5000),
@@ -33,7 +40,7 @@ export async function loadRunNotices(db: Db, userId: string | null, limit = 8): 
   const summaries = runs.map((r) => summarizeRun(r, (byRun.get(r.id) ?? []) as never));
   const acked = new Set((acks.data ?? []).map((a) => a.run_id));
   const p = pickNotice(summaries, acked);
-  return { summaries, notice: p.show, ackIds: p.ackIds, manual };
+  return { summaries, notice: p.show, ackIds: p.ackIds, manual, bookmarks };
 }
 
 export async function ackRuns(db: Db, householdId: string, userId: string, runIds: string[]): Promise<void> {

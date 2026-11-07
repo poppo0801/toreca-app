@@ -8,6 +8,8 @@ import { manualDismissAction, manualDoneAction, manualRecheckAction } from "@/ap
 import { useEditRequest } from "@/components/edit-request";
 import { SwipeRow } from "@/components/swipe-row";
 import { Button } from "@/components/ui/button";
+import { isApplicationClosed } from "@/lib/collector/closed";
+import { useMinuteNow } from "@/lib/use-minute-now";
 import { manualHeadline, type ManualItem } from "@/lib/collector/manual-items";
 import { EXCLUSION_REASONS, type ExclusionReasonCode } from "@/lib/collector/triage";
 import { cn } from "@/lib/utils";
@@ -123,9 +125,13 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
     if (r.ok) router.refresh();
   };
 
-  const now = groups.open.filter((i) => i.group === "now" && !hidden.has(i.id));
-  const later = groups.open.filter((i) => i.group === "later" && !hidden.has(i.id));
-  if (groups.open.length === 0 && groups.retryingCount === 0 && groups.closed.length === 0) return null;
+  // 画面を開いたまま受付終了を迎えた候補も、その場で一覧と件数から外す
+  const tick = useMinuteNow();
+  const live = (i: ManualItem) => !isApplicationClosed({ dueAt: i.dueAt }, tick);
+  const openItems = groups.open.filter(live);
+  const now = openItems.filter((i) => i.group === "now" && !hidden.has(i.id));
+  const later = openItems.filter((i) => i.group === "later" && !hidden.has(i.id));
+  if (openItems.length === 0 && groups.retryingCount === 0 && groups.closed.length === 0) return null;
 
   const row = (it: ManualItem, actions: boolean) => {
     const opened = openId === it.id;

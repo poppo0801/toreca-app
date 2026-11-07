@@ -186,6 +186,8 @@ function fromLottery(l: Lottery, data: AppData): LotteryInput {
   return {
     chain: { id: l.chainId, name: chain?.name ?? "" },
     store: { id: l.storeId, name: store?.name ?? "", prefecture: store?.prefecture ?? "" },
+    storeMode: l.storeMode ?? "fixed",
+    selectableStores: l.selectableStores ?? [],
     multiMode: l.multiMode,
     campaignId: l.campaignId ?? null,
     newCampaign: null,
@@ -751,9 +753,27 @@ export function LotteryFormDialog({
                     {flagChip("store", "店舗")}
                   </span>
                   <MasterCombobox label="店舗" value={v.store} options={storeOptions} onChange={(store) => set("store", { ...store, prefecture: store.id ? "" : (v.store.prefecture ?? "") })} />
-                  {!v.store.id && !v.store.name.trim() && (v.chain.id || v.chain.name.trim()) && <span className="mt-0.5 block text-[11px] text-muted-foreground" data-testid="no-store-hint">店舗なし（系列のみ）</span>}
+                  {!v.store.id && !v.store.name.trim() && (v.chain.id || v.chain.name.trim()) && v.storeMode !== "select_on_apply" && <span className="mt-0.5 block text-[11px] text-muted-foreground" data-testid="no-store-hint">店舗なし（系列のみ）</span>}
                 </div>
               </div>
+              {/* 店舗の指定方式。応募時に店舗を選ぶ抽選は、登録時に店舗を決めず、応募者ごとに応募店舗を記録する */}
+              <label className="block text-sm">
+                <span className="text-[13px] font-medium">店舗の指定</span>
+                <select
+                  aria-label="店舗の指定"
+                  value={v.storeMode ?? "fixed"}
+                  onChange={(e) => {
+                    const m = e.target.value as NonNullable<LotteryInput["storeMode"]>;
+                    setV((st) => ({ ...st, storeMode: m, ...(m === "select_on_apply" ? { store: { id: null, name: "応募時に店舗選択", prefecture: "" } } : m === "none" ? { store: { id: null, name: "", prefecture: "" } } : st.storeMode === "select_on_apply" ? { store: { id: null, name: "", prefecture: "" } } : {}) }));
+                  }}
+                  className="mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm"
+                  data-testid="store-mode"
+                >
+                  <option value="fixed">店舗固定</option>
+                  <option value="select_on_apply">応募時に店舗選択</option>
+                  <option value="none">店舗指定なし（通販など）</option>
+                </select>
+              </label>
               {(openFlag === "chain" || openFlag === "store" || (!v.chain.id && candidates.chain.length > 0) || (!v.store.id && candidates.store.length > 0)) && (
                 <div>
                   {flagPanel("chain")}

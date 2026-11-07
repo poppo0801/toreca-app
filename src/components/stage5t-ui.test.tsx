@@ -12,6 +12,8 @@ const items: ManualItem[] = [
 ];
 let notice: unknown = null;
 let manual: ManualItem[] = [];
+// 画面を開いたまま受付終了を迎えた候補を外す処理（Stage 6N）は、固定の日付の試験データでも動くよう時刻を固定する
+vi.mock("@/lib/use-minute-now", () => ({ useMinuteNow: () => new Date("2026-11-04T03:00:00Z") }));
 vi.mock("@/app/(app)/collection-notice-actions", () => ({
   getRunNoticesAction: async () => ({ summaries: [], notice, ackIds: [], manual }),
   ackRunNoticesAction: async () => ({ ok: true }),

@@ -229,6 +229,10 @@ export interface Lottery {
   id: string;
   /** この抽選のBOX販売形態（確定している場合のみ。あれば系列の目安より優先） */
   boxShrinkHint?: BoxShrinkHint | null;
+  /** 店舗の指定方式（Stage 6N）。未設定は店舗固定 */
+  storeMode?: "fixed" | "select_on_apply" | "none";
+  /** 応募時に選べる店舗（取得できたときだけ） */
+  selectableStores?: { name: string; prefecture: string }[];
   campaignId?: string;
   chainId: string;
   storeId: string | null;
@@ -310,6 +314,8 @@ export interface Application {
   itemResults: Record<string, ResultStatus>;
   /** choose_one で応募時に選んだ明細ID */
   selectedItemId: string | null;
+  /** 応募した店舗（店舗選択式の抽選・Stage 6N）。プロフィール（応募アカウント）ごとに独立。未設定は null */
+  appliedStore?: { id: string | null; name: string; prefecture: string } | null;
   resultConfirmedAt: string | null;
   fulfillment: FulfillmentStatus;
   createdAt: string;
@@ -334,6 +340,8 @@ export interface PurchaseItem {
 export interface Purchase {
   id: string;
   applicationId: string | null;
+  /** 系列（Stage 6N）。店舗なしの購入は系列のみ。未設定の旧データは店舗の系列から判断する */
+  chainId?: string | null;
   storeId: string | null;
   /** マスター未登録の店舗名（自由入力） */
   storeLabel?: string | null;

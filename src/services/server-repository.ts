@@ -5,6 +5,7 @@ import {
   loadAppDataAction,
   saveLotteryAction,
   setAppliedAction,
+  setAppliedStoreAction,
   setEventStateAction,
   setFulfillmentAction,
   revertFulfillmentAction,
@@ -40,6 +41,7 @@ export class ServerActionRepository implements LotteryRepository {
   deleteSale = (actor: string, id: string) => deleteSaleAction(id, actor);
   reorderProfiles = (actor: string, ids: string[]) => reorderProfilesAction(ids, actor);
   updateProfile = (actor: string, profileId: string, input: Parameters<typeof updateProfileAction>[1]) => updateProfileAction(profileId, input, actor);
+  setAppliedStore = (actor: string, appId: string, store: { id: string | null; name: string; prefecture: string } | null) => setAppliedStoreAction(appId, store, actor);
   setResult = (actor: string, appId: string, r: Parameters<typeof setResultAction>[1]) => setResultAction(appId, r, actor);
   setFulfillment = (actor: string, appId: string, f: Parameters<typeof setFulfillmentAction>[1]) => setFulfillmentAction(appId, f, actor);
   revertFulfillment = (actor: string, appId: string, to: "none" | "procedure_done") => revertFulfillmentAction(appId, to, actor);

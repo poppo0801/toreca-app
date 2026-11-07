@@ -654,6 +654,9 @@ export type Database = {
       applications: {
         Row: {
           applied_at: string | null
+          applied_store_id: string | null
+          applied_store_name: string
+          applied_store_prefecture: string
           created_at: string
           fulfillment_status: string
           household_id: string
@@ -671,6 +674,9 @@ export type Database = {
         }
         Insert: {
           applied_at?: string | null
+          applied_store_id?: string | null
+          applied_store_name?: string
+          applied_store_prefecture?: string
           created_at?: string
           fulfillment_status?: string
           household_id: string
@@ -688,6 +694,9 @@ export type Database = {
         }
         Update: {
           applied_at?: string | null
+          applied_store_id?: string | null
+          applied_store_name?: string
+          applied_store_prefecture?: string
           created_at?: string
           fulfillment_status?: string
           household_id?: string
@@ -704,6 +713,13 @@ export type Database = {
           updated_by_profile_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "applications_applied_store_fk"
+            columns: ["applied_store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
           {
             foreignKeyName: "applications_household_id_fkey"
             columns: ["household_id"]
@@ -3105,6 +3121,38 @@ export type Database = {
           },
         ]
       }
+      fuel_settings: {
+        Row: {
+          household_id: string
+          km_per_l: number
+          price_per_l: number
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          household_id: string
+          km_per_l?: number
+          price_per_l?: number
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          household_id?: string
+          km_per_l?: number
+          price_per_l?: number
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fuel_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: true
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       household_members: {
         Row: {
           created_at: string
@@ -3395,9 +3443,11 @@ export type Database = {
           result_date: string | null
           result_end_date: string | null
           result_precision: string
+          selectable_stores: Json | null
           source_kind: string
           source_urls: string[]
           store_id: string | null
+          store_mode: string
           unconfirmed_fields: string[]
           updated_at: string
           updated_by_profile_id: string | null
@@ -3459,9 +3509,11 @@ export type Database = {
           result_date?: string | null
           result_end_date?: string | null
           result_precision?: string
+          selectable_stores?: Json | null
           source_kind?: string
           source_urls?: string[]
           store_id?: string | null
+          store_mode?: string
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -3523,9 +3575,11 @@ export type Database = {
           result_date?: string | null
           result_end_date?: string | null
           result_precision?: string
+          selectable_stores?: Json | null
           source_kind?: string
           source_urls?: string[]
           store_id?: string | null
+          store_mode?: string
           unconfirmed_fields?: string[]
           updated_at?: string
           updated_by_profile_id?: string | null
@@ -4757,6 +4811,7 @@ export type Database = {
           archived_at: string | null
           buyer_profile_id: string | null
           category: string
+          chain_id: string | null
           channel: string
           created_at: string
           household_id: string
@@ -4776,6 +4831,7 @@ export type Database = {
           archived_at?: string | null
           buyer_profile_id?: string | null
           category?: string
+          chain_id?: string | null
           channel?: string
           created_at?: string
           household_id: string
@@ -4795,6 +4851,7 @@ export type Database = {
           archived_at?: string | null
           buyer_profile_id?: string | null
           category?: string
+          chain_id?: string | null
           channel?: string
           created_at?: string
           household_id?: string
@@ -4822,6 +4879,13 @@ export type Database = {
             columns: ["buyer_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "purchases_chain_fk"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
             referencedColumns: ["id", "household_id"]
           },
           {
@@ -5289,6 +5353,58 @@ export type Database = {
           },
         ]
       }
+      store_trip_distances: {
+        Row: {
+          chain_id: string
+          household_id: string
+          id: string
+          one_way_km: number
+          store_id: string | null
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          chain_id: string
+          household_id: string
+          id?: string
+          one_way_km: number
+          store_id?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          chain_id?: string
+          household_id?: string
+          id?: string
+          one_way_km?: number
+          store_id?: string | null
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_trip_distances_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "store_trip_distances_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "store_trip_distances_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       stores: {
         Row: {
           address_optional: string
@@ -5424,6 +5540,7 @@ export type Database = {
           store_id: string | null
           store_name: string
           username: string
+          x_user_id: string | null
         }
         Insert: {
           basis: string
@@ -5438,6 +5555,7 @@ export type Database = {
           store_id?: string | null
           store_name?: string
           username: string
+          x_user_id?: string | null
         }
         Update: {
           basis?: string
@@ -5452,6 +5570,7 @@ export type Database = {
           store_id?: string | null
           store_name?: string
           username?: string
+          x_user_id?: string | null
         }
         Relationships: [
           {
@@ -5595,6 +5714,98 @@ export type Database = {
             foreignKeyName: "x_bookmark_links_household_id_fkey"
             columns: ["household_id"]
             isOneToOne: true
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      x_bookmark_posts: {
+        Row: {
+          candidate_id: string | null
+          created_at: string
+          deadline_at: string | null
+          display_name: string
+          failure_kind: string | null
+          first_seen_at: string
+          household_id: string
+          id: string
+          last_attempt_at: string | null
+          lottery_id: string | null
+          next_retry_at: string | null
+          popup_shown_at: string | null
+          post_id: string
+          post_url: string
+          reason: string
+          retry_count: number
+          state: string
+          summary: string
+          supplement_note: string
+          supplement_url: string | null
+          supplemented_at: string | null
+          updated_at: string
+          user_closed_at: string | null
+          user_closed_kind: string | null
+          username: string
+        }
+        Insert: {
+          candidate_id?: string | null
+          created_at?: string
+          deadline_at?: string | null
+          display_name?: string
+          failure_kind?: string | null
+          first_seen_at?: string
+          household_id: string
+          id?: string
+          last_attempt_at?: string | null
+          lottery_id?: string | null
+          next_retry_at?: string | null
+          popup_shown_at?: string | null
+          post_id: string
+          post_url?: string
+          reason?: string
+          retry_count?: number
+          state?: string
+          summary?: string
+          supplement_note?: string
+          supplement_url?: string | null
+          supplemented_at?: string | null
+          updated_at?: string
+          user_closed_at?: string | null
+          user_closed_kind?: string | null
+          username?: string
+        }
+        Update: {
+          candidate_id?: string | null
+          created_at?: string
+          deadline_at?: string | null
+          display_name?: string
+          failure_kind?: string | null
+          first_seen_at?: string
+          household_id?: string
+          id?: string
+          last_attempt_at?: string | null
+          lottery_id?: string | null
+          next_retry_at?: string | null
+          popup_shown_at?: string | null
+          post_id?: string
+          post_url?: string
+          reason?: string
+          retry_count?: number
+          state?: string
+          summary?: string
+          supplement_note?: string
+          supplement_url?: string | null
+          supplemented_at?: string | null
+          updated_at?: string
+          user_closed_at?: string | null
+          user_closed_kind?: string | null
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "x_bookmark_posts_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
             referencedRelation: "households"
             referencedColumns: ["id"]
           },
