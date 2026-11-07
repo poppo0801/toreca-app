@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addHoldingAction, saveCardAction, updateCardAction } from "@/app/(app)/collection/actions";
 import { FlagChip, FlagPanel } from "@/components/review-flag";
 import { Button } from "@/components/ui/button";
+import { RegisterKindSwitch } from "@/components/register-kind-switch";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import type { CardExtraction, CardField } from "@/lib/ai/card-provider";
 import { conditionOptions } from "@/lib/card-condition";
@@ -54,7 +55,7 @@ export async function uploadCardImage(file: File): Promise<{ ok: true; imagePath
  *  - 画像を選ぶとAIが読み取り、結果を入力欄に入れる。読み取れない項目は空欄のまま（説明文は入れず、「要確認」の詳細に出す）。
  *  - 既存のカードと照合し、同じ商品コード・番号・レアリティなら新規にせず所有記録を追加する。似ているだけのカードは候補として示し、自動では統合しない。
  */
-export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved, onBulk }: { open: boolean; onOpenChange: (v: boolean) => void; mode: CardFormMode; cards: CardRow[]; actor: string; onSaved: () => void; /** 画像を複数選んだとき（画像1枚＝カード1種類の一括登録へ移る） */ onBulk?: (files: File[]) => void }) {
+export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved, onBulk, onSwitchKind }: { open: boolean; onOpenChange: (v: boolean) => void; mode: CardFormMode; cards: CardRow[]; actor: string; onSaved: () => void; /** 画像を複数選んだとき（画像1枚＝カード1種類の一括登録へ移る） */ onBulk?: (files: File[]) => void; /** 新規登録のとき、上部の「カード／BOX」でBOXが選ばれた */ onSwitchKind?: () => void }) {
   const edit = mode.kind === "edit" ? mode.card : null;
   const holdingOnly = mode.kind === "holding";
   const base = mode.kind === "edit" || mode.kind === "holding" ? mode.card : null;
@@ -175,6 +176,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent aria-describedby="card-form-desc" data-testid="card-form" onOpenAutoFocus={(e) => e.preventDefault()}>
         <div className="px-4 pb-2">
+          {mode.kind === "new" && onSwitchKind && <RegisterKindSwitch value="card" onChange={onSwitchKind} />}
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription id="card-form-desc" className="sr-only">
             {title}

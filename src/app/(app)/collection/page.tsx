@@ -1,7 +1,7 @@
-import { CollectionView } from "@/components/collection-view";
+import { CollectionHub } from "@/components/collection-hub";
 
 export const metadata = { title: "コレクション | トレマネ" };
 
 export default function CollectionPage() {
-  return <CollectionView />;
+  return <CollectionHub />;
 }

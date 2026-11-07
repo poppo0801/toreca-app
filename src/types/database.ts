@@ -871,6 +871,237 @@ export type Database = {
           },
         ]
       }
+      box_lots: {
+        Row: {
+          acquired_on: string | null
+          actual_unit_price: number | null
+          archived_at: string | null
+          chain_id: string | null
+          created_at: string
+          household_id: string
+          id: string
+          market_price_date: string | null
+          market_price_source: string
+          market_unit_price: number | null
+          note: string
+          product_id: string
+          purchase_item_id: string | null
+          source_kind: string
+          store_id: string | null
+          store_label: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          acquired_on?: string | null
+          actual_unit_price?: number | null
+          archived_at?: string | null
+          chain_id?: string | null
+          created_at?: string
+          household_id: string
+          id?: string
+          market_price_date?: string | null
+          market_price_source?: string
+          market_unit_price?: number | null
+          note?: string
+          product_id: string
+          purchase_item_id?: string | null
+          source_kind: string
+          store_id?: string | null
+          store_label?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          acquired_on?: string | null
+          actual_unit_price?: number | null
+          archived_at?: string | null
+          chain_id?: string | null
+          created_at?: string
+          household_id?: string
+          id?: string
+          market_price_date?: string | null
+          market_price_source?: string
+          market_unit_price?: number | null
+          note?: string
+          product_id?: string
+          purchase_item_id?: string | null
+          source_kind?: string
+          store_id?: string | null
+          store_label?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_lots_chain_id_household_id_fkey"
+            columns: ["chain_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "chains"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_lots_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_lots_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_lots_purchase_item_id_household_id_fkey"
+            columns: ["purchase_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_items"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_lots_store_id_household_id_fkey"
+            columns: ["store_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_lots_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      box_movements: {
+        Row: {
+          created_by_profile_id: string | null
+          household_id: string
+          id: string
+          kind: string
+          lot_id: string
+          note: string
+          occurred_at: string
+          op_id: string | null
+          qty: number
+          ref_id: string | null
+          reverts_op: string | null
+          shrink_state: string
+        }
+        Insert: {
+          created_by_profile_id?: string | null
+          household_id: string
+          id?: string
+          kind: string
+          lot_id: string
+          note?: string
+          occurred_at?: string
+          op_id?: string | null
+          qty: number
+          ref_id?: string | null
+          reverts_op?: string | null
+          shrink_state: string
+        }
+        Update: {
+          created_by_profile_id?: string | null
+          household_id?: string
+          id?: string
+          kind?: string
+          lot_id?: string
+          note?: string
+          occurred_at?: string
+          op_id?: string | null
+          qty?: number
+          ref_id?: string | null
+          reverts_op?: string | null
+          shrink_state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_movements_created_by_profile_id_household_id_fkey"
+            columns: ["created_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_movements_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_movements_lot_id_household_id_fkey"
+            columns: ["lot_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "box_lots"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      box_prices: {
+        Row: {
+          amount_yen: number
+          confirmed_on: string
+          created_at: string
+          household_id: string
+          id: string
+          product_id: string
+          shrink_state: string | null
+          source: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          amount_yen: number
+          confirmed_on?: string
+          created_at?: string
+          household_id: string
+          id?: string
+          product_id: string
+          shrink_state?: string | null
+          source?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          amount_yen?: number
+          confirmed_on?: string
+          created_at?: string
+          household_id?: string
+          id?: string
+          product_id?: string
+          shrink_state?: string | null
+          source?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_prices_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_prices_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "box_prices_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       box_receipts: {
         Row: {
           chain_id: string | null
@@ -952,6 +1183,51 @@ export type Database = {
           },
           {
             foreignKeyName: "box_receipts_updated_by_profile_id_household_id_fkey"
+            columns: ["updated_by_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      box_settings: {
+        Row: {
+          created_at: string
+          household_id: string
+          no_shrink_pct: number
+          shrink_pct: number
+          sync_enabled_from: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          household_id: string
+          no_shrink_pct?: number
+          shrink_pct?: number
+          sync_enabled_from?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          household_id?: string
+          no_shrink_pct?: number
+          shrink_pct?: number
+          sync_enabled_from?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_settings_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: true
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_settings_updated_by_profile_id_household_id_fkey"
             columns: ["updated_by_profile_id", "household_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -4635,6 +4911,7 @@ export type Database = {
         Row: {
           amount: number
           archived_at: string | null
+          box_state: string | null
           cost_amount: number | null
           cost_purchase_item_id: string | null
           cost_quantity: number | null
@@ -4657,6 +4934,7 @@ export type Database = {
         Insert: {
           amount: number
           archived_at?: string | null
+          box_state?: string | null
           cost_amount?: number | null
           cost_purchase_item_id?: string | null
           cost_quantity?: number | null
@@ -4679,6 +4957,7 @@ export type Database = {
         Update: {
           amount?: number
           archived_at?: string | null
+          box_state?: string | null
           cost_amount?: number | null
           cost_purchase_item_id?: string | null
           cost_quantity?: number | null
@@ -5418,6 +5697,99 @@ export type Database = {
         Returns: Json
       }
       bootstrap_household: { Args: never; Returns: string }
+      box_add_manual: {
+        Args: {
+          p_acquired_on: string
+          p_actor: string
+          p_actual: number
+          p_chain: string
+          p_household: string
+          p_market: number
+          p_market_date: string
+          p_market_source: string
+          p_note: string
+          p_op: string
+          p_product: string
+          p_qty: number
+          p_state: string
+          p_store: string
+          p_store_label: string
+        }
+        Returns: string
+      }
+      box_adjust: {
+        Args: {
+          p_actor: string
+          p_delta: number
+          p_lot: string
+          p_note?: string
+          p_op: string
+          p_state: string
+        }
+        Returns: undefined
+      }
+      box_apply_target: {
+        Args: {
+          p_actor: string
+          p_item: string
+          p_lot: string
+          p_state: string
+          p_target: number
+        }
+        Returns: undefined
+      }
+      box_balance: { Args: { p_lot: string; p_state: string }; Returns: number }
+      box_import_purchase_item: {
+        Args: { p_actor: string; p_item: string }
+        Returns: string
+      }
+      box_open: {
+        Args: {
+          p_actor: string
+          p_household: string
+          p_note?: string
+          p_op: string
+          p_product: string
+          p_qty: number
+          p_state: string
+        }
+        Returns: undefined
+      }
+      box_revert_op: {
+        Args: { p_actor: string; p_household: string; p_op: string }
+        Returns: undefined
+      }
+      box_sync_allowed: {
+        Args: { p_created: string; p_household: string }
+        Returns: boolean
+      }
+      box_sync_purchase_item: {
+        Args: {
+          p_actor?: string
+          p_delete?: boolean
+          p_force?: boolean
+          p_item: string
+        }
+        Returns: string
+      }
+      box_sync_sale: {
+        Args: { p_actor?: string; p_sale: string }
+        Returns: undefined
+      }
+      box_update_lot: {
+        Args: {
+          p_acquired_on: string
+          p_actor: string
+          p_actual: number
+          p_lot: string
+          p_market: number
+          p_market_date: string
+          p_market_source: string
+          p_note: string
+          p_store_label: string
+        }
+        Returns: undefined
+      }
       bump_collection_stats: {
         Args: { p_day: string; p_delta: Json; p_household: string }
         Returns: undefined

@@ -264,6 +264,16 @@ export function totalsOf(rows: CardSummaryRow[]): CollectionTotals {
   return t;
 }
 
+/** 保有カードの価格（販売参考・買取参考）の最終取得日を「M/D」で返す（価格が1つも無ければ null） */
+export function lastPriceDate(rows: CardSummaryRow[]): string | null {
+  let best: string | null = null;
+  for (const r of rows) {
+    if (r.qty <= 0) continue;
+    for (const p of [r.sale, r.buyback]) if (p && (!best || p.confirmedOn > best)) best = p.confirmedOn;
+  }
+  return best ? `${Number(best.slice(5, 7))}/${Number(best.slice(8, 10))}` : null;
+}
+
 export function breakdown(rows: CardSummaryRow[], by: "rarity" | "productName"): { key: string; kinds: number; qty: number }[] {
   const m = new Map<string, { kinds: number; qty: number }>();
   for (const r of rows) {

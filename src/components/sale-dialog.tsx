@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { CountInput } from "@/components/count-input";
+import { useEffect, useMemo, useState } from "react";
+import { loadProductStockAction } from "@/app/(app)/collection/box-actions";
+import { BOX_STATE_LABEL, BOX_STATES } from "@/lib/box-collection";
 import { useApp } from "@/components/app-provider";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { ProfileAvatar } from "@/components/profile-avatar";
@@ -10,7 +13,7 @@ import { jstDateString } from "@/lib/datetime";
 import { costCandidates, proratedCost, UNIT_LABEL } from "@/lib/finance";
 import { saleSchema } from "@/lib/finance-input";
 import { readPref, writePref } from "@/services/local-device-store";
-import type { Sale } from "@/types/domain";
+import type { Sale, ShrinkState } from "@/types/domain";
 
 const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
 const SELLER_KEY = "seller";
@@ -23,7 +26,7 @@ type CostMode = "none" | "manual" | "link";
  * 同じ購入分を別の売却の原価に重複して使えない（数量の残りで制限）。
  */
 export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpenChange: (v: boolean) => void; sale: Sale | null }) {
-  const { data, profile, actions } = useApp();
+  const { data, profile, actions, persistent } = useApp();
   const isEdit = sale !== null;
   const profiles = data.profiles.filter((p) => p.active !== false);
   const [soldOn, setSoldOn] = useState(sale?.soldOn ?? jstDateString(new Date()));
@@ -44,6 +47,9 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
   const [costAmount, setCostAmount] = useState(sale?.costAmount != null ? String(sale.costAmount) : "");
   const [linkItem, setLinkItem] = useState(sale?.costPurchaseItemId ?? "");
   const [linkQty, setLinkQty] = useState(sale?.costQuantity ?? 1);
+  /** BOXの売却で減らす在庫の状態（"" = 在庫に反映しない） */
+  const [boxState, setBoxState] = useState<"" | ShrinkState>(sale?.boxState ?? "");
+  const [stock, setStock] = useState<Record<ShrinkState, number> | null>(null);
   const [fee, setFee] = useState(String(sale?.fee ?? 0));
   const [shipping, setShipping] = useState(String(sale?.shipping ?? 0));
   const [memo, setMemo] = useState(sale?.memo ?? "");
@@ -54,6 +60,22 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
     () => data.products.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.officialName, hint: p.code || undefined })),
     [data.products],
   );
+  // BOXコレクションの所有数（状態別）。BOXの売却で、減らす在庫の状態を選ぶために読み込む
+  const boxProductId = persistent && unit === "box" ? product.id : null;
+  useEffect(() => {
+    let alive = true;
+    if (!boxProductId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 商品・単位の変更に合わせて在庫の表示を初期化する
+      setStock(null);
+      return;
+    }
+    void loadProductStockAction(boxProductId).then((r) => alive && setStock(r.ok ? r.stock : null));
+    return () => {
+      alive = false;
+    };
+  }, [boxProductId]);
+  /** 状態ごとに選べる数量。編集中の売却がすでに減らしている分は、戻して数える */
+  const stockOf = (s: ShrinkState) => (stock?.[s] ?? 0) + (sale?.boxState === s && sale.productId === product.id && sale.unit === "box" ? sale.quantity : 0);
   const candidates = useMemo(() => costCandidates(data, sale?.id), [data, sale?.id]);
   const picked = candidates.find((c) => c.itemId === linkItem);
   const linkedCost = picked ? proratedCost(picked.amountPaid, picked.quantity, linkQty) : null;
@@ -72,6 +94,7 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
       unit,
       amount: Number(amount === "" ? NaN : amount),
       sellerProfileId: seller,
+      boxState: boxProductId && boxState ? boxState : null,
       costAmount: costMode === "manual" ? (costAmount.trim() === "" ? null : Number(costAmount)) : linked ? (costAmount.trim() !== "" ? Number(costAmount) : linkedCost) : null,
       costPurchaseItemId: linked ? picked.itemId : null,
       costQuantity: linked ? linkQty : null,
@@ -122,7 +145,7 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
           <div className="grid grid-cols-3 gap-2">
             <label className="text-sm">
               数量
-              <input type="number" min={1} aria-label="売却数量" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className={field} />
+              <CountInput aria-label="売却数量" value={quantity} onChange={setQuantity} className={field} />
             </label>
             <label className="text-sm">
               単位
@@ -139,6 +162,21 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
               <input type="number" min={0} inputMode="numeric" aria-label="売却金額" value={amount} onChange={(e) => setAmount(e.target.value)} className={field} />
             </label>
           </div>
+
+          {boxProductId && stock && (
+            <label className="block text-sm" data-testid="sale-box-state">
+              減らすBOXの在庫
+              <select aria-label="減らすBOXの在庫の状態" value={boxState} onChange={(e) => setBoxState(e.target.value as "" | ShrinkState)} className={field}>
+                <option value="">在庫に反映しない</option>
+                {BOX_STATES.filter((s) => stockOf(s) > 0 || boxState === s).map((s) => (
+                  <option key={s} value={s}>
+                    {BOX_STATE_LABEL[s]}（所有 {stockOf(s)}BOX）
+                  </option>
+                ))}
+              </select>
+              {boxState && quantity > stockOf(boxState) && <span className="mt-0.5 block text-[11px] text-danger">所有数（{stockOf(boxState)}BOX）を超えています</span>}
+            </label>
+          )}
 
           <fieldset>
             <legend className="text-sm">売却名義人</legend>
@@ -192,7 +230,7 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
                   <>
                     <label className="flex items-center gap-2 text-sm">
                       原価にする数量
-                      <input type="number" min={1} max={picked.remaining} aria-label="原価にする数量" value={linkQty} onChange={(e) => setLinkQty(Number(e.target.value))} className="min-h-11 w-24 rounded-md border bg-input px-3" />
+                      <CountInput aria-label="原価にする数量" max={picked.remaining} value={linkQty} onChange={setLinkQty} className="min-h-11 w-24 rounded-md border bg-input px-3" />
                       <span className="text-xs text-muted-foreground">（残り{picked.remaining}）</span>
                     </label>
                     <p className="text-xs text-muted-foreground">

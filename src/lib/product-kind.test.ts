@@ -11,7 +11,8 @@ describe("商品区分ごとの数量の単位", () => {
     expect(values(unitOptions({ productKind: "other" }))).toEqual(["piece"]);
   });
   it("未分類・商品未選択は従来どおりパック／BOX。販売形態が単品・セットと分かっているものは個", () => {
-    expect(values(unitOptions(undefined))).toEqual(["box", "pack"]);
+    expect(values(unitOptions(undefined))).toEqual(["box", "pack", "piece"]); // 商品未選択
+    expect(values(unitOptions({ productKind: null, salesForm: null }))).toEqual(["box", "pack"]);
     expect(values(unitOptions({ productKind: null, salesForm: null }))).toEqual(["box", "pack"]);
     expect(kindOf({ productKind: null, salesForm: "single_set" })).toBe("other");
     expect(values(unitOptions({ productKind: null, salesForm: "single_set" }))).toEqual(["piece"]);

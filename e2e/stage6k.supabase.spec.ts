@@ -125,7 +125,7 @@ test("コレクション: 長押しドラッグで並び替え。お気に入り
 
     await page.goto("/collection");
     await expect(page.getByTestId("card-tile").first()).toBeVisible();
-    await page.getByLabel("検索").click();
+    await page.getByTestId("collection-panel-card").getByLabel("検索", { exact: true }).click();
     await page.getByLabel("コレクションを検索").fill("6Kカード");
     await page.getByTestId("fav-filter").click();
     // 並びは見た目の順（上→下・左→右）。並び替え中は DOM のノードを動かさず CSS の order だけを変える
@@ -159,7 +159,7 @@ test("コレクション: 長押しドラッグで並び替え。お気に入り
     // お気に入り表示では保存される: 再読み込みしても同じ並び
     await page.waitForTimeout(800);
     await page.reload();
-    await page.getByLabel("検索").click();
+    await page.getByTestId("collection-panel-card").getByLabel("検索", { exact: true }).click();
     await page.getByLabel("コレクションを検索").fill("6Kカード");
     await page.getByTestId("fav-filter").click();
     await expect.poll(order).toEqual(moved);

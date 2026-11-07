@@ -78,7 +78,7 @@ test.describe("Stage 6H 画面", () => {
     }
   });
 
-  test("コレクション: 右上に［相場更新］［＋カード登録］。押しやすい高さで、見出しと重ならない", async ({ page }) => {
+  test("コレクション: 右上に［相場更新］［登録］。押しやすい高さで、見出しと重ならない", async ({ page }) => {
     await login(page);
     await page.goto("/collection");
     for (const w of WIDTHS) {
@@ -89,7 +89,7 @@ test.describe("Stage 6H 画面", () => {
       await expect(add).toBeVisible();
       const m = (await market.boundingBox())!;
       const a = (await add.boundingBox())!;
-      expect(m.x + m.width, "相場更新はカード登録の左").toBeLessThanOrEqual(a.x + 1);
+      expect(m.x + m.width, "相場更新は登録の左").toBeLessThanOrEqual(a.x + 1);
       expect(m.height).toBeGreaterThanOrEqual(40);
       expect(a.height).toBeGreaterThanOrEqual(40);
       expect(a.x + a.width, "画面の右端に収まる").toBeLessThanOrEqual(w);

@@ -39,6 +39,8 @@ export const saleSchema = z.object({
   unit: z.enum(["box", "pack", "set", "piece"]),
   amount: yen,
   sellerProfileId: z.uuid("売却名義人を選択してください"),
+  /** BOXの売却で減らす在庫の状態（BOXコレクション）。null/未指定は在庫に反映しない */
+  boxState: z.enum(["shrink", "no_shrink", "unknown"]).nullable().optional(),
   /** 原価。未設定は null（0円とはみなさない） */
   costAmount: optionalYen,
   /** 紐づけた購入明細と、その何個分か（同時に指定。重複計上はDBが防ぐ） */

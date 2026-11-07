@@ -22,6 +22,7 @@ import type {
   MultiMode,
   ProductKind,
   ProfileColor,
+  ShrinkState,
   ResultStatus,
 } from "@/types/domain";
 
@@ -49,6 +50,8 @@ export function mapDbError(e: PgError): string {
     case "23514":
       if (e.message.includes("fulfillment_status") || e.message.includes("already purchased")) return "購入済みの応募の結果は変更できません";
       if (e.message.includes("only one item can win")) return "この抽選は当選できる商品が1つまでです";
+      if (e.message.includes("insufficient box stock")) return "BOXの所有数が足りません（売却・開封・数量の変更が所有数を超えています）";
+      if (e.message.includes("append-only")) return "在庫の履歴は変更できません";
       if (e.message.includes("cost quantity exceeds")) return "この購入分の原価は既に他の売却に使われています（数量を超えています）";
       if (e.message.includes("single lottery") || e.message.includes("multi lottery")) return "抽選方式と商品数が一致していません";
       return "入力値が制約に違反しています";
@@ -459,6 +462,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       productLabel: x.product_label,
       quantity: x.quantity,
       unit: x.unit as "box" | "pack" | "set" | "piece",
+      boxState: ((x as { box_state?: string | null }).box_state ?? null) as ShrinkState | null,
       amount: x.amount,
       sellerProfileId: x.seller_profile_id,
       costAmount: x.cost_amount,

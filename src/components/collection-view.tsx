@@ -1,8 +1,7 @@
 "use client";
 
-import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
-import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star, TrendingUp } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { loadCollectionAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
 import { useApp } from "@/components/app-provider";
@@ -15,7 +14,7 @@ import { MarketUpdateDialog } from "@/components/market-update";
 import { useDragReorder } from "@/components/use-drag-reorder";
 import { applyOrder, mergeFavoriteOrder } from "@/lib/reorder";
 import { ShineButton } from "@/components/shine";
-import { breakdown, DEFAULT_FILTERS, filterCards, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
+import { breakdown, DEFAULT_FILTERS, filterCards, lastPriceDate, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs } from "@/lib/profile-settings";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { cn } from "@/lib/utils";
@@ -39,7 +38,12 @@ const PAGE = 60;
  * コレクション（所有カード）。既定は画像グリッド（3〜5列・初期4列）、テキスト一覧にも切り替えられる。
  * 表示（列数・形式・演出）とお気に入りはプロフィールごと。画像はサムネイルを遅延読み込みし、一覧は60件ずつ描画する。
  */
-export function CollectionView() {
+export interface CardPanelHandle {
+  openRegister: () => void;
+  openMarket: () => void;
+}
+
+export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandle>; /** 登録フォーム上部の「カード／BOX」でBOXが選ばれた */ onSwitchKind?: () => void }) {
   const { profile, settings, saveSettings } = useApp();
   const prefs = settings.collection ?? DEFAULT_COLLECTION_PREFS;
   const params = useSearchParams();
@@ -59,6 +63,7 @@ export function CollectionView() {
   const [form, setForm] = useState<CardFormMode | null>(null);
   const [bulk, setBulk] = useState<File[] | null>(null);
   const [reorder, setReorder] = useState(false);
+  useImperativeHandle(ref, () => ({ openRegister: () => setForm({ kind: "new" }), openMarket: () => setShowMarket(true) }), []);
   const [limit, setLimit] = useState(PAGE);
   const sentinel = useRef<HTMLDivElement>(null);
 
@@ -97,6 +102,7 @@ export function CollectionView() {
   const rows = useMemo(() => (data ? summarizeCards(data.cards, data.holdings, data.prices, data.favorites, profile.id, { multipliers: data.multipliers, market: data.market }) : []), [data, profile.id]);
   const shown = useMemo(() => sortCards(filterCards(rows, filters), sort), [rows, filters, sort]);
   const totals = useMemo(() => totalsOf(rows), [rows]);
+  const priceDate = useMemo(() => lastPriceDate(rows), [rows]);
   const rarities = useMemo(() => [...new Set(rows.map((r) => r.rarity).filter(Boolean))].sort(), [rows]);
   const products = useMemo(() => [...new Set(rows.map((r) => r.productName).filter(Boolean))].sort(), [rows]);
   const ordered = useMemo(() => applyOrder(shown, tempOrder), [shown, tempOrder]);
@@ -175,32 +181,24 @@ export function CollectionView() {
 
   return (
     <div className="space-y-3" data-testid="collection">
-      <div className={PAGE_HEADING_ROW}>
-        <PageHeading navId="collection">コレクション</PageHeading>
-        {/* 右上: [相場更新][＋カード登録]。スマホでも押しやすい高さ（40px）にする */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button size="sm" variant="outline" className="h-10 gap-1 px-2.5" onClick={() => setShowMarket(true)} data-testid="market-update-open">
-            <TrendingUp className="size-4" aria-hidden="true" />
-            相場更新
-          </Button>
-          <Button size="sm" className="h-10 px-3" onClick={() => setForm({ kind: "new" })} data-testid="add-card">
-            ＋カード登録
-          </Button>
-        </div>
-      </div>
-
       {data && (
         <section aria-label="保有状況" className="rounded-xl border bg-card px-2.5 text-xs" data-testid="collection-summary">
           <button type="button" onClick={() => setShowStats((v) => !v)} aria-expanded={showStats} className="flex min-h-9 w-full items-center gap-x-2 text-left" data-testid="summary-line">
             <span className="min-w-0 flex-1 truncate font-medium tabular-nums">
-              {totals.kinds}種・{totals.qty}枚｜購入額 {totals.qty === 0 ? "—" : yen(totals.costTotal)}｜参考買取 {totals.buybackTotal > 0 || totals.buybackMissingKinds < totals.kinds ? yen(totals.buybackTotal) : "—"}
+              購入 {totals.qty === 0 ? "—" : yen(totals.costTotal)}｜買取 {totals.buybackTotal > 0 || totals.buybackMissingKinds < totals.kinds ? yen(totals.buybackTotal) : "—"}｜{totals.qty}枚
             </span>
-            {(totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && totals.kinds > 0 && <span className="shrink-0 rounded-full border border-warn px-1.5 text-[10px] text-warn">一部のみ</span>}
+            {priceDate && (
+              <span className="shrink-0 text-[10px] text-muted-foreground" data-testid="card-price-date">
+                {priceDate}
+              </span>
+            )}
+            {(totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && totals.kinds > 0 && <span className="shrink-0 rounded-full border border-warn px-1.5 text-[10px] text-warn">一部</span>}
             <ChartColumn className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           </button>
           {showStats && (
             <div className="space-y-2 border-t py-2" data-testid="collection-stats">
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+                <Row k="カードの種類" v={`${totals.kinds}種`} />
                 <Row k="参考価値（販売）" v={totals.saleTotal > 0 || totals.saleMissingKinds < totals.kinds ? yen(totals.saleTotal) : "—"} />
                 <Row k="販売参考との差額" v={totals.saleDiffKinds > 0 ? signed(totals.saleDiff) : "—"} />
                 <Row k="買取参考との差額" v={totals.buybackDiffKinds > 0 ? signed(totals.buybackDiff) : "—"} />
@@ -400,7 +398,7 @@ export function CollectionView() {
           onChanged={() => void load()}
         />
       )}
-      {form && data && <CardFormDialog open onOpenChange={(v) => !v && setForm(null)} mode={form} cards={data.cards} actor={profile.id} onSaved={() => void load()} onBulk={(files) => (setForm(null), setBulk(files.slice(0, BULK_MAX_IMAGES)))} />}
+      {form && data && <CardFormDialog open onOpenChange={(v) => !v && setForm(null)} mode={form} cards={data.cards} actor={profile.id} onSaved={() => void load()} onBulk={(files) => (setForm(null), setBulk(files.slice(0, BULK_MAX_IMAGES)))} onSwitchKind={onSwitchKind ? () => (setForm(null), onSwitchKind()) : undefined} />}
       {bulk && data && <CardBulkDialog open onOpenChange={(v) => !v && setBulk(null)} files={bulk} cards={data.cards} actor={profile.id} onSaved={() => void load()} />}
     </div>
   );

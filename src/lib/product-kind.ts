@@ -34,7 +34,8 @@ export function isPackProduct(p: ProductLike): boolean {
 
 /** 選べる単位。current が選択肢にない旧データ（セットなど）は、変換せず選択肢の末尾に残す */
 export function unitOptions(p: ProductLike, current?: ItemUnit): { value: ItemUnit; label: string }[] {
-  const base: ItemUnit[] = isPackProduct(p) ? ["box", "pack"] : ["piece"];
+  // 商品が未選択のうちは区分が分からないので、BOX・パック・個のどれも選べる（区分を推測しない）
+  const base: ItemUnit[] = !p ? ["box", "pack", "piece"] : isPackProduct(p) ? ["box", "pack"] : ["piece"];
   const list = current && !base.includes(current) ? [...base, current] : base;
   return list.map((value) => ({ value, label: UNIT_NAME[value] }));
 }

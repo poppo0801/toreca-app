@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { normalizeCardExtraction } from "@/lib/ai/card-provider";
-import { batchDuplicateKey, breakdown, DEFAULT_FILTERS, filterCards, isShine, latestPrice, matchCard, sortCards, summarizeCards, totalsOf, type CardRow, type FavoriteRow, type HoldingRow, type PriceRow } from "@/lib/collection";
+import { batchDuplicateKey, breakdown, DEFAULT_FILTERS, filterCards, isShine, lastPriceDate, latestPrice, matchCard, sortCards, summarizeCards, totalsOf, type CardRow, type FavoriteRow, type HoldingRow, type PriceRow } from "@/lib/collection";
 import { cardInputSchema, holdingInputSchema, parseYen, priceInputSchema } from "@/lib/collection-input";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs, normalizeProfileSettings } from "@/lib/profile-settings";
 
@@ -176,5 +176,18 @@ describe("入力の検証と表示設定", () => {
     expect(isShine("sr")).toBe(true);
     expect(isShine("C")).toBe(false);
     expect(isShine("")).toBe(false);
+  });
+});
+
+describe("最終価格取得日（コレクション上部）", () => {
+  const cs = [card("1", "ピカチュウex"), card("2", "ミュウex")];
+  it("保有カードの販売・買取参考の確認日のうち最も新しい日を「M/D」で返す。価格が無ければ null", () => {
+    const rows = summarizeCards(cs, [hold("1", "1", 1, 100), hold("2", "2", 1, 100)], [price("1", "1", "sale", 300, "2026-11-20"), price("2", "2", "buyback", 200, "2026-12-01")], [], null);
+    expect(lastPriceDate(rows)).toBe("12/1");
+    expect(lastPriceDate(summarizeCards(cs, [hold("1", "1", 1, 100)], [], [], null))).toBeNull();
+  });
+  it("所持していない（0枚の）カードの価格は対象にしない", () => {
+    const rows = summarizeCards(cs, [hold("1", "1", 1, 100)], [price("1", "1", "sale", 300, "2026-11-20"), price("2", "2", "buyback", 200, "2026-12-01")], [], null);
+    expect(lastPriceDate(rows)).toBe("11/20");
   });
 });

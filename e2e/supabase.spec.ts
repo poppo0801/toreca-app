@@ -1208,7 +1208,7 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
   await expect(form).toHaveCount(0);
   await expect(page.getByTestId("card-tile")).toHaveCount(1);
   await expect(page.getByTestId("tile-qty")).toHaveText("×2");
-  await expect(page.getByTestId("collection-summary")).toContainText("1種・2枚");
+  await expect(page.getByTestId("collection-summary")).toContainText("2枚");
   await expect(page.getByTestId("collection-summary")).toContainText("30,000円");
 
   // 同じカード（商品コード・番号・レアリティ）は新規にせず、所有記録を追加（1枚・18,000円）
@@ -2200,9 +2200,9 @@ test("Stage 5P 支出を登録: 開いた直後に購入日が入力状態にな
   expect(dateLabel.y + dateLabel.height).toBeLessThanOrEqual(date.y + 1); // 項目名の下に入力
   expect(Math.abs(date.y - method.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(date.height - method.height)).toBeLessThanOrEqual(1);
-  // 数量単位: BOX・パック・セットに加えて個
+  // 数量単位: BOX・パック・個（旧データのセットは保存済みの行にだけ残る）
   const units = await exp.getByLabel("単位1").locator("option").allInnerTexts();
-  expect(units).toEqual(["BOX", "パック", "セット", "個"]);
+  expect(units).toEqual(["BOX", "パック", "個"]); // 商品が未選択のうちは区分を決めない
   await exp.getByRole("combobox", { name: "商品1", exact: true }).fill("E2E個単位商品");
   await exp.getByLabel("単位1").selectOption("piece");
   await exp.getByLabel("数量1").fill("2");

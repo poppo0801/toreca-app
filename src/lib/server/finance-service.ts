@@ -151,6 +151,8 @@ export async function saveSale(
     unit: v.unit,
     amount: v.amount,
     seller_profile_id: v.sellerProfileId,
+    // BOXの売却だけ、減らす在庫の状態を持つ（所有数の増減はDBの連動が行う。超過は拒否される）
+    box_state: productId && v.unit === "box" ? (v.boxState ?? null) : null,
     cost_amount: v.costAmount,
     cost_purchase_item_id: v.costPurchaseItemId,
     cost_quantity: v.costQuantity,
