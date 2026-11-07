@@ -191,6 +191,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await expect(rows).toHaveCount(1);
   await expect(rows).toContainText("金額未入力");
   await rows.click();
+  await page.getByTestId("ledger-edit").click(); // 一覧のカード → 詳細シート → 編集（Stage 6R）
   const exp = page.getByRole("dialog");
   await expect(exp).toContainText("抽選の当選から作成された購入");
   await exp.getByLabel("購入金額1").fill("5400");
@@ -212,7 +213,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await add.getByRole("button", { name: "保存" }).click();
   await expect(add).toHaveCount(0);
   await expect(page.getByTestId("sum-expense")).toHaveText("6,300円");
-  await expect(page.getByTestId("ledger-row").filter({ hasText: "マスターにない店" })).toContainText("-900円");
+  await expect(page.getByTestId("ledger-row").filter({ hasText: "E2Eテスト商品 6パック" })).toContainText("-900円");
 
   // 売却（収入）: 名義人・原価を購入履歴から紐づけ（同じ購入分は重複して使えない）
   await page.getByRole("button", { name: "＋売却" }).click();

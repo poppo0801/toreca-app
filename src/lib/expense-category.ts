@@ -15,12 +15,16 @@ export interface ExpenseCategory {
   /** 品名の入力欄の見出し */
   itemLabel: string;
   itemPlaceholder: string;
+  /** 一覧の短い分類名（Stage 6R）。フォームの品目名（label）とは別 */
+  short: string;
+  /** 分類色（CSS 変数。globals.css の --cat-*） */
+  color: string;
 }
 
 export const EXPENSE_CATEGORIES: readonly ExpenseCategory[] = [
-  { id: "pokemon_card", label: "ポケモンカード", master: true, quantity: true, channel: true, itemLabel: "商品", itemPlaceholder: "" },
-  { id: "goods", label: "カード周辺グッズ", master: false, quantity: true, channel: true, itemLabel: "品名", itemPlaceholder: "例: スリーブ、ローダー、ファイル" },
-  { id: "expense", label: "経費", master: false, quantity: false, channel: false, itemLabel: "内容", itemPlaceholder: "例: 交通費、駐車場代、送料" },
+  { id: "pokemon_card", label: "ポケモンカード", master: true, quantity: true, channel: true, itemLabel: "商品", itemPlaceholder: "", short: "カード", color: "var(--cat-card)" },
+  { id: "goods", label: "周辺グッズ", master: false, quantity: true, channel: true, itemLabel: "品名", itemPlaceholder: "例: スリーブ、ローダー、ファイル", short: "サプライ", color: "var(--cat-supply)" },
+  { id: "expense", label: "経費", master: false, quantity: false, channel: false, itemLabel: "内容", itemPlaceholder: "例: 交通費、駐車場代、送料", short: "経費", color: "var(--cat-expense)" },
 ];
 
 export const DEFAULT_EXPENSE_CATEGORY = "pokemon_card";
@@ -29,7 +33,7 @@ export const EXPENSE_CATEGORY_IDS = EXPENSE_CATEGORIES.map((c) => c.id) as [stri
 /** 未知の区分（将来追加された品目など）も、ラベルはIDのまま表示し、カード扱いにはしない */
 export function categoryOf(id: string | null | undefined): ExpenseCategory {
   const key = id ?? DEFAULT_EXPENSE_CATEGORY;
-  return EXPENSE_CATEGORIES.find((c) => c.id === key) ?? { id: key, label: key, master: false, quantity: true, channel: true, itemLabel: "品名", itemPlaceholder: "" };
+  return EXPENSE_CATEGORIES.find((c) => c.id === key) ?? { id: key, label: key, master: false, quantity: true, channel: true, itemLabel: "品名", itemPlaceholder: "", short: key, color: "var(--muted-foreground)" };
 }
 
 /** ポケモンカードの購入か（購入実績・カード数量・購入条件の集計の対象） */

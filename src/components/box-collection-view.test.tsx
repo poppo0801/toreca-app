@@ -110,7 +110,9 @@ describe("BOXコレクションの表示", () => {
   it("相場が1つも無いときは「—」（0円としない）", async () => {
     setData({ lots: [lot("l1", "A")], movements: [mv("l1", "unknown", 2)] });
     await mount();
-    expect(q("box-summary-line")!.textContent).toContain("購入 —｜買取 —｜2BOX");
+    expect(q("box-summary-line")!.textContent).toContain("購入 —");
+    expect(q("box-summary-line")!.textContent).toContain("買取 —");
+    expect(q("box-summary-line")!.textContent).toContain("2BOX");
     expect(q("box-price-date")).toBeNull();
   });
   it("初期は価格の高い順。価格未取得の商品も表示し末尾に並ぶ。並び順の切替ができる", async () => {

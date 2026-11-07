@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChartColumn, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowDown, ArrowUp, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
-import { loadCollectionAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
+import { loadCollectionAction, reorderCardsAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
+import { SummaryTriple } from "@/components/summary-triple";
+import { useReveal } from "@/components/use-reveal";
 import { useApp } from "@/components/app-provider";
 import { CardBulkDialog, BULK_MAX_IMAGES } from "@/components/card-bulk";
 import { CardDetailSheet } from "@/components/card-detail-sheet";
@@ -14,13 +16,13 @@ import { MarketUpdateDialog } from "@/components/market-update";
 import { useDragReorder } from "@/components/use-drag-reorder";
 import { applyOrder, mergeFavoriteOrder } from "@/lib/reorder";
 import { ShineButton } from "@/components/shine";
-import { breakdown, DEFAULT_FILTERS, filterCards, lastPriceDate, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
+import { breakdown, DEFAULT_FILTERS, filterCards, lastPriceDate, orderOf, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs } from "@/lib/profile-settings";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { cn } from "@/lib/utils";
 
 const SORTS: { value: SortKey; label: string }[] = [
-  { value: "default", label: "標準（お気に入り→価値の高い順）" },
+  { value: "default", label: "標準（自分の並び順）" },
   { value: "fav", label: "お気に入り順" },
   { value: "valueDesc", label: "参考価値の高い順" },
   { value: "valueAsc", label: "参考価値の低い順" },
@@ -33,6 +35,10 @@ const COLS_CLASS = { 3: "grid-cols-3", 4: "grid-cols-4", 5: "grid-cols-5" } as c
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
 const signed = (n: number) => `${n > 0 ? "+" : ""}${n.toLocaleString("ja-JP")}円`;
 const PAGE = 60;
+/** 直近に取得したコレクション（同じ画面に戻ったとき、取得を待たずに先に表示する。取得が終わったら置き換える） */
+let cachedCollection: { key: string; data: CollectionData } | null = null;
+/** 一覧の先頭からこの枚数の画像は、すぐ読み込む（それ以降は画面に近づいてから） */
+const EAGER_IMAGES = 12;
 
 /**
  * コレクション（所有カード）。既定は画像グリッド（3〜5列・初期4列）、テキスト一覧にも切り替えられる。
@@ -44,10 +50,19 @@ export interface CardPanelHandle {
 }
 
 export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandle>; /** 登録フォーム上部の「カード／BOX」でBOXが選ばれた */ onSwitchKind?: () => void }) {
-  const { profile, settings, saveSettings } = useApp();
+  const { profile, settings, saveSettings, data: app } = useApp();
+  // 世帯（プロフィールの集合）が同じときだけ、直近のコレクションを先に表示する（別のログインの内容を見せない）
+  const cacheKey = app.profiles.map((p) => p.id).sort().join(",");
   const prefs = settings.collection ?? DEFAULT_COLLECTION_PREFS;
   const params = useSearchParams();
-  const [data, setData] = useState<CollectionData | null>(null);
+  const [data, setDataState] = useState<CollectionData | null>(() => (cachedCollection?.key === cacheKey ? cachedCollection.data : null));
+  const setData = useCallback((u: CollectionData | null | ((d: CollectionData | null) => CollectionData | null)) => {
+    setDataState((d) => {
+      const next = typeof u === "function" ? u(d) : u;
+      cachedCollection = next ? { key: cacheKey, data: next } : null;
+      return next;
+    });
+  }, [cacheKey]);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<CollectionFilters>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<SortKey>("default");
@@ -71,13 +86,13 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
     const r = await loadCollectionAction();
     if (r.ok) setData(r.data);
     else setError(r.error);
-  }, []);
+  }, [setData]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部データの取得
     void load();
   }, [load]);
-  // 表示形式・列数・並びが変わったときだけ、順にフェードインし直す（key が変わると一覧が作り直される）
-  const animKey = `${prefs.view}-${prefs.cols}-${filters.favOnly}-${sort}`;
+  // 順次フェードイン（左上→右へ行ごと。画面に入ったカードを順に。一度表示したカードは再演出しない）
+  const reveal = useReveal(true);
 
   // 購入記録から「コレクションに追加」で来たとき: 購入情報を引き継いで登録フォームを開く
   const prefilled = useRef(false);
@@ -100,7 +115,9 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
   }, [params, data]);
 
   const rows = useMemo(() => (data ? summarizeCards(data.cards, data.holdings, data.prices, data.favorites, profile.id, { multipliers: data.multipliers, market: data.market }) : []), [data, profile.id]);
-  const shown = useMemo(() => sortCards(filterCards(rows, filters), sort), [rows, filters, sort]);
+  // 「標準」= このプロフィールが並べた順（保存順）。保存が無いプロフィールは従来の標準
+  const myOrder = useMemo(() => (data ? orderOf(data.orders ?? [], profile.id) : []), [data, profile.id]);
+  const shown = useMemo(() => sortCards(filterCards(rows, filters), sort, myOrder), [rows, filters, sort, myOrder]);
   const totals = useMemo(() => totalsOf(rows), [rows]);
   const priceDate = useMemo(() => lastPriceDate(rows), [rows]);
   const rarities = useMemo(() => [...new Set(rows.map((r) => r.rarity).filter(Boolean))].sort(), [rows]);
@@ -111,14 +128,6 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
   // DOM のノードを移動（再挿入）するとブラウザが CSS アニメーション（光沢・フェードイン）をやり直し、カードが消えて現れるように見えるため
   const posOf = useMemo(() => new Map(visible.map((r, i) => [r.id, i])), [visible]);
   const domRows = useMemo(() => (tempOrder ? shown.filter((r) => posOf.has(r.id)) : visible), [tempOrder, shown, posOf, visible]);
-  // 順次フェードインは一覧を表示し直した直後だけ。そのあとの並び替えや再描画では再生しない
-  const [fadeOn, setFadeOn] = useState(true);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 一覧を作り直したとき（key が変わったとき）だけ再生する
-    setFadeOn(true);
-    const t = window.setTimeout(() => setFadeOn(false), 1100);
-    return () => window.clearTimeout(t);
-  }, [animKey]);
   const activeFilters = [filters.rarity, filters.product, filters.qty !== "all", filters.priced !== "all", filters.image !== "all"].filter(Boolean).length;
 
   // 続きを読み込む（一覧の末尾が見えたら60件ずつ増やす）
@@ -143,8 +152,10 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
     void load();
   };
 
-  // 長押しドラッグ: お気に入り表示（お気に入り順）では保存、それ以外は一時的な並び替え
-  const persistDrag = filters.favOnly && (sort === "default" || sort === "fav");
+  // 長押しドラッグ: 「標準」ではこのプロフィールの並び順として保存。お気に入り順（お気に入りのみ）ではお気に入りの順位を保存。それ以外は一時的な並び替え
+  const persistProfile = sort === "default";
+  const persistFav = filters.favOnly && sort === "fav";
+  const persistDrag = persistProfile || persistFav;
   const dragFull = (ids: string[]) => [...ids, ...ordered.map((r) => r.id).filter((id) => !ids.includes(id))];
   const drag = useDragReorder({
     enabled: !reorder && visible.length > 1,
@@ -152,6 +163,19 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
     onMove: (ids) => setTempOrder(dragFull(ids)),
     onDrop: (ids) => {
       if (!persistDrag) return;
+      if (persistProfile) {
+        // 表示している範囲の新しい並びを、全カードの保存順（現在の標準順）に当てはめる。絞り込みで見えていないカードの位置は動かさない
+        const base = sortCards(rows, "default", myOrder).map((r) => r.id);
+        const full = mergeFavoriteOrder(base, dragFull(ids));
+        setData((d) => (d ? { ...d, orders: [...(d.orders ?? []).filter((o) => o.profileId !== profile.id), ...full.map((cardId, position) => ({ profileId: profile.id, cardId, position }))] } : d));
+        setTempOrder(null);
+        void reorderCardsAction(profile.id, full).then((r) => {
+          // 保存できなかったときは通知し、サーバーの保存順を読み直して表示との不一致を残さない
+          if (!r.ok) setError(`並び順を保存できませんでした。元の並びに戻します（${r.error}）`);
+          void load();
+        });
+        return;
+      }
       const mine = data ? data.favorites.filter((f) => f.profileId === profile.id).sort((a, b) => a.rank - b.rank).map((f) => f.cardId) : [];
       const merged = mergeFavoriteOrder(mine, dragFull(ids));
       setData((d) => (d ? { ...d, favorites: d.favorites.map((f) => (f.profileId === profile.id && merged.includes(f.cardId) ? { ...f, rank: merged.indexOf(f.cardId) } : f)) } : d));
@@ -181,21 +205,23 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
 
   return (
     <div className="space-y-3" data-testid="collection">
-      {data && (
-        <section aria-label="保有状況" className="rounded-xl border bg-card px-2.5 text-xs" data-testid="collection-summary">
-          <button type="button" onClick={() => setShowStats((v) => !v)} aria-expanded={showStats} className="flex min-h-9 w-full items-center gap-x-2 text-left" data-testid="summary-line">
-            <span className="min-w-0 flex-1 truncate font-medium tabular-nums">
-              購入 {totals.qty === 0 ? "—" : yen(totals.costTotal)}｜買取 {totals.buybackTotal > 0 || totals.buybackMissingKinds < totals.kinds ? yen(totals.buybackTotal) : "—"}｜{totals.qty}枚
-            </span>
-            {priceDate && (
-              <span className="shrink-0 text-[10px] text-muted-foreground" data-testid="card-price-date">
-                {priceDate}
-              </span>
-            )}
-            {(totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && totals.kinds > 0 && <span className="shrink-0 rounded-full border border-warn px-1.5 text-[10px] text-warn">一部</span>}
-            <ChartColumn className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          </button>
-          {showStats && (
+      {/* 集計は購入／買取／枚数の3分割。読み込み中も枠を出し、数値だけ「—」にする（画像や集計の取得を待たずに画面の骨組みを先に表示） */}
+      {(() => {
+        const partial = !!data && (totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && totals.kinds > 0;
+        return (
+        <section aria-label="保有状況" className="rounded-xl border bg-card text-xs" data-testid="collection-summary" aria-busy={!data}>
+          <SummaryTriple
+            testId="summary-line"
+            loading={!data}
+            expanded={showStats}
+            onToggle={() => data && setShowStats((v) => !v)}
+            cells={[
+              { label: "購入", value: !data || totals.qty === 0 ? "—" : yen(totals.costTotal), partial },
+              { label: "買取", value: !data ? "—" : totals.buybackTotal > 0 || totals.buybackMissingKinds < totals.kinds ? yen(totals.buybackTotal) : "—", sub: priceDate ?? undefined, subTestId: "card-price-date" },
+              { label: "枚数", value: data ? `${totals.qty}枚` : "—" },
+            ]}
+          />
+          {data && showStats && (
             <div className="space-y-2 border-t py-2" data-testid="collection-stats">
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
                 <Row k="カードの種類" v={`${totals.kinds}種`} />
@@ -213,7 +239,8 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
             </div>
           )}
         </section>
-      )}
+        );
+      })()}
 
       {/* 操作は1行: 検索・絞り込み・並び順・列数・お気に入り・その他（表示形式・演出・並び替え） */}
       <div className="flex items-center gap-1" data-testid="collection-toolbar">
@@ -310,7 +337,7 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
           {error}
         </p>
       )}
-      {!data && !error && <p className="text-sm text-muted-foreground">読み込み中…</p>}
+      {!data && !error && <CardSkeleton cols={prefs.cols} grid={prefs.view === "grid"} />}
       {data && shown.length === 0 && (
         <p className="rounded-lg border p-4 text-center text-sm text-muted-foreground" data-testid="collection-empty">
           {rows.length === 0 ? "まだカードが登録されていません。「画像から追加」または「手入力」で登録できます。" : "条件に合うカードがありません。"}
@@ -333,11 +360,11 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
           ))}
         </ul>
       ) : prefs.view === "grid" ? (
-        <ul key={animKey} className={cn("grid gap-2", COLS_CLASS[prefs.cols])} data-testid="card-grid" data-cols={prefs.cols} data-drag-persist={persistDrag ? "1" : "0"}>
+        <ul className={cn("grid gap-2", COLS_CLASS[prefs.cols])} data-testid="card-grid" data-cols={prefs.cols} data-drag-persist={persistDrag ? "1" : "0"}>
           {domRows.map((r, i) => (
-            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_9rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && fadeOn && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24), order: posOf.get(r.id) }} data-testid="card-tile">
+            <li key={r.id} {...drag.bind(r.id)} ref={reveal.bind(r.id)} className="reveal relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_9rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]" style={{ order: posOf.get(r.id) }} data-testid="card-tile">
               <ShineButton rarity={r.rarity} enabled={prefs.fx} onClick={() => setOpenId(r.id)} aria-label={`${r.name} ${r.rarity}の詳細を開く`} className="relative block w-full overflow-hidden rounded-lg">
-                <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="aspect-[5/7] w-full" />
+                <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="aspect-[5/7] w-full" priority={i < EAGER_IMAGES ? (i < 8 ? "high" : "eager") : "lazy"} />
               </ShineButton>
               <button type="button" onClick={() => void toggleFav(r.id, r.favRank === null)} aria-pressed={r.favRank !== null} aria-label={r.favRank !== null ? `${r.name}のお気に入りを外す` : `${r.name}をお気に入りにする`} className="absolute left-0 top-0 flex size-8 items-center justify-center" data-testid="tile-fav">
                 <span className="flex size-5 items-center justify-center rounded-full bg-card/85 shadow-sm">
@@ -353,11 +380,11 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
           ))}
         </ul>
       ) : (
-        <ul key={animKey} className="flex flex-col gap-1.5" data-testid="card-list">
+        <ul className="flex flex-col gap-1.5" data-testid="card-list">
           {domRows.map((r, i) => (
-            <li key={r.id} {...drag.bind(r.id)} className={cn("relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]", prefs.fx && fadeOn && i < 24 && "card-fade")} style={{ ["--i" as string]: Math.min(i, 24), order: posOf.get(r.id) }} data-testid="card-row">
+            <li key={r.id} {...drag.bind(r.id)} ref={reveal.bind(r.id)} className="reveal relative select-none [-webkit-touch-callout:none] [contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] data-[dragging]:shadow-lg data-[dragging]:[content-visibility:visible]" style={{ order: posOf.get(r.id) }} data-testid="card-row">
               <button type="button" onClick={() => setOpenId(r.id)} className="flex w-full items-center gap-2.5 rounded-xl border bg-card p-2 pr-10 text-left active:bg-muted/60">
-                <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="h-14 w-10" />
+                <Thumb r={r} url={data?.thumbUrls[r.thumbPath ?? ""] ?? null} size="h-14 w-10" priority={i < 8 ? "eager" : "lazy"} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold">{r.name}</span>
                   <span className="block truncate text-xs text-muted-foreground">{[r.rarity, r.cardNumber, r.productName].filter(Boolean).join(" ・ ")}</span>
@@ -430,15 +457,48 @@ function Breakdown({ title, items }: { title: string; items: { key: string; kind
 }
 
 /** カード画像（縦横比を維持して全体を表示。切り抜かない）。画像が無いときは名前入りのプレースホルダー */
-function Thumb({ r, url, size }: { r: CardSummaryRow; url: string | null; size: string }) {
+function Thumb({ r, url, size, priority = "lazy" }: { r: CardSummaryRow; url: string | null; size: string; priority?: "high" | "eager" | "lazy" }) {
+  // 画像は並列に取得され、読み込みが終わるまで（失敗したときも）名前入りのプレースホルダーを出す。先頭の数枚は優先して読み込む
+  const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  const ref = useCallback((el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth > 0) setState("ok");
+  }, []);
+  const placeholder = <span className="line-clamp-4 px-1 text-center text-[10px] leading-tight text-muted-foreground">{r.name}</span>;
   return (
-    <span className={cn("flex items-center justify-center overflow-hidden rounded-lg bg-muted", size)} data-testid="card-thumb">
-      {url ? (
-        // eslint-disable-next-line @next/next/no-img-element -- 期限つきURLのサムネイル
-        <img src={url} alt={r.name} loading="lazy" decoding="async" draggable={false} className="pointer-events-none h-full w-full select-none object-contain [-webkit-touch-callout:none] [-webkit-user-drag:none]" />
-      ) : (
-        <span className="line-clamp-4 px-1 text-center text-[10px] leading-tight text-muted-foreground">{r.name}</span>
+    <span className={cn("relative flex items-center justify-center overflow-hidden rounded-lg bg-muted", size)} data-testid="card-thumb" data-img={url ? state : "none"}>
+      {(!url || state !== "ok") && (url && state === "loading" ? <span className="absolute inset-0 flex items-center justify-center">{placeholder}</span> : placeholder)}
+      {url && state !== "error" && (
+        // eslint-disable-next-line @next/next/no-img-element -- 固定URLのサムネイル（ブラウザが長期間キャッシュする）
+        <img
+          ref={ref}
+          src={url}
+          alt={r.name}
+          loading={priority === "lazy" ? "lazy" : "eager"}
+          fetchPriority={priority === "high" ? "high" : undefined}
+          decoding="async"
+          draggable={false}
+          onLoad={() => setState("ok")}
+          onError={() => setState("error")}
+          className={cn("pointer-events-none h-full w-full select-none object-contain transition-opacity duration-200 [-webkit-touch-callout:none] [-webkit-user-drag:none]", state === "ok" ? "opacity-100" : "opacity-0")}
+        />
       )}
     </span>
+  );
+}
+
+/** 読み込み中の骨組み（カードの枠）。集計・操作は先に表示され、ここにカードが入る */
+function CardSkeleton({ cols, grid }: { cols: 3 | 4 | 5; grid: boolean }) {
+  return grid ? (
+    <ul className={cn("grid gap-2", COLS_CLASS[cols])} aria-hidden="true" data-testid="collection-skeleton">
+      {Array.from({ length: cols * 3 }, (_, i) => (
+        <li key={i} className="aspect-[5/7] animate-pulse rounded-lg bg-muted/70" />
+      ))}
+    </ul>
+  ) : (
+    <ul className="flex flex-col gap-1.5" aria-hidden="true" data-testid="collection-skeleton">
+      {Array.from({ length: 6 }, (_, i) => (
+        <li key={i} className="h-[4.5rem] animate-pulse rounded-xl bg-muted/70" />
+      ))}
+    </ul>
   );
 }

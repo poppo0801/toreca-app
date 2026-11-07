@@ -8,7 +8,7 @@ import { useApp } from "@/components/app-provider";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { jstDateString } from "@/lib/datetime";
 import { costCandidates, proratedCost, UNIT_LABEL } from "@/lib/finance";
 import { saleSchema } from "@/lib/finance-input";
@@ -123,11 +123,14 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogTitle>{isEdit ? "売却を編集" : "売却（収入）を登録"}</DialogTitle>
-        <DialogDescription>売却名義人は、実際に売却手続きを行った人です。確定申告用の所得計算ではなく、家族の取引の振り返り用です。</DialogDescription>
-        <form onSubmit={submit} className="mt-3 space-y-3" noValidate>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent aria-describedby="sale-form-desc" data-testid="sale-form" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <div className="px-4 pb-2">
+          <SheetTitle>{isEdit ? "売却を編集" : "売却（収入）を登録"}</SheetTitle>
+          <SheetDescription id="sale-form-desc">売却名義人は、実際に売却手続きを行った人です。確定申告用の所得計算ではなく、家族の取引の振り返り用です。</SheetDescription>
+        </div>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <SheetBody className="space-y-3 border-t pt-3">
           <div className="grid grid-cols-2 gap-2">
             <label className="text-sm">
               売却日
@@ -262,27 +265,22 @@ export function SaleDialog({ open, onOpenChange, sale }: { open: boolean; onOpen
               {error}
             </p>
           )}
-          <div className="flex items-center justify-between gap-2">
-            {isEdit ? (
-              <Button type="button" variant="outline" onClick={remove} disabled={busy}>
+          </SheetBody>
+          <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+            {isEdit && (
+              <Button type="button" variant="outline" className="mr-auto" onClick={remove} disabled={busy}>
                 削除
               </Button>
-            ) : (
-              <span />
             )}
-            <div className="flex gap-2">
-              <DialogClose asChild>
-                <Button type="button" variant="outline">
-                  キャンセル
-                </Button>
-              </DialogClose>
-              <Button type="submit" disabled={busy}>
-                {busy ? "保存中…" : "保存"}
-              </Button>
-            </div>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              キャンセル
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? "保存中…" : "保存"}
+            </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

@@ -21,6 +21,10 @@
   --primary-foreground: #ffffff;
   /* 情報区別用 */
   --info: #0f766e;
+  /* 支出の分類色（収支の一覧の左端のライン・分類ラベル・内訳バー）。色だけでなく必ず分類名も表示する */
+  --cat-card: #dc2626;
+  --cat-supply: #2563eb;
+  --cat-expense: #16a34a;
   --success: #15803d;
   --danger: #b91c1c;
   --warn: #a16207;
@@ -50,6 +54,9 @@
   --primary-ink: #fb923c;
   --primary-foreground: #111111;
   --info: #2dd4bf;
+  --cat-card: #f87171;
+  --cat-supply: #60a5fa;
+  --cat-expense: #4ade80;
   --success: #4ade80;
   --danger: #f87171;
   --warn: #facc15;
@@ -259,9 +266,37 @@ input[type="datetime-local"]::-webkit-datetime-edit {
     transform: translateY(0);
   }
 }
+/* 旧: 先頭24件の固定ずらし。現在は下の .reveal（画面に入ったカードを左上から順に。use-reveal.ts） */
 .card-fade {
   animation: card-fade 0.26s ease-out backwards;
   animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+/*
+ * コレクションの順次フェード表示（Stage 6R）。opacity だけを動かす（transform は触らない: ドラッグの移動・光のエフェクトと干渉しない）。
+ * data-reveal の未設定=透明（枠は確保済み）/ in=フェードイン中（--d だけ遅らせる）/ done=表示済み（演出なし）。動きを減らす設定では即表示。
+ */
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.reveal:not([data-reveal]) {
+  opacity: 0;
+}
+.reveal[data-reveal="in"] {
+  animation: card-reveal 0.34s ease-out both;
+  animation-delay: var(--d, 0ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal:not([data-reveal]),
+  .reveal[data-reveal="in"] {
+    opacity: 1;
+    animation: none;
+  }
 }
 
 /*

@@ -10,7 +10,7 @@ import { ChainStoreFields } from "@/components/chain-store-fields";
 import { FuelCalc } from "@/components/fuel-calc";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { jstDateString } from "@/lib/datetime";
 import { categoryOf, EXPENSE_CATEGORIES } from "@/lib/expense-category";
 import { flexToJstDate, suggestedAmount } from "@/lib/finance";
@@ -137,14 +137,17 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
   const fromLottery = purchase?.source === "lottery";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange}>
       {/* 開いた直後に購入日（日付ピッカー・キーボード）が自動で開かないよう、最初のフォーカスは入力欄ではなくパネル自身にする */}
-      <DialogContent className="max-w-lg" onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus?.(); }}>
-        <DialogTitle>{isEdit ? "支出を編集" : "支出を登録"}</DialogTitle>
-        <DialogDescription className={fromLottery ? undefined : "sr-only"}>
-          {fromLottery ? "抽選の当選から作成された購入です。実際の購入日・店舗・数量・支払金額を確認して修正してください。" : "支出の入力"}
-        </DialogDescription>
-        <form onSubmit={submit} className="mt-3 space-y-3" noValidate>
+      <SheetContent aria-describedby="expense-form-desc" data-testid="expense-form" onOpenAutoFocus={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus?.(); }}>
+        <div className="px-4 pb-2">
+          <SheetTitle>{isEdit ? "支出を編集" : "支出を登録"}</SheetTitle>
+          <SheetDescription id="expense-form-desc" className={fromLottery ? undefined : "sr-only"}>
+            {fromLottery ? "抽選の当選から作成された購入です。実際の購入日・店舗・数量・支払金額を確認して修正してください。" : "支出の入力"}
+          </SheetDescription>
+        </div>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <SheetBody className="space-y-3 border-t pt-3">
           {/* 品目（先頭）。ポケモンカードは商品マスター・購入実績と連携。周辺グッズ・経費は自由入力で、購入実績には含めない */}
           <label className="block text-sm">
             <span className="block leading-5">品目</span>
@@ -279,33 +282,29 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
               {error}
             </p>
           )}
-          <div className="flex items-center justify-between gap-2">
-            {isEdit && !fromLottery ? (
-              <Button type="button" variant="outline" onClick={remove} disabled={busy}>
+          </SheetBody>
+          <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+            {isEdit && !fromLottery && (
+              <Button type="button" variant="outline" className="mr-auto" onClick={remove} disabled={busy}>
                 削除
               </Button>
-            ) : (
-              <span />
             )}
-            <div className="flex gap-2">
-              <DialogClose asChild>
-                <Button type="button" variant="outline">
-                  キャンセル
-                </Button>
-              </DialogClose>
-              <Button type="submit" disabled={busy}>
-                {busy ? "保存中…" : "保存"}
-              </Button>
-            </div>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              キャンセル
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? "保存中…" : "保存"}
+            </Button>
           </div>
         </form>
+
         {receiptItem !== null && items[receiptItem]?.id && (
           <BoxReceiptDialog
             items={[{ id: items[receiptItem].id as string, quantity: items[receiptItem].quantity, label: items[receiptItem].product.name || "BOX" }]}
             onClose={() => setReceiptItem(null)}
           />
         )}
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

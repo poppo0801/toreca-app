@@ -10,6 +10,10 @@ import type { AppData, FlexibleDate, ItemUnit, Product, PurchaseUnit, Purchase, 
 
 export type LedgerFilter = "all" | "expense" | "income";
 
+/** 期間の指定: 年月（YYYY-MM）または全期間 */
+export const ALL_PERIOD = "all";
+const inPeriod = (date: string | null, ym: string) => (ym === ALL_PERIOD ? true : !!date && ymOf(date) === ym);
+
 export interface LedgerEntry {
   kind: "expense" | "income";
   id: string;
@@ -53,6 +57,12 @@ export function purchaseTotal(p: Pick<Purchase, "items">): { total: number; unkn
   return { total, unknown };
 }
 
+/** 収支の一覧・詳細に出す商品名はマスターの正式名称（略称・別名には置き換えない）。マスターに無い商品は入力された名称 */
+export function productFullName(data: AppData, productId: string | null, label?: string | null): string {
+  const p = productId ? data.products.find((x) => x.id === productId) : undefined;
+  return p?.officialName ?? label ?? "商品未登録";
+}
+
 export function productName(data: AppData, productId: string | null, label?: string | null): string {
   const p = productId ? data.products.find((x) => x.id === productId) : undefined;
   return p?.aliases[0] ?? p?.officialName ?? label ?? "商品未登録";
@@ -61,7 +71,7 @@ export function productName(data: AppData, productId: string | null, label?: str
 export function purchaseTitle(data: AppData, p: Purchase): string {
   const first = p.items[0];
   if (!first) return "購入";
-  const name = productName(data, first.productId, first.productLabel);
+  const name = productFullName(data, first.productId, first.productLabel);
   const more = p.items.length > 1 ? ` ほか${p.items.length - 1}件` : "";
   // 経費は数量・単位を出さない（金額中心）
   if (!categoryOf(p.category).quantity) return `${name}${more}`;
@@ -82,7 +92,7 @@ export function ledgerEntries(data: AppData, ym: string, filter: LedgerFilter, s
   if (filter !== "income") {
     for (const p of data.purchases) {
       const date = flexToJstDate(p.purchasedOn);
-      if (!date || ymOf(date) !== ym) continue;
+      if (!inPeriod(date, ym)) continue;
       if (category !== "all" && (p.category ?? "pokemon_card") !== category) continue;
       const { total, unknown } = purchaseTotal(p);
       out.push({
@@ -99,13 +109,13 @@ export function ledgerEntries(data: AppData, ym: string, filter: LedgerFilter, s
   // 品目で絞るときは支出だけ（収入には品目がない）
   if (filter !== "expense" && category === "all") {
     for (const s of data.sales) {
-      if (ymOf(s.soldOn) !== ym) continue;
+      if (!inPeriod(s.soldOn, ym)) continue;
       if (sellerId !== "all" && s.sellerProfileId !== sellerId) continue;
       out.push({
         kind: "income",
         id: s.id,
         date: s.soldOn,
-        title: `${productName(data, s.productId, s.productLabel)} ${s.quantity}${UNIT_LABEL[s.unit]}`,
+        title: `${productFullName(data, s.productId, s.productLabel)} ${s.quantity}${UNIT_LABEL[s.unit]}`,
         sub: s.platform || "売却先未設定",
         amount: s.amount,
         sellerProfileId: s.sellerProfileId,
@@ -131,7 +141,7 @@ export function monthSummary(data: AppData, ym: string): MonthSummary {
   const cats = new Map<string, number>();
   for (const p of data.purchases) {
     const date = flexToJstDate(p.purchasedOn);
-    if (!date || ymOf(date) !== ym) continue;
+    if (!inPeriod(date, ym)) continue;
     const t = purchaseTotal(p);
     expense += t.total;
     expenseUnknown += t.unknown;
@@ -139,7 +149,7 @@ export function monthSummary(data: AppData, ym: string): MonthSummary {
     cats.set(c, (cats.get(c) ?? 0) + t.total);
   }
   const byCategory = [...cats.entries()].map(([category, amount]) => ({ category, label: categoryOf(category).label, amount }));
-  const income = data.sales.filter((s) => ymOf(s.soldOn) === ym).reduce((sum, s) => sum + s.amount, 0);
+  const income = data.sales.filter((s) => inPeriod(s.soldOn, ym)).reduce((sum, s) => sum + s.amount, 0);
   return { expense, income, net: income - expense, expenseUnknown, byCategory };
 }
 

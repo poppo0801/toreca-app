@@ -1,9 +1,10 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { isAllowedCondition } from "@/lib/card-condition";
 import { cardInputSchema, holdingInputSchema, priceInputSchema, type CardInput, type HoldingInput, type PriceInput } from "@/lib/collection-input";
-import type { CardRow, FavoriteRow, HoldingRow, MarketPriceRow, PriceRow } from "@/lib/collection";
+import type { CardRow, OrderRow, FavoriteRow, HoldingRow, MarketPriceRow, PriceRow } from "@/lib/collection";
 import { DEFAULT_MULTIPLIERS, validateMultipliers, type ConditionMultipliers } from "@/lib/condition-value";
 import { createClient } from "@/lib/supabase/server";
 
@@ -31,6 +32,9 @@ const any = (db: Db) => db as any;
 
 const THUMB_TTL = 60 * 60;
 
+/** 一覧の画像URL（Stage 6R）。期限つきURLではなく、内容で決まる固定URL（ブラウザが長期間キャッシュできる） */
+const thumbUrlOf = (id: string, path: string) => `/api/card-image/${id}?v=${createHash("sha1").update(path).digest("hex").slice(0, 12)}&s=thumb&p=${encodeURIComponent(path)}`;
+
 export interface CollectionData {
   cards: CardRow[];
   holdings: HoldingRow[];
@@ -38,8 +42,10 @@ export interface CollectionData {
   /** 取得した相場（手動の参考相場とは別） */
   market: MarketPriceRow[];
   favorites: FavoriteRow[];
-  /** サムネイルの保存先 → 期限つきURL */
+  /** サムネイルの保存先 → 画像のURL（内容で決まる固定URL） */
   thumbUrls: Record<string, string>;
+  /** プロフィール別の「標準」並び順（保存されたものだけ） */
+  orders: OrderRow[];
   /** 状態別の評価倍率（%）。未設定の世帯は既定値 */
   multipliers: ConditionMultipliers;
 }
@@ -47,13 +53,14 @@ export interface CollectionData {
 export async function loadCollectionAction(): Promise<R<{ data: CollectionData }>> {
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const [c, h, p, f, mk, cm] = await Promise.all([
+  const [c, h, p, f, mk, cm, od] = await Promise.all([
     any(db).from("card_masters").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(5000),
     any(db).from("card_holdings").select("*").is("archived_at", null).limit(20000),
     any(db).from("card_prices").select("*").order("confirmed_on", { ascending: false }).limit(20000),
     any(db).from("card_favorites").select("profile_id,card_id,rank").limit(20000),
     any(db).from("card_market_prices").select("*").limit(20000),
     any(db).from("condition_multipliers").select("a_pct,b_pct,c_pct").maybeSingle(),
+    any(db).from("card_display_orders").select("profile_id,card_id,position").limit(50000),
   ]);
   if (c.error || h.error || p.error || f.error) return fail("コレクションを取得できませんでした");
   const cards: CardRow[] = c.data.map((r: Record<string, unknown>) => ({
@@ -117,15 +124,12 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
         fetchedAt: r.fetched_at as string,
       }));
   const favorites: FavoriteRow[] = f.data.map((r: Record<string, unknown>) => ({ profileId: r.profile_id as string, cardId: r.card_id as string, rank: r.rank as number }));
-  // サムネイルだけを期限つきURLにする（詳細用の大きい画像は、開いたときに個別に取得する）
-  const paths = [...new Set(cards.map((x) => x.thumbPath).filter((x): x is string => !!x))];
+  // サムネイルは固定URL（画像の署名の発行という通信が不要になり、ブラウザのキャッシュも効く）。詳細用の大きい画像は、開いたときに取得する
   const thumbUrls: Record<string, string> = {};
-  for (let i = 0; i < paths.length; i += 200) {
-    const { data: signed } = await db.storage.from("card-images").createSignedUrls(paths.slice(i, i + 200), THUMB_TTL);
-    for (const s of signed ?? []) if (s.path && s.signedUrl) thumbUrls[s.path] = s.signedUrl;
-  }
+  for (const x of cards) if (x.thumbPath) thumbUrls[x.thumbPath] = thumbUrlOf(x.id, x.thumbPath);
+  const orders: OrderRow[] = od.error ? [] : (od.data as { profile_id: string; card_id: string; position: number }[]).map((r) => ({ profileId: r.profile_id, cardId: r.card_id, position: r.position }));
   const multipliers: ConditionMultipliers = !cm.error && cm.data ? { A: cm.data.a_pct, B: cm.data.b_pct, C: cm.data.c_pct } : DEFAULT_MULTIPLIERS;
-  return { ok: true, data: { cards, holdings, prices, market, favorites, thumbUrls, multipliers } };
+  return { ok: true, data: { cards, holdings, prices, market, favorites, thumbUrls, multipliers, orders } };
 }
 
 /** 詳細表示用の大きい画像のURL（自世帯のパスだけ） */
@@ -323,6 +327,19 @@ export async function reorderFavoritesAction(profileId: string, cardIds: string[
     rank++;
   }
   return { ok: true };
+}
+
+/**
+ * プロフィール別の「標準」並び順を保存する（Stage 6R）。そのプロフィールの順序をまとめて置き換える（DB関数・1トランザクション）。
+ * カード・所有記録・お気に入り・登録日・価格は変更しない。
+ */
+export async function reorderCardsAction(profileId: string, cardIds: string[]): Promise<R> {
+  const ids = z.array(z.uuid()).max(20000).safeParse(cardIds);
+  if (!uuid.safeParse(profileId).success || !ids.success || new Set(ids.data).size !== ids.data.length) return fail("リクエストが不正です");
+  const db = await ctx();
+  if (!db) return fail("ログインが必要です");
+  const { error } = await any(db).rpc("set_card_display_order", { p_profile: profileId, p_cards: ids.data });
+  return error ? fail("並び順を保存できませんでした") : { ok: true };
 }
 
 /** 状態別の評価倍率（%）を保存する。基準相場・取得相場・手動価格は変更しない（評価額の計算にだけ使う） */

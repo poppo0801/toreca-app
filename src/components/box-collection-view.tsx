@@ -1,6 +1,7 @@
 "use client";
 
-import { ChartColumn, Ellipsis, FileInput, LayoutGrid, List, Percent, Search, SlidersHorizontal } from "lucide-react";
+import { Ellipsis, FileInput, LayoutGrid, List, Percent, Search, SlidersHorizontal } from "lucide-react";
+import { SummaryTriple } from "@/components/summary-triple";
 import { useCallback, useEffect, useImperativeHandle, useMemo, useState, type Ref } from "react";
 import { loadBoxCollectionAction } from "@/app/(app)/collection/box-actions";
 import { useApp } from "@/components/app-provider";
@@ -78,19 +79,18 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
   return (
     <div className="space-y-3" data-testid="box-collection">
       {data && (
-        <section aria-label="保有状況" className="rounded-xl border bg-card px-2.5 text-xs" data-testid="box-summary">
-          <button type="button" onClick={() => setShowStats((v) => !v)} aria-expanded={showStats} className="flex min-h-9 w-full items-center gap-x-2 text-left" data-testid="box-summary-line">
-            <span className="min-w-0 flex-1 truncate font-medium tabular-nums">
-              購入 {totals.qty === 0 || totals.purchaseMissingQty === totals.qty ? "—" : yen(totals.purchaseTotal)}｜買取 {totals.qty === 0 || totals.buybackMissingQty === totals.qty ? "—" : yen(totals.buybackTotal)}｜{totals.qty}BOX
-            </span>
-            {totals.priceDate && (
-              <span className="shrink-0 text-[10px] text-muted-foreground" data-testid="box-price-date">
-                {md(totals.priceDate)}
-              </span>
-            )}
-            {partial && <span className="shrink-0 rounded-full border border-warn px-1.5 text-[10px] text-warn">一部</span>}
-            <ChartColumn className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          </button>
+        <section aria-label="保有状況" className="rounded-xl border bg-card text-xs" data-testid="box-summary">
+          {/* 購入／買取／BOX数の3分割（カードと共通） */}
+          <SummaryTriple
+            testId="box-summary-line"
+            expanded={showStats}
+            onToggle={() => setShowStats((v) => !v)}
+            cells={[
+              { label: "購入", value: totals.qty === 0 || totals.purchaseMissingQty === totals.qty ? "—" : yen(totals.purchaseTotal), partial },
+              { label: "買取", value: totals.qty === 0 || totals.buybackMissingQty === totals.qty ? "—" : yen(totals.buybackTotal), sub: totals.priceDate ? md(totals.priceDate) : undefined, subTestId: "box-price-date" },
+              { label: "BOX", value: `${totals.qty}BOX` },
+            ]}
+          />
           {showStats && (
             <div className="space-y-1.5 border-t py-2" data-testid="box-stats">
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1">

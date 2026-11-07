@@ -44,6 +44,21 @@ export interface PriceRow {
   sourceUrl: string | null;
   createdAt: string;
 }
+/** 保存された並び順から、プロフィールのカードID列を取り出す（位置の昇順） */
+export function orderOf(orders: readonly OrderRow[], profileId: string): string[] {
+  return orders
+    .filter((o) => o.profileId === profileId)
+    .sort((a, b) => a.position - b.position)
+    .map((o) => o.cardId);
+}
+
+/** プロフィール別の「標準」並び順（保存されたもの） */
+export interface OrderRow {
+  profileId: string;
+  cardId: string;
+  position: number;
+}
+
 export interface FavoriteRow {
   profileId: string;
   cardId: string;
@@ -190,7 +205,23 @@ const byValue = (a: CardSummaryRow, b: CardSummaryRow, dir: 1 | -1) => {
   return (a.refValue - b.refValue) * dir;
 };
 
-export function sortCards(rows: CardSummaryRow[], key: SortKey): CardSummaryRow[] {
+/**
+ * 並び替え。「標準」（default）は、現在のプロフィールが自由に並べた順（Stage 6R）。
+ * order = そのプロフィールの保存順（カードIDの並び）。保存順に無いカード（あとから登録したもの）は末尾に、登録の古い順で並べる。
+ * 保存順が無いプロフィールは、従来の標準（お気に入り→参考価値の高い順）のまま。他の並び順は保存順を変えない。
+ */
+export function sortCards(rows: CardSummaryRow[], key: SortKey, order?: readonly string[] | null): CardSummaryRow[] {
+  if (key === "default" && order && order.length > 0) {
+    const pos = new Map(order.map((id, i) => [id, i]));
+    return rows.slice().sort((a, b) => {
+      const pa = pos.get(a.id);
+      const pb = pos.get(b.id);
+      if (pa !== undefined && pb !== undefined) return pa - pb;
+      if (pa !== undefined) return -1;
+      if (pb !== undefined) return 1;
+      return a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
+    });
+  }
   const out = rows.slice();
   const name = (a: CardSummaryRow, b: CardSummaryRow) => a.name.localeCompare(b.name, "ja");
   out.sort((a, b) => {

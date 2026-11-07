@@ -1306,6 +1306,52 @@ export type Database = {
           },
         ]
       }
+      card_display_orders: {
+        Row: {
+          card_id: string
+          household_id: string
+          position: number
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          card_id: string
+          household_id: string
+          position: number
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          card_id?: string
+          household_id?: string
+          position?: number
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_display_orders_card_id_household_id_fkey"
+            columns: ["card_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "card_masters"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "card_display_orders_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_display_orders_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       card_favorites: {
         Row: {
           card_id: string
@@ -6377,6 +6423,10 @@ export type Database = {
       save_lottery_tx_as: {
         Args: { p: Json; p_actor: string; p_household: string }
         Returns: string
+      }
+      set_card_display_order: {
+        Args: { p_cards: string[]; p_profile: string }
+        Returns: number
       }
       set_item_results: {
         Args: { p_actor: string; p_application_id: string; p_results: Json }

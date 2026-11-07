@@ -1,28 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartColumn, ChevronLeft, ChevronRight, ListFilter } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ExpenseDialog } from "@/components/expense-dialog";
 import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { ExpenseBar } from "@/components/expense-bar";
+import { LedgerDetailSheet } from "@/components/ledger-detail-sheet";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { SaleDialog } from "@/components/sale-dialog";
 import { Button } from "@/components/ui/button";
 import { jstDateString } from "@/lib/datetime";
 import { categoryOf, EXPENSE_CATEGORIES } from "@/lib/expense-category";
-import { ledgerEntries, monthSummary, shiftMonth, type LedgerFilter } from "@/lib/finance";
+import { ALL_PERIOD, ledgerEntries, monthSummary, shiftMonth, type LedgerFilter } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
-const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
-
-function dayLabel(date: string | null): string {
+/** 一覧カードの日付（今年は M/D、ほかの年は YY/M/D）。日付不明はそのまま */
+function shortDate(date: string | null, today: string): string {
   if (!date) return "日付不明";
   const [y, m, d] = date.split("-").map(Number);
-  return `${m}/${d}（${WEEK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}）`;
+  return String(y) === today.slice(0, 4) ? `${m}/${d}` : `${String(y).slice(2)}/${m}/${d}`;
 }
+
+const PAGE = 60;
 
 const TABS: { value: LedgerFilter; label: string }[] = [
   { value: "all", label: "すべて" },
@@ -32,13 +35,16 @@ const TABS: { value: LedgerFilter; label: string }[] = [
 
 /** 年月の選択（年を移動して月を選ぶ。購入記録の期間選択と同じ操作）。選んだ月へ直接移動する */
 function MonthPicker({ ym, onPick, onClose }: { ym: string; onPick: (v: string) => void; onClose: () => void }) {
-  const [year, setYear] = useState(Number(ym.slice(0, 4)));
+  const [year, setYear] = useState(ym === ALL_PERIOD ? new Date().getFullYear() : Number(ym.slice(0, 4)));
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent data-testid="month-picker">
         <DialogTitle>年月を選択</DialogTitle>
         <DialogDescription className="sr-only">月を選ぶと、その月の収支へ移動します</DialogDescription>
         <div className="mt-3 space-y-2">
+          <button type="button" onClick={() => onPick(ALL_PERIOD)} aria-pressed={ym === ALL_PERIOD} data-testid="period-all" className={cn("min-h-10 w-full rounded-md border text-sm", ym === ALL_PERIOD ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}>
+            全期間
+          </button>
           <div className="flex items-center justify-between">
             <Button variant="ghost" size="icon" className="size-9" aria-label="前の年" onClick={() => setYear(year - 1)}>
               <ChevronLeft className="size-4" />
@@ -110,18 +116,35 @@ export function FinanceView() {
   const [expense, setExpense] = useState<{ id: string | null } | null>(null);
   const [sale, setSale] = useState<{ id: string | null } | null>(null);
   const [picking, setPicking] = useState(false);
+  /** 取引の詳細（下から開くシート）。「編集」で入力フォームへ */
+  const [detail, setDetail] = useState<{ kind: "expense" | "income"; id: string } | null>(null);
   const [filtering, setFiltering] = useState(false);
   // 適用中の絞り込み: 支出/すべては品目、収入は売却名義人
   const activeFilters = (filter === "income" ? (seller !== "all" ? 1 : 0) : category !== "all" ? 1 : 0);
 
   const summary = useMemo(() => monthSummary(data, ym), [data, ym]);
   const entries = useMemo(() => ledgerEntries(data, ym, filter, filter === "income" ? seller : "all", filter === "income" ? "all" : category), [data, ym, filter, seller, category]);
-  const groups = useMemo(() => {
-    const m = new Map<string, typeof entries>();
-    for (const e of entries) m.set(e.date ?? "", [...(m.get(e.date ?? "") ?? []), e]);
-    return [...m.entries()];
-  }, [entries]);
-  const [y, mo] = ym.split("-");
+  const all = ym === ALL_PERIOD;
+  const today = jstDateString(new Date());
+  // 全期間でも軽く動くよう、60件ずつ描画する（末尾が近づくと続きを読み込む）。期間・種類・絞り込みを変えたら先頭から
+  const [limit, setLimit] = useState(PAGE);
+  const listKey = `${ym}|${filter}|${seller}|${category}`;
+  const [lastKey, setLastKey] = useState(listKey);
+  if (lastKey !== listKey) {
+    setLastKey(listKey);
+    setLimit(PAGE);
+  }
+  const visible = entries.slice(0, limit);
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || visible.length >= entries.length) return;
+    const io = new IntersectionObserver((e) => e[0].isIntersecting && setLimit((n) => n + PAGE), { rootMargin: "400px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible.length, entries.length]);
+  const bar = summary.byCategory.map((c) => ({ id: c.category, label: categoryOf(c.category).short, amount: c.amount, color: categoryOf(c.category).color }));
+  const [y, mo] = all ? ["", ""] : ym.split("-");
 
   return (
     <div className="space-y-2">
@@ -145,13 +168,13 @@ export function FinanceView() {
       </div>
 
       <div className="flex items-center justify-between rounded-lg bg-card px-1 py-0.5">
-        <Button variant="ghost" size="icon" className="size-10" aria-label="前の月" onClick={() => setYm(shiftMonth(ym, -1))}>
+        <Button variant="ghost" size="icon" className="size-10" aria-label="前の月" disabled={all} onClick={() => setYm(shiftMonth(ym, -1))}>
           <ChevronLeft className="size-5" />
         </Button>
         <button type="button" onClick={() => setPicking(true)} aria-label="年月を選ぶ" data-testid="month-label" className="min-h-10 rounded-md px-3 text-sm font-semibold hover:bg-muted">
-          {y}年{Number(mo)}月
+          {all ? "全期間" : `${y}年${Number(mo)}月`}
         </button>
-        <Button variant="ghost" size="icon" className="size-10" aria-label="次の月" onClick={() => setYm(shiftMonth(ym, 1))}>
+        <Button variant="ghost" size="icon" className="size-10" aria-label="次の月" disabled={all} onClick={() => setYm(shiftMonth(ym, 1))}>
           <ChevronRight className="size-5" />
         </Button>
       </div>
@@ -205,49 +228,52 @@ export function FinanceView() {
         </button>
       </div>
 
-      {summary.byCategory.length > 1 && filter !== "income" && (
-        <p className="text-[11px] text-muted-foreground" data-testid="sum-by-category">
-          支出の内訳: {summary.byCategory.map((c) => `${c.label} ${yen(c.amount)}`).join(" ／ ")}
-        </p>
-      )}
+      {filter !== "income" && <ExpenseBar items={bar} />}
 
-      <ul className="space-y-2" data-testid="ledger-list" aria-label="取引一覧">
-        {groups.map(([date, list]) => (
-          <li key={date || "none"}>
-            <p className="mb-0.5 px-1 text-xs text-muted-foreground">{dayLabel(date || null)}</p>
-            <ul className="divide-y overflow-hidden rounded-lg border bg-card">
-              {list.map((e) => {
-                const seller = e.sellerProfileId ? data.profiles.find((p) => p.id === e.sellerProfileId) : undefined;
-                return (
-                  <li key={`${e.kind}-${e.id}`}>
-                    <button
-                      type="button"
-                      disabled={!persistent}
-                      onClick={() => (e.kind === "expense" ? setExpense({ id: e.id }) : setSale({ id: e.id }))}
-                      className="flex min-h-14 w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted disabled:hover:bg-transparent"
-                      data-testid="ledger-row"
-                      data-kind={e.kind}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm">{e.title}</span>
-                        <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                          {seller && <ProfileAvatar profile={seller} size="xs" />}
-                          {e.kind === "expense" && e.category && e.category !== "pokemon_card" && <span className="shrink-0 rounded-full border px-1.5 text-[10px] text-foreground" data-testid="row-category">{categoryOf(e.category).label}</span>}
-                          {e.sub}
-                        </span>
-                      </span>
-                      <span className={cn("shrink-0 text-sm font-semibold", e.kind === "income" ? "text-info" : "")}>
-                        {e.amount === null ? <span className="text-xs font-normal text-muted-foreground">金額未入力</span> : `${e.kind === "income" ? "+" : "-"}${yen(e.amount)}`}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        ))}
+      {/* 取引1件につき独立した角丸カード（日付ごとの見出し・区切りは無い）。左端の細いラインと分類名で支出の分類を示す。系列・店舗は詳細で確認 */}
+      <ul className="space-y-1.5" data-testid="ledger-list" aria-label="取引一覧">
+        {visible.map((e) => {
+          const seller = e.sellerProfileId ? data.profiles.find((p) => p.id === e.sellerProfileId) : undefined;
+          const cat = e.kind === "expense" ? categoryOf(e.category) : null;
+          const color = cat ? cat.color : "var(--info)";
+          return (
+            <li key={`${e.kind}-${e.id}`}>
+              <button
+                type="button"
+                onClick={() => setDetail({ kind: e.kind, id: e.id })}
+                className="relative flex w-full flex-col gap-0.5 overflow-hidden rounded-xl border bg-card py-1.5 pl-3.5 pr-3 text-left active:bg-muted/60"
+                data-testid="ledger-row"
+                data-kind={e.kind}
+                data-category={e.category ?? ""}
+              >
+                <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1" style={{ background: color }} data-testid="row-line" />
+                <span className="flex items-center gap-1.5 text-xs">
+                  <span className="tabular-nums text-muted-foreground" data-testid="row-date">
+                    {shortDate(e.date, today)}
+                  </span>
+                  <span className="shrink-0 rounded-full border px-1.5 text-[10px] font-medium leading-4" style={{ color, borderColor: color }} data-testid="row-category">
+                    {cat ? cat.short : "売却"}
+                  </span>
+                  {seller && <ProfileAvatar profile={seller} size="xs" />}
+                  <span className={cn("ml-auto shrink-0 text-sm font-semibold tabular-nums", e.kind === "income" && "text-info")}>
+                    {e.amount === null ? <span className="text-xs font-normal text-muted-foreground">金額未入力</span> : `${e.kind === "income" ? "+" : "-"}${yen(e.amount)}`}
+                  </span>
+                </span>
+                <span className="block truncate text-sm" title={e.title} data-testid="row-title">
+                  {e.title}
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
-      {entries.length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">この月の取引はありません。</p>}
+      <div ref={sentinel} aria-hidden="true" />
+      {visible.length < entries.length && (
+        <Button variant="outline" className="w-full" onClick={() => setLimit((n) => n + PAGE)} data-testid="ledger-more">
+          もっと見る（{visible.length}/{entries.length}）
+        </Button>
+      )}
+      {entries.length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{all ? "取引はありません。" : "この月の取引はありません。"}</p>}
 
       {filtering && (
         <FinanceFilterDialog
@@ -261,6 +287,19 @@ export function FinanceView() {
         />
       )}
       {picking && <MonthPicker ym={ym} onPick={(v) => { setYm(v); setPicking(false); }} onClose={() => setPicking(false)} />}
+      {detail && (
+        <LedgerDetailSheet
+          kind={detail.kind}
+          id={detail.id}
+          onClose={() => setDetail(null)}
+          onEdit={() => {
+            const d = detail;
+            setDetail(null);
+            if (d.kind === "expense") setExpense({ id: d.id });
+            else setSale({ id: d.id });
+          }}
+        />
+      )}
       {expense && (
         <ExpenseDialog
           key={expense.id ?? "new"}
