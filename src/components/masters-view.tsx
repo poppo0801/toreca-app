@@ -7,6 +7,7 @@ import { useApp } from "@/components/app-provider";
 import { ChainLogo } from "@/components/chain-logo";
 import { ChainLogoButton } from "@/components/chain-logo-manager";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
+import { ChainDeleteButton, ChainMergeButton } from "@/components/chain-merge-dialog";
 import { ProductDeleteButton, ProductMergeButton } from "@/components/product-merge-dialog";
 import { SetCompositionButton } from "@/components/product-set-dialog";
 import { normName } from "@/lib/norm";
@@ -415,6 +416,12 @@ function MasterItem({
           {entity.key === "products" && <ProductImagesButton productId={row.id} name={String(row.official_name)} />}
           {entity.key === "profiles" && <RulesDialog profile={row} chains={rows.chains} stores={rows.stores} rules={rules} />}
           <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline">編集</Button>} />
+          {entity.key === "chains" && (
+            <RowMenu label={`${title}のその他の操作`}>
+              <ChainMergeButton chainId={row.id} name={String(row.name)} />
+              <ChainDeleteButton chainId={row.id} name={String(row.name)} />
+            </RowMenu>
+          )}
           {entity.key === "products" && (
             <RowMenu label={`${title}のその他の操作`}>
               <SetCompositionButton productId={row.id} name={String(row.official_name)} />

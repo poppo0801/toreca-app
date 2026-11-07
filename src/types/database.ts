@@ -1895,6 +1895,50 @@ export type Database = {
           },
         ]
       }
+      chain_merge_history: {
+        Row: {
+          counts: Json
+          from_chain_id: string
+          from_name: string
+          household_id: string
+          id: string
+          into_chain_id: string
+          into_name: string
+          merged_at: string
+          merged_by_profile_id: string | null
+        }
+        Insert: {
+          counts?: Json
+          from_chain_id: string
+          from_name?: string
+          household_id: string
+          id?: string
+          into_chain_id: string
+          into_name?: string
+          merged_at?: string
+          merged_by_profile_id?: string | null
+        }
+        Update: {
+          counts?: Json
+          from_chain_id?: string
+          from_name?: string
+          household_id?: string
+          id?: string
+          into_chain_id?: string
+          into_name?: string
+          merged_at?: string
+          merged_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chain_merge_history_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chain_requirements: {
         Row: {
           archived_at: string | null
@@ -5930,6 +5974,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _repoint_store: {
+        Args: { p_from: string; p_to: string }
+        Returns: undefined
+      }
       ack_travel_review: { Args: { p_actor: string }; Returns: undefined }
       apply_lottery_import: {
         Args: {
@@ -6064,6 +6112,7 @@ export type Database = {
         Args: { p_day: string; p_delta: Json; p_household: string }
         Returns: undefined
       }
+      chain_reference_counts: { Args: { p_id: string }; Returns: Json }
       claim_ai_job_items: {
         Args: { p_lease_secs?: number; p_limit: number }
         Returns: {
@@ -6174,6 +6223,7 @@ export type Database = {
         Returns: undefined
       }
       current_household_id: { Args: never; Returns: string }
+      delete_chain: { Args: { p_id: string }; Returns: undefined }
       delete_product: { Args: { p_id: string }; Returns: undefined }
       ensure_profile_accounts: { Args: never; Returns: number }
       flex_ok: { Args: { d: string; p: string; t: string }; Returns: boolean }
@@ -6199,6 +6249,15 @@ export type Database = {
       mark_purchased: {
         Args: { p_actor: string; p_application_id: string }
         Returns: undefined
+      }
+      merge_chain_masters: {
+        Args: {
+          p_actor: string
+          p_execute?: boolean
+          p_from: string
+          p_into: string
+        }
+        Returns: Json
       }
       merge_chains: { Args: { p_from: string; p_into: string }; Returns: Json }
       merge_products: {
