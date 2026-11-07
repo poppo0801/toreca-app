@@ -12,7 +12,7 @@ export const cardInputSchema = z.object({
   setCode: text("商品コード", 20),
   rarity: text("レアリティ", 10),
   cardType: text("カードの種類", 30),
-  productName: text("収録商品", 120),
+  productName: text("収録パック", 120),
   productId: z.uuid().nullable().default(null),
   imagePath: path,
   thumbPath: path,

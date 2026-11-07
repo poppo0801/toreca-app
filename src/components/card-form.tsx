@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { RegisterKindSwitch } from "@/components/register-kind-switch";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import type { CardExtraction, CardField } from "@/lib/ai/card-provider";
+import { useApp } from "@/components/app-provider";
+import { packForSetCode } from "@/lib/product-pack";
 import { conditionOptions } from "@/lib/card-condition";
 import { matchCard, type CardRow, type CardSummaryRow } from "@/lib/collection";
 import { parseYen } from "@/lib/collection-input";
@@ -20,7 +22,7 @@ export type CardFormMode =
   | { kind: "holding"; card: CardSummaryRow };
 
 const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
-const FIELD_LABEL: Record<CardField, string> = { name: "カード名", cardNumber: "カード番号", setCode: "商品コード", rarity: "レアリティ", productName: "収録商品" };
+const FIELD_LABEL: Record<CardField, string> = { name: "カード名", cardNumber: "カード番号", setCode: "商品コード", rarity: "レアリティ", productName: "収録パック" };
 
 /** 画像1枚をAIで読み取る（/api/card-extract）。結果は候補で、フォームで確認・修正してから保存する */
 export async function analyzeCardImage(file: File): Promise<{ ok: true; extraction: CardExtraction; runId: string | null } | { ok: false; message: string }> {
@@ -62,12 +64,24 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
   const prefill = mode.kind === "new" ? mode.prefill : undefined;
 
   const [f, setF] = useState({ name: base?.name ?? prefill?.name ?? "", cardNumber: base?.cardNumber ?? "", setCode: base?.setCode ?? "", rarity: base?.rarity ?? "", cardType: base?.cardType ?? "", productName: base?.productName ?? "" });
+  // 収録パックは、商品コードからマスターの商品名を自動入力する（利用者が自分で書き換えた後は上書きしない）
+  const { data: appData } = useApp();
+  const products = appData?.products ?? [];
+  const autoPack = useRef<string | null>(null);
+  const withPack = <T extends { setCode: string; productName: string }>(cur: T, next: T): T => {
+    const pack = packForSetCode(next.setCode, products);
+    if (!pack) return next;
+    const userEdited = cur.productName !== "" && cur.productName !== autoPack.current;
+    if (userEdited && next.productName === cur.productName) return next;
+    autoPack.current = pack;
+    return { ...next, productName: pack };
+  };
   const [h, setH] = useState({
     qty: String(prefill?.quantity ?? 1),
     price: prefill?.unitPrice != null ? String(prefill.unitPrice) : "",
     date: prefill?.acquiredOn ?? "",
     source: prefill?.source ?? "",
-    condition: "",
+    condition: "A",
     note: "",
   });
   const [file, setFile] = useState<File | null>(null);
@@ -88,7 +102,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
     if (!r.ok) return setAi({ state: "failed", message: r.message, runId: null, issues: [] });
     const x = r.extraction;
     // 読み取れた項目だけ入力する（空欄を上書きしない）。説明文は入れない
-    setF((cur) => ({ name: x.name || cur.name, cardNumber: x.cardNumber || cur.cardNumber, setCode: x.setCode || cur.setCode, rarity: x.rarity || cur.rarity, cardType: x.cardType || cur.cardType, productName: x.productName || cur.productName }));
+    setF((cur) => withPack({ ...cur, productName: "" }, { name: x.name || cur.name, cardNumber: x.cardNumber || cur.cardNumber, setCode: x.setCode || cur.setCode, rarity: x.rarity || cur.rarity, cardType: x.cardType || cur.cardType, productName: x.productName || cur.productName }));
     setAi({ state: "done", runId: r.runId, issues: x.issues });
   };
 
@@ -245,7 +259,7 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
                     <span className="flex items-center gap-1 text-[13px] font-medium">
                       商品コード {chip("setCode")}
                     </span>
-                    <input value={f.setCode} onChange={(e) => setF({ ...f, setCode: e.target.value })} className={field} aria-label="商品コード" maxLength={20} />
+                    <input value={f.setCode} onChange={(e) => setF(withPack(f, { ...f, setCode: e.target.value }))} className={field} aria-label="商品コード" maxLength={20} />
                   </label>
                 </div>
                 {panel("cardNumber")}
@@ -265,9 +279,14 @@ export function CardFormDialog({ open, onOpenChange, mode, cards, actor, onSaved
                 {panel("rarity")}
                 <label className="block text-sm">
                   <span className="flex items-center gap-1 text-[13px] font-medium">
-                    収録商品 {chip("productName")}
+                    収録パック {chip("productName")}
                   </span>
-                  <input value={f.productName} onChange={(e) => setF({ ...f, productName: e.target.value })} className={field} aria-label="収録商品" maxLength={120} />
+                  <input value={f.productName} onChange={(e) => setF({ ...f, productName: e.target.value })} className={field} aria-label="収録パック" maxLength={120} list="pack-options" autoComplete="off" />
+                  <datalist id="pack-options">
+                    {products.filter((p) => !p.archived).map((p) => (
+                      <option key={p.id} value={p.officialName} />
+                    ))}
+                  </datalist>
                 </label>
                 {panel("productName")}
               </>

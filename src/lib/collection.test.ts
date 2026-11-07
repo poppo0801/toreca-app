@@ -115,7 +115,7 @@ describe("カードマスターとの照合（名称の類似だけで統合し�
     const m = matchCard({ name: "ピカチュウEX", cardNumber: "201/165", setCode: "SV2A", rarity: "sar" }, cards);
     expect(m.kind === "exact" && m.card.id).toBe("1");
   });
-  it("同名でも、番号・レアリティが違えば別のカード（自動では確定しない）。同じ番号で収録商品が不明なら候補", () => {
+  it("同名でも、番号・レアリティが違えば別のカード（自動では確定しない）。同じ番号で収録パックが不明なら候補", () => {
     expect(matchCard({ name: "ピカチュウex", cardNumber: "300/165", setCode: "sv2a", rarity: "SAR" }, cards).kind).toBe("none");
     const c = matchCard({ name: "ピカチュウex", cardNumber: "201/165", setCode: "sv2a", rarity: "UR" }, cards);
     expect(c.kind).toBe("candidates"); // 番号は同じだがレアリティが違う → 利用者が選ぶ

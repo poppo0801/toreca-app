@@ -299,7 +299,7 @@ const key = (s: string) => norm(s);
 /**
  * exact: 商品・セットコード＋カード番号＋レアリティがすべて一致（または、番号とセットコードが一致しレアリティが片方だけ未入力でない場合は候補）。
  * candidates: 番号が同じ・名称が同じなど、同じカードの可能性があるもの（利用者が選ぶ。自動では確定しない）。
- * 同名で番号・レアリティ・収録商品が違うカードは別のカード。
+ * 同名で番号・レアリティ・収録パックが違うカードは別のカード。
  */
 export function matchCard(id: CardIdentity, cards: CardRow[]): CardMatch {
   const num = key(id.cardNumber);

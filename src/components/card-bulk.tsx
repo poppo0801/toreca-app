@@ -142,7 +142,7 @@ export function CardBulkDialog({ open, onOpenChange, files, cards, actor, onSave
         {
           cardId: existing,
           card: { ...ident, cardType: it.cardType, productName: it.productName, imagePath: img.imagePath, thumbPath: img.thumbPath, imageSha: img.sha, analysisRunId: it.runId },
-          holding: { quantity: qty, acquiredOn: "", unitPriceYen: price, source: "", condition: "", note: "", purchaseId: null },
+          holding: { quantity: qty, acquiredOn: "", unitPriceYen: price, source: "", condition: "A", note: "", purchaseId: null },
         },
         actor,
       );
@@ -232,7 +232,7 @@ export function CardBulkDialog({ open, onOpenChange, files, cards, actor, onSave
                           <input value={it.rarity} onChange={(e) => patch(it.id, { rarity: e.target.value })} className={field} />
                         </label>
                         <label className="text-xs">
-                          収録商品
+                          収録パック
                           <input value={it.productName} onChange={(e) => patch(it.id, { productName: e.target.value })} className={field} />
                         </label>
                         <label className="text-xs">

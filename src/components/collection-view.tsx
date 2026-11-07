@@ -209,7 +209,7 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
                 </p>
               )}
               <Breakdown title="レアリティ別" items={breakdown(rows, "rarity")} />
-              <Breakdown title="収録商品別" items={breakdown(rows, "productName")} />
+              <Breakdown title="収録パック別" items={breakdown(rows, "productName")} />
             </div>
           )}
         </section>

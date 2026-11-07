@@ -115,7 +115,7 @@ export function CardDetailSheet({
 
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border p-3 text-sm" aria-label="カード情報">
               <Item label="所持枚数" value={`${card.qty}枚`} />
-              <Item label="収録商品" value={card.productName || "—"} />
+              <Item label="収録パック" value={card.productName || "—"} />
               <Item label="購入額（合計）" value={card.costTotal === null ? "—" : `${yen(card.costTotal)}${card.costUnknownQty > 0 ? `（${card.costUnknownQty}枚は金額不明）` : ""}`} />
               <Item label="カードの種類" value={card.cardType || "—"} />
               <Item label="販売参考相場" value={card.sale ? `${yen(card.sale.amountYen)}／枚（${card.sale.confirmedOn}${card.sale.source ? `・${card.sale.source}` : ""}）` : "未設定"} />
