@@ -14,6 +14,7 @@ import { ProductThumb } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
 import { RegisterKindSwitch } from "@/components/register-kind-switch";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { BOX_STATE_LABEL, BOX_STATES, DEFAULT_BOX_SETTINGS, latestPrices, type BoxPriceRow, type BoxSettings, type BoxSummaryRow } from "@/lib/box-collection";
 import type { ImportableItem } from "@/lib/server/box-collection-service";
 import { jstToday } from "@/lib/ai/extraction";
@@ -103,14 +104,18 @@ export function BoxFormDialog({ onClose, onSaved, onSwitchKind }: { onClose: () 
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="box-form" aria-describedby="box-form-desc">
-        {onSwitchKind && <RegisterKindSwitch value="box" onChange={onSwitchKind} />}
-        <DialogTitle>BOXを登録</DialogTitle>
-        <DialogDescription id="box-form-desc" className="sr-only">
-          所有しているBOXを手動で登録します
-        </DialogDescription>
-        <div className="mt-2 space-y-2.5">
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent aria-describedby="box-form-desc" data-testid="box-form" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <div className="px-4 pb-2">
+          {onSwitchKind && <RegisterKindSwitch value="box" onChange={onSwitchKind} />}
+          <SheetTitle>BOXを登録</SheetTitle>
+          <SheetDescription id="box-form-desc" className="sr-only">
+            所有しているBOXを手動で登録します
+          </SheetDescription>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+        <SheetBody className="space-y-2.5 border-t pt-3">
+        <div className="space-y-2.5">
           <div className="text-sm">
             商品
             <MasterCombobox label="BOXの商品" value={product} options={options} onChange={setProduct} />
@@ -175,9 +180,18 @@ export function BoxFormDialog({ onClose, onSaved, onSwitchKind }: { onClose: () 
           </label>
         </div>
         {err(error)}
-        <Footer busy={busy} onSave={() => void save()} label="登録" />
-      </DialogContent>
-    </Dialog>
+        </SheetBody>
+        <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            閉じる
+          </Button>
+          <Button type="button" onClick={() => void save()} disabled={busy} data-testid="box-dialog-save">
+            {busy ? "保存中…" : "登録"}
+          </Button>
+        </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

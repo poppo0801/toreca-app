@@ -17,7 +17,7 @@ const SWIPE_RATIO = 1.6;
 const SLIDE_MS = 300;
 
 /**
- * コレクション（カード／BOX）。上部のタブのタップ、または左右スワイプで切り替える（横へ滑るアニメーション）。
+ * コレクション（カード／BOX）。左右スワイプだけで切り替える（横へ滑るアニメーション。切替ボタンは置かない）。
  * 一覧・集計・並び順・絞り込みは各ページで独立。右上の［相場更新］［登録］は表示中のページに対して働く。
  * スワイプは、ダイアログ内・長押しドラッグ中・入力欄での操作では切り替えない。
  */
@@ -71,26 +71,10 @@ export function CollectionHub() {
 
   if (!IS_SUPABASE_MODE) return <p className="text-sm text-muted-foreground">コレクションはSupabaseモード（ログイン後）でのみ利用できます。</p>;
 
-  const tabBtn = (k: CollectionKind, label: string) => (
-    <button
-      key={k}
-      type="button"
-      role="tab"
-      id={`collection-tab-${k}`}
-      aria-selected={tab === k}
-      aria-controls={`collection-panel-${k}`}
-      onClick={() => setTab(k)}
-      className={cn("min-h-10 flex-1 rounded-md text-sm font-medium transition-colors", tab === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
-      data-testid={`collection-tab-${k}`}
-    >
-      {label}
-    </button>
-  );
   const panel = (k: CollectionKind, children: React.ReactNode) => (
     <div
-      role="tabpanel"
-      id={`collection-panel-${k}`}
-      aria-labelledby={`collection-tab-${k}`}
+      role="region"
+      aria-label={k === "card" ? "カードのコレクション" : "BOXのコレクション"}
       aria-hidden={tab !== k}
       inert={tab !== k}
       className={cn("w-1/2 shrink-0", tab !== k && !sliding && "h-0 overflow-hidden")}
@@ -111,14 +95,9 @@ export function CollectionHub() {
             相場更新
           </Button>
           <Button size="sm" className="h-10 px-3" onClick={() => (tab === "card" ? cardRef.current?.openRegister() : boxRef.current?.openRegister())} data-testid="add-card">
-            登録
+            ＋登録
           </Button>
         </div>
-      </div>
-
-      <div role="tablist" aria-label="コレクションの種類" className="flex gap-1 rounded-lg border p-0.5" data-testid="collection-tabs">
-        {tabBtn("card", "カード")}
-        {tabBtn("box", "BOX")}
       </div>
 
       <div className="overflow-x-clip [touch-action:pan-y]" onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} data-testid="collection-swipe">

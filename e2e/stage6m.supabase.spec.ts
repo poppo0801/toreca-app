@@ -20,6 +20,18 @@ async function login(page: Page) {
   await expect(page).toHaveURL(/\/lotteries$/);
 }
 
+/** 左右スワイプ（タッチイベント）でカード／BOXを切り替える */
+async function swipe(page: Page, dir: "left" | "right") {
+  await page.getByTestId("collection-swipe").evaluate((el, d) => {
+    const r = el.getBoundingClientRect();
+    const y = r.top + 60;
+    const [x0, x1] = d === "left" ? [r.left + r.width * 0.8, r.left + r.width * 0.3] : [r.left + r.width * 0.2, r.left + r.width * 0.7];
+    const mk = (x: number) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+    el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, touches: [mk(x0)], changedTouches: [mk(x0)] }));
+    el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true, touches: [], changedTouches: [mk(x1)] }));
+  }, dir);
+}
+
 async function household(): Promise<string> {
   const a = admin();
   const { data: list } = await a.auth.admin.listUsers({ perPage: 200 });
@@ -46,10 +58,10 @@ test("コレクション: カード／BOXの切替。BOXの手動登録・集計
   await page.goto("/collection");
   // 初期はカード。タブでBOXへ（BOXは空）
   await expect(page.getByTestId("collection-hub")).toHaveAttribute("data-tab", "card");
-  await page.getByTestId("collection-tab-box").click();
+  await swipe(page, "left");
   await expect(page.getByTestId("collection-hub")).toHaveAttribute("data-tab", "box");
   await expect(page.getByTestId("box-empty")).toBeVisible();
-  await expect(page.getByTestId("add-card")).toHaveText("登録");
+  await expect(page.getByTestId("add-card")).toHaveText("＋登録");
 
   // 手動登録（シュリンクあり2BOX・実購入5,400円・購入時の市場相場12,000円）
   await page.getByTestId("add-card").click();
@@ -100,9 +112,9 @@ test("コレクション: カード／BOXの切替。BOXの手動登録・集計
   await page.getByTestId("box-sort").selectOption("releaseAsc");
   expect(await firstName()).toContain("ステラミラクル");
   // カードのページには影響しない
-  await page.getByTestId("collection-tab-card").click();
+  await swipe(page, "right");
   await expect(page.getByTestId("collection-hub")).toHaveAttribute("data-tab", "card");
-  await page.getByTestId("collection-tab-box").click();
+  await swipe(page, "left");
   await expect(page.getByTestId("box-sort")).toHaveValue("releaseAsc"); // ページごとに独立して保持される
 
   // 詳細: 状態別の数量と評価。シュリンクなしは基準×85%で評価（ここではシュリンクあり）

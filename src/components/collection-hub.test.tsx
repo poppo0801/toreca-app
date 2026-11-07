@@ -60,14 +60,15 @@ function swipe(from: [number, number], to: [number, number], target: Element = q
 }
 
 describe("コレクションのカード／BOX切替", () => {
-  it("初期はカード。タブのタップで切り替わる（BOXのページだけが操作対象になる）", () => {
+  it("初期はカード。切替ボタンは無く、スワイプだけで切り替わる", () => {
     expect(tab()).toBe("card");
-    act(() => q("collection-tab-box").click());
+    swipe([300, 200], [150, 205]);
     expect(tab()).toBe("box");
-    expect(q("collection-tab-box").getAttribute("aria-selected")).toBe("true");
+    expect(q("collection-tabs")).toBeNull();
+    expect(host.querySelector("[role=tab]")).toBeNull();
     expect(q("collection-panel-card").getAttribute("aria-hidden")).toBe("true");
     expect(q("collection-panel-box").getAttribute("aria-hidden")).toBe("false");
-    act(() => q("collection-tab-card").click());
+    swipe([100, 200], [260, 190]);
     expect(tab()).toBe("card");
   });
   it("左右のスワイプで切り替わる。向きが合わないスワイプは何も起きない", () => {
@@ -107,10 +108,10 @@ describe("コレクションのカード／BOX切替", () => {
     expect(tab()).toBe("card");
   });
   it("右上の［相場更新］［登録］は表示中のページに対して働く。登録ボタンの名称は「登録」", () => {
-    expect(q("add-card").textContent).toBe("登録");
+    expect(q("add-card").textContent).toBe("＋登録");
     act(() => q("add-card").click());
     act(() => q("market-update-open").click());
-    act(() => q("collection-tab-box").click());
+    swipe([300, 200], [150, 205]);
     act(() => q("add-card").click());
     act(() => q("market-update-open").click());
     expect(calls).toEqual(["card:register", "card:market", "box:register", "box:prices"]);
@@ -121,14 +122,14 @@ describe("コレクションのカード／BOX切替", () => {
     root = createRoot(host);
     act(() => root.render(createElement(CollectionHub)));
     expect(tab()).toBe("box");
-    act(() => q("collection-tab-card").click());
+    swipe([100, 200], [260, 190]);
     expect(window.location.search).not.toContain("tab=box");
-    act(() => q("collection-tab-box").click());
+    swipe([300, 200], [150, 205]);
     expect(window.location.search).toContain("tab=box");
   });
   it("切替アニメーションのあと、非表示のページは高さを持たない（スクロール量に影響しない）", () => {
     vi.useFakeTimers();
-    act(() => q("collection-tab-box").click());
+    swipe([300, 200], [150, 205]);
     expect(q("collection-panel-card").className).not.toContain("h-0");
     act(() => void vi.advanceTimersByTime(400));
     expect(q("collection-panel-card").className).toContain("h-0");
