@@ -171,6 +171,21 @@ export function wonProgress(l: Lottery, app: Pick<Application, "fulfillment">, n
   return { ...base, status: "open", label: inWindow ? `受取可能 〜${until}` : `${split ? "受取期限" : "購入・受取期限"} ${until}`, swipeable: true };
 }
 
+/**
+ * 当選の購入・受取が「今、対応が必要」か（当選タブのバッジ用・Stage 7B）。
+ *  - 購入期間中の未購入／受取期間中の未受取（期限内）→ 必要
+ *  - 期限を過ぎても未処理（期限超過）→ 必要（対応漏れを防ぐ。購入・受取の記録をすれば消える）
+ *  - 期間の開始前（waiting_start）・完了 → 不要
+ *  - 期限が未確認のとき: 開始日が分かっていて始まっていれば必要。期間がまったく未設定なら、対応が必要と確実に言えないので不要
+ */
+export function wonNeedsAction(l: Lottery, app: Pick<Application, "fulfillment">, now: Date): boolean {
+  const p = wonProgress(l, app, now);
+  if (p.status === "open" || p.status === "overdue") return true;
+  if (p.status !== "unknown") return false;
+  const startOf = p.stage === "purchase" ? l.procedureStart : receivePeriod(l).start;
+  return startOf.precision !== "unknown";
+}
+
 /** 当選タブの並び: 要確認(期限超過) → 期限の近い順 → 期限未確認 → 完了 */
 export function wonSortRank(p: WonProgress): number {
   if (p.status === "overdue") return 0;

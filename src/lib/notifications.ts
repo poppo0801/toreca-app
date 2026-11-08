@@ -1,6 +1,6 @@
 import { formatFlexible, formatResultShort, hasResultPeriod, isResultFinished, jstDateString, resultEndDay } from "@/lib/datetime";
 import { effectiveEventState, judgeAccount, profileSeesChainId } from "@/lib/eligibility";
-import { receivePeriod, wonProgress } from "@/lib/lottery-flow";
+import { receivePeriod, wonNeedsAction, wonProgress } from "@/lib/lottery-flow";
 import { scopeProfileIds } from "@/lib/profile-link";
 import { formatItem, isManaged } from "@/lib/lottery-view";
 import type { AppData, FlexibleDate, Lottery, Profile } from "@/types/domain";
@@ -456,11 +456,11 @@ export function computeAlerts(data: AppData, profileId: string, now: Date): InAp
 /**
  * タブの赤丸と未対応件数。件数は「抽選」単位で数え、1応募に複数商品があっても重複計上しない。
  *  - appliedDot: 発表日を過ぎても結果が未登録の応募がある（「応募済み」タブ）
- *  - wonDot: 当選済みで購入・受取が完了していない応募がある（「当選」タブ）
+ *  - wonDot: 購入期間中の未購入・受取期間中の未受取・期限超過の未処理がある（「当選」タブ。対応が必要な当選だけ）
  */
-export function tabDots(data: AppData, profileId: string, now: Date): { appliedDot: boolean; wonDot: boolean } {
+export function tabDots(data: AppData, profileId: string, now: Date, scope?: ReadonlySet<string>): { appliedDot: boolean; wonDot: boolean } {
   // タブに表示される範囲（現在のユーザー＋紐づくサブ）と同じ。通知の送り先設定には影響しない（赤丸はタブ内の未対応を示すだけ）
-  const applicantIds = new Set(scopeProfileIds(data.profiles, profileId));
+  const applicantIds = scope ?? new Set(scopeProfileIds(data.profiles, profileId));
   const mine = new Set(data.accounts.filter((a) => applicantIds.has(a.profileId) && a.active && profileSeesChainId(data, a.profileId, a.chainId)).map((a) => a.id));
   let appliedDot = false;
   let wonDot = false;
@@ -468,7 +468,8 @@ export function tabDots(data: AppData, profileId: string, now: Date): { appliedD
     if (l.eventState === "cancelled") continue;
     const apps = data.applications.filter((a) => a.lotteryId === l.id && a.state === "applied" && mine.has(a.accountId));
     if (!appliedDot && isResultFinished(l, now) === true && apps.some((a) => a.result === "pending")) appliedDot = true;
-    if (!wonDot && apps.some((a) => a.result === "won" && a.fulfillment !== "purchased")) wonDot = true;
+    // 当選タブの●: 購入・受取の対応が必要な当選があるときだけ（Stage 7B）。当選件数が1件以上というだけでは出さない
+    if (!wonDot && apps.some((a) => a.result === "won" && wonNeedsAction(l, a, now))) wonDot = true;
   }
   return { appliedDot, wonDot };
 }

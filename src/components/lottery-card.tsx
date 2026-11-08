@@ -24,6 +24,7 @@ import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-sum
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
 import { CautionMark } from "@/components/caution-mark";
+import { selectStoreDisplay } from "@/lib/applied-store";
 import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
 import { WonRow } from "@/components/won-actions";
@@ -113,6 +114,25 @@ function AnnounceGlyph() {
   return <Megaphone className="size-3.5 shrink-0" aria-hidden="true" />;
 }
 
+/**
+ * 日付表示Bタイプ（2行）。左の列=日付（左寄せ・長いものは省略）、右の列=受取方法・距離など（同じ列の文字は左端をそろえる）。
+ * 同じ行の左右を1つのグリッドに置き、行がずれないようにする。右が無いときは左が全幅を使う。
+ */
+function DateBlockB({ left, right }: { left: React.ReactNode[]; right: React.ReactNode[] }) {
+  const rows = Math.max(left.length, right.length);
+  if (rows === 0) return null;
+  return (
+    <div className={cn("grid items-center gap-x-3 gap-y-0.5 text-[11px]", right.length > 0 ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)]")} data-testid="card-dates-b">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="contents" data-testid="date-b-row">
+          <div className="min-w-0 whitespace-nowrap text-left" data-testid="date-b-left">{left[i]}</div>
+          {right.length > 0 && <div className="min-w-0 whitespace-nowrap text-left text-muted-foreground" data-testid="date-b-right">{right[i]}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function LotteryCard({
   lottery,
   tab,
@@ -152,7 +172,9 @@ export function LotteryCard({
 
   const sum = summarizeItems(lottery, data);
   const firstProduct = data.products.find((p) => p.id === sum.firstProductId);
-  const storeLine = `${chain?.name ?? ""} ${store?.name ?? ""}`.trim();
+  // 店舗選択式の抽選は、応募前は「店舗選択式」、応募後は現在のプロフィールが応募した店舗を出す（カードは1枚のまま）
+  const selectStore = selectStoreDisplay(data, lottery, profile.id, viewScope);
+  const storeLine = `${chain?.name ?? ""} ${selectStore ? selectStore.text : (store?.name ?? "")}`.trim();
   const dist = storeDistance(data, store);
   const placeI = placeInfo({ receiveMethod: lottery.receiveMethod, prefecture: store?.prefecture, storeKind: store?.salesKind });
   const place = placeI.label;
@@ -201,6 +223,59 @@ export function LotteryCard({
   const periodInfo = displayPeriod(lottery, now);
   const wonRows = wonTab ? wonPeriodRows(lottery, now) : [];
   const finished = event === "closed" || event === "cancelled";
+
+  // Bタイプ（2行）の日付表示（Stage 7B）: 左=日付（左寄せ）、右=受取方法・距離など（左端をそろえる）。表示する項目はAタイプと同じ条件
+  const dateB = detailMode && (settings.dateLayout ?? "a") === "b";
+  const leftB: React.ReactNode[] = [];
+  const rightB: React.ReactNode[] = [];
+  if (dateB) {
+    if (appliedTab) {
+      leftB.push(
+        <span key="r" className={cn("inline-flex min-w-0 items-center gap-1", stage === "unknown" && "text-muted-foreground")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
+          <CalendarCheck className="size-[1.15em] shrink-0" aria-hidden="true" />
+          <span className="truncate">{resultDayText(lottery, now)}</span>
+        </span>,
+        <PeriodItem key="p" label={periodInfo.label} text={compactPeriodText(periodInfo.text)} />,
+      );
+    } else if (wonTab && won) {
+      for (const r of wonRows) leftB.push(<PeriodItem key={r.label} label={r.label} text={compactPeriodText(r.text)} />);
+    } else {
+      if (display.deadline) {
+        leftB.push(
+          <span key="d" className="inline-flex min-w-0 items-center gap-1" data-testid="deadline-day" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
+            <Clock className="size-[1.15em] shrink-0 text-primary-ink" aria-hidden="true" />
+            <span className="truncate">{deadlineW ?? "—"}</span>
+          </span>,
+        );
+      }
+      leftB.push(<PeriodItem key="p" label={periodInfo.label} text={periodInfo.text} />);
+    }
+    if (display.receive) {
+      rightB.push(
+        <span key="rc" className="inline-flex items-center gap-1" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
+          {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}
+          {RECEIVE_SHORT[lottery.receiveMethod]}
+        </span>,
+      );
+    }
+    if (dist && placeI.showLocation) {
+      rightB.push(
+        <span key="ds" data-testid="distance" title="自宅からの直線距離（道路距離ではありません）" className={cn("inline-flex items-center gap-0.5 font-bold", BAND_CLASS[dist.band].split(" ").filter((c) => c.startsWith("text-")).join(" "))}>
+          <MapPin className="size-3.5" aria-hidden="true" />
+          {formatKm(dist.km)}
+        </span>,
+      );
+    }
+    if (display.applyMethod) rightB.push(<span key="am">応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>);
+    if (appliedTab && announceShort(lottery.announcementMethods)) {
+      rightB.push(
+        <span key="an" className="inline-flex items-center gap-1" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods)}`}>
+          <AnnounceGlyph />
+          {announceShort(lottery.announcementMethods)}
+        </span>,
+      );
+    }
+  }
 
   return (
     <article
@@ -296,65 +371,71 @@ export function LotteryCard({
               {/* 店舗名（最大2行）→ 都道府県 → 距離。狭い幅では都道府県・距離が次の行へ折り返す */}
               <div className="flex min-w-0 flex-nowrap items-center gap-x-1.5 text-xs text-muted-foreground" data-testid="card-place">
                 <ChainLogo src={chain?.logoSrc} name={chain?.name ?? ""} />
-                <span className="min-w-0 flex-1 truncate" data-testid="store-name" title={storeLine}>{storeLine}</span>
+                <span className="min-w-0 flex-1 truncate" data-testid="store-name" title={selectStore ? `${storeLine}（${selectStore.title}）` : storeLine}>{storeLine}</span>
                 {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 whitespace-nowrap rounded-full border bg-input px-1.5 py-px text-[10px] leading-none text-foreground">{place}</span>}
                 {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 whitespace-nowrap rounded-full border border-info px-1.5 py-px text-[10px] leading-none text-info">発送可</span>}
                 {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
                 <CautionMark cautions={lottery.cautions} />
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
-              {/* 日時は2種類あっても同じ1行に並べる（FitLineが実測し、余白→字間→行全体の文字サイズの順に詰める） */}
-              <span className="block w-full min-w-0 text-[11px]" data-testid="card-dates">
-                <FitLine wrap={appliedTab || wonTab} innerProps={{ className: "gap-x-3 gap-y-0.5", "data-testid": "date-row" }}>
-                  {appliedTab ? (
-                    <>
-                      {/* 応募済み: 当落発表日（発表期間）＋購入期間（分離していれば受取期間）。応募締切はカードに出さない（詳細で確認できる） */}
-                      <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", stage === "unknown" && "text-muted-foreground")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
-                        <CalendarCheck className="size-[1.15em] shrink-0" aria-hidden="true" />
-                        {resultDayText(lottery, now)}
-                      </span>
-                      <PeriodItem label={periodInfo.label} text={compactPeriodText(periodInfo.text)} />
-                    </>
-                  ) : wonTab && won ? (
-                    wonRows.map((r) => <PeriodItem key={r.label} label={r.label} text={compactPeriodText(r.text)} />)
-                  ) : (
-                    <>
-                      {display.deadline && (
-                        <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="deadline-day" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
-                          <Clock className="size-[1.15em] shrink-0 text-primary-ink" aria-hidden="true" />
-                          <span>{deadlineW ?? "—"}</span>
+              {dateB ? (
+                <DateBlockB left={leftB} right={rightB} />
+              ) : (
+                <>
+                {/* 日時は2種類あっても同じ1行に並べる（FitLineが実測し、余白→字間→行全体の文字サイズの順に詰める） */}
+                <span className="block w-full min-w-0 text-[11px]" data-testid="card-dates">
+                  <FitLine wrap={appliedTab || wonTab} innerProps={{ className: "gap-x-3 gap-y-0.5", "data-testid": "date-row" }}>
+                    {appliedTab ? (
+                      <>
+                        {/* 応募済み: 当落発表日（発表期間）＋購入期間（分離していれば受取期間）。応募締切はカードに出さない（詳細で確認できる） */}
+                        <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", stage === "unknown" && "text-muted-foreground")} data-testid="result-day" aria-label={`当選発表 ${formatFlexible(lottery.resultDate)}`}>
+                          <CalendarCheck className="size-[1.15em] shrink-0" aria-hidden="true" />
+                          {resultDayText(lottery, now)}
                         </span>
-                      )}
-                      <PeriodItem label={periodInfo.label} text={periodInfo.text} />
-                    </>
-                  )}
-                </FitLine>
-              </span>
-              {/* 受取方法と、店頭受取のときの自宅からの直線距離（通販・位置が未設定のときは出さない。推測しない）。残り時間は下段の操作ボタンの隣 */}
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="card-meta">
-                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                  {display.receive && (
-                    <span className="inline-flex items-center gap-1" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
-                      {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}
-                      {RECEIVE_SHORT[lottery.receiveMethod]}
-                    </span>
-                  )}
-                  {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
-                  {/* 発表方法が未確認のときは、アイコン・文字とも項目ごと出さない */}
-                  {appliedTab && announceShort(lottery.announcementMethods) && (
-                    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods)}`}>
-                      <AnnounceGlyph />
-                      {announceShort(lottery.announcementMethods)}
-                    </span>
-                  )}
+                        <PeriodItem label={periodInfo.label} text={compactPeriodText(periodInfo.text)} />
+                      </>
+                    ) : wonTab && won ? (
+                      wonRows.map((r) => <PeriodItem key={r.label} label={r.label} text={compactPeriodText(r.text)} />)
+                    ) : (
+                      <>
+                        {display.deadline && (
+                          <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="deadline-day" aria-label={`応募締切 ${formatFlexible(lottery.applyDeadline)}`}>
+                            <Clock className="size-[1.15em] shrink-0 text-primary-ink" aria-hidden="true" />
+                            <span>{deadlineW ?? "—"}</span>
+                          </span>
+                        )}
+                        <PeriodItem label={periodInfo.label} text={periodInfo.text} />
+                      </>
+                    )}
+                  </FitLine>
                 </span>
-                {dist && placeI.showLocation && (
-                  <span data-testid="distance" title="自宅からの直線距離（道路距離ではありません）" className={cn("inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-xs font-bold", BAND_CLASS[dist.band].split(" ").filter((c) => c.startsWith("text-")).join(" "))}>
-                    <MapPin className="size-3.5" aria-hidden="true" />
-                    {formatKm(dist.km)}
+                {/* 受取方法と、店頭受取のときの自宅からの直線距離（通販・位置が未設定のときは出さない。推測しない）。残り時間は下段の操作ボタンの隣 */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="card-meta">
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    {display.receive && (
+                      <span className="inline-flex items-center gap-1" aria-label={`受取方法 ${RECEIVE_SHORT[lottery.receiveMethod]}`}>
+                        {lottery.receiveMethod === "store" ? <StoreIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <Truck className="size-3.5 shrink-0" aria-hidden="true" />}
+                        {RECEIVE_SHORT[lottery.receiveMethod]}
+                      </span>
+                    )}
+                    {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
+                    {/* 発表方法が未確認のときは、アイコン・文字とも項目ごと出さない */}
+                    {appliedTab && announceShort(lottery.announcementMethods) && (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods)}`}>
+                        <AnnounceGlyph />
+                        {announceShort(lottery.announcementMethods)}
+                      </span>
+                    )}
                   </span>
-                )}
-              </div>
+                  {dist && placeI.showLocation && (
+                    <span data-testid="distance" title="自宅からの直線距離（道路距離ではありません）" className={cn("inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap text-xs font-bold", BAND_CLASS[dist.band].split(" ").filter((c) => c.startsWith("text-")).join(" "))}>
+                      <MapPin className="size-3.5" aria-hidden="true" />
+                      {formatKm(dist.km)}
+                    </span>
+                  )}
+                </div>
+                </>
+              )}
               {(event === "postponed" || notice || lottery.isNew || skipSource || skipException) && (
                 <span className="flex flex-wrap gap-1">
                   {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}

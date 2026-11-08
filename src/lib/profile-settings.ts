@@ -8,6 +8,10 @@ import { CARD_FIELDS, normalizeCardDisplay, type CardDisplay } from "@/lib/card-
 
 export type CardView = "simple" | "detail";
 export type ThemePref = "light" | "dark" | "system";
+/** 抽選管理の横スワイプ（Stage 7B）: card=カード操作（従来）／tab=タブ切替 */
+export type SwipeMode = "card" | "tab";
+/** 抽選カードの日付表示（Stage 7B）: a=従来／b=2行（左=日付、右=受取方法・距離） */
+export type DateLayout = "a" | "b";
 
 /** コレクションの表示（列数・画像/テキスト・演出）。お気に入りの順位はここに含めない（個人の選択なのでコピーしない） */
 export interface CollectionPrefs {
@@ -36,6 +40,10 @@ export interface ProfileSettings {
   cardDisplay?: CardDisplay;
   theme?: ThemePref;
   collection?: CollectionPrefs;
+  /** 抽選管理のスワイプ操作（未設定=カード操作） */
+  swipeMode?: SwipeMode;
+  /** 抽選カードの日付表示（未設定=Aタイプ） */
+  dateLayout?: DateLayout;
 }
 
 export type ProfileSettingKey = keyof ProfileSettings;
@@ -46,6 +54,8 @@ export const COPY_ITEMS: { key: ProfileSettingKey; label: string; hint: string }
   { key: "cardView", label: "抽選カードのシンプル／詳細表示", hint: "一覧の表示モード" },
   { key: "cardDisplay", label: "抽選カードの表示項目", hint: "締切・発表日・受取方法などの表示のON/OFF" },
   { key: "theme", label: "テーマ（ライト／ダーク）", hint: "画面の配色" },
+  { key: "swipeMode", label: "抽選管理のスワイプ操作", hint: "カード操作／タブ切替" },
+  { key: "dateLayout", label: "抽選カードの日付表示", hint: "Aタイプ／Bタイプ（2行）" },
   { key: "collection", label: "コレクションの表示（列数・画像/テキスト・演出）", hint: "お気に入りの順位は含みません" },
 ];
 export const SETTING_KEYS: ProfileSettingKey[] = COPY_ITEMS.map((c) => c.key);
@@ -85,6 +95,8 @@ export function normalizeProfileSettings(raw: unknown): ProfileSettings {
     if (CARD_FIELDS.some((k) => typeof cd[k] === "boolean")) out.cardDisplay = normalizeCardDisplay(cd);
   }
   if (r.collection && typeof r.collection === "object") out.collection = normalizeCollectionPrefs(r.collection);
+  if (r.swipeMode === "card" || r.swipeMode === "tab") out.swipeMode = r.swipeMode;
+  if (r.dateLayout === "a" || r.dateLayout === "b") out.dateLayout = r.dateLayout;
   if (r.theme === "light" || r.theme === "dark" || r.theme === "system") out.theme = r.theme;
   return out;
 }

@@ -74,6 +74,14 @@ export function hasWon(data: AppData, lotteryId: string, scope?: ReadonlySet<str
   return liveApplications(data, lotteryId, scope).some((a) => a.result === "won");
 }
 
+/**
+ * 当選タブに出す当選: 当選していて、受取が完了していない応募を持つ（Stage 7B）。
+ * 受取済み（fulfillment=purchased）だけの抽選は当選タブの一覧から外すが、当選・購入・受取の記録・収支・BOX・プロフィール別の履歴は削除しない（購入記録・収支・コレクションの画面と、全情報などから確認できる）。
+ */
+export function hasActiveWon(data: AppData, lotteryId: string, scope?: ReadonlySet<string>): boolean {
+  return liveApplications(data, lotteryId, scope).some((a) => a.result === "won" && a.fulfillment !== "purchased");
+}
+
 /** 発表予定を過ぎたのに結果が未登録 */
 export function isResultOverdue(data: AppData, lottery: Lottery, now: Date): boolean {
   return hasPendingResult(data, lottery.id) && isResultFinished(lottery, now) === true;
@@ -112,8 +120,10 @@ export function eventStateOf(lottery: Lottery, now: Date): Lottery["eventState"]
  * 画面のタブは保存場所ではなく検索ビュー（database-schema.md §2）。
  */
 export function tabOf(data: AppData, lottery: Lottery, scope?: ReadonlySet<string>): Tab {
-  if (hasWon(data, lottery.id, scope)) return "won";
+  if (hasActiveWon(data, lottery.id, scope)) return "won";
   if (hasPendingResult(data, lottery.id, scope) && kindOf(lottery) === "normal") return "applied";
+  // 受取まで済んだ当選は、当選タブからも要チェックからも外れる（履歴は全情報などから確認できる。Stage 7B）
+  if (hasWon(data, lottery.id, scope)) return "all";
   return isManaged(data, lottery.id) ? "managed" : "all";
 }
 
@@ -135,7 +145,7 @@ export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date, sco
       case "applied":
         return hasPendingResult(data, lottery.id, scope) && kindOf(lottery) === "normal";
       case "won":
-        return hasWon(data, lottery.id, scope);
+        return hasActiveWon(data, lottery.id, scope);
       case "all":
         return true;
     }

@@ -4,15 +4,20 @@ import { useMemo, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { storeChoices, type StoreChoice } from "@/lib/applied-store";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { recentStoreCandidates, type StoreChoice } from "@/lib/applied-store";
 import { PREFECTURE_LIST } from "@/lib/geo";
+import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
 
+/** 候補として並べる件数（残りは入力欄の絞り込みから選べる） */
+const SHOWN_CANDIDATES = 5;
+
 /**
- * 応募先の店舗を選ぶ・入力する（店舗選択式の抽選・Stage 6N）。応募した本人（プロフィール）の応募記録にだけ保存される。
- *  - 店舗の一覧が分かっていれば選択式（入力で絞り込み）。一覧が不明なら手動入力
- *  - 店舗を決めずに応募済みにもできる（未設定として保存し、あとで変更できる）
+ * 応募先の店舗を入力する小さなボトムシート（店舗選択式の抽選・Stage 6N／7B）。応募した本人（プロフィール）の応募記録にだけ保存される。
+ *  - 候補は現在のプロフィールの応募履歴（同じ系列で応募した店舗・過去に使った店舗）→ 系列マスターの店舗の順。タップで選択、入力で絞り込み。自由入力もできる
+ *  - 確定した時点で呼び出し元が応募済みにする。キャンセルでは何も変えない
+ *  - 店舗は原則入力する。「店舗を決めずに進む」（allowUnset）は、店舗が応募時点で未定の抽選のための例外で、あとから変更できる
  */
 export function AppliedStoreDialog({
   lottery,
@@ -27,19 +32,22 @@ export function AppliedStoreDialog({
   initial?: StoreChoice | null;
   title?: string;
   confirmLabel?: string;
-  /** 「店舗を決めずに」進めるボタンを出す（応募前）。変更時は出さず、空にして決定すると未設定に戻る */
+  /** 「店舗を決めずに」進むボタンを出す（応募前）。変更時は出さず、空にして決定すると未設定に戻る */
   allowUnset?: boolean;
   onSubmit: (store: StoreChoice | null) => void | Promise<void>;
   onClose: () => void;
 }) {
   const { data, profile } = useApp();
-  const choices = useMemo(() => storeChoices(data, lottery), [data, lottery]);
+  const chain = data.chains.find((c) => c.id === lottery.chainId);
+  const candidates = useMemo(() => recentStoreCandidates(data, lottery, profile.id), [data, lottery, profile.id]);
   const [ref, setRef] = useState<MasterRef>({ id: initial?.id ?? null, name: initial?.name ?? "" });
   const [pref, setPref] = useState(initial?.prefecture ?? "");
   const [busy, setBusy] = useState(false);
-  const options = useMemo(() => choices.map((c) => ({ id: c.id ?? `n:${c.name}`, name: c.name, hint: c.prefecture || undefined })), [choices]);
-
-  const picked = ref.name.trim() ? (choices.find((c) => (ref.id && (c.id === ref.id || `n:${c.name}` === ref.id)) || c.name === ref.name.trim()) ?? null) : null;
+  const options = useMemo(() => candidates.map((c) => ({ id: c.id ?? `n:${c.name}`, name: c.name, hint: c.prefecture || undefined })), [candidates]);
+  const norm = (s: string) => s.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+  const picked = ref.name.trim() ? (candidates.find((c) => (ref.id && (c.id === ref.id || `n:${c.name}` === ref.id)) || norm(c.name) === norm(ref.name)) ?? null) : null;
+  // 履歴由来の候補を先頭に（履歴が無ければマスターの先頭）。入力中は入力欄の絞り込みに任せ、候補の並びは出し続ける
+  const shown = candidates.slice(0, SHOWN_CANDIDATES);
   const finish = async (store: StoreChoice | null) => {
     setBusy(true);
     try {
@@ -48,26 +56,50 @@ export function AppliedStoreDialog({
       setBusy(false);
     }
   };
+  const pick = (c: StoreChoice) => {
+    setRef({ id: c.id, name: c.name });
+    setPref(c.prefecture);
+  };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="applied-store-dialog">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>
-          {lottery.storeMode === "select_on_apply" ? "この抽選は応募時に店舗を選びます。" : ""}
-          {profile.label}の応募として記録されます（他のユーザーの応募店舗は変わりません）。
-        </DialogDescription>
-        <div className="mt-3 space-y-2">
+    <Sheet open onOpenChange={(o) => !o && !busy && onClose()}>
+      <SheetContent data-testid="applied-store-dialog" aria-describedby="applied-store-desc">
+        <div className="px-4 pb-2 pt-1">
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription id="applied-store-desc">
+            {chain?.name ?? ""}（{profile.label}の応募として記録。他のユーザーの応募店舗は変わりません）
+          </SheetDescription>
+        </div>
+        <SheetBody className="space-y-3">
+          {shown.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="店舗の候補" data-testid="store-candidates">
+              {shown.map((c) => {
+                const on = !!ref.name.trim() && norm(c.name) === norm(ref.name);
+                return (
+                  <button
+                    key={c.name}
+                    type="button"
+                    data-testid="store-candidate"
+                    data-history={c.history ? "1" : "0"}
+                    aria-pressed={on}
+                    onClick={() => pick(c)}
+                    className={cn("min-h-9 max-w-full truncate rounded-full border px-3 text-sm", on ? "border-primary bg-primary text-primary-foreground" : "bg-input hover:bg-muted")}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div className="text-sm">
-            店舗{choices.length === 0 ? "（店舗の一覧が不明なため、手入力してください）" : ""}
             <MasterCombobox
               label="応募先の店舗"
               value={ref}
               options={options}
-              placeholder={choices.length > 0 ? "店舗を検索または入力" : "店舗名を入力"}
+              placeholder={candidates.length > 0 ? "店舗を検索または入力" : "店舗名を入力"}
               onChange={(v) => {
                 setRef(v);
-                const c = choices.find((x) => (v.id && (x.id === v.id || `n:${x.name}` === v.id)) || x.name === v.name.trim());
+                const c = candidates.find((x) => (v.id && (x.id === v.id || `n:${x.name}` === v.id)) || norm(x.name) === norm(v.name));
                 if (c) setPref(c.prefecture);
               }}
             />
@@ -85,25 +117,25 @@ export function AppliedStoreDialog({
               </select>
             </label>
           )}
-        </div>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={busy}>
-            キャンセル
-          </Button>
-          {allowUnset && (
-            <Button variant="outline" disabled={busy} onClick={() => void finish(null)} data-testid="applied-store-unset">
-              店舗を決めずに進む
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            {allowUnset && (
+              <Button variant="ghost" size="sm" className="mr-auto text-muted-foreground" disabled={busy} onClick={() => void finish(null)} data-testid="applied-store-unset">
+                店舗を決めずに進む
+              </Button>
+            )}
+            <Button variant="outline" onClick={onClose} disabled={busy}>
+              キャンセル
             </Button>
-          )}
-          <Button
-            disabled={busy || (allowUnset && !ref.name.trim())}
-            onClick={() => void finish(ref.name.trim() ? { id: picked?.id ?? (ref.id && !ref.id.startsWith("n:") ? ref.id : null), name: picked?.name ?? ref.name.trim(), prefecture: picked?.prefecture ?? pref } : null)}
-            data-testid="applied-store-ok"
-          >
-            {confirmLabel}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+            <Button
+              disabled={busy || (allowUnset && !ref.name.trim())}
+              onClick={() => void finish(ref.name.trim() ? { id: picked?.id ?? (ref.id && !ref.id.startsWith("n:") ? ref.id : null), name: picked?.name ?? ref.name.trim(), prefecture: picked?.prefecture ?? pref } : null)}
+              data-testid="applied-store-ok"
+            >
+              {confirmLabel}
+            </Button>
+          </div>
+        </SheetBody>
+      </SheetContent>
+    </Sheet>
   );
 }

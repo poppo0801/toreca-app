@@ -15,6 +15,8 @@ import { LotteryMatrix } from "@/components/lottery-matrix";
 import { OngoingSection } from "@/components/ongoing-section";
 import { SwipeCard } from "@/components/swipe-card";
 import { SwipeGuide } from "@/components/swipe-guide";
+import { useTabSwipe } from "@/components/use-tab-swipe";
+import { adjacentTab } from "@/lib/tab-swipe";
 import { UndoToastProvider } from "@/components/undo-toast";
 import { StatusLegend } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
@@ -172,6 +174,15 @@ function LotteryBoardInner() {
     if (before !== after) setFilters((f) => ({ ...f, status: after }));
     setTab(next);
   };
+  // タブ切替モード（プロフィール別の設定）: 横スワイプで隣のタブへ。端のタブではそれ以上動かない。小さなスライドで切り替える（再読み込みなし）
+  const tabSwipe = (settings.swipeMode ?? "card") === "tab";
+  const [slide, setSlide] = useState<"next" | "prev" | null>(null);
+  useTabSwipe(tabSwipe, (dir) => {
+    const next = adjacentTab(TABS.map((t) => t.value), tab, dir);
+    if (!next) return;
+    setSlide(dir);
+    selectTab(next);
+  });
 
   // ★・応募・スワイプで今のタブから外れるカードは、共通の退出アニメーションで見送る（一覧表示のみ）。
   // 保存後も今のタブ・絞り込みに残るカードは、そのまま残す（isShown で判定）
@@ -184,7 +195,7 @@ function LotteryBoardInner() {
   // 新着 = 全情報タブに出ている抽選（件数と同じ集合: 既定の絞り込み・スルー除外）のうち、まだ詳細を確認していないもの。必ず件数以下になる（Stage 6K）。
   // 以前は絞り込み前の全抽選から数えていたため、受付終了・応募済みの新着が混ざって件数を超えていた
   const newCount = useMemo(() => selectLotteries(data, "all", defaultFiltersFor("all"), now, profile.id).filter((l) => l.isNew).length, [data, now, profile.id]);
-  const dots = useMemo(() => tabDots(data, profile.id, now), [data, profile.id, now]);
+  const dots = useMemo(() => tabDots(data, profile.id, now, viewScope), [data, profile.id, now, viewScope]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
   const showSkip = true;
   const statusDefault = defaultFiltersFor(tab).status;
@@ -262,7 +273,7 @@ function LotteryBoardInner() {
       </div>
       {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
 
-      <div className="space-y-2 pt-2">
+      <div className={cn("space-y-2 pt-2", slide && "motion-safe:animate-[tab-slide-in-from-right_0.22s_ease-out]", slide === "prev" && "motion-safe:animate-[tab-slide-in-from-left_0.22s_ease-out]")} data-testid="board-content" data-swipe-mode={tabSwipe ? "tab" : "card"} onAnimationEnd={() => setSlide(null)}>
         {legend && (
           <div className="rounded-lg border bg-card p-2 shadow-card" data-testid="legend">
             <p className="mb-1 text-xs font-bold">応募状態アイコン</p>

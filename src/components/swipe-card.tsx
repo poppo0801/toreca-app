@@ -49,10 +49,11 @@ interface PendingDialog {
  * 実際の更新は既存の状態管理(actions)を使い、成功したら画面上部のUndo通知を出す。
  */
 export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: Tab; children: React.ReactNode }) {
-  const { data, now, profile, actions, persistent } = useApp();
+  const { data, now, profile, actions, persistent, settings } = useApp();
   const toast = useUndoToast();
   const exit = useApplyExit();
-  const enabled = useSwipeEnabled() && persistent;
+  // タブ切替モード（プロフィール別の設定）では、カードの横スワイプ操作は無効（横スワイプはタブの切替に使う）。カードのタップ・詳細・ボタンは従来どおり
+  const enabled = useSwipeEnabled() && persistent && (settings?.swipeMode ?? "card") === "card";
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   /** 確定して一覧から外れる操作のとき、離した位置から同じ方向へ流れてフェードアウトしている向き */

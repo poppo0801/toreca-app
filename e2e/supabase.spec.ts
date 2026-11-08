@@ -171,12 +171,13 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await expect(card).toContainText("E2E電機 E2E店");
   await expect(card).toContainText(/E2Eテスト商品\s*1BOX/);
   await expect(card).not.toContainText("(30P)"); // 仮登録商品の入数は未確認のため換算を出さない
-  // 当選・購入未完了なので、当選タブに赤丸
-  await expect(page.getByTestId("tab-dot-won")).toBeVisible();
+  // 購入・受取の期間が未設定の当選は、対応が必要と確実には言えないので赤丸を出さない（Stage 7B。期間中・期限超過の未対応は stage7b.supabase.spec.ts で確認）
+  await expect(page.getByTestId("tab-dot-won")).toHaveCount(0);
 
   // 購入済みを何度押しても購入記録は1件
   await card.getByRole("button", { name: "受取を記録" }).click();
-  await expect(card.getByTestId("won-done")).toContainText("受取済");
+  // 受取済みの当選は当選タブの一覧から外れる（記録は残る）
+  await expect(page.getByTestId("lottery-card").filter({ hasText: "E2E電機 E2E店" })).toHaveCount(0);
   await expect(page.getByTestId("tab-dot-won")).toHaveCount(0);
 
   // 仮登録のマスターはマスター管理に「仮登録」として出る（重複せず1件ずつ）
@@ -256,7 +257,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await pickFilter(page, "状態", "any"); // 受付終了の抽選も含める
   await expect(page.getByTestId("lottery-card")).toHaveCount(0);
   await page.getByRole("tab", { name: /当選/ }).click();
-  await expect(page.getByTestId("lottery-card").first().getByTestId("won-done")).toContainText("受取済");
+  await expect(page.getByTestId("lottery-card")).toHaveCount(0); // 受取済みは当選タブの一覧に出ない（記録は残る）
 });
 
 /** JST の日付・時刻（フォーム入力用） */
@@ -415,7 +416,7 @@ test("複数商品の抽選（B方式）: 商品ごとの当落→当選した�
   const won = page.getByTestId("lottery-card").filter({ hasText: "E2E複数商品1" });
   await expect(won).toContainText(/E2E複数商品1\s*1BOX/);
   await won.getByRole("button", { name: "受取を記録" }).click();
-  await expect(won.getByTestId("won-done")).toContainText("受取済");
+  await expect(won).toHaveCount(0); // 受取済みは当選タブの一覧から外れる
   await page.goto("/finance");
   const row = page.getByTestId("ledger-row").filter({ hasText: "E2E複数商品1" });
   await expect(row).toHaveCount(1);
@@ -806,7 +807,7 @@ test("購入記録: 収支・抽選の購入と同じ記録。登録・編集・
   await page.getByRole("tab", { name: /当選/ }).click();
   const card = page.getByTestId("lottery-card").filter({ hasText: "E2E購入商品" });
   await card.getByRole("button", { name: "受取を記録" }).click();
-  await expect(card.getByTestId("won-done")).toContainText("受取済");
+  await expect(card).toHaveCount(0);
 
   await page.getByRole("navigation", { name: "メイン" }).last().getByRole("link", { name: "購入記録" }).click();
   await expect(page).toHaveURL(/\/purchases$/);

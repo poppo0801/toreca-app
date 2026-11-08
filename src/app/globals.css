@@ -229,6 +229,14 @@ input[type="datetime-local"]::-webkit-datetime-edit {
     opacity: 0;
   }
 }
+@keyframes tab-slide-in-from-right {
+  from { opacity: 0.4; transform: translateX(18px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tab-slide-in-from-left {
+  from { opacity: 0.4; transform: translateX(-18px); }
+  to { opacity: 1; transform: none; }
+}
 @keyframes apply-exit-slide-left {
   0% {
     transform: translateX(0);

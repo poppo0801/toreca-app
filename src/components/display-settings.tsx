@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 
 /** 抽選カードのスワイプ操作の使用（この端末だけの設定。誤操作が多いときはオフにできる） */
 function SwipeSetting() {
+  const { settings, saveSettings } = useApp();
+  const mode = settings.swipeMode ?? "card";
   const [on, setOn] = useState(true);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末設定の復元（マウント後に1回）
@@ -24,7 +26,21 @@ function SwipeSetting() {
         スワイプ操作
         <InfoTip text="抽選カードを左右にスワイプして、★追加・応募済み・当落などを素早く記録します（スマホのみ）。操作後に3秒間「元に戻す」を出します。誤操作が多いときはオフにしてください。" label="スワイプ操作" />
       </h2>
-      <label className="flex min-h-11 items-center gap-2 text-sm" data-testid="swipe-toggle">
+      {/* 抽選管理の横スワイプの使い方（プロフィール別。別の端末でも同じ設定になる） */}
+      <div role="radiogroup" aria-label="抽選管理のスワイプ操作" className="inline-flex rounded-md border p-0.5" data-testid="swipe-mode">
+        {(
+          [
+            ["card", "カード操作"],
+            ["tab", "タブ切替"],
+          ] as const
+        ).map(([v, text]) => (
+          <button key={v} type="button" role="radio" aria-checked={mode === v} data-testid={`swipe-mode-${v}`} onClick={() => void saveSettings({ swipeMode: v })} className={cn("min-h-10 rounded px-4 text-sm", mode === v ? "bg-primary text-primary-foreground" : "hover:bg-muted")}>
+            {text}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">{mode === "tab" ? "横スワイプで 全情報・要チェック・応募済み・当選 のタブを切り替えます。★・応募済みなどはカードの詳細やボタンから操作できます。" : "カードを横スワイプして ★・応募済み・当落などを操作します。"}</p>
+      <label className={cn("flex min-h-11 items-center gap-2 text-sm", mode === "tab" && "opacity-50")} data-testid="swipe-toggle">
         <input
           type="checkbox"
           className="size-4"
@@ -34,7 +50,7 @@ function SwipeSetting() {
             writePref("swipe", e.target.checked ? "on" : "off");
           }}
         />
-        この端末でスワイプ操作を使う
+        この端末でカードのスワイプ操作を使う
       </label>
     </section>
   );
@@ -190,6 +206,21 @@ export function DisplaySettings() {
               {text}
             </button>
           ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">日付表示</span>
+          <div role="radiogroup" aria-label="抽選カードの日付表示" className="inline-flex rounded-md border p-0.5" data-testid="date-layout">
+            {(
+              [
+                ["a", "Aタイプ"],
+                ["b", "Bタイプ（2行）"],
+              ] as const
+            ).map(([v, text]) => (
+              <button key={v} type="button" role="radio" aria-checked={(settings.dateLayout ?? "a") === v} data-testid={`date-layout-${v}`} onClick={() => void saveSettings({ dateLayout: v })} className={cn("min-h-10 rounded px-3 text-sm", (settings.dateLayout ?? "a") === v ? "bg-primary text-primary-foreground" : "hover:bg-muted")}>
+                {text}
+              </button>
+            ))}
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">詳細表示で出す項目を選びます。応募締切が近い警告・★・応募状況の操作は、この設定に関係なく表示されます。</p>
         <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2" data-testid="card-fields">

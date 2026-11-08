@@ -79,9 +79,10 @@ describe("タブと並び順", () => {
     expect(selectLotteries(d, "applied", DEFAULT_FILTERS, NOW).map((l) => l.id)).not.toContain("L10");
     expect(selectLotteries(d, "all", { ...DEFAULT_FILTERS, status: "any" }, NOW).map((l) => l.id)).toContain("L10");
   });
-  it("当選: 未購入が先、購入済みは後ろ", () => {
+  it("当選: 受取済みは当選タブの一覧に出さない（Stage 7B。記録は残る）", () => {
     const d = mk();
-    expect(selectLotteries(d, "won", DEFAULT_FILTERS, NOW).map((l) => l.id)).toEqual(["L7", "L8"]);
+    expect(selectLotteries(d, "won", DEFAULT_FILTERS, NOW).map((l) => l.id)).toEqual(["L7"]);
+    expect(d.applications.some((a) => a.lotteryId === "L8" && a.result === "won" && a.fulfillment === "purchased")).toBe(true);
   });
   it("商品の入数でBOX/P換算する（固定30Pにしない）", () => {
     const d = mk();

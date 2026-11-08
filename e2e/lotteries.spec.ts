@@ -856,8 +856,10 @@ test("Stage 5N: 当選タブのカードはコンパクト。下段は1行で、
   const overlap = label.x < btn.x + btn.width && btn.x < label.x + label.width && label.y < btn.y + btn.height && btn.y < label.y + label.height;
   expect(overlap).toBe(false);
   await row.getByRole("button", { name: "受取を記録" }).click({ trial: true }); // 他の要素に遮られていない
+  const id = await card.getAttribute("data-lottery-id");
   await row.getByRole("button", { name: "受取を記録" }).click();
-  await expect(row.getByTestId("won-done")).toContainText("受取済");
+  // 受取が済んだ当選は当選タブの一覧から外れる（Stage 7B。記録は残る）
+  await expect(page.locator(`[data-lottery-id="${id}"]`)).toHaveCount(0);
 });
 
 test("Stage 5N: 応募済みタブは発表日基準。「応募済み」ボタンの代わりに当選/落選ボタンがあり、発表日を示す（日付は太字にしない）", async ({ page }) => {
