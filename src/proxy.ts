@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { hardenCookie } from "@/lib/supabase/cookies";
 import { safeNext } from "@/lib/share-intake";
+import { isTransientAuthError } from "@/lib/resilience";
 
 /**
  * 認証ガード（Supabaseモード時のみ）。未ログインは /login へ。セッションCookieもここで更新する。
@@ -27,8 +28,10 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const { data } = await supabase.auth.getClaims();
+  const { data, error } = await supabase.auth.getClaims();
   const loggedIn = !!data?.claims;
+  // セッションの確認が通信の失敗で終わった（復帰直後の接続不安定など）ときは、ログアウト扱いにせず通す。画面側で再取得する（Stage 7C）
+  if (!loggedIn && isTransientAuthError(error) && request.cookies.getAll().some((c) => c.name.startsWith("sb-"))) return response;
   const isLogin = request.nextUrl.pathname === "/login";
 
   if (!loggedIn && !isLogin) {
@@ -48,5 +51,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/cron/|api/health|.*\\.(?:svg|png|jpg|jpeg|gif|webp|js|webmanifest)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/cron/|api/health|api/version|.*\\.(?:svg|png|jpg|jpeg|gif|webp|js|webmanifest)$).*)"],
 };

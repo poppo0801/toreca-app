@@ -30,10 +30,15 @@ export function readPref<T extends string>(key: string, allowed: readonly T[], f
 }
 
 /** 画面の一時的な状態（タブ・フィルターなど）。タブを閉じるまで保持し、保存できなくても動作は続ける */
+/** ホーム画面アプリがバックグラウンドで破棄されて再起動したあとも、直前のタブ・フィルターに戻れるよう、端末にも一定時間（12時間）控えを残す（Stage 7C） */
+const SESSION_BACKUP_MS = 12 * 3600_000;
 export function readSession<T>(key: string, validate: (v: unknown) => T | null): T | null {
   try {
     const raw = window.sessionStorage.getItem(`tcg.session.${key}`);
-    return raw ? validate(JSON.parse(raw)) : null;
+    if (raw) return validate(JSON.parse(raw));
+    const b = JSON.parse(window.localStorage.getItem(`tcg.sessionBackup.${key}`) ?? "null") as { t?: number; v?: unknown } | null;
+    if (b && typeof b.t === "number" && Date.now() - b.t < SESSION_BACKUP_MS) return validate(b.v);
+    return null;
   } catch {
     return null;
   }
@@ -42,6 +47,7 @@ export function readSession<T>(key: string, validate: (v: unknown) => T | null):
 export function writeSession(key: string, value: unknown): void {
   try {
     window.sessionStorage.setItem(`tcg.session.${key}`, JSON.stringify(value));
+    window.localStorage.setItem(`tcg.sessionBackup.${key}`, JSON.stringify({ t: Date.now(), v: value }));
   } catch {
     /* noop */
   }

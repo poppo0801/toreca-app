@@ -10,6 +10,8 @@ import { createRepository } from "@/services";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { rebindPushSubscription } from "@/app/(app)/settings/notifications/actions";
 import { copyProfileSettings, saveProfileSettings } from "@/app/(app)/settings/profile-settings-actions";
+import { recordClientError } from "@/lib/client-resilience";
+import { classifyError, retryDelayMs } from "@/lib/resilience";
 import { normalizeProfileSettings, type ProfileSettingKey, type ProfileSettings } from "@/lib/profile-settings";
 import { currentSubscription, pushSupported, registerServiceWorker } from "@/lib/push-client";
 import { SplashScreen } from "@/components/splash-screen";
@@ -26,7 +28,8 @@ interface AppContextValue {
   /** DB保存を伴う機能（抽選登録・編集・複製・購入入力）が使えるか。mockでは false */
   persistent: boolean;
   /** 最新のデータを取得して画面に反映し、そのデータを返す（失敗時は null） */
-  reload: () => Promise<AppData | null>;
+  /** データの再取得。silent=失敗しても通知を出さない（バックグラウンド復帰時の静かな更新） */
+  reload: (opts?: { silent?: boolean }) => Promise<AppData | null>;
   /** 現在のプロフィールの設定（下部メニュー・カード表示・テーマ） */
   settings: ProfileSettings;
   settingsOf: (profileId: string) => ProfileSettings;
@@ -103,22 +106,42 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   // 一度でも読み込めたあとの更新失敗では、画面全体をエラーにせず通知にとどめる（全面ローディング/エラーは起動時だけ）
   const hasData = useRef(false);
 
-  const load = useCallback(async (): Promise<AppData | null> => {
-    const start = new Date();
-    try {
-      const d = await withTimeout(repo.load(start), LOAD_TIMEOUT_MS);
-      hasData.current = true;
-      setData(d);
-      setNow(start);
-      setLoadError(null);
-      return d;
-    } catch (e) {
-      const message = e instanceof Error && e.message ? e.message : "データの取得に失敗しました";
-      if (hasData.current) setNotice(`最新のデータを取得できませんでした（${message}）`);
-      else setLoadError(message);
-      return null;
-    }
-  }, [repo]);
+  const loading = useRef(false);
+  const load = useCallback(
+    async (opts: { silent?: boolean } = {}): Promise<AppData | null> => {
+      // 一時的な通信失敗（切断・時間切れ）は、数回やり直してから失敗として扱う（Stage 7C）。認証や画面のバグ由来のエラーは繰り返さない
+      loading.current = true;
+      try {
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const start = new Date();
+          try {
+            const d = await withTimeout(repo.load(start), attempt === 0 ? LOAD_TIMEOUT_MS : 12_000);
+            hasData.current = true;
+            setData(d);
+            setNow(start);
+            setLoadError(null);
+            return d;
+          } catch (e) {
+            lastError = e;
+            // 時間切れ（すでに25秒待った）は繰り返さない。すぐ失敗する通信エラーだけやり直す
+            if (classifyError(e) !== "network" || attempt === 2) break;
+            if (typeof navigator !== "undefined" && navigator.onLine === false) break; // 切断中は復帰（online）を待つ
+            await new Promise((r) => setTimeout(r, retryDelayMs(attempt)));
+          }
+        }
+        recordClientError(lastError, "load");
+        const message = lastError instanceof Error && lastError.message ? lastError.message : "データの取得に失敗しました";
+        if (hasData.current) {
+          if (!opts.silent) setNotice(`最新のデータを取得できませんでした（${message}）`);
+        } else setLoadError(message);
+        return null;
+      } finally {
+        loading.current = false;
+      }
+    },
+    [repo],
+  );
 
   // 初回ロード。以降はページ遷移のたびに再取得（マスター管理での変更を反映するため）
   // 設定の中のページ同士の移動（一覧 ⇄ 下のページ）は、データを取り直さない（画面のちらつき・無駄な通信を避ける）

@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, Eye, EyeOff, GripVertical, RotateCcw } from "lucide
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ClientErrorLog } from "@/components/client-error-log";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { CARD_FIELDS, CARD_FIELD_LABEL, DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
@@ -236,6 +237,8 @@ export function DisplaySettings() {
       </section>
 
       <SwipeSetting />
+
+      <ClientErrorLog />
 
       <section aria-labelledby="theme-title" className="space-y-2">
         <h2 id="theme-title" className="text-sm font-bold">

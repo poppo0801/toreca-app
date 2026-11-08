@@ -241,26 +241,29 @@ export function FinanceView() {
               <button
                 type="button"
                 onClick={() => setDetail({ kind: e.kind, id: e.id })}
-                className="relative flex w-full flex-col gap-0.5 overflow-hidden rounded-xl border bg-card py-1.5 pl-3.5 pr-3 text-left active:bg-muted/60"
+                className="relative grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 overflow-hidden rounded-xl border bg-card py-1.5 pl-3.5 pr-3 text-left active:bg-muted/60"
                 data-testid="ledger-row"
                 data-kind={e.kind}
                 data-category={e.category ?? ""}
               >
                 <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1" style={{ background: color }} data-testid="row-line" />
-                <span className="flex items-center gap-1.5 text-xs">
-                  <span className="tabular-nums text-muted-foreground" data-testid="row-date">
-                    {shortDate(e.date, today)}
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex items-center gap-1.5 text-xs">
+                    <span className="tabular-nums text-muted-foreground" data-testid="row-date">
+                      {shortDate(e.date, today)}
+                    </span>
+                    <span className="shrink-0 rounded-full border px-1.5 text-[10px] font-medium leading-4" style={{ color, borderColor: color }} data-testid="row-category">
+                      {cat ? cat.short : "売却"}
+                    </span>
+                    {seller && <ProfileAvatar profile={seller} size="xs" />}
                   </span>
-                  <span className="shrink-0 rounded-full border px-1.5 text-[10px] font-medium leading-4" style={{ color, borderColor: color }} data-testid="row-category">
-                    {cat ? cat.short : "売却"}
-                  </span>
-                  {seller && <ProfileAvatar profile={seller} size="xs" />}
-                  <span className={cn("ml-auto shrink-0 text-sm font-semibold tabular-nums", e.kind === "income" && "text-info")}>
-                    {e.amount === null ? <span className="text-xs font-normal text-muted-foreground">金額未入力</span> : `${e.kind === "income" ? "+" : "-"}${yen(e.amount)}`}
+                  <span className="block truncate text-sm" title={e.title} data-testid="row-title">
+                    {e.title}
                   </span>
                 </span>
-                <span className="block truncate text-sm" title={e.title} data-testid="row-title">
-                  {e.title}
+                {/* 金額は右端にそろえる（桁数が違っても右端が同じ。最小幅を持たせ、商品名が長くても重ならない） */}
+                <span className={cn("min-w-[5.75rem] text-right text-base font-semibold tabular-nums", e.kind === "income" && "text-info")} data-testid="row-amount">
+                  {e.amount === null ? <span className="text-xs font-normal text-muted-foreground">金額未入力</span> : `${e.kind === "income" ? "+" : "-"}${yen(e.amount)}`}
                 </span>
               </button>
             </li>

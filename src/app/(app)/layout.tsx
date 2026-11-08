@@ -5,6 +5,7 @@ import { CollectionResultNotice } from "@/components/collection-result-notice";
 import { SplashScreen } from "@/components/splash-screen";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { isTransientAuthError } from "@/lib/resilience";
 
 /**
  * 認証が必要な画面はすべてリクエストごとに描画する（ビルド時に静的生成しない）。
@@ -16,8 +17,12 @@ export const dynamic = "force-dynamic";
 async function AuthGate({ children }: { children: React.ReactNode }) {
   if (isSupabaseMode) {
     const supabase = await createClient();
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) redirect("/login");
+    // ログインの確認。通信の一時的な失敗ではログイン画面へ送らず、画面側の復旧（再試行）に任せる（Stage 7C）
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    if (!auth.user) {
+      if (isTransientAuthError(authError)) throw new Error("通信に失敗しました（認証の確認）");
+      redirect("/login");
+    }
     // 世帯が未作成なら作る（冪等）。以降のクエリはRLSで自世帯のみ。
     await supabase.rpc("bootstrap_household");
     // 応募名義はユーザー(プロフィール)ごとに1つ。系列ごとの内部アカウントを自動で保証する（画面での管理は不要）

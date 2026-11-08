@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import { Ellipsis, Settings } from "lucide-react";
 import { AiJobsProvider } from "@/components/ai-jobs-provider";
 import { AppProvider, useApp } from "@/components/app-provider";
+import { ResilienceWatcher } from "@/components/resilience-watcher";
 import { BrandLogo } from "@/components/brand-logo";
 import { NotificationBell } from "@/components/notification-bell";
 import { iconOf } from "@/components/page-heading";
@@ -201,6 +202,7 @@ export function AppShell({ children, overlay }: { children: React.ReactNode; /**
       <AiJobsProvider>
         <Shell>{children}</Shell>
         {overlay}
+        <ResilienceWatcher />
       </AiJobsProvider>
     </AppProvider>
   );

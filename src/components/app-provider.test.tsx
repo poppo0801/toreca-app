@@ -114,6 +114,31 @@ describe("起動時のロード画面", () => {
   });
 });
 
+describe("通信の一時的な失敗からの復旧（Stage 7C）", () => {
+  it("起動時の通信エラー（iPhoneの Load failed など）は自動でやり直し、エラー画面にせず通常画面になる", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const load = vi.fn(() => {
+      calls++;
+      return calls < 3 ? Promise.reject(new TypeError("Load failed")) : Promise.resolve(data());
+    });
+    await render(fakeRepo(load));
+    expect(splash()?.getAttribute("data-state")).toBe("loading");
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(splash()).toBeNull();
+    expect(app()).not.toBeNull();
+  });
+  it("通信エラーが続くときは3回でやめて、再試行・ログイン画面への導線のあるエラーにする（ログアウトはしない）", async () => {
+    vi.useFakeTimers();
+    const load = vi.fn(() => Promise.reject(new TypeError("Failed to fetch")));
+    await render(fakeRepo(load));
+    await act(async () => vi.advanceTimersByTimeAsync(20_000));
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(splash()?.getAttribute("data-state")).toBe("error");
+  });
+});
+
 describe("起動後は全面ローディングを出さない", () => {
   it("ページ移動に伴う再取得の間も、通常画面のまま（ロード画面に戻らない）", async () => {
     let calls = 0;

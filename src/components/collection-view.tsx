@@ -5,6 +5,7 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 import { useSearchParams } from "next/navigation";
 import { loadCollectionAction, reorderCardsAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
 import { SummaryTriple } from "@/components/summary-triple";
+import { useLatestLoader } from "@/components/use-latest-loader";
 import { useReveal } from "@/components/use-reveal";
 import { useApp } from "@/components/app-provider";
 import { CardBulkDialog, BULK_MAX_IMAGES } from "@/components/card-bulk";
@@ -82,11 +83,8 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
   const [limit, setLimit] = useState(PAGE);
   const sentinel = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
-    const r = await loadCollectionAction();
-    if (r.ok) setData(r.data);
-    else setError(r.error);
-  }, [setData]);
+  // 取得の順序を保証し、価格・相場の更新後は取得が終わるまで集計を薄く表示する（useLatestLoader）
+  const { load, refreshing } = useLatestLoader(loadCollectionAction, setData, setError);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部データの取得
     void load();
@@ -213,6 +211,7 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
           <SummaryTriple
             testId="summary-line"
             loading={!data}
+            refreshing={refreshing && !!data}
             expanded={showStats}
             onToggle={() => data && setShowStats((v) => !v)}
             cells={[
@@ -222,20 +221,14 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
             ]}
           />
           {data && showStats && (
-            <div className="space-y-2 border-t py-2" data-testid="collection-stats">
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+            <div className="space-y-3.5 border-t px-3.5 py-3.5" data-testid="collection-stats">
+              <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2.5 text-[13px]">
                 <Row k="カードの種類" v={`${totals.kinds}種`} />
                 <Row k="参考価値（販売）" v={totals.saleTotal > 0 || totals.saleMissingKinds < totals.kinds ? yen(totals.saleTotal) : "—"} />
                 <Row k="販売参考との差額" v={totals.saleDiffKinds > 0 ? signed(totals.saleDiff) : "—"} />
                 <Row k="買取参考との差額" v={totals.buybackDiffKinds > 0 ? signed(totals.buybackDiff) : "—"} />
               </dl>
-              {(totals.saleMissingKinds > 0 || totals.buybackMissingKinds > 0 || totals.costUnknownQty > 0) && (
-                <p className="text-[11px] text-warn" data-testid="stats-partial">
-                  一部のカードだけの集計です: 販売参考が未設定 {totals.saleMissingKinds}種・買取参考が未設定 {totals.buybackMissingKinds}種・購入金額が未入力 {totals.costUnknownQty}枚（未設定は0円とせず、計算に含めていません）。
-                </p>
-              )}
               <Breakdown title="レアリティ別" items={breakdown(rows, "rarity")} />
-              <Breakdown title="収録パック別" items={breakdown(rows, "productName")} />
             </div>
           )}
         </section>
@@ -409,7 +402,7 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
       )}
 
       {showMult && data && <ConditionMultipliersDialog open onOpenChange={setShowMult} value={data.multipliers} onSaved={(m) => setData((d) => (d ? { ...d, multipliers: m } : d))} />}
-      {showMarket && data && <MarketUpdateDialog open onOpenChange={setShowMarket} cardCount={data.cards.length} market={data.market} onDone={() => void load()} />}
+      {showMarket && data && <MarketUpdateDialog open onOpenChange={setShowMarket} cardCount={data.cards.length} market={data.market} onDone={load} />}
       {opened && data && (
         <CardDetailSheet
           card={opened}
@@ -444,10 +437,10 @@ function Breakdown({ title, items }: { title: string; items: { key: string; kind
   if (items.length === 0) return null;
   return (
     <div>
-      <p className="text-[11px] font-medium">{title}</p>
-      <ul className="flex flex-wrap gap-1 pt-0.5">
+      <p className="text-xs font-medium">{title}</p>
+      <ul className="flex flex-wrap gap-1.5 pt-1.5">
         {items.slice(0, 12).map((i) => (
-          <li key={i.key} className="rounded-full border px-2 py-0.5 text-[11px]">
+          <li key={i.key} className="rounded-full border px-2.5 py-0.5 text-[11px]">
             {i.key} {i.qty}枚
           </li>
         ))}

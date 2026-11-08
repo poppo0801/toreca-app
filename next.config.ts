@@ -11,6 +11,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // 画面側のエラー記録・新バージョンの検出に使うビルド識別（コミットの短縮ID。秘密情報ではない）
+  env: { NEXT_PUBLIC_BUILD_ID: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev" },
   poweredByHeader: false,
   // Excel入出力(exceljs)はサーバーで動かす。バンドルせず外部パッケージとして読む
   serverExternalPackages: ["exceljs"],

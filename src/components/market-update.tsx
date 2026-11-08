@@ -16,7 +16,7 @@ export const lastMarketUpdate = (market: MarketPriceRow[]): string | null => mar
  * 相場を一括更新（Stage 6G）。登録済みの全カードを、公開CSV 1回で照合する。手動の参考相場は変更しない。
  * 取得できない場合や許可を確認したくない場合は、CSVファイルを選んで取り込める。
  */
-export function MarketUpdateDialog({ open, onOpenChange, cardCount, market, onDone }: { open: boolean; onOpenChange: (v: boolean) => void; cardCount: number; market: MarketPriceRow[]; onDone: () => void }) {
+export function MarketUpdateDialog({ open, onOpenChange, cardCount, market, onDone }: { open: boolean; onOpenChange: (v: boolean) => void; cardCount: number; market: MarketPriceRow[]; /** 更新後に集計を取り直す。完了まで待つ */ onDone: () => void | Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<MarketUpdateResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -27,11 +27,14 @@ export function MarketUpdateDialog({ open, onOpenChange, cardCount, market, onDo
     setBusy(true);
     setErr(null);
     const r = await updateMarketPricesAction(opts);
-    setBusy(false);
     if (r.ok) {
       setRes((cur) => (opts.cardId && cur ? { ...cur, ambiguous: cur.ambiguous.filter((a) => a.cardId !== opts.cardId), summary: { ...cur.summary, updated: cur.summary.updated + r.result.summary.updated, ambiguous: Math.max(0, cur.summary.ambiguous - 1) } } : r.result));
-      onDone();
-    } else setErr(r.error);
+      await onDone();
+      setBusy(false);
+    } else {
+      setBusy(false);
+      setErr(r.error);
+    }
   };
 
   const pickFile = async (f: File | undefined) => {

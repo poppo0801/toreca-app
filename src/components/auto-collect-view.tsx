@@ -535,7 +535,7 @@ export function AutoCollectView({
   return (
     <div className="space-y-4" data-testid="collection">
       {/* ① 自動収集の動作状況（現在の状態。設定ではない） */}
-      <Block no="①" title="動作状況" testId="status" defaultOpen tip="解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。">
+      <Block no="①" title="動作状況" testId="status" tip="解析待ちは、バックグラウンドのワーカー（Supabase Cron が数分おきに起動）が、締切が近いものから小分けで解析します。待ち時間が長いものは優先度が上がります。失敗は 15分→1時間→4時間後に最大3回再試行し、上限に達したものは「失敗」に隔離します。AI読み取りの上限（時間・日・月額予算・ワーカーの1日の上限）に達すると、次の読み取りを始めません。">
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} disabled={busy !== null} data-testid="collect-now">
             {busy === "run" ? "収集しています…" : "今すぐ収集"}

@@ -2,7 +2,8 @@
 
 import { Ellipsis, FileInput, LayoutGrid, List, Percent, Search, SlidersHorizontal } from "lucide-react";
 import { SummaryTriple } from "@/components/summary-triple";
-import { useCallback, useEffect, useImperativeHandle, useMemo, useState, type Ref } from "react";
+import { useLatestLoader } from "@/components/use-latest-loader";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { loadBoxCollectionAction } from "@/app/(app)/collection/box-actions";
 import { useApp } from "@/components/app-provider";
 import { BoxFormDialog, BoxImportDialog, BoxMultipliersDialog, BoxPriceDialog } from "@/components/box-dialogs";
@@ -55,13 +56,8 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
   const [dialog, setDialog] = useState<"form" | "prices" | "mult" | "import" | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const r = await loadBoxCollectionAction();
-    if (r.ok) {
-      setData(r.data);
-      setError(null);
-    } else setError(r.error);
-  }, []);
+  // 取得の順序を保証し、価格の更新後は取得が終わるまで集計を薄く表示する（useLatestLoader）
+  const { load, refreshing } = useLatestLoader(loadBoxCollectionAction, setData, setError);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部データの取得
     void load();
@@ -83,6 +79,7 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
           {/* 購入／買取／BOX数の3分割（カードと共通） */}
           <SummaryTriple
             testId="box-summary-line"
+            refreshing={refreshing && !!data}
             expanded={showStats}
             onToggle={() => setShowStats((v) => !v)}
             cells={[
