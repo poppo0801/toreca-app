@@ -74,7 +74,7 @@ describe("Stage 6K: 支出の品目区分", () => {
     return { ...d, purchases: [mk("a", undefined, 10000), mk("b", "pokemon_card", 5000), mk("c", "goods", 1200), mk("d", "expense", 800)], sales: [] };
   };
   it("品目の定義: ポケモンカード・カード周辺グッズ・経費。既存（未設定）はポケモンカード", () => {
-    expect(EXPENSE_CATEGORIES.map((c) => c.label)).toEqual(["ポケモンカード", "周辺グッズ", "経費"]);
+    expect(EXPENSE_CATEGORIES.map((c) => c.label)).toEqual(["ポケモンカード", "シングルカード", "周辺グッズ", "経費", "その他"]);
     expect(isCardPurchase({})).toBe(true);
     expect(isCardPurchase({ category: "goods" })).toBe(false);
     expect(categoryOf("expense").quantity).toBe(false);

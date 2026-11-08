@@ -407,13 +407,16 @@ test("購入記録: 下部メニューから開け、履歴と商品別の累計
   // 全期間にすると、モックの購入が一覧に出る
   await page.getByTestId("period-label").click();
   await page.getByTestId("period-picker").getByRole("tab", { name: "全期間" }).click();
+  // 初期表示は商品別の累計（左のタブ）。上部は BOX・パック・その他商品・総額の4項目（Stage 7E）
+  await expect(page.getByRole("tab", { name: "商品別の累計" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("product-total-row").first()).toBeVisible();
+  await expect(page.getByTestId("purchase-summary").locator("dt")).toHaveText(["BOX", "パック", "その他商品", "総額"]);
+  // 購入履歴（右のタブ）。日付見出しは無く、1件ごとのカードに購入日がある
+  await page.getByRole("tab", { name: "購入履歴" }).click();
   const rows = page.getByTestId("purchase-row");
   await expect(rows.first()).toBeVisible();
-  const n = await rows.count();
-  await expect(page.getByTestId("purchase-count")).toHaveText(`${n}件`);
-  // 商品別の累計
-  await page.getByRole("tab", { name: "商品別の累計" }).click();
-  await expect(page.getByTestId("product-total-row").first()).toBeVisible();
+  await expect(rows.first().getByTestId("purchase-date")).toBeVisible();
+  await expect(page.getByTestId("to-collection")).toHaveCount(0);
   // 期間（月）と前後移動
   await page.getByTestId("period-label").click();
   await page.getByTestId("period-picker").getByRole("tab", { name: "月", exact: true }).click();

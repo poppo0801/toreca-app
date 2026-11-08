@@ -46,6 +46,9 @@ export function shiftMonth(ym: string, delta: number): string {
 
 export const UNIT_LABEL: Record<PurchaseUnit, string> = { box: "BOX", pack: "パック", set: "セット", piece: "個" };
 
+/** 数量の単位表記。シングルカードは「枚」（保存の単位は個） */
+export const unitLabelFor = (unit: PurchaseUnit, category?: string | null): string => (category === "single_card" ? "枚" : UNIT_LABEL[unit]);
+
 /** 購入の合計金額。未入力の明細は合計に含めず件数を返す。 */
 export function purchaseTotal(p: Pick<Purchase, "items">): { total: number; unknown: number } {
   let total = 0;
@@ -75,7 +78,7 @@ export function purchaseTitle(data: AppData, p: Purchase): string {
   const more = p.items.length > 1 ? ` ほか${p.items.length - 1}件` : "";
   // 経費は数量・単位を出さない（金額中心）
   if (!categoryOf(p.category).quantity) return `${name}${more}`;
-  return `${name} ${first.quantity}${UNIT_LABEL[first.unit]}${more}`;
+  return `${name} ${first.quantity}${unitLabelFor(first.unit, p.category)}${more}`;
 }
 
 export function purchaseStoreName(data: AppData, p: Purchase): string {

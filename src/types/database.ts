@@ -3427,6 +3427,41 @@ export type Database = {
           },
         ]
       }
+      item_default_images: {
+        Row: {
+          category: string
+          household_id: string
+          sha256: string
+          storage_path: string
+          updated_at: string
+          updated_by_profile_id: string | null
+        }
+        Insert: {
+          category: string
+          household_id: string
+          sha256: string
+          storage_path: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Update: {
+          category?: string
+          household_id?: string
+          sha256?: string
+          storage_path?: string
+          updated_at?: string
+          updated_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_default_images_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       limit_exemptions: {
         Row: {
           created_at: string

@@ -12,7 +12,7 @@ import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { jstDateString } from "@/lib/datetime";
-import { categoryOf, EXPENSE_CATEGORIES } from "@/lib/expense-category";
+import { categoryOf, EXPENSE_CATEGORIES, isSingleCard } from "@/lib/expense-category";
 import { flexToJstDate, suggestedAmount } from "@/lib/finance";
 import { FUEL_ITEM_NAME } from "@/lib/fuel";
 import { expenseSchema } from "@/lib/finance-input";
@@ -228,17 +228,34 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
                       </Button>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {cat.quantity && (
-                    <CountInput aria-label={`数量${i + 1}`} value={it.quantity} onChange={(quantity) => patch(i, { quantity })} className={`${field} mt-0 w-20`} />
-                    )}
-                    {cat.master && <select aria-label={`単位${i + 1}`} value={it.unit} onChange={(e) => patch(i, { unit: e.target.value as ItemState["unit"] })} className={`${field} mt-0 w-28`}>
-                      {unitOptions(data.products.find((p) => p.id === it.product.id), it.unit).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>}
+                  {/* 数量と単位は横並び（数量の右に単位）。数量欄は狭く、単位は残りの幅を使う。シングルカードは単位「枚」で固定（Stage 7E） */}
+                  {cat.quantity && (
+                    <div className="flex items-center gap-2" data-testid="qty-unit-row">
+                      <span className="shrink-0 text-xs text-muted-foreground">数量</span>
+                      <CountInput aria-label={`数量${i + 1}`} value={it.quantity} onChange={(quantity) => patch(i, { quantity })} className={`${field} mt-0 w-20 shrink-0`} />
+                      {cat.master && (
+                        <>
+                          <span className="shrink-0 text-xs text-muted-foreground">単位</span>
+                          <select aria-label={`単位${i + 1}`} value={it.unit} onChange={(e) => patch(i, { unit: e.target.value as ItemState["unit"] })} className={`${field} mt-0 min-w-0 flex-1`}>
+                            {unitOptions(data.products.find((p) => p.id === it.product.id), it.unit).map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </>
+                      )}
+                      {isSingleCard(category) && (
+                        <>
+                          <span className="shrink-0 text-xs text-muted-foreground">単位</span>
+                          <select aria-label={`単位${i + 1}`} value="piece" disabled className={`${field} mt-0 min-w-0 flex-1`} data-testid="unit-fixed">
+                            <option value="piece">枚</option>
+                          </select>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
                     {persistent && it.id && it.unit === "box" && (
                       <Button type="button" size="sm" variant="outline" className="mt-0 h-11" onClick={() => setReceiptItem(i)} data-testid="open-receipt">
                         受取の状態
@@ -252,7 +269,7 @@ export function ExpenseDialog({ open, onOpenChange, purchase }: { open: boolean;
                       placeholder="金額(円)"
                       value={it.amount}
                       onChange={(e) => patch(i, { amount: e.target.value, touched: true })}
-                      className={`${field} mt-0 w-32 min-w-0 flex-1`}
+                      className={`${field} mt-0 min-w-0 flex-1`}
                     />
                   </div>
                   {cat.master && <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

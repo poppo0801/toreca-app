@@ -25,6 +25,8 @@
   --cat-card: #dc2626;
   --cat-supply: #2563eb;
   --cat-expense: #16a34a;
+  --cat-single: #ea580c;
+  --cat-other: #6b7280;
   --success: #15803d;
   --danger: #b91c1c;
   --warn: #a16207;
@@ -57,6 +59,8 @@
   --cat-card: #f87171;
   --cat-supply: #60a5fa;
   --cat-expense: #4ade80;
+  --cat-single: #fb923c;
+  --cat-other: #9ca3af;
   --success: #4ade80;
   --danger: #f87171;
   --warn: #facc15;

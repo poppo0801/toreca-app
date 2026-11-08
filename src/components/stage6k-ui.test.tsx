@@ -49,7 +49,7 @@ describe("Stage 6K: 支出登録フォーム", () => {
     mount(createElement(ExpenseDialog, { open: true, onOpenChange: () => undefined, purchase: null }));
     const form = q("form")!;
     expect(form.firstElementChild?.querySelector('[data-testid="expense-category"]')).not.toBeNull();
-    expect([...(q('[data-testid="expense-category"]') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["ポケモンカード", "周辺グッズ", "経費"]);
+    expect([...(q('[data-testid="expense-category"]') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["ポケモンカード", "シングルカード", "周辺グッズ", "経費", "その他"]);
     expect(document.body.textContent).not.toContain("購入した商品を登録します");
     expect(document.body.textContent).not.toContain("マスター登録済みの商品は購入実績にも自動で反映されます");
   });

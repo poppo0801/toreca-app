@@ -15,7 +15,7 @@ vi.mock("@/app/(app)/settings/profile-settings-actions", () => ({
   copyProfileSettings: vi.fn(),
 }));
 
-import { AppProvider, useApp } from "@/components/app-provider";
+import { AppProvider, resolveActorId, useApp } from "@/components/app-provider";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -209,5 +209,29 @@ describe("設定の連続操作（表示切替を続けて押したとき）", (
     await act(async () => saveCalls[1].resolve({ ok: true }));
     await flush();
     expect(view()).toBe("detail");
+  });
+});
+
+describe("操作者の解決（Stage 7E: 第二ユーザーの応募済みエラーの根本原因）", () => {
+  const profiles = [{ id: "pA" }, { id: "pB" }, { id: "pC", active: false }];
+  it("画面に表示しているプロフィールと同じ規則で操作者を決める: 選択中 → 端末に保存した選択 → 先頭", () => {
+    expect(resolveActorId(profiles, "pB", null)).toBe("pB");
+    // 再読み込み後は state が未設定。端末に保存した第二ユーザーが操作者になる（以前は先頭の pA になっていた）
+    expect(resolveActorId(profiles, null, "pB")).toBe("pB");
+    expect(resolveActorId(profiles, null, null)).toBe("pA");
+    expect(resolveActorId(profiles, null, "unknown")).toBe("pA");
+    expect(resolveActorId(profiles, "pC", null)).toBe("pA"); // 無効なプロフィールは使わない
+    expect(resolveActorId([], null, "pB")).toBeUndefined();
+  });
+  it("端末に第二ユーザーが保存されているとき、操作（run）の操作者は表示中の第二ユーザーになる", async () => {
+    window.localStorage.setItem("tcg.device.profileId", "pB");
+    const seen: string[] = [];
+    const repo = { persistent: false, load: async () => data(), setApplied: async (actor: string) => (seen.push(actor), { ok: true as const, data: data() }) } as unknown as LotteryRepository;
+    await render(repo);
+    await flush();
+    expect(ctx?.profile.id).toBe("pB");
+    await act(async () => void (await ctx!.actions.setApplied("L1", "b-c1", true)));
+    expect(seen).toEqual(["pB"]);
+    window.localStorage.removeItem("tcg.device.profileId");
   });
 });

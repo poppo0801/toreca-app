@@ -306,6 +306,14 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
   const { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates } = await loadOptional(db, householdId);
+  // 購入記録の標準画像（Stage 7E）。取得できなくても他のデータは読み込む
+  const defaultImages: NonNullable<AppData["defaultImages"]> = {};
+  try {
+    const di = await db.from("item_default_images").select("category,sha256");
+    for (const r of di.data ?? []) if (r.category === "single_card" || r.category === "other") defaultImages[r.category] = { url: `/api/default-image/${r.category}?v=${r.sha256.slice(0, 12)}` };
+  } catch {
+    /* 標準画像なしで続行 */
+  }
 
   return {
     profiles: profiles.map((p) => {
@@ -524,6 +532,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     battles,
     settings,
     profileSettings,
+    defaultImages,
     chainConditions,
     chainConditionStates,
   };

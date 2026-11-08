@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { useApplyExit } from "@/components/apply-exit";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { BoxReceiptDialog } from "@/components/box-receipt-dialog";
 import { productName } from "@/lib/finance";
@@ -31,17 +32,25 @@ const TONE: Record<string, string> = {
  * 購入記録は応募ごとに1件（受取済みにしたときに DB 関数が1件だけ作る。何度押しても二重計上しない）。期間前に押したときは確認する（履歴の補正は期間外でも可能）。
  */
 /** 受取の記録のあと、BOXの購入があればシュリンク状態の入力を促す（「あとで」で閉じられる。購入履歴の編集からも記録できる） */
-function ReceiptPrompt({ applicationId, onClose }: { applicationId: string; onClose: () => void }) {
+function ReceiptPrompt({ applicationId, lotteryId, onClose }: { applicationId: string; lotteryId: string; onClose: () => void }) {
   const { data, persistent } = useApp();
-  if (!persistent) return null; // 保存先がない（デモ）ときは記録できない
+  const exit = useApplyExit();
   const purchase = data.purchases.find((p) => p.applicationId === applicationId);
-  const items = (purchase?.items ?? []).filter((i) => i.unit === "box" && i.id).map((i) => ({ id: i.id as string, quantity: i.quantity, label: productName(data, i.productId, i.productLabel) }));
-  if (items.length === 0) return null;
+  const items = persistent ? (purchase?.items ?? []).filter((i) => i.unit === "box" && i.id).map((i) => ({ id: i.id as string, quantity: i.quantity, label: productName(data, i.productId, i.productLabel) })) : [];
+  const shown = items.length > 0;
+  // 入力画面を出している間は、カードを一覧に残す。閉じたら（当選タブから外れていれば）退出アニメーションで見送る（Stage 7E）
+  useEffect(() => {
+    if (!shown) return;
+    exit?.pin(lotteryId, true);
+    return () => exit?.pin(lotteryId, false);
+  }, [exit, lotteryId, shown]);
+  if (!shown) return null; // 保存先がない（デモ）・BOXの購入がないときは出さない
   return <BoxReceiptDialog items={items} onClose={onClose} />;
 }
 
 export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lottery; app: Application; ownerLabel?: string }) {
   const { now, actions } = useApp();
+  const exit = useApplyExit();
   const [busy, run] = useBusy();
   const [confirm, setConfirm] = useState<"purchase" | "receive" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,12 +59,26 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
   const split = hasSeparateSteps(lottery);
   const shipping = lottery.receiveMethod === "shipping";
 
+  // 受取の記録: 当選タブから外れるときは、他のタブと共通の退出アニメーション（右へスライド → 画面外 → 下のカードが上へ詰まる）。
+  // 保存に成功したときだけ一覧から外し、失敗したらカードを元に戻す。他のプロフィールの当選が残るカードは外れない（Stage 7E）
   const exec = (kind: "purchase" | "receive") =>
     run(async () => {
       setError(null);
-      const res = await actions.setFulfillment(app.id, kind === "purchase" ? "procedure_done" : "purchased");
-      if (!res.ok) setError(res.error);
-      else if (kind === "receive") setReceiptFor(app.id);
+      const handle = kind === "receive" ? exit?.begin(lottery.id) : undefined;
+      let res: Awaited<ReturnType<typeof actions.setFulfillment>>;
+      try {
+        res = await actions.setFulfillment(app.id, kind === "purchase" ? "procedure_done" : "purchased");
+      } catch (e) {
+        handle?.fail();
+        throw e;
+      }
+      if (!res.ok) {
+        setError(res.error);
+        handle?.fail();
+      } else {
+        if (kind === "receive") setReceiptFor(app.id);
+        handle?.ok();
+      }
     });
   const press = (kind: "purchase" | "receive") => (p.status === "waiting_start" ? setConfirm(kind) : void exec(kind));
   const confirmDialog = (
@@ -117,7 +140,7 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
           </span>
         )}
         {confirmDialog}
-        {receiptFor && <ReceiptPrompt applicationId={receiptFor} onClose={() => setReceiptFor(null)} />}
+        {receiptFor && <ReceiptPrompt applicationId={receiptFor} lotteryId={lottery.id} onClose={() => setReceiptFor(null)} />}
       </>
     );
   }
@@ -136,7 +159,7 @@ export function WonRecordButtons({ lottery, app, ownerLabel }: { lottery: Lotter
         </span>
       )}
       {confirmDialog}
-      {receiptFor && <ReceiptPrompt applicationId={receiptFor} onClose={() => setReceiptFor(null)} />}
+      {receiptFor && <ReceiptPrompt applicationId={receiptFor} lotteryId={lottery.id} onClose={() => setReceiptFor(null)} />}
     </>
   );
 }

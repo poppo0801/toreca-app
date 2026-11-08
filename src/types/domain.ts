@@ -489,6 +489,8 @@ export interface AppData {
   profileSettings?: Record<string, import("@/lib/profile-settings").ProfileSettings>;
   /** 世帯設定（カード表示項目・自宅の位置など）。未設定のデータ・モックでは省略 */
   settings?: HouseholdSettings;
+  /** 購入記録の標準画像（品目別: シングルカード・その他）。商品個別の画像が無い購入記録に表示する共通の画像（Stage 7E）。未登録の品目は省略 */
+  defaultImages?: Partial<Record<"single_card" | "other", { url: string }>>;
   /** 対戦記録（Stage 5A）。モックでは省略 */
   battles?: BattleRecord[];
   /** 系列別の抽選条件（Stage 5R）と、プロフィール別の達成状況。未適用の環境・モックでは省略 */

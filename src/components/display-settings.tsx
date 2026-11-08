@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ClientErrorLog } from "@/components/client-error-log";
+import { DefaultImagesSettings } from "@/components/default-images-settings";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { CARD_FIELDS, CARD_FIELD_LABEL, DEFAULT_CARD_DISPLAY } from "@/lib/card-display";
@@ -237,6 +238,8 @@ export function DisplaySettings() {
       </section>
 
       <SwipeSetting />
+
+      <DefaultImagesSettings />
 
       <ClientErrorLog />
 

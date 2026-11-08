@@ -88,6 +88,13 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/** 操作中のプロフィールID: 選択中の state → 端末に保存した選択 → 先頭の有効なプロフィール。画面の表示（value.profile）と同じ規則 */
+export function resolveActorId(profiles: readonly { id: string; active?: boolean }[], selected: string | null, saved: string | null): string | undefined {
+  const active = profiles.filter((p) => p.active !== false);
+  const want = selected ?? saved;
+  return (active.find((p) => p.id === want) ?? active[0])?.id;
+}
+
 export function AppProvider({ children, repository }: { children: React.ReactNode; /** テスト用: データの取得元を差し替える */ repository?: LotteryRepository }) {
   const [repo] = useState<LotteryRepository>(() => repository ?? createRepository());
   const pathname = usePathname();
@@ -174,7 +181,9 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
 
   const run = useCallback(
     async (fn: (actor: string) => Promise<Outcome>): Promise<Outcome> => {
-      const actor = profileId ?? data?.profiles.find((p) => p.active !== false)?.id;
+      // 操作者は、画面に表示している（操作中の）プロフィールと必ず同じにする。端末に保存した選択（再読み込み後など）も同じ規則で解決する。
+      // 以前は state が未設定のとき先頭のプロフィールを使い、第二ユーザーの応募済み操作が「他のユーザーの応募状況は変更できません」になっていた（Stage 7E）
+      const actor = resolveActorId(data?.profiles ?? [], profileId, localDeviceStore.getProfileId());
       if (!actor) return { ok: false, error: "操作プロフィールが選択されていません" };
       let res: Outcome;
       try {

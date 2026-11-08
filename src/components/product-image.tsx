@@ -145,6 +145,23 @@ export function ProductThumb({ product, heightClass = "h-14" }: { product: Pick<
   return <ProductImageView image={img} alt={`${product.officialName} ${kind}`} heightClass={heightClass} />;
 }
 
+/**
+ * 購入記録の画像（Stage 7E）。優先順位: 商品個別の画像 → 品目別の標準画像（シングルカード・その他。設定で登録）→ 画像なしアイコン。
+ * 標準画像は共通の1つを参照する（購入記録ごとに複製しない）。
+ */
+export function PurchaseThumb({ product, category, heightClass = "h-14" }: { product: Pick<Product, "officialName" | "images"> | undefined; category?: string | null; heightClass?: string }) {
+  const { data } = useApp();
+  const own = product?.images?.box ?? product?.images?.pack ?? product?.images?.unit;
+  const std = !own && (category === "single_card" || category === "other") ? data.defaultImages?.[category] : undefined;
+  if (std) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- 認証付きの自前API（内容ハッシュ入りURLで長期キャッシュ）
+      <img src={std.url} alt={category === "single_card" ? "シングルカード（標準画像）" : "その他（標準画像）"} loading="lazy" decoding="async" data-testid="default-image" className={cn("w-auto max-w-full object-contain", heightClass)} />
+    );
+  }
+  return <ProductThumb product={product} heightClass={heightClass} />;
+}
+
 /** 商品マスター編集用: 種類ごとの画像と、アップロード・差し替えボタン */
 export function ProductImagePanel({ productId }: { productId: string }) {
   const { data, profile, reload } = useApp();

@@ -44,7 +44,7 @@ describe("Stage 6R: プロフィール別の「標準」並び順", () => {
 
 describe("Stage 6R: 支出の分類名・色", () => {
   it("一覧の短い名称はカード／サプライ／経費、フォームの品目名は周辺グッズ。内部IDは変わらない", () => {
-    expect(EXPENSE_CATEGORIES.map((c) => [c.id, c.short])).toEqual([["pokemon_card", "カード"], ["goods", "サプライ"], ["expense", "経費"]]);
+    expect(EXPENSE_CATEGORIES.map((c) => [c.id, c.short])).toEqual([["pokemon_card", "カード"], ["single_card", "シングル"], ["goods", "サプライ"], ["expense", "経費"], ["other", "その他"]]);
     expect(categoryOf("goods").label).toBe("周辺グッズ");
   });
   it("色は赤・青・緑の分類色", () => {
