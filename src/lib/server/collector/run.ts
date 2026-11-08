@@ -30,11 +30,15 @@ import { activeExclusions, altPlanFor, recordAltSuccess, recordHardSource } from
 import { loadXIdentities, loadXLinks, saveXIdentity } from "@/lib/server/collector/x-accounts";
 import { identifyAccount, identityHint, type AccountIdentity, type SavedIdentity } from "@/lib/collector/store-identity";
 import { otherTcgItemIndexes, productNamesOf, tcgTextsOf } from "@/lib/collector/category";
-import { PREFECTURE_LIST, prefectureOf } from "@/lib/geo";
+import { PREFECTURE_LIST } from "@/lib/geo";
 import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from "@/lib/collector/x-accounts";
 import { dropUsernameChain, resolveXChain } from "@/lib/collector/x-chain";
 import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { detectStoreSelect } from "@/lib/collector/store-select";
+import { judgeRegion, isRegionReason, regionExclusionOf } from "@/lib/collector/region";
+import { decideRegistration } from "@/lib/collector/attention";
+import { classifyReviewReasons } from "@/lib/collector/review-reasons";
+import { autoCompleteLottery } from "@/lib/server/collector/complete";
 import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
 import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
@@ -233,12 +237,14 @@ export function conditionsFromRow(row: Record<string, unknown>): CollectionCondi
   });
 }
 
-type StatKey = "ai_log_failures" | "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "provisional_registered" | "failed_jobs" | "x_posts_manual" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining";
-export type StatDelta = Partial<Record<StatKey, number>>;
+type StatKey = "ai_log_failures" | "discovered_new" | "discovered_initial" | "changed" | "duplicates" | "excluded" | "ai_calls" | "ai_success" | "ai_failed" | "registered_new" | "provisional_registered" | "failed_jobs" | "x_posts_manual" | "updated_existing" | "review_added" | "input_tokens" | "output_tokens" | "cost_jpy" | "queue_remaining" | "registered_caution" | "excluded_region";
+export type StatDelta = Partial<Record<StatKey, number>> & { /** 確認待ちになった理由の分類ごとの件数（Stage 7A） */ reasons?: Record<string, number> };
 
 /** 日別統計(日本時間の日付)への原子的な加算。統計の失敗で本処理を止めない */
 export async function bumpStats(db: Db, householdId: string, now: Date, delta: StatDelta): Promise<void> {
-  const clean = Object.fromEntries(Object.entries(delta).filter(([k, v]) => typeof v === "number" && (v !== 0 || k === "queue_remaining")));
+  const { reasons, ...nums } = delta;
+  const clean: Record<string, unknown> = Object.fromEntries(Object.entries(nums).filter(([k, v]) => typeof v === "number" && (v !== 0 || k === "queue_remaining")));
+  if (reasons && Object.keys(reasons).length > 0) clean.reasons = reasons;
   if (Object.keys(clean).length === 0) return;
   await db.rpc("bump_collection_stats", { p_household: householdId, p_day: jstDayString(now), p_delta: clean as unknown as Json }).then(() => undefined, () => undefined);
 }
@@ -345,7 +351,8 @@ export async function appendSourceUrl(db: Db, lotteryId: string, url: string): P
   const cur = data.source_urls ?? [];
   if (cur.includes(url) || cur.length >= 10) return false;
   // 抽選の確定情報には触れず、情報源URLの追加だけを行う
-  const { error } = await db.from("lotteries").update({ source_urls: [...cur, url] }).eq("id", lotteryId);
+  // 自動処理による更新の印（cautions_updated_at）も更新する。利用者の手動編集と区別して、注意付きの抽選の自動補完（Stage 7A）を止めないため
+  const { error } = await db.from("lotteries").update({ source_urls: [...cur, url], cautions_updated_at: new Date().toISOString() }).eq("id", lotteryId);
   return !error;
 }
 
@@ -684,7 +691,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   const dist = store ? storeDistance(data, store) : null;
   // 地域の判定には、店舗の登録 → 告知から読み取った都道府県 → 一覧に表示された都道府県の順で使う（マスターには推測で書き込まない）
-  const knownPref = store?.prefecture || (store?.address ? (prefectureOf(store.address) ?? "") : "") || input.store.prefecture || lh?.prefecture || "";
+  // 地域は、店舗マスター → 住所 → 告知・一覧の都道府県 → 店舗名の地域名・市区町村名の順に、根拠つきで判定する。複数店舗の一覧・曖昧な地名は不明のまま（地域外と断定しない）（Stage 7A）
+  const region = judgeRegion({ masterPrefecture: store?.prefecture, address: store?.address, storeName: input.store.id ? "" : input.store.name, statedPrefecture: input.store.prefecture || lh?.prefecture || "" });
+  const knownPref = region.prefecture;
   const texts = tcgTextsOf({ title: q.title, card: q.card, context: q.context, postText: q.post?.text, quotedText: q.post?.quoted?.text, products: productNamesOf(input) });
   const ev = evaluateCandidate(input, cond, { texts, prefecture: knownPref, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
   const { ready, missing, provisional } = isReady(draft, input);
@@ -753,13 +762,18 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const high = dups.find((d) => d.level === "high");
   if (high) {
     const added = await appendSourceUrl(db, high.lotteryId, q.url);
+    // 注意付きで登録した抽選は、新しい情報で不足を補い、相違を再評価する（値のある項目・手動編集した抽選は上書きしない）（Stage 7A）
+    const completed = await autoCompleteLottery(db, high.lotteryId, input, { official: mySource.kind === "official_site" || mySource.kind === "official_x", now: deps.now }).catch(() => null);
     await supersede("duplicate", high.lotteryId);
-    await finish("completed", { status: "duplicate", lottery_id: high.lotteryId, reasons: [high.reason, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due }, { duplicates: 1 });
+    await finish("completed", { status: "duplicate", lottery_id: high.lotteryId, reasons: [high.reason, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です", ...(completed?.updated ? [`注意付きの抽選を自動補完しました: ${completed.filled.join("・") || "注意の再評価"}`] : [])], draft: stored, ...due }, { duplicates: 1, ...(completed?.updated ? { updated_existing: 1 } : {}) });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   if (ev.verdict === "exclude") {
     await supersede("excluded");
-    await finish("skipped", { status: "excluded", reasons: ev.reasons, draft: stored, ...due }, { excluded: 1 });
+    // 対象外の地域による自動除外は、情報元・日時・判定した地域・理由・根拠を残す（候補は削除せず、除外一覧から確認・戻せる）
+    const byRegion = isRegionReason(ev.reasons) && !!region.prefecture;
+    const storedEx = byRegion ? ({ ...(stored as object), exclusion: regionExclusionOf(region, { at: nowIso, source: q.url, reason: ev.reasons.join("・") }) } as unknown as Json) : stored;
+    await finish("skipped", { status: "excluded", reasons: byRegion ? [...ev.reasons, `判定根拠: ${region.note}`] : ev.reasons, draft: storedEx, ...due }, { excluded: 1, ...(byRegion ? { excluded_region: 1 } : {}) });
     return { usedAi: true, registered: false, aiFailed: false };
   }
   // 予告・一部判明の告知に、抽選の文言が無い（新商品の発売予定などの告知）ときは、抽選予告として扱わない
@@ -770,7 +784,10 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 受付前の予告は除外しない。詳細が確定していれば通常の登録対象、未発表なら再調査として保持する
   const stageGap = !ready && (stage === "teaser" || stage === "partial") ? [`${STAGE_LABEL[stage]}: 応募の日時が未発表または不明です`] : [];
   const reasons = [...(conflict ? [conflict] : []), ...stageGap, ...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
-  const canRegisterNow = ev.verdict === "match" && ready && dups.length === 0 && !conflict;
+  // 登録の判定（Stage 7A）: A=十分 → 通常登録 / B=情報不足・軽微な矛盾 → 注意付きで登録 / C=抽選として成立するか判断できない → 確認待ち
+  const chainRow = data.chains.find((x) => x.id === input.chain.id);
+  const decision = decideRegistration({ input, verdict: ev.verdict, verdictReasons: ev.reasons, missing, fields: myFields, duplicateCount: dups.length, stage, modePending: draft.modePending, textConflict: typeof conflictText === "string" ? conflictText : null, chainStoreSelectDefault: !!chainRow?.storeSelectDefault, storeResolved: !missing.some((m) => /店舗を確実に特定できません/.test(m)), now: nowIso });
+  const canRegisterNow = (ev.verdict === "match" || ev.verdict === "review") && decision.grade !== "C";
   // 追跡する予告（受付前・詳細未発表）: 要手動確認へ送らず、続報を待って保持する。受付開始が近いほど短い間隔で再確認する
   if (wantTrack && !canRegisterNow) {
     const dueAtT = due ? new Date(due.due_at) : null;
@@ -787,15 +804,23 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   if (canRegisterNow) {
     if (autoRegister && (deps.canRegister || deps.serviceRegister)) {
+      // 店舗を特定できないときの補正（系列の「店舗選択式を基本とする」設定、または仮の店舗名）。推測で店舗を決めない
+      if (decision.patch?.storeMode === "select_on_apply") {
+        const ph = data.stores.find((s) => s.chainId === input.chain.id && s.name === SELECT_STORE_PLACEHOLDER);
+        input.storeMode = "select_on_apply";
+        input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
+      } else if (decision.patch?.store) input.store = decision.patch.store;
       const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister });
       if (saved.ok) {
-        // 自動収集の印。NEW表示は新規に把握した時点を基準にする
-        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto" }).eq("id", saved.value.id);
+        // 自動収集の印。NEW表示は新規に把握した時点を基準にする。注意付きの登録は、注意情報（項目別・理由別）と信頼度を保存する
+        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: decision.cautions as unknown as Json, confidence: decision.confidence, cautions_updated_at: nowIso }).eq("id", saved.value.id);
         // 店舗の都道府県が空のままにならないよう、確実な根拠のある都道府県だけを補う（既に入っている値は変えない）
         await fillStorePrefecture(db, saved.value.id, input.receiveMethod === "shipping" ? "" : knownPref);
         const storedReg = trackingObj ? ({ ...(stored as object), tracking: { ...trackingObj, promotedAt: nowIso, promotedLotteryId: saved.value.id } } as unknown as Json) : stored;
         await supersede("registered", saved.value.id);
-        await finish("completed", { status: "auto_registered", triage: "auto_register", triage_reason: "条件に一致し、情報が十分なため自動登録", lottery_id: saved.value.id, reasons: [provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: storedReg, ...due }, { registered_new: 1, provisional_registered: provisional.length > 0 ? 1 : 0 });
+        const withCaution = decision.grade === "B";
+        const storedCaution = withCaution ? ({ ...(storedReg as object), cautions: decision.cautions, confidence: decision.confidence } as unknown as Json) : storedReg;
+        await finish("completed", { status: "auto_registered", triage: "auto_register", triage_reason: withCaution ? "注意付きで自動登録（不足・相違は注意として記録）" : "条件に一致し、情報が十分なため自動登録", lottery_id: saved.value.id, reasons: [...(withCaution ? [`注意付きで自動登録しました: ${decision.cautions.map((x) => x.message.replace(/（.*$/, "")).join("／")}`] : []), provisional.length > 0 ? `条件に一致したため自動登録しました（未登録の${provisional.join("・")}は仮登録。マスター管理で確認できます）` : "条件に一致し、情報が十分なため自動登録しました", ...(secondary.length > 0 ? [`${secondary.join("・")}は二次情報（まとめサイト）です`] : [])], draft: storedCaution, ...due }, { registered_new: 1, registered_caution: withCaution ? 1 : 0, provisional_registered: provisional.length > 0 ? 1 : 0 });
         return { usedAi: true, registered: true, aiFailed: false };
       }
       // 登録の失敗はシステム側で解決できない → 要手動確認
@@ -814,7 +839,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   if (hd.triage === "auto_exclude") {
     await finish("skipped", { status: "excluded", fail_kind: "expired", reasons: [hd.reason, ...gaps.slice(0, 3)], draft: stored, ...triagePatch(hd, c, deps.now), ...due }, { excluded: 1 });
   } else {
-    await finish("review", { status: "pending", reasons: [...gaps, hd.reason].slice(0, 10), draft: { ...(stored as object), queued: { ...q, changed: false } } as unknown as Json, ...triagePatch(hd, c, deps.now), ...due }, { review_added: 1 });
+    // 確認待ちになった理由を分類して、日別に集計する（主な確認待ち理由）
+    const reasonCounts = Object.fromEntries(classifyReviewReasons([...gaps, hd.reason, ...decision.blockers]).map((k) => [k, 1]));
+    await finish("review", { status: "pending", reasons: [...gaps, hd.reason].slice(0, 10), draft: { ...(stored as object), queued: { ...q, changed: false } } as unknown as Json, ...triagePatch(hd, c, deps.now), ...due }, { review_added: 1, reasons: reasonCounts });
   }
   return { usedAi: true, registered: false, aiFailed: false };
 }

@@ -1,6 +1,9 @@
 import { deadlinePassed, evaluateCandidate, type CollectionConditions } from "@/lib/collector/conditions";
 import { tcgTextsOf } from "@/lib/collector/category";
-import { prefectureOf } from "@/lib/geo";
+import { decideRegistration, type RegistrationDecision } from "@/lib/collector/attention";
+import type { FieldMap } from "@/lib/collector/fields";
+import { isRegionReason, judgeRegion, regionExclusionOf, type RegionExclusion } from "@/lib/collector/region";
+import { classifyStage } from "@/lib/collector/stage";
 import { findDuplicates, matchChain, matchProduct, matchStore, type LotteryDraft, type MatchKind } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
@@ -130,6 +133,10 @@ export interface Judgement {
   missing: string[];
   deadline: "past" | "open" | "unknown";
   improved: boolean;
+  /** 登録の判定（Stage 7A）。action=register のとき、A=通常登録／B=注意付き登録 */
+  decision?: RegistrationDecision;
+  /** 地域外として除外するときの記録（Stage 7A） */
+  exclusion?: RegionExclusion;
 }
 
 /** 締切までの日数（日）。不明は null */
@@ -170,18 +177,25 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
   const dist = store ? storeDistance(data, store) : null;
   const dr = stored as unknown as { listInfo?: { title?: string; card?: string; context?: string }; xpost?: { text?: string; quoted?: { text?: string } } };
   const texts = tcgTextsOf({ title: c.title, card: dr.listInfo?.card, context: dr.listInfo?.context, postText: dr.xpost?.text, quotedText: dr.xpost?.quoted?.text });
-  const ev = evaluateCandidate(input, cond, { texts, prefecture: store?.prefecture || (store?.address ? (prefectureOf(store.address) ?? "") : "") || input.store.prefecture || "", storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now });
-  if (ev.verdict === "exclude") return { ...base, cls: "F", action: "exclude", reasons: [`収集条件の対象外です（${ev.reasons.join("・")}）`], priority: 6, missing: [] };
+  const region = judgeRegion({ masterPrefecture: store?.prefecture, address: store?.address, storeName: input.store.id ? "" : input.store.name, statedPrefecture: input.store.prefecture });
+  const ev = evaluateCandidate(input, cond, { texts, prefecture: region.prefecture, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now });
+  if (ev.verdict === "exclude") {
+    const exclusion = isRegionReason(ev.reasons) && region.prefecture ? regionExclusionOf(region, { at: now.toISOString(), source: c.source_url ?? "", reason: ev.reasons.join("・") }) : undefined;
+    return { ...base, cls: "F", action: "exclude", reasons: [`収集条件の対象外です（${ev.reasons.join("・")}）`], priority: 6, missing: [], exclusion };
+  }
 
   const draftLike = { input, summary: rm.summary, candidates: rm.candidates, modePending: !!stored.modePending } as unknown as LotteryDraft;
-  const { ready, missing } = isReady(draftLike, input);
+  const { missing } = isReady(draftLike, input);
   const days = daysToDeadline(c, input, now);
   const soon = days !== null && days <= 3 ? 0 : 1;
-  const hasWarnings = (stored.warnings ?? []).length > 0;
-
   const hasConflict = Object.values(stored.fields ?? {}).some((f) => f?.state === "conflict");
-  if (ready && ev.verdict === "match" && !hasWarnings && !hasConflict) {
-    return { ...base, cls: rm.improved ? "B" : "A", action: "register", reasons: [rm.improved ? "新しいマスター照合で系列・店舗・商品を確実に特定できたため、AI再解析なしで登録しました" : "情報が十分で既存の抽選と重複しないため登録しました"], priority: soon === 0 ? 1 : rm.improved ? 2 : 4, missing: [] };
+  // 登録の判定（Stage 7A）: A=十分 → 通常登録 / B=情報不足・軽微な矛盾 → 注意付きで登録 / C=抽選として成立するか判断できない → 確認待ち
+  const textConflict = (stored.warnings ?? []).find((w) => /矛盾|食い違/.test(w)) ?? null;
+  const chainRow = data.chains.find((x) => x.id === input.chain.id);
+  const decision = decideRegistration({ input, verdict: ev.verdict, verdictReasons: ev.reasons, missing, fields: (stored.fields ?? {}) as FieldMap, duplicateCount: dups.length, stage: classifyStage(input, new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now)), modePending: !!stored.modePending, textConflict, chainStoreSelectDefault: !!chainRow?.storeSelectDefault, storeResolved: !missing.some((m) => /店舗を確実に特定できません/.test(m)), now: now.toISOString() });
+  if (!stored.tracking && ev.verdict !== "upcoming" && (ev.verdict === "match" || ev.verdict === "review") && decision.grade !== "C") {
+    const why = decision.grade === "A" ? (rm.improved ? "新しいマスター照合で系列・店舗・商品を確実に特定できたため、AI再解析なしで登録しました" : "情報が十分で既存の抽選と重複しないため登録しました") : `不足・相違は注意として記録し、注意付きで登録しました（${decision.cautions.map((x) => x.message.replace(/（.*$/, "")).slice(0, 3).join("／")}）`;
+    return { ...base, cls: rm.improved ? "B" : "A", action: "register", reasons: [why], priority: soon === 0 ? 1 : rm.improved ? 2 : 4, missing: [], decision };
   }
 
   // 情報源間で食い違う項目がある: 自動では確定せず、確認待ちに残す（情報は揃っていても矛盾あり）

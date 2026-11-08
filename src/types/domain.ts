@@ -83,6 +83,8 @@ export interface Chain {
   operationKind?: "direct" | "other" | "unconfirmed" | null;
   /** BOX販売形態の目安（系列ごと。抽選に応募するかの参考で、実際の受取状態ではない）。未設定は null */
   boxShrinkHint?: BoxShrinkHint | null;
+  /** 店舗選択式の抽選を基本とする系列（Stage 7A）。店舗を特定できない抽選を店舗選択式として扱う目安。個別の抽選・告知の明示情報が優先 */
+  storeSelectDefault?: boolean;
 }
 
 export interface Store {
@@ -286,6 +288,10 @@ export interface Lottery {
   createdAt: string;
   /** 初期値のまま保存された（確認していない）項目名。ユーザーが選び直すと外れる */
   unconfirmedFields?: string[];
+  /** 注意付き自動登録の注意情報（Stage 7A）。項目別・理由別。注意が無ければ空 */
+  cautions?: import("@/lib/collector/attention").Caution[];
+  /** 信頼度（内部管理） */
+  confidence?: import("@/lib/collector/attention").Confidence | null;
   /** 最終更新（他端末での更新を検出するため）。モックでは未設定 */
   updatedAt?: string;
 }

@@ -217,7 +217,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
     expect(c.reasons.join()).toContain("商品確認待ち");
   });
 
-  it("11) 情報に矛盾（画像同士の食い違い）がある告知は、自動登録せず利用者の判断にする", async () => {
+  it("11) 情報に矛盾（画像同士の食い違い）がある告知は、確認待ちにせず注意付きで自動登録し、矛盾を注意として残す（Stage 7A）", async () => {
     plan = { chain: "テスト玩具6C", product: "6C商品", store: "本店", start: jst(-1, 10), deadline: jst(9, 23, 59) };
     const base = extractor.extract;
     extractor.extract = async (r: never) => {
@@ -228,8 +228,11 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
     await run();
     extractor.extract = base;
     const c = await cand("conf");
-    expect(c.status).not.toBe("auto_registered");
-    expect(c.triage).toBe("manual");
-    expect(c.reasons.join()).toContain("矛盾");
+    expect(c.status).toBe("auto_registered");
+    expect(c.reasons.join()).toContain("注意付き");
+    const lot = (await sys.from("lotteries").select("cautions,confidence").eq("id", c.lottery_id!).single()).data as unknown as { cautions: { code: string; message: string }[]; confidence: string };
+    const tc = lot.cautions.find((x) => x.code === "text_conflict");
+    expect(tc?.message).toContain("矛盾");
+    expect(lot.confidence).toBe("conflict");
   });
 });

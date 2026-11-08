@@ -171,7 +171,7 @@ export async function runMergePass(deps: CollectDeps, opts: { execute: boolean; 
   await bumpStats(db, householdId, now, { excluded: applied.size });
   // 統合後の登録判定（AIなし。登録条件を満たし、矛盾が無ければ既存の再評価が登録する）
   const re = appliedCarriers.length > 0 ? await runReevaluation(deps, { execute: true, aiMax: 0, ids: appliedCarriers, budgetMs: 40_000 }).catch(() => null) : null;
-  report.reeval = re && re.ok ? { registered: re.counts.registered ?? 0, duplicate: re.counts.duplicate ?? 0, excluded: (re.counts.excluded_past ?? 0) + (re.counts.excluded_offtarget ?? 0), review: re.counts.review ?? 0 } : null;
+  report.reeval = re && re.ok ? { registered: (re.counts.registered ?? 0) + (re.counts.registered_caution ?? 0), duplicate: re.counts.duplicate ?? 0, excluded: (re.counts.excluded_past ?? 0) + (re.counts.excluded_offtarget ?? 0), review: re.counts.review ?? 0 } : null;
   return report;
 }
 

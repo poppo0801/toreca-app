@@ -55,7 +55,7 @@ describe("地域・通販・距離", () => {
   it("対象6都府県の店頭は一致、対象外は除外、都道府県不明は要確認", () => {
     for (const p of DEFAULT_PREFECTURES) expect(ev({}, {}, { prefecture: p }).verdict, p).toBe("match");
     expect(ev({}, {}, { prefecture: "北海道" }).verdict).toBe("exclude");
-    expect(ev({}, {}, { prefecture: "" }).verdict).toBe("review");
+    expect(ev({ store: { id: "s1", name: "サンプル店", prefecture: "" } }, {}, { prefecture: "" }).verdict).toBe("review");
   });
   it("通販・発送の抽選は全国対象（都道府県を問わない）。『通販を含まない』なら除外。Web応募でも通販にはならない", () => {
     expect(ev({ receiveMethod: "shipping" }, {}, { prefecture: "北海道" }).verdict).toBe("match");
@@ -71,8 +71,10 @@ describe("地域・通販・距離", () => {
     const r = ev({ receiveMethod: "unknown" });
     expect(r.verdict).toBe("match");
     expect(r.reasons.join("")).toContain("受取方法は未確認");
-    expect(ev({ receiveMethod: "unknown" }, {}, { prefecture: "" }).verdict).toBe("review");
-    expect(ev({ receiveMethod: "unknown" }, {}, { prefecture: "北海道" }).verdict).toBe("review");
+    expect(ev({ receiveMethod: "unknown", store: { id: "s1", name: "サンプル店", prefecture: "" } }, {}, { prefecture: "" }).verdict).toBe("review");
+    // 特定の1店舗の抽選で地域が対象外と分かれば、受取方法が不明でも除外する（Stage 7A）。店舗が特定できない（店舗名なし）ときは要確認のまま
+    expect(ev({ receiveMethod: "unknown" }, {}, { prefecture: "北海道" }).verdict).toBe("exclude");
+    expect(ev({ receiveMethod: "unknown", store: { id: null, name: "", prefecture: "" } }, {}, { prefecture: "北海道" }).verdict).toBe("review");
     expect(ev({ receiveMethod: "unknown" }, { maxDistanceKm: 10 }, { distanceKm: 50 }).verdict).toBe("exclude");
   });
   it("距離制限: 超えたら除外、位置不明は要確認（0kmにしない）、通販には適用しない", () => {

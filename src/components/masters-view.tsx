@@ -8,6 +8,7 @@ import { ChainLogo } from "@/components/chain-logo";
 import { ChainLogoButton } from "@/components/chain-logo-manager";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
 import { ChainDeleteButton, ChainMergeButton } from "@/components/chain-merge-dialog";
+import { ChainStoreSelectToggle } from "@/components/chain-store-select-toggle";
 import { ProductDeleteButton, ProductMergeButton } from "@/components/product-merge-dialog";
 import { SetCompositionButton } from "@/components/product-set-dialog";
 import { normName } from "@/lib/norm";
@@ -418,6 +419,7 @@ function MasterItem({
           <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline">編集</Button>} />
           {entity.key === "chains" && (
             <RowMenu label={`${title}のその他の操作`}>
+              <ChainStoreSelectToggle chainId={row.id} name={String(row.name)} on={row.store_select_default === true} />
               <ChainMergeButton chainId={row.id} name={String(row.name)} />
               <ChainDeleteButton chainId={row.id} name={String(row.name)} />
             </RowMenu>

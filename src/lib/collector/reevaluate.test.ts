@@ -79,7 +79,7 @@ describe("judge（再評価の分類）", () => {
     const j = run(cand(stored(input())))!;
     expect(j.action).toBe("register");
     expect(j.cls).toBe("B");
-    expect(j.reasons[0]).toContain("AI再解析なし");
+    expect(j.reasons[0]).toMatch(/AI再解析なし|注意付きで登録/);
   });
   it("解析時に既に特定済みで条件を満たす候補はA", () => {
     const d = data();
@@ -140,9 +140,13 @@ describe("judge（再評価の分類）", () => {
     const j = run(cand(stored(input({ chain: { id: null, name: "まったく存在しない系列XYZ" }, store: { id: null, name: "", prefecture: "" } }), { warnings: [] })))!;
     expect(j.action).not.toBe("requeue");
   });
-  it("解析時の注意（矛盾など）が残る候補は自動登録しない", () => {
-    const j = run(cand(stored(input(), { warnings: ["結果発表日が本文と受付欄で異なります"] })))!;
-    expect(j.action).not.toBe("register");
+  it("解析時の軽微な注意は注意付きで登録し、抽選の存在自体に関わる矛盾は登録しない（Stage 7A）", () => {
+    const minor = run(cand(stored(input(), { warnings: ["結果発表日が本文と受付欄で矛盾しています"] })))!;
+    expect(minor.action).toBe("register");
+    expect(minor.decision?.grade).toBe("B");
+    expect(minor.decision?.cautions.map((x) => x.code)).toContain("text_conflict");
+    const serious = run(cand(stored(input(), { warnings: ["別の抽選の情報が混ざっていて矛盾しています"] })))!;
+    expect(serious.action).not.toBe("register");
   });
   it("更新の提案・解析結果のない候補は対象外（null）", () => {
     expect(run(cand(stored(input(), { update: { changes: [] } })))).toBeNull();

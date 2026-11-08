@@ -2070,6 +2070,7 @@ export type Database = {
           memo: string
           name: string
           operation_kind: string | null
+          store_select_default: boolean
           updated_at: string
           updated_by_profile_id: string | null
         }
@@ -2087,6 +2088,7 @@ export type Database = {
           memo?: string
           name: string
           operation_kind?: string | null
+          store_select_default?: boolean
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -2104,6 +2106,7 @@ export type Database = {
           memo?: string
           name?: string
           operation_kind?: string | null
+          store_select_default?: boolean
           updated_at?: string
           updated_by_profile_id?: string | null
         }
@@ -2312,14 +2315,17 @@ export type Database = {
           discovered_new: number
           duplicates: number
           excluded: number
+          excluded_region: number
           failed_jobs: number
           household_id: string
           input_tokens: number
           output_tokens: number
           provisional_registered: number
           queue_remaining: number | null
+          registered_caution: number
           registered_new: number
           review_added: number
+          review_reasons: Json
           updated_at: string
           updated_existing: number
           x_posts_manual: number
@@ -2336,14 +2342,17 @@ export type Database = {
           discovered_new?: number
           duplicates?: number
           excluded?: number
+          excluded_region?: number
           failed_jobs?: number
           household_id: string
           input_tokens?: number
           output_tokens?: number
           provisional_registered?: number
           queue_remaining?: number | null
+          registered_caution?: number
           registered_new?: number
           review_added?: number
+          review_reasons?: Json
           updated_at?: string
           updated_existing?: number
           x_posts_manual?: number
@@ -2360,14 +2369,17 @@ export type Database = {
           discovered_new?: number
           duplicates?: number
           excluded?: number
+          excluded_region?: number
           failed_jobs?: number
           household_id?: string
           input_tokens?: number
           output_tokens?: number
           provisional_registered?: number
           queue_remaining?: number | null
+          registered_caution?: number
           registered_new?: number
           review_added?: number
+          review_reasons?: Json
           updated_at?: string
           updated_existing?: number
           x_posts_manual?: number
@@ -3494,8 +3506,11 @@ export type Database = {
           archived_at: string | null
           box_shrink_hint: string | null
           campaign_id: string | null
+          cautions: Json
+          cautions_updated_at: string | null
           chain_id: string
           conditions_text: string
+          confidence: string | null
           confirmed_at: string | null
           confirmed_by_profile_id: string | null
           created_at: string
@@ -3560,8 +3575,11 @@ export type Database = {
           archived_at?: string | null
           box_shrink_hint?: string | null
           campaign_id?: string | null
+          cautions?: Json
+          cautions_updated_at?: string | null
           chain_id: string
           conditions_text?: string
+          confidence?: string | null
           confirmed_at?: string | null
           confirmed_by_profile_id?: string | null
           created_at?: string
@@ -3626,8 +3644,11 @@ export type Database = {
           archived_at?: string | null
           box_shrink_hint?: string | null
           campaign_id?: string | null
+          cautions?: Json
+          cautions_updated_at?: string | null
           chain_id?: string
           conditions_text?: string
+          confidence?: string | null
           confirmed_at?: string | null
           confirmed_by_profile_id?: string | null
           created_at?: string
@@ -6306,6 +6327,7 @@ export type Database = {
         Returns: Json
       }
       merge_chains: { Args: { p_from: string; p_into: string }; Returns: Json }
+      merge_counts: { Args: { a: Json; b: Json }; Returns: Json }
       merge_products: {
         Args: {
           p_actor: string

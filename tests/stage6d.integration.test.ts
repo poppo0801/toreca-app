@@ -116,7 +116,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     expect(l[0].conditions_text).toContain("会員登録");
   });
 
-  it("2) 情報源間で食い違う項目（受取方法）は、どちらにも決めず矛盾として記録し、自動登録せず確認待ちに残す。情報充実度は下げない", async () => {
+  it("2) 情報源間で食い違う項目（受取方法）は、どちらにも決めず矛盾として記録し、注意付きで自動登録する（Stage 7A）。情報充実度は下げない", async () => {
     plan = { chain: "統合系列6D", store: "本店", product: "6D商品2", deadline: jst(6, 23, 59), receive: "store" };
     await sys.from("products").insert({ household_id: hid, official_name: "6D商品2", packs_per_box: 20 });
     // 先の候補は応募方法が不明のため登録できない…ではなく、ここでは締切が無い候補で保留にする
@@ -127,12 +127,16 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     await addX("911000002", "q6d_official", "統合系列6D 本店で6D商品2の抽選受付中（配送でお届け）");
     await run();
     const b = await candBy("x:911000002");
-    expect(b.status).toBe("pending");
+    // 受取方法の食い違いは応募機会の把握に致命的ではないため、確認待ちにせず注意付きで登録する（どちらの値かは決めず、矛盾として記録して注意に残す）
+    expect(b.status).toBe("auto_registered");
     expect(dr(b).fields?.receiveMethod?.state).toBe("conflict");
     expect(dr(b).assessment?.conflict).toContain("受取方法");
     expect(["A", "B"]).toContain(dr(b).assessment?.rank); // 情報は揃っている（ランクは下げず、矛盾を別に示す）
-    expect(b.reasons.join()).toContain("食い違う項目");
-    expect((await lots()).length).toBe(1); // 登録されない（1件目のみ）
+    expect(b.reasons.join()).toContain("注意付き");
+    const cautions = ((await sys.from("lotteries").select("cautions,confidence").eq("id", b.lottery_id!).single()).data as unknown as { cautions: { code: string }[]; confidence: string });
+    expect(cautions.cautions.map((c) => c.code)).toContain("conflict_receiveMethod");
+    expect(cautions.confidence).toBe("conflict");
+    expect((await lots()).length).toBe(2); // 1件目と、注意付きで登録された2件目
   });
 
   it("3) 補足投稿（応募条件だけを説明する投稿）は、引用元の投稿で対象が一意に特定できれば、商品・締切が無くても既存候補へ補完する", async () => {
@@ -158,6 +162,11 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
   });
 
   it("4) 補足投稿の対象が複数あって一意に決まらない場合は、自動補完せず関連候補として記録する（同じアカウントというだけでは統合しない）", async () => {
+    // 同じ公式アカウント・同じ系列で、追跡中（確認待ち）の候補が複数ある状態にする（別の商品の予告を1件追加。Stage 7A で情報不足の候補は注意付きで登録されるようになったため）
+    await sys.from("products").insert({ household_id: hid, official_name: "6D商品4", packs_per_box: 20 });
+    plan = { chain: "統合系列6D", store: "本店", product: "6D商品4", start: jst(2, 10), result: jst(9, 0) };
+    await addX("911000019", "q6d_official", "統合系列6D 本店で6D商品4の抽選を予告（詳細は後日）");
+    await run();
     plan = { chain: "統合系列6D", store: "本店", product: "6D商品3", start: jst(1, 10), result: jst(9, 0) };
     await addX("911000020", "q6d_official", "統合系列6D 本店で6D商品3の抽選（別の回）");
     await run();

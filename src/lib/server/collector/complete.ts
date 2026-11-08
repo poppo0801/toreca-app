@@ -1,0 +1,75 @@
+import "server-only";
+import { confidenceOf, type Caution } from "@/lib/collector/attention";
+import { planCompletion, type CompletionFields } from "@/lib/collector/complete";
+import { dbToFlex, flexInputToDb, flexToInput, type LotteryInput } from "@/lib/lottery-input";
+import type { Db } from "@/lib/server/lottery-service";
+import type { Json } from "@/types/database";
+
+/**
+ * 注意付きの自動登録の抽選を、新しい情報で自動補完する（Stage 7A）。判定は src/lib/collector/complete.ts（純関数）。
+ * 対象は「自動収集で登録され、注意が残っていて、登録後に手動編集されていない」抽選だけ。
+ *  - 手動編集の判定: 最後の更新が、自動処理による更新（cautions_updated_at）から2分以内であること（利用者が保存し直した抽選は触らない）
+ *  - 値のある項目は上書きしない（締切の暫定採用・公式による更新だけが例外。planCompletion を参照）
+ */
+const MANUAL_EDIT_TOLERANCE_MS = 120_000;
+type FlexCols = { precision: string; date: string | null; at: string | null };
+
+const COLS = {
+  resultDate: ["result_precision", "result_date", "result_at"],
+  applyDeadline: ["apply_deadline_precision", "apply_deadline_date", "apply_deadline_at"],
+  procedureStart: ["procedure_start_precision", "procedure_start_date", "procedure_start_at"],
+  procedureDeadline: ["procedure_deadline_precision", "procedure_deadline_date", "procedure_deadline_at"],
+  receiveStart: ["receive_start_precision", "receive_start_date", "receive_start_at"],
+  receiveDeadline: ["receive_deadline_precision", "receive_deadline_date", "receive_deadline_at"],
+} as const;
+type FlexKey = keyof typeof COLS;
+
+export interface CompleteResult {
+  updated: boolean;
+  filled: string[];
+  skipped?: "not_found" | "not_auto" | "no_cautions" | "manual_edit";
+}
+
+export async function autoCompleteLottery(db: Db, lotteryId: string, incoming: CompletionFields, o: { official: boolean; now: Date }): Promise<CompleteResult> {
+  const { data: row } = await db.from("lotteries").select("*").eq("id", lotteryId).maybeSingle();
+  if (!row) return { updated: false, filled: [], skipped: "not_found" };
+  if (row.source_kind !== "auto" || row.archived_at) return { updated: false, filled: [], skipped: "not_auto" };
+  const cautions = (Array.isArray(row.cautions) ? row.cautions : []) as unknown as Caution[];
+  if (cautions.length === 0) return { updated: false, filled: [], skipped: "no_cautions" };
+  const base = new Date(row.cautions_updated_at ?? row.created_at).getTime();
+  if (new Date(row.updated_at).getTime() - base > MANUAL_EDIT_TOLERANCE_MS) return { updated: false, filled: [], skipped: "manual_edit" };
+
+  const r = row as unknown as Record<string, string | null>;
+  const flex = (k: FlexKey) => flexToInput(dbToFlex(r[COLS[k][0]] ?? "unknown", r[COLS[k][1]] ?? null, r[COLS[k][2]] ?? null));
+  const cur: CompletionFields = {
+    resultDate: flex("resultDate"),
+    applyDeadline: flex("applyDeadline"),
+    procedureStart: flex("procedureStart"),
+    procedureDeadline: flex("procedureDeadline"),
+    receiveStart: flex("receiveStart"),
+    receiveDeadline: flex("receiveDeadline"),
+    receiveMethod: row.receive_method as LotteryInput["receiveMethod"],
+    applyMethod: row.apply_method as LotteryInput["applyMethod"],
+  };
+  const plan = planCompletion(cur, incoming, cautions, { official: o.official, now: o.now.toISOString() });
+  if (Object.keys(plan.patch).length === 0 && !plan.cautionsChanged) return { updated: false, filled: [] };
+
+  const update: Record<string, unknown> = {};
+  for (const k of Object.keys(COLS) as FlexKey[]) {
+    const v = plan.patch[k];
+    if (!v) continue;
+    const db2 = flexInputToDb(v as never) as FlexCols;
+    update[COLS[k][0]] = db2.precision;
+    update[COLS[k][1]] = db2.date;
+    update[COLS[k][2]] = db2.at;
+  }
+  if (plan.patch.receiveMethod) update.receive_method = plan.patch.receiveMethod;
+  if (plan.patch.applyMethod) update.apply_method = plan.patch.applyMethod;
+  const hasConflict = plan.cautions.some((c) => c.code.startsWith("conflict_") || c.code === "deadline_conflict" || c.code === "text_conflict");
+  update.cautions = plan.cautions as unknown as Json;
+  const conf = confidenceOf({}, plan.cautions.length > 0, hasConflict);
+  update.confidence = conf === "single_source" && o.official ? "official" : conf;
+  update.cautions_updated_at = new Date().toISOString();
+  const { error } = await db.from("lotteries").update(update as never).eq("id", lotteryId);
+  return error ? { updated: false, filled: [] } : { updated: true, filled: plan.filled };
+}

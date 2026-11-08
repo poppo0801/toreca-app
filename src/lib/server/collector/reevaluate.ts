@@ -5,6 +5,8 @@ import { rebuildQueued } from "@/lib/collector/queued";
 import { aiAllowance, conditionsFromRow, processQueue, type CollectDeps } from "@/lib/server/collector/run";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service";
+import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
+import { bumpStats } from "@/lib/server/collector/run";
 import type { Json } from "@/types/database";
 
 /**
@@ -13,7 +15,7 @@ import type { Json } from "@/types/database";
  *  - 変更するのは候補の行（status/job_state/reasons/draft）と、条件を満たした候補の新規登録だけ。既存の抽選・応募・当落・購入は変更しない。
  *  - 候補は物理削除しない。変更前の状態は draft.reeval.before に記録し、restoreReevaluation で復元できる。
  */
-export const REEVAL_VERSION = "2026-11-04";
+export const REEVAL_VERSION = "2026-11-08-7a";
 
 export interface ReevalMarker {
   at: string;
@@ -43,7 +45,7 @@ export interface ReevalRow {
   id: string;
   cls: ReevalClass;
   action: string;
-  outcome: "registered" | "duplicate" | "excluded_past" | "excluded_offtarget" | "review" | "failed" | "requeued";
+  outcome: "registered" | "registered_caution" | "duplicate" | "excluded_past" | "excluded_offtarget" | "review" | "failed" | "requeued";
   via?: ReevalMarker["via"];
   reason: string;
   deadline: string;
@@ -133,7 +135,7 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
         continue;
       }
       if (!opts.execute) {
-        note(c, j, j.action === "register" ? "registered" : j.action === "duplicate" ? "duplicate" : j.action === "exclude" ? (j.cls === "E" ? "excluded_past" : "excluded_offtarget") : "review", j.action === "register" ? "rematch" : "rule");
+        note(c, j, j.action === "register" ? (j.decision?.grade === "B" ? "registered_caution" : "registered") : j.action === "duplicate" ? "duplicate" : j.action === "exclude" ? (j.cls === "E" ? "excluded_past" : "excluded_offtarget") : "review", j.action === "register" ? "rematch" : "rule");
         continue;
       }
       const nowIso = now.toISOString();
@@ -143,11 +145,19 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
         note(c, j, "duplicate", "rule");
       } else if (j.action === "exclude") {
         const m = mark(c, j, "rule");
-        await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", reasons: [...j.reasons, "確認待ち候補の再評価で除外（候補は残しています。除外一覧から戻せます）"], draft: newDraft(c, j, {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
+        await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", reasons: [...j.reasons, ...(j.exclusion ? [`判定根拠: ${j.exclusion.note}`] : []), "確認待ち候補の再評価で除外（候補は残しています。除外一覧から戻せます）"], draft: newDraft(c, j, j.exclusion ? { exclusion: j.exclusion } : {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
+        if (j.exclusion) await bumpStats(db, householdId, now, { excluded: 1, excluded_region: 1 });
         note(c, j, j.cls === "E" ? "excluded_past" : "excluded_offtarget", "rule");
       } else if (j.action === "register") {
         const stored = c.draft as StoredDraft;
         const input = { ...j.rematched.input, isManaged: false, applications: [], sourceUrls: [...new Set([...(j.rematched.input.sourceUrls ?? []), ...(c.source_url ? [c.source_url] : [])])].slice(0, 10) };
+        // 店舗を特定できないときの補正（系列の店舗選択式の設定、または仮の店舗名）。推測で店舗を決めない（Stage 7A）
+        const patch = j.decision?.patch;
+        if (patch?.storeMode === "select_on_apply") {
+          const ph = data.stores.find((s) => s.chainId === input.chain.id && s.name === SELECT_STORE_PLACEHOLDER);
+          input.storeMode = "select_on_apply";
+          input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
+        } else if (patch?.store) input.store = patch.store;
         const saved = await saveLottery(db, householdId, null, input, deps.actor, { asService: !deps.canRegister });
         if (!saved.ok) {
           const m = mark(c, j, "rematch");
@@ -155,11 +165,13 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
           note(c, j, "failed", "rematch");
           continue;
         }
-        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto" }).eq("id", saved.value.id);
+        const withCaution = j.decision?.grade === "B";
+        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: (j.decision?.cautions ?? []) as unknown as Json, confidence: j.decision?.confidence ?? null, cautions_updated_at: nowIso }).eq("id", saved.value.id);
+        await bumpStats(db, householdId, now, { registered_new: 1, registered_caution: withCaution ? 1 : 0 });
         const via: ReevalMarker["via"] = markers.get(c.id)?.via ?? (j.cls === "B" ? "rematch" : "rule");
         const m = mark(c, j, via, { registeredLotteryId: saved.value.id });
-        await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: [...j.reasons, "確認待ち候補の再評価で自動登録しました（要チェック・応募記録は作っていません）"], draft: { ...stored, input, summary: j.rematched.summary, reeval: m } as unknown as Json, resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
-        note(c, j, "registered", via);
+        await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: [...j.reasons, "確認待ち候補の再評価で自動登録しました（要チェック・応募記録は作っていません）"], draft: { ...stored, input, summary: j.rematched.summary, ...(withCaution ? { cautions: j.decision?.cautions, confidence: j.decision?.confidence } : {}), reeval: m } as unknown as Json, resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
+        note(c, j, withCaution ? "registered_caution" : "registered", via);
         data = await loadAppData(db, householdId); // 同じ回の中で同じ抽選を二重に登録しない
       } else {
         // keep: 登録はしない。理由を最新にし、再照合で改善した内容を草稿に反映する

@@ -1,6 +1,7 @@
 import type { ExtractedFlex, ExtractedLottery, FieldKey } from "@/lib/ai/extraction";
 import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { normName } from "@/lib/norm";
+import { productNameCandidates, tidyProductName } from "@/lib/product-name";
 import { flexToJstDate } from "@/lib/finance";
 import type { AppData, Chain, Lottery, Product, Store } from "@/types/domain";
 import { splitNotes } from "@/lib/notes";
@@ -221,6 +222,11 @@ export function matchProduct(name: string, code: string, products: Product[]): M
   const names = (p: Product) => [p.officialName, ...p.aliases, ...(p.code ? [p.code] : [])];
   const strict = decide(rankByName(name, active, names, productKey));
   if (strict.kind === "exact" || strict.kind === "alias") return strict;
+  // 装飾語（【再販】・ブランド名・発売日）を除いた名称、括弧内の本体名でも照合する（Stage 7A）。確実な一致（正式名称・別表記）のときだけ既存商品に紐づける
+  for (const cand of productNameCandidates(name).slice(1)) {
+    const m = decide(rankByName(cand, active, names, productKey));
+    if (m.kind === "exact" || m.kind === "alias") return { kind: "alias", item: m.item, candidates: [] };
+  }
 
   // 同一とみなせる根拠が一意にあるときだけ、確実な一致（別名扱い）にする。曖昧なら従来どおり候補にとどめる
   const q = productKey(name);
@@ -336,7 +342,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
     if (hit.item) used.add(hit.item.id);
     itemSummary.push({ name: it.name, kind: hit.kind, matchedName: hit.item?.officialName ?? null });
     return {
-      product: hit.item ? { id: hit.item.id, name: hit.item.officialName } : { id: null, name: it.name },
+      product: hit.item ? { id: hit.item.id, name: hit.item.officialName } : { id: null, name: tidyProductName(it.name) },
       quantity: it.quantity,
       unit: it.unit,
     };

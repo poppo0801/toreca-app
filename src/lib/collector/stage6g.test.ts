@@ -81,6 +81,7 @@ describe("Stage 6G: 店舗名の明示的な地域名", () => {
     const ev = (s: string) => evaluateCandidate(mk(s), cond, { prefecture: "", storeKind: "physical", distanceKm: null, now: NOW }).verdict;
     expect(ev("千葉中央店")).toBe("exclude");
     expect(ev("大阪梅田店")).toBe("match");
-    expect(ev("成田店")).toBe("review");
+    expect(ev("成田店")).toBe("exclude"); // 市区町村名から都道府県（千葉県）を判定する（Stage 7A）
+    expect(ev("ミナト本店")).toBe("review");
   });
 });

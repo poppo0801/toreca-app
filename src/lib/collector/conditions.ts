@@ -4,6 +4,7 @@
  */
 import type { LotteryInput } from "@/lib/lottery-input";
 import { judgeTcg, otherTcgReason, productNamesOf } from "@/lib/collector/category";
+import { judgeRegion, looksMultiStore } from "@/lib/collector/region";
 import { HIDDEN_REQUIREMENT_TAGS, placeInfo, type RequirementTag, type StoreKind } from "@/lib/lottery-taxonomy";
 
 export const DEFAULT_PREFECTURES = ["兵庫県", "大阪府", "京都府", "東京都", "千葉県", "神奈川県"] as const;
@@ -146,7 +147,8 @@ export function prefectureFromStoreName(name: string): string {
 }
 
 export function evaluateCandidate(input: LotteryInput, cond: CollectionConditions, rawCtx: EvalContext): Evaluation {
-  const hinted = rawCtx.prefecture || (input.receiveMethod === "shipping" ? "" : prefectureFromStoreName(input.store?.name ?? ""));
+  // 地域は、店舗マスター・住所・告知の都道府県 → 店舗名の地域名・市区町村名の順に判定する。複数店舗の一覧・曖昧な地名は不明のままにする（Stage 7A）
+  const hinted = rawCtx.prefecture || (input.receiveMethod === "shipping" ? "" : judgeRegion({ storeName: input.store?.name ?? "" }).prefecture);
   const ctx: EvalContext = { ...rawCtx, prefecture: resolveTargetPrefecture(hinted, cond.prefectures) };
   const excluded: string[] = [];
   const review: string[] = [];
@@ -193,7 +195,12 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
     if (!cond.includeOnline) excluded.push("通販・発送の抽選は収集しない設定です");
     else notes.push("通販・発送（全国対象。配送先の制限がないかは告知で確認してください）");
   } else if (recv === "unknown" && !(ctx.prefecture && cond.prefectures.includes(ctx.prefecture))) {
-    review.push("受取方法（店頭・発送）が不明です");
+    // 特定の1店舗（実店舗）の抽選で、その店舗の地域が対象外と分かり、通販・発送の記載もない → 対象地域内の店舗を選べる可能性がないので除外する（Stage 7A）。
+    // 地域が不明・複数店舗の一覧・通販/店舗選択式・店舗名なしは、地域外と断定せず従来どおり要確認にする
+    const sname = (input.store?.name ?? "").trim();
+    const specific = ctx.storeKind === "physical" && input.storeMode !== "select_on_apply" && sname !== "" && !/^(オンライン|通販|ネット通販|ネットショップ|オンラインストア|オンラインショップ|公式オンライン|公式通販|店舗未確認|応募時に店舗選択)$/.test(sname) && !looksMultiStore(sname);
+    if (ctx.prefecture && specific && !cond.prefectures.includes(ctx.prefecture)) excluded.push(`対象外の地域です（${ctx.prefecture}の店舗限定の抽選で、通販・発送の記載がありません）`);
+    else review.push("受取方法（店頭・発送）が不明です");
   } else if (place.canShip && cond.includeOnline && !cond.prefectures.includes(ctx.prefecture)) {
     notes.push("店頭受取の地域は対象外ですが、発送で受け取れます");
   } else if (!ctx.prefecture) {

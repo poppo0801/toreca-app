@@ -110,7 +110,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C 追加: 確認待ち候補の再評�
     const snap0 = await snapshot();
     aiCalls = 0;
     const r = (await runReevaluation(deps(), { execute: true, aiMax: 0 })) as ReevalReport;
-    expect(r.counts).toMatchObject({ excluded_past: 1, registered: 1 });
+    expect(r.counts).toMatchObject({ excluded_past: 1, registered_caution: 1 }); // 当選発表日などが未確認の候補は、注意付きで登録される（Stage 7A）
     expect(aiCalls).toBe(0);
     const past = await cand("past");
     expect(past).toMatchObject({ status: "excluded", job_state: "skipped" });

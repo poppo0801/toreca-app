@@ -22,7 +22,7 @@ interface ReevalResult {
   after?: { review: number };
 }
 
-const OUTCOME_LABEL: Record<string, string> = { registered: "自動登録", duplicate: "重複", excluded_past: "応募期限終了で除外", excluded_offtarget: "対象外で除外", review: "確認待ちのまま", failed: "失敗", requeued: "再解析待ち" };
+const OUTCOME_LABEL: Record<string, string> = { registered: "自動登録", registered_caution: "注意付きで自動登録", duplicate: "重複", excluded_past: "応募期限終了で除外", excluded_offtarget: "対象外で除外", review: "確認待ちのまま", failed: "失敗", requeued: "再解析待ち" };
 const CHUNK = 20;
 
 async function call(body: Record<string, unknown>): Promise<ReevalResult> {

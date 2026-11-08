@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { markLotterySeen } from "@/app/(app)/lotteries/seen-actions";
-import { ExternalLink, Star } from "lucide-react";
+import { ExternalLink, Star, TriangleAlert } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { DuplicateDialog } from "@/components/duplicate-dialog";
 import { LotteryFormDialog } from "@/components/lottery-form";
@@ -223,6 +223,21 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 {!managed && <Chip className="text-muted-foreground">要チェック外</Chip>}
               </div>
             </section>
+
+            {/* 注意付きで自動登録された抽選: 不足・相違している項目と理由（注意が無い抽選には出さない） */}
+            {(lottery.cautions?.length ?? 0) > 0 && (
+              <section aria-label="確認が必要な点" data-testid="caution-section" className="rounded-lg border border-primary-ink/50 px-3 py-2 text-xs">
+                <p className="flex items-center gap-1 font-semibold text-primary-ink">
+                  <TriangleAlert className="size-3.5" aria-hidden="true" />
+                  確認が必要な点
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {lottery.cautions!.map((c) => (
+                    <li key={c.code} data-testid={`caution-${c.code}`}>{c.message}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             {/* 2. 日時（2カラム） */}
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border p-3" aria-label="日時">

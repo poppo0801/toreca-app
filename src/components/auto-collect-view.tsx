@@ -20,6 +20,7 @@ import { HIDDEN_REQUIREMENT_TAGS, REQUIREMENT_TAGS } from "@/lib/lottery-taxonom
 import { RANKS, RANK_LABEL, type Rank } from "@/lib/collector/completeness";
 import type { RowAssess } from "@/lib/collector/assess-row";
 import { filterRows, nextAfter, rankCounts, SORT_LABEL, sortRows, type SortKey } from "@/lib/collector/review-list";
+import { REVIEW_REASON_LABEL } from "@/lib/collector/review-reasons";
 import { cn } from "@/lib/utils";
 
 export interface SourceView {
@@ -102,6 +103,12 @@ export interface StatRow {
   review_added: number;
   queue_remaining: number | null;
   provisional_registered?: number;
+  /** 注意付きで自動登録した件数（登録の内数。Stage 7A） */
+  registered_caution?: number;
+  /** 対象外の地域として自動除外した件数（除外の内数） */
+  excluded_region?: number;
+  /** 確認待ちになった理由の分類ごとの件数 */
+  review_reasons?: Record<string, number>;
   failed_jobs?: number;
   input_tokens: number;
   output_tokens: number;
@@ -461,9 +468,12 @@ export function AutoCollectView({
   const js = (c: CandidateView) => c.job_state ?? "";
   const js2 = (c: CandidateView) => c.job_state ?? "";
   const rate = stats.reduce(
-    (a, r) => ({ total: a.total + r.ai_success, reg: a.reg + r.registered_new, prov: a.prov + (r.provisional_registered ?? 0), review: a.review + r.review_added, dup: a.dup + r.duplicates, excl: a.excl + r.excluded, failed: a.failed + (r.failed_jobs ?? 0) }),
-    { total: 0, reg: 0, prov: 0, review: 0, dup: 0, excl: 0, failed: 0 },
+    (a, r) => ({ total: a.total + r.ai_success, reg: a.reg + r.registered_new, prov: a.prov + (r.provisional_registered ?? 0), review: a.review + r.review_added, dup: a.dup + r.duplicates, excl: a.excl + r.excluded, failed: a.failed + (r.failed_jobs ?? 0), caution: a.caution + (r.registered_caution ?? 0), region: a.region + (r.excluded_region ?? 0) }),
+    { total: 0, reg: 0, prov: 0, review: 0, dup: 0, excl: 0, failed: 0, caution: 0, region: 0 },
   );
+  // 主な確認待ち理由（直近30日）
+  const reasonTotals = stats.reduce<Record<string, number>>((m, r) => { for (const [k, v] of Object.entries(r.review_reasons ?? {})) m[k] = (m[k] ?? 0) + Number(v); return m; }, {});
+  const topReasons = Object.entries(reasonTotals).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const toggleSel = (id: string) => setSel((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const list = candidates.filter((c) =>
     tab === "queued" ? ["pending", "retry", "processing"].includes(js(c)) : tab === "pending" ? js(c) === "review" : tab === "excluded" ? js(c) === "skipped" : tab === "failed" ? js(c) === "failed" : c.status === tab,
@@ -953,8 +963,13 @@ export function AutoCollectView({
             <dd className="font-semibold">
               {rate.total > 0 ? `${Math.round((rate.reg / rate.total) * 100)}%` : "—"}
               <span className="text-[11px] font-normal text-muted-foreground">
-                {" "}30日: 解析{rate.total}→登録{rate.reg}（仮{rate.prov}）／確認待ち+{rate.review}／重複{rate.dup}／対象外{rate.excl}／失敗{rate.failed}
+                {" "}30日: 解析{rate.total}→登録{rate.reg}（仮{rate.prov}・注意付き{rate.caution}）／確認待ち+{rate.review}／重複{rate.dup}／対象外{rate.excl}（地域外{rate.region}）／失敗{rate.failed}
               </span>
+              {topReasons.length > 0 && (
+                <span className="block text-[11px] font-normal text-muted-foreground" data-testid="ops-review-reasons">
+                  主な確認待ち理由: {topReasons.map(([k, n]) => `${REVIEW_REASON_LABEL[k] ?? k} ${n}`).join("／")}
+                </span>
+              )}
             </dd>
           </div>
         </dl>
@@ -1003,9 +1018,9 @@ export function AutoCollectView({
                       <td className="p-1">{r.discovered_new}{r.discovered_initial > 0 && <span className="text-muted-foreground">＋初回{r.discovered_initial}</span>}</td>
                       <td className="p-1">{r.changed}</td>
                       <td className="p-1">{r.duplicates}</td>
-                      <td className="p-1">{r.excluded}</td>
+                      <td className="p-1">{r.excluded}{(r.excluded_region ?? 0) > 0 && <span className="text-muted-foreground">（地域外{r.excluded_region}）</span>}</td>
                       <td className="p-1">{r.ai_calls}（{r.ai_success}/{r.ai_failed}）</td>
-                      <td className="p-1">{r.registered_new}{(r.provisional_registered ?? 0) > 0 && <span className="text-muted-foreground">（{r.provisional_registered}）</span>}</td>
+                      <td className="p-1">{r.registered_new}{(r.provisional_registered ?? 0) > 0 && <span className="text-muted-foreground">（{r.provisional_registered}）</span>}{(r.registered_caution ?? 0) > 0 && <span className="text-muted-foreground"> 注意{r.registered_caution}</span>}</td>
                       <td className="p-1">{r.updated_existing}</td>
                       <td className="p-1">{r.review_added}</td>
                       <td className="p-1">{r.failed_jobs ?? 0}</td>

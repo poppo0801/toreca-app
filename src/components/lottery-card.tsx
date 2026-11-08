@@ -23,6 +23,7 @@ import { announceShort, placeInfo } from "@/lib/lottery-taxonomy";
 import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-summary";
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
+import { CautionMark } from "@/components/caution-mark";
 import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
 import { WonRow } from "@/components/won-actions";
@@ -240,6 +241,7 @@ export function LotteryCard({
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <ChainLogo src={chain?.logoSrc} name={chain?.name ?? ""} className="size-4 my-0 rounded-[4px]" />
                 <span className="min-w-0 truncate">{storeLine}</span>
+                <CautionMark cautions={lottery.cautions} />
                 {display.prefecture && place && <span className="ml-0.5 shrink-0 rounded-full border px-1.5 py-px text-[10px]">{place}</span>}
               </span>
               <ProductLine name={sum.name} extra={sum.extraKinds} />
@@ -298,6 +300,7 @@ export function LotteryCard({
                 {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 whitespace-nowrap rounded-full border bg-input px-1.5 py-px text-[10px] leading-none text-foreground">{place}</span>}
                 {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 whitespace-nowrap rounded-full border border-info px-1.5 py-px text-[10px] leading-none text-info">発送可</span>}
                 {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
+                <CautionMark cautions={lottery.cautions} />
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
               {/* 日時は2種類あっても同じ1行に並べる（FitLineが実測し、余白→字間→行全体の文字サイズの順に詰める） */}

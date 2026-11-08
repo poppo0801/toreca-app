@@ -80,6 +80,8 @@ export interface Conflict {
   label: string;
   a: { value: string; url: string };
   b: { value: string; url: string };
+  /** 応募締切の食い違い: earlier=早い方を暫定採用 / far_apart=日付が離れていて別の抽選・別の意味の可能性（置き換えない） */
+  provisional?: "earlier" | "far_apart";
 }
 
 export interface MergeResult {
@@ -306,14 +308,26 @@ export function mergeSides(carrier: Side, other: Side): MergeResult {
       continue;
     }
     // 同じ出どころ（コピー）の値が違う場合も矛盾として記録する。優先順位が高い値を仮に残す
-    const winner = SOURCE_RANK[osrc.kind] > SOURCE_RANK[csrc.kind] ? "other" : "carrier";
+    let winner: "other" | "carrier" = SOURCE_RANK[osrc.kind] > SOURCE_RANK[csrc.kind] ? "other" : "carrier";
+    // 応募締切が食い違い、公式情報で確定できない（優先順位が同じ）ときは、応募漏れを防ぐため早い方を暫定採用する（確定情報としては扱わない）。
+    // 日付が2週間以上離れているときは別の抽選・別の意味の日付の可能性があるため、早い方への置き換えはしない（Stage 7A）
+    let provisional: Conflict["provisional"];
+    if (k === "applyDeadline" && SOURCE_RANK[osrc.kind] === SOURCE_RANK[csrc.kind]) {
+      const dc = cv.slice(0, 10);
+      const dop = ov.slice(0, 10);
+      const gap = Math.abs(Date.parse(dc) - Date.parse(dop)) / 86_400_000;
+      if (Number.isFinite(gap) && gap <= 14) {
+        provisional = "earlier";
+        winner = dop < dc ? "other" : "carrier";
+      } else if (Number.isFinite(gap)) provisional = "far_apart";
+    }
     if (winner === "other") {
       copyField(k, other.input, input, other.summary, summary);
       fields[k] = { value: ov.slice(0, 120), source: osrc, state: "conflict", origins: op?.origins ?? [osrc.origin], alt: { value: cv.slice(0, 120), source: csrc } };
     } else {
       fields[k] = { ...(cp as FieldProv), state: "conflict", alt: { value: ov.slice(0, 120), source: osrc } };
     }
-    conflicts.push({ field: k, label: FIELD_LABEL[k], a: { value: cv.slice(0, 80), url: csrc.url }, b: { value: ov.slice(0, 80), url: osrc.url } });
+    conflicts.push({ field: k, label: FIELD_LABEL[k], a: { value: cv.slice(0, 80), url: csrc.url }, b: { value: ov.slice(0, 80), url: osrc.url }, ...(provisional ? { provisional } : {}) });
   }
   // 情報源URLの統合（上限10件）
   input.sourceUrls = [...new Set([...(input.sourceUrls ?? []), ...(other.input.sourceUrls ?? [])])].slice(0, 10);
