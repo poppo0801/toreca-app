@@ -100,7 +100,7 @@ export function AiSupplementDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] max-w-xl overflow-y-auto" data-testid="ai-supplement">
+      <DialogContent className="max-w-xl overflow-y-auto" data-testid="ai-supplement">
         <DialogTitle className="flex items-center gap-2">
           <Sparkles className="size-4 text-primary-ink" aria-hidden="true" />
           AIで情報を補完

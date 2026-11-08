@@ -3,7 +3,7 @@
  * 方針: 一時的な通信失敗は部分的に再取得する。全画面の再読み込みは最終手段で、回数制限をかけ、入力中（ダイアログ表示中）は行わない。
  */
 
-export type ErrorKind = "chunk" | "skew" | "network" | "timeout" | "auth" | "other";
+export type ErrorKind = "chunk" | "skew" | "network" | "timeout" | "auth" | "other" | "terminated" | "discarded";
 
 const text = (e: unknown): string => {
   if (e instanceof Error) return `${e.name} ${e.message}`;

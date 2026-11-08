@@ -55,7 +55,7 @@ function SetCompositionDialog({ productId, name, onClose }: { productId: string;
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
+      <DialogContent className="max-w-md overflow-y-auto">
         <DialogTitle>セット構成</DialogTitle>
         <DialogDescription>
           「{name}」に含まれる商品と数量を登録します。構成は参考情報で、このセットを購入しても構成商品の購入金額・数量には加算されません。構成が分からない場合は空のままにしてください。

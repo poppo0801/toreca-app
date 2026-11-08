@@ -158,7 +158,7 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
       {(showSearch || filters.q !== "") && (
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <input type="search" autoFocus={showSearch} value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="商品名" aria-label="BOXを検索" className="h-10 w-full rounded-md border bg-input pl-8 pr-2 text-sm" />
+          <input type="search" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="商品名" aria-label="BOXを検索" className="h-10 w-full rounded-md border bg-input pl-8 pr-2 text-sm" />
         </div>
       )}
       {showFilters && (

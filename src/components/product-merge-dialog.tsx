@@ -163,7 +163,7 @@ function MergeDialog({ fromId, name, onClose }: { fromId: string; name: string; 
 
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto" data-testid="product-merge-dialog">
+      <DialogContent className="max-w-md overflow-y-auto" data-testid="product-merge-dialog">
         <DialogTitle>「{name}」を既存商品に統合</DialogTitle>
         <DialogDescription>同じ商品の重複登録を1つにまとめます。履歴は削除せず、参照を統合先へ付け替えます。</DialogDescription>
         {done ? (

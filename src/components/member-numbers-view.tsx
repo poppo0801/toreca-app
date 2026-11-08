@@ -177,7 +177,7 @@ function EditDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="overflow-y-auto">
         <DialogTitle>{isNew ? "会員番号を追加" : `${chainName(target.chainId)}の会員番号`}</DialogTitle>
         <DialogDescription className="sr-only">会員番号は文字列として保存され、先頭のゼロも保持されます</DialogDescription>
         <div className="space-y-3 text-sm">

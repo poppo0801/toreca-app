@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { clearClientErrorLog, readClientErrorLog } from "@/lib/client-resilience";
 import type { ClientErrorEntry } from "@/lib/resilience";
 
-const KIND: Record<ClientErrorEntry["kind"], string> = { chunk: "古い画面", skew: "バージョン不整合", network: "通信", timeout: "時間切れ", auth: "認証", other: "その他" };
+const KIND: Record<ClientErrorEntry["kind"], string> = { chunk: "古い画面", skew: "バージョン不整合", network: "通信", timeout: "時間切れ", auth: "認証", other: "その他", terminated: "表示中に終了した可能性", discarded: "バックグラウンドで破棄" };
 
 /** この端末の接続・画面エラーの記録（最大30件。Stage 7C）。原因の確認用で、認証情報・個人情報は含まれない */
 export function ClientErrorLog() {

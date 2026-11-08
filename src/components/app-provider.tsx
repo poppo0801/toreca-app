@@ -155,8 +155,16 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   }, [load, pathname]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(timer);
+    // 「いま」の更新（1分ごと）。バックグラウンドの間は動かさず、戻ったときに1回だけ更新する（全画面の再描画を無駄に起こさない）
+    const tick = () => {
+      if (document.visibilityState !== "hidden") setNow(new Date());
+    };
+    const timer = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
 
   const selectProfile = useCallback((id: string) => {

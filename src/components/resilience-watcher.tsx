@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
-import { BUILD_ID, hasUnsavedInput, markResume, recordClientError, tryAutoReload } from "@/lib/client-resilience";
+import { BUILD_ID, hasUnsavedInput, markResume, recordClientError, startLifecycleTracking, touchLifecycle, tryAutoReload } from "@/lib/client-resilience";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { resumeAction } from "@/lib/resilience";
 
@@ -42,6 +42,10 @@ export function ResilienceWatcher() {
     }
   }, []);
 
+  // 前回の終わり方（表示中に終了／バックグラウンドで破棄）の検出と、状態の記録
+  useEffect(() => startLifecycleTracking(() => window.location.pathname), []);
+  useEffect(() => touchLifecycle(), [pathname]);
+
   const resumed = useCallback(async (force = false) => {
     // force: 切断中に復帰して待っていた場合（接続が戻ったので、離れていた時間にかかわらず取得する）
     const hiddenMs = force ? Number.POSITIVE_INFINITY : hiddenAt.current ? Date.now() - hiddenAt.current : 0;
@@ -50,6 +54,8 @@ export function ResilienceWatcher() {
     const action = resumeAction({ hiddenMs, sinceLastLoadMs: Date.now() - lastLoad.current, online: navigator.onLine, loading: busy.current });
     if (action === "wait-online") waitingOnline.current = true;
     if (action !== "refresh") return;
+    // 設定・マスター管理などの画面は、開くたびに自分のデータを取得している。復帰のたびに全データを取り直さない
+    if (window.location.pathname.startsWith("/settings")) return;
     busy.current = true;
     try {
       const d = await reloadRef.current({ silent: true });

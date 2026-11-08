@@ -163,7 +163,7 @@ function ChainMergeDialog({ fromId, name, onClose }: { fromId: string; name: str
 
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto" data-testid="chain-merge-dialog">
+      <DialogContent className="max-w-md overflow-y-auto" data-testid="chain-merge-dialog">
         <DialogTitle>「{name}」を既存系列に統合</DialogTitle>
         <DialogDescription>同じ系列の重複登録を1つにまとめます。履歴は削除せず、店舗・抽選・応募・購入などの参照を統合先へ付け替えます。</DialogDescription>
         {done ? (

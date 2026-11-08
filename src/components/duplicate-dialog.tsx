@@ -33,7 +33,7 @@ export function DuplicateDialog({ lottery, open, onOpenChange }: { lottery: Lott
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="overflow-y-auto">
         <DialogTitle>他店舗に複製</DialogTitle>
         <DialogDescription>
           選んだ店舗ごとに、同じ内容の抽選を独立して登録します。応募・当落は引き継ぎません。実際にその店舗で開催されるか確認してから登録してください。

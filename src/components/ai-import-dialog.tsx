@@ -93,7 +93,7 @@ export function AiImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] max-w-xl overflow-y-auto">
+      <DialogContent className="max-w-xl overflow-y-auto">
         <DialogTitle className="flex items-center gap-2">
           <Sparkles className="size-4 text-primary-ink" aria-hidden="true" />
           AIで読み取る

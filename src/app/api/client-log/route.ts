@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 const entry = z.object({
   at: z.string().max(40),
-  kind: z.enum(["chunk", "skew", "network", "timeout", "auth", "other"]),
+  kind: z.enum(["chunk", "skew", "network", "timeout", "auth", "other", "terminated", "discarded"]),
   path: z.string().max(80),
   afterResume: z.boolean(),
   online: z.boolean(),

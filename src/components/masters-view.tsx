@@ -111,6 +111,9 @@ function GeoStatusBar({ stores }: { stores: Record<string, unknown>[] }) {
   );
 }
 
+/** 一覧を1回に描画する件数 */
+const MASTER_PAGE = 40;
+
 export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[] }) {
   const { profile } = useApp();
   const router = useRouter();
@@ -122,6 +125,8 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [bulkPending, startBulk] = useTransition();
   const entity = ENTITIES[key];
+  // 一覧は40件ずつ描画する（画面のDOM・画像を増やしすぎない。Stage 7D）。表示する種類・検索・絞り込みを変えたら先頭の40件に戻る
+  const [page, setPage] = useState<{ sig: string; n: number }>({ sig: "", n: MASTER_PAGE });
   const bulkable = BULK_KEYS.includes(key) && entity.retire === "archived_at";
 
   // 参照列の表示名を引く辞書
@@ -157,6 +162,8 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
       return [String(r.official_name ?? ""), String(r.product_code ?? ""), ...(aliasByProduct.get(r.id) ?? [])].some((t) => normName(t).includes(nq));
     });
 
+  const pageSig = [key, q, category, codeKind, logoFilter, showRetired].join("|");
+  const shownCount = page.sig === pageSig ? page.n : MASTER_PAGE;
   const pickedRows = visible.filter((r) => selected.has(r.id));
   const toHide = pickedRows.filter((r) => !isRetired(entity, r));
   const toShow = pickedRows.filter((r) => isRetired(entity, r));
@@ -308,10 +315,15 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
       {key === "stores" && <GeoStatusBar stores={rows.stores} />}
 
       <ul className="space-y-2" aria-label={`${entity.label}一覧`}>
-        {visible.map((r) => (
+        {visible.slice(0, shownCount).map((r) => (
           <MasterItem key={r.id} entity={entity} row={r} rows={rows} names={names} rules={rules} manage={bulkable && manage} selected={selected.has(r.id)} onSelect={() => toggleSel(r.id)} />
         ))}
       </ul>
+      {visible.length > shownCount && (
+        <Button variant="outline" className="w-full" onClick={() => setPage({ sig: pageSig, n: shownCount + MASTER_PAGE })} data-testid="masters-more">
+          もっと見る（{shownCount}/{visible.length}）
+        </Button>
+      )}
       {visible.length === 0 && (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
           {key === "chains" && logoFilter === "nologo" ? "ロゴ未登録の系列はありません。" : `${entity.label}はまだ登録されていません。「＋ 追加」から登録してください。`}
@@ -549,7 +561,7 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
         {trigger}
       </span>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+        <DialogContent className="overflow-y-auto">
           <DialogTitle>
             {entity.label}を{record ? "編集" : "追加"}
           </DialogTitle>
@@ -715,7 +727,7 @@ function RulesDialog({ profile, chains, stores, rules }: { profile: Row; chains:
         応募対象
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+        <DialogContent className="overflow-y-auto">
           <DialogTitle>{String(profile.label)} の応募対象</DialogTitle>
           <DialogDescription>
             「許可」を1つでも選ぶと許可リスト方式（許可した系列・店舗のみが応募漏れの対象）になります。「除外」は常に対象外です。すべて「指定なし」なら全系列・全店舗が対象です。

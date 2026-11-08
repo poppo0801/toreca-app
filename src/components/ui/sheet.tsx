@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
+import { usePanelFocus } from "@/components/ui/initial-focus";
 
 export const Sheet = DialogPrimitive.Root;
 export const SheetClose = DialogPrimitive.Close;
@@ -23,6 +24,7 @@ export function SheetContent({
   const ref = React.useRef<HTMLDivElement>(null);
   const closeRef = React.useRef<HTMLButtonElement>(null);
   const drag = React.useRef<{ y0: number; t0: number } | null>(null);
+  const focus = usePanelFocus();
 
   const dismiss = () => (onSwipeDismiss ? onSwipeDismiss() : closeRef.current?.click());
   const setTransform = (value: string, transition: string) => {
@@ -65,6 +67,7 @@ export function SheetContent({
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-[fade-in_0.15s_ease-out]" />
       <DialogPrimitive.Content
         ref={ref}
+        {...focus}
         className={cn(
           "fixed inset-x-0 bottom-[var(--kb-inset,0px)] z-50 flex max-h-[calc(100dvh-env(safe-area-inset-top)-0.5rem-var(--kb-inset,0px))] flex-col rounded-t-2xl border border-b-0 bg-card text-card-foreground shadow-[var(--shadow-sheet)] outline-none",
           "data-[state=open]:animate-[sheet-in_0.22s_ease-out] data-[state=closed]:animate-[sheet-out_0.18s_ease-in]",
