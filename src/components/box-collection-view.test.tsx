@@ -64,6 +64,8 @@ function setData(d: Partial<BoxCollectionData>) {
     lots: [],
     movements: [],
     prices: [],
+    market: [],
+    status: [],
     settings: DEFAULT_BOX_SETTINGS,
     importable: [],
     ...d,

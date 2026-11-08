@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { RegisterKindSwitch } from "@/components/register-kind-switch";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { BOX_STATE_LABEL, BOX_STATES, DEFAULT_BOX_SETTINGS, latestPrices, type BoxPriceRow, type BoxSettings, type BoxSummaryRow } from "@/lib/box-collection";
+import { BOX_STATE_LABEL, BOX_STATES, DEFAULT_BOX_SETTINGS, indexMarket, jstDateOf, latestPrices, marketKey, type BoxMarketRow, type BoxPriceRow, type BoxSettings, type BoxSummaryRow } from "@/lib/box-collection";
 import type { ImportableItem } from "@/lib/server/box-collection-service";
 import { jstToday } from "@/lib/ai/extraction";
 import type { ShrinkState } from "@/types/domain";
@@ -215,9 +215,10 @@ export function BoxFormDialog({ onClose, onSaved, onSwitchKind }: { onClose: () 
  * 参考買取相場の更新。所有している商品ごとに基準相場を入力する（無料で使える取得元がないため手動）。
  * 追記方式で過去の値は残る。空欄の商品は変更しない。状態別の実際の相場は、商品の詳細から入力する。
  */
-export function BoxPriceDialog({ rows, prices, onClose, onSaved }: { rows: BoxSummaryRow[]; prices: BoxPriceRow[]; onClose: () => void; onSaved: () => void }) {
+export function BoxPriceDialog({ rows, prices, market = [], onOpenMarket, onClose, onSaved }: { rows: BoxSummaryRow[]; prices: BoxPriceRow[]; market?: BoxMarketRow[]; onOpenMarket?: () => void; onClose: () => void; onSaved: () => void }) {
   const { profile } = useApp();
   const latest = useMemo(() => latestPrices(prices), [prices]);
+  const marketIdx = useMemo(() => indexMarket(market), [market]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [date, setDate] = useState(() => jstToday(new Date()));
   const [source, setSource] = useState("手動");
@@ -246,6 +247,11 @@ export function BoxPriceDialog({ rows, prices, onClose, onSaved }: { rows: BoxSu
       <DialogContent data-testid="box-price-dialog" aria-describedby="box-price-desc">
         <DialogTitle>BOXの相場を更新</DialogTitle>
         <DialogDescription id="box-price-desc">1BOXあたりの参考買取相場（円）。入力した商品だけ更新します。</DialogDescription>
+        {onOpenMarket && (
+          <Button type="button" variant="outline" size="sm" className="mt-2 w-full" onClick={onOpenMarket} data-testid="box-open-market">
+            ポケカ価格比較から取得
+          </Button>
+        )}
         <div className="mt-2 grid grid-cols-2 gap-2">
           <label className="text-sm">
             基準日
@@ -259,11 +265,12 @@ export function BoxPriceDialog({ rows, prices, onClose, onSaved }: { rows: BoxSu
         <ul className="mt-2 max-h-[45dvh] space-y-1.5 overflow-y-auto">
           {rows.map((r) => {
             const cur = latest.get(`${r.productId}|`);
+            const mk = marketIdx.get(marketKey(r.productId, "buyback", "base"));
             return (
               <li key={r.productId} className="flex items-center gap-2 text-sm" data-testid="box-price-row">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px]">{r.name}</span>
-                  <span className="block text-[11px] text-muted-foreground">{cur ? `現在 ${yen(cur.amountYen)}（${cur.confirmedOn.slice(5).replace("-", "/")}）` : "相場 未取得"}</span>
+                  <span className="block text-[11px] text-muted-foreground">{cur ? `現在 ${yen(cur.amountYen)}（${cur.confirmedOn.slice(5).replace("-", "/")}）` : mk ? `取得 ${yen(mk.medianYen)}（${jstDateOf(mk.fetchedAt).slice(5).replace("-", "/")}・${mk.sampleCount === 1 ? "1店舗のみ" : `${mk.sampleCount}店舗`}）` : "相場 未取得"}</span>
                 </span>
                 <input
                   type="text"

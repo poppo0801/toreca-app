@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { isAllowedCondition } from "@/lib/card-condition";
 import { cardInputSchema, holdingInputSchema, priceInputSchema, type CardInput, type HoldingInput, type PriceInput } from "@/lib/collection-input";
-import type { CardRow, OrderRow, FavoriteRow, HoldingRow, MarketPriceRow, PriceRow } from "@/lib/collection";
+import type { CardRow, OrderRow, FavoriteRow, HoldingRow, MarketPriceRow, MarketStatusRow, PriceRow } from "@/lib/collection";
 import { DEFAULT_MULTIPLIERS, validateMultipliers, type ConditionMultipliers } from "@/lib/condition-value";
 import { createClient } from "@/lib/supabase/server";
 
@@ -41,6 +41,12 @@ export interface CollectionData {
   prices: PriceRow[];
   /** 取得した相場（手動の参考相場とは別） */
   market: MarketPriceRow[];
+  /** カードごとの相場の取得状況（取得を試みたもの） */
+  status: MarketStatusRow[];
+  /** 直近の相場更新の結果（失敗の表示用。取得済みの価格は失敗しても消えない） */
+  lastRun: MarketRunInfo | null;
+  /** 相場更新でBOXとして照合する商品の数（商品マスターの有効な件数） */
+  boxProductCount: number;
   favorites: FavoriteRow[];
   /** サムネイルの保存先 → 画像のURL（内容で決まる固定URL） */
   thumbUrls: Record<string, string>;
@@ -50,10 +56,17 @@ export interface CollectionData {
   multipliers: ConditionMultipliers;
 }
 
+export interface MarketRunInfo {
+  ok: boolean;
+  errorKind: string | null;
+  errorMessage: string;
+  at: string;
+}
+
 export async function loadCollectionAction(): Promise<R<{ data: CollectionData }>> {
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const [c, h, p, f, mk, cm, od] = await Promise.all([
+  const [c, h, p, f, mk, cm, od, st, run, pc] = await Promise.all([
     any(db).from("card_masters").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(5000),
     any(db).from("card_holdings").select("*").is("archived_at", null).limit(20000),
     any(db).from("card_prices").select("*").order("confirmed_on", { ascending: false }).limit(20000),
@@ -61,6 +74,9 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
     any(db).from("card_market_prices").select("*").limit(20000),
     any(db).from("condition_multipliers").select("a_pct,b_pct,c_pct").maybeSingle(),
     any(db).from("card_display_orders").select("profile_id,card_id,position").limit(50000),
+    any(db).from("market_status").select("subject_id,status,sale_ok,buyback_ok,reason,checked_at").eq("subject", "card").limit(20000),
+    any(db).from("market_update_runs").select("ok,error_kind,error_message,created_at").order("created_at", { ascending: false }).limit(1),
+    any(db).from("products").select("id", { count: "exact", head: true }).is("archived_at", null),
   ]);
   if (c.error || h.error || p.error || f.error) return fail("コレクションを取得できませんでした");
   const cards: CardRow[] = c.data.map((r: Record<string, unknown>) => ({
@@ -129,7 +145,11 @@ export async function loadCollectionAction(): Promise<R<{ data: CollectionData }
   for (const x of cards) if (x.thumbPath) thumbUrls[x.thumbPath] = thumbUrlOf(x.id, x.thumbPath);
   const orders: OrderRow[] = od.error ? [] : (od.data as { profile_id: string; card_id: string; position: number }[]).map((r) => ({ profileId: r.profile_id, cardId: r.card_id, position: r.position }));
   const multipliers: ConditionMultipliers = !cm.error && cm.data ? { A: cm.data.a_pct, B: cm.data.b_pct, C: cm.data.c_pct } : DEFAULT_MULTIPLIERS;
-  return { ok: true, data: { cards, holdings, prices, market, favorites, thumbUrls, multipliers, orders } };
+  // 取得状況の表が無い・読めない場合も、コレクション自体は表示する
+  const status: MarketStatusRow[] = st.error ? [] : (st.data as Record<string, unknown>[]).filter((r) => ids.has(r.subject_id as string)).map((r) => ({ subjectId: r.subject_id as string, status: r.status as MarketStatusRow["status"], saleOk: !!r.sale_ok, buybackOk: !!r.buyback_ok, reason: (r.reason as string) ?? "", checkedAt: r.checked_at as string }));
+  const lr = !run.error && run.data && run.data.length > 0 ? (run.data[0] as Record<string, unknown>) : null;
+  const lastRun: MarketRunInfo | null = lr ? { ok: !!lr.ok, errorKind: (lr.error_kind as string) ?? null, errorMessage: (lr.error_message as string) ?? "", at: lr.created_at as string } : null;
+  return { ok: true, data: { cards, holdings, prices, market, status, lastRun, boxProductCount: pc.error ? 0 : (pc.count ?? 0), favorites, thumbUrls, multipliers, orders } };
 }
 
 /** 詳細表示用の大きい画像のURL（自世帯のパスだけ） */

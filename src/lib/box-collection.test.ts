@@ -90,7 +90,7 @@ describe("シュリンク状態別の買取評価", () => {
     const latest = latestPrices([price("A", 10000)]);
     expect(unitBuyback("A", "unknown", latest, settings)).toMatchObject({ amount: 10000, basis: "base" });
     expect(unitBuyback("A", "no_shrink", latest, { shrinkPct: 100, noShrinkPct: 70 }).amount).toBe(7000);
-    expect(unitBuyback("Z", "shrink", latest, settings)).toEqual({ amount: null, basis: "none", date: null });
+    expect(unitBuyback("Z", "shrink", latest, settings)).toEqual({ amount: null, basis: "none", date: null, source: null, samples: null });
   });
   it("テラスタルフェスex: シュリンクあり2BOX＋なし1BOXを状態別に評価する", () => {
     const lots = [lot({ id: "l1", productId: "A", marketUnitPrice: 12000 })];

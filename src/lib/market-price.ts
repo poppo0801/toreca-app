@@ -210,8 +210,13 @@ const median = (a: number[]) => {
 export function aggregate(rows: MarketRow[], kind: "sell" | "buy", grade: "A" | "B" | "C" = "A"): PriceStat | null {
   const okCond = grade !== "A" ? GRADE_SELL_CONDITIONS[grade] : kind === "sell" ? SELL_CONDITIONS : BUY_CONDITIONS;
   if (grade !== "A" && kind !== "sell") return null;
+  return aggregateWith(rows, kind, (c) => okCond.has(c) && !/中古/.test(c));
+}
+
+/** 集計の共通処理（カード・BOX）。accept は集計に使う状態の条件。同じ店舗は販売=最安／買取=最高の1件、3店舗以上は外れ値を除外し、中央値を返す */
+export function aggregateWith(rows: MarketRow[], kind: "sell" | "buy", accept: (condition: string) => boolean): PriceStat | null {
   const mine = rows.filter((r) => r.kind === kind);
-  const usable = mine.filter((r) => (kind === "buy" || r.inStock) && okCond.has(r.condition) && !/中古/.test(r.condition));
+  const usable = mine.filter((r) => (kind === "buy" || r.inStock) && accept(r.condition));
   // 店舗ごとに1件（販売=最安／買取=最高）
   const perShop = new Map<string, MarketRow>();
   for (const r of usable) {
@@ -235,7 +240,7 @@ export function aggregate(rows: MarketRow[], kind: "sell" | "buy", grade: "A" | 
     samples: picked.length,
     outliers,
     excluded: mine.length - usable.length,
-    shops: picked.map((r) => ({ shop: r.shop, price: r.price, condition: r.condition, url: r.url, scrapedAt: r.scrapedAt })).sort((a, b) => (kind === "sell" ? a.price - b.price : b.price - a.price)),
+    shops: picked.map((r) => ({ shop: r.shop, price: r.price, condition: r.condition, url: r.url, scrapedAt: r.scrapedAt })).sort((x, y) => (kind === "sell" ? x.price - y.price : y.price - x.price)),
   };
 }
 

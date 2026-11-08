@@ -8,6 +8,7 @@ import { loadBoxCollectionAction } from "@/app/(app)/collection/box-actions";
 import { useApp } from "@/components/app-provider";
 import { BoxFormDialog, BoxImportDialog, BoxMultipliersDialog, BoxPriceDialog } from "@/components/box-dialogs";
 import { BoxDetailSheet } from "@/components/box-detail-sheet";
+import { MarketUpdateDialog } from "@/components/market-update";
 import { ProductThumb } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +54,7 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
   const [showFilters, setShowFilters] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-  const [dialog, setDialog] = useState<"form" | "prices" | "mult" | "import" | null>(null);
+  const [dialog, setDialog] = useState<"form" | "prices" | "mult" | "import" | "market" | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   // 取得の順序を保証し、価格の更新後は取得が終わるまで集計を薄く表示する（useLatestLoader）
@@ -64,7 +65,7 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
   }, [load]);
   useImperativeHandle(ref, () => ({ openRegister: () => setDialog("form"), openPrices: () => setDialog("prices") }), []);
 
-  const rows = useMemo(() => (data ? summarizeBoxes(data.products, data.lots, balancesOf(data.movements), data.prices, data.settings) : []), [data]);
+  const rows = useMemo(() => (data ? summarizeBoxes(data.products, data.lots, balancesOf(data.movements), data.prices, data.settings, data.market) : []), [data]);
   const shown = useMemo(() => sortBoxes(filterBoxes(rows, filters), sort), [rows, filters, sort]);
   const totals = useMemo(() => totalsOfBoxes(rows), [rows]);
   const opened = rows.find((r) => r.productId === openId) ?? null;
@@ -107,6 +108,11 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
               {partial && (
                 <p className="text-[11px] text-warn" data-testid="box-stats-partial">
                   一部のBOXだけの集計です: 購入時点の価格が未取得 {totals.purchaseMissingQty}BOX・買取相場が未取得 {totals.buybackMissingQty}BOX（未取得は0円とせず、計算に含めていません）。
+                </p>
+              )}
+              {totals.marketQty > 0 && (
+                <p className="text-[11px] text-muted-foreground" data-testid="box-stats-market">
+                  買取のうち{totals.marketQty}BOXは、手動の相場がないため取得した相場（CSV）で評価しています。詳細で店舗数・取得日時を確認できます。
                 </p>
               )}
               {totals.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">シュリンク状態「－」の{totals.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
@@ -237,10 +243,11 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
       )}
 
       {dialog === "form" && <BoxFormDialog onClose={() => setDialog(null)} onSaved={() => void load()} onSwitchKind={onSwitchKind ? () => (setDialog(null), onSwitchKind()) : undefined} />}
-      {dialog === "prices" && data && <BoxPriceDialog rows={sortBoxes(rows, "priceDesc")} prices={data.prices} onClose={() => setDialog(null)} onSaved={() => void load()} />}
+      {dialog === "prices" && data && <BoxPriceDialog rows={sortBoxes(rows, "priceDesc")} prices={data.prices} market={data.market} onOpenMarket={() => setDialog("market")} onClose={() => setDialog(null)} onSaved={() => void load()} />}
+      {dialog === "market" && data && <MarketUpdateDialog open onOpenChange={(v) => !v && setDialog(null)} cardCount={0} boxCount={data.products.length} market={[]} lastAt={data.market.reduce<string | null>((a, m) => (!a || m.fetchedAt > a ? m.fetchedAt : a), null)} lastRun={null} onDone={load} />}
       {dialog === "mult" && data && <BoxMultipliersDialog value={data.settings} onClose={() => setDialog(null)} onSaved={(s) => setData((d) => (d ? { ...d, settings: s } : d))} />}
       {dialog === "import" && data && <BoxImportDialog items={data.importable} onClose={() => setDialog(null)} onSaved={() => void load()} />}
-      {opened && data && <BoxDetailSheet row={opened} prices={data.prices} settings={data.settings} movements={data.movements} onOpenChange={(v) => !v && setOpenId(null)} onChanged={() => void load()} />}
+      {opened && data && <BoxDetailSheet row={opened} prices={data.prices} market={data.market} status={data.status} settings={data.settings} movements={data.movements} onOpenChange={(v) => !v && setOpenId(null)} onChanged={() => void load()} />}
     </div>
   );
 }

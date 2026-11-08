@@ -161,6 +161,7 @@ test("購入記録（BOX）の登録で所有数が増え、収支の支出は�
   await expect(tile.getByTestId("box-tile-unknown")).toBeVisible(); // 受取前は状態未確認
   // 購入記録の数量を直すと所有数も追従する（二重加算しない）
   await page.goto("/purchases");
+  await page.getByTestId("tab-history").click(); // 初期表示は商品別の累計（Stage 7E）
   await page.getByTestId("purchase-row").filter({ hasText: "6M購入連動BOX" }).click();
   await page.getByLabel("数量1").fill("3");
   await page.getByRole("button", { name: "保存" }).click();

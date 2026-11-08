@@ -73,8 +73,20 @@ export interface CardSummaryRow extends CardRow {
   costTotal: number | null;
   /** 購入価格が未入力の枚数 */
   costUnknownQty: number;
+  /** 手動で登録した参考相場（最新）。取得した相場は別に saleMarket / buybackMarket */
   sale: PriceRow | null;
   buyback: PriceRow | null;
+  /** 評価に使っている価格の出所。manual=手動の参考相場 / market=取得した相場（手動が無いとき）/ null=価格なし。販売・買取は独立に決める */
+  saleSource: PriceSource | null;
+  buybackSource: PriceSource | null;
+  /** 取得した状態Aの相場（あれば）。出所が market のとき、評価の基準になる */
+  saleMarket: MarketPriceRow | null;
+  buybackMarket: MarketPriceRow | null;
+  /** 評価に使っている基準相場（1枚あたり・状態補正前） */
+  saleUnitYen: number | null;
+  buybackUnitYen: number | null;
+  /** 相場の取得状況（取得を試みたことがあれば） */
+  marketStatus: MarketStatusRow | null;
   /** 所持枚数×参考相場（状態補正後の評価額）。相場が未設定なら null（0円にしない） */
   saleValue: number | null;
   buybackValue: number | null;
@@ -104,20 +116,45 @@ export function latestPrice(prices: PriceRow[], kind: PriceRow["kind"]): PriceRo
   return best;
 }
 
+export type PriceSource = "manual" | "market";
+
+/** 相場の取得状況（Stage 7F）。取得を試みた結果と理由。価格そのものは持たない */
+export interface MarketStatusRow {
+  subjectId: string;
+  status: "updated" | "unlisted" | "ambiguous" | "insufficient" | "no_price";
+  saleOk: boolean;
+  buybackOk: boolean;
+  reason: string;
+  checkedAt: string;
+}
+
+/** UTCの日時 → 日本時間の日付（YYYY-MM-DD） */
+export const jstDate = (iso: string): string => new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+
 export interface SummarizeOptions {
   /** 状態別の倍率（%）。省略時は既定（A100/B85/C65） */
   multipliers?: ConditionMultipliers;
   /** 取得した状態別の実際の販売相場（あれば倍率より優先）。取得元の価格データは変更しない */
   market?: MarketPriceRow[];
+  /** 相場の取得状況（カード単位） */
+  status?: MarketStatusRow[];
 }
 
 export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices: PriceRow[], favorites: FavoriteRow[], profileId: string | null, opts: SummarizeOptions = {}): CardSummaryRow[] {
   const mult = opts.multipliers ?? DEFAULT_MULTIPLIERS;
+  // 取得した相場（Stage 7F）: 状態Aの基準相場と、状態B・Cの実際の販売相場。手動の参考相場があるカード・種別では使わない
   const actualSale = new Map<string, Partial<Record<ValuationGrade, number>>>();
+  const marketA = new Map<string, { sale?: MarketPriceRow; buyback?: MarketPriceRow }>();
   for (const m of opts.market ?? []) {
-    if (m.kind !== "sale" || !m.conditionGrade || m.conditionGrade === "A") continue;
-    actualSale.set(m.cardId, { ...(actualSale.get(m.cardId) ?? {}), [m.conditionGrade]: m.medianYen });
+    const g = m.conditionGrade ?? "A";
+    if (g === "A") {
+      marketA.set(m.cardId, { ...(marketA.get(m.cardId) ?? {}), [m.kind]: m });
+      continue;
+    }
+    if (m.kind !== "sale") continue;
+    actualSale.set(m.cardId, { ...(actualSale.get(m.cardId) ?? {}), [g]: m.medianYen });
   }
+  const statusOf = new Map((opts.status ?? []).map((x) => [x.subjectId, x]));
   const byCardH = new Map<string, HoldingRow[]>();
   for (const h of holdings) byCardH.set(h.cardId, [...(byCardH.get(h.cardId) ?? []), h]);
   const byCardP = new Map<string, PriceRow[]>();
@@ -133,9 +170,19 @@ export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices:
     const sale = latestPrice(ps, "sale");
     const buyback = latestPrice(ps, "buyback");
     const hv = hs.map((h) => ({ qty: h.quantity, condition: h.condition }));
-    // 販売は状態別の実際の相場があればそれを優先、なければ基準相場×倍率。買取の状態別相場は取得できないので、常に基準相場×倍率
-    const sv = valuate(hv, sale ? sale.amountYen : null, mult, actualSale.get(c.id));
-    const bv = valuate(hv, buyback ? buyback.amountYen : null, mult);
+    // 価格の優先順位（販売・買取は独立）: 基準相場は ①手動の参考相場 → ②取得した基準相場（状態A）→ ③価格なし。
+    // 状態B・Cの所持分は、取得した状態別の実際の販売相場があれば倍率による推定より優先し（実価格 > 推定）、なければ基準相場×倍率。
+    // 取得した相場で手動の相場を上書きしない。状態別の実価格が無いのに、倍率による推定値を実価格として扱わない
+    const mk = marketA.get(c.id);
+    const act = actualSale.get(c.id);
+    const saleMarket = mk?.sale ?? null;
+    const buybackMarket = mk?.buyback ?? null;
+    const saleBase = sale ? sale.amountYen : (saleMarket?.medianYen ?? null);
+    const buybackBase = buyback ? buyback.amountYen : (buybackMarket?.medianYen ?? null);
+    const sv = valuate(hv, saleBase, mult, act);
+    const bv = valuate(hv, buybackBase, mult);
+    const saleSource: PriceSource | null = sale ? "manual" : saleBase !== null || sv.value !== null ? "market" : null;
+    const buybackSource: PriceSource | null = buyback ? "manual" : buybackBase !== null ? "market" : null;
     const saleValue = sv.value;
     const buybackValue = bv.value;
     const costComplete = costTotal !== null && costUnknownQty === 0;
@@ -147,6 +194,13 @@ export function summarizeCards(cards: CardRow[], holdings: HoldingRow[], prices:
       costUnknownQty,
       sale,
       buyback,
+      saleSource,
+      buybackSource,
+      saleMarket,
+      buybackMarket,
+      saleUnitYen: saleBase,
+      buybackUnitYen: buybackBase,
+      marketStatus: statusOf.get(c.id) ?? null,
       saleValue,
       buybackValue,
       saleBaseValue: sv.baseValue,
@@ -300,7 +354,10 @@ export function lastPriceDate(rows: CardSummaryRow[]): string | null {
   let best: string | null = null;
   for (const r of rows) {
     if (r.qty <= 0) continue;
-    for (const p of [r.sale, r.buyback]) if (p && (!best || p.confirmedOn > best)) best = p.confirmedOn;
+    for (const [p, m, src] of [[r.sale, r.saleMarket, r.saleSource], [r.buyback, r.buybackMarket, r.buybackSource]] as const) {
+      const d = src === "manual" ? p?.confirmedOn : src === "market" && m ? jstDate(m.fetchedAt) : null;
+      if (d && (!best || d > best)) best = d;
+    }
   }
   return best ? `${Number(best.slice(5, 7))}/${Number(best.slice(8, 10))}` : null;
 }
@@ -389,4 +446,46 @@ export interface MarketPriceRow {
   sourceUrl: string | null;
   csvUpdatedAt: string | null;
   fetchedAt: string;
+}
+
+// ---------------------------------------------------------------- 価格の取得状況（Stage 7F）
+/** 取得した価格をこの日数より古いまま使っているとき、古いことを示す */
+export const STALE_DAYS = 7;
+
+export const STATUS_TEXT: Record<MarketStatusRow["status"], string> = {
+  updated: "取得成功",
+  unlisted: "取得元のCSVに対象カードがありません（収録外）",
+  ambiguous: "商品の照合が確定していません",
+  insufficient: "収録弾またはカード番号が未登録のため照合できません",
+  no_price: "掲載はありますが、売切・対象外の状態のみで集計できる価格がありません",
+};
+
+export interface PriceState {
+  /** ok=問題なし / warn=一部のみ・古い / none=価格なし */
+  level: "ok" | "warn" | "none";
+  /** 短い表示（一覧のアイコンの説明・詳細の見出し） */
+  label: string;
+  /** 理由・補足（詳細画面） */
+  detail: string;
+}
+
+const daysSince = (iso: string, now: Date) => Math.floor((now.getTime() - new Date(iso).getTime()) / 86_400_000);
+
+/** カードの価格の取得状況。手動価格は取得の失敗で消えず、取得できなかった理由・古さを区別して返す（推測で補わない） */
+export function cardPriceState(r: Pick<CardSummaryRow, "saleSource" | "buybackSource" | "saleMarket" | "buybackMarket" | "marketStatus">, now: Date = new Date()): PriceState {
+  const hasSale = r.saleSource !== null;
+  const hasBuy = r.buybackSource !== null;
+  const reason = r.marketStatus ? (r.marketStatus.reason || STATUS_TEXT[r.marketStatus.status]) : "";
+  if (!hasSale && !hasBuy) {
+    return { level: "none", label: r.marketStatus ? (r.marketStatus.status === "ambiguous" || r.marketStatus.status === "insufficient" ? "商品照合失敗" : r.marketStatus.status === "unlisted" ? "CSVに対象カードなし" : "価格なし") : "未取得", detail: r.marketStatus ? reason : "まだ相場を取得していません。相場を更新するか、手動で参考相場を登録できます" };
+  }
+  const used = [r.saleSource === "market" ? r.saleMarket : null, r.buybackSource === "market" ? r.buybackMarket : null].filter((m): m is MarketPriceRow => !!m);
+  const oldest = used.length > 0 ? used.map((m) => m.fetchedAt).sort()[0] : null;
+  if (oldest && daysSince(oldest, now) >= STALE_DAYS) return { level: "warn", label: `価格が古い（${daysSince(oldest, now)}日前）`, detail: "最後に取得した価格のままです。更新に失敗した場合も、取得済みの価格は消していません" };
+  if (!hasSale || !hasBuy) {
+    const missing = hasSale ? "買取" : "販売";
+    return { level: "warn", label: hasSale ? "販売価格のみ" : "買取価格のみ", detail: `${missing}の価格は取得できていません${reason && r.marketStatus?.status === "updated" ? "（取得元に掲載がないか、対象外の状態のみ）" : reason ? `：${reason}` : ""}` };
+  }
+  if (r.saleSource === "manual" && r.buybackSource === "manual") return { level: "ok", label: "手動価格", detail: "手動で登録した参考相場です" };
+  return { level: "ok", label: "取得成功", detail: "" };
 }

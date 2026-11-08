@@ -10,7 +10,7 @@ import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/
 import { useShine } from "@/components/shine";
 import { conditionOptions, initialCondition, normalizeGrade } from "@/lib/card-condition";
 import { GRADE_DESCRIPTION } from "@/lib/condition-value";
-import { type CardRow, type CardSummaryRow, type HoldingRow, type MarketPriceRow, type PriceRow } from "@/lib/collection";
+import { cardPriceState, jstDate, type CardRow, type CardSummaryRow, type HoldingRow, type MarketPriceRow, type PriceRow } from "@/lib/collection";
 import { parseYen } from "@/lib/collection-input";
 import { cn } from "@/lib/utils";
 
@@ -118,13 +118,13 @@ export function CardDetailSheet({
               <Item label="収録パック" value={card.productName || "—"} />
               <Item label="購入額（合計）" value={card.costTotal === null ? "—" : `${yen(card.costTotal)}${card.costUnknownQty > 0 ? `（${card.costUnknownQty}枚は金額不明）` : ""}`} />
               <Item label="カードの種類" value={card.cardType || "—"} />
-              <Item label="販売参考相場" value={card.sale ? `${yen(card.sale.amountYen)}／枚（${card.sale.confirmedOn}${card.sale.source ? `・${card.sale.source}` : ""}）` : "未設定"} />
-              <Item label="買取参考相場" value={card.buyback ? `${yen(card.buyback.amountYen)}／枚（${card.buyback.confirmedOn}${card.buyback.source ? `・${card.buyback.source}` : ""}）` : "未設定"} />
+              <Item label="販売参考相場" value={priceText(card, "sale")} testId="ref-sale" />
+              <Item label="買取参考相場" value={priceText(card, "buyback")} testId="ref-buyback" />
               <Item label="販売参考との差額" value={signed(card.saleDiff)} testId="diff-sale" />
               <Item label="買取参考との差額" value={signed(card.buybackDiff)} testId="diff-buyback" />
             </dl>
             <ValuationBlock card={card} />
-            <MarketBlock rows={market.filter((m) => m.cardId === card.id)} />
+            <MarketBlock rows={market.filter((m) => m.cardId === card.id)} card={card} />
             <p className="-mt-2 text-[11px] text-muted-foreground">参考相場は確定した売却額ではありません（状態により変わります）。差額は購入価格が全枚数分そろい、相場が設定されているときだけ計算します。</p>
 
             <section aria-labelledby="hold-title" className="space-y-1.5">
@@ -300,7 +300,7 @@ function ValuationBlock({ card }: { card: CardSummaryRow }) {
             <span className="font-bold tabular-nums" data-testid={`valuation-${r.key}-adjusted`}>{yen(r.adjusted ?? 0)}</span>
           </p>
           <p className="text-[11px] text-muted-foreground">
-            {r.lines.map((l) => `${l.grade}（${GRADE_DESCRIPTION[l.grade]}）${l.qty}枚×${yen(l.unitYen)}${l.source === "market" ? "（状態別の取得相場）" : l.pct === 100 ? "" : `（基準×${l.pct}%）`}`).join(" ／ ")}
+            {r.lines.map((l) => `${l.grade}（${GRADE_DESCRIPTION[l.grade]}）${l.qty}枚×${yen(l.unitYen)}${l.source === "market" ? "（状態別の取得相場）" : l.pct === 100 ? "" : `（基準×${l.pct}%の推定）`}`).join(" ／ ")}
           </p>
         </div>
       ))}
@@ -309,7 +309,19 @@ function ValuationBlock({ card }: { card: CardSummaryRow }) {
   );
 }
 
-function MarketBlock({ rows: all }: { rows: MarketPriceRow[] }) {
+/** 参考相場の表示: 手動か取得か、取得日、店舗数（1店舗のみは明示） */
+function priceText(card: CardSummaryRow, kind: "sale" | "buyback"): string {
+  const manual = kind === "sale" ? card.sale : card.buyback;
+  const mk = kind === "sale" ? card.saleMarket : card.buybackMarket;
+  const src = kind === "sale" ? card.saleSource : card.buybackSource;
+  if (src === "manual" && manual) return `${yen(manual.amountYen)}／枚（${manual.confirmedOn}${manual.source ? `・${manual.source}` : ""}・手動）`;
+  if (src === "market" && mk) return `${yen(mk.medianYen)}／枚（取得 ${jstDate(mk.fetchedAt)}・${mk.sampleCount === 1 ? "1店舗のみ" : `${mk.sampleCount}店舗`}）`;
+  if (src === "market") return "状態別の取得相場のみ";
+  return "未設定";
+}
+
+function MarketBlock({ rows: all, card }: { rows: MarketPriceRow[]; card: CardSummaryRow }) {
+  const state = cardPriceState(card);
   const rows = all.filter((r) => (r.conditionGrade ?? "A") === "A");
   const sale = rows.find((r) => r.kind === "sale");
   const buy = rows.find((r) => r.kind === "buyback");
@@ -324,6 +336,12 @@ function MarketBlock({ rows: all }: { rows: MarketPriceRow[] }) {
         <Item label="最終取得" value={fetched ? new Date(fetched).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"} />
         <Item label="参照サイト" value={rows[0] ? <a href={rows[0].sourceUrl ?? "https://card.pricebest.jp/data/"} target="_blank" rel="noopener noreferrer" className="underline">{rows[0].source || "ポケカ価格比較"}</a> : "—"} />
       </dl>
+      {state.level !== "ok" && (
+        <p className={cn("text-[11px]", state.level === "none" ? "text-muted-foreground" : "text-warn")} data-testid="price-state">
+          価格の状況: {state.label}
+          {state.detail ? `（${state.detail}）` : ""}
+        </p>
+      )}
       {(sale || buy) && <p className="text-[11px] text-muted-foreground">店舗の公開価格の中央値（状態A基準）です。補正前の基準相場で、状態別の評価額は上の欄に出します。実際の取引価格や査定額とは異なります。</p>}
     </div>
   );

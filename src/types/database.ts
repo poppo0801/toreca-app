@@ -993,6 +993,120 @@ export type Database = {
           },
         ]
       }
+      box_market_links: {
+        Row: {
+          created_at: string
+          csv_key: string
+          csv_name: string
+          household_id: string
+          id: string
+          product_id: string
+        }
+        Insert: {
+          created_at?: string
+          csv_key: string
+          csv_name?: string
+          household_id: string
+          id?: string
+          product_id: string
+        }
+        Update: {
+          created_at?: string
+          csv_key?: string
+          csv_name?: string
+          household_id?: string
+          id?: string
+          product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_market_links_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_market_links_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      box_market_prices: {
+        Row: {
+          basis: string
+          csv_updated_at: string | null
+          fetched_at: string
+          high_yen: number
+          household_id: string
+          id: string
+          kind: string
+          low_yen: number
+          match_method: string
+          median_yen: number
+          outlier_count: number
+          product_id: string
+          sample_count: number
+          shops: Json
+          source: string
+          source_url: string | null
+        }
+        Insert: {
+          basis: string
+          csv_updated_at?: string | null
+          fetched_at?: string
+          high_yen: number
+          household_id: string
+          id?: string
+          kind: string
+          low_yen: number
+          match_method: string
+          median_yen: number
+          outlier_count?: number
+          product_id: string
+          sample_count: number
+          shops?: Json
+          source?: string
+          source_url?: string | null
+        }
+        Update: {
+          basis?: string
+          csv_updated_at?: string | null
+          fetched_at?: string
+          high_yen?: number
+          household_id?: string
+          id?: string
+          kind?: string
+          low_yen?: number
+          match_method?: string
+          median_yen?: number
+          outlier_count?: number
+          product_id?: string
+          sample_count?: number
+          shops?: Json
+          source?: string
+          source_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "box_market_prices_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "box_market_prices_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       box_movements: {
         Row: {
           created_by_profile_id: string | null
@@ -3972,6 +4086,94 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "management_counters_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_status: {
+        Row: {
+          buyback_ok: boolean
+          checked_at: string
+          household_id: string
+          id: string
+          reason: string
+          sale_ok: boolean
+          status: string
+          subject: string
+          subject_id: string
+        }
+        Insert: {
+          buyback_ok?: boolean
+          checked_at?: string
+          household_id: string
+          id?: string
+          reason?: string
+          sale_ok?: boolean
+          status: string
+          subject: string
+          subject_id: string
+        }
+        Update: {
+          buyback_ok?: boolean
+          checked_at?: string
+          household_id?: string
+          id?: string
+          reason?: string
+          sale_ok?: boolean
+          status?: string
+          subject?: string
+          subject_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_status_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_update_runs: {
+        Row: {
+          created_at: string
+          csv_rows: number | null
+          error_kind: string | null
+          error_message: string
+          household_id: string
+          id: string
+          ok: boolean
+          source: string
+          summary: Json
+        }
+        Insert: {
+          created_at?: string
+          csv_rows?: number | null
+          error_kind?: string | null
+          error_message?: string
+          household_id: string
+          id?: string
+          ok: boolean
+          source?: string
+          summary?: Json
+        }
+        Update: {
+          created_at?: string
+          csv_rows?: number | null
+          error_kind?: string | null
+          error_message?: string
+          household_id?: string
+          id?: string
+          ok?: boolean
+          source?: string
+          summary?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_update_runs_household_id_fkey"
             columns: ["household_id"]
             isOneToOne: false
             referencedRelation: "households"

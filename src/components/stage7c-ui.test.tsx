@@ -68,6 +68,9 @@ const dataWith = (marketB: number | null): CollectionData => ({
   favorites: [],
   thumbUrls: {},
   orders: [],
+  status: [],
+  lastRun: null,
+  boxProductCount: 0,
   multipliers: { A: 100, B: 85, C: 65 },
 });
 

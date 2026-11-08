@@ -34,6 +34,8 @@ const TABLES_ALL = [
   "battle_records", "household_settings", "ai_extraction_logs", "ai_extraction_feedback", "chain_aliases", "store_aliases",
   // Stage 5C: Excel取り込み履歴（管理番号の採番カウンターは、復元時に商品・店舗の管理番号の最大値から自動で再構成される）
   "master_import_history", "profile_settings", "card_masters", "card_holdings", "card_prices", "card_market_prices", "card_market_links", "x_account_identities", "x_bookmark_links", "card_favorites", "ai_jobs", "ai_job_items",
+  // Stage 7F: BOXコレクション・取得した相場と取得状況・カードの並び順・状態別の倍率・購入記録の標準画像
+  "box_settings", "box_lots", "box_movements", "box_prices", "box_receipts", "box_market_links", "box_market_prices", "market_status", "market_update_runs", "card_display_orders", "condition_multipliers", "item_default_images",
 ];
 
 const TABLES = TABLES_ALL.filter((t) => !SKIP.has(t));
@@ -48,7 +50,10 @@ const sha256 = {};
 for (const table of TABLES) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from(table).select("*").order({ household_members: "user_id", lottery_management: "lottery_id", household_settings: "household_id", profile_settings: "profile_id" }[table] ?? "id").range(from, from + 999);
+    let q = supabase.from(table).select("*");
+    // 並び順の列（複数列はカンマ区切り）。ページをまたいでも順序が揺れないよう、主キー全体で並べる
+    for (const col of ({ household_members: "user_id", lottery_management: "lottery_id", household_settings: "household_id", profile_settings: "profile_id", box_settings: "household_id", condition_multipliers: "household_id", item_default_images: "household_id,category", card_display_orders: "profile_id,card_id" }[table] ?? "id").split(",")) q = q.order(col);
+    const { data, error } = await q.range(from, from + 999);
     if (error) throw new Error(`${table}: ${error.message}`);
     rows.push(...data);
     if (data.length < 1000) break;

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleHelp, Ellipsis, LayoutGrid, List, Percent, Search, SlidersHorizontal, Sparkles, Star, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { loadCollectionAction, reorderCardsAction, reorderFavoritesAction, setFavoriteAction, type CollectionData } from "@/app/(app)/collection/actions";
@@ -17,7 +17,7 @@ import { MarketUpdateDialog } from "@/components/market-update";
 import { useDragReorder } from "@/components/use-drag-reorder";
 import { applyOrder, mergeFavoriteOrder } from "@/lib/reorder";
 import { ShineButton } from "@/components/shine";
-import { breakdown, DEFAULT_FILTERS, filterCards, lastPriceDate, orderOf, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
+import { breakdown, cardPriceState, DEFAULT_FILTERS, filterCards, lastPriceDate, orderOf, sortCards, summarizeCards, totalsOf, type CardSummaryRow, type CollectionFilters, type SortKey } from "@/lib/collection";
 import { DEFAULT_COLLECTION_PREFS, normalizeCollectionPrefs } from "@/lib/profile-settings";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { cn } from "@/lib/utils";
@@ -112,7 +112,7 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
     });
   }, [params, data]);
 
-  const rows = useMemo(() => (data ? summarizeCards(data.cards, data.holdings, data.prices, data.favorites, profile.id, { multipliers: data.multipliers, market: data.market }) : []), [data, profile.id]);
+  const rows = useMemo(() => (data ? summarizeCards(data.cards, data.holdings, data.prices, data.favorites, profile.id, { multipliers: data.multipliers, market: data.market, status: data.status }) : []), [data, profile.id]);
   // 「標準」= このプロフィールが並べた順（保存順）。保存が無いプロフィールは従来の標準
   const myOrder = useMemo(() => (data ? orderOf(data.orders ?? [], profile.id) : []), [data, profile.id]);
   const shown = useMemo(() => sortCards(filterCards(rows, filters), sort, myOrder), [rows, filters, sort, myOrder]);
@@ -383,7 +383,8 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
                   <span className="block truncate text-xs text-muted-foreground">{[r.rarity, r.cardNumber, r.productName].filter(Boolean).join(" ・ ")}</span>
                   <span className="block text-xs">
                     ×{r.qty}
-                    <span className="ml-2 text-muted-foreground">買取参考 {r.buyback ? yen(r.buyback.amountYen) : "未設定"}</span>
+                    <span className="ml-2 text-muted-foreground">買取参考 {r.buybackUnitYen !== null ? yen(r.buybackUnitYen) : "未設定"}</span>
+                    <PriceFlag r={r} />
                   </span>
                 </span>
               </button>
@@ -402,7 +403,7 @@ export function CollectionView({ ref, onSwitchKind }: { ref?: Ref<CardPanelHandl
       )}
 
       {showMult && data && <ConditionMultipliersDialog open onOpenChange={setShowMult} value={data.multipliers} onSaved={(m) => setData((d) => (d ? { ...d, multipliers: m } : d))} />}
-      {showMarket && data && <MarketUpdateDialog open onOpenChange={setShowMarket} cardCount={data.cards.length} market={data.market} onDone={load} />}
+      {showMarket && data && <MarketUpdateDialog open onOpenChange={setShowMarket} cardCount={data.cards.length} boxCount={data.boxProductCount} market={data.market} lastRun={data.lastRun} onDone={load} />}
       {opened && data && (
         <CardDetailSheet
           card={opened}
@@ -450,6 +451,15 @@ function Breakdown({ title, items }: { title: string; items: { key: string; kind
 }
 
 /** カード画像（縦横比を維持して全体を表示。切り抜かない）。画像が無いときは名前入りのプレースホルダー */
+/** 価格が未取得・一部のみ・古いときだけ出す小さな印（詳細で理由を確認できる） */
+function PriceFlag({ r }: { r: CardSummaryRow }) {
+  if (r.qty <= 0) return null;
+  const st = cardPriceState(r);
+  if (st.level === "ok") return null;
+  const Icon = st.level === "none" ? CircleHelp : TriangleAlert;
+  return <Icon className={cn("ml-1 inline size-3.5 align-text-bottom", st.level === "none" ? "text-muted-foreground" : "text-warn")} role="img" aria-label={`価格: ${st.label}`} data-testid="price-flag" />;
+}
+
 function Thumb({ r, url, size, priority = "lazy" }: { r: CardSummaryRow; url: string | null; size: string; priority?: "high" | "eager" | "lazy" }) {
   // 画像は並列に取得され、読み込みが終わるまで（失敗したときも）名前入りのプレースホルダーを出す。先頭の数枚は優先して読み込む
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");

@@ -10,6 +10,9 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } fr
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import {
   availableStates,
+  indexMarket,
+  jstDateOf,
+  type BoxMarketRow,
   BOX_STATE_LABEL,
   BOX_STATES,
   latestPrices,
@@ -23,6 +26,8 @@ import {
   type StateCounts,
 } from "@/lib/box-collection";
 import { jstToday } from "@/lib/ai/extraction";
+import { BOX_BASIS_LABEL, BOX_METHOD_LABEL } from "@/lib/box-market";
+import { STATUS_TEXT, type MarketStatusRow } from "@/lib/collection";
 import type { ShrinkState } from "@/types/domain";
 
 const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
@@ -42,6 +47,39 @@ const parseYen = (s: string): number | null | undefined => {
   return /^\d{1,9}$/.test(t) ? Number(t) : undefined;
 };
 
+/** 取得した相場（CSV）の内訳。手動の相場とは別。店舗数・取得日時・照合の根拠・取得できなかった理由を示す */
+function MarketInfo({ productId, market, status, hasManual }: { productId: string; market: BoxMarketRow[]; status: MarketStatusRow | null; hasManual: boolean }) {
+  const mine = market.filter((m) => m.productId === productId);
+  if (mine.length === 0 && !status) return null;
+  const fetched = mine.map((m) => m.fetchedAt).sort().at(-1) ?? null;
+  const method = mine[0]?.matchMethod;
+  const order = ["base", "no_shrink", "shrink"] as const;
+  const line = (m: BoxMarketRow) => `${m.kind === "sale" ? "販売" : "買取"}・${BOX_BASIS_LABEL[m.basis]} ${yen(m.medianYen)}（${m.sampleCount === 1 ? "1店舗のみ" : `${m.sampleCount}店舗`}）`;
+  const rows = mine.slice().sort((a, b) => (a.kind === b.kind ? order.indexOf(a.basis) - order.indexOf(b.basis) : a.kind === "sale" ? -1 : 1));
+  return (
+    <section className="space-y-1 rounded-lg border p-3 text-xs" aria-label="取得した相場" data-testid="box-market-info">
+      <p className="text-[13px] font-bold">取得した相場（ポケカ価格比較）</p>
+      {rows.length > 0 ? (
+        <ul className="space-y-0.5">
+          {rows.map((m) => (
+            <li key={`${m.kind}${m.basis}`} data-testid={`market-${m.kind}-${m.basis}`} className={m.sampleCount === 1 ? "text-warn" : undefined}>
+              {line(m)}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground">{status ? status.reason || STATUS_TEXT[status.status] : "未取得"}</p>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        {fetched ? `最終取得 ${md(jstDateOf(fetched))}` : "未取得"}
+        {method ? ` ・ 照合: ${BOX_METHOD_LABEL[method]}` : ""}
+        {hasManual ? " ・ 手動の相場があるため、評価には手動の相場を使います" : ""}
+      </p>
+      <p className="text-[11px] text-muted-foreground">「未開封」「新品」の掲載は、シュリンクの有無を断定しない基準の価格として扱います。シュリンクの有無が明示された価格だけ、状態別の実価格にします。</p>
+    </section>
+  );
+}
+
 type Sub = "open" | "adjust" | "state" | "price" | { lot: BoxLotRow } | null;
 
 /**
@@ -51,6 +89,8 @@ type Sub = "open" | "adjust" | "state" | "price" | { lot: BoxLotRow } | null;
 export function BoxDetailSheet({
   row,
   prices,
+  market,
+  status,
   settings,
   movements,
   onOpenChange,
@@ -58,6 +98,8 @@ export function BoxDetailSheet({
 }: {
   row: BoxSummaryRow;
   prices: BoxPriceRow[];
+  market: BoxMarketRow[];
+  status: MarketStatusRow[];
   settings: BoxSettings;
   movements: BoxMovementRow[];
   onOpenChange: (v: boolean) => void;
@@ -66,6 +108,7 @@ export function BoxDetailSheet({
   const { data } = useApp();
   const product = data.products.find((p) => p.id === row.productId);
   const latest = useMemo(() => latestPrices(prices), [prices]);
+  const marketIdx = useMemo(() => indexMarket(market), [market]);
   const [sub, setSub] = useState<Sub>(null);
   const [error, setError] = useState<string | null>(null);
   const lotIds = new Set(row.lots.map((l) => l.lot.id));
@@ -108,12 +151,15 @@ export function BoxDetailSheet({
                 </thead>
                 <tbody>
                   {BOX_STATES.filter((s) => row.byState[s] > 0).map((s) => {
-                    const b = unitBuyback(row.productId, s, latest, settings);
+                    const b = unitBuyback(row.productId, s, latest, settings, marketIdx);
                     return (
                       <tr key={s} className="border-t" data-testid={`state-${s}`}>
                         <td className="py-1.5">
                           {BOX_STATE_LABEL[s]}
-                          <span className="block text-[10px] text-muted-foreground">{BASIS[b.basis]}</span>
+                          <span className="block text-[10px] text-muted-foreground">
+                            {BASIS[b.basis]}
+                            {b.source === "market" ? `・取得相場${b.samples === 1 ? "（1店舗のみ）" : `（${b.samples}店舗）`}` : b.source === "manual" ? "・手動" : ""}
+                          </span>
                         </td>
                         <td className="py-1.5 text-right tabular-nums">{row.byState[s]}BOX</td>
                         <td className="py-1.5 text-right tabular-nums">{yen(b.amount)}</td>
@@ -130,6 +176,8 @@ export function BoxDetailSheet({
               </p>
               {row.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">シュリンク状態「－」の{row.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
             </section>
+
+            <MarketInfo productId={row.productId} market={market} status={status.find((x) => x.subjectId === row.productId) ?? null} hasManual={latest.has(`${row.productId}|`)} />
 
             <div className="flex flex-wrap gap-2" data-testid="box-ops">
               <Button size="sm" onClick={() => setSub("open")} data-testid="box-open-btn">

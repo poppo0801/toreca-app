@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { BoxLotRow, BoxMovementRow, BoxPriceRow, BoxProductInfo, BoxSettings } from "@/lib/box-collection";
+import type { BoxLotRow, BoxMarketRow, BoxMovementRow, BoxPriceRow, BoxProductInfo, BoxSettings } from "@/lib/box-collection";
+import type { MarketStatusRow } from "@/lib/collection";
 import { DEFAULT_BOX_SETTINGS } from "@/lib/box-collection";
 import { mapDbError, type Db, type ServiceResult } from "@/lib/server/lottery-service";
 
@@ -33,6 +34,9 @@ export interface BoxCollectionData {
   lots: BoxLotRow[];
   movements: BoxMovementRow[];
   prices: BoxPriceRow[];
+  /** 取得したBOXの相場と、商品ごとの取得状況（手動の相場とは別） */
+  market: BoxMarketRow[];
+  status: MarketStatusRow[];
   settings: BoxSettings;
   /** 購入記録にあるBOXで、まだBOXコレクションに入っていないもの（過去の購入記録の手動取り込み用） */
   importable: ImportableItem[];
@@ -41,12 +45,14 @@ export interface BoxCollectionData {
 type Row = Record<string, unknown>;
 
 export async function loadBoxCollection(db: Db): Promise<ServiceResult<BoxCollectionData>> {
-  const [pr, lo, mv, bp, st] = await Promise.all([
+  const [pr, lo, mv, bp, st, bm, ms] = await Promise.all([
     any(db).from("products").select("id,official_name,release_date").limit(5000),
     any(db).from("box_lots").select("*").limit(5000),
     any(db).from("box_movements").select("*").order("occurred_at", { ascending: false }).limit(20000),
     any(db).from("box_prices").select("*").order("confirmed_on", { ascending: false }).limit(20000),
     any(db).from("box_settings").select("shrink_pct,no_shrink_pct").maybeSingle(),
+    any(db).from("box_market_prices").select("*").limit(5000),
+    any(db).from("market_status").select("subject_id,status,sale_ok,buyback_ok,reason,checked_at").eq("subject", "box").limit(5000),
   ]);
   if (pr.error || lo.error || mv.error || bp.error) return fail("BOXコレクションを取得できませんでした");
   const lots: BoxLotRow[] = (lo.data as Row[]).map((r) => ({
@@ -87,6 +93,26 @@ export async function loadBoxCollection(db: Db): Promise<ServiceResult<BoxCollec
     source: (r.source as string) ?? "",
     createdAt: r.created_at as string,
   }));
+  // 取得した相場・取得状況の表が読めない場合も、BOXコレクション自体は表示する
+  const market: BoxMarketRow[] = bm.error
+    ? []
+    : (bm.data as Row[]).map((r) => ({
+        productId: r.product_id as string,
+        kind: r.kind as BoxMarketRow["kind"],
+        basis: r.basis as BoxMarketRow["basis"],
+        medianYen: r.median_yen as number,
+        lowYen: r.low_yen as number,
+        highYen: r.high_yen as number,
+        sampleCount: r.sample_count as number,
+        outlierCount: (r.outlier_count as number) ?? 0,
+        shops: (r.shops as BoxMarketRow["shops"]) ?? [],
+        source: (r.source as string) ?? "",
+        sourceUrl: (r.source_url as string | null) ?? null,
+        csvUpdatedAt: (r.csv_updated_at as string | null) ?? null,
+        fetchedAt: r.fetched_at as string,
+        matchMethod: r.match_method as BoxMarketRow["matchMethod"],
+      }));
+  const status: MarketStatusRow[] = ms.error ? [] : (ms.data as Row[]).map((r) => ({ subjectId: r.subject_id as string, status: r.status as MarketStatusRow["status"], saleOk: !!r.sale_ok, buybackOk: !!r.buyback_ok, reason: (r.reason as string) ?? "", checkedAt: r.checked_at as string }));
   const products: BoxProductInfo[] = (pr.data as Row[]).map((r) => ({ id: r.id as string, name: r.official_name as string, releaseDate: (r.release_date as string | null) ?? null }));
   const settings: BoxSettings = st.data ? { shrinkPct: st.data.shrink_pct, noShrinkPct: st.data.no_shrink_pct } : DEFAULT_BOX_SETTINGS;
 
@@ -118,7 +144,7 @@ export async function loadBoxCollection(db: Db): Promise<ServiceResult<BoxCollec
       })
       .sort((a, b) => (b.purchasedOn ?? "").localeCompare(a.purchasedOn ?? ""));
   }
-  return ok({ products, lots, movements, prices, settings, importable });
+  return ok({ products, lots, movements, prices, market, status, settings, importable });
 }
 
 const manualSchema = z.object({
