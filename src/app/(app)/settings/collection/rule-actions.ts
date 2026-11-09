@@ -5,6 +5,7 @@ import { z } from "zod";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import { createClient } from "@/lib/supabase/server";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
+import { ADMIN_ONLY_MESSAGE, isAdminProfile } from "@/lib/server/collector/admin-guard";
 
 /**
  * 除外ルール（collection_rules）の見直し（Stage 7H）: 編集・無効化・再有効化・削除。
@@ -24,10 +25,11 @@ async function ctx(): Promise<{ db: Db } | null> {
   return (await currentHouseholdId(db)) ? { db } : null;
 }
 
-export async function setRuleActiveAction(ruleId: string, active: boolean): Promise<RuleResult> {
+export async function setRuleActiveAction(ruleId: string, active: boolean, actor: string | null): Promise<RuleResult> {
   if (!id.safeParse(ruleId).success) return { ok: false, error: "不正な指定です" };
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
+  if (!(await isAdminProfile(c.db, actor))) return { ok: false, error: ADMIN_ONLY_MESSAGE };
   const now = new Date().toISOString();
   const { data, error } = await any(c.db).from("collection_rules").update({ active, released_at: active ? null : now, updated_at: now }).eq("id", ruleId).select("id");
   revalidatePath("/settings/collection");
@@ -42,11 +44,12 @@ const editSchema = z.object({
   keywords: z.array(z.string().trim().min(2).max(40)).max(20),
 });
 
-export async function updateRuleAction(ruleId: string, raw: z.input<typeof editSchema>): Promise<RuleResult> {
+export async function updateRuleAction(ruleId: string, raw: z.input<typeof editSchema>, actor: string | null): Promise<RuleResult> {
   const p = editSchema.safeParse(raw);
   if (!id.safeParse(ruleId).success || !p.success) return { ok: false, error: p.success ? "不正な指定です" : (p.error.issues[0]?.message ?? "入力内容を確認してください") };
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
+  if (!(await isAdminProfile(c.db, actor))) return { ok: false, error: ADMIN_ONLY_MESSAGE };
   const cur = (await any(c.db).from("collection_rules").select("kind").eq("id", ruleId).maybeSingle()).data as { kind: string } | null;
   if (!cur) return { ok: false, error: "ルールが見つかりません" };
   // 別ゲームのルールは、キーワードが1つ以上必要（空にして広範囲を除外しない）
@@ -59,10 +62,11 @@ export async function updateRuleAction(ruleId: string, raw: z.input<typeof editS
   return error ? { ok: false, error: "更新できませんでした" } : { ok: true };
 }
 
-export async function deleteRuleAction(ruleId: string): Promise<RuleResult> {
+export async function deleteRuleAction(ruleId: string, actor: string | null): Promise<RuleResult> {
   if (!id.safeParse(ruleId).success) return { ok: false, error: "不正な指定です" };
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
+  if (!(await isAdminProfile(c.db, actor))) return { ok: false, error: ADMIN_ONLY_MESSAGE };
   const { error } = await any(c.db).from("collection_rules").delete().eq("id", ruleId);
   revalidatePath("/settings/collection");
   return error ? { ok: false, error: "削除できませんでした" } : { ok: true };

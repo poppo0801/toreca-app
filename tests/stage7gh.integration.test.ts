@@ -135,6 +135,21 @@ describe.skipIf(!dbTestsEnabled)("Stage 7G/7H", () => {
       expect((await u1.from("collection_candidates").select("id").eq("id", c)).data).toHaveLength(1);
     });
 
+    it("Stage 7J: 管理者フラグ（profiles.is_admin）は既定で false。テスト世帯のプロフィールは管理者ではない。表示名を変えても判定は変わらない（IDの列）", async () => {
+      const profs = (await x(u1).from("profiles").select("id,label,is_admin")).data as { id: string; label: string; is_admin: boolean }[];
+      expect(profs.length).toBeGreaterThan(0);
+      expect(profs.every((p) => p.is_admin === false)).toBe(true);
+      // 管理者に設定 → 表示名を変更しても is_admin は変わらない
+      const target = profs[0];
+      expect((await x(u1).from("profiles").update({ is_admin: true }).eq("id", target.id)).error).toBeNull();
+      expect((await x(u1).from("profiles").update({ label: "改名後" }).eq("id", target.id)).error).toBeNull();
+      expect((await x(u1).from("profiles").select("is_admin,label").eq("id", target.id).single()).data).toMatchObject({ is_admin: true, label: "改名後" });
+      // 他の世帯のプロフィールは更新できない
+      const other = (await u2.from("profiles").select("id").limit(1)).data![0].id;
+      await x(u1).from("profiles").update({ is_admin: true }).eq("id", other);
+      expect((await x(u2).from("profiles").select("is_admin").eq("id", other).single()).data.is_admin).toBe(false);
+    });
+
     it("household の掃除で新しい表も消える（外部キーは cascade）", async () => {
       const probe = (await admin.from("households").select("id").eq("id", h2).single()).data;
       expect(probe?.id).toBe(h2);

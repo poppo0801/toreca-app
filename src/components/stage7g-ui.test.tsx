@@ -65,20 +65,23 @@ describe("Stage 7G: 対戦記録ページ", () => {
     setup(list);
     expect(qa("battle-row")).toHaveLength(2);
     const first = qa("battle-row").find((r) => r.textContent?.includes("リザードン"))!;
-    expect(first.textContent).toContain(`相手：${data.profiles[1].label}`);
-    expect(first.textContent).toContain("リザードン vs サーナイト");
+    const line = (row: Element, id: string) => ({ name: row.querySelector(`[data-testid="${id}"] [data-testid="battle-name"]`)!.textContent, deck: row.querySelector(`[data-testid="${id}"] [data-testid="battle-deck"]`)!.textContent });
+    // 自分を1行目、相手を2行目（ラベルなし）。それぞれ独立した1行
+    expect(line(first, "battle-me")).toEqual({ name: data.profiles[0].label, deck: "リザードン" });
+    expect(line(first, "battle-opp")).toEqual({ name: data.profiles[1].label, deck: "サーナイト" });
+    expect(first.textContent).not.toMatch(/MY|VS|vs|自分|相手：/);
     expect(first.querySelector('[data-result="win"]')!.textContent).toBe("◯");
     // 外部の相手
     const ext = qa("battle-row").find((r) => r.textContent?.includes("ピカチュウ"))!;
-    expect(ext.textContent).toContain("相手：友だち");
+    expect(line(ext, "battle-opp").name).toBe("友だち");
     expect(ext.querySelector('[data-result="lose"]')!.textContent).toBe("×");
     // 相手側（Bの画面）: 共有の1件だけ。デッキ・勝敗が反転し、相手はA
     me = 1;
     act(() => root.render(createElement(BattlesView, { key: "b" })));
     const b = qa("battle-row");
     expect(b).toHaveLength(1);
-    expect(b[0].textContent).toContain(`相手：${data.profiles[0].label}`);
-    expect(b[0].textContent).toContain("サーナイト vs リザードン");
+    expect(line(b[0], "battle-me")).toEqual({ name: data.profiles[1].label, deck: "サーナイト" });
+    expect(line(b[0], "battle-opp")).toEqual({ name: data.profiles[0].label, deck: "リザードン" });
     expect(b[0].querySelector('[data-result="lose"]')!.textContent).toBe("×");
   });
 
@@ -90,15 +93,51 @@ describe("Stage 7G: 対戦記録ページ", () => {
     expect(card.textContent).toContain("公認大会");
     const mark = card.querySelector('[data-result="draw"]')!;
     expect(mark.textContent).toBe("△");
-    expect(mark.className).toContain("ml-auto"); // 右端
+    expect(mark.className).toContain("text-4xl"); // 大きく太字
+    expect(mark.className).toContain("font-bold");
+    expect(mark.parentElement!.className).toContain("items-center"); // 右端で上下中央
+    expect(mark.parentElement!.className).toContain("justify-center");
+    expect(card.lastElementChild).toBe(mark.parentElement); // カードの右端
     expect(mark.getAttribute("aria-label")).toBe("引き分け"); // 色だけに頼らない
+    // 対戦形式は小さな角丸チップ。「vs ○○」の相手名表示は無い
+    expect(card.querySelector('[data-testid="battle-format"]')!.className).toContain("rounded-full");
   });
 
   it("勝敗の色は 勝ち=青・負け=赤・引き分け=緑（一覧・分析で共通）", () => {
     setup((a) => [rec({ id: "w", profileId: a, result: "win" }), rec({ id: "l", profileId: a, result: "lose" }), rec({ id: "d", profileId: a, result: "draw" })]);
-    expect(document.body.querySelector('[data-result="win"]')!.className).toContain("--cat-supply");
-    expect(document.body.querySelector('[data-result="lose"]')!.className).toContain("danger");
-    expect(document.body.querySelector('[data-result="draw"]')!.className).toContain("success");
+    expect(document.body.querySelector('span[data-result="win"]')!.className).toContain("--cat-supply");
+    expect(document.body.querySelector('span[data-result="lose"]')!.className).toContain("danger");
+    expect(document.body.querySelector('span[data-result="draw"]')!.className).toContain("success");
+    // 左端のアクセントバーは記号と同じ色（細いバー。カード全体は塗らない）
+    const bar = (r: string) => document.body.querySelector(`[data-testid="battle-row"][data-result="${r}"] [data-testid="battle-bar"]`)!;
+    expect(bar("win").className).toContain("--cat-supply");
+    expect(bar("lose").className).toContain("bg-danger");
+    expect(bar("draw").className).toContain("bg-success");
+    expect(bar("win").className).toContain("w-1.5");
+    expect(document.body.querySelector('[data-testid="battle-row"]')!.className).not.toContain("bg-[var(--cat-supply)]");
+  });
+
+  it("プロフィールアイコン: アプリ内のユーザーは設定済みのアイコン、外部の相手は共通の人物アイコン", () => {
+    setup((a, b) => [rec({ id: "i1", profileId: a, opponentProfileId: b, myDeck: "共有デッキ" }), rec({ id: "i2", profileId: a, opponent: "友だち", myDeck: "外部デッキ" })]);
+    const rows = qa("battle-row");
+    const shared = rows.find((r) => r.textContent?.includes("共有デッキ"))!;
+    expect(shared.querySelectorAll('[data-testid="battle-external-icon"]')).toHaveLength(0); // 双方がアプリ内のプロフィール
+    const ext = rows.find((r) => r.querySelector('[data-testid="battle-external-icon"]'))!;
+    expect(ext.querySelectorAll('[data-testid="battle-external-icon"]')).toHaveLength(1); // 外部の相手だけ人物アイコン
+    expect(ext.querySelector('[data-testid="battle-me"] [data-testid="battle-external-icon"]')).toBeNull();
+    // アイコンは小さく（24px程度）
+    expect(ext.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-6");
+  });
+
+  it("デッキ名は原則1行で収まるよう、ユーザー名は幅を抑え、デッキ名は最大2行まで", () => {
+    setup((a) => [rec({ id: "d1", profileId: a, opponent: "あいうえおかきくけこさしすせそ", myDeck: "スタートデッキ100 (025)", opponentDeck: "スタートデッキ100 (001)" })]);
+    const row = qa("battle-row")[0];
+    expect(row.querySelector('[data-testid="battle-name"]')!.className).toContain("max-w-[5.5rem]");
+    expect(row.querySelector('[data-testid="battle-name"]')!.className).toContain("truncate");
+    const deck = row.querySelector('[data-testid="battle-deck"]')!;
+    expect(deck.className).toContain("line-clamp-2");
+    expect(deck.className).toContain("flex-1");
+    expect(deck.textContent).toBe("スタートデッキ100 (025)");
   });
 
   it("フィルターはボトムシート（使用デッキ・期間・対戦形式）で絞り込め、設定中は印が付く", () => {
@@ -124,7 +163,12 @@ describe("Stage 7G: 対戦記録ページ", () => {
       rec({ id: "3", profileId: a, myDeck: "B", format: "公認大会", result: "draw" }),
       rec({ id: "4", profileId: b, opponentProfileId: a, myDeck: "Z", opponentDeck: "A", format: "ジムバトル", result: "lose" }), // Aから見ると勝ち
     ]);
-    expect(q("battle-summary")).toBeNull(); // 一覧には集計を出さない
+    // 一覧の上部の総合集計（対戦数・勝ち・負け・勝率）。分析シートとは別
+    expect([...q("battle-summary")!.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["対戦", "勝ち", "負け", "勝率"]);
+    expect(q("sum-total-value")!.textContent).toBe("4");
+    expect(q("sum-win-value")!.textContent).toBe("2");
+    expect(q("sum-lose-value")!.textContent).toBe("1");
+    expect(q("sum-rate-value")!.textContent).toBe("67%"); // 引き分け(1)は対戦数に含め、勝率の母数に含めない
     click(q("battle-analysis-open"));
     const s = q("battle-analysis")!;
     expect(s.querySelector('[data-testid="battle-total"]')!.textContent).toBe("4");

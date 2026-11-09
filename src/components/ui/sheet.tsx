@@ -52,7 +52,13 @@ export function SheetContent({
       dismiss(); // タップ
     } else if (dy > 110 || (dy > 40 && speed > 0.5)) {
       setTransform("translateY(100%)", "transform 0.16s ease-in");
-      window.setTimeout(dismiss, 150);
+      window.setTimeout(() => {
+        dismiss();
+        // 閉じる前に確認を出す画面（入力があるフォームなど）では、パネルは開いたまま。画面外へ動かしたままにせず、元の位置へ戻す
+        window.setTimeout(() => {
+          if (ref.current?.getAttribute("data-state") === "open") setTransform("translateY(0)", "transform 0.18s ease-out");
+        }, 60);
+      }, 150);
     } else {
       setTransform("translateY(0)", "transform 0.18s ease-out");
     }

@@ -100,13 +100,16 @@ function LotteryBoardInner() {
   const { data, now, persistent, profile, settings, saveSettings } = useApp();
   // 抽選候補（自動収集の確認待ち）の件数。0件・取得失敗なら何も出さない
   const [candCount, setCandCount] = useState(0);
+  // 管理者のプロフィールのみ（Stage 7J）。他のプロフィールでは件数も取得しない
+  const isAdmin = profile.isAdmin === true;
   useEffect(() => {
+    if (!isAdmin) return;
     let alive = true;
     void reviewCandidateCountAction().then((n) => alive && setCandCount(n)).catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, []);
+  }, [isAdmin]);
   const params = useSearchParams();
   const focusId = params.get("focus");
   const { unseen: unseenJobs } = useAiJobs();
@@ -223,7 +226,7 @@ function LotteryBoardInner() {
         <div className={PAGE_HEADING_ROW}>
           <PageHeading navId="lotteries">抽選管理</PageHeading>
           <div className="flex min-w-0 items-center gap-1">
-            {candCount > 0 && (
+            {isAdmin && candCount > 0 && (
               <Link href="/lotteries/candidates" className="flex h-8 shrink-0 items-center rounded-full border border-primary px-2.5 text-xs font-bold text-primary-ink" data-testid="candidates-link">
                 抽選候補 {candCount}件
               </Link>

@@ -40,6 +40,19 @@ async function post(body: Record<string, unknown>): Promise<{ ok: boolean; error
 }
 
 export function CandidatesView({ candidates }: { candidates: CandidateView[] }) {
+  const { profile } = useApp();
+  // 抽選候補の管理（登録・除外・ルール）は管理者のプロフィールのみ（Stage 7J）。判定はプロフィールID（isAdmin）。サーバー側の操作も同じ判定で拒否する
+  if (profile.isAdmin !== true) {
+    return (
+      <div className="space-y-2" data-testid="candidates-admin-only">
+        <PageHeading navId="lotteries">抽選候補</PageHeading>
+        <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">抽選候補は、管理者のプロフィールのみ利用できます。</p>
+        <Link href="/lotteries" className="text-sm underline">
+          抽選管理へ戻る
+        </Link>
+      </div>
+    );
+  }
   return (
     <UndoToastProvider>
       <CandidatesInner candidates={candidates} />
@@ -53,7 +66,7 @@ export function CandidatesView({ candidates }: { candidates: CandidateView[] }) 
  */
 function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
   const router = useRouter();
-  const { data, now } = useApp();
+  const { data, now, profile } = useApp();
   const toast = useUndoToast();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("new");
@@ -93,7 +106,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
     toast.show({
       message: `除外しました（${EXCLUDE_REASON_LABEL[r.reason]}）${ruleText}`,
       undo: async () => {
-        const u = await post({ action: "undoReason", items: r.prev, rule: r.rule });
+        const u = await post({ action: "undoReason", actor: profile.id, items: r.prev, rule: r.rule });
         if (!u.ok) return u.error ?? "元に戻せませんでした";
         unhide(c.id);
         router.refresh();

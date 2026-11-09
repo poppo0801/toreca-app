@@ -90,6 +90,8 @@ export function sortBattles(list: BattleRecord[]): BattleRecord[] {
 /** 勝敗の記号と色（一覧・詳細・分析で共通）。色だけに頼らず記号でも判別できる */
 export const RESULT_SYMBOL: Record<BattleResult, string> = { win: "◯", lose: "×", draw: "△" };
 export const RESULT_COLOR_CLASS: Record<BattleResult, string> = { win: "text-[var(--cat-supply)]", lose: "text-danger", draw: "text-success" };
+/** カード左端のアクセントバーの色（勝敗の記号と同じ色） */
+export const RESULT_BAR_CLASS: Record<BattleResult, string> = { win: "bg-[var(--cat-supply)]", lose: "bg-danger", draw: "bg-success" };
 
 export const invertResult = (r: BattleResult): BattleResult => (r === "win" ? "lose" : r === "lose" ? "win" : "draw");
 const invertTurn = (t: BattleRecord["turnOrder"]): BattleRecord["turnOrder"] => (t === "first" ? "second" : t === "second" ? "first" : "");
@@ -106,6 +108,10 @@ export interface BattleView {
   turnOrder: BattleRecord["turnOrder"];
   /** 対戦相手の表示名（アプリ内プロフィールの名前、または外部の相手の名称。無ければ空） */
   opponentName: string;
+  /** 見ているプロフィール（「自分」側）のID */
+  myProfileId: string;
+  /** 対戦相手がアプリ内プロフィールのときそのID。外部の相手は null（共通の人物アイコンで表示する） */
+  opponentProfileId: string | null;
   /** player=記録した側 / opponent=アプリ内の相手として見ている側 */
   role: "player" | "opponent";
   /** アプリ内プロフィール同士の対戦 */
@@ -119,8 +125,8 @@ export const isUnassigned = (b: BattleRecord): boolean => b.profileId === null;
 export function viewFor(b: BattleRecord, viewer: string, labelOf: (profileId: string) => string): BattleView | null {
   const shared = !!b.opponentProfileId;
   const base = { id: b.id, playedOn: b.playedOn, format: b.format, memo: b.memo, shared, record: b };
-  if (b.profileId === viewer) return { ...base, result: b.result, myDeck: b.myDeck, opponentDeck: b.opponentDeck, turnOrder: b.turnOrder, opponentName: b.opponentProfileId ? labelOf(b.opponentProfileId) : b.opponent, role: "player" };
-  if (b.opponentProfileId === viewer && b.profileId) return { ...base, result: invertResult(b.result), myDeck: b.opponentDeck, opponentDeck: b.myDeck, turnOrder: invertTurn(b.turnOrder), opponentName: labelOf(b.profileId), role: "opponent" };
+  if (b.profileId === viewer) return { ...base, result: b.result, myDeck: b.myDeck, opponentDeck: b.opponentDeck, turnOrder: b.turnOrder, opponentName: b.opponentProfileId ? labelOf(b.opponentProfileId) : b.opponent, myProfileId: viewer, opponentProfileId: b.opponentProfileId ?? null, role: "player" };
+  if (b.opponentProfileId === viewer && b.profileId) return { ...base, result: invertResult(b.result), myDeck: b.opponentDeck, opponentDeck: b.myDeck, turnOrder: invertTurn(b.turnOrder), opponentName: labelOf(b.profileId), myProfileId: viewer, opponentProfileId: b.profileId, role: "opponent" };
   return null;
 }
 

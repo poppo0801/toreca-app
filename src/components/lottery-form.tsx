@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ListPlus, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, ListPlus, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { AiImportDialog } from "@/components/ai-import-dialog";
 import { AiSupplementDialog } from "@/components/ai-supplement-dialog";
 import { ProductThumb } from "@/components/product-image";
@@ -238,88 +238,18 @@ function sourcesFromLottery(l: Lottery | null): Record<string, FieldSource> {
 
 /**
  * 抽選の登録・編集（下から開くパネル）。
- *  - 上部のハンドルを下へスワイプすると最小化し、一覧を見ながら入力を保持できる（下部の再開バーのタップ／上スワイプで再開）。
- *    入力内容は画面内の状態としてだけ保持し、再読み込みで破棄する（長期の下書き保存はしない）。
+ *  - 入力途中の再開はしない（Stage 7J）。閉じると未保存の入力は破棄され、次に開くと新規は初期状態、編集は保存済みの最新データから始まる。
+ *    入力内容があるまま閉じようとしたときは、破棄してよいか確認する（保存済みのデータは変わらない）。
  *  - 応募期限が過去でも保存でき、新規登録時は応募済み／当選／落選まで同時に登録できる。
  *  - 日時は空欄=不明・日付のみ・日付+時刻。応募方法・受取方法の初期値は「未確認」として区別して保存する。
  *  - 編集中に他の端末で更新された場合は、保存前に気づけるよう警告する。
  */
-/** 最小化中の再開バー。タップ・上へのスワイプ・Enter/Space で再開。右端の×で破棄（入力があれば確認） */
-function MinimizedBar({
-  title,
-  summary,
-  dirty,
-  onResume,
-  onDiscard,
-  confirming,
-  setConfirming,
-}: {
-  title: string;
-  summary: string;
-  dirty: boolean;
-  onResume: () => void;
-  onDiscard: () => void;
-  confirming: boolean;
-  setConfirming: (v: boolean) => void;
-}) {
-  const start = useRef<{ y: number; moved: boolean } | null>(null);
-  return (
-    <div
-      data-testid="form-minimized"
-      className="fixed inset-x-3 bottom-[calc(3.25rem_+_env(safe-area-inset-bottom)_+_0.5rem)] z-40 rounded-xl border border-primary bg-card shadow-[var(--shadow-sheet)] md:left-auto md:right-6 md:w-96"
-    >
-      {confirming ? (
-        <div role="alert" className="flex items-center gap-2 p-2 text-sm">
-          <span className="min-w-0 flex-1">入力中の内容を破棄しますか？</span>
-          <Button size="sm" variant="danger" onClick={onDiscard} data-testid="form-minimized-discard-ok">
-            破棄
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
-            続ける
-          </Button>
-        </div>
-      ) : (
-        <div className="flex items-center">
-          <button
-            type="button"
-            aria-label={`${title}を再開（タップまたは上へスワイプ）`}
-            onClick={() => {
-              if (!start.current?.moved) onResume();
-            }}
-            onPointerDown={(e) => {
-              start.current = { y: e.clientY, moved: false };
-            }}
-            onPointerMove={(e) => {
-              if (start.current && start.current.y - e.clientY > 8) start.current.moved = true;
-            }}
-            onPointerUp={(e) => {
-              if (start.current && start.current.y - e.clientY > 30) onResume();
-            }}
-            className="flex min-h-12 min-w-0 flex-1 touch-pan-x items-center gap-2 px-3 text-left"
-          >
-            <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-xs text-muted-foreground">{title}（入力途中）</span>
-              <span className="block truncate text-sm font-medium">{summary}</span>
-            </span>
-            <span className="shrink-0 text-xs font-bold text-primary-ink">再開</span>
-          </button>
-          <button type="button" aria-label="入力を破棄" onClick={() => (dirty ? setConfirming(true) : onDiscard())} className="flex size-11 shrink-0 items-center justify-center text-muted-foreground" data-testid="form-minimized-discard">
-            <X className="size-4" aria-hidden="true" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function LotteryFormDialog({
   open,
   onOpenChange,
   lottery,
   prefill,
   onSaved,
-  restoreSignal,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -329,8 +259,6 @@ export function LotteryFormDialog({
   prefill?: { draft: LotteryDraft; runId: string | null };
   /** 保存に成功したときに呼ばれる（新規登録なら作成した抽選のID） */
   onSaved?: (lotteryId: string | null) => void;
-  /** 値が変わるたびに、最小化している登録フォームを開き直す（同じ候補をもう一度開くとき） */
-  restoreSignal?: number;
 }) {
   const { data, actions, reload } = useApp();
   const isEdit = lottery !== null;
@@ -350,11 +278,6 @@ export function LotteryFormDialog({
   const [v, setV] = useState<LotteryInput>(() => initial.input);
   const [urlsText, setUrlsText] = useState(() => initial.urlsText);
   const [sources, setSources] = useState<Record<string, FieldSource>>(() => initial.sources);
-  const [minimized, setMinimized] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 開き直しの要求に応じて最小化を解除する
-    if (restoreSignal) setMinimized(false);
-  }, [restoreSignal]);
   const [pending, setPending] = useState<null | "discard" | "reset" | "bulk">(null);
   const router = useRouter();
   const [conflict, setConflict] = useState(false);
@@ -376,7 +299,6 @@ export function LotteryFormDialog({
   const [duplicates, setDuplicates] = useState<DraftDuplicate[]>([]);
   const [dupAck, setDupAck] = useState(false);
   const [aiFilled, setAiFilled] = useState(false);
-  const [discardOnBar, setDiscardOnBar] = useState(false);
   // AI読み取りから入力したときの、解析の実行IDとフォームに入力した直後の値（登録時にAIの抽出結果との比較を1回だけ記録する）
   const [aiRun, setAiRun] = useState<{ runId: string; filled: LotteryInput } | null>(null);
   const [reason, setReason] = useState<FeedbackReason | "">("");
@@ -391,6 +313,8 @@ export function LotteryFormDialog({
   }, []);
 
   const finish = () => onOpenChange(false);
+  // 閉じる操作（×・背景・Esc・ハンドルのスワイプ）。入力が変更されていれば、破棄の確認を出す。変更が無ければそのまま閉じる
+  const requestClose = () => (dirty ? setPending("discard") : finish());
 
   const applyDraft = (d: LotteryDraft, runId: string | null = null) => {
     const next = { ...d.input };
@@ -613,12 +537,11 @@ export function LotteryFormDialog({
   const flagPanel = (k: FieldKey) => <FlagPanel id={`flag-${k}`} text={flags[k]} evidence={evidence[k]} open={openFlag === k} />;
   const flagCount = Object.values(flags).filter(Boolean).length;
   const title = isEdit ? "抽選を編集" : "抽選を登録";
-  const summary = [v.chain.name, v.store.name].filter(Boolean).join(" ") || "（系列・店舗 未入力）";
 
   return (
     <>
-      <Sheet open={open && !minimized} onOpenChange={(o) => !o && setMinimized(true)}>
-        <SheetContent aria-describedby="lottery-form-desc" data-testid="lottery-form" onOpenAutoFocus={(e) => e.preventDefault()} onSwipeDismiss={() => setMinimized(true)}>
+      <Sheet open={open} onOpenChange={(o) => !o && requestClose()}>
+        <SheetContent aria-describedby="lottery-form-desc" data-testid="lottery-form" onOpenAutoFocus={(e) => e.preventDefault()} onSwipeDismiss={requestClose}>
           <div className="flex items-center gap-1 px-4 pb-2">
             <div className="min-w-0 flex-1">
               <SheetTitle>{title}</SheetTitle>
@@ -771,8 +694,14 @@ export function LotteryFormDialog({
                 >
                   <option value="fixed">店舗固定</option>
                   <option value="select_on_apply">応募時に店舗選択</option>
-                  <option value="none">店舗指定なし（通販など）</option>
+                  <option value="none">店舗指定なし</option>
                 </select>
+                {/* 応募済みの抽選を店舗選択式に変更するとき: 既存の応募履歴は変更しない。応募店舗は、応募したプロフィールが詳細から入力する */}
+                {isEdit && lottery && v.storeMode === "select_on_apply" && lottery.storeMode !== "select_on_apply" && data.applications.some((a) => a.lotteryId === lottery.id && a.state === "applied") && (
+                  <span className="mt-1 block text-[11px] text-warn" data-testid="store-mode-applied-note">
+                    応募済みのプロフィールがあります。応募の履歴は変わりません。応募した店舗は、各プロフィールが抽選の詳細で入力してください（未設定の間は「店舗未設定」と表示されます）。
+                  </span>
+                )}
               </label>
               {(openFlag === "chain" || openFlag === "store" || (!v.chain.id && candidates.chain.length > 0) || (!v.store.id && candidates.store.length > 0)) && (
                 <div>
@@ -1287,11 +1216,6 @@ export function LotteryFormDialog({
           />
         )}
       </Sheet>
-
-      {/* 最小化中: 抽選一覧を見ながら、タップまたは上へのスワイプで入力を再開できる */}
-      {open && minimized && (
-        <MinimizedBar title={title} summary={summary} dirty={dirty} onResume={() => setMinimized(false)} onDiscard={finish} confirming={discardOnBar} setConfirming={setDiscardOnBar} />
-      )}
     </>
   );
 }

@@ -9,7 +9,7 @@ import { ExpenseDialog } from "@/components/expense-dialog";
 import { PurchaseThumb } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
 import { jstDateString } from "@/lib/datetime";
-import { productName, purchaseStoreName, purchaseTotal } from "@/lib/finance";
+import { productFullName, purchaseStoreName, purchaseTotal } from "@/lib/finance";
 import { flexToJstDate } from "@/lib/finance";
 import { filterPurchases, isSingleItem, periodLabel, productTotals, purchaseStats, quantityLabel, shiftPeriod, type Period, type PeriodKind, type ProductTotal } from "@/lib/purchase-records";
 import { cn } from "@/lib/utils";
@@ -210,8 +210,8 @@ export function PurchasesView() {
                     <PurchaseThumb product={product} category={kind} heightClass="h-12" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium" data-testid="purchase-title">
-                      {first ? productName(data, first.productId, first.productLabel) : "購入"}
+                    <span className="line-clamp-2 break-words text-sm font-medium leading-snug" data-testid="purchase-title">
+                      {first ? productFullName(data, first.productId, first.productLabel) : "購入"}
                       {p.items.length > 1 && <span className="text-muted-foreground"> ほか{p.items.length - 1}件</span>}
                     </span>
                     <span className="flex flex-wrap items-center gap-x-2 text-xs">
@@ -248,7 +248,7 @@ export function PurchasesView() {
                   <PurchaseThumb product={product} category={r.single ? "single_card" : r.category} heightClass="h-14" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium" data-testid="total-name">
+                  <span className="line-clamp-2 break-words text-[13px] font-medium leading-snug" data-testid="total-name">
                     {r.label}
                   </span>
                   <span className="block truncate text-[11px] text-muted-foreground" data-testid="total-sub">

@@ -10,7 +10,7 @@ const dismiss = vi.fn(async (..._a: unknown[]) => ({ ok: true }) as { ok: boolea
 vi.mock("@/lib/use-minute-now", () => ({ useMinuteNow: () => new Date("2026-11-04T03:00:00Z") }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
 vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: "p1" }, reload: async () => null }) }));
-vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: (p: { restoreSignal?: number; prefill?: { draft?: { input?: { chain?: { name?: string } } } } }) => createElement("div", { "data-testid": "edit-form", "data-chain": p.prefill?.draft?.input?.chain?.name ?? "", "data-restore": String(p.restoreSignal ?? 0) }) }));
+vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: (p: { prefill?: { draft?: { input?: { chain?: { name?: string } } } } }) => createElement("div", { "data-testid": "edit-form", "data-chain": p.prefill?.draft?.input?.chain?.name ?? "" }) }));
 vi.mock("@/app/(app)/settings/collection/manual-actions", () => ({ manualDismissAction: (...a: unknown[]) => dismiss(...a), manualDoneAction: async () => ({ ok: true }), manualRecheckAction: async () => ({ ok: true }) }));
 
 import { AutoCollectView, type CandidateView } from "@/components/auto-collect-view";
@@ -205,10 +205,9 @@ describe("Stage 6J: 収集候補のスワイプ", () => {
     expect(form).not.toBeNull();
     expect(form.getAttribute("data-chain")).toBe(chain);
     expect(fetchBody).toEqual([]); // 開いただけ。何も変更しない
-    // 閉じると最小化されて残る登録フォームは、同じ候補をもう一度開くたびに「開き直し」の合図が変わる（最小化が解除される）
-    const first = form.getAttribute("data-restore");
+    // 入力途中の再開はしない（Stage 7J）: 同じ候補をもう一度開いても、候補の解析結果から始まる
     await swipe(q('[data-testid="swipe-row"]', qa('[data-testid="candidate-row"]')[0])!, 120);
-    expect(q('[data-testid="edit-form"]')!.getAttribute("data-restore")).not.toBe(first);
+    expect(q('[data-testid="edit-form"]')!.getAttribute("data-chain")).toBe(chain);
   });
 });
 

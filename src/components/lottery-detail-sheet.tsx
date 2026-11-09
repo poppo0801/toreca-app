@@ -14,7 +14,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } fr
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { deadlineBadge, formatMonthDay, formatPlain, hasResultPeriod, isResultFinished } from "@/lib/datetime";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
-import { resultNotice } from "@/lib/lottery-summary";
+import { markLabel, profileMarks, resultNotice } from "@/lib/lottery-summary";
 import { OngoingOps } from "@/components/ongoing-ops";
 import { PastApplyRecorder } from "@/components/past-apply-recorder";
 import { WonRecordButtons } from "@/components/won-actions";
@@ -57,6 +57,30 @@ function Field({ label, children, className }: { label: string; children: React.
 
 const DASH = <span className="text-muted-foreground">—</span>;
 
+/** 日付・期間の1項目（独立した角丸カード）。項目名と日時を区別して表示する */
+function DateCard({ label, children, span2, testId }: { label: string; children: React.ReactNode; span2?: boolean; testId?: string }) {
+  return (
+    <div className={cn("min-w-0 rounded-lg border px-2.5 py-1.5", span2 && "col-span-2")} data-testid={testId ?? "date-card"} data-label={label}>
+      <dt className="text-[11px] leading-4 text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 break-words text-[13px] font-medium leading-snug">{children}</dd>
+    </div>
+  );
+}
+
+/** 現在のプロフィールの応募状態（上部のステータス行の右側）。詳細は下の「応募状況」で確認する */
+function MyStatus({ lottery }: { lottery: Lottery }) {
+  const { data, now, profile } = useApp();
+  const mark = profileMarks(data, lottery, now).find((m) => m.profileId === profile.id);
+  if (!mark) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 text-xs" data-testid="my-status" data-status={mark.status} data-result={mark.result} aria-label={`${profile.label}: ${markLabel(mark)}`}>
+      <ProfileAvatar profile={profile} size="xs" />
+      <StatusIcon status={mark.status} className="size-4" />
+      <span className="font-medium">{markLabel(mark)}</span>
+    </span>
+  );
+}
+
 /** 初期値のまま（未確認）の項目に付ける印 */
 function Unconfirmed({ show }: { show: boolean }) {
   if (!show) return null;
@@ -98,6 +122,24 @@ function AppliedStoreRow({ lottery, app, canEdit }: { lottery: Lottery; app: App
 }
 
 /**
+ * 応募店舗が未設定の案内（Stage 7J）。「応募時に店舗選択」の抽選で、現在のプロフィールの応募済みの記録に店舗が無いとき、入力を求める。
+ * 既存の応募履歴は変更しない（店舗だけを追加する）。他のプロフィールの店舗は変えない（他のプロフィールの分は下の「ユーザー別の結果」で確認・設定）。
+ */
+function StoreMissingNotice({ lottery }: { lottery: Lottery }) {
+  const { data, profile } = useApp();
+  const mine = lottery.storeMode === "select_on_apply" ? myApplication(data, lottery.id, profile.id) : undefined;
+  if (!mine || mine.state !== "applied" || mine.appliedStore?.name) return null;
+  return (
+    <div className="rounded-md border border-warn px-2 py-1.5 text-xs" role="status" data-testid="applied-store-missing">
+      <p className="font-medium text-warn">応募店舗が未設定です。応募した店舗を入力してください。</p>
+      <div className="mt-1">
+        <AppliedStoreRow lottery={lottery} app={mine} canEdit />
+      </div>
+    </div>
+  );
+}
+
+/**
  * 抽選の詳細（下から開くパネル）。重要な順に、商品 → 日時（2カラム）→ 方法 → URL → 条件・制限 → ユーザー別 → 備考・操作。
  * 閉じると一覧に戻り、スクロール位置は呼び出し側で維持する。
  */
@@ -135,7 +177,6 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const apps = data.applications.filter((a) => a.lotteryId === lottery.id && a.state === "applied").sort((a, b) => profileIdx(a.accountId) - profileIdx(b.accountId));
   const skipSource = skipSourceFor(data, profile.id, lottery);
   const skipException = hasSkipException(data, profile.id, lottery);
-  const mineApp = myApplication(data, lottery.id, profile.id);
   // 当選の購入・受取の記録は、現在のユーザーと紐づくサブの当選が対象（記録は応募の所有者に保存される）
   const scopedWon = scopedApplications(data, lottery.id, viewScope).filter((a) => a.result === "won");
   const rules = effectiveRules(data, lottery);
@@ -206,22 +247,23 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   );
                 })}
               </ul>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {place.label && <Chip className="rounded-full" data-testid="detail-place">{place.label}</Chip>}
-                {place.canShip && <Chip className="rounded-full border-info text-info">発送可</Chip>}
-                {dist && place.showLocation && (
-                  <Chip className={cn("rounded-full", BAND_CLASS[dist.band])} title="自宅からの直線距離（道路距離ではありません）">
-                    直線 {formatKm(dist.km)}
-                  </Chip>
-                )}
-                {store?.roundTripFare != null && <Chip className="rounded-full">往復交通費 {store.roundTripFare.toLocaleString("ja-JP")}円</Chip>}
-                {MODE_LABEL[lottery.multiMode] && <Chip className="border-info text-info">{MODE_LABEL[lottery.multiMode]}</Chip>}
-                {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}
-                {EVENT_LABEL[event] && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
-                {notice === "unconfirmed" && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
-                {notice === "in_period" && <Chip className="text-info">発表期間中</Chip>}
-                {!managed && <Chip className="text-muted-foreground">要チェック外</Chip>}
+              {/* ステータス行（原則1行）: 左=発送可・受付前などの抽選状態 / 右=現在のプロフィールの応募状態。詳細は下の「応募状況」 */}
+              <div className="flex items-center justify-between gap-2" data-testid="status-line">
+                <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden" data-testid="status-left">
+                  {place.canShip && <Chip className="shrink-0 rounded-full border-info text-info">発送可</Chip>}
+                  {EVENT_LABEL[event] && <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
+                  {notice === "unconfirmed" && <Chip className="shrink-0 border-danger font-bold text-danger">結果未確認</Chip>}
+                  {notice === "in_period" && <Chip className="shrink-0 text-info">発表期間中</Chip>}
+                  {lottery.isNew && <Chip className="shrink-0 border-info text-info">NEW</Chip>}
+                </div>
+                <MyStatus lottery={lottery} />
               </div>
+              {(MODE_LABEL[lottery.multiMode] || !managed) && (
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="status-extra">
+                  {MODE_LABEL[lottery.multiMode] && <Chip className="border-info text-info">{MODE_LABEL[lottery.multiMode]}</Chip>}
+                  {!managed && <Chip className="text-muted-foreground">要チェック外</Chip>}
+                </div>
+              )}
             </section>
 
             {/* 注意付きで自動登録された抽選: 不足・相違している項目と理由（注意が無い抽選には出さない） */}
@@ -239,81 +281,95 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               </section>
             )}
 
-            {/* 2. 日時（2カラム） */}
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border p-3" aria-label="日時">
-              <Field label="応募開始">{lottery.applyStart.precision === "unknown" ? DASH : formatPlain(lottery.applyStart)}</Field>
-              <Field label="応募締切">
-                <span className={cn(lottery.applyDeadline.precision === "unknown" && "text-muted-foreground")}>
-                  {lottery.applyDeadline.precision === "unknown" ? "—" : formatPlain(lottery.applyDeadline)}
-                </span>
-                <DeadlineBadgeView badge={remaining} className="ml-1 px-1 py-0.5" />
-              </Field>
-              <Field label="当選発表">{lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatPlain(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatPlain(lottery.resultDate)}</Field>
-              <Field label={lottery.procedureSplit ? "購入期間" : "購入・受取期間"}>{periodText(lottery.procedureStart, lottery.procedureDeadline)}</Field>
-              {lottery.procedureSplit && <Field label="受取期間">{periodText(lottery.receiveStart ?? { precision: "unknown" }, lottery.receiveDeadline ?? { precision: "unknown" })}</Field>}
-              {kindOf(lottery) !== "normal" && (
-                <Field label="抽選方式">
-                  {KIND_LABEL[kindOf(lottery)]}
-                  {lottery.validUntil ? `（有効期限 ${lottery.validUntil.slice(5).replace("-", "/")}）` : ""}
+            {/* 2. 日付・期間: 1項目ごとの独立した角丸カード（2列）。奇数のときは最後を横いっぱいに */}
+            {(() => {
+              const cards: { key: string; label: string; body: React.ReactNode }[] = [
+                { key: "start", label: "応募開始", body: lottery.applyStart.precision === "unknown" ? DASH : formatPlain(lottery.applyStart) },
+                {
+                  key: "deadline",
+                  label: "応募締切",
+                  body: (
+                    <>
+                      <span className={cn(lottery.applyDeadline.precision === "unknown" && "text-muted-foreground")}>{lottery.applyDeadline.precision === "unknown" ? "—" : formatPlain(lottery.applyDeadline)}</span>
+                      <DeadlineBadgeView badge={remaining} className="ml-1 px-1 py-0.5" />
+                    </>
+                  ),
+                },
+                { key: "result", label: "当選発表", body: lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatPlain(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatPlain(lottery.resultDate) },
+                { key: "procedure", label: lottery.procedureSplit ? "購入期間" : "購入・受取期間", body: periodText(lottery.procedureStart, lottery.procedureDeadline) },
+                ...(lottery.procedureSplit ? [{ key: "receive", label: "受取期間", body: periodText(lottery.receiveStart ?? { precision: "unknown" }, lottery.receiveDeadline ?? { precision: "unknown" }) }] : []),
+                ...(kindOf(lottery) !== "normal"
+                  ? [{ key: "kind", label: "抽選方式", body: `${KIND_LABEL[kindOf(lottery)]}${lottery.validUntil ? `（有効期限 ${lottery.validUntil.slice(5).replace("-", "/")}）` : ""}` }]
+                  : []),
+              ];
+              return (
+                <dl className="grid grid-cols-2 gap-2" aria-label="日時" data-testid="date-cards">
+                  {cards.map((c, i) => (
+                    <DateCard key={c.key} label={c.label} span2={cards.length % 2 === 1 && i === cards.length - 1} testId={`date-${c.key}`}>
+                      {c.body}
+                    </DateCard>
+                  ))}
+                </dl>
+              );
+            })()}
+
+            {/* 3. 応募・受取情報: 関連する項目をグループ化し、細い罫線・縦の区切り線で整理する */}
+            <div className="divide-y rounded-lg border text-sm" data-testid="info-group" aria-label="応募・受取情報">
+              <dl className="grid grid-cols-2 divide-x">
+                <Field label="応募方法" className="px-3 py-2">
+                  {lottery.applyMethod === "unknown" ? DASH : APPLY_LABEL[lottery.applyMethod]}
+                  <Unconfirmed show={unconfirmed.includes("applyMethod")} />
                 </Field>
-              )}
-            </dl>
-
-            {/* 3. 方法 */}
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2" aria-label="方法">
-              <Field label="応募方法">
-                {lottery.applyMethod === "unknown" ? DASH : APPLY_LABEL[lottery.applyMethod]}
-                <Unconfirmed show={unconfirmed.includes("applyMethod")} />
-              </Field>
-              <Field label="受取方法">
-                {lottery.receiveMethod === "unknown" ? DASH : RECEIVE_LABEL[lottery.receiveMethod]}
-                <Unconfirmed show={unconfirmed.includes("receiveMethod")} />
-              </Field>
-              <Field label="発表方法" className="col-span-2">
-                <AnnounceView lottery={lottery} />
-              </Field>
-              <Field label="登録経路">
-                <RegistrationOrigin lottery={lottery} />
-              </Field>
-            </dl>
-
-            {/* 4. URL */}
-            {(lottery.announcementUrl || lottery.sourceUrls.length > 0) && (
-              <ul className="space-y-1 text-sm" aria-label="URL">
-                {lottery.announcementUrl && (
-                  <li>
-                    <a href={lottery.announcementUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-info underline">
-                      発表ページ <ExternalLink className="size-3" aria-hidden="true" />
-                    </a>
-                  </li>
-                )}
-                {lottery.sourceUrls.map((u) => (
-                  <li key={u} className="truncate">
-                    <a href={u} target="_blank" rel="noreferrer noopener" className="inline-flex max-w-full items-center gap-1 text-info underline">
-                      <span className="truncate">{u}</span> <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {/* 5. 条件・制限 */}
-            <dl className="space-y-2 rounded-lg border p-3" aria-label="応募条件・制限">
-              <Field label="応募条件">
-                <RequirementView lottery={lottery} />
-              </Field>
-              <EligibilitySection lottery={lottery} />
-              <div className="grid grid-cols-2 gap-x-3">
-                <Field label="応募制限">
+                <Field label="受取方法" className="px-3 py-2">
+                  {lottery.receiveMethod === "unknown" ? DASH : RECEIVE_LABEL[lottery.receiveMethod]}
+                  <Unconfirmed show={unconfirmed.includes("receiveMethod")} />
+                  {(place.label || (dist && place.showLocation) || store?.roundTripFare != null) && (
+                    <span className="mt-0.5 flex flex-wrap items-center gap-1" data-testid="receive-meta">
+                      {place.label && <Chip className="rounded-full" data-testid="detail-place">{place.label}</Chip>}
+                      {dist && place.showLocation && (
+                        <Chip className={cn("rounded-full", BAND_CLASS[dist.band])} title="自宅からの直線距離（道路距離ではありません）">
+                          直線 {formatKm(dist.km)}
+                        </Chip>
+                      )}
+                      {store?.roundTripFare != null && <Chip className="rounded-full">往復交通費 {store.roundTripFare.toLocaleString("ja-JP")}円</Chip>}
+                    </span>
+                  )}
+                </Field>
+              </dl>
+              <dl>
+                <Field label="発表方法" className="px-3 py-2">
+                  <AnnounceView lottery={lottery} />
+                </Field>
+              </dl>
+              <dl aria-label="応募条件・制限">
+                <Field label="応募条件" className="px-3 py-2">
+                  <RequirementView lottery={lottery} />
+                </Field>
+                <div className="px-3 pb-2">
+                  <EligibilitySection lottery={lottery} />
+                </div>
+              </dl>
+              <dl className="grid grid-cols-2 divide-x">
+                <Field label="応募制限" className="px-3 py-2">
                   {lottery.limit.basis === "unknown" ? "未確認（要確認）" : `${LIMIT_BASIS_LABEL[lottery.limit.basis]}${lottery.limit.maxCount}回`}
                   <Unconfirmed show={unconfirmed.includes("limitBasis")} />
                 </Field>
-                <Field label="本人確認・書類">{lottery.verificationText || DASH}</Field>
-              </div>
-              <p className="text-xs text-muted-foreground" data-testid="rules-applied">
+                <Field label="本人確認・書類" className="px-3 py-2">
+                  {lottery.verificationText || DASH}
+                </Field>
+              </dl>
+              <p className="px-3 py-1.5 text-xs text-muted-foreground" data-testid="rules-applied">
                 適用される応募制限: {rules.length > 0 ? rules.map(describeRule).join(" ／ ") : "未確認（要確認）"}
               </p>
-            </dl>
+            </div>
+
+            {lottery.announcementUrl && (
+              <p className="text-sm" aria-label="発表ページ">
+                <a href={lottery.announcementUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-info underline">
+                  発表ページ <ExternalLink className="size-3" aria-hidden="true" />
+                </a>
+              </p>
+            )}
 
             {/* 6. 応募状況: 通常はアイコン＋状態マークの1行と、現在のユーザーの応募操作。理由の詳細は展開 */}
             <section aria-label="応募状況" className="rounded-lg border" data-testid="user-section">
@@ -322,6 +378,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   <ApplyStatusRow lottery={lottery} />
                   <MyApplyButton lottery={lottery} />
                 </div>
+                <StoreMissingNotice lottery={lottery} />
                 {persistent && <PastApplyRecorder lottery={lottery} />}
                 {persistent && <OngoingOps lottery={lottery} />}
                 {persistent && scopedWon.map((w) => {
@@ -446,6 +503,28 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 </Button>
               )}
             </div>
+            {/* 管理情報（重要度が低いもの）。確認が必要な注意・不足の警告はここに入れない（上部の「確認が必要な点」に出す） */}
+            <details className="text-sm" data-testid="admin-info">
+              <summary className="flex min-h-9 cursor-pointer items-center text-muted-foreground">管理情報（登録経路・情報源）</summary>
+              <div className="space-y-2 pt-1">
+                <dl>
+                  <Field label="登録経路">
+                    <RegistrationOrigin lottery={lottery} />
+                  </Field>
+                </dl>
+                {lottery.sourceUrls.length > 0 && (
+                  <ul className="space-y-1 text-sm" aria-label="情報源URL">
+                    {lottery.sourceUrls.map((u) => (
+                      <li key={u} className="truncate">
+                        <a href={u} target="_blank" rel="noreferrer noopener" className="inline-flex max-w-full items-center gap-1 text-info underline">
+                          <span className="truncate">{u}</span> <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </details>
             <details className="text-sm" data-testid="more-ops">
               <summary className="flex min-h-9 cursor-pointer items-center text-muted-foreground">その他の操作</summary>
               <div className="flex flex-wrap gap-2 pt-1">

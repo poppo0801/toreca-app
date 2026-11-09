@@ -76,8 +76,15 @@ test("対戦記録: プロフィール別。共有の対戦は1件だけ保存�
     await expect(f1).toHaveCount(0);
     const rowA = page.getByTestId("battle-row");
     await expect(rowA).toHaveCount(1);
-    await expect(rowA.first()).toContainText(`相手：${pb.label}`);
-    await expect(rowA.first()).toContainText("リザードン vs サーナイト");
+    // 自分を1行目・相手を2行目（アイコン・ユーザー名・デッキ名）。右端に大きな勝敗記号、左端に同じ色のバー
+    await expect(rowA.first().getByTestId("battle-me")).toContainText(pa.label);
+    await expect(rowA.first().getByTestId("battle-me")).toContainText("リザードン");
+    await expect(rowA.first().getByTestId("battle-opp")).toContainText(pb.label);
+    await expect(rowA.first().getByTestId("battle-opp")).toContainText("サーナイト");
+    await expect(rowA.first().getByTestId("battle-bar")).toBeVisible();
+    // 総合集計（対戦・勝ち・負け・勝率）
+    await expect(page.getByTestId("sum-total-value")).toHaveText("1");
+    await expect(page.getByTestId("sum-rate-value")).toHaveText("100%");
     await expect(rowA.first().locator('[data-result="win"]')).toHaveText("◯");
     // 保存されるのは1件
     expect((await a.from("battle_records").select("id,profile_id,opponent_profile_id,result").eq("household_id", hid).is("archived_at", null)).data).toHaveLength(1);
@@ -85,7 +92,10 @@ test("対戦記録: プロフィール別。共有の対戦は1件だけ保存�
     // 外部の相手（Aの記録だけ）
     await (await record({ result: "負け", my: "ピカチュウ", opp: "ミュウ", format: "公認大会", external: "友だち" })).waitFor({ state: "detached" });
     await expect(page.getByTestId("battle-row")).toHaveCount(2);
-    await expect(page.getByTestId("battle-row").filter({ hasText: "ピカチュウ" })).toContainText("相手：友だち");
+    await expect(page.getByTestId("battle-row").filter({ hasText: "ピカチュウ" }).getByTestId("battle-opp")).toContainText("友だち");
+    await expect(page.getByTestId("battle-row").filter({ hasText: "ピカチュウ" }).getByTestId("battle-external-icon")).toHaveCount(1); // 外部の相手は共通の人物アイコン
+    await expect(page.getByTestId("sum-total-value")).toHaveText("2");
+    await expect(page.getByTestId("sum-rate-value")).toHaveText("50%");
 
     // Bの画面: 共有の1件だけ。自分/相手・デッキ・勝敗が反転（Aの勝ち → Bの負け）。外部の相手の記録は見えない
     await switchProfile(page, pb.label);
@@ -93,8 +103,11 @@ test("対戦記録: プロフィール別。共有の対戦は1件だけ保存�
     await expect(page.locator("header").getByTestId("current-profile")).toHaveText(pb.label);
     const rowB = page.getByTestId("battle-row");
     await expect(rowB).toHaveCount(1);
-    await expect(rowB.first()).toContainText(`相手：${pa.label}`);
-    await expect(rowB.first()).toContainText("サーナイト vs リザードン");
+    await expect(rowB.first().getByTestId("battle-me")).toContainText(pb.label);
+    await expect(rowB.first().getByTestId("battle-me")).toContainText("サーナイト");
+    await expect(rowB.first().getByTestId("battle-opp")).toContainText(pa.label);
+    await expect(rowB.first().getByTestId("battle-opp")).toContainText("リザードン");
+    await expect(page.getByTestId("sum-rate-value")).toHaveText("0%");
     await expect(rowB.first().locator('[data-result="lose"]')).toHaveText("×");
 
     // Bが同じ対戦を自分側から登録しようとしても、二重登録にはならない
@@ -152,6 +165,9 @@ test("抽選候補ページ: 件数・カード・除外理由（6種類）・�
   await login(page);
   const hid = await household();
   const a = admin();
+  const { data: profs } = await a.from("profiles").select("id,label").eq("household_id", hid).eq("active", true).order("sort_order");
+  const [admin1, other1] = profs!;
+  await a.from("profiles").update({ is_admin: true }).eq("id", admin1.id);
   const EMPTY = { precision: "unknown", date: "", time: "" };
   const input = (chain: string, store: string, product: string) => ({
     chain: { id: null, name: chain },
@@ -191,6 +207,23 @@ test("抽選候補ページ: 件数・カード・除外理由（6種類）・�
     await add("c-region", input("E2E電機", "豊橋店", "E2E弾 BOX"));
     await add("c-game", input("E2E電機", "梅田店", "他社E2Eカード 拡張パック"));
     await add("c-other", input("E2E別系列", "なんば店", "E2E弾 BOX"));
+
+    // 管理者以外のプロフィールでは、リンクは出ず、URLを直接開いても案内だけ。管理操作はサーバーでも拒否される
+    await page.goto("/lotteries");
+    await switchProfile(page, other1.label);
+    await page.reload();
+    await expect(page.getByTestId("candidate-card")).toHaveCount(0);
+    await expect(page.getByTestId("candidates-link")).toHaveCount(0);
+    await page.goto("/lotteries/candidates");
+    await expect(page.getByTestId("candidates-admin-only")).toBeVisible();
+    await expect(page.getByTestId("candidate-card")).toHaveCount(0);
+    const denied = await page.evaluate(async (profileId) => {
+      const r = await fetch("/api/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "excludeReason", id: "00000000-0000-4000-8000-000000000000", actor: profileId, input: { reason: "other" } }) });
+      return r.status;
+    }, other1.id);
+    expect(denied).toBe(403);
+    expect((await a.from("collection_candidates").select("status").eq("dedupe_key", keys[0]).single()).data!.status).toBe("pending"); // 変更されていない
+    await switchProfile(page, admin1.label);
 
     // 抽選管理に「抽選候補 N件」のリンク → 専用ページ
     await page.goto("/lotteries");
@@ -268,6 +301,7 @@ test("抽選候補ページ: 件数・カード・除外理由（6種類）・�
     await expect.poll(async () => (await a.from("collection_rules").select("id").eq("id", regionRule[0].id)).data?.length).toBe(0);
     expect((await a.from("collection_exclusion_log").select("id").eq("household_id", hid).eq("rule_id", regionRule[0].id)).data).toHaveLength(1); // 履歴は残る
   } finally {
+    await a.from("profiles").update({ is_admin: false }).eq("id", admin1.id);
     await a.from("collection_exclusion_log").delete().eq("household_id", hid);
     await a.from("collection_rules").delete().eq("household_id", hid);
     await a.from("collection_candidates").delete().in("dedupe_key", keys);

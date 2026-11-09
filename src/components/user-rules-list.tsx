@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { deleteRuleAction, setRuleActiveAction, updateRuleAction } from "@/app/(app)/settings/collection/rule-actions";
+import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { EXCLUDE_REASON_LABEL, USER_RULE_KIND_LABEL, type UserRuleKind } from "@/lib/collector/user-rules";
 import { PREFECTURE_LIST } from "@/lib/geo";
@@ -46,6 +47,8 @@ function summary(r: RuleView): string {
  */
 export function UserRulesList({ rules, log }: { rules: RuleView[]; log: ExclusionLogView[] }) {
   const router = useRouter();
+  const { profile } = useApp();
+  const admin = profile.isAdmin === true;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -71,6 +74,11 @@ export function UserRulesList({ rules, log }: { rules: RuleView[]; log: Exclusio
       {msg && (
         <p role="status" className="text-muted-foreground" data-testid="rule-msg">
           {msg}
+        </p>
+      )}
+      {!admin && (
+        <p className="text-muted-foreground" data-testid="rules-readonly">
+          除外ルールの変更は管理者のプロフィールのみ行えます（内容の確認はできます）。
         </p>
       )}
       {rules.length === 0 && <p className="text-muted-foreground">除外ルールはありません。抽選候補の「除外」で理由を選ぶと、必要なものだけルールが作られます。</p>}
@@ -121,7 +129,7 @@ export function UserRulesList({ rules, log }: { rules: RuleView[]; log: Exclusio
                   <input className={field} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
                 </label>
                 <div className="flex gap-1.5">
-                  <Button size="sm" disabled={busy} data-testid="rule-save" onClick={() => void run(() => updateRuleAction(r.id, { label: draft.label, note: draft.note, prefecture: draft.prefecture, city: draft.city, keywords: draft.keywords.split(/[、,\s]+/).filter(Boolean) }), "更新しました")}>
+                  <Button size="sm" disabled={busy} data-testid="rule-save" onClick={() => void run(() => updateRuleAction(r.id, { label: draft.label, note: draft.note, prefecture: draft.prefecture, city: draft.city, keywords: draft.keywords.split(/[、,\s]+/).filter(Boolean) }, profile.id), "更新しました")}>
                     保存
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -129,12 +137,12 @@ export function UserRulesList({ rules, log }: { rules: RuleView[]; log: Exclusio
                   </Button>
                 </div>
               </div>
-            ) : (
+            ) : admin ? (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => startEdit(r)} data-testid="rule-edit">
                   編集
                 </Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => setRuleActiveAction(r.id, !r.active), r.active ? "無効にしました（履歴は残ります）" : "有効にしました")} data-testid="rule-toggle">
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => setRuleActiveAction(r.id, !r.active, profile.id), r.active ? "無効にしました（履歴は残ります）" : "有効にしました")} data-testid="rule-toggle">
                   {r.active ? "無効にする" : "再び有効にする"}
                 </Button>
                 <Button
@@ -143,14 +151,14 @@ export function UserRulesList({ rules, log }: { rules: RuleView[]; log: Exclusio
                   className="text-danger"
                   disabled={busy}
                   onClick={() => {
-                    if (window.confirm("このルールを削除しますか？（除外した候補の履歴は残ります）")) void run(() => deleteRuleAction(r.id), "削除しました");
+                    if (window.confirm("このルールを削除しますか？（除外した候補の履歴は残ります）")) void run(() => deleteRuleAction(r.id, profile.id), "削除しました");
                   }}
                   data-testid="rule-delete"
                 >
                   削除
                 </Button>
               </div>
-            )}
+            ) : null}
           </li>
         ))}
       </ul>

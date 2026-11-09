@@ -2,13 +2,14 @@
 
 import { PageHeading } from "@/components/page-heading";
 import { useMemo, useRef, useState } from "react";
-import { ChartColumn, SlidersHorizontal } from "lucide-react";
+import { ChartColumn, SlidersHorizontal, UserRound } from "lucide-react";
 import { claimBattle, deleteBattle, saveBattle } from "@/app/(app)/battles/actions";
 import { useApp } from "@/components/app-provider";
+import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { jstDateString } from "@/lib/datetime";
-import { BATTLE_RESULT_LABEL, battleInputSchema, EMPTY_VIEW_FILTER, filterViews, hasViewFilter, isUnassigned, RESULT_COLOR_CLASS, RESULT_SYMBOL, tally, tallyBy, viewsFor, type BattleInput, type BattleView, type BattleViewFilter } from "@/lib/battle";
+import { BATTLE_RESULT_LABEL, battleInputSchema, EMPTY_VIEW_FILTER, filterViews, hasViewFilter, isUnassigned, RESULT_BAR_CLASS, RESULT_COLOR_CLASS, RESULT_SYMBOL, tally, tallyBy, viewsFor, type BattleInput, type BattleView, type BattleViewFilter } from "@/lib/battle";
 import { cn } from "@/lib/utils";
 import type { BattleResult } from "@/types/domain";
 
@@ -41,6 +42,9 @@ export function BattlesView() {
   const available = data.battles !== undefined;
   const mine = useMemo(() => viewsFor(data.battles ?? [], profile.id, labelOf), [data.battles, profile.id, labelOf]);
   const rows = useMemo(() => filterViews(mine, filter), [mine, filter]);
+  const total = useMemo(() => tally(rows), [rows]);
+  const profileById = useMemo(() => new Map(data.profiles.map((p) => [p.id, p])), [data.profiles]);
+  const myProfile = (id: string) => profileById.get(id) ?? null;
   const unassigned = useMemo(() => (data.battles ?? []).filter(isUnassigned), [data.battles]);
   const filtered = hasViewFilter(filter);
 
@@ -70,22 +74,49 @@ export function BattlesView() {
 
       {available && (
         <>
+          {/* 総合集計（現在のプロフィールの戦績。絞り込み中はその対象。勝率＝勝ち÷（勝ち＋負け）、引き分けは対戦数に含め勝率の母数には含めない） */}
+          <dl className="grid grid-cols-4 divide-x rounded-lg border bg-card py-1.5 text-center shadow-card" data-testid="battle-summary">
+            {(
+              [
+                ["対戦", "total", `${total.total}`],
+                ["勝ち", "win", `${total.win}`],
+                ["負け", "lose", `${total.lose}`],
+                ["勝率", "rate", pct(total.winRate)],
+              ] as const
+            ).map(([l, id, v]) => (
+              <div key={id} className="min-w-0 px-1" data-testid={`sum-${id}`}>
+                <dt className="text-[10px] leading-4 text-muted-foreground">{l}</dt>
+                <dd className="text-sm font-bold tabular-nums leading-5" data-testid={`sum-${id}-value`}>
+                  {v}
+                </dd>
+              </div>
+            ))}
+          </dl>
           <ul className="space-y-2" data-testid="battle-list" aria-label="対戦履歴">
             {rows.map((b) => (
               <li key={b.id}>
-                <button type="button" disabled={!persistent} onClick={() => setEdit({ view: b })} data-testid="battle-row" className="w-full rounded-xl border bg-card px-3 py-2 text-left shadow-card active:bg-muted/60 disabled:active:bg-card">
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm font-bold tabular-nums" data-testid="battle-date">
-                      {b.playedOn.slice(5).replace("-", "/")}
+                <button type="button" disabled={!persistent} onClick={() => setEdit({ view: b })} data-testid="battle-row" data-result={b.result} className="flex w-full items-stretch overflow-hidden rounded-xl border bg-card text-left shadow-card active:bg-muted/60 disabled:active:bg-card">
+                  {/* 左端: 勝敗のアクセントバー（記号と同じ色。細く、カード全体は塗らない） */}
+                  <span className={cn("w-1.5 shrink-0", RESULT_BAR_CLASS[b.result])} aria-hidden="true" data-testid="battle-bar" />
+                  <span className="min-w-0 flex-1 px-2.5 py-2">
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-sm font-bold tabular-nums" data-testid="battle-date">
+                        {b.playedOn.slice(5).replace("-", "/")}
+                      </span>
+                      {b.format && (
+                        <span className="min-w-0 truncate rounded-full border bg-muted px-2 py-px text-[11px] text-muted-foreground" data-testid="battle-format">
+                          {b.format}
+                        </span>
+                      )}
                     </span>
-                    {b.format && <span className="min-w-0 truncate text-xs text-muted-foreground">{b.format}</span>}
-                    <ResultMark result={b.result} className="ml-auto" />
+                    <span className="mt-1 block space-y-0.5" data-testid="battle-detail">
+                      <PlayerLine profile={myProfile(b.myProfileId)} name={labelOf(b.myProfileId)} deck={b.myDeck} mine testId="battle-me" />
+                      <PlayerLine profile={b.opponentProfileId ? myProfile(b.opponentProfileId) : null} name={b.opponentName || "外部の相手"} deck={b.opponentDeck} testId="battle-opp" />
+                    </span>
                   </span>
-                  <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-sm" data-testid="battle-detail">
-                    {b.opponentName && <span className="text-muted-foreground">相手：{b.opponentName}</span>}
-                    <span className="min-w-0 break-words font-medium">
-                      {b.myDeck || "（デッキ未入力）"} <span className="font-normal text-muted-foreground">vs</span> {b.opponentDeck || "（相手デッキ未入力）"}
-                    </span>
+                  {/* 右端: 大きな勝敗記号（上下中央） */}
+                  <span className="flex w-14 shrink-0 items-center justify-center">
+                    <ResultMark result={b.result} className="text-4xl" />
                   </span>
                 </button>
               </li>
@@ -115,6 +146,27 @@ export function BattlesView() {
       {panel === "analysis" && <AnalysisSheet rows={rows} filtered={filtered} onClose={() => setPanel(null)} />}
       {edit && <BattleSheet key={edit.view?.id ?? "new"} view={edit.view} decks={[...new Set(mine.map((b) => b.myDeck).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ja"))} onClose={() => setEdit(null)} />}
     </div>
+  );
+}
+
+/** 対戦カードの1行（プロフィールアイコン・ユーザー名・使用デッキ）。外部の相手は共通の人物アイコン。デッキ名は原則1行、長いときだけ最大2行 */
+function PlayerLine({ profile, name, deck, mine, testId }: { profile: Parameters<typeof ProfileAvatar>[0]["profile"] | null; name: string; deck: string; mine?: boolean; testId: string }) {
+  return (
+    <span className="flex items-center gap-1.5" data-testid={testId}>
+      {profile ? (
+        <ProfileAvatar profile={profile} size="sm" />
+      ) : (
+        <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground" data-testid="battle-external-icon">
+          <UserRound className="size-3.5" />
+        </span>
+      )}
+      <span className={cn("max-w-[5.5rem] shrink-0 truncate text-[11px]", mine ? "font-bold" : "text-muted-foreground")} data-testid="battle-name">
+        {name}
+      </span>
+      <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] leading-tight" data-testid="battle-deck">
+        {deck || "（デッキ未入力）"}
+      </span>
+    </span>
   );
 }
 
@@ -221,7 +273,7 @@ function AnalysisSheet({ rows, filtered, onClose }: { rows: BattleView[]; filter
           <SheetClose className="min-h-10 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted">閉じる</SheetClose>
         </div>
         <SheetBody className="space-y-3 border-t pt-3">
-          <dl className="grid grid-cols-5 gap-1.5 text-center" data-testid="battle-summary">
+          <dl className="grid grid-cols-5 gap-1.5 text-center" data-testid="battle-analysis-summary">
             {(
               [
                 ["対戦", "total", `${t.total}`],

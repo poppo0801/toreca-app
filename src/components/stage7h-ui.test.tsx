@@ -9,10 +9,13 @@ import type { CandidateView } from "@/components/auto-collect-view";
 
 const NOW = new Date("2026-11-09T03:00:00Z");
 let data: AppData = createMockData(NOW);
+/** 操作中のプロフィール（既定は管理者） */
+let me = 0;
+let admin = true;
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ usePathname: () => "/lotteries/candidates", useRouter: () => ({ refresh, push: vi.fn() }), useSearchParams: () => new URLSearchParams("") }));
 vi.mock("@/components/app-provider", () => ({
-  useApp: () => ({ data, now: NOW, profile: data.profiles[0], settings: {}, persistent: true, reload: async () => null }),
+  useApp: () => ({ data, now: NOW, profile: { ...data.profiles[me], isAdmin: admin }, settings: {}, persistent: true, reload: async () => null }),
 }));
 vi.mock("@/components/lottery-form", () => ({ LotteryFormDialog: ({ onSaved }: { onSaved: (id: string) => void }) => createElement("button", { type: "button", "data-testid": "mock-form-save", onClick: () => onSaved("lot-new") }, "保存") }));
 
@@ -23,6 +26,8 @@ let host: HTMLDivElement;
 const calls: { url: string; body: Record<string, unknown> }[] = [];
 beforeEach(() => {
   data = createMockData(NOW);
+  me = 0;
+  admin = true;
   calls.length = 0;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -80,6 +85,19 @@ const three = () => [
   cand("c3", { chain: "サンプル電機", chainId: "chain-a", store: "なんば店", product: "テスト弾 BOX", fetched: "2026-11-05T02:00:00Z" }),
 ];
 const mount = (list: CandidateView[]) => act(() => root.render(createElement(CandidatesView, { candidates: list })));
+
+describe("Stage 7J: 抽選候補は管理者のプロフィールのみ", () => {
+  it("管理者以外のプロフィールでは候補も操作も表示されず、案内だけが出る。プロフィールの切替で表示が変わる", () => {
+    admin = false;
+    mount(three());
+    expect(q("candidates-admin-only")).not.toBeNull();
+    expect(qa("candidate-card")).toHaveLength(0);
+    expect(q("candidate-exclude")).toBeNull();
+    admin = true;
+    act(() => root.render(createElement(CandidatesView, { candidates: three(), key: "admin" })));
+    expect(qa("candidate-card")).toHaveLength(3);
+  });
+});
 
 describe("Stage 7H: 抽選候補ページ", () => {
   it("カード形式で表示し、件数・新着順・新着印を出す。主要操作は「確認・登録」と「除外」の2つだけ（除外理由のボタンは常時表示しない）", () => {
@@ -194,6 +212,7 @@ describe("Stage 7H: 抽選候補ページ", () => {
     await click(q("exclude-submit"));
     await flush();
     expect(calls.find((x) => x.body.action === "excludeReason")!.body.input).toMatchObject({ reason: "other_game", keywords: ["他社カード"] });
+    expect(calls.find((x) => x.body.action === "excludeReason")!.body.actor).toBe(data.profiles[0].id); // 操作者のID（サーバーが管理者か確認する）
   });
 
   it("確認・登録: 登録フォームで保存すると候補を登録済みにして一覧から外す", async () => {

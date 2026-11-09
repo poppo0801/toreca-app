@@ -331,6 +331,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         iconMark: p.icon_mark,
         notifyRecipientIds: p.notify_recipient_ids,
         active: p.active,
+        isAdmin: (p as unknown as { is_admin?: boolean }).is_admin === true,
         allowedChainIds: allowChains.length > 0 ? allowChains : null,
         allowedStoreIds: mine.filter((r) => r.mode === "allow" && r.store_id !== null).map((r) => r.store_id as string),
         blockedChainIds: mine.filter((r) => r.mode === "block" && r.store_id === null).map((r) => r.chain_id),

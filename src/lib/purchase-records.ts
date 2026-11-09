@@ -1,5 +1,5 @@
 import { isPurchaseRecord } from "@/lib/expense-category";
-import { flexToJstDate, productName, purchaseTotal, unitLabelFor } from "@/lib/finance";
+import { flexToJstDate, productFullName, purchaseTotal, unitLabelFor } from "@/lib/finance";
 import type { AppData, Purchase, PurchaseItem, PurchaseUnit } from "@/types/domain";
 
 /**
@@ -155,11 +155,11 @@ export function productTotals(data: AppData, purchases: Purchase[], onlyProductI
   for (const p of purchases) {
     for (const it of p.items) {
       if (onlyProductId && it.productId !== onlyProductId) continue;
-      const r = get(it.productId, productName(data, it.productId, it.productLabel), p.category ?? "pokemon_card", isSingleItem(p, it));
+      const r = get(it.productId, productFullName(data, it.productId, it.productLabel), p.category ?? "pokemon_card", isSingleItem(p, it));
       r.direct[it.unit] = (r.direct[it.unit] ?? 0) + it.quantity;
       if (it.amountPaid === null) r.amountUnknown++;
       else r.amount += it.amountPaid;
-      if (it.productId) for (const c of comps.get(it.productId) ?? []) get(c.componentProductId, productName(data, c.componentProductId)).viaSet += c.quantity * it.quantity;
+      if (it.productId) for (const c of comps.get(it.productId) ?? []) get(c.componentProductId, productFullName(data, c.componentProductId)).viaSet += c.quantity * it.quantity;
     }
   }
   for (const r of map.values()) {

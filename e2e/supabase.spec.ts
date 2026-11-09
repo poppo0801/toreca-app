@@ -704,7 +704,7 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await expect(form.getByRole("alert").filter({ hasText: "購入・受取の開始が終了より後" })).toBeVisible();
   await form.getByLabel("購入・受取終了の日付").fill("2026-02-25");
 
-  // 右上の閉じる・最小化ボタンは無い。上部のハンドルを下へスワイプすると最小化し、一覧を見ながら入力を保持できる
+  // 右上の閉じる・最小化ボタンは無い。上部のハンドルを下へスワイプすると閉じる操作になる。入力があるときは破棄の確認が出て、「続ける」で入力に戻れる。入力途中の再開（最小化）は無い（Stage 7J）
   await expect(form.getByRole("button", { name: /^最小化/ })).toHaveCount(0);
   await expect(form.getByRole("button", { name: "閉じる", exact: true })).toHaveCount(0);
   const hb = (await form.getByTestId("sheet-handle").boundingBox())!;
@@ -713,11 +713,9 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 + 60, { steps: 5 });
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 + 160, { steps: 5 });
   await page.mouse.up();
-  await expect(form).toHaveCount(0);
-  const bar = page.getByTestId("form-minimized");
-  await expect(bar).toContainText("E2Eフォーム電機 E2Eフォーム店");
-  await page.getByRole("tab", { name: /要チェック/ }).click(); // 最小化中も一覧を操作できる
-  await bar.getByRole("button", { name: /を再開/ }).click(); // タップで再開（上スワイプでも再開できる）
+  await expect(form.getByTestId("form-confirm")).toContainText("入力中の内容を破棄");
+  await expect(page.getByTestId("form-minimized")).toHaveCount(0);
+  await form.getByRole("button", { name: "入力を続ける" }).click(); // 入力はそのまま
   await expect(page.getByTestId("lottery-form").getByLabel("応募締切の日付")).toHaveValue("2026-02-01");
   await expect(page.getByTestId("lottery-form").getByLabel("購入・受取開始の日付")).toHaveValue("2026-02-20");
 
@@ -759,8 +757,8 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await expect(sheet.getByLabel("日時")).toContainText("2/5 00:00");
   await expect(sheet.getByLabel("日時")).toContainText("購入・受取期間"); // 開始〜終了
   await expect(sheet.getByLabel("日時")).toContainText("2/20");
-  await expect(sheet.getByLabel("方法")).toContainText("Web");
-  await expect(sheet.getByLabel("方法").getByText("初期値・未確認")).toHaveCount(1); // 応募方法だけが未確認の初期値
+  await expect(sheet.getByLabel("応募・受取情報")).toContainText("Web");
+  await expect(sheet.getByLabel("応募・受取情報").getByText("初期値・未確認")).toHaveCount(1); // 応募方法だけが未確認の初期値
   await closeSheet(page);
 
   // 編集: 別の端末（別タブ）で先に更新されると、保存の前に気づける

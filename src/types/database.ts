@@ -5194,6 +5194,7 @@ export type Database = {
           icon_mark: string
           id: string
           initial: string
+          is_admin: boolean
           kind: string
           label: string
           main_profile_id: string | null
@@ -5211,6 +5212,7 @@ export type Database = {
           icon_mark?: string
           id?: string
           initial: string
+          is_admin?: boolean
           kind?: string
           label: string
           main_profile_id?: string | null
@@ -5228,6 +5230,7 @@ export type Database = {
           icon_mark?: string
           id?: string
           initial?: string
+          is_admin?: boolean
           kind?: string
           label?: string
           main_profile_id?: string | null

@@ -41,6 +41,8 @@ export interface Profile {
   id: string;
   /** 無効化されたプロフィールは切替対象から外す（履歴表示には残す）。未指定=有効 */
   active?: boolean;
+  /** 管理者プロフィール（Stage 7J）。抽選候補ページの管理操作（除外ルールの作成・変更など）ができる。判定は表示名ではなくID（この項目）。未指定=管理者ではない */
+  isAdmin?: boolean;
   label: string;
   /** メイン=全系列を表示・操作 / サブ=対象系列（allowedChainIds）の抽選だけ。未指定=メイン */
   kind?: "main" | "sub";

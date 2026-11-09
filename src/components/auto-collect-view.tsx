@@ -384,12 +384,8 @@ export function AutoCollectView({
   const [productQ, setProductQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CandidateView | null>(null);
-  // 登録フォームは閉じると最小化されて残る（入力を失わない）。同じ候補を開き直すときは最小化を解除する（restoreSignal）
-  const [editNonce, setEditNonce] = useState(0);
-  const openEdit = (c: CandidateView) => {
-    setEditing(c);
-    setEditNonce((n) => n + 1);
-  };
+  // 登録フォームは、閉じると未保存の入力を破棄する（入力途中の再開はしない。Stage 7J）。開くたびに候補の解析結果から始まる
+  const openEdit = (c: CandidateView) => setEditing(c);
   // 「要手動確認」から渡された候補の編集フォームを、収集候補の一覧を経由せずに直接開く（解析済みの内容をそのまま反映）
   const editReq = useEditRequest();
   const editReqId = editReq?.id ?? null;
@@ -1325,7 +1321,6 @@ export function AutoCollectView({
       {editing?.draft?.input && (
         <LotteryFormDialog
           key={editing.id}
-          restoreSignal={editNonce}
           open
           lottery={null}
           onOpenChange={(v) => !v && setEditing(null)}
