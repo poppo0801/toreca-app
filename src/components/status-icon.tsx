@@ -13,6 +13,11 @@ export const STATUS_META: Record<AccountStatus, { symbol: string; label: string;
   needs_review: { symbol: "！", label: "要確認", icon: TriangleAlert, tone: "text-warn", hint: "会員資格や応募制限が未確認で、判定を確定できません" },
 };
 
+/** 状態名。受付前・受付終了・中止による「応募不可」は、その状態名で表示する（開始前の抽選を応募不可と表示しない） */
+export function statusLabelWithReason(status: AccountStatus, reason: string): string {
+  return status === "unavailable" && ["受付前", "受付終了", "中止"].includes(reason) ? reason : STATUS_META[status].label;
+}
+
 export function StatusIcon({ status, className }: { status: AccountStatus; className?: string }) {
   const { icon: Icon, tone } = STATUS_META[status];
   return <Icon aria-hidden="true" strokeWidth={2.4} className={cn("size-[18px] shrink-0", tone, className)} />;

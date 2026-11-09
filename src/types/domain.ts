@@ -495,6 +495,12 @@ export interface AppData {
   defaultImages?: Partial<Record<"single_card" | "other", { url: string }>>;
   /** 対戦記録（Stage 5A）。モックでは省略 */
   battles?: BattleRecord[];
+  /** BOXの開封実績（Stage 7K）。BOX在庫の履歴（開封の行と取り消し）から導出した、取り消されていない開封。モックでは省略 */
+  boxOpenings?: BoxOpening[];
+  /** BOXコレクションにロットがある購入明細のID（Stage 7K。購入したBOXが「未開封（在庫）」か「BOXコレクション未登録（開封状態が不明）」かの判定に使う） */
+  boxLotItemIds?: string[];
+  /** 単品パック・デッキ・セット商品などの開封・使用開始の記録（Stage 7K。BOXコレクションを経由しない）。取り消したものは含まない。モックでは省略 */
+  openingRecords?: OpeningRecord[];
   /** 系列別の抽選条件（Stage 5R）と、プロフィール別の達成状況。未適用の環境・モックでは省略 */
   chainConditions?: import("@/lib/chain-conditions").ChainCondition[];
   chainConditionStates?: import("@/lib/chain-conditions").ConditionState[];
@@ -503,6 +509,35 @@ export interface AppData {
 export type BattleResult = "win" | "lose" | "draw";
 
 /** 対戦記録。収支・抽選とは独立した記録 */
+/** BOXの開封実績（1回の開封操作 × ロット）。金額は開封したロットの実際の購入単価 × 数量（購入単価が不明なら null。市場相場は使わない） */
+export interface BoxOpening {
+  id: string;
+  opId: string;
+  lotId: string;
+  productId: string;
+  quantity: number;
+  occurredAt: string;
+  profileId: string | null;
+  /** 開封したロットの1BOXあたりの実際の購入価格。不明は null */
+  unitPrice: number | null;
+  storeId: string | null;
+  purchaseItemId: string | null;
+}
+
+/** 開封・使用開始の記録（BOXコレクションを経由しない商品）。取り消しは非表示（archived）で、集計から除かれる */
+export interface OpeningRecord {
+  id: string;
+  productId: string | null;
+  label: string;
+  quantity: number;
+  unit: "pack" | "set" | "piece";
+  openedOn: string;
+  amountYen: number | null;
+  profileId: string | null;
+  purchaseItemId: string | null;
+  note: string;
+}
+
 export interface BattleRecord {
   id: string;
   playedOn: string;

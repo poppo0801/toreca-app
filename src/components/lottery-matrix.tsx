@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
-import { STATUS_META, StatusIcon, StatusLegend } from "@/components/status-icon";
+import { StatusIcon, StatusLegend, statusLabelWithReason } from "@/components/status-icon";
 import { judgeAccount } from "@/lib/eligibility";
 import { cn } from "@/lib/utils";
 import type { AccountStatus, Lottery } from "@/types/domain";
@@ -85,8 +85,8 @@ export function LotteryMatrix({ lotteries, actionOnly }: { lotteries: Lottery[];
                       {c ? (
                         <span
                           role="img"
-                          title={`${STATUS_META[c.status].label}（${c.reason}）`}
-                          aria-label={`${profiles[i].label}: ${STATUS_META[c.status].label}（${c.reason}）`}
+                          title={`${statusLabelWithReason(c.status, c.reason)}（${c.reason}）`}
+                          aria-label={`${profiles[i].label}: ${statusLabelWithReason(c.status, c.reason)}（${c.reason}）`}
                           data-status={c.status}
                           className={cn("inline-flex size-7 items-center justify-center rounded-full", NEEDS_ACTION.includes(c.status) && "border border-primary bg-input")}
                         >

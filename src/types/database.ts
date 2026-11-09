@@ -4654,6 +4654,92 @@ export type Database = {
           },
         ]
       }
+      opening_records: {
+        Row: {
+          amount_yen: number | null
+          archived_at: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          household_id: string
+          id: string
+          label: string
+          note: string
+          op_id: string | null
+          opened_on: string
+          product_id: string | null
+          profile_id: string | null
+          purchase_item_id: string | null
+          quantity: number
+          unit: string
+          updated_at: string
+        }
+        Insert: {
+          amount_yen?: number | null
+          archived_at?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id: string
+          id?: string
+          label?: string
+          note?: string
+          op_id?: string | null
+          opened_on: string
+          product_id?: string | null
+          profile_id?: string | null
+          purchase_item_id?: string | null
+          quantity: number
+          unit: string
+          updated_at?: string
+        }
+        Update: {
+          amount_yen?: number | null
+          archived_at?: string | null
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id?: string
+          id?: string
+          label?: string
+          note?: string
+          op_id?: string | null
+          opened_on?: string
+          product_id?: string | null
+          profile_id?: string | null
+          purchase_item_id?: string | null
+          quantity?: number
+          unit?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opening_records_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opening_records_product_id_household_id_fkey"
+            columns: ["product_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "opening_records_profile_id_household_id_fkey"
+            columns: ["profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "opening_records_purchase_item_id_household_id_fkey"
+            columns: ["purchase_item_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_items"
+            referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
       product_aliases: {
         Row: {
           alias: string

@@ -76,7 +76,7 @@ test("抽選詳細のレイアウトと、応募済みの抽選を店舗選択�
     // ステータス行は1行（左=状態、右=現在のプロフィールの応募状態）
     const line = await detail.getByTestId("status-line").boundingBox();
     expect(line!.height).toBeLessThan(40);
-    await expect(detail.getByTestId("my-status")).toBeVisible();
+    await expect(detail.getByTestId("status-strip")).toBeVisible(); // 全プロフィールの応募状態（アイコンと記号）
     // 管理情報（登録経路）は下部
     const adminY = (await detail.getByTestId("admin-info").boundingBox())!.y;
     const datesY = (await dates.boundingBox())!.y;
@@ -136,9 +136,9 @@ test("購入記録: 商品名は正式名称（略称ではない）。最大2�
   const longName = "7J正式名称の確認用の長い商品名 スペシャルエディション 30th CELEBRATION プレミアムBOX";
   const prod = (await a.from("products").insert({ household_id: hid, official_name: longName, packs_per_box: 30 } as never).select("id").single()).data!.id as string;
   await a.from("product_aliases").insert({ household_id: hid, product_id: prod, alias: "7J略称30th", normalized_alias: "7j略称30th" } as never);
-  const today = new Date(Date.now() + 9 * 3600_000).toISOString();
-  const pu = (await a.from("purchases").insert({ household_id: hid, purchased_at: today, channel: "store", source_kind: "manual", category: "pokemon_card" } as never).select("id").single()).data!.id as string;
-  await a.from("purchase_items").insert({ household_id: hid, purchase_id: pu, product_id: prod, quantity: 3, unit: "box", amount_paid: 21600 } as never);
+  // 購入記録は開封の記録（Stage 7K）。単品パックの開封記録で商品名の表示を確認する
+  const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+  const op = (await a.from("opening_records").insert({ household_id: hid, product_id: prod, quantity: 3, unit: "pack", opened_on: today, amount_yen: 450 } as never).select("id").single()).data!.id as string;
   try {
     await page.goto("/purchases");
     const total = page.getByTestId("product-total-row").filter({ hasText: "7J正式名称" });
@@ -158,7 +158,6 @@ test("購入記録: 商品名は正式名称（略称ではない）。最大2�
     expect(tb.x + tb.width).toBeLessThanOrEqual(ab.x + 1); // 金額と重ならない
     expect(tb.height).toBeLessThan(50);
   } finally {
-    await a.from("purchase_items").delete().eq("purchase_id", pu);
-    await a.from("purchases").delete().eq("id", pu);
+    await a.from("opening_records").delete().eq("id", op);
   }
 });

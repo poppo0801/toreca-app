@@ -164,14 +164,13 @@ test("購入記録と支出: シングルカード（枚固定）を登録する
     await expect(page.getByTestId("tab-products")).toHaveAttribute("aria-selected", "true");
     await expect(page.getByTestId("product-totals")).toBeVisible();
     const totalRow = (name: string) => page.getByTestId("product-total-row").filter({ hasText: name });
-    await expect(totalRow("7E-BOX商品").getByTestId("total-qty")).toHaveText("60パック");
-    await expect(totalRow("7E-BOX商品").getByTestId("total-sub")).toHaveText("3BOX ｜ 購入総額 21,600円");
+    // 購入しただけの未開封BOXは購入記録に含めない（Stage 7K。収支には残る）
+    await expect(totalRow("7E-BOX商品")).toHaveCount(0);
     await expect(totalRow("7Eピカチュウ").getByTestId("total-qty")).toHaveText("6枚");
     await expect(totalRow("7Eピカチュウ").getByTestId("default-image")).toBeVisible(); // 標準画像
-    await expect(totalRow("7E-BOX商品").getByTestId("default-image")).toHaveCount(0); // 商品個別（画像なし）はシングル用の標準画像を使わない
     // 上部の集計（横4分割・コンパクト）
-    await expect(page.getByTestId("stat-box")).toContainText("3");
-    await expect(page.getByTestId("stat-pack")).toContainText("60");
+    await expect(page.getByTestId("stat-box")).toContainText("0");
+    await expect(page.getByTestId("stat-pack")).toContainText("0");
     const sb = (await page.getByTestId("purchase-summary").boundingBox())!;
     expect(sb.height).toBeLessThan(70);
     // 購入履歴: 日付見出しなし・数量→単位・コレクション追加リンクなし・金額は右寄せ

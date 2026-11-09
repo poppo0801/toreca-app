@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { deriveBoxOpenings, type MovementRow } from "@/lib/usage-records";
 import { z } from "zod";
 import { normalizeCardDisplay } from "@/lib/card-display";
 import { normalizeProfileSettings } from "@/lib/profile-settings";
@@ -135,6 +136,51 @@ function parseContentBox(v: unknown): { x: number; y: number; w: number; h: numb
 export async function currentHouseholdId(db: Db): Promise<string | null> {
   const { data } = await db.from("households").select("id").maybeSingle();
   return data?.id ?? null;
+}
+
+// ------------------------------------------------------------------ 購入記録（開封実績・開封記録）
+/**
+ * 購入記録（Stage 7K）の元データ。BOXの開封実績は、BOX在庫の履歴（box_movements）の「開封」行から、取り消し済みの操作を除いて導出する。
+ * 金額は開封したロットの実際の購入単価（市場相場は使わない）。取得できなくても他のデータは読み込む（未適用の環境では省略）。
+ */
+async function loadUsage(db: Db, householdId?: string): Promise<Pick<AppData, "boxOpenings" | "boxLotItemIds" | "openingRecords">> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
+  const from = (t: string): any => (db as any).from(t);
+  const scope = <T extends { eq: (c: string, v: string) => T }>(q: T): T => (householdId ? q.eq("household_id", householdId) : q);
+  const out: Pick<AppData, "boxOpenings" | "boxLotItemIds" | "openingRecords"> = {};
+  try {
+    const [mv, lots] = await Promise.all([
+      scope(from("box_movements").select("id,lot_id,kind,qty,op_id,reverts_op,occurred_at,created_by_profile_id").in("kind", ["open", "adjust"]).order("occurred_at", { ascending: false }).limit(20000)),
+      scope(from("box_lots").select("id,product_id,actual_unit_price,store_id,purchase_item_id,archived_at").limit(5000)),
+    ]);
+    if (!mv.error && !lots.error) {
+      type L = { id: string; product_id: string; actual_unit_price: number | null; store_id: string | null; purchase_item_id: string | null; archived_at: string | null };
+      out.boxOpenings = deriveBoxOpenings(mv.data as MovementRow[], lots.data as L[]);
+      out.boxLotItemIds = (lots.data as L[]).filter((l) => l.purchase_item_id && !l.archived_at).map((l) => l.purchase_item_id as string);
+    }
+  } catch {
+    /* 未適用: BOXの開封実績なし */
+  }
+  try {
+    const r = await scope(from("opening_records").select("id,product_id,label,quantity,unit,opened_on,amount_yen,profile_id,purchase_item_id,note").is("archived_at", null).order("opened_on", { ascending: false }).limit(5000));
+    if (!r.error) {
+      out.openingRecords = (r.data as Record<string, unknown>[]).map((x) => ({
+        id: x.id as string,
+        productId: (x.product_id as string | null) ?? null,
+        label: (x.label as string) ?? "",
+        quantity: x.quantity as number,
+        unit: x.unit as "pack" | "set" | "piece",
+        openedOn: x.opened_on as string,
+        amountYen: (x.amount_yen as number | null) ?? null,
+        profileId: (x.profile_id as string | null) ?? null,
+        purchaseItemId: (x.purchase_item_id as string | null) ?? null,
+        note: (x.note as string) ?? "",
+      }));
+    }
+  } catch {
+    /* 未適用 */
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ 読み込み
@@ -307,6 +353,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
   const { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates } = await loadOptional(db, householdId);
+  const usage = await loadUsage(db, householdId);
   // 購入記録の標準画像（Stage 7E）。取得できなくても他のデータは読み込む
   const defaultImages: NonNullable<AppData["defaultImages"]> = {};
   try {
@@ -532,6 +579,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       after: a.after_json,
     })),
     battles,
+    ...usage,
     settings,
     profileSettings,
     defaultImages,

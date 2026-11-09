@@ -93,8 +93,10 @@ describe("Stage 7G: 対戦記録ページ", () => {
     expect(card.textContent).toContain("公認大会");
     const mark = card.querySelector('[data-result="draw"]')!;
     expect(mark.textContent).toBe("△");
-    expect(mark.className).toContain("text-4xl"); // 大きく太字
-    expect(mark.className).toContain("font-bold");
+    expect(mark.className).toContain("text-[2.5rem]"); // 大きく
+    const svg = mark.querySelector('[data-testid="result-svg"]')!; // 太い線のSVG（3種類とも同じ線幅）
+    expect(Number(svg.getAttribute("data-stroke"))).toBeGreaterThanOrEqual(3);
+    expect(svg.getAttribute("stroke-width")).toBe(svg.getAttribute("data-stroke"));
     expect(mark.parentElement!.className).toContain("items-center"); // 右端で上下中央
     expect(mark.parentElement!.className).toContain("justify-center");
     expect(card.lastElementChild).toBe(mark.parentElement); // カードの右端
@@ -126,13 +128,17 @@ describe("Stage 7G: 対戦記録ページ", () => {
     expect(ext.querySelectorAll('[data-testid="battle-external-icon"]')).toHaveLength(1); // 外部の相手だけ人物アイコン
     expect(ext.querySelector('[data-testid="battle-me"] [data-testid="battle-external-icon"]')).toBeNull();
     // アイコンは小さく（24px程度）
-    expect(ext.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-6");
+    expect(ext.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-5");
   });
 
   it("デッキ名は原則1行で収まるよう、ユーザー名は幅を抑え、デッキ名は最大2行まで", () => {
     setup((a) => [rec({ id: "d1", profileId: a, opponent: "あいうえおかきくけこさしすせそ", myDeck: "スタートデッキ100 (025)", opponentDeck: "スタートデッキ100 (001)" })]);
     const row = qa("battle-row")[0];
-    expect(row.querySelector('[data-testid="battle-name"]')!.className).toContain("max-w-[5.5rem]");
+    // ユーザー名は固定幅（デッキ名の開始位置が自分・相手で揃う）。アイコンは20px
+    const names = [...row.querySelectorAll('[data-testid="battle-name"]')];
+    expect(names).toHaveLength(2);
+    expect(names.every((n) => n.className.includes("w-[4.25rem]") && n.className.includes("shrink-0"))).toBe(true);
+    expect(row.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-5");
     expect(row.querySelector('[data-testid="battle-name"]')!.className).toContain("truncate");
     const deck = row.querySelector('[data-testid="battle-deck"]')!;
     expect(deck.className).toContain("line-clamp-2");

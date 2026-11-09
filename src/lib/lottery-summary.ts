@@ -1,5 +1,5 @@
 import { isResultFinished, isResultInPeriod } from "@/lib/datetime";
-import { accountsForLottery, judgeAccount } from "@/lib/eligibility";
+import { accountsForLottery, effectiveEventState, judgeAccount } from "@/lib/eligibility";
 import { formatQuantity } from "@/lib/lottery-view";
 import type { AccountStatus, AppData, Application, Lottery, ResultStatus } from "@/types/domain";
 
@@ -75,8 +75,24 @@ export function profileMarks(data: AppData, lottery: Lottery, now: Date): Profil
   });
 }
 
-/** 画面に出す状態名（色だけに頼らず文字でも区別できるように） */
-export function markLabel(m: Pick<ProfileMark, "status" | "result" | "partial">): string {
+/** 抽選全体の受付状態（プロフィールごとの応募状況とは別に判定する。Stage 7K）。応募開始・締切の日時がどちらも不明で受付中とも断定できないときは null（推測して確定しない） */
+export type ReceptionLabel = "受付前" | "受付中" | "受付終了" | "中止" | "延期";
+export function receptionState(lottery: Lottery, now: Date): ReceptionLabel | null {
+  const ev = effectiveEventState(lottery, now);
+  if (ev === "cancelled") return "中止";
+  if (ev === "postponed") return "延期";
+  if (ev === "closed") return "受付終了";
+  if (ev === "before") return "受付前";
+  const known = lottery.applyStart.precision !== "unknown" || lottery.applyDeadline.precision !== "unknown";
+  return known ? "受付中" : null;
+}
+
+/** 抽選全体の受付状態が理由で応募できないときの理由（これらは「応募不可」とは表示しない） */
+export const RECEPTION_REASONS: readonly string[] = ["受付前", "受付終了", "中止"];
+
+/** 画面に出す状態名（色だけに頼らず文字でも区別できるように）。受付前・受付終了・中止は「応募不可」とせず、その状態を表示する（条件によって応募できない場合だけ「応募不可」） */
+export function markLabel(m: Pick<ProfileMark, "status" | "result" | "partial"> & { reason?: string }): string {
+  if (m.status === "unavailable" && m.reason && RECEPTION_REASONS.includes(m.reason)) return m.reason;
   if (m.status === "applied") {
     if (m.result === "won") return "当選";
     if (m.result === "lost") return "落選";

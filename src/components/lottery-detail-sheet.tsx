@@ -8,13 +8,13 @@ import { DuplicateDialog } from "@/components/duplicate-dialog";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { ProductThumb } from "@/components/product-image";
 import { ProfileAvatar } from "@/components/profile-avatar";
-import { STATUS_META, StatusIcon } from "@/components/status-icon";
+import { StatusIcon, statusLabelWithReason } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { deadlineBadge, formatMonthDay, formatPlain, hasResultPeriod, isResultFinished } from "@/lib/datetime";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
-import { markLabel, profileMarks, resultNotice } from "@/lib/lottery-summary";
+import { markLabel, profileMarks, receptionState, resultNotice, type ReceptionLabel } from "@/lib/lottery-summary";
 import { OngoingOps } from "@/components/ongoing-ops";
 import { PastApplyRecorder } from "@/components/past-apply-recorder";
 import { WonRecordButtons } from "@/components/won-actions";
@@ -23,7 +23,7 @@ import { useViewScope } from "@/components/user-scope";
 import { canOperateOwner, ownerIdOf, scopedApplications } from "@/lib/profile-link";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
-import { APPLY_LABEL, EVENT_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
+import { APPLY_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
 import { AppliedStoreDialog } from "@/components/applied-store-dialog";
@@ -37,13 +37,15 @@ import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSk
 import { cn } from "@/lib/utils";
 import type { Application, FlexibleDate, Lottery } from "@/types/domain";
 
-function Chip({ children, className, title }: { children: React.ReactNode; className?: string; title?: string }) {
+function Chip({ children, className, title, ...rest }: { children: React.ReactNode; className?: string; title?: string; "data-testid"?: string }) {
   return (
-    <span title={title} className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-xs", className)}>
+    <span title={title} {...rest} className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-xs", className)}>
       {children}
     </span>
   );
 }
+
+const RECEPTION_TONE: Record<ReceptionLabel, string> = { 受付前: "text-info", 受付中: "text-success", 受付終了: "text-muted-foreground", 中止: "text-muted-foreground", 延期: "text-muted-foreground" };
 
 /** 項目名と値の1組。値が空なら「—」 */
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
@@ -57,26 +59,57 @@ function Field({ label, children, className }: { label: string; children: React.
 
 const DASH = <span className="text-muted-foreground">—</span>;
 
-/** 日付・期間の1項目（独立した角丸カード）。項目名と日時を区別して表示する */
-function DateCard({ label, children, span2, testId }: { label: string; children: React.ReactNode; span2?: boolean; testId?: string }) {
+/** 日付・期間の1項目（外枠なし。区切り線は一覧側で付ける）。項目名と日時を区別して表示する */
+function DateCell({ label, children, span2, divider, testId }: { label: string; children: React.ReactNode; span2?: boolean; divider?: boolean; testId?: string }) {
   return (
-    <div className={cn("min-w-0 rounded-lg border px-2.5 py-1.5", span2 && "col-span-2")} data-testid={testId ?? "date-card"} data-label={label}>
+    <div className={cn("min-w-0 py-2", span2 && "col-span-2", divider && "border-b border-border/70")} data-testid={testId ?? "date-card"} data-label={label}>
       <dt className="text-[11px] leading-4 text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 break-words text-[13px] font-medium leading-snug">{children}</dd>
     </div>
   );
 }
 
-/** 現在のプロフィールの応募状態（上部のステータス行の右側）。詳細は下の「応募状況」で確認する */
-function MyStatus({ lottery }: { lottery: Lottery }) {
+/**
+ * 上部のステータス行の右側: 対象となるアプリ内プロフィール全員の応募状態（アイコン＋記号だけ。長い文字は出さない）。
+ * 詳細は下の「応募状況」。プロフィールの表示順は設定に従い、幅が足りないときは残りを「＋N」にする。現在のプロフィールは薄い背景で区別する。
+ */
+function StatusStrip({ lottery }: { lottery: Lottery }) {
   const { data, now, profile } = useApp();
-  const mark = profileMarks(data, lottery, now).find((m) => m.profileId === profile.id);
-  if (!mark) return null;
+  const order = (id: string) => data.profiles.findIndex((p) => p.id === id);
+  const marks = profileMarks(data, lottery, now).sort((x, y) => order(x.profileId) - order(y.profileId));
+  if (marks.length === 0) return null;
+  const MAX = 4;
+  const shown = marks.slice(0, MAX);
+  const rest = marks.length - shown.length;
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-xs" data-testid="my-status" data-status={mark.status} data-result={mark.result} aria-label={`${profile.label}: ${markLabel(mark)}`}>
-      <ProfileAvatar profile={profile} size="xs" />
-      <StatusIcon status={mark.status} className="size-4" />
-      <span className="font-medium">{markLabel(mark)}</span>
+    <span className="inline-flex shrink-0 items-center gap-1.5" data-testid="status-strip" aria-label="プロフィール別の応募状況">
+      {shown.map((m) => {
+        const owner = data.profiles.find((p) => p.id === m.profileId);
+        if (!owner) return null;
+        const label = markLabel(m);
+        const mine = owner.id === profile.id;
+        return (
+          <span
+            key={m.accountId}
+            role="img"
+            aria-label={`${owner.label}: ${label}`}
+            title={`${owner.label}: ${label}（${m.reason}）`}
+            data-profile={owner.id}
+            data-status={m.status}
+            data-result={m.result}
+            data-mine={mine ? "1" : undefined}
+            className={cn("inline-flex items-center gap-0.5", mine && "rounded-full bg-muted/70 pr-1", m.status !== "applied" && m.status !== "needs_review" && "opacity-[0.45]")}
+          >
+            <ProfileAvatar profile={owner} size="xs" className={cn("size-[18px] text-[9px]", m.status !== "applied" && "grayscale")} />
+            {m.status === "applied" && m.result === "won" ? <span className="text-[11px] font-bold leading-none text-success">当選</span> : m.status === "applied" && m.result === "lost" ? <span className="text-[11px] leading-none text-muted-foreground">落選</span> : <StatusIcon status={m.status} className="size-3.5" />}
+          </span>
+        );
+      })}
+      {rest > 0 && (
+        <span className="text-[11px] text-muted-foreground" data-testid="status-strip-more">
+          ＋{rest}
+        </span>
+      )}
     </span>
   );
 }
@@ -170,6 +203,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const store = data.stores.find((s) => s.id === lottery.storeId);
   const managed = isManaged(data, lottery.id);
   const event = effectiveEventState(lottery, now);
+  // 抽選全体の受付状態（プロフィールの応募状況とは別に判定。日時が不明なときは断定しない）
+  const reception = receptionState(lottery, now);
   const remaining = event === "closed" ? null : deadlineBadge(lottery.applyDeadline, now);
   const notice = resultNotice(data, lottery, now);
   const accounts = accountsForLottery(data, lottery);
@@ -251,12 +286,12 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               <div className="flex items-center justify-between gap-2" data-testid="status-line">
                 <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden" data-testid="status-left">
                   {place.canShip && <Chip className="shrink-0 rounded-full border-info text-info">発送可</Chip>}
-                  {EVENT_LABEL[event] && <Chip className="shrink-0 text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
+                  {reception && <Chip className={cn("shrink-0", RECEPTION_TONE[reception])} data-testid="reception-chip">{reception}</Chip>}
                   {notice === "unconfirmed" && <Chip className="shrink-0 border-danger font-bold text-danger">結果未確認</Chip>}
                   {notice === "in_period" && <Chip className="shrink-0 text-info">発表期間中</Chip>}
                   {lottery.isNew && <Chip className="shrink-0 border-info text-info">NEW</Chip>}
                 </div>
-                <MyStatus lottery={lottery} />
+                <StatusStrip lottery={lottery} />
               </div>
               {(MODE_LABEL[lottery.multiMode] || !managed) && (
                 <div className="flex flex-wrap items-center gap-1.5" data-testid="status-extra">
@@ -281,7 +316,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               </section>
             )}
 
-            {/* 2. 日付・期間: 1項目ごとの独立した角丸カード（2列）。奇数のときは最後を横いっぱいに */}
+            {/* 2. 日付・期間: 外枠なしの区切り線形式（2列）。奇数のときは最後を横いっぱいに */}
             {(() => {
               const cards: { key: string; label: string; body: React.ReactNode }[] = [
                 { key: "start", label: "応募開始", body: lottery.applyStart.precision === "unknown" ? DASH : formatPlain(lottery.applyStart) },
@@ -303,24 +338,28 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   : []),
               ];
               return (
-                <dl className="grid grid-cols-2 gap-2" aria-label="日時" data-testid="date-cards">
-                  {cards.map((c, i) => (
-                    <DateCard key={c.key} label={c.label} span2={cards.length % 2 === 1 && i === cards.length - 1} testId={`date-${c.key}`}>
-                      {c.body}
-                    </DateCard>
-                  ))}
+                <dl className="grid grid-cols-2 gap-x-4" aria-label="日時" data-testid="date-cards">
+                  {cards.map((c, i) => {
+                    const rows = Math.ceil(cards.length / 2);
+                    const row = Math.floor(i / 2);
+                    return (
+                      <DateCell key={c.key} label={c.label} span2={cards.length % 2 === 1 && i === cards.length - 1} divider={row < rows - 1} testId={`date-${c.key}`}>
+                        {c.body}
+                      </DateCell>
+                    );
+                  })}
                 </dl>
               );
             })()}
 
             {/* 3. 応募・受取情報: 関連する項目をグループ化し、細い罫線・縦の区切り線で整理する */}
-            <div className="divide-y rounded-lg border text-sm" data-testid="info-group" aria-label="応募・受取情報">
-              <dl className="grid grid-cols-2 divide-x">
-                <Field label="応募方法" className="px-3 py-2">
+            <div className="divide-y divide-border/70 border-y text-sm" data-testid="info-group" aria-label="応募・受取情報">
+              <dl className="grid grid-cols-2 gap-x-4">
+                <Field label="応募方法" className="py-2">
                   {lottery.applyMethod === "unknown" ? DASH : APPLY_LABEL[lottery.applyMethod]}
                   <Unconfirmed show={unconfirmed.includes("applyMethod")} />
                 </Field>
-                <Field label="受取方法" className="px-3 py-2">
+                <Field label="受取方法" className="py-2">
                   {lottery.receiveMethod === "unknown" ? DASH : RECEIVE_LABEL[lottery.receiveMethod]}
                   <Unconfirmed show={unconfirmed.includes("receiveMethod")} />
                   {(place.label || (dist && place.showLocation) || store?.roundTripFare != null) && (
@@ -337,28 +376,28 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 </Field>
               </dl>
               <dl>
-                <Field label="発表方法" className="px-3 py-2">
+                <Field label="発表方法" className="py-2">
                   <AnnounceView lottery={lottery} />
                 </Field>
               </dl>
               <dl aria-label="応募条件・制限">
-                <Field label="応募条件" className="px-3 py-2">
+                <Field label="応募条件" className="py-2">
                   <RequirementView lottery={lottery} />
                 </Field>
-                <div className="px-3 pb-2">
+                <div className="pb-2">
                   <EligibilitySection lottery={lottery} />
                 </div>
               </dl>
-              <dl className="grid grid-cols-2 divide-x">
-                <Field label="応募制限" className="px-3 py-2">
+              <dl className="grid grid-cols-2 gap-x-4">
+                <Field label="応募制限" className="py-2">
                   {lottery.limit.basis === "unknown" ? "未確認（要確認）" : `${LIMIT_BASIS_LABEL[lottery.limit.basis]}${lottery.limit.maxCount}回`}
                   <Unconfirmed show={unconfirmed.includes("limitBasis")} />
                 </Field>
-                <Field label="本人確認・書類" className="px-3 py-2">
+                <Field label="本人確認・書類" className="py-2">
                   {lottery.verificationText || DASH}
                 </Field>
               </dl>
-              <p className="px-3 py-1.5 text-xs text-muted-foreground" data-testid="rules-applied">
+              <p className="py-1.5 text-xs text-muted-foreground" data-testid="rules-applied">
                 適用される応募制限: {rules.length > 0 ? rules.map(describeRule).join(" ／ ") : "未確認（要確認）"}
               </p>
             </div>
@@ -412,9 +451,9 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                         <span className="font-medium">{acc.label}</span>
                         <span className="inline-flex items-center gap-1">
                           <StatusIcon status={j.status} className="size-4" />
-                          {STATUS_META[j.status].label}
+                          {statusLabelWithReason(j.status, j.reason)}
                         </span>
-                        <span className="text-muted-foreground">{j.reason}</span>
+                        {statusLabelWithReason(j.status, j.reason) !== j.reason && <span className="text-muted-foreground">{j.reason}</span>}
                         {exempt && <Chip className="text-muted-foreground">制限の例外（規約確認済み）</Chip>}
                         {persistent && (j.status === "covered_by_limit" || exempt) && (
                           <Button size="sm" variant="outline" onClick={() => runRule(() => setLimitExemptionAction(lottery.id, acc.id, !exempt, "規約を確認し、この抽選では別枠として応募可能", profile.id))}>

@@ -27,7 +27,6 @@ import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
 let root: Root;
 let host: HTMLDivElement;
 const q = (id: string) => document.body.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-const qa = (id: string) => [...document.body.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)];
 const patch = (id: string, p: Partial<Lottery>) => {
   data = { ...data, lotteries: data.lotteries.map((l) => (l.id === id ? { ...l, ...p } : l)) };
 };
@@ -51,18 +50,20 @@ afterEach(() => {
 });
 
 describe("Stage 7J: 抽選詳細のレイアウト", () => {
-  it("日付・期間は1項目ごとの独立した角丸カード（2列）。項目名と日時が分かれ、奇数のときは最後が横いっぱい", () => {
+  it("日付・期間は外枠・角丸なしの区切り線形式（2列）。項目名と日時が分かれ、最後の行以外にだけ薄い区切り線。奇数のときは最後が横いっぱい", () => {
     open("L1");
     const grid = q("date-cards")!;
     expect(grid.className).toContain("grid-cols-2");
     const cards = [...q("date-cards")!.querySelectorAll<HTMLElement>("[data-label]")];
     expect(cards.length).toBeGreaterThanOrEqual(4);
     for (const c of cards) {
-      expect(c.className).toContain("rounded-lg");
-      expect(c.className).toContain("border");
+      expect(c.className).not.toContain("rounded"); // 角丸の枠なし
+      expect(c.className).not.toMatch(/(^|\s)border(\s|$)/);
       expect(c.querySelector("dt")!.textContent).toBeTruthy(); // 項目名
       expect(c.querySelector("dd")).not.toBeNull(); // 日時
     }
+    const rows = Math.ceil(cards.length / 2);
+    cards.forEach((c, i) => expect(c.className.includes("border-b")).toBe(Math.floor(i / 2) < rows - 1)); // 区切り線は行の間だけ
     const labels = cards.map((c) => c.getAttribute("data-label"));
     expect(labels.slice(0, 3)).toEqual(["応募開始", "応募締切", "当選発表"]);
     if (cards.length % 2 === 1) expect(cards.at(-1)!.className).toContain("col-span-2");
@@ -84,7 +85,45 @@ describe("Stage 7J: 抽選詳細のレイアウト", () => {
     expect(labels).not.toContain("購入・受取期間");
   });
 
-  it("ステータス行は1行: 左=抽選の状態、右=現在のプロフィールの応募状態。応募状態はプロフィールに応じて変わる", () => {
+  it("上部の応募状態は対象のアプリ内プロフィール全員分（アイコン＋記号だけ。長い文字は出さない）。現在のプロフィールは区別する", () => {
+    open("L1");
+    const strip = q("status-strip")!;
+    const items = [...strip.querySelectorAll<HTMLElement>("[data-profile]")];
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(strip.textContent).not.toMatch(/応募不可|未応募|応募済み|スルー/); // 長い文字列は上部に出さない
+    // 並びはプロフィールの設定順
+    const order = data.profiles.map((p) => p.id);
+    const ids = items.map((i) => i.getAttribute("data-profile")!);
+    expect(ids).toEqual([...ids].sort((a, b) => order.indexOf(a) - order.indexOf(b)));
+    expect(items.filter((i) => i.getAttribute("data-mine") === "1")).toHaveLength(1);
+  });
+
+  it("開始前の抽選は「応募不可」と表示せず「受付前」。受付中・受付終了も抽選の日時で判定し、日時が不明なら断定しない", async () => {
+    const { receptionState, markLabel } = await import("@/lib/lottery-summary");
+    const base = data.lotteries.find((x) => x.id === "L1")!;
+    const L = (p: Partial<Lottery>) => ({ ...base, eventState: "open", ...p }) as Lottery;
+    const future = { precision: "date_only", date: "2026-11-20" } as const;
+    const past = { precision: "date_only", date: "2026-10-20" } as const;
+    expect(receptionState(L({ applyStart: future, applyDeadline: { precision: "date_only", date: "2026-11-30" } }), NOW)).toBe("受付前");
+    expect(receptionState(L({ applyStart: past, applyDeadline: { precision: "date_only", date: "2026-11-30" } }), NOW)).toBe("受付中");
+    expect(receptionState(L({ applyStart: past, applyDeadline: past }), NOW)).toBe("受付終了");
+    expect(receptionState(L({ applyStart: { precision: "unknown" }, applyDeadline: { precision: "unknown" } }), NOW)).toBeNull(); // 推測しない
+    expect(receptionState(L({ eventState: "cancelled" }), NOW)).toBe("中止");
+    // プロフィールの応募状況の文言: 受付前・受付終了・中止は状態名。条件によって応募できないときだけ「応募不可」
+    expect(markLabel({ status: "unavailable", result: "none" as never, partial: false, reason: "受付前" })).toBe("受付前");
+    expect(markLabel({ status: "unavailable", result: "none" as never, partial: false, reason: "受付終了" })).toBe("受付終了");
+    expect(markLabel({ status: "unavailable", result: "none" as never, partial: false, reason: "その他の理由" })).toBe("応募不可");
+  });
+
+  it("ステータス行の左には抽選の受付状態（受付前など）が出る。判定の詳細でも開始前を「応募不可」と表示しない", () => {
+    patch("L1", { applyStart: { precision: "date_only", date: "2026-11-20" } } as Partial<Lottery>);
+    open("L1");
+    expect(q("reception-chip")!.textContent).toBe("受付前");
+    expect(q("judge-list")!.textContent).not.toContain("応募不可");
+    expect(q("judge-list")!.textContent).toContain("受付前");
+  });
+
+  it("ステータス行は1行: 左=抽選の状態、右=全プロフィールの応募状態", () => {
     const l = data.lotteries.find((x) => x.id === "L1")!;
     const mine = data.accounts.find((a) => a.profileId === data.profiles[0].id)!;
     const app: Application = { id: "app-x", lotteryId: l.id, accountId: mine.id, state: "applied", result: "pending", fulfillment: "none", createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() } as unknown as Application;
@@ -94,13 +133,13 @@ describe("Stage 7J: 抽選詳細のレイアウト", () => {
     expect(line.className).toContain("flex");
     expect(line.className).not.toContain("flex-wrap"); // 2行にしない
     expect(line.querySelector('[data-testid="status-left"]')!.className).toContain("flex-nowrap");
-    expect(q("my-status")!.getAttribute("data-status")).toBe("applied");
-    // 別のプロフィールでは、そのプロフィールの状態
+    expect(q("status-strip")!.querySelector(`[data-profile="${data.profiles[0].id}"]`)!.getAttribute("data-status")).toBe("applied");
+    // 別のプロフィールを選ぶと、そのプロフィールが「現在」の印になる
     act(() => root.unmount());
     root = createRoot(host);
     profileIdx = 1;
     open("L1");
-    expect(q("my-status")?.getAttribute("data-status") ?? "other").not.toBe("applied");
+    expect(q("status-strip")!.querySelector('[data-mine="1"]')!.getAttribute("data-profile")).toBe(data.profiles[1].id);
   });
 
   it("応募・受取情報はグループ化（細い罫線）され、応募条件・応募制限・本人確認・書類が読める", () => {

@@ -286,6 +286,10 @@ export function createMockData(now: Date): AppData {
         note: "",
       },
     ],
+    // 購入記録（Stage 7K）: BOXの開封実績の例（モックのデータ）。購入しただけの未開封BOXは購入記録に含まれない
+    boxOpenings: [{ id: "bo1", opId: "bop1", lotId: "lot-m1", productId: "p1", quantity: 1, occurredAt: new Date(now.getTime() - 2 * 86_400_000).toISOString(), profileId: "pA", unitPrice: 5400, storeId: "s2", purchaseItemId: null }],
+    openingRecords: [],
+    boxLotItemIds: [],
     skipRules: [{ id: "sk1", profileId: "pA", scope: "store", scopeId: "s5", exceptionLotteryIds: [] }],
     applicationRules: [],
     limitExemptions: [],

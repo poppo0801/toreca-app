@@ -11,6 +11,13 @@ export interface BarItem {
   color: string;
 }
 
+/** バーの分類の並び順（金額の大小で変えない）。左から: ポケモンカード・シングルカード・周辺グッズ・経費・その他 */
+export const BAR_ORDER = ["pokemon_card", "single_card", "goods", "expense", "other"] as const;
+const orderOf = (id: string) => {
+  const i = (BAR_ORDER as readonly string[]).indexOf(id);
+  return i < 0 ? BAR_ORDER.length : i;
+};
+
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
 
 /** 割合の表示。1%未満は「1%未満」（極端に小さい分類も確認できるようにする） */
@@ -21,14 +28,15 @@ export function percentLabel(amount: number, total: number): string {
 }
 
 /**
- * 支出の内訳を、分類別の割合を示す横長の1本のバーで表す（Stage 6R）。高さは約12px。
+ * 支出の内訳を、分類別の割合を示す横長の1本のバーで表す（Stage 6R・7K）。高さは約12px。バー全体が1つの角丸で、内部を割合に応じて色分けする（分類ごとの別のバーにしない・分類の間に余白を設けない）。
+ * 並びは固定（ポケモンカード・シングルカード・周辺グッズ・経費・その他）。
  * 色の部分をタップすると、その分類の金額と割合をバーの近くに小さく出す（レイアウトは押し下げない）。
  * 同じ色の再タップ・バー以外のタップで閉じ、別の色で切り替わる。金額0円の分類は描画しない。支出が0円なら「支出なし」。
  */
 export function ExpenseBar({ items }: { items: BarItem[] }) {
   const [active, setActive] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
-  const shown = items.filter((i) => i.amount > 0);
+  const shown = items.filter((i) => i.amount > 0).sort((a, b) => orderOf(a.id) - orderOf(b.id));
   const total = shown.reduce((a, i) => a + i.amount, 0);
 
   useEffect(() => {
@@ -60,21 +68,21 @@ export function ExpenseBar({ items }: { items: BarItem[] }) {
     <div ref={box} className="relative" data-testid="expense-bar">
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-[10px] text-muted-foreground">支出内訳</span>
-        <div className="flex h-5 min-w-0 flex-1 items-center gap-px" role="group" aria-label="支出の内訳（分類別の割合）">
-          {shown.map((i) => (
-            <button
-              key={i.id}
-              type="button"
-              aria-pressed={current === i.id}
-              aria-label={`${i.label} ${yen(i.amount)}（${percentLabel(i.amount, total)}）`}
-              onClick={() => setActive(current === i.id ? null : i.id)}
-              className="flex h-5 items-center"
-              style={{ flexGrow: i.amount, flexBasis: 0, minWidth: 8 }}
-              data-testid={`bar-seg-${i.id}`}
-            >
-              <span className={cn("block h-3 w-full transition-opacity first:rounded-l-full last:rounded-r-full", current && current !== i.id && "opacity-45")} style={{ background: i.color }} />
-            </button>
-          ))}
+        <div className="flex h-5 min-w-0 flex-1 items-center">
+          <div className="flex h-3 w-full overflow-hidden rounded-full" role="group" aria-label="支出の内訳（分類別の割合）" data-testid="expense-bar-track">
+            {shown.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                aria-pressed={current === i.id}
+                aria-label={`${i.label} ${yen(i.amount)}（${percentLabel(i.amount, total)}）`}
+                onClick={() => setActive(current === i.id ? null : i.id)}
+                className={cn("h-3 transition-opacity", current && current !== i.id && "opacity-45")}
+                style={{ flexGrow: i.amount, flexBasis: 0, minWidth: 3, background: i.color }}
+                data-testid={`bar-seg-${i.id}`}
+              />
+            ))}
+          </div>
         </div>
       </div>
       {sel && (

@@ -19,9 +19,14 @@ const pct = (r: number | null) => (r === null ? "－" : `${Math.round(r * 100)}%
 
 /** 勝敗の記号（◯青・×赤・△緑）。色だけに頼らず記号でも判別できる。一覧・詳細・分析で共通 */
 export function ResultMark({ result, className }: { result: BattleResult; className?: string }) {
+  // 3種類とも同じ線の太さ（SVG）。色は currentColor（勝ち青・負け赤・引き分け緑）。読み上げ・テキストの記号は sr-only で残す
+  const sw = 3.4;
   return (
-    <span role="img" aria-label={BATTLE_RESULT_LABEL[result]} data-result={result} className={cn("shrink-0 text-xl font-bold leading-none", RESULT_COLOR_CLASS[result], className)}>
-      {RESULT_SYMBOL[result]}
+    <span role="img" aria-label={BATTLE_RESULT_LABEL[result]} data-result={result} className={cn("inline-flex shrink-0 items-center justify-center", RESULT_COLOR_CLASS[result], className)}>
+      <svg viewBox="0 0 24 24" className="size-[1em]" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-testid="result-svg" data-stroke={sw}>
+        {result === "win" ? <circle cx="12" cy="12" r="8.2" /> : result === "lose" ? <path d="M5.5 5.5 18.5 18.5M18.5 5.5 5.5 18.5" /> : <path d="M12 4.6 20.2 19H3.8Z" />}
+      </svg>
+      <span className="sr-only">{RESULT_SYMBOL[result]}</span>
     </span>
   );
 }
@@ -116,7 +121,7 @@ export function BattlesView() {
                   </span>
                   {/* 右端: 大きな勝敗記号（上下中央） */}
                   <span className="flex w-14 shrink-0 items-center justify-center">
-                    <ResultMark result={b.result} className="text-4xl" />
+                    <ResultMark result={b.result} className="text-[2.5rem]" />
                   </span>
                 </button>
               </li>
@@ -149,18 +154,18 @@ export function BattlesView() {
   );
 }
 
-/** 対戦カードの1行（プロフィールアイコン・ユーザー名・使用デッキ）。外部の相手は共通の人物アイコン。デッキ名は原則1行、長いときだけ最大2行 */
+/** 対戦カードの1行（プロフィールアイコン・ユーザー名・使用デッキ）。外部の相手は共通の人物アイコン。ユーザー名は固定幅（自分・相手でデッキ名の左端が揃う）。デッキ名は原則1行、長いときだけ最大2行 */
 function PlayerLine({ profile, name, deck, mine, testId }: { profile: Parameters<typeof ProfileAvatar>[0]["profile"] | null; name: string; deck: string; mine?: boolean; testId: string }) {
   return (
     <span className="flex items-center gap-1.5" data-testid={testId}>
       {profile ? (
-        <ProfileAvatar profile={profile} size="sm" />
+        <ProfileAvatar profile={profile} size="xs" />
       ) : (
-        <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground" data-testid="battle-external-icon">
-          <UserRound className="size-3.5" />
+        <span aria-hidden="true" className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground" data-testid="battle-external-icon">
+          <UserRound className="size-3" />
         </span>
       )}
-      <span className={cn("max-w-[5.5rem] shrink-0 truncate text-[11px]", mine ? "font-bold" : "text-muted-foreground")} data-testid="battle-name">
+      <span className={cn("w-[4.25rem] shrink-0 truncate text-[11px]", mine ? "font-bold" : "text-muted-foreground")} data-testid="battle-name">
         {name}
       </span>
       <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] leading-tight" data-testid="battle-deck">

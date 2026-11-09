@@ -15,11 +15,11 @@ vi.mock("@/components/app-provider", () => ({
   useApp: () => ({ data, now: NOW, profile: data.profiles[0], settings: {}, actions, persistent: true, reload: async () => null }),
 }));
 
-import { PurchasesView, totalDisplay } from "@/components/purchases-view";
+import { PurchasesView } from "@/components/purchases-view";
 import { ExpenseDialog } from "@/components/expense-dialog";
 import { WonRecordButtons } from "@/components/won-actions";
 import { ApplyExitProvider } from "@/components/apply-exit";
-import { productTotals, filterPurchases, ALL_PURCHASES } from "@/lib/purchase-records";
+import { filterPurchases, ALL_PURCHASES } from "@/lib/purchase-records";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -49,6 +49,9 @@ const setup = () => {
       { id: "p-deck", officialName: "スタートデッキセット", aliases: [], code: "", packsPerBox: null },
     ] as never,
     productSetItems: [],
+    boxOpenings: [],
+    openingRecords: [],
+    boxLotItemIds: [],
     defaultImages: { single_card: { url: "/api/default-image/single_card?v=abc" } },
     purchases: [
       pk("a", "2026-11-01", [{ id: "i1", productId: "p-box", quantity: 3, unit: "box", amountPaid: 21600 }]),
@@ -82,44 +85,35 @@ describe("Stage 7E: 購入記録ページ", () => {
     await toAll();
     const cells = ["box", "pack", "other", "amount"].map((k) => q(`stat-${k}`)!);
     expect(cells.map((c) => c.querySelector("dt")!.textContent)).toEqual(["BOX", "パック", "その他商品", "総額"]);
-    expect(cells.map((c) => c.querySelector("dd")!.textContent)).toEqual(["3", "60", "3", "¥36,860"]);
+    // 購入しただけの未開封BOXは含めない（Stage 7K）。この月のデータはシングルカードの購入だけ → 総額にシングルカードの金額を含める
+    expect(cells.map((c) => c.querySelector("dd")!.textContent?.replace("＊", ""))).toEqual(["0", "0", "0", "¥6,260"]);
     expect(q("purchase-summary")!.className).toContain("grid-cols-4");
     expect(q("purchase-count")).toBeNull();
     expect(document.body.textContent).not.toContain("購入金額");
   });
-  it("商品別: 商品名・累計パック数を大きく、BOX数と購入総額を補足に。セット商品は個数、シングルカードは枚。説明文は出ない", async () => {
+  it("商品別: シングルカードは購入枚数。未開封BOX・開封状態が不明な購入は累計に含めない。標準画像を表示。説明文は出ない", async () => {
     mountView();
     await toAll();
     const rows = qa("product-total-row");
-    const by = (name: string) => rows.find((r) => r.querySelector('[data-testid="total-name"]')!.textContent === name)!;
-    expect(by("30th CELEBRATION").querySelector('[data-testid="total-qty"]')!.textContent).toBe("60パック");
-    expect(by("30th CELEBRATION").querySelector('[data-testid="total-sub"]')!.textContent).toBe("3BOX ｜ 購入総額 21,600円");
-    expect(by("スタートデッキセット").querySelector('[data-testid="total-qty"]')!.textContent).toBe("3個");
-    expect(by("スタートデッキセット").querySelector('[data-testid="total-sub"]')!.textContent).toBe("購入総額 9,000円");
-    expect(by("シングルカード").querySelector('[data-testid="total-qty"]')!.textContent).toBe("6枚");
-    expect(by("シングルカード").querySelector('[data-testid="total-sub"]')!.textContent).toBe("購入総額 6,260円");
+    expect(rows).toHaveLength(1); // 30th CELEBRATION（未開封BOX）・スタートデッキセット（開封状態が不明）は含まれない
+    expect(rows[0].querySelector('[data-testid="total-name"]')!.textContent).toBe("シングルカード");
+    expect(rows[0].querySelector('[data-testid="total-qty"]')!.textContent).toBe("6枚");
+    expect(rows[0].querySelector('[data-testid="total-sub"]')!.textContent).toBe("総額 6,260円");
     expect(document.body.textContent).not.toContain("構成商品には数量だけを参考として加えます");
-    // シングルカードは標準画像を表示（商品個別の画像が無いとき）
-    expect(by("シングルカード").querySelector('[data-testid="default-image"]')?.getAttribute("src")).toBe("/api/default-image/single_card?v=abc");
+    expect(rows[0].querySelector('[data-testid="default-image"]')?.getAttribute("src")).toBe("/api/default-image/single_card?v=abc");
   });
-  it("パック換算できない商品は、無理にパック数を出さない", () => {
-    const r = productTotals({ ...data, products: [{ id: "x", officialName: "入数不明", aliases: [], code: "", packsPerBox: null }] as never, productSetItems: [] }, [pk("x1", "2026-11-01", [{ id: "q", productId: "x", quantity: 2, unit: "box", amountPaid: 100 }])])[0];
-    expect(totalDisplay(r)).toEqual({ qty: "2BOX", sub: "購入総額 100円" });
-  });
-  it("購入履歴: 日付見出しを廃止し、各カードに購入日。数量は『3BOX』『6個』『6枚』の形。『コレクションに追加』のリンクは無い。金額は右寄せ", async () => {
+  it("購入履歴: 日付見出しを廃止し、各カードに日付。数量は『6枚』の形。金額は右寄せ。未開封BOXの購入は履歴に出ない", async () => {
     mountView();
     await toAll();
     await act(async () => q("tab-history")!.click());
     const rows = qa("purchase-row");
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(1);
     expect(qa("purchase-list")[0].querySelector("ul")).toBeNull(); // 日付ごとのグループ（入れ子の一覧）が無い
     expect(q("to-collection")).toBeNull();
-    expect(document.body.textContent).not.toContain("コレクションに追加");
-    expect(rows.map((r) => r.querySelector('[data-testid="purchase-qty"]')!.textContent)).toEqual(["6枚", "3セット", "3BOX"]);
-    expect(rows.map((r) => r.querySelector('[data-testid="purchase-date"]')!.textContent)).toEqual(["11/5（木）", "11/4（水）", "11/1（日）"]);
+    expect(rows.map((r) => r.querySelector('[data-testid="purchase-qty"]')!.textContent)).toEqual(["6枚"]);
+    expect(rows[0].querySelector('[data-testid="purchase-date"]')!.textContent).toBe("購入 11/5");
     expect(rows[0].querySelector('[data-testid="purchase-amount"]')!.className).toContain("text-right");
-    // 1件ごとの独立したカード
-    expect(rows.every((r) => r.className.includes("rounded-xl") && r.className.includes("border"))).toBe(true);
+    expect(rows.every((r) => r.className.includes("rounded-xl") && r.className.includes("border"))).toBe(true); // 1件ごとの独立したカード
   });
   it("絞り込みは「商品別の累計／購入履歴」の切替の右の小さなアイコンボタン（Stage 7I。月選択欄の右ではない）", () => {
     mountView();

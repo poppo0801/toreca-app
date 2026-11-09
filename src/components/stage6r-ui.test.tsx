@@ -37,7 +37,32 @@ describe("Stage 6R: 支出内訳バー", () => {
     mount(createElement(ExpenseBar, { items }));
     expect(q("bar-seg-pokemon_card")).not.toBeNull();
     expect(q("bar-seg-none")).toBeNull();
-    expect(q("bar-seg-goods")!.querySelector("span")!.className).toContain("h-3");
+    expect(q("bar-seg-goods")!.className).toContain("h-3");
+  });
+  it("Stage 7K: 一本のバー（全体が1つの角丸）を割合で色分け。分類の間に余白が無く、順序は金額の大小に関係なく固定、幅の合計は100%", () => {
+    const mixed = [
+      { id: "expense", label: "経費", amount: 2000, color: "green" },
+      { id: "goods", label: "サプライ", amount: 3000, color: "blue" },
+      { id: "other", label: "その他", amount: 500, color: "gray" },
+      { id: "single_card", label: "シングル", amount: 4000, color: "orange" },
+      { id: "pokemon_card", label: "カード", amount: 10000, color: "red" },
+    ];
+    mount(createElement(ExpenseBar, { items: mixed }));
+    const track = q("expense-bar-track")!;
+    expect(track.className).toContain("rounded-full"); // バー全体が1つの角丸
+    expect(track.className).toContain("overflow-hidden");
+    expect(track.className).not.toContain("gap-"); // 分類の間に余白なし
+    const segs = [...track.querySelectorAll("button")];
+    expect(segs.map((s) => s.getAttribute("data-testid"))).toEqual(["bar-seg-pokemon_card", "bar-seg-single_card", "bar-seg-goods", "bar-seg-expense", "bar-seg-other"]);
+    expect(segs.map((s) => s.style.background)).toEqual(["red", "orange", "blue", "green", "gray"]);
+    // 幅は金額の割合（flex-grow が金額、basis 0）。合計 = 100%
+    const total = 10000 + 4000 + 3000 + 2000 + 500;
+    expect(segs.map((s) => Number(s.style.flexGrow))).toEqual([10000, 4000, 3000, 2000, 500]);
+    expect(segs.reduce((a, s) => a + Number(s.style.flexGrow), 0)).toBe(total);
+    expect(segs.every((s) => s.style.flexBasis === "0px" || s.style.flexBasis === "0")).toBe(true);
+    // 金額が逆転しても順序は変わらない
+    mount(createElement(ExpenseBar, { items: mixed.map((i) => (i.id === "other" ? { ...i, amount: 90000 } : i)) }));
+    expect([...q("expense-bar-track")!.querySelectorAll("button")].map((s) => s.getAttribute("data-testid"))).toEqual(["bar-seg-pokemon_card", "bar-seg-single_card", "bar-seg-goods", "bar-seg-expense", "bar-seg-other"]);
   });
   it("色をタップすると金額と割合が出て、同じ色の再タップで閉じ、別の色で切り替わる", () => {
     mount(createElement(ExpenseBar, { items }));

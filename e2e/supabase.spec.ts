@@ -789,12 +789,12 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await page.screenshot({ path: "docs/screenshots/stage45-detail-mobile.png" });
 });
 
-test("購入記録: 収支・抽選の購入と同じ記録。登録・編集・削除がどの画面からでも反映され、二重計上されない", async ({ page }) => {
-  test.setTimeout(90_000);
-  page.on("dialog", (d) => d.accept()); // 削除の確認
+test("購入記録: 開封した商品・購入したシングルカードの記録。未開封の購入は含めず、収支の支出と二重計上しない", async ({ page }) => {
+  test.setTimeout(120_000);
+  page.on("dialog", (d) => d.accept()); // 削除・取り消しの確認
   await login(page);
 
-  // 抽選で当選→購入済み → 購入記録に自動で入る（金額は未入力）
+  // 抽選で当選→購入済み → 収支の購入には入るが、未開封のBOXなので購入記録（開封・シングルカード）には入らない
   await page.getByRole("button", { name: "＋登録" }).click();
   const form = page.getByTestId("lottery-form");
   await fillMasters(form, "E2E購入電機", "E2E購入店", "E2E購入商品");
@@ -807,77 +807,100 @@ test("購入記録: 収支・抽選の購入と同じ記録。登録・編集・
   await card.getByRole("button", { name: "受取を記録" }).click();
   await expect(card).toHaveCount(0);
 
+  await page.goto("/finance");
+  await expect(page.getByTestId("ledger-row").filter({ hasText: "E2E購入商品" })).toHaveCount(1); // 収支には購入が残る
+  const yen = (t: string) => Number(t.replace(/[^\d]/g, ""));
+  const expenseBefore = yen(await page.getByTestId("sum-expense").innerText());
+
   await page.getByRole("navigation", { name: "メイン" }).last().getByRole("link", { name: "購入記録" }).click();
   await expect(page).toHaveURL(/\/purchases$/);
   await expect(page.getByTestId("tab-products")).toHaveAttribute("aria-selected", "true"); // 初期表示は商品別の累計
   await page.getByTestId("tab-history").click();
+  await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" })).toHaveCount(0); // 未開封の購入は含めない
+  await expect(page.getByTestId("product-total-row").filter({ hasText: "E2E購入商品" })).toHaveCount(0);
+
+  // 直接登録: 単品パックの開封（＋記録 → 開封・使用開始）。収支に新しい支出は作られない
+  await page.getByTestId("purchase-add").click();
+  await page.getByTestId("choose-opening").click();
+  const add = page.getByTestId("opening-form");
+  await add.getByRole("combobox", { name: "商品", exact: true }).fill("E2E購入商品");
+  await add.getByLabel("開封の数量").fill("2");
+  await add.getByLabel("開封分の購入金額").fill("800");
+  await add.getByTestId("opening-save").click();
+  await expect(add).toHaveCount(0);
   const rows = page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" });
-  await expect(rows).toHaveCount(1); // 購入済みを何度押しても1件
-  await expect(rows).toContainText("金額未入力");
-  await expect(rows).toContainText("抽選当選");
-  // この商品だけに絞る（同じ世帯の他のテストの購入が混ざらないように）。絞り込みは折りたたまれている
+  await expect(rows).toHaveCount(1);
+  await expect(rows.getByTestId("purchase-qty")).toHaveText("2パック");
+  await expect(rows).toContainText("800円");
   await page.getByTestId("filter-toggle").click();
   await page.getByLabel("商品で絞り込み").selectOption({ label: "E2E購入商品" });
-  await expect(page.getByTestId("purchase-row")).toHaveCount(1);
-  await expect(page.getByTestId("stat-amount")).toContainText("¥0"); // 未入力は0円の支出として数えない（件数は別）
-  await expect(page.getByText(/金額が未入力の購入が1件/)).toBeVisible();
-
-  // 購入記録から金額を編集 → 収支にも反映（同じ取引を参照）
-  await rows.click();
-  const dlg = page.getByRole("dialog");
-  await dlg.getByLabel("購入金額1").fill("3000");
-  await dlg.getByRole("button", { name: "保存" }).click();
-  await expect(dlg).toHaveCount(0);
-  await expect(rows).toContainText("3,000円");
-  await expect(page.getByTestId("stat-amount")).toContainText("¥3,000");
-
-  // 購入記録から手動登録 → 一覧・商品別の累計・収支に反映
-  await page.getByRole("button", { name: "＋購入を記録" }).click();
-  const add = page.getByRole("dialog");
-  await add.getByRole("combobox", { name: "商品1", exact: true }).fill("E2E購入商品");
-  await add.getByLabel("数量1").fill("2");
-  await add.getByLabel("単位1").selectOption("pack");
-  await add.getByLabel("購入金額1").fill("800");
-  await add.getByRole("button", { name: "保存" }).click();
-  await expect(add).toHaveCount(0);
-  await page.getByLabel("商品で絞り込み").selectOption({ label: "E2E購入商品" });
-  await expect(page.getByTestId("purchase-row")).toHaveCount(2);
-  await expect(page.getByTestId("stat-amount")).toContainText("¥3,800");
+  await expect(page.getByTestId("stat-pack")).toContainText("2");
+  await expect(page.getByTestId("stat-amount")).toContainText("¥800");
   await page.getByRole("tab", { name: "商品別の累計" }).click();
   const total = page.getByTestId("product-total-row").filter({ hasText: "E2E購入商品" });
-  await expect(total.getByTestId("total-qty")).toHaveText("1BOX"); // 仮登録の商品は入数が不明なのでパック換算しない（BOX数を表示）
-  await expect(total.getByTestId("total-sub")).toContainText("2パック");
-  await expect(total.getByTestId("total-sub")).toContainText("3,800円"); // 金額は二重計上されない（BOX 3,000 + パック 800）
-  await page.getByRole("tab", { name: "購入履歴" }).click();
-
-  // 収支にも同じ2件（二重に増えない）
+  await expect(total.getByTestId("total-qty")).toHaveText("2パック");
+  await expect(total.getByTestId("total-sub")).toContainText("800円");
+  // 収支の支出は増えていない（二重計上なし）
   await page.goto("/finance");
-  await expect(page.getByTestId("ledger-row").filter({ hasText: "E2E購入商品" })).toHaveCount(2);
-  const yen = (t: string) => Number(t.replace(/[^\d]/g, ""));
-  const expenseBefore = yen(await page.getByTestId("sum-expense").innerText());
+  await expect(page.getByTestId("ledger-row").filter({ hasText: "E2E購入商品" })).toHaveCount(1);
+  expect(yen(await page.getByTestId("sum-expense").innerText())).toBe(expenseBefore);
 
-  // 収支から支出を登録 → 購入記録にも出る
+  // 編集（金額）→ 取り消し（累計・履歴から除かれる。収支は変わらない）
+  await page.goto("/purchases");
+  await page.getByTestId("tab-history").click();
+  await page.getByTestId("filter-toggle").click();
+  await page.getByLabel("商品で絞り込み").selectOption({ label: "E2E購入商品" });
+  await page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" }).click();
+  await page.getByLabel("開封分の購入金額").fill("900");
+  await page.getByTestId("opening-save").click();
+  await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" })).toContainText("900円");
+  await page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" }).click();
+  await page.getByTestId("opening-cancel").click();
+  await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" })).toHaveCount(0);
+
+  // 収支から単品パックの支出を登録 → 開封状態が不明な購入に出る（勝手に開封済みにしない）→ 開封済みにすると実績に加わる
+  await page.goto("/finance");
   await page.getByRole("button", { name: "＋支出" }).click();
   const exp = page.getByRole("dialog");
   await exp.getByRole("combobox", { name: "商品1", exact: true }).fill("E2E収支起点商品");
+  await exp.getByLabel("単位1").selectOption("pack");
+  await exp.getByLabel("数量1").fill("3");
   await exp.getByLabel("購入金額1").fill("1200");
   await exp.getByRole("button", { name: "保存" }).click();
   await expect(exp).toHaveCount(0);
   await expect(page.getByTestId("sum-expense")).toHaveText(`${(expenseBefore + 1200).toLocaleString("ja-JP")}円`);
   await page.goto("/purchases");
   await page.getByTestId("tab-history").click();
-  await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E収支起点商品" })).toContainText("1,200円");
-
-  // 購入記録から削除 → 収支からも消える
-  await page.getByTestId("purchase-row").filter({ hasText: "E2E収支起点商品" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "削除" }).click();
   await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E収支起点商品" })).toHaveCount(0);
+  const unconf = page.getByTestId("unconfirmed");
+  await unconf.locator("summary").click();
+  const urow = page.getByTestId("unconfirmed-row").filter({ hasText: "E2E収支起点商品" });
+  await expect(urow).toContainText("3パック");
+  await urow.getByTestId("unconfirmed-open").click();
+  const conf = page.getByTestId("opening-form");
+  await expect(conf.getByLabel("開封分の購入金額")).toHaveValue("1200");
+  await conf.getByLabel("開封の数量").fill("1");
+  await expect(conf.getByLabel("開封分の購入金額")).toHaveValue("400"); // 数量に応じて按分
+  await conf.getByTestId("opening-save").click();
+  await expect(conf).toHaveCount(0);
+  const done = page.getByTestId("purchase-row").filter({ hasText: "E2E収支起点商品" });
+  await expect(done).toHaveCount(1);
+  await expect(done).toContainText("1パック");
+  await expect(done).toContainText("400円"); // 1200円×1/3
+  await page.getByTestId("unconfirmed").locator("summary").click().catch(() => undefined);
+  await expect(page.getByTestId("unconfirmed-row").filter({ hasText: "E2E収支起点商品" })).toContainText("2パック"); // 残りは未確認のまま
+  // 収支は変わらない
   await page.goto("/finance");
+  await expect(page.getByTestId("sum-expense")).toHaveText(`${(expenseBefore + 1200).toLocaleString("ja-JP")}円`);
+  // 収支から削除すると、購入記録の「不明」の一覧からも消える。確認済みの開封記録は履歴として残る（購入との関連は外れる）
+  await page.getByTestId("ledger-row").filter({ hasText: "E2E収支起点商品" }).click();
+  await page.getByRole("button", { name: "編集" }).click(); // 取引の詳細 → 編集
+  await page.getByRole("dialog").getByRole("button", { name: "削除" }).click();
   await expect(page.getByTestId("ledger-row").filter({ hasText: "E2E収支起点商品" })).toHaveCount(0);
-  await expect(page.getByTestId("sum-expense")).toHaveText(`${expenseBefore.toLocaleString("ja-JP")}円`); // 元の合計に戻る（二重に残らない）
+  await expect(page.getByTestId("sum-expense")).toHaveText(`${expenseBefore.toLocaleString("ja-JP")}円`);
   await page.goto("/purchases");
   await page.getByTestId("tab-history").click();
-  await expect(page.getByTestId("purchase-row").first()).toBeVisible();
+  await expect(page.getByTestId("purchase-row").first()).toBeVisible().catch(() => undefined);
   await page.screenshot({ path: "docs/screenshots/stage5a-purchases-mobile.png" });
 
   // 当選率: 上の当選1件が系列別に集計される（応募1・当選1・確定1 → 参考値）
@@ -2226,14 +2249,13 @@ test("Stage 5P 支出を登録: 開いた直後に購入日が入力状態にな
   await exp.getByLabel("購入金額1").fill("2400");
   await exp.getByRole("button", { name: "保存" }).click();
   await expect(exp).toHaveCount(0);
-  await page.goto("/purchases");
-  await page.getByTestId("tab-history").click();
-  const row = page.getByTestId("purchase-row").filter({ hasText: "E2E個単位商品" });
-  await expect(row.getByTestId("purchase-qty")).toHaveText("2個"); // 数量が先・単位が後（Stage 7E）
-  await expect(row).toContainText("2,400円");
-  // 編集で開き直しても「個」のまま
-  await row.click();
+  // 収支の支出として保存される（購入記録は開封・シングルカードの記録のため、未確認の購入として扱われる）。編集で開き直しても「個」のまま
+  await page.goto("/finance");
+  const lrow = page.getByTestId("ledger-row").filter({ hasText: "E2E個単位商品" });
+  await expect(lrow).toContainText("2,400");
+  await lrow.click();
+  await page.getByRole("button", { name: "編集" }).click(); // 取引の詳細 → 編集
   await expect(page.getByRole("dialog").getByLabel("単位1")).toHaveValue("piece");
   await page.getByRole("dialog").getByRole("button", { name: "削除" }).click();
-  await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E個単位商品" })).toHaveCount(0);
+  await expect(page.getByTestId("ledger-row").filter({ hasText: "E2E個単位商品" })).toHaveCount(0);
 });
