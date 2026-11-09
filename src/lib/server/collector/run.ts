@@ -26,6 +26,8 @@ import type { ImageStats } from "@/lib/server/collector/x-rich";
 import { listInfoFromQueued, rebuildQueued, type AiReason } from "@/lib/collector/queued";
 import { dueSources, runResultOf, type AttemptStatus } from "@/lib/collector/schedule";
 import { lowInfoOverride, decideHold, hostOf, hostRole, matchExclusion, triagePatch, type ExclusionRule } from "@/lib/collector/triage";
+import { activeUserRules, chainAreaSets } from "@/lib/server/collector/user-rules-load";
+import type { UserRule } from "@/lib/collector/user-rules";
 import { activeExclusions, altPlanFor, recordAltSuccess, recordHardSource } from "@/lib/server/collector/sources-health";
 import { loadXIdentities, loadXLinks, saveXIdentity } from "@/lib/server/collector/x-accounts";
 import { identifyAccount, identityHint, type AccountIdentity, type SavedIdentity } from "@/lib/collector/store-identity";
@@ -511,7 +513,7 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
 }
 
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
-async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = []): Promise<Outcome> {
+async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = [], userRules: UserRule[] = []): Promise<Outcome> {
   const { db } = deps;
   const nowIso = deps.now.toISOString();
   const clear = { lease_until: null, locked_by: null };
@@ -695,7 +697,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const region = judgeRegion({ masterPrefecture: store?.prefecture, address: store?.address, storeName: input.store.id ? "" : input.store.name, statedPrefecture: input.store.prefecture || lh?.prefecture || "" });
   const knownPref = region.prefecture;
   const texts = tcgTextsOf({ title: q.title, card: q.card, context: q.context, postText: q.post?.text, quotedText: q.post?.quoted?.text, products: productNamesOf(input) });
-  const ev = evaluateCandidate(input, cond, { texts, prefecture: knownPref, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now });
+  // 利用者が確定した除外ルール（Stage 7H）も、地域・商品・通販の例外と同じ判定（evaluateCandidate）の中で評価する
+  const areaSets = userRules.some((r) => r.kind === "area_chain") ? chainAreaSets(data, cond.prefectures) : undefined;
+  const ev = evaluateCandidate(input, cond, { texts, prefecture: knownPref, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now, userRules, chainsInArea: areaSets?.chainsInArea, chainsWithStores: areaSets?.chainsWithStores });
   const { ready, missing, provisional } = isReady(draft, input);
   const stage = classifyStage(input, jstDayString(deps.now));
   // ---- 抽選予告の追跡（Stage 6C）
@@ -1177,6 +1181,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   let fails = ctx.settings.consecutive_failures ?? 0;
   const lease = 150;
   const rules = await activeExclusions(db, householdId);
+  const userRules = await activeUserRules(db, householdId);
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;
@@ -1261,7 +1266,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
         await db.from("collection_candidates").update({ job_state: it.c.triage === "auto_retry" ? "retry" : "pending", lease_until: null, locked_by: null, attempts: Math.max(0, (it.c.attempts ?? 1) - 1) }).eq("id", it.c.id);
         continue;
       }
-      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules).catch(async (): Promise<Outcome> => {
+      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules, userRules).catch(async (): Promise<Outcome> => {
         await db.from("collection_candidates").update({ status: "pending", job_state: "retry", last_error: "解析中にエラーが発生しました", next_run_at: new Date(now.getTime() + 15 * 60_000).toISOString(), lease_until: null, locked_by: null }).eq("id", it.c.id);
         return { usedAi: true, registered: false, aiFailed: true };
       });

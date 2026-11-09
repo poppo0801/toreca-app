@@ -11,6 +11,7 @@ import { archiveReasonOf, isReevaluable } from "@/lib/collector/archive";
 import { runReevaluation } from "@/lib/server/collector/reevaluate";
 import type { Db } from "@/lib/server/lottery-service";
 import { excludeCandidates, requeueCandidates, undoExclude } from "@/lib/server/collector/review-actions";
+import { deactivateRule, excludeWithReason } from "@/lib/server/collector/exclusion-reasons";
 import { rebuildQueued } from "@/lib/collector/queued";
 import { learnAliases, planAliasLearning, type LearnInput } from "@/lib/server/collector/learn";
 import { checkUrl } from "@/lib/server/safe-fetch";
@@ -75,6 +76,9 @@ const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setAiBudget"), budgetJpy: z.number().int().min(0).max(1_000_000), rate: z.number().min(50).max(500), actor: z.uuid().nullable().optional() }),
   // 本日(日本時間)だけの日次上限の一時変更。null で解除。翌日は通常の設定に戻る
   z.object({ action: z.literal("exclude"), id: uuid }),
+  // 除外理由つきの除外（Stage 7H）。入力の検証・ルールの作成・履歴の記録は excludeWithReason
+  z.object({ action: z.literal("excludeReason"), id: uuid, actor: z.uuid().nullable().optional(), input: z.unknown() }),
+  z.object({ action: z.literal("undoReason"), items: z.array(z.object({ id: uuid, prev: z.record(z.string(), z.unknown()) })).min(1).max(100), rule: z.object({ table: z.enum(["collection_rules", "collection_exclusions"]), id: uuid, created: z.boolean() }).nullable().optional() }),
   z.object({ action: z.literal("restore"), id: uuid }),
   z.object({ action: z.literal("addSource"), source: sourceInput }),
   z.object({ action: z.literal("updateSource"), id: uuid, source: sourceInput }),
@@ -224,6 +228,15 @@ export async function POST(request: NextRequest) {
       if (!r.ok) return json({ ok: false, error: "更新に失敗しました" }, 500);
       if (r.excluded === 0) return json({ ok: false, error: "除外できませんでした（登録済みの候補は除外できません）" }, 422);
       return json({ ok: true, excluded: 1, prev: r.prev });
+    }
+    case "excludeReason": {
+      const r = await excludeWithReason(db as never, householdId, b.id, b.actor ?? null, b.input as never);
+      return r.ok ? json({ ok: true, prev: r.prev, rule: r.rule, reason: r.reason }) : json({ ok: false, error: r.error }, 422);
+    }
+    case "undoReason": {
+      const r = await undoExclude(db, b.items as never);
+      if (r.restored > 0 && b.rule) await deactivateRule(db as never, b.rule);
+      return r.restored > 0 || r.failed === 0 ? json({ ok: true, ...r }) : json({ ok: false, error: "元に戻せませんでした" }, 422);
     }
     case "undoExclude": {
       const r = await undoExclude(db, b.items as never);

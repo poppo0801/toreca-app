@@ -115,18 +115,19 @@ function AnnounceGlyph() {
 }
 
 /**
- * 日付表示Bタイプ（2行）。左の列=日付（左寄せ・長いものは省略）、右の列=受取方法・距離など（同じ列の文字は左端をそろえる）。
- * 同じ行の左右を1つのグリッドに置き、行がずれないようにする。右が無いときは左が全幅を使う。
+ * 日付表示Bタイプ（2行・2カラム）。左のカラム=日付（左寄せ。幅は日付の内容に合わせて確保）、右のカラム=受取方法・距離など（左カラムの右に独立して置き、左寄せ。2行とも開始位置が同じ）。
+ * 右の情報を各日付の直後に詰めたり、行の右端に寄せたりしない。同じ行の左右を1つのグリッドに置き、行がずれないようにする。右が無いときは左が全幅を使う。
+ * 幅が足りないときは右のカラムを省略表示にし、文字を重ねない。
  */
 function DateBlockB({ left, right }: { left: React.ReactNode[]; right: React.ReactNode[] }) {
   const rows = Math.max(left.length, right.length);
   if (rows === 0) return null;
   return (
-    <div className={cn("grid items-center gap-x-3 gap-y-0.5 text-[11px]", right.length > 0 ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)]")} data-testid="card-dates-b">
+    <div className={cn("grid items-center gap-x-4 gap-y-0.5 text-[11px]", right.length > 0 ? "grid-cols-[minmax(0,max-content)_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)]")} data-testid="card-dates-b">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="contents" data-testid="date-b-row">
           <div className="min-w-0 whitespace-nowrap text-left" data-testid="date-b-left">{left[i]}</div>
-          {right.length > 0 && <div className="min-w-0 whitespace-nowrap text-left text-muted-foreground" data-testid="date-b-right">{right[i]}</div>}
+          {right.length > 0 && <div className="min-w-0 truncate whitespace-nowrap text-left text-muted-foreground" data-testid="date-b-right">{right[i]}</div>}
         </div>
       ))}
     </div>

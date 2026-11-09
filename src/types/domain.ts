@@ -504,8 +504,10 @@ export type BattleResult = "win" | "lose" | "draw";
 export interface BattleRecord {
   id: string;
   playedOn: string;
-  /** 使用した人（任意） */
+  /** 記録の持ち主（「自分」側のプロフィール）。null=所有者不明の未割当 */
   profileId: string | null;
+  /** アプリ内プロフィールとの対戦のときの相手。1件だけ保存し、表示するプロフィールに応じて自分/相手・デッキ・勝敗を反転する。外部の相手は opponent（名称） */
+  opponentProfileId?: string | null;
   myDeck: string;
   opponent: string;
   opponentDeck: string;

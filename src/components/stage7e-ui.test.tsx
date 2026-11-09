@@ -121,14 +121,35 @@ describe("Stage 7E: 購入記録ページ", () => {
     // 1件ごとの独立したカード
     expect(rows.every((r) => r.className.includes("rounded-xl") && r.className.includes("border"))).toBe(true);
   });
-  it("絞り込みは月選択欄の右の小さなアイコンボタン（専用の1行を使わない）", () => {
+  it("絞り込みは「商品別の累計／購入履歴」の切替の右の小さなアイコンボタン（Stage 7I。月選択欄の右ではない）", () => {
     mountView();
     const f = q("filter-toggle")!;
     expect(f.textContent).toBe("");
     expect(f.className).toContain("size-10");
-    expect(f.parentElement).toBe(q("period-label")!.parentElement!.parentElement);
+    // タブ切替と同じ行（右側）にあり、月選択の行にはない
+    expect(f.parentElement).toBe(q("tab-products")!.parentElement!.parentElement);
+    expect(q("period-label")!.parentElement!.parentElement!.contains(f)).toBe(false);
     act(() => f.click());
     expect(q("purchase-filters")).not.toBeNull();
+  });
+  it("上部の表示順: 月選択 → 集計 → 商品別累計／購入履歴の切替（＋絞り込み）→ 一覧", () => {
+    mountView();
+    const order = ["period-label", "purchase-summary", "tab-products", "product-totals"].map((id) => q(id)!);
+    for (let i = 0; i < order.length - 1; i++) expect(order[i].compareDocumentPosition(order[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it("商品別累計は1商品1枚の独立した角丸カード。左に画像・中央に商品名と補足・右に累計数量（右寄せ）", () => {
+    mountView();
+    const list = q("product-totals")!;
+    expect(list.className).toContain("space-y-2");
+    const rows = [...document.body.querySelectorAll('[data-testid="product-total-row"]')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.className).toContain("rounded-xl");
+      expect(r.className).toContain("border");
+      const qty = r.querySelector('[data-testid="total-qty"]')!;
+      expect(qty.className).toContain("text-right");
+      expect(r.querySelector('[data-testid="total-name"]')!.compareDocumentPosition(qty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // 数量は商品名の右
+    }
   });
 });
 

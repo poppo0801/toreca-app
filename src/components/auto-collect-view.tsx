@@ -1100,6 +1100,14 @@ export function AutoCollectView({
             )}
           </div>
         )}
+        {tab === "pending" && (
+          <p className="text-[11px]" data-testid="candidates-page-link">
+            <a href="/lotteries/candidates" className="text-info underline">
+              抽選候補ページ
+            </a>
+            で、抽選管理と同じカード形式で処理できます（除外理由の記録・除外ルールの作成に対応）。
+          </p>
+        )}
         {tab === "pending" && reviewRows.some((x) => x.row.assess) && (
           <div className="flex items-center gap-1 text-[11px]" data-testid="review-controls">
             <div role="group" aria-label="情報充実度" className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto" data-testid="rank-filter">

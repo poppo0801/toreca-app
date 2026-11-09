@@ -168,6 +168,7 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
         id: r.id,
         playedOn: r.played_on,
         profileId: r.profile_id,
+        opponentProfileId: (r as unknown as { opponent_profile_id?: string | null }).opponent_profile_id ?? null,
         myDeck: r.my_deck,
         opponent: r.opponent,
         opponentDeck: r.opponent_deck,

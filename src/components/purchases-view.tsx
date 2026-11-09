@@ -114,7 +114,7 @@ export function PurchasesView() {
         )}
       </div>
 
-      {/* 1. 期間選択（〈 2026年11月 〉）と、右側の小さな絞り込みボタン */}
+      {/* 1. 期間選択（〈 2026年11月 〉） */}
       <div className="flex items-center gap-1">
         <div className="flex min-w-0 flex-1 items-center justify-between rounded-lg bg-card px-0.5">
           <Button variant="ghost" size="icon" className="size-10" aria-label="前の期間" disabled={period.kind === "all"} onClick={() => setPeriod(shiftPeriod(period, -1))}>
@@ -127,13 +127,46 @@ export function PurchasesView() {
             <ChevronRight className="size-5" />
           </Button>
         </div>
+      </div>
+      <PeriodPicker open={picker} onOpenChange={setPicker} period={period} onPick={(p) => (setPeriod(p), setPicker(false))} years={dataYears} />
+
+      {/* 2. 集計（BOX・パック・その他商品・総額）を横4分割の1行で */}
+      <dl className="grid grid-cols-4 divide-x rounded-lg border bg-card py-1.5 text-center shadow-card" data-testid="purchase-summary">
+        {cells.map((c) => (
+          <div key={c.id} className="min-w-0 px-1" data-testid={`stat-${c.id}`} title={c.note}>
+            <dt className="truncate text-[10px] leading-4 text-muted-foreground">{c.label}</dt>
+            <dd className={cn("truncate font-bold tabular-nums leading-5", c.value.length >= 9 ? "text-xs" : "text-sm")}>
+              {c.value}
+              {c.note && (
+                <span aria-label={c.note} className="text-[10px] font-normal text-muted-foreground">
+                  ＊
+                </span>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {stats.amountUnknown > 0 && <p className="text-xs text-muted-foreground">金額が未入力の購入が{stats.amountUnknown}件あります（総額には含まれていません。0円とは扱いません）。</p>}
+
+      {/* 3. 商品別の累計（左）／購入履歴（右）の切替と、右側の小さな絞り込みボタン */}
+      <div className="flex items-center gap-1">
+      <div role="tablist" aria-label="表示の切替" className="grid min-w-0 flex-1 grid-cols-2 rounded-lg bg-muted p-0.5">
+        {(
+          [
+            ["products", "商品別の累計"],
+            ["history", "購入履歴"],
+          ] as const
+        ).map(([v, label]) => (
+          <button key={v} role="tab" type="button" aria-selected={tab === v} onClick={() => setTab(v)} className={cn("min-h-9 rounded-md text-[13px] font-medium", tab === v ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")} data-testid={`tab-${v}`}>
+            {label}
+          </button>
+        ))}
+      </div>
         <Button variant="outline" size="icon" className={cn("relative size-10 shrink-0", hasFilter && "border-primary text-primary-ink")} aria-label={hasFilter ? "絞り込み（設定中）" : "絞り込み"} aria-expanded={showFilter || hasFilter} onClick={() => setShowFilter((v) => !v)} data-testid="filter-toggle">
           <SlidersHorizontal className="size-4" aria-hidden="true" />
           {hasFilter && <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-primary" aria-hidden="true" />}
         </Button>
       </div>
-      <PeriodPicker open={picker} onOpenChange={setPicker} period={period} onPick={(p) => (setPeriod(p), setPicker(false))} years={dataYears} />
-
       {(showFilter || hasFilter) && (
         <div className="flex gap-1.5" data-testid="purchase-filters">
           <select aria-label="商品で絞り込み" value={productId} onChange={(e) => setProductId(e.target.value)} className={cn(chip, "flex-1")}>
@@ -159,38 +192,6 @@ export function PurchasesView() {
           )}
         </div>
       )}
-
-      {/* 2. 商品別の累計（左）／購入履歴（右）の切替 */}
-      <div role="tablist" aria-label="表示の切替" className="grid grid-cols-2 rounded-lg bg-muted p-0.5">
-        {(
-          [
-            ["products", "商品別の累計"],
-            ["history", "購入履歴"],
-          ] as const
-        ).map(([v, label]) => (
-          <button key={v} role="tab" type="button" aria-selected={tab === v} onClick={() => setTab(v)} className={cn("min-h-9 rounded-md text-[13px] font-medium", tab === v ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-card")} data-testid={`tab-${v}`}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* 3. 集計（BOX・パック・その他商品・総額）を横4分割の1行で */}
-      <dl className="grid grid-cols-4 divide-x rounded-lg border bg-card py-1.5 text-center shadow-card" data-testid="purchase-summary">
-        {cells.map((c) => (
-          <div key={c.id} className="min-w-0 px-1" data-testid={`stat-${c.id}`} title={c.note}>
-            <dt className="truncate text-[10px] leading-4 text-muted-foreground">{c.label}</dt>
-            <dd className={cn("truncate font-bold tabular-nums leading-5", c.value.length >= 9 ? "text-xs" : "text-sm")}>
-              {c.value}
-              {c.note && (
-                <span aria-label={c.note} className="text-[10px] font-normal text-muted-foreground">
-                  ＊
-                </span>
-              )}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {stats.amountUnknown > 0 && <p className="text-xs text-muted-foreground">金額が未入力の購入が{stats.amountUnknown}件あります（総額には含まれていません。0円とは扱いません）。</p>}
 
       {/* 4. 一覧 */}
       {tab === "history" ? (
@@ -237,30 +238,30 @@ export function PurchasesView() {
           })}
         </ul>
       ) : (
-        <ul className="divide-y overflow-hidden rounded-xl border bg-card shadow-card" data-testid="product-totals" aria-label="商品別の累計">
+        <ul className="space-y-2" data-testid="product-totals" aria-label="商品別の累計">
           {totals.map((r) => {
             const product = r.productId ? data.products.find((x) => x.id === r.productId) : undefined;
             const d = totalDisplay(r);
             return (
-              <li key={r.productId ?? r.label} className="flex items-center gap-2.5 px-2.5 py-2" data-testid="product-total-row">
+              <li key={r.productId ?? r.label} className="flex items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2 shadow-card" data-testid="product-total-row">
                 <span className="flex h-14 w-11 shrink-0 items-center justify-center">
                   <PurchaseThumb product={product} category={r.single ? "single_card" : r.category} heightClass="h-14" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium" data-testid="total-name">
+                  <span className="block truncate text-[13px] font-medium" data-testid="total-name">
                     {r.label}
-                  </span>
-                  <span className="block text-lg font-bold leading-6 tabular-nums" data-testid="total-qty">
-                    {d.qty}
                   </span>
                   <span className="block truncate text-[11px] text-muted-foreground" data-testid="total-sub">
                     {d.sub}
                   </span>
                 </span>
+                <span className="w-20 shrink-0 text-right text-base font-bold tabular-nums" data-testid="total-qty">
+                  {d.qty}
+                </span>
               </li>
             );
           })}
-          {totals.length === 0 && <li className="p-4 text-center text-sm text-muted-foreground">該当する購入はありません。</li>}
+          {totals.length === 0 && <li className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">該当する購入はありません。</li>}
         </ul>
       )}
       {tab === "history" && purchases.length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">この条件の購入記録はありません。</p>}

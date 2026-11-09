@@ -7,6 +7,7 @@ import { ApplyExitProvider, useApplyExitController } from "@/components/apply-ex
 import { useSearchParams } from "next/navigation";
 import { ChartColumn, CircleHelp, LayoutList, Rows3, Search, SlidersHorizontal, Table2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { reviewCandidateCountAction } from "@/app/(app)/lotteries/candidates/count-action";
 import { useAiJobs } from "@/components/ai-jobs-provider";
 import { countActiveFilters, FilterSheet } from "@/components/lottery-filter-sheet";
 import { LotteryFormDialog } from "@/components/lottery-form";
@@ -97,6 +98,15 @@ export function LotteryBoard() {
 
 function LotteryBoardInner() {
   const { data, now, persistent, profile, settings, saveSettings } = useApp();
+  // 抽選候補（自動収集の確認待ち）の件数。0件・取得失敗なら何も出さない
+  const [candCount, setCandCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void reviewCandidateCountAction().then((n) => alive && setCandCount(n)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const params = useSearchParams();
   const focusId = params.get("focus");
   const { unseen: unseenJobs } = useAiJobs();
@@ -212,7 +222,12 @@ function LotteryBoardInner() {
       <div className="sticky top-[var(--header-h)] z-20 -mx-3 space-y-1.5 border-b bg-background px-3 pb-1.5 md:-mx-6 md:px-6">
         <div className={PAGE_HEADING_ROW}>
           <PageHeading navId="lotteries">抽選管理</PageHeading>
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
+            {candCount > 0 && (
+              <Link href="/lotteries/candidates" className="flex h-8 shrink-0 items-center rounded-full border border-primary px-2.5 text-xs font-bold text-primary-ink" data-testid="candidates-link">
+                抽選候補 {candCount}件
+              </Link>
+            )}
             <Link href="/records" aria-label="応募実績・当選率を見る" className="flex size-9 items-center justify-center rounded-md hover:bg-muted">
               <ChartColumn className="size-[18px]" aria-hidden="true" />
             </Link>

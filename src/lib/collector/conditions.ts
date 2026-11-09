@@ -5,6 +5,7 @@
 import type { LotteryInput } from "@/lib/lottery-input";
 import { judgeTcg, otherTcgReason, productNamesOf } from "@/lib/collector/category";
 import { judgeRegion, looksMultiStore } from "@/lib/collector/region";
+import { evaluateUserRules, type UserRule } from "@/lib/collector/user-rules";
 import { HIDDEN_REQUIREMENT_TAGS, placeInfo, type RequirementTag, type StoreKind } from "@/lib/lottery-taxonomy";
 
 export const DEFAULT_PREFECTURES = ["兵庫県", "大阪府", "京都府", "東京都", "千葉県", "神奈川県"] as const;
@@ -79,6 +80,11 @@ export interface EvalContext {
   now: Date;
   /** 商品のTCG種別の判定に使う文字列（題名・本文・商品名）。指定しなければ商品名だけで判定する */
   texts?: string[];
+  /** 利用者が確定した除外ルール（Stage 7H）。地域・店舗／エリア外系列／別ゲーム。既存の判定（地域・商品・通販の例外）と同じ流れで評価する */
+  userRules?: UserRule[];
+  /** 対象地域に店舗がある系列・店舗マスターを持つ系列（エリア外系列のルールの判定に使う） */
+  chainsInArea?: ReadonlySet<string>;
+  chainsWithStores?: ReadonlySet<string>;
 }
 
 const JST = "Asia/Tokyo";
@@ -161,6 +167,13 @@ export function evaluateCandidate(input: LotteryInput, cond: CollectionCondition
   const allOther = prodNames.length > 0 && prodNames.every((n) => judgeTcg([n]).category === "other");
   if (tcg.category === "other" || allOther) excluded.push(otherTcgReason(tcg.other || judgeTcg(prodNames).other));
   else if (tcg.category === "mixed") notes.push("複数のTCGを案内する告知です（ポケモンカードの情報だけを対象にします）");
+
+  // ---- 利用者の除外ルール（Stage 7H）。根拠が確認できるものだけ。通販・店舗選択式・ポケモンカードも含む投稿は除外しない
+  if ((ctx.userRules ?? []).length > 0) {
+    const ur = evaluateUserRules(ctx.userRules ?? [], { chainId: input.chain?.id ?? null, chainName: input.chain?.name ?? "", storeId: input.store?.id ?? null, storeName: input.store?.name ?? "", productNames: productNamesOf(input), receiveMethod: input.receiveMethod, storeKind: ctx.storeKind, selectOnApply: input.storeMode === "select_on_apply", chainsInArea: ctx.chainsInArea, chainsWithStores: ctx.chainsWithStores });
+    excluded.push(...ur.excluded);
+    notes.push(...ur.notes);
+  }
 
   // ---- 受付状況
   const ended = deadlinePassed(input.applyDeadline, ctx.now);

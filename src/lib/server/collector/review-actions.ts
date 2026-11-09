@@ -34,12 +34,12 @@ export async function excludeCandidates(db: Db, ids: string[]): Promise<{ ok: tr
 
 /** 除外の取り消し。利用者が除外した候補だけを直前の状態へ戻す（他の処理で変わった候補には触れない） */
 export async function undoExclude(db: Db, items: ExcludeSnapshot[]): Promise<{ restored: number; failed: number }> {
-  const allowed = ["status", "job_state", "triage", "triage_reason", "manual_state", "reasons", "resolved_at", "completed_at", "next_run_at"];
+  const allowed = ["status", "job_state", "triage", "triage_reason", "manual_state", "reasons", "resolved_at", "completed_at", "next_run_at", "lottery_id"];
   let restored = 0;
   let failed = 0;
   for (const it of items) {
     const patch = Object.fromEntries(Object.entries(it.prev).filter(([k]) => allowed.includes(k)));
-    const { data, error } = await db.from("collection_candidates").update(patch as never).eq("id", it.id).eq("status", "excluded").contains("reasons", [USER_EXCLUDED]).select("id");
+    const { data, error } = await db.from("collection_candidates").update(patch as never).eq("id", it.id).in("status", ["excluded", "duplicate"]).contains("reasons", [USER_EXCLUDED]).select("id");
     if (error || (data ?? []).length === 0) failed++;
     else restored++;
   }

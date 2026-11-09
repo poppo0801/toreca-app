@@ -820,8 +820,10 @@ export type Database = {
           id: string
           memo: string
           my_deck: string
+          op_id: string | null
           opponent: string
           opponent_deck: string
+          opponent_profile_id: string | null
           played_on: string
           profile_id: string | null
           result: string
@@ -837,8 +839,10 @@ export type Database = {
           id?: string
           memo?: string
           my_deck?: string
+          op_id?: string | null
           opponent?: string
           opponent_deck?: string
+          opponent_profile_id?: string | null
           played_on: string
           profile_id?: string | null
           result: string
@@ -854,8 +858,10 @@ export type Database = {
           id?: string
           memo?: string
           my_deck?: string
+          op_id?: string | null
           opponent?: string
           opponent_deck?: string
+          opponent_profile_id?: string | null
           played_on?: string
           profile_id?: string | null
           result?: string
@@ -870,6 +876,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "households"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "battle_records_opponent_fk"
+            columns: ["opponent_profile_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id", "household_id"]
           },
           {
             foreignKeyName: "battle_records_profile_id_household_id_fkey"
@@ -2508,6 +2521,63 @@ export type Database = {
           },
         ]
       }
+      collection_exclusion_log: {
+        Row: {
+          candidate_id: string
+          created_at: string
+          created_by_profile_id: string | null
+          detail: Json
+          duplicate_candidate_id: string | null
+          duplicate_lottery_id: string | null
+          household_id: string
+          id: string
+          reason_code: string
+          rule_id: string | null
+          rule_table: string | null
+        }
+        Insert: {
+          candidate_id: string
+          created_at?: string
+          created_by_profile_id?: string | null
+          detail?: Json
+          duplicate_candidate_id?: string | null
+          duplicate_lottery_id?: string | null
+          household_id: string
+          id?: string
+          reason_code: string
+          rule_id?: string | null
+          rule_table?: string | null
+        }
+        Update: {
+          candidate_id?: string
+          created_at?: string
+          created_by_profile_id?: string | null
+          detail?: Json
+          duplicate_candidate_id?: string | null
+          duplicate_lottery_id?: string | null
+          household_id?: string
+          id?: string
+          reason_code?: string
+          rule_id?: string | null
+          rule_table?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_exclusion_log_candidate_id_household_id_fkey"
+            columns: ["candidate_id", "household_id"]
+            isOneToOne: false
+            referencedRelation: "collection_candidates"
+            referencedColumns: ["id", "household_id"]
+          },
+          {
+            foreignKeyName: "collection_exclusion_log_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       collection_exclusions: {
         Row: {
           active: boolean
@@ -2790,6 +2860,77 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "stores"
             referencedColumns: ["id", "household_id"]
+          },
+        ]
+      }
+      collection_rules: {
+        Row: {
+          active: boolean
+          chain_id: string | null
+          chain_name: string
+          city: string
+          created_at: string
+          created_by_profile_id: string | null
+          household_id: string
+          id: string
+          keywords: string[]
+          kind: string
+          label: string
+          note: string
+          prefecture: string
+          released_at: string | null
+          source_candidate_id: string | null
+          store_id: string | null
+          store_name: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          chain_id?: string | null
+          chain_name?: string
+          city?: string
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id: string
+          id?: string
+          keywords?: string[]
+          kind: string
+          label?: string
+          note?: string
+          prefecture?: string
+          released_at?: string | null
+          source_candidate_id?: string | null
+          store_id?: string | null
+          store_name?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          chain_id?: string | null
+          chain_name?: string
+          city?: string
+          created_at?: string
+          created_by_profile_id?: string | null
+          household_id?: string
+          id?: string
+          keywords?: string[]
+          kind?: string
+          label?: string
+          note?: string
+          prefecture?: string
+          released_at?: string | null
+          source_candidate_id?: string | null
+          store_id?: string | null
+          store_name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_rules_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
           },
         ]
       }

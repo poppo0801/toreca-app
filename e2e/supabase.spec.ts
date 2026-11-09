@@ -911,8 +911,19 @@ test("対戦記録: 登録→一覧・勝率→編集→削除。再読込でも
   await record("勝ち", "E2Eデッキ", "相手デッキX");
   await record("負け", "E2Eデッキ", "相手デッキY");
   await expect(page.getByTestId("battle-row")).toHaveCount(2);
-  await expect(page.getByTestId("battle-対戦")).toHaveText("2");
-  await expect(page.getByTestId("battle-勝率")).toHaveText("50%");
+  // 戦績の分析は右上のアイコンから（一覧とは分離）。相手デッキ別は無く、使用デッキ別・対戦形式別がある
+  const rate = async () => {
+    await page.getByTestId("battle-analysis-open").click();
+    const a = page.getByTestId("battle-analysis");
+    await expect(a.getByTestId("battle-by-deck")).toBeVisible();
+    await expect(a.getByTestId("battle-by-format")).toContainText("ジムバトル");
+    await expect(a).not.toContainText("相手デッキ別");
+    const v = await a.getByTestId("battle-rate").textContent();
+    const total = await a.getByTestId("battle-total").textContent();
+    await a.getByRole("button", { name: "閉じる", exact: true }).click();
+    return { v, total };
+  };
+  expect(await rate()).toEqual({ v: "50%", total: "2" });
 
   // 必須項目（勝敗）が無いと保存できない
   await page.getByRole("button", { name: "＋対戦を記録" }).click();
@@ -924,7 +935,7 @@ test("対戦記録: 登録→一覧・勝率→編集→削除。再読込でも
   await page.getByTestId("battle-row").filter({ hasText: "相手デッキY" }).click();
   await page.getByTestId("battle-form").getByRole("radio", { name: "勝ち" }).click();
   await page.getByTestId("battle-form").getByRole("button", { name: "保存" }).click();
-  await expect(page.getByTestId("battle-勝率")).toHaveText("100%");
+  expect((await rate()).v).toBe("100%");
 
   // 再読込しても保持
   await page.reload();

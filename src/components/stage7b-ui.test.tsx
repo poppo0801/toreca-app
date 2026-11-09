@@ -73,8 +73,9 @@ describe("Stage 7B: 日付表示 A/B", () => {
     expect(rows[1].querySelector('[data-testid="period"]')).not.toBeNull();
     const lefts = qa('[data-testid="date-b-left"]');
     expect(lefts.every((e) => e.className.includes("text-left") && e.className.includes("whitespace-nowrap"))).toBe(true);
-    // 右の列は1つのグリッド列（auto）に置かれ、全行で開始位置が同じ
-    expect(b.className).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    // 2カラム: 左は日付の幅を確保し、右はその右の独立した列（全行で開始位置が同じ。行の右端には寄せない）
+    expect(b.className).toContain("grid-cols-[minmax(0,max-content)_minmax(0,1fr)]");
+    expect(b.className).not.toContain("_auto]");
     const rights = qa('[data-testid="date-b-right"]');
     expect(rights.every((e) => e.className.includes("text-left"))).toBe(true);
     expect(rights[0].textContent).toContain("店頭");

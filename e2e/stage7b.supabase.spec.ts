@@ -173,6 +173,17 @@ test("設定とタブ切替スワイプ: スワイプ操作・日付表示はプ
     const card = page.getByTestId("lottery-card").filter({ hasText: "7B設定商品" });
     await expect(card).toHaveCount(1);
     await expect(card.getByTestId("card-dates-b")).toBeVisible();
+    // Stage 7I: 右カラム（受取方法・距離）は左カラムの右に独立した列として置かれ、左寄せ・2行とも開始位置が同じ。行の右端に寄せない
+    const lefts = card.getByTestId("date-b-left");
+    const rights = card.getByTestId("date-b-right");
+    if ((await rights.count()) >= 2) {
+      const lb = await lefts.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()));
+      const rb = await rights.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()));
+      expect(Math.abs(rb[0].x - rb[1].x)).toBeLessThan(1); // 右カラムの開始位置が2行で同じ
+      expect(Math.max(...lb.map((r) => r.right))).toBeLessThanOrEqual(rb[0].x + 1); // 左カラムの右に置かれ、重ならない
+      const cardBox = (await card.boundingBox())!;
+      expect(rb[0].x + rb[0].width).toBeLessThan(cardBox.x + cardBox.width - 4); // カードの右端へ寄せていない
+    }
     await expect(page.getByTestId("board-content")).toHaveAttribute("data-swipe-mode", "tab");
     const selected = async () => (await page.getByRole("tab", { selected: true }).first().innerText()).replace(/\s+/g, "");
     const cdp = await page.context().newCDPSession(page);

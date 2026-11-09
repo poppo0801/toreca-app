@@ -5,6 +5,8 @@ import { CollectionMaintenance } from "@/components/collection-maintenance";
 import { EditRequestProvider } from "@/components/edit-request";
 import { archiveCounts, archiveReasonOf, isArchived, isReevaluable } from "@/lib/collector/archive";
 import { ManualReviewList } from "@/components/manual-review";
+import { UserRulesList, type ExclusionLogView, type RuleView } from "@/components/user-rules-list";
+import { chainAreaSets } from "@/lib/server/collector/user-rules-load";
 import { ExclusionRules, HardSources, type ExclusionView, type HardSourceView } from "@/components/source-controls";
 import { closedReviewIds } from "@/lib/server/collector/closed-ids";
 import { loadManualGroups } from "@/lib/server/collector/manual-items";
@@ -158,6 +160,16 @@ export default async function CollectionPage() {
     lastProgressAt: lastProgressAt?.toISOString() ?? null,
     dueTodayQueued: dueToday.count ?? 0,
   };
+  // 除外ルール（抽選候補の除外で確定したもの）と除外の履歴。対象地域に店舗がある系列のルールは「適用されない」と示す
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表は生成型に無い場合がある
+  const anyDb = db as any;
+  const [ruleRes, logRes] = await Promise.all([
+    anyDb.from("collection_rules").select("id,kind,label,chain_id,chain_name,store_name,prefecture,city,keywords,note,active,created_at").order("created_at", { ascending: false }).limit(200),
+    anyDb.from("collection_exclusion_log").select("id,candidate_id,reason_code,detail,rule_id,created_at").order("created_at", { ascending: false }).limit(20),
+  ]);
+  const areaSets = appData ? chainAreaSets(appData, conditionsFromRow(settings.data as unknown as Record<string, unknown>).prefectures) : null;
+  const ruleViews: RuleView[] = ((ruleRes.error ? [] : ruleRes.data) ?? []).map((r: RuleView & { chain_id: string | null }) => ({ ...r, keywords: r.keywords ?? [], chainInArea: r.kind === "area_chain" && r.chain_id ? (areaSets?.chainsInArea.has(r.chain_id) ?? false) : undefined }));
+  const logViews: ExclusionLogView[] = (logRes.error ? [] : logRes.data) ?? [];
   return (
     <>
       <p className="mb-2 text-sm">
@@ -190,7 +202,11 @@ export default async function CollectionPage() {
       </EditRequestProvider>
       <div className="mt-3 space-y-3">
         <CollectionMaintenance review={Math.max(0, (nReview.count ?? 0) - closedIds.size)} archive={archive} />
-        <Block no="⑤" title="収集元の管理" testId="sources" summary={`除外${(exclusions.data ?? []).filter((r) => r.active).length}件・取得困難${(hardSources.data ?? []).length}件`}>
+        <Block no="⑤" title="収集元の管理" testId="sources" summary={`除外${(exclusions.data ?? []).filter((r) => r.active).length + ruleViews.filter((r) => r.active).length}件・取得困難${(hardSources.data ?? []).length}件`}>
+          <div className="space-y-2">
+            <p className="text-xs font-medium">除外ルール（抽選候補の除外から作成）</p>
+            <UserRulesList rules={ruleViews} log={logViews} />
+          </div>
           <div className="space-y-2">
             <p className="text-xs font-medium">除外中の収集元</p>
             <ExclusionRules rules={(exclusions.data ?? []) as unknown as ExclusionView[]} />
