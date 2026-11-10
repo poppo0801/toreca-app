@@ -85,6 +85,10 @@ export interface CandidateView {
   last_error?: string | null;
   due_at?: string | null;
   last_changed_at?: string | null;
+  /** 要手動確認（Stage 5T）。抽選候補ページで管理する（Stage 7M） */
+  triage?: string | null;
+  manual_state?: string | null;
+  manual_reason?: string | null;
   /** 情報充実度（A〜E）・対応優先度・項目別の出典。確認待ちの候補だけ（表示のたびに再計算） */
   assess?: RowAssess | null;
 }

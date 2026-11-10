@@ -15,13 +15,13 @@ import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitl
 import { UndoToastProvider, useUndoToast } from "@/components/undo-toast";
 import { RANKS, type Rank } from "@/lib/collector/completeness";
 import { missingBadges } from "@/lib/collector/missing-badges";
+import { CANDIDATE_STATE_LABEL, CANDIDATE_STATES, candidateStates, NEW_HOURS, type CandidateState } from "@/lib/collector/candidate-state";
 import { filterRows, rankCounts, SORT_LABEL, sortRows, type SortKey } from "@/lib/collector/review-list";
 import { EXCLUDE_REASON_LABEL } from "@/lib/collector/user-rules";
 import type { LotteryDraft } from "@/lib/lottery-match";
 import { cn } from "@/lib/utils";
 
 const PAGE = 10;
-const NEW_HOURS = 36;
 
 type Flex = { precision: string; date?: string; time?: string } | undefined;
 /** 日時の短い表示。不明は「未確認」（推測で埋めない） */
@@ -72,6 +72,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("new");
   const [rank, setRank] = useState<"all" | Rank>("all");
+  const [stateFilter, setStateFilter] = useState<"all" | CandidateState>("all");
   const [limit, setLimit] = useState(PAGE);
   const [editing, setEditing] = useState<CandidateView | null>(null);
   const [excluding, setExcluding] = useState<CandidateView | null>(null);
@@ -87,7 +88,19 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
   const sortable = useMemo(() => rows.map((c) => ({ c, row: { id: c.id, fetched_at: c.fetched_at, dueMs: dueMs(c), kind: c.kind, assess: c.assess ? { rank: c.assess.rank, priority: c.assess.priority } : null } })), [rows]);
   const byId = useMemo(() => new Map(sortable.map((x) => [x.row.id, x.c])), [sortable]);
   const ranks = useMemo(() => rankCounts(sortable.map((x) => x.row)), [sortable]);
-  const shown = useMemo(() => sortRows(filterRows(sortable.map((x) => x.row), rank), sortKey).map((r) => byId.get(r.id)!), [sortable, rank, sortKey, byId]);
+  const states = useMemo(() => new Map(rows.map((c) => [c.id, candidateStates(c, now)])), [rows, now]);
+  const stateCounts = useMemo(() => {
+    const n: Record<CandidateState, number> = { new: 0, missing: 0, check: 0, done: 0 };
+    for (const s of states.values()) for (const k of s) n[k]++;
+    return n;
+  }, [states]);
+  const shown = useMemo(
+    () =>
+      sortRows(filterRows(sortable.map((x) => x.row), rank), sortKey)
+        .map((r) => byId.get(r.id)!)
+        .filter((c) => stateFilter === "all" || states.get(c.id)?.has(stateFilter)),
+    [sortable, rank, sortKey, byId, stateFilter, states],
+  );
   const visible = shown.slice(0, limit);
 
   const hide = (id: string) => setHidden((h) => new Set(h).add(id));
@@ -142,6 +155,14 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <select aria-label="絞り込み（状態）" value={stateFilter} onChange={(e) => setStateFilter(e.target.value as "all" | CandidateState)} className="h-9 rounded-md border bg-input px-2 text-xs" data-testid="candidates-state">
+            <option value="all">全状態</option>
+            {CANDIDATE_STATES.map((k) => (
+              <option key={k} value={k}>
+                {CANDIDATE_STATE_LABEL[k]}（{stateCounts[k]}）
+              </option>
+            ))}
+          </select>
           <select aria-label="絞り込み（情報充実度）" value={rank} onChange={(e) => setRank(e.target.value as "all" | Rank)} className="h-9 rounded-md border bg-input px-2 text-xs" data-testid="candidates-rank">
             <option value="all">すべて</option>
             {RANKS.map((r) => (
@@ -188,6 +209,11 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
                       </span>
                     )}
                     {c.assess?.conflict && <span className="shrink-0 text-[10px] font-bold text-warn">矛盾あり</span>}
+                    {c.triage === "manual" && c.manual_state === "open" && (
+                      <span className="shrink-0 rounded border border-warn px-1 text-[10px] font-bold text-warn" data-testid="candidate-check">
+                        要確認
+                      </span>
+                    )}
                   </span>
                   <span className="block truncate">{f.productNames.join("・") || "商品名は未確認"}</span>
                   <span className="block truncate text-muted-foreground">

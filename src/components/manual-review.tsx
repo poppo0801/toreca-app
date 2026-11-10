@@ -233,6 +233,9 @@ export function ManualReviewList({ groups }: { groups: ManualGroups }) {
           要手動確認：0件
         </p>
       )}
+      <Link href="/lotteries/candidates" className="block text-xs text-info underline" data-testid="manual-to-candidates">
+        抽選候補ページ（状態「要確認」）でも確認・登録・除外できます
+      </Link>
       {msg && (
         <p className="text-xs text-muted-foreground" role="status">
           {msg}

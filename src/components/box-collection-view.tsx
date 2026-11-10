@@ -63,6 +63,16 @@ export function BoxCollectionPanel({ ref, onSwitchKind }: { ref?: Ref<BoxPanelHa
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部データの取得
     void load();
   }, [load]);
+  // 購入記録の「開封状態が未確認」などから、商品を指定して詳細を開く（?open=商品ID）
+  useEffect(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get("open");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- URLの指定を初回に1度だけ反映
+      if (id) setOpenId(id);
+    } catch {
+      /* URLを読めなくても一覧は使える */
+    }
+  }, []);
   useImperativeHandle(ref, () => ({ openRegister: () => setDialog("form"), openPrices: () => setDialog("prices") }), []);
 
   const rows = useMemo(() => (data ? summarizeBoxes(data.products, data.lots, balancesOf(data.movements), data.prices, data.settings, data.market) : []), [data]);

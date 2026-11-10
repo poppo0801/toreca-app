@@ -51,7 +51,7 @@ describe("Stage 7A: 注意アイコン", () => {
     for (const view of ["detail", "simple"] as const) {
       mount("L1", view);
       expect(q('[data-testid="caution-mark"]'), `${view}: 通常`).toBeNull();
-      patch("L1", { cautions: [caution("result_date_unknown", "当選発表日が確認できていません")] });
+      patch("L1", { cautions: [caution("result_date_unknown", "当選発表日が確認できていません")], resultDate: { precision: "unknown" } });
       mount("L1", view);
       const mark = q('[data-testid="caution-mark"]')!;
       expect(mark, view).not.toBeNull();
@@ -60,7 +60,7 @@ describe("Stage 7A: 注意アイコン", () => {
     }
   });
   it("NEW・★・応募状態と重ならない位置（店舗名の行の中）にあり、カードの高さを増やす行を追加しない", () => {
-    patch("L1", { cautions: [caution("store_unconfirmed", "受取店舗が確定していません")], isNew: true });
+    patch("L1", { cautions: [caution("store_unconfirmed", "受取店舗が確定していません")], isNew: true, storeId: null });
     mount("L1", "detail");
     const mark = q('[data-testid="caution-mark"]')!;
     expect(mark.closest('[data-testid="card-place"]')).not.toBeNull();

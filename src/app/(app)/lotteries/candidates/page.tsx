@@ -20,9 +20,9 @@ export default async function CandidatesPage() {
   const hh = await db.from("households").select("id").maybeSingle();
   if (!hh.data) return <p className="text-sm text-muted-foreground">世帯が見つかりません。</p>;
   const now = new Date();
-  const cols = "id,source_id,title,source_url,status,reasons,draft,lottery_id,fetched_at,job_state,kind,attempts,next_run_at,last_error,due_at,last_changed_at,memo_id";
+  const cols = "id,source_id,title,source_url,status,reasons,draft,lottery_id,fetched_at,job_state,kind,attempts,next_run_at,last_error,due_at,last_changed_at,memo_id,triage,manual_state,manual_reason";
   const [rev, settings, closed, appData] = await Promise.all([
-    db.from("collection_candidates").select(cols).eq("job_state", "review").neq("status", "auto_registered").order("created_at", { ascending: false }).limit(500),
+    db.from("collection_candidates").select(cols).eq("job_state", "review").in("status", ["pending", "failed"]).is("lottery_id", null).order("created_at", { ascending: false }).limit(500),
     db.from("collection_settings").select("*").limit(1).maybeSingle(),
     closedReviewIds(db as never, now).catch(() => new Set<string>()),
     loadAppData(db as never, hh.data.id).catch(() => null),

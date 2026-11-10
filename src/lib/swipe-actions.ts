@@ -74,6 +74,8 @@ export type SwipePlan =
   | { kind: "confirm"; op: SwipeOp }
   /** 希望商品を選んで応募する抽選: 商品を選んでから応募済みにする */
   | { kind: "choose-item" }
+  /** 複数商品（商品ごとに当落）の抽選: 応募した商品を選んでから応募済みにする（Stage 7M） */
+  | { kind: "choose-items" }
   /** 応募時に店舗を選ぶ抽選: 応募先の店舗を選んでから応募済みにする（Stage 6N） */
   | { kind: "choose-store" }
   /** 購入と受取が分かれている抽選: 操作内容を選ぶダイアログ（Undoは使わず、確認してから確定） */
@@ -107,7 +109,7 @@ export function planSwipe(
       return isSkippedBy(data, profileId, lottery) ? { kind: "blocked", message: "すでにスルー中です" } : { kind: "run", op };
     case "mark_applied": {
       const c = applyControlFor(data, lottery, profileId, now);
-      if (c.kind === "apply") return c.needsChoice ? { kind: "choose-item" } : c.needsStore ? { kind: "choose-store" } : { kind: "run", op };
+      if (c.kind === "apply") return c.needsChoice ? { kind: "choose-item" } : c.needsItems && !c.needsStore ? { kind: "choose-items" } : c.needsItems ? { kind: "open-detail", message: "応募した商品と店舗を、詳細から選んでください" } : c.needsStore ? { kind: "choose-store" } : { kind: "run", op };
       if (c.kind === "applied") return { kind: "blocked", message: "すでに応募済みです" };
       if (c.kind === "blocked") return { kind: "blocked", message: `応募できません（${c.label}）` };
       return { kind: "blocked", message: "このユーザーの応募アカウントがありません" };

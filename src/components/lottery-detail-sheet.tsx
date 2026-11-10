@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { markLotterySeen } from "@/app/(app)/lotteries/seen-actions";
-import { ExternalLink, Star, TriangleAlert } from "lucide-react";
+import { ChevronDown, ExternalLink, Star, TriangleAlert } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { DuplicateDialog } from "@/components/duplicate-dialog";
 import { LotteryFormDialog } from "@/components/lottery-form";
@@ -35,6 +35,9 @@ import { RegistrationOrigin } from "@/components/registration-origin";
 import { EligibilitySection } from "@/components/eligibility-mark";
 import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
+import { liveCautions } from "@/lib/live-cautions";
+import { ItemPickerDialog } from "@/components/item-picker-dialog";
+import { appliedItemsOf, isPerItemApply } from "@/lib/item-apply";
 import type { Application, FlexibleDate, Lottery } from "@/types/domain";
 
 function Chip({ children, className, title, ...rest }: { children: React.ReactNode; className?: string; title?: string; "data-testid"?: string }) {
@@ -221,6 +224,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const dist = storeDistance(data, store);
   const place = placeInfo({ receiveMethod: lottery.receiveMethod, prefecture: store?.prefecture, storeKind: store?.salesKind });
   const unconfirmed = lottery.unconfirmedFields ?? [];
+  // 確認が必要な点は、保存時の解析結果ではなく現在の登録内容から再評価する（補った項目は自動で消える）
+  const cautions = liveCautions(lottery, store);
   // 要確認の理由は全ユーザー分を繰り返さず、同じ内容を1つにまとめて出す
   const reviewReasons = [...new Set(accounts.map((acc) => judgeAccount(data, lottery, acc, now)).filter((j) => j.status === "needs_review").map((j) => j.reason))];
 
@@ -302,18 +307,19 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
             </section>
 
             {/* 注意付きで自動登録された抽選: 不足・相違している項目と理由（注意が無い抽選には出さない） */}
-            {(lottery.cautions?.length ?? 0) > 0 && (
-              <section aria-label="確認が必要な点" data-testid="caution-section" className="rounded-lg border border-primary-ink/50 px-3 py-2 text-xs">
-                <p className="flex items-center gap-1 font-semibold text-primary-ink">
+            {cautions.length > 0 && (
+              <details aria-label="確認が必要な点" data-testid="caution-section" className="group rounded-lg border border-primary-ink/50 px-3 py-2 text-xs">
+                <summary className="flex cursor-pointer list-none items-center gap-1 font-semibold text-primary-ink" data-testid="caution-summary">
                   <TriangleAlert className="size-3.5" aria-hidden="true" />
-                  確認が必要な点
-                </p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                  {lottery.cautions!.map((c) => (
-                    <li key={c.code} data-testid={`caution-${c.code}`}>{c.message}</li>
+                  要確認（{cautions.length}件）
+                  <ChevronDown className="ml-auto size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <ul className="mt-1.5 list-disc space-y-1 pl-4 leading-relaxed">
+                  {cautions.map((c) => (
+                    <li key={c.code} className="break-words" data-testid={`caution-${c.code}`}>{c.message}</li>
                   ))}
                 </ul>
-              </section>
+              </details>
             )}
 
             {/* 2. 日付・期間: 外枠なしの区切り線形式（2列）。奇数のときは最後を横いっぱいに */}
@@ -353,7 +359,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
             })()}
 
             {/* 3. 応募・受取情報: 関連する項目をグループ化し、細い罫線・縦の区切り線で整理する */}
-            <div className="divide-y divide-border/70 border-y text-sm" data-testid="info-group" aria-label="応募・受取情報">
+            <div className="divide-y divide-border/70 rounded-lg border px-3 text-sm" data-testid="info-group" aria-label="応募・受取情報">
               <dl className="grid grid-cols-2 gap-x-4">
                 <Field label="応募方法" className="py-2">
                   {lottery.applyMethod === "unknown" ? DASH : APPLY_LABEL[lottery.applyMethod]}
@@ -418,6 +424,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   <MyApplyButton lottery={lottery} />
                 </div>
                 <StoreMissingNotice lottery={lottery} />
+                <AppliedItemsRow lottery={lottery} />
                 {persistent && <PastApplyRecorder lottery={lottery} />}
                 {persistent && <OngoingOps lottery={lottery} />}
                 {persistent && scopedWon.map((w) => {
@@ -697,6 +704,72 @@ function periodText(start: FlexibleDate, end: FlexibleDate): React.ReactNode {
   return `${start.precision === "unknown" ? "" : formatPlain(start)}〜${end.precision === "unknown" ? "" : formatPlain(end)}`;
 }
 
+/**
+ * 複数商品（商品ごとに当落）の抽選で、現在のプロフィールが応募した商品（Stage 7M）。変更は現在のプロフィールの応募だけ。
+ * 従来の記録で応募商品が特定できないときは、全商品として暫定表示し、実際に応募した商品を選んで確定するよう促す。
+ */
+function AppliedItemsRow({ lottery }: { lottery: Lottery }) {
+  const { data, profile, actions } = useApp();
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const app = myApplication(data, lottery.id, profile.id);
+  if (!isPerItemApply(lottery) || !app) return null;
+  const { ids, confirmed } = appliedItemsOf(lottery, app);
+  const nameOf = (id: string) => {
+    const it = lottery.items.find((i) => i.id === id);
+    return data.products.find((p) => p.id === it?.productId)?.officialName ?? "商品未登録";
+  };
+  const locked = lottery.items.flatMap((i) => (i.id && (app.itemResults[i.id] ?? "pending") !== "pending" ? [i.id] : []));
+  const editable = app.fulfillment === "none";
+  return (
+    <div className="space-y-1 text-xs" data-testid="applied-items">
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 flex-1">
+          <span className="text-muted-foreground">応募商品: </span>
+          <span className="break-words font-medium" data-testid="applied-items-names">{ids.map(nameOf).join("・") || "なし"}</span>
+        </p>
+        {editable && (
+          <Button size="sm" variant="outline" className="h-7 shrink-0 px-2 text-xs" onClick={() => setEditing(true)} data-testid="applied-items-edit">
+            {confirmed ? "変更" : "確認する"}
+          </Button>
+        )}
+      </div>
+      {!confirmed && (
+        <p className="text-warn" data-testid="applied-items-unconfirmed">
+          応募した商品が未確認です（全商品として表示しています）。実際に応募した商品を選んで確定してください。
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="text-danger">
+          {error}
+        </p>
+      )}
+      {editing && (
+        <ItemPickerDialog
+          lottery={lottery}
+          initial={ids}
+          title="応募した商品を変更"
+          confirmLabel="保存する"
+          allowEmpty
+          lockedIds={locked}
+          onClose={() => setEditing(false)}
+          onSubmit={async (picked) => {
+            const r = await actions.setAppliedItems(app.id, picked);
+            if (r && !r.ok) return setError(r.error);
+            setError(null);
+            setEditing(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** 当選した商品の購入記録（当選からの購入）があるか。商品別の購入済みの表示に使う */
+function purchasedItem(data: { purchases: { applicationId: string | null; items: { lotteryItemId?: string | null }[] }[] }, applicationId: string, itemId: string): boolean {
+  return data.purchases.some((p) => p.applicationId === applicationId && p.items.some((i) => i.lotteryItemId === itemId));
+}
+
 /** 商品名の下に、ユーザーごとの当落を小さく添える（複数商品） */
 export function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; itemId: string; apps: Application[] }) {
   const { data, now } = useApp();
@@ -706,6 +779,8 @@ export function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; it
     <span className="mt-0.5 flex flex-wrap gap-1.5">
       {apps.map((a) => {
         if (lottery.multiMode === "choose_one" && a.selectedItemId !== itemId) return null;
+        // 商品ごとに当落の抽選: そのプロフィールが応募した商品だけに当落を表示する
+        if (isPerItemApply(lottery) && !appliedItemsOf(lottery, a).ids.includes(itemId)) return null;
         const owner = data.profiles.find((p) => p.id === data.accounts.find((x) => x.id === a.accountId)?.profileId);
         if (!owner) return null;
         const r = a.itemResults[itemId] ?? "pending";
@@ -713,6 +788,7 @@ export function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; it
           <span key={a.id} className="inline-flex items-center gap-0.5 text-xs" data-testid="item-result-tag">
             <ProfileAvatar profile={owner} size="xs" />
             <span className={cn(r === "won" && "font-bold text-success")}>{r === "pending" && finished ? "結果未確認" : RESULT_LABEL[r]}</span>
+            {r === "won" && purchasedItem(data, a.id, itemId) && <span className="text-muted-foreground">・購入済み</span>}
           </span>
         );
       })}
@@ -724,7 +800,8 @@ export function ItemResultTags({ lottery, itemId, apps }: { lottery: Lottery; it
 function ItemResultEditor({ lottery, app, ownerLabel }: { lottery: Lottery; app: Application; ownerLabel: string }) {
   const { data, actions } = useApp();
   const locked = app.fulfillment === "purchased";
-  const items = lottery.multiMode === "choose_one" ? lottery.items.filter((i) => i.id === app.selectedItemId) : lottery.items;
+  const appliedIds = new Set(appliedItemsOf(lottery, app).ids);
+  const items = lottery.multiMode === "choose_one" ? lottery.items.filter((i) => i.id === app.selectedItemId) : isPerItemApply(lottery) ? lottery.items.filter((i) => i.id && appliedIds.has(i.id)) : lottery.items;
   const wonId = Object.entries(app.itemResults).find(([, r]) => r === "won")?.[0];
   return (
     <ul className="ml-8 space-y-1" aria-label={`${ownerLabel}の商品別の当落`}>

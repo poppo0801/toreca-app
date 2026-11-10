@@ -653,6 +653,7 @@ export type Database = {
       }
       applications: {
         Row: {
+          applied_item_ids: string[] | null
           applied_at: string | null
           applied_store_id: string | null
           applied_store_name: string
@@ -673,6 +674,7 @@ export type Database = {
           updated_by_profile_id: string | null
         }
         Insert: {
+          applied_item_ids?: string[] | null
           applied_at?: string | null
           applied_store_id?: string | null
           applied_store_name?: string
@@ -693,6 +695,7 @@ export type Database = {
           updated_by_profile_id?: string | null
         }
         Update: {
+          applied_item_ids?: string[] | null
           applied_at?: string | null
           applied_store_id?: string | null
           applied_store_name?: string
@@ -6916,6 +6919,10 @@ export type Database = {
       set_card_display_order: {
         Args: { p_cards: string[]; p_profile: string }
         Returns: number
+      }
+      set_applied_items: {
+        Args: { p_actor: string; p_application_id: string; p_item_ids: string[] }
+        Returns: undefined
       }
       set_item_results: {
         Args: { p_actor: string; p_application_id: string; p_results: Json }

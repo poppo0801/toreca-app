@@ -497,6 +497,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         result: a.result_status as ResultStatus,
         itemResults: Object.fromEntries(itemResults.filter((r) => r.application_id === a.id).map((r) => [r.lottery_item_id, r.result_status as ResultStatus])),
         selectedItemId: a.selected_item_id,
+        appliedItemIds: a.applied_item_ids ?? null,
         appliedStore: a.applied_store_id || a.applied_store_name ? { id: a.applied_store_id, name: a.applied_store_name, prefecture: a.applied_store_prefecture } : null,
         resultConfirmedAt: a.result_confirmed_at,
         fulfillment: a.fulfillment_status as FulfillmentStatus,
@@ -881,6 +882,8 @@ export interface ApplyOptions {
   appliedAt?: string | null;
   /** 応募した店舗（店舗選択式の抽選。応募記録＝プロフィールごとに保存。Stage 6N） */
   appliedStore?: AppliedStoreInput | null;
+  /** 複数商品（商品ごとに当落）の抽選で、応募する商品の明細ID（Stage 7M）。1件以上 */
+  itemIds?: string[];
 }
 
 export interface AppliedStoreInput {
@@ -940,13 +943,23 @@ async function setAppliedCore(
     if (!it) return fail("選択した商品がこの抽選にありません");
   }
   const selected = mode.multi_mode === "choose_one" ? selectedItemId : null;
+  // 商品ごとに当落の抽選: 応募した商品を記録する（指定が無ければ未指定=null のまま。全商品とは確定しない）
+  let appliedItems: string[] | null = null;
+  if (applied && opts.itemIds !== undefined) {
+    if (mode.multi_mode !== "all" && mode.multi_mode !== "one_win") return fail("この抽選は商品を選んで応募する方式ではありません");
+    const ids = [...new Set(opts.itemIds)];
+    if (ids.length === 0 || !ids.every((x) => uuid.safeParse(x).success)) return fail("応募する商品を1つ以上選択してください");
+    const { data: its } = await db.from("lottery_items").select("id").eq("lottery_id", lotteryId).in("id", ids);
+    if ((its ?? []).length !== ids.length) return fail("選択した商品がこの抽選にありません");
+    appliedItems = ids;
+  }
   const state = applied ? "applied" : "cancelled";
   const { data: existing } = await db.from("applications").select("id,state").eq("lottery_id", lotteryId).eq("service_account_id", accountId).maybeSingle();
   if (existing) {
     if (existing.state === state) return ok(undefined);
     const { error } = await db
       .from("applications")
-      .update({ state, ...(storeCols ?? {}), ...(applied && selected ? { selected_item_id: selected } : {}), ...(applied && opts.backfill ? { applied_at: backfillAppliedAt(opts) } : {}), updated_by_profile_id: actor })
+      .update({ state, ...(storeCols ?? {}), ...(applied && selected ? { selected_item_id: selected } : {}), ...(appliedItems ? { applied_item_ids: appliedItems } : {}), ...(applied && opts.backfill ? { applied_at: backfillAppliedAt(opts) } : {}), updated_by_profile_id: actor })
       .eq("id", existing.id);
     return error ? fail(mapDbError(error)) : ok(undefined);
   }
@@ -955,7 +968,7 @@ async function setAppliedCore(
   const { data: acc } = await db.from("service_accounts").select("chain_id,active").eq("id", accountId).maybeSingle();
   if (!lot || !acc || lot.chain_id !== acc.chain_id || !acc.active) return fail("この抽選に応募できるアカウントではありません");
   const { error } = await db.from("applications").insert({
-    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: opts.backfill ? backfillAppliedAt(opts) : nowIso(), state: "applied", selected_item_id: selected, updated_by_profile_id: actor, ...(storeCols ?? {}),
+    household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: opts.backfill ? backfillAppliedAt(opts) : nowIso(), state: "applied", selected_item_id: selected, ...(appliedItems ? { applied_item_ids: appliedItems } : {}), updated_by_profile_id: actor, ...(storeCols ?? {}),
   });
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
@@ -1155,6 +1168,25 @@ export async function setResult(db: Db, applicationId: string, result: ResultSta
     if (lid) await autoManageLottery(db, lid, actor).catch(() => undefined);
   }
   return r;
+}
+
+/**
+ * 応募した商品の変更（Stage 7M）。複数商品（商品ごとに当落）の抽選で、現在のプロフィール自身の応募だけが対象。
+ * 当落が登録済みの商品は外せない。全商品を外すと応募を取り消す（応募済みタブから外れる）。他のプロフィールの応募は変えない。
+ */
+export async function setAppliedItems(db: Db, applicationId: string, itemIds: string[], actor: string | null): Promise<ServiceResult> {
+  const p = z.array(z.uuid()).max(30).safeParse([...new Set(itemIds)]);
+  if (!p.success || !uuid.safeParse(applicationId).success) return fail("リクエストが不正です");
+  const denied = await applicationAccessError(db, actor, applicationId);
+  if (denied) return fail(denied);
+  const { error } = await db.rpc("set_applied_items", { p_application_id: applicationId, p_item_ids: p.data, p_actor: actor as string });
+  if (error) {
+    const msg = String(error.message ?? "");
+    if (msg.includes("item has a result")) return fail("当落が登録済みの商品は外せません");
+    if (msg.includes("already in purchase flow")) return fail("購入手続きに進んでいるため変更できません");
+    return fail(mapDbError(error));
+  }
+  return ok(undefined);
 }
 
 export async function setItemResults(db: Db, applicationId: string, results: { itemId: string; result: ResultStatus }[], actor: string | null): Promise<ServiceResult> {

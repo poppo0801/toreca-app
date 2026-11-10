@@ -308,8 +308,8 @@ export function PurchasesView() {
       {/* 開封状態が不明な購入（既存の購入記録）。勝手に開封済みとは扱わない。確認すると開封実績に加わる（収支の支出は増えない） */}
       {persistent && (classification.unknown.length > 0 || classification.boxUnregistered > 0) && (
         <details className="rounded-xl border bg-card px-3 py-2 text-sm" data-testid="unconfirmed">
-          <summary className="min-h-8 cursor-pointer font-medium">開封状態が不明な購入 {classification.unknown.length + classification.boxUnregistered}件</summary>
-          <p className="mt-1 text-[11px] text-muted-foreground">購入しただけでは、開封したとは数えません。開封・使用開始したものは「開封済みにする」で記録できます（収支の支出は増えません）。</p>
+          <summary className="min-h-8 cursor-pointer font-medium">開封状態が未確認：{classification.unknown.length + classification.boxUnregistered}件</summary>
+          <p className="mt-1 text-[11px] text-muted-foreground">購入しただけでは、開封したとは数えません。開封済みとして記録したものだけが開封累計に入ります（収支の支出は増えません）。</p>
           <ul className="mt-2 space-y-1.5">
             {classification.unknown.map((u) => (
               <li key={u.itemId} className="flex items-center gap-2 text-xs" data-testid="unconfirmed-row">
@@ -325,11 +325,22 @@ export function PurchasesView() {
                 </Button>
               </li>
             ))}
-            {classification.boxUnregistered > 0 && (
-              <li className="text-xs text-muted-foreground" data-testid="unconfirmed-box">
-                BOXコレクションに未登録の購入BOXが{classification.boxUnregistered}件あります。コレクションに取り込み、開封すると、ここに反映されます。
+            {classification.boxUnregisteredItems.map((b) => (
+              <li key={b.productId ?? b.label} data-testid="unconfirmed-box">
+                {b.productId ? (
+                  <Link href={`/collection?tab=box&open=${b.productId}`} className="flex min-h-9 items-center justify-between gap-2 text-xs" data-testid="unconfirmed-box-link">
+                    <span className="min-w-0 flex-1 truncate font-medium">{b.label}</span>
+                    <span className="shrink-0 tabular-nums">{b.quantity}BOX</span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  </Link>
+                ) : (
+                  <span className="flex min-h-9 items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 flex-1 truncate font-medium">{b.label}</span>
+                    <span className="shrink-0 tabular-nums">{b.quantity}BOX</span>
+                  </span>
+                )}
               </li>
-            )}
+            ))}
           </ul>
         </details>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { addBoxPricesAction, adjustBoxAction, openBoxesAction, reclassifyBoxAction, revertBoxOpAction, updateBoxLotAction } from "@/app/(app)/collection/box-actions";
 import { useApp } from "@/components/app-provider";
 import { CountInput } from "@/components/count-input";
@@ -9,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import {
+  actualPurchaseTotal,
   availableStates,
+  openedQtyOf,
   indexMarket,
   jstDateOf,
   type BoxMarketRow,
@@ -114,6 +117,9 @@ export function BoxDetailSheet({
   const lotIds = new Set(row.lots.map((l) => l.lot.id));
   const history = movements.filter((m) => lotIds.has(m.lotId)).slice(0, 40);
   const reverted = new Set(movements.map((m) => m.revertsOp).filter(Boolean) as string[]);
+  // 保有数（在庫）と開封済み数は別の数字（開封した分は保有数から減っている）。二重に数えない
+  const openedQty = openedQtyOf(movements, lotIds);
+  const purchase = actualPurchaseTotal(row.lots);
   const changed = () => (onChanged(), setSub(null));
 
   const undo = async (opId: string) => {
@@ -134,7 +140,8 @@ export function BoxDetailSheet({
             <div className="min-w-0 flex-1">
               <SheetTitle className="text-sm">{row.name}</SheetTitle>
               <SheetDescription id="box-detail-desc">
-                {row.qty}BOX{row.releaseDate ? ` ・ 発売 ${row.releaseDate.replaceAll("-", "/")}` : ""}
+                <span data-testid="box-hold-line">保有 {row.qty}BOX ｜ 開封済み {openedQty}BOX</span>
+                {row.releaseDate ? ` ・ 発売 ${row.releaseDate.replaceAll("-", "/")}` : ""}
               </SheetDescription>
             </div>
           </div>
@@ -145,8 +152,8 @@ export function BoxDetailSheet({
                   <tr>
                     <th className="py-1 text-left font-normal">状態</th>
                     <th className="py-1 text-right font-normal">数量</th>
-                    <th className="py-1 text-right font-normal">買取（1BOX）</th>
-                    <th className="py-1 text-right font-normal">買取（計）</th>
+                    <th className="py-1 text-right font-normal">買取単価</th>
+                    <th className="py-1 text-right font-normal">買取合計</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -168,11 +175,19 @@ export function BoxDetailSheet({
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 font-bold" data-testid="state-total">
+                    <td className="py-1.5">合計</td>
+                    <td className="py-1.5 text-right tabular-nums">{row.qty}BOX</td>
+                    <td className="py-1.5 text-right text-muted-foreground">—</td>
+                    <td className="py-1.5 text-right tabular-nums">{yen(row.buybackTotal)}</td>
+                  </tr>
+                </tfoot>
               </table>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                購入（評価額）{yen(row.purchaseTotal)}
-                {row.purchaseMissingQty > 0 && `（${row.purchaseMissingQty}BOXは価格未取得）`} ／ 買取 {yen(row.buybackTotal)}
-                {row.buybackMissingQty > 0 && `（${row.buybackMissingQty}BOXは相場未取得）`}。参考評価で、買取の保証額ではありません。
+              {row.buybackMissingQty > 0 && <p className="text-[11px] text-muted-foreground">{row.buybackMissingQty}BOXは相場が未取得のため、買取合計に含めていません。</p>}
+              <p className="mt-1.5 text-sm font-bold" data-testid="box-purchase-total">
+                購入総額：{purchase.total === null ? "未取得" : yen(purchase.total)}
+                {purchase.total !== null && purchase.missingQty > 0 && <span className="ml-1 text-[11px] font-normal text-muted-foreground">（{purchase.missingQty}BOXは購入価格が未取得）</span>}
               </p>
               {row.buybackUnconfirmedQty > 0 && <p className="text-[11px] text-warn">シュリンク状態「－」の{row.buybackUnconfirmedQty}BOXは、基準相場のまま計算しています。</p>}
             </section>
@@ -187,10 +202,10 @@ export function BoxDetailSheet({
                 相場を入力
               </Button>
               <Button size="sm" variant="outline" onClick={() => setSub("state")} data-testid="box-state-btn">
-                シュリンク状態を変更
+                シュリンク変更
               </Button>
               <Button size="sm" variant="outline" onClick={() => setSub("adjust")} data-testid="box-adjust-btn">
-                数量を調整
+                数量調整
               </Button>
             </div>
             {error && (
@@ -199,47 +214,50 @@ export function BoxDetailSheet({
               </p>
             )}
 
-            <section aria-label="購入ロット" className="space-y-1.5" data-testid="box-lots">
-              <h3 className="text-xs font-bold">購入ロット</h3>
-              <ul className="space-y-1.5">
+            <details aria-label="購入ロット" className="group rounded-lg border" data-testid="box-lots">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-3 text-xs font-bold" data-testid="box-lots-summary">
+                購入ロット（{row.lots.length}件）
+                <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <ul className="divide-y border-t">
                 {row.lots.map(({ lot, counts }) => {
-                  const v = lotUnitValue(lot);
+                  const qty = counts.shrink + counts.no_shrink + counts.unknown;
+                  const amount = lot.actualUnitPrice === null ? null : lot.actualUnitPrice * qty;
                   return (
-                    <li key={lot.id} className="rounded-md border px-2.5 py-1.5 text-xs" data-testid="box-lot">
-                      <div className="flex flex-wrap items-center gap-x-2">
-                        <span className="font-medium">{lot.acquiredOn?.replaceAll("-", "/") ?? "購入日不明"}</span>
-                        <span className="text-muted-foreground">{lot.storeLabel || "購入元不明"}</span>
-                        <span className="rounded border px-1 text-[10px] text-muted-foreground">{lot.sourceKind === "purchase" ? "購入記録と連動" : "手動登録"}</span>
-                        <button type="button" className="ml-auto text-info underline" onClick={() => setSub({ lot })} data-testid="lot-edit">
-                          編集
+                    <li key={lot.id} className="px-3 py-1.5 text-xs" data-testid="box-lot">
+                      <div className="flex items-center gap-x-2">
+                        <span className="w-12 shrink-0 font-medium">{lot.acquiredOn ? md(lot.acquiredOn) : "日付不明"}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          {BOX_STATES.filter((st) => counts[st] > 0)
+                            .map((st) => `${BOX_STATE_LABEL[st]}`)
+                            .join("・") || "—"}
+                        </span>
+                        <span className="shrink-0 tabular-nums">{qty}BOX</span>
+                        <span className="w-20 shrink-0 text-right tabular-nums">{yen(amount)}</span>
+                        <button type="button" className="shrink-0 text-info underline" onClick={() => setSub({ lot })} data-testid="lot-edit">
+                          詳細
                         </button>
                       </div>
-                      <div className="mt-0.5">
-                        {BOX_STATES.filter((s) => counts[s] > 0)
-                          .map((s) => `${BOX_STATE_LABEL[s]} ${counts[s]}BOX`)
-                          .join(" ・ ")}
-                      </div>
-                      <div className="mt-0.5 text-muted-foreground">
-                        実購入 {yen(lot.actualUnitPrice)} ／ 購入時の市場相場 {yen(lot.marketUnitPrice)}
-                        {lot.marketUnitPrice !== null && lot.marketPriceSource ? `（${lot.marketPriceSource} ${lot.marketPriceDate?.replaceAll("-", "/") ?? ""}）` : ""}
-                      </div>
-                      <div className="text-muted-foreground">評価に使う購入価格: {v.basis === "market" ? "購入時点の市場相場" : v.basis === "actual" ? "実購入価格（市場相場なし）" : "未取得"}</div>
+                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{lot.storeLabel || "購入元不明"}</div>
                     </li>
                   );
                 })}
               </ul>
-            </section>
+            </details>
 
-            <section aria-label="履歴" data-testid="box-history">
-              <h3 className="text-xs font-bold">在庫の履歴</h3>
-              <ul className="mt-1 divide-y rounded-md border text-xs">
-                {history.length === 0 && <li className="px-2.5 py-2 text-muted-foreground">履歴はありません</li>}
+            <details aria-label="在庫履歴" className="group rounded-lg border" data-testid="box-history">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-3 text-xs font-bold" data-testid="box-history-summary">
+                在庫履歴（{history.length}件）
+                <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <ul className="divide-y border-t text-xs">
+                {history.length === 0 && <li className="px-3 py-2 text-muted-foreground">履歴はありません</li>}
                 {history.map((m) => (
-                  <li key={m.id} className="flex items-center gap-2 px-2.5 py-1.5">
-                    <span className="w-12 shrink-0 text-muted-foreground">{md(m.occurredAt.slice(0, 10))}</span>
+                  <li key={m.id} className="flex items-center gap-2 px-3 py-1.5">
+                    <span className="w-11 shrink-0 text-muted-foreground">{md(m.occurredAt.slice(0, 10))}</span>
                     <span className="w-9 shrink-0">{m.revertsOp ? "取消" : KIND[m.kind]}</span>
-                    <span className="min-w-0 flex-1 truncate">{BOX_STATE_LABEL[m.state]}</span>
-                    <span className="shrink-0 tabular-nums">{m.qty > 0 ? `+${m.qty}` : m.qty}</span>
+                    <span className="shrink-0 tabular-nums">{m.qty > 0 ? `＋${m.qty}` : `－${-m.qty}`}BOX</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{BOX_STATE_LABEL[m.state]}</span>
                     {(m.kind === "open" || m.kind === "adjust") && m.opId && !m.revertsOp && !reverted.has(m.opId) ? (
                       <button type="button" className="shrink-0 text-info underline" onClick={() => void undo(m.opId as string)} data-testid="undo-op">
                         取り消し
@@ -250,7 +268,7 @@ export function BoxDetailSheet({
                   </li>
                 ))}
               </ul>
-            </section>
+            </details>
           </SheetBody>
         </SheetContent>
       </Sheet>

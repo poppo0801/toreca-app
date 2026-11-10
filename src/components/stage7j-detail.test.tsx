@@ -152,7 +152,7 @@ describe("Stage 7J: 抽選詳細のレイアウト", () => {
   });
 
   it("登録経路・情報源URLは下部の管理情報にあり、注意情報は管理情報に隠さず上部に出す", () => {
-    patch("L1", { sourceUrls: ["https://example.invalid/a"], cautions: [{ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: NOW.toISOString() }] } as Partial<Lottery>);
+    patch("L1", { sourceUrls: ["https://example.invalid/a"], resultDate: { precision: "unknown" }, cautions: [{ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: NOW.toISOString() }] } as Partial<Lottery>);
     open("L1");
     const admin = q("admin-info")!;
     expect(admin.tagName).toBe("DETAILS");

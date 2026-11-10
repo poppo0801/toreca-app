@@ -44,6 +44,8 @@ interface AppContextValue {
     setManaged: (lotteryId: string, v: boolean) => Promise<Outcome>;
     setApplied: (lotteryId: string, accountId: string, v: boolean, selectedItemId?: string | null, opts?: ApplyOptions) => Promise<Outcome>;
     setItemResults: (applicationId: string, results: { itemId: string; result: ResultStatus }[]) => Promise<Outcome>;
+    /** 複数商品抽選の応募商品の変更（Stage 7M） */
+    setAppliedItems: (applicationId: string, itemIds: string[]) => Promise<Outcome>;
     saveExpense: (id: string | null, input: ExpenseInput) => Promise<Outcome>;
     deleteExpense: (id: string) => Promise<Outcome>;
     saveSale: (id: string | null, input: SaleInput) => Promise<Outcome>;
@@ -314,6 +316,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         setManaged: (id, v) => run((a) => repo.setManaged(a, id, v)),
         setApplied: (id, acc, v, sel, opts) => run((a) => repo.setApplied(a, id, acc, v, sel, opts)),
         setItemResults: (id, r) => run((a) => repo.setItemResults(a, id, r)),
+        setAppliedItems: (id, items) => run((a) => repo.setAppliedItems(a, id, items)),
         saveExpense: (id, input) => run((a) => repo.saveExpense(a, id, input)),
         deleteExpense: (id) => run((a) => repo.deleteExpense(a, id)),
         saveSale: (id, input) => run((a) => repo.saveSale(a, id, input)),

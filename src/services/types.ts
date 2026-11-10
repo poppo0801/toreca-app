@@ -18,6 +18,7 @@ export interface LotteryRepository {
   setManaged(actorId: string, lotteryId: string, isManaged: boolean): Promise<Outcome>;
   setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean, selectedItemId?: string | null, opts?: ApplyOptions): Promise<Outcome>;
   setItemResults(actorId: string, applicationId: string, results: { itemId: string; result: ResultStatus }[]): Promise<Outcome>;
+  setAppliedItems(actorId: string, applicationId: string, itemIds: string[]): Promise<Outcome>;
   saveExpense(actorId: string, id: string | null, input: ExpenseInput): Promise<Outcome>;
   deleteExpense(actorId: string, id: string): Promise<Outcome>;
   saveSale(actorId: string, id: string | null, input: SaleInput): Promise<Outcome>;

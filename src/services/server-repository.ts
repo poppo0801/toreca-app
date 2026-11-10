@@ -13,6 +13,7 @@ import {
   setManagedAction,
   setResultAction,
   setItemResultsAction,
+  setAppliedItemsAction,
   saveExpenseAction,
   deleteExpenseAction,
   saveSaleAction,
@@ -35,6 +36,7 @@ export class ServerActionRepository implements LotteryRepository {
   setManaged = (actor: string, id: string, v: boolean) => setManagedAction(id, v, actor);
   setApplied = (actor: string, id: string, acc: string, v: boolean, selected: string | null = null, opts: ApplyOptions = {}) => setAppliedAction(id, acc, v, actor, selected, opts);
   setItemResults = (actor: string, appId: string, results: Parameters<typeof setItemResultsAction>[1]) => setItemResultsAction(appId, results, actor);
+  setAppliedItems = (actor: string, appId: string, itemIds: string[]) => setAppliedItemsAction(appId, itemIds, actor);
   saveExpense = (actor: string, id: string | null, input: Parameters<typeof saveExpenseAction>[1]) => saveExpenseAction(id, input, actor);
   deleteExpense = (actor: string, id: string) => deleteExpenseAction(id, actor);
   saveSale = (actor: string, id: string | null, input: Parameters<typeof saveSaleAction>[1]) => saveSaleAction(id, input, actor);

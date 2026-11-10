@@ -15,6 +15,7 @@ import { DEADLINE_TONE_CLASS } from "@/lib/lottery-labels";
 import { applyControlFor, markLabel, profileMarks } from "@/lib/lottery-summary";
 import { formatItem } from "@/lib/lottery-view";
 import { useBusy } from "@/lib/use-busy";
+import { ItemPickerDialog } from "@/components/item-picker-dialog";
 import { cn } from "@/lib/utils";
 import type { FlexibleDate, Lottery } from "@/types/domain";
 
@@ -95,8 +96,10 @@ export function ApplyStatusRow({ lottery, className }: { lottery: Lottery; class
 export function MyApplyButton({ lottery, compact = false, className }: { lottery: Lottery; /** シンプル表示用: 文字なしの丸いボタン（✓=応募済み／－=未応募） */ compact?: boolean; className?: string }) {
   const { data, now, profile, actions } = useApp();
   const [choosing, setChoosing] = useState(false);
+  /** 複数商品（商品ごとに当落）の抽選: 応募した商品の選択中（店舗選択式では、選んだ商品を保持して店舗へ進む） */
+  const [pickingItems, setPickingItems] = useState(false);
   /** 応募時に店舗を選ぶ抽選: 店舗の選択中（商品を選ぶ抽選では、選んだ商品を保持） */
-  const [storing, setStoring] = useState<{ itemId?: string } | null>(null);
+  const [storing, setStoring] = useState<{ itemId?: string; itemIds?: string[] } | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [busy, runBusy] = useBusy();
   const [error, setError] = useState<string | null>(null);
@@ -104,13 +107,13 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
   const control = applyControlFor(data, lottery, profile.id, now);
   if (control.kind === "none") return null;
 
-  const run = (applied: boolean, itemId?: string, store?: StoreChoice | null) =>
+  const run = (applied: boolean, itemId?: string, store?: StoreChoice | null, itemIds?: string[]) =>
     runBusy(async () => {
       setError(null);
       const handle = applied ? exit?.begin(lottery.id) : undefined;
       let res: Awaited<ReturnType<typeof actions.setApplied>>;
       try {
-        res = await actions.setApplied(lottery.id, control.accountId, applied, itemId, store === undefined ? undefined : { appliedStore: store });
+        res = await actions.setApplied(lottery.id, control.accountId, applied, itemId, store === undefined && !itemIds ? undefined : { ...(store === undefined ? {} : { appliedStore: store }), ...(itemIds ? { itemIds } : {}) });
       } catch (e) {
         handle?.fail(); // 通信エラーなどでカードを残したままにしない
         throw e;
@@ -143,6 +146,7 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         onClick={() => {
           if (applied) setConfirmUndo(true);
           else if (control.kind === "apply" && control.needsChoice) setChoosing(true);
+          else if (control.kind === "apply" && control.needsItems) setPickingItems(true);
           else if (control.kind === "apply" && control.needsStore) setStoring({});
           else void run(true);
         }}
@@ -160,6 +164,17 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         <span role="alert" className="sr-only">
           {error}
         </span>
+      )}
+      {pickingItems && (
+        <ItemPickerDialog
+          lottery={lottery}
+          onClose={() => setPickingItems(false)}
+          onSubmit={async (ids) => {
+            setPickingItems(false);
+            if (control.kind === "apply" && control.needsStore) setStoring({ itemIds: ids });
+            else await run(true, undefined, undefined, ids);
+          }}
+        />
       )}
       <Dialog open={choosing} onOpenChange={setChoosing}>
         <DialogContent>
@@ -191,9 +206,9 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
           confirmLabel="応募済みにする"
           onClose={() => setStoring(null)}
           onSubmit={async (store) => {
-            const itemId = storing.itemId;
+            const { itemId, itemIds } = storing;
             setStoring(null);
-            await run(true, itemId, store);
+            await run(true, itemId, store, itemIds);
           }}
         />
       )}

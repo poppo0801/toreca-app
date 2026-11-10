@@ -314,3 +314,31 @@ export function filterBoxes(rows: BoxSummaryRow[], f: BoxFilters): BoxSummaryRow
 export function availableStates(counts: StateCounts): ShrinkState[] {
   return BOX_STATES.filter((s) => counts[s] > 0);
 }
+
+/** 開封済みのBOX数（開封の記録から。取り消された開封は含めない）。lotIds で対象のロットに絞る */
+export function openedQtyOf(movements: BoxMovementRow[], lotIds: ReadonlySet<string>): number {
+  const reverted = new Set(movements.filter((m) => m.revertsOp).map((m) => `${m.revertsOp}|${m.lotId}`));
+  let n = 0;
+  for (const m of movements) {
+    if (!lotIds.has(m.lotId) || m.kind !== "open" || m.qty >= 0 || m.revertsOp) continue;
+    if (m.opId && reverted.has(`${m.opId}|${m.lotId}`)) continue;
+    n += -m.qty;
+  }
+  return n;
+}
+
+/**
+ * 購入総額: 保有しているBOXの実際の購入価格（ロットの実購入単価×数量）の合計。購入時点の市場相場（評価額）は使わない。
+ * 実購入価格が不明なロットは含めず、その数量を missingQty で返す（推定値を実績として扱わない）。1つも分からなければ total は null。
+ */
+export function actualPurchaseTotal(lots: { lot: Pick<BoxLotRow, "actualUnitPrice">; counts: StateCounts }[]): { total: number | null; missingQty: number } {
+  let total: number | null = null;
+  let missingQty = 0;
+  for (const { lot, counts } of lots) {
+    const qty = counts.shrink + counts.no_shrink + counts.unknown;
+    if (qty <= 0) continue;
+    if (lot.actualUnitPrice === null) missingQty += qty;
+    else total = (total ?? 0) + lot.actualUnitPrice * qty;
+  }
+  return { total, missingQty };
+}

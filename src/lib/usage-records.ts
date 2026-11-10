@@ -299,6 +299,8 @@ export interface PurchaseClassification {
   unknown: UnconfirmedPurchase[];
   /** BOXコレクションに未登録のため、開封状態が不明な購入BOX（明細の数） */
   boxUnregistered: number;
+  /** 上記の内訳（商品名・BOX数・BOXコレクションの詳細への手がかり）。商品ごとにまとめる */
+  boxUnregisteredItems: { productId: string | null; label: string; quantity: number }[];
 }
 
 /**
@@ -306,7 +308,7 @@ export interface PurchaseClassification {
  * 不明なものは勝手に開封済みと推定せず、後から確認して登録できる（opening_records の購入明細への関連で二重計上しない）。
  */
 export function classifyPurchases(data: AppData): PurchaseClassification {
-  const r: PurchaseClassification = { opened: 0, unopened: 0, unknown: [], boxUnregistered: 0 };
+  const r: PurchaseClassification = { opened: 0, unopened: 0, unknown: [], boxUnregistered: 0, boxUnregisteredItems: [] };
   const lotItems = new Set(data.boxLotItemIds ?? []);
   const openedByItem = new Map<string, number>();
   for (const o of data.boxOpenings ?? []) if (o.purchaseItemId) openedByItem.set(o.purchaseItemId, (openedByItem.get(o.purchaseItemId) ?? 0) + o.quantity);
@@ -321,7 +323,13 @@ export function classifyPurchases(data: AppData): PurchaseClassification {
           const opened = Math.min(i.quantity, openedByItem.get(i.id) ?? 0);
           r.opened += opened;
           r.unopened += i.quantity - opened;
-        } else r.boxUnregistered++;
+        } else {
+          r.boxUnregistered++;
+          const key = i.productId ?? `label:${i.productLabel ?? ""}`;
+          const cur = r.boxUnregisteredItems.find((x) => (x.productId ?? `label:${x.label}`) === key);
+          if (cur) cur.quantity += i.quantity;
+          else r.boxUnregisteredItems.push({ productId: i.productId, label: productFullName(data, i.productId, i.productLabel), quantity: i.quantity });
+        }
         continue;
       }
       if (i.unit !== "pack" && i.unit !== "set" && i.unit !== "piece") continue;

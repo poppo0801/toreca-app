@@ -20,6 +20,7 @@ import {
   setManaged,
   setResult,
   setItemResults,
+  setAppliedItems,
   updateProfileSettings,
   reorderProfiles,
   type ProfileSettingsInput,
@@ -128,6 +129,10 @@ export async function setAppliedStoreAction(applicationId: string, store: { id: 
 
 export async function revertFulfillmentAction(applicationId: string, to: "none" | "procedure_done", actor: string | null): Promise<MutationResult> {
   return mutate((c) => revertFulfillment(c.db, applicationId, to, actor));
+}
+
+export async function setAppliedItemsAction(applicationId: string, itemIds: string[], actor: string | null): Promise<MutationResult> {
+  return mutate((c) => setAppliedItems(c.db, applicationId, itemIds, actor));
 }
 
 export async function setItemResultsAction(

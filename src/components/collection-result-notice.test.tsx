@@ -58,13 +58,14 @@ describe("起動時の収集結果ポップアップ", () => {
     await flush();
     expect(q("run-notice")).not.toBeNull();
     expect(q("run-notice")!.textContent).toContain("11/5 6:00の定期収集");
-    expect(q("run-発見")!.textContent).toBe("4件");
-    expect(q("run-自動登録")!.textContent).toBe("1件");
-    expect(q("run-確認待ち")!.textContent).toBe("2件");
-    expect(q("run-取得失敗")!.textContent).toBe("1件");
+    // 簡潔な3項目（新しい抽選候補・自動登録・重複／除外）。「要手動確認」の警告は出さない
+    expect(q("brief-新しい抽選候補")!.textContent).toBe("2件");
+    expect(q("brief-自動登録")!.textContent).toBe("1件");
+    expect(q("brief-重複・除外")!.textContent).toBe("0件");
+    expect(q("run-notice")!.textContent).not.toContain("要手動確認");
     expect(q("run-processing")).toBeNull();
-    // ボタンは「確認する」「閉じる」の2つだけ（詳細・登録された抽選・確認待ちへ などは出さない）
-    expect([...q("run-notice")!.querySelectorAll("button, a")].map((e) => e.textContent?.trim()).filter((t) => t !== "Close" && t !== "")).toEqual(["閉じる", "確認する"]);
+    // ボタンは「抽選候補を確認」「閉じる」の2つだけ
+    expect([...q("run-notice")!.querySelectorAll("button, a")].map((e) => e.textContent?.trim()).filter((t) => t !== "Close" && t !== "")).toEqual(["閉じる", "抽選候補を確認"]);
     expect(q("run-notice-review")).toBeNull();
     expect(q("run-notice-lotteries")).toBeNull();
     expect(q("run-notice-detail")).toBeNull();
@@ -75,7 +76,7 @@ describe("起動時の収集結果ポップアップ", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("確認する: ポップアップをすぐ閉じ、要手動確認の一覧へ直接移動する（サーバー処理を待たない）", async () => {
+  it("抽選候補を確認: ポップアップをすぐ閉じ、抽選候補ページへ直接移動する（サーバー処理を待たない）", async () => {
     notice = sum([{ job_state: "review" }]);
     ackIds = [notice.runId];
     await act(async () => root.render(createElement(CollectionResultNotice)));
@@ -83,7 +84,7 @@ describe("起動時の収集結果ポップアップ", () => {
     ack.mockClear();
     await act(async () => q("run-notice-confirm")!.click());
     expect(q("run-notice")).toBeNull();
-    expect(push).toHaveBeenCalledWith("/settings/collection#manual");
+    expect(push).toHaveBeenCalledWith("/lotteries/candidates");
     expect(ack).not.toHaveBeenCalled(); // 遷移の後に追加のサーバー処理を走らせない
   });
 

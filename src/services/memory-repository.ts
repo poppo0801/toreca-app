@@ -27,7 +27,7 @@ export class InMemoryRepository implements LotteryRepository {
   async setManaged(actorId: string, lotteryId: string, isManaged: boolean) {
     return this.apply((d) => m.setManaged(d, actorId, lotteryId, isManaged, new Date()));
   }
-  async setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean, _selected?: string | null, opts?: { backfill?: boolean; appliedAt?: string | null }) {
+  async setApplied(actorId: string, lotteryId: string, accountId: string, applied: boolean, _selected?: string | null, opts?: { backfill?: boolean; appliedAt?: string | null; itemIds?: string[] }) {
     // 応募状態を変えられるのは、操作中のプロフィール自身のアカウントだけ（他のプロフィールは閲覧のみ）
     const acc = this.data?.accounts.find((a) => a.id === accountId);
     if (acc && acc.profileId !== actorId) return { ok: false as const, error: "他のユーザーの応募状況は変更できません" };
@@ -50,6 +50,9 @@ export class InMemoryRepository implements LotteryRepository {
   }
   async setEventState(actorId: string, lotteryId: string, state: Parameters<typeof m.setEventState>[3]) {
     return this.apply((d) => m.setEventState(d, actorId, lotteryId, state, new Date()));
+  }
+  async setAppliedItems(actorId: string, applicationId: string, itemIds: string[]) {
+    return this.apply((d) => m.setAppliedItems(d, actorId, applicationId, itemIds, new Date()));
   }
   async setItemResults() {
     return UNSUPPORTED;

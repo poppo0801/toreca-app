@@ -24,6 +24,8 @@ import { extraKindsLabel, resultNotice, summarizeItems } from "@/lib/lottery-sum
 import { formatItem, isManaged, type Tab } from "@/lib/lottery-view";
 import { ChainLogo } from "@/components/chain-logo";
 import { CautionMark } from "@/components/caution-mark";
+import { liveCautions } from "@/lib/live-cautions";
+import { itemsForTab } from "@/lib/item-apply";
 import { selectStoreDisplay } from "@/lib/applied-store";
 import { EligibilityMark } from "@/components/eligibility-mark";
 import { ResultButtons, ResultCountdownBadge } from "@/components/result-actions";
@@ -171,7 +173,8 @@ export function LotteryCard({
   const skipSource = skipSourceFor(data, profile.id, lottery);
   const skipException = hasSkipException(data, profile.id, lottery);
 
-  const sum = summarizeItems(lottery, data);
+  // 商品ごとに当落の抽選: 応募済みタブは応募した商品だけ、当選タブは当選した商品だけを表示する（Stage 7M）
+  const sum = summarizeItems({ ...lottery, items: itemsForTab(data, lottery, tab, viewScope) }, data);
   const firstProduct = data.products.find((p) => p.id === sum.firstProductId);
   // 店舗選択式の抽選は、応募前は「店舗選択式」、応募後は現在のプロフィールが応募した店舗を出す（カードは1枚のまま）
   const selectStore = selectStoreDisplay(data, lottery, profile.id, viewScope);
@@ -317,7 +320,7 @@ export function LotteryCard({
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <ChainLogo src={chain?.logoSrc} name={chain?.name ?? ""} className="size-4 my-0 rounded-[4px]" />
                 <span className="min-w-0 truncate">{storeLine}</span>
-                <CautionMark cautions={lottery.cautions} />
+                <CautionMark cautions={liveCautions(lottery, store)} />
                 {display.prefecture && place && <span className="ml-0.5 shrink-0 rounded-full border px-1.5 py-px text-[10px]">{place}</span>}
               </span>
               <ProductLine name={sum.name} extra={sum.extraKinds} />
@@ -376,7 +379,7 @@ export function LotteryCard({
                 {display.prefecture && place && <span data-testid="place-chip" className="shrink-0 whitespace-nowrap rounded-full border bg-input px-1.5 py-px text-[10px] leading-none text-foreground">{place}</span>}
                 {display.prefecture && placeI.canShip && <span data-testid="ship-chip" className="shrink-0 whitespace-nowrap rounded-full border border-info px-1.5 py-px text-[10px] leading-none text-info">発送可</span>}
                 {showFare && <span className="shrink-0 text-[11px]">¥{store!.roundTripFare!.toLocaleString("ja-JP")}</span>}
-                <CautionMark cautions={lottery.cautions} />
+                <CautionMark cautions={liveCautions(lottery, store)} />
               </div>
               <ProductLine name={sum.name} quantity={display.quantity ? sum.quantity : undefined} extra={sum.extraKinds} className="text-sm" />
               {dateB ? (

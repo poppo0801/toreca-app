@@ -15,6 +15,8 @@ export interface RunNotices {
   manual: ManualItem[];
   /** Xブックマークの投稿ごとの処理状況（新規は起動時に個別表示、未解決は解決するまで残す） */
   bookmarks: BookmarkPanel;
+  /** 起動時に表示する収集で見つかった新しい抽選候補（最大3件。ポップアップに簡潔に出す） */
+  newCandidates?: { id: string; title: string }[];
 }
 
 export const EMPTY_BOOKMARKS: BookmarkPanel = { fresh: [], unresolved: [], shownIds: [], syncIssue: null };
@@ -40,7 +42,12 @@ export async function loadRunNotices(db: Db, userId: string | null, limit = 8): 
   const summaries = runs.map((r) => summarizeRun(r, (byRun.get(r.id) ?? []) as never));
   const acked = new Set((acks.data ?? []).map((a) => a.run_id));
   const p = pickNotice(summaries, acked);
-  return { summaries, notice: p.show, ackIds: p.ackIds, manual, bookmarks };
+  let newCandidates: { id: string; title: string }[] = [];
+  if (p.show) {
+    const { data: nc } = await db.from("collection_candidates").select("id,title").eq("discovered_run_id", p.show.runId).eq("job_state", "review").neq("status", "auto_registered").order("created_at", { ascending: false }).limit(3);
+    newCandidates = ((nc ?? []) as { id: string; title: string | null }[]).map((c) => ({ id: c.id, title: (c.title ?? "").slice(0, 60) || "（題名なし）" }));
+  }
+  return { summaries, notice: p.show, ackIds: p.ackIds, manual, bookmarks, newCandidates };
 }
 
 export async function ackRuns(db: Db, householdId: string, userId: string, runIds: string[]): Promise<void> {

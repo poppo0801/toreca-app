@@ -68,6 +68,7 @@ test("注意付きの自動登録: 一覧の注意アイコンと詳細の確認
     await card("7A注意店").getByRole("button", { name: /の詳細を開く/ }).first().click();
     const sheet = page.getByTestId("lottery-detail-sheet");
     await expect(sheet.getByTestId("caution-section")).toBeVisible();
+    await sheet.getByTestId("caution-summary").click(); // 確認が必要な点は初期は閉じている
     await expect(sheet.getByTestId("caution-result_date_unknown")).toHaveText("当選発表日が確認できていません");
     await expect(sheet.getByTestId("caution-deadline_conflict")).toContainText("11/10と11/12");
     await page.keyboard.press("Escape");

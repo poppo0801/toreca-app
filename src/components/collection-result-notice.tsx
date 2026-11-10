@@ -36,6 +36,40 @@ export function RunCounts({ s, compact = false }: { s: RunSummary; compact?: boo
   );
 }
 
+/** 起動時ポップアップの収集結果（Stage 7M）。新しい抽選候補・自動登録・重複／除外の3つだけを簡潔に。通常の結果に警告色は使わない */
+export function RunBrief({ s, fresh }: { s: RunSummary; fresh: { id: string; title: string }[] }) {
+  const rows: [string, number, boolean][] = [
+    ["新しい抽選候補", s.review, s.review > 0],
+    ["自動登録", s.autoRegistered, false],
+    ["重複・除外", s.duplicates + s.excluded, false],
+  ];
+  return (
+    <div className="space-y-2" data-testid="run-brief">
+      <dl className="space-y-1 text-sm">
+        {rows.map(([label, n, strong]) => (
+          <div key={label} className="flex items-baseline justify-between gap-2">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className={cn("tabular-nums", strong && "font-semibold")} data-testid={`brief-${label}`}>
+              {n}件
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {fresh.length > 0 && (
+        <ul className="space-y-0.5 border-t pt-1.5 text-xs" data-testid="brief-fresh">
+          {fresh.map((c) => (
+            <li key={c.id} className="truncate">
+              ・{c.title}
+            </li>
+          ))}
+          {s.review > fresh.length && <li className="text-muted-foreground">ほか {s.review - fresh.length}件</li>}
+        </ul>
+      )}
+      {s.failed > 0 && <p className="text-[11px] text-muted-foreground">取得できなかった情報 {s.failed}件（自動で再取得します）</p>}
+    </div>
+  );
+}
+
 export function RunStateLabel({ s }: { s: RunSummary }) {
   if (s.legacy) return <span className="text-[11px] text-muted-foreground">旧形式（内訳なし）</span>;
   if (s.state === "processing") return <span className="rounded bg-info/15 px-1.5 text-[11px] font-medium text-info" data-testid="run-processing">処理中</span>;
@@ -54,6 +88,7 @@ export function CollectionResultNotice() {
   const router = useRouter();
   const { profile } = useApp();
   const [notice, setNotice] = useState<RunSummary | null>(null);
+  const [fresh, setFresh] = useState<{ id: string; title: string }[]>([]);
   /** Xブックマーク（最上部の専用エリア）。新規は個別にすべて表示し、未解決は解決するまで残る */
   const [bm, setBm] = useState<{ fresh: BookmarkView[]; unresolved: BookmarkView[]; syncIssue: string | null } | null>(null);
 
@@ -78,6 +113,7 @@ export function CollectionResultNotice() {
       if (b && b.shownIds.length > 0) void ackBookmarksShownAction(b.shownIds);
       if (b) setBm({ fresh, unresolved: b.unresolved, syncIssue: b.syncIssue });
       setNotice(r.notice);
+      setFresh(r.newCandidates ?? []);
     });
     return () => {
       live = false;
@@ -88,10 +124,10 @@ export function CollectionResultNotice() {
     setNotice(null);
     setBm(null);
   };
-  /** 確認する: ポップアップをすぐ閉じて、要手動確認の一覧へ移る（移動先の読み込みは移動後に表示する） */
+  /** 抽選候補を確認: ポップアップをすぐ閉じて、抽選候補ページへ移る */
   const confirm = () => {
     close();
-    router.push("/settings/collection#manual");
+    router.push("/lotteries/candidates");
   };
   if (!notice && !bm) return null;
   const s = notice;
@@ -105,18 +141,13 @@ export function CollectionResultNotice() {
           {s && <RunStateLabel s={s} />}
         </DialogTitle>
         <DialogDescription className="sr-only">自動収集の結果の要約</DialogDescription>
-        {s && <RunCounts s={s} />}
-        {s && (s.excluded > 0 || s.duplicates > 0 || s.costJpy > 0) && (
-          <p className="text-[11px] text-muted-foreground">
-            対象外 {s.excluded}件・重複 {s.duplicates}件・AI費用 約{s.costJpy}円
-          </p>
-        )}
+        {s && <RunBrief s={s} fresh={fresh} />}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={close} className="min-h-10 rounded-md px-4 text-sm text-muted-foreground hover:bg-muted" data-testid="run-notice-close">
             閉じる
           </button>
           <button type="button" onClick={confirm} className="min-h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" data-testid="run-notice-confirm">
-            確認する
+            抽選候補を確認
           </button>
         </div>
       </DialogContent>

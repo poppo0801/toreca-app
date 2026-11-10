@@ -76,7 +76,7 @@ function setAppliedCore(
   accountId: string,
   applied: boolean,
   at: Date,
-  opts: { backfill?: boolean; appliedAt?: string | null } = {},
+  opts: { backfill?: boolean; appliedAt?: string | null; itemIds?: string[] } = {},
 ): AppData {
   const existing = data.applications.find(
     (a) => a.lotteryId === lotteryId && a.accountId === accountId,
@@ -86,7 +86,7 @@ function setAppliedCore(
   if (!existing && !applied) return data;
   const nowIso = at.toISOString();
   const applications = existing
-    ? data.applications.map((a) => (a.id === existing.id ? { ...a, state } : a))
+    ? data.applications.map((a) => (a.id === existing.id ? { ...a, state, ...(applied && opts.itemIds ? { appliedItemIds: opts.itemIds } : {}) } : a))
     : [
         ...data.applications,
         {
@@ -99,6 +99,7 @@ function setAppliedCore(
           result: "pending" as const,
           itemResults: {},
           selectedItemId: null,
+          appliedItemIds: opts.itemIds ?? null,
           resultConfirmedAt: null,
           fulfillment: "none" as const,
           createdAt: nowIso,
@@ -148,7 +149,19 @@ function setResultCore(
 }
 
 
-export function setApplied(data: AppData, actorProfileId: string, lotteryId: string, accountId: string, applied: boolean, at: Date, opts: { backfill?: boolean; appliedAt?: string | null } = {}): AppData {
+/** 応募した商品の変更（モック用）。全商品を外すと応募を取り消す */
+export function setAppliedItems(data: AppData, actorProfileId: string, applicationId: string, itemIds: string[], at: Date): AppData {
+  const app = data.applications.find((a) => a.id === applicationId);
+  if (!app || app.state !== "applied") return data;
+  const state: Application["state"] = itemIds.length === 0 ? "cancelled" : "applied";
+  return {
+    ...data,
+    applications: data.applications.map((a) => (a.id === applicationId ? { ...a, state, appliedItemIds: itemIds } : a)),
+    audit: withAudit(data, { actorProfileId, at: at.toISOString(), entityType: "application", entityId: applicationId, action: itemIds.length === 0 ? "cancel_apply" : "set_applied_items", before: { items: app.appliedItemIds ?? null }, after: { items: itemIds } }),
+  };
+}
+
+export function setApplied(data: AppData, actorProfileId: string, lotteryId: string, accountId: string, applied: boolean, at: Date, opts: { backfill?: boolean; appliedAt?: string | null; itemIds?: string[] } = {}): AppData {
   const out = setAppliedCore(data, actorProfileId, lotteryId, accountId, applied, at, opts);
   return applied && out !== data ? ensureManaged(out, actorProfileId, lotteryId, at) : out;
 }

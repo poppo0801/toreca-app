@@ -322,6 +322,11 @@ export interface Application {
   itemResults: Record<string, ResultStatus>;
   /** choose_one で応募時に選んだ明細ID */
   selectedItemId: string | null;
+  /**
+   * 複数商品（商品ごとに当落）の抽選で、応募した商品の明細ID（Stage 7M）。プロフィール（応募アカウント）ごとに独立。
+   * null/未設定 = 単一商品の抽選、または従来の記録で応募商品が未確認（勝手に全商品応募と確定せず、全商品を表示して確認を促す）
+   */
+  appliedItemIds?: string[] | null;
   /** 応募した店舗（店舗選択式の抽選・Stage 6N）。プロフィール（応募アカウント）ごとに独立。未設定は null */
   appliedStore?: { id: string | null; name: string; prefecture: string } | null;
   resultConfirmedAt: string | null;
