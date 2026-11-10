@@ -23,7 +23,7 @@ import { useViewScope } from "@/components/user-scope";
 import { canOperateOwner, ownerIdOf, scopedApplications } from "@/lib/profile-link";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
-import { APPLY_LABEL, LIMIT_BASIS_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
+import { APPLY_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
 import { AppliedStoreDialog } from "@/components/applied-store-dialog";
@@ -33,6 +33,7 @@ import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
 import { RegistrationOrigin } from "@/components/registration-origin";
 import { EligibilitySection } from "@/components/eligibility-mark";
+import { acknowledgeCautionsAction } from "@/app/(app)/lotteries/actions";
 import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 import { liveCautions } from "@/lib/live-cautions";
@@ -51,23 +52,80 @@ function Chip({ children, className, title, ...rest }: { children: React.ReactNo
 const RECEPTION_TONE: Record<ReceptionLabel, string> = { 受付前: "text-info", 受付中: "text-success", 受付終了: "text-muted-foreground", 中止: "text-muted-foreground", 延期: "text-muted-foreground" };
 
 /** 項目名と値の1組。値が空なら「—」 */
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+function Field({ label, children, className, valueClassName }: { label: string; children: React.ReactNode; className?: string; valueClassName?: string }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 break-words text-sm">{children}</dd>
+      <dt className="text-[10px] leading-4 text-muted-foreground/70">{label}</dt>
+      <dd className={cn("mt-0.5 break-words text-sm", valueClassName)}>{children}</dd>
     </div>
   );
 }
 
 const DASH = <span className="text-muted-foreground">—</span>;
 
+/** 2列の左右の位置: 左は右側に、右は左側に同じ余白を取り、中央に薄い縦線を引く（上部の日付と下部の情報で共通） */
+const SIDE_CLS = { l: "border-r border-border/70 pr-3", r: "pl-3" } as const;
+/** 日時の途中で改行しない（改行は「〜」の位置だけ） */
+const nb = (s: string) => <span className="whitespace-nowrap">{s}</span>;
+
 /** 日付・期間の1項目（外枠なし。区切り線は一覧側で付ける）。項目名と日時を区別して表示する */
-function DateCell({ label, children, span2, divider, testId }: { label: string; children: React.ReactNode; span2?: boolean; divider?: boolean; testId?: string }) {
+function DateCell({ label, children, span2, divider, side, testId }: { label: string; children: React.ReactNode; span2?: boolean; divider?: boolean; side?: "l" | "r"; testId?: string }) {
   return (
-    <div className={cn("min-w-0 py-2", span2 && "col-span-2", divider && "border-b border-border/70")} data-testid={testId ?? "date-card"} data-label={label}>
-      <dt className="text-[11px] leading-4 text-muted-foreground">{label}</dt>
+    <div className={cn("min-w-0 py-2", span2 && "col-span-2", divider && "border-b border-border/70", side && SIDE_CLS[side])} data-testid={testId ?? "date-card"} data-label={label}>
+      <dt className="text-[10px] leading-4 text-muted-foreground/70">{label}</dt>
       <dd className="mt-0.5 break-words text-[13px] font-medium leading-snug">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * 長文の項目（本人確認・書類など）。短い文章はそのまま、長い文章は3行で省略して「詳細を見る」で全文を展開する。
+ * 省略は表示だけで、全文は常にDOMに保持する（情報の欠落なし）。
+ */
+const LONG_TEXT = 80;
+function LongText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > LONG_TEXT || text.split("\n").length > 3;
+  if (!long) return <span className="whitespace-pre-wrap break-words">{text}</span>;
+  return (
+    <span data-testid="long-text">
+      <span className={cn("block whitespace-pre-wrap break-words", !open && "line-clamp-3")} data-testid="long-text-body">{text}</span>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="mt-0.5 min-h-7 text-xs text-info underline" data-testid="long-text-toggle">
+        {open ? "閉じる" : "詳細を見る"}
+      </button>
+    </span>
+  );
+}
+
+/** 要確認ブロックの「確認済みにする」。表示中の注意をまとめて解除する（DBに保存。同じ内容では再表示しない） */
+function AckButton({ lotteryId, codes }: { lotteryId: string; codes: string[] }) {
+  const { reload } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 px-3 text-xs"
+        disabled={busy}
+        data-testid="caution-ack"
+        onClick={async () => {
+          setBusy(true);
+          const r = await acknowledgeCautionsAction(lotteryId, codes);
+          setBusy(false);
+          if (!r.ok) return setError(r.error);
+          setError(null);
+          await reload();
+        }}
+      >
+        確認済みにする
+      </Button>
+      {error && (
+        <span role="alert" className="text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -319,24 +377,25 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                     <li key={c.code} className="break-words" data-testid={`caution-${c.code}`}>{c.message}</li>
                   ))}
                 </ul>
+                {persistent && <AckButton lotteryId={lottery.id} codes={cautions.map((c) => c.code)} />}
               </details>
             )}
 
             {/* 2. 日付・期間: 外枠なしの区切り線形式（2列）。奇数のときは最後を横いっぱいに */}
             {(() => {
               const cards: { key: string; label: string; body: React.ReactNode }[] = [
-                { key: "start", label: "応募開始", body: lottery.applyStart.precision === "unknown" ? DASH : formatPlain(lottery.applyStart) },
+                { key: "start", label: "応募開始", body: lottery.applyStart.precision === "unknown" ? DASH : nb(formatPlain(lottery.applyStart)) },
                 {
                   key: "deadline",
                   label: "応募締切",
                   body: (
                     <>
-                      <span className={cn(lottery.applyDeadline.precision === "unknown" && "text-muted-foreground")}>{lottery.applyDeadline.precision === "unknown" ? "—" : formatPlain(lottery.applyDeadline)}</span>
+                      <span className={cn("whitespace-nowrap", lottery.applyDeadline.precision === "unknown" && "text-muted-foreground")}>{lottery.applyDeadline.precision === "unknown" ? "—" : formatPlain(lottery.applyDeadline)}</span>
                       <DeadlineBadgeView badge={remaining} className="ml-1 px-1 py-0.5" />
                     </>
                   ),
                 },
-                { key: "result", label: "当選発表", body: lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? `${formatPlain(lottery.resultDate)}〜${formatMonthDay(lottery.resultEndDate!, now)}` : formatPlain(lottery.resultDate) },
+                { key: "result", label: "当選発表", body: lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? <>{nb(`${formatPlain(lottery.resultDate)}〜`)}{nb(formatMonthDay(lottery.resultEndDate!, now))}</> : nb(formatPlain(lottery.resultDate)) },
                 { key: "procedure", label: lottery.procedureSplit ? "購入期間" : "購入・受取期間", body: periodText(lottery.procedureStart, lottery.procedureDeadline) },
                 ...(lottery.procedureSplit ? [{ key: "receive", label: "受取期間", body: periodText(lottery.receiveStart ?? { precision: "unknown" }, lottery.receiveDeadline ?? { precision: "unknown" }) }] : []),
                 ...(kindOf(lottery) !== "normal"
@@ -344,12 +403,13 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   : []),
               ];
               return (
-                <dl className="grid grid-cols-2 gap-x-4" aria-label="日時" data-testid="date-cards">
+                <dl className="grid grid-cols-2 px-[13px]" aria-label="日時" data-testid="date-cards">
                   {cards.map((c, i) => {
                     const rows = Math.ceil(cards.length / 2);
                     const row = Math.floor(i / 2);
+                    const alone = cards.length % 2 === 1 && i === cards.length - 1;
                     return (
-                      <DateCell key={c.key} label={c.label} span2={cards.length % 2 === 1 && i === cards.length - 1} divider={row < rows - 1} testId={`date-${c.key}`}>
+                      <DateCell key={c.key} label={c.label} span2={alone} divider={row < rows - 1} side={alone ? undefined : i % 2 === 0 ? "l" : "r"} testId={`date-${c.key}`}>
                         {c.body}
                       </DateCell>
                     );
@@ -360,12 +420,12 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
             {/* 3. 応募・受取情報: 関連する項目をグループ化し、細い罫線・縦の区切り線で整理する */}
             <div className="divide-y divide-border/70 rounded-lg border px-3 text-sm" data-testid="info-group" aria-label="応募・受取情報">
-              <dl className="grid grid-cols-2 gap-x-4">
-                <Field label="応募方法" className="py-2">
+              <dl className="grid grid-cols-2">
+                <Field label="応募方法" className={cn("py-2", SIDE_CLS.l)}>
                   {lottery.applyMethod === "unknown" ? DASH : APPLY_LABEL[lottery.applyMethod]}
                   <Unconfirmed show={unconfirmed.includes("applyMethod")} />
                 </Field>
-                <Field label="受取方法" className="py-2">
+                <Field label="受取方法" className={cn("py-2", SIDE_CLS.r)}>
                   {lottery.receiveMethod === "unknown" ? DASH : RECEIVE_LABEL[lottery.receiveMethod]}
                   <Unconfirmed show={unconfirmed.includes("receiveMethod")} />
                   {(place.label || (dist && place.showLocation) || store?.roundTripFare != null) && (
@@ -394,18 +454,18 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   <EligibilitySection lottery={lottery} />
                 </div>
               </dl>
-              <dl className="grid grid-cols-2 gap-x-4">
+              {/* 応募制限: 抽選固有の制限は適用される制限に含まれるため、1項目に統合（未確認は警告扱いにしない） */}
+              <dl aria-label="応募制限">
                 <Field label="応募制限" className="py-2">
-                  {lottery.limit.basis === "unknown" ? "未確認（要確認）" : `${LIMIT_BASIS_LABEL[lottery.limit.basis]}${lottery.limit.maxCount}回`}
+                  <span data-testid="rules-applied">{rules.length > 0 ? rules.map(describeRule).join(" ／ ") : <span className="text-muted-foreground">未確認</span>}</span>
                   <Unconfirmed show={unconfirmed.includes("limitBasis")} />
                 </Field>
+              </dl>
+              <dl aria-label="本人確認・書類">
                 <Field label="本人確認・書類" className="py-2">
-                  {lottery.verificationText || DASH}
+                  {lottery.verificationText ? <LongText text={lottery.verificationText} /> : DASH}
                 </Field>
               </dl>
-              <p className="py-1.5 text-xs text-muted-foreground" data-testid="rules-applied">
-                適用される応募制限: {rules.length > 0 ? rules.map(describeRule).join(" ／ ") : "未確認（要確認）"}
-              </p>
             </div>
 
             {lottery.announcementUrl && (
@@ -523,7 +583,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
             {/* 7. 備考・操作 */}
             {lottery.memo && (
               <dl>
-                <Field label="備考">
+                <Field label="備考" valueClassName="text-[12.5px] leading-[1.45]">
                   <NotesView text={lottery.memo} />
                 </Field>
               </dl>
@@ -550,27 +610,26 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
               )}
             </div>
             {/* 管理情報（重要度が低いもの）。確認が必要な注意・不足の警告はここに入れない（上部の「確認が必要な点」に出す） */}
-            <details className="text-sm" data-testid="admin-info">
-              <summary className="flex min-h-9 cursor-pointer items-center text-muted-foreground">管理情報（登録経路・情報源）</summary>
-              <div className="space-y-2 pt-1">
-                <dl>
-                  <Field label="登録経路">
-                    <RegistrationOrigin lottery={lottery} />
-                  </Field>
-                </dl>
-                {lottery.sourceUrls.length > 0 && (
-                  <ul className="space-y-1 text-sm" aria-label="情報源URL">
-                    {lottery.sourceUrls.map((u) => (
-                      <li key={u} className="truncate">
-                        <a href={u} target="_blank" rel="noreferrer noopener" className="inline-flex max-w-full items-center gap-1 text-info underline">
-                          <span className="truncate">{u}</span> <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </details>
+            {/* 登録経路・情報元リンクは常時表示（折りたたまない）。情報元が無いときは登録経路だけで余白を作らない */}
+            <div className="space-y-1 text-sm" data-testid="admin-info">
+              <dl>
+                <Field label="登録経路">
+                  <RegistrationOrigin lottery={lottery} />
+                </Field>
+              </dl>
+              {lottery.sourceUrls.length > 0 && (
+                <ul className="space-y-0.5" aria-label="情報元リンク">
+                  {lottery.sourceUrls.map((u) => (
+                    <li key={u} className="min-w-0">
+                      <a href={u} target="_blank" rel="noreferrer noopener" title={u} className="flex min-h-8 max-w-full items-center gap-1 text-xs text-info underline" data-testid="source-link">
+                        <span className="min-w-0 truncate">{u.replace(/^https?:\/\//, "")}</span>
+                        <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <details className="text-sm" data-testid="more-ops">
               <summary className="flex min-h-9 cursor-pointer items-center text-muted-foreground">その他の操作</summary>
               <div className="flex flex-wrap gap-2 pt-1">
@@ -701,7 +760,13 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 /** 期間の表示（開始〜終了。どちらか不明なら空側を省く。両方不明は「—」） */
 function periodText(start: FlexibleDate, end: FlexibleDate): React.ReactNode {
   if (start.precision === "unknown" && end.precision === "unknown") return DASH;
-  return `${start.precision === "unknown" ? "" : formatPlain(start)}〜${end.precision === "unknown" ? "" : formatPlain(end)}`;
+  // 改行は「〜」の位置だけにする（日時の途中で折り返さない）
+  return (
+    <>
+      {nb(`${start.precision === "unknown" ? "" : formatPlain(start)}〜`)}
+      {end.precision === "unknown" ? null : nb(formatPlain(end))}
+    </>
+  );
 }
 
 /**

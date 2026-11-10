@@ -39,6 +39,9 @@ export function planCompletion(cur: CompletionFields, inc: CompletionFields, cau
     next = next.filter((c) => !codes.includes(c.code));
   };
   const add = (c: Caution) => {
+    // 確認済みにした注意と同じ内容なら、解除状態を保つ（同じ情報で復活させない）。内容が変わったら新しい注意として扱う
+    const prev = next.find((x) => x.code === c.code);
+    if (prev?.ackAt && prev.message === c.message) return;
     next = [...next.filter((x) => x.code !== c.code), c];
   };
 

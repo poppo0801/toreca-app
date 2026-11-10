@@ -1,6 +1,6 @@
 import { deadlinePassed, evaluateCandidate, type CollectionConditions } from "@/lib/collector/conditions";
 import { tcgTextsOf } from "@/lib/collector/category";
-import { decideRegistration, type RegistrationDecision } from "@/lib/collector/attention";
+import { decideRegistration, isUnmanagedConflict, type RegistrationDecision } from "@/lib/collector/attention";
 import type { FieldMap } from "@/lib/collector/fields";
 import { isRegionReason, judgeRegion, regionExclusionOf, type RegionExclusion } from "@/lib/collector/region";
 import { classifyStage } from "@/lib/collector/stage";
@@ -190,7 +190,7 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
   const soon = days !== null && days <= 3 ? 0 : 1;
   const hasConflict = Object.values(stored.fields ?? {}).some((f) => f?.state === "conflict");
   // 登録の判定（Stage 7A）: A=十分 → 通常登録 / B=情報不足・軽微な矛盾 → 注意付きで登録 / C=抽選として成立するか判断できない → 確認待ち
-  const textConflict = (stored.warnings ?? []).find((w) => /矛盾|食い違/.test(w)) ?? null;
+  const textConflict = (stored.warnings ?? []).find((w) => /矛盾|食い違/.test(w) && !isUnmanagedConflict(w)) ?? null;
   const chainRow = data.chains.find((x) => x.id === input.chain.id);
   const decision = decideRegistration({ input, verdict: ev.verdict, verdictReasons: ev.reasons, missing, fields: (stored.fields ?? {}) as FieldMap, duplicateCount: dups.length, stage: classifyStage(input, new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now)), modePending: !!stored.modePending, textConflict, chainStoreSelectDefault: !!chainRow?.storeSelectDefault, storeResolved: !missing.some((m) => /店舗を確実に特定できません/.test(m)), now: now.toISOString() });
   if (!stored.tracking && ev.verdict !== "upcoming" && (ev.verdict === "match" || ev.verdict === "review") && decision.grade !== "C") {

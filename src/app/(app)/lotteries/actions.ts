@@ -21,6 +21,7 @@ import {
   setResult,
   setItemResults,
   setAppliedItems,
+  acknowledgeCautions,
   updateProfileSettings,
   reorderProfiles,
   type ProfileSettingsInput,
@@ -133,6 +134,11 @@ export async function revertFulfillmentAction(applicationId: string, to: "none" 
 
 export async function setAppliedItemsAction(applicationId: string, itemIds: string[], actor: string | null): Promise<MutationResult> {
   return mutate((c) => setAppliedItems(c.db, applicationId, itemIds, actor));
+}
+
+/** 要確認を確認済みにする（表示中の注意のコードをまとめて解除。状態はDBに保存） */
+export async function acknowledgeCautionsAction(lotteryId: string, codes: string[]): Promise<MutationResult> {
+  return mutate((c) => acknowledgeCautions(c.db, lotteryId, codes));
 }
 
 export async function setItemResultsAction(

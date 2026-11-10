@@ -104,8 +104,8 @@ export function BattlesView() {
                   {/* 左端: 勝敗のアクセントバー（記号と同じ色。細く、カード全体は塗らない） */}
                   <span className={cn("w-1.5 shrink-0", RESULT_BAR_CLASS[b.result])} aria-hidden="true" data-testid="battle-bar" />
                   <span className="min-w-0 flex-1 px-2.5 py-2">
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-sm font-bold tabular-nums" data-testid="battle-date">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[12.5px] font-bold tabular-nums" data-testid="battle-date">
                         {b.playedOn.slice(5).replace("-", "/")}
                       </span>
                       {b.format && (
@@ -120,7 +120,7 @@ export function BattlesView() {
                     </span>
                   </span>
                   {/* 右端: 大きな勝敗記号（上下中央） */}
-                  <span className="flex w-14 shrink-0 items-center justify-center">
+                  <span className="flex w-14 shrink-0 items-center justify-center pr-3" data-testid="battle-mark-box">
                     <ResultMark result={b.result} className="text-[2.5rem]" />
                   </span>
                 </button>
@@ -157,15 +157,16 @@ export function BattlesView() {
 /** 対戦カードの1行（プロフィールアイコン・ユーザー名・使用デッキ）。外部の相手は共通の人物アイコン。ユーザー名は固定幅（自分・相手でデッキ名の左端が揃う）。デッキ名は原則1行、長いときだけ最大2行 */
 function PlayerLine({ profile, name, deck, mine, testId }: { profile: Parameters<typeof ProfileAvatar>[0]["profile"] | null; name: string; deck: string; mine?: boolean; testId: string }) {
   return (
-    <span className="flex items-center gap-1.5" data-testid={testId}>
+    <span className="flex items-center gap-1" data-testid={testId}>
       {profile ? (
-        <ProfileAvatar profile={profile} size="xs" />
+        <ProfileAvatar profile={profile} size="xs" className="size-[17px] text-[9px]" />
       ) : (
-        <span aria-hidden="true" className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground" data-testid="battle-external-icon">
-          <UserRound className="size-3" />
+        <span aria-hidden="true" className="inline-flex size-[17px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground" data-testid="battle-external-icon">
+          <UserRound className="size-2.5" />
         </span>
       )}
-      <span className={cn("w-[4.25rem] shrink-0 truncate text-[11px]", mine ? "font-bold" : "text-muted-foreground")} data-testid="battle-name">
+      {/* ユーザー名は自分・相手とも通常の太さ。固定幅で、デッキ名の開始位置が2行で揃う */}
+      <span className="w-[3.75rem] shrink-0 truncate text-[11px] text-muted-foreground" data-mine={mine ? "1" : undefined} data-testid="battle-name">
         {name}
       </span>
       <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] leading-tight" data-testid="battle-deck">

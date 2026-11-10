@@ -71,6 +71,15 @@ test("複数商品の商品別応募・確認事項の折りたたみ・通知�
     await expect(sheet.getByTestId("caution-result_date_unknown")).toBeHidden();
     await sheet.getByTestId("caution-summary").click();
     await expect(sheet.getByTestId("caution-result_date_unknown")).toHaveText("当選発表日が確認できていません");
+    // Stage 7N: 「確認済みにする」→ ブロックが消え、解除状態がDBに保存される（再読み込み後も復活しない）
+    await sheet.getByTestId("caution-ack").click();
+    await expect(sheet.getByTestId("caution-section")).toHaveCount(0);
+    await expect.poll(async () => (((await a.from("lotteries").select("cautions").eq("id", lot).single()).data?.cautions ?? []) as { ackAt?: string }[])[0]?.ackAt).toBeTruthy();
+    await page.reload();
+    await page.getByRole("tab", { name: /要チェック/ }).click();
+    await page.getByTestId("lottery-card").filter({ hasText: "7M駅前店" }).getByRole("button", { name: /の詳細を開く/ }).first().click();
+    await expect(page.getByTestId("lottery-detail-sheet")).toBeVisible();
+    await expect(page.getByTestId("caution-section")).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     // 応募済みにする → 商品選択（初期は全商品）。商品ベータの選択を外して確定 → 商品アルファだけ応募

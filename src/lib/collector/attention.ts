@@ -24,6 +24,21 @@ export interface Caution {
   values?: string[];
   /** 注意を付けた日時（ISO） */
   at: string;
+  /** 利用者が「確認済みにする」で解除した日時（ISO）。解除した注意は、同じ内容では再表示しない */
+  ackAt?: string;
+}
+
+/**
+ * 抽選管理の対象外の矛盾か（金額・料金の表示差など）。
+ * チケットサイトの「0円」と本文の「税込891円」のような差は、サイトの表示仕様による違いで、抽選情報の矛盾ではない。
+ * 応募期間・当選発表・応募条件・受取など、抽選管理に必要な項目に触れている矛盾は対象外にしない。
+ */
+export function isUnmanagedConflict(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const price = /金額|価格|料金|値段|税込|税抜|\d+\s*円|0円|チケット(サイト|ページ)?の?(表示|価格|金額)|販売価格|手数料/.test(text);
+  if (!price) return false;
+  const managed = /応募(期間|期限|締切|開始|方法|条件)|締切|締め切り|当選(発表|日)|発表日|抽選(日|結果)|受取|購入期間|引換|引き換え|受付|開始日|終了日|日時|日付|店舗|対象商品|商品名|別の抽選|抽選(では|ではない)/.test(text);
+  return !managed;
 }
 
 /** 信頼度（内部管理）。利用者向けには、注意が必要なときの小さな印だけを出す */
@@ -111,6 +126,8 @@ const SERIOUS_TEXT_CONFLICT = /抽選(では|で は)?(ない|なく)|別(の)?(
  */
 export function decideRegistration(c: RegistrationContext): RegistrationDecision {
   const { input } = c;
+  // 抽選管理の対象外（金額の表示差など）の矛盾は、矛盾として扱わない
+  if (isUnmanagedConflict(c.textConflict)) c = { ...c, textConflict: null };
   const blockers: string[] = [];
   const cautions: Caution[] = [];
   let patch: RegistrationDecision["patch"] = null;

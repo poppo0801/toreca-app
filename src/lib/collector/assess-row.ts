@@ -3,6 +3,7 @@
  * 画面の表示のたびに、最新のマスター（商品・系列・店舗の登録状況）で照合し直すので、古いランクが残らない。
  */
 import { assessCompleteness, missingSummary, priorityOf, RANK_LABEL, STAGE_SHORT, type Assessment, type Priority, type Rank } from "@/lib/collector/completeness";
+import { isUnmanagedConflict } from "@/lib/collector/attention";
 import { conflictLabels, SOURCE_LABEL, SOURCE_RANK, FIELD_LABEL, FIELD_KEYS, type FieldMap, type SourceKind } from "@/lib/collector/fields";
 import { rematch, type StoredDraft } from "@/lib/collector/reevaluate";
 import { evaluateCandidate, type CollectionConditions } from "@/lib/collector/conditions";
@@ -56,7 +57,7 @@ export function assessRow(row: Row, data: AppData, now: Date, important: Set<str
   const rm = rematch(d as unknown as StoredDraft, data);
   const input = rm.input as LotteryInput;
   const fieldConflicts = conflictLabels(d.fields);
-  const warnConflict = (d.warnings ?? []).find((w) => /矛盾|食い違/.test(w));
+  const warnConflict = (d.warnings ?? []).find((w) => /矛盾|食い違/.test(w) && !isUnmanagedConflict(w));
   const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目: ${fieldConflicts.join("・")}` : warnConflict ? `情報に矛盾の疑い: ${warnConflict.slice(0, 40)}` : null;
   // 収集条件の判定（地域・受取方法など）。未確認なら、登録可能（A）とはしない
   const store = data.stores.find((s) => s.id === input.store.id);

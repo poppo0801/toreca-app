@@ -1,6 +1,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/app/(app)/lotteries/actions", () => ({ acknowledgeCautionsAction: vi.fn(async () => ({ ok: true })) }));
 import { createMockData } from "@/data/mock";
 import { dateOnly } from "@/lib/datetime";
 import { wonPeriodRows } from "@/lib/lottery-flow";

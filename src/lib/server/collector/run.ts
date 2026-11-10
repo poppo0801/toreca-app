@@ -38,7 +38,7 @@ import { dropUsernameChain, resolveXChain } from "@/lib/collector/x-chain";
 import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { detectStoreSelect } from "@/lib/collector/store-select";
 import { judgeRegion, isRegionReason, regionExclusionOf } from "@/lib/collector/region";
-import { decideRegistration } from "@/lib/collector/attention";
+import { decideRegistration, isUnmanagedConflict } from "@/lib/collector/attention";
 import { classifyReviewReasons } from "@/lib/collector/review-reasons";
 import { autoCompleteLottery } from "@/lib/server/collector/complete";
 import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
@@ -706,7 +706,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 抽選の実施を示す文言があるか（「新商品が発売される」だけの告知を、抽選予告として追跡しない）
   const isNotice = stage === "teaser" || stage === "partial";
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
-  const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w));
+  const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w) && !isUnmanagedConflict(w));
   const fieldConflicts = conflictLabels(myFields);
   const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目があります: ${fieldConflicts.join("・")}` : conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : null;
   // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）。

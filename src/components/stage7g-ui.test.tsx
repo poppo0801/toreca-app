@@ -128,7 +128,7 @@ describe("Stage 7G: 対戦記録ページ", () => {
     expect(ext.querySelectorAll('[data-testid="battle-external-icon"]')).toHaveLength(1); // 外部の相手だけ人物アイコン
     expect(ext.querySelector('[data-testid="battle-me"] [data-testid="battle-external-icon"]')).toBeNull();
     // アイコンは小さく（24px程度）
-    expect(ext.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-5");
+    expect(ext.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-[17px]");
   });
 
   it("デッキ名は原則1行で収まるよう、ユーザー名は幅を抑え、デッキ名は最大2行まで", () => {
@@ -137,9 +137,11 @@ describe("Stage 7G: 対戦記録ページ", () => {
     // ユーザー名は固定幅（デッキ名の開始位置が自分・相手で揃う）。アイコンは20px
     const names = [...row.querySelectorAll('[data-testid="battle-name"]')];
     expect(names).toHaveLength(2);
-    expect(names.every((n) => n.className.includes("w-[4.25rem]") && n.className.includes("shrink-0"))).toBe(true);
-    expect(row.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-5");
+    expect(names.every((n) => n.className.includes("w-[3.75rem]") && n.className.includes("shrink-0"))).toBe(true);
+    expect(row.querySelector('[data-testid="battle-external-icon"]')!.className).toContain("size-[17px]");
     expect(row.querySelector('[data-testid="battle-name"]')!.className).toContain("truncate");
+    expect(names.some((n) => n.className.includes("font-bold"))).toBe(false); // 自分・相手とも通常の太さ
+    expect(row.querySelector('[data-testid="battle-mark-box"]')!.className).toContain("pr-3"); // 勝敗記号を少し左へ
     const deck = row.querySelector('[data-testid="battle-deck"]')!;
     expect(deck.className).toContain("line-clamp-2");
     expect(deck.className).toContain("flex-1");

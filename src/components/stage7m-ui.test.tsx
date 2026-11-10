@@ -1,6 +1,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/app/(app)/lotteries/actions", () => ({ acknowledgeCautionsAction: vi.fn(async () => ({ ok: true })) }));
 import { createMockData } from "@/data/mock";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -151,5 +152,56 @@ describe("Stage 7M: 複数商品抽選の応募", () => {
     const checked = () => (qa("item-picker-check") as HTMLInputElement[]).map((c) => c.checked);
     click(q("applied-items-edit"));
     expect(checked()).toEqual([false, true]);
+  });
+});
+
+describe("Stage 7N: 抽選詳細の要確認の解除・長文・常時表示", () => {
+  it("「確認済みにする」は展開したブロックに1つだけ。押すと表示中の注意をまとめて解除する", async () => {
+    const { acknowledgeCautionsAction } = await import("@/app/(app)/lotteries/actions");
+    patch("L1", {
+      resultDate: { precision: "unknown" },
+      receiveMethod: "unknown",
+      cautions: [
+        { code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: "" },
+        { code: "receive_method_unknown", field: "receiveMethod", message: "受取方法が確認できていません", at: "" },
+      ],
+    });
+    openDetail("L1");
+    expect(qa("caution-ack")).toHaveLength(1);
+    expect(q("caution-section")!.querySelectorAll("li button")).toHaveLength(0); // 項目ごとの解除ボタンなし
+    await act(async () => q("caution-ack")!.click());
+    expect(acknowledgeCautionsAction).toHaveBeenCalledWith("L1", ["result_date_unknown", "receive_method_unknown"]);
+  });
+
+  it("解除済み（ackAtあり）の注意は表示しない。全て解除済みならブロックごと消える", () => {
+    patch("L1", { resultDate: { precision: "unknown" }, cautions: [{ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: "", ackAt: "2026-11-02T00:00:00Z" }] });
+    openDetail("L1");
+    expect(q("caution-section")).toBeNull();
+  });
+
+  it("長い本人確認・書類は省略して「詳細を見る」で全文。短いものはそのまま", () => {
+    const long = "運転免許証・マイナンバーカード等の顔写真付き身分証明書を店頭で提示。".repeat(4);
+    patch("L1", { verificationText: long });
+    openDetail("L1");
+    expect(q("long-text-body")!.textContent).toBe(long); // 全文はDOMに保持
+    expect(q("long-text-body")!.className).toContain("line-clamp-3");
+    click(q("long-text-toggle"));
+    expect(q("long-text-body")!.className).not.toContain("line-clamp-3");
+    act(() => root.unmount());
+    root = createRoot(host);
+    patch("L1", { verificationText: "身分証" });
+    openDetail("L1");
+    expect(q("long-text")).toBeNull();
+  });
+
+  it("2列は左右に同じ構成の縦の区切り（左セルの右罫線）。応募制限は1項目に統合", () => {
+    openDetail("L1");
+    const cells = qa("date-card").length ? qa("date-card") : [...q("date-cards")!.querySelectorAll<HTMLElement>("[data-label]")];
+    expect(cells[0].className).toContain("border-r");
+    expect(cells[1].className).toContain("pl-3");
+    const g = q("info-group")!;
+    expect(g.textContent).not.toContain("適用される応募制限");
+    expect(g.querySelectorAll('[data-testid="rules-applied"]')).toHaveLength(1);
+    expect(g.textContent).not.toContain("未確認（要確認）");
   });
 });

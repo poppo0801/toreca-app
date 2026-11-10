@@ -1,6 +1,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/app/(app)/lotteries/actions", () => ({ acknowledgeCautionsAction: vi.fn(async () => ({ ok: true })) }));
 import { createMockData } from "@/data/mock";
 import type { AppData, Application, Lottery } from "@/types/domain";
 
@@ -63,7 +64,7 @@ describe("Stage 7J: 抽選詳細のレイアウト", () => {
       expect(c.querySelector("dd")).not.toBeNull(); // 日時
     }
     const rows = Math.ceil(cards.length / 2);
-    cards.forEach((c, i) => expect(c.className.includes("border-b")).toBe(Math.floor(i / 2) < rows - 1)); // 区切り線は行の間だけ
+    cards.forEach((c, i) => expect(/(^|\s)border-b(\s|$)/.test(c.className)).toBe(Math.floor(i / 2) < rows - 1)); // 区切り線は行の間だけ
     const labels = cards.map((c) => c.getAttribute("data-label"));
     expect(labels.slice(0, 3)).toEqual(["応募開始", "応募締切", "当選発表"]);
     if (cards.length % 2 === 1) expect(cards.at(-1)!.className).toContain("col-span-2");
@@ -155,9 +156,10 @@ describe("Stage 7J: 抽選詳細のレイアウト", () => {
     patch("L1", { sourceUrls: ["https://example.invalid/a"], resultDate: { precision: "unknown" }, cautions: [{ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: NOW.toISOString() }] } as Partial<Lottery>);
     open("L1");
     const admin = q("admin-info")!;
-    expect(admin.tagName).toBe("DETAILS");
+    expect(admin.tagName).toBe("DIV"); // 折りたたまず常時表示
     expect(admin.textContent).toContain("登録経路");
-    expect(admin.textContent).toContain("https://example.invalid/a");
+    expect(admin.textContent).toContain("example.invalid/a");
+    expect(admin.closest("details")).toBeNull();
     // 注意は管理情報の外（上部）
     const caution = q("caution-section")!;
     expect(admin.contains(caution)).toBe(false);

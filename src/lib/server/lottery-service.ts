@@ -11,10 +11,12 @@ import { chainLogoUrl } from "@/lib/chain-logo";
 import { isCondKind, isCondState, sanitizePurchaseParams, type CondKind, type CondState } from "@/lib/chain-conditions";
 import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
+import { ackCautions, pruneCautionsOnEdit, type EditSnapshot } from "@/lib/live-cautions";
+import type { Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
 import { validateLink } from "@/lib/profile-link";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
-import type { Database } from "@/types/database";
+import type { Database, Json } from "@/types/database";
 import type {
   AppData,
   BoxShrinkHint,
@@ -91,6 +93,31 @@ export async function subScopeError(db: Db, actor: string | null, chainId: strin
   const allowed = (rules ?? []).filter((r) => r.mode === "allow" && r.store_id === null).map((r) => r.chain_id);
   const lite = (chains ?? []).map((c) => ({ id: c.id, name: c.name, aliases: (aliases ?? []).filter((a) => a.chain_id === c.id).map((a) => a.alias) }));
   return profileSeesChain({ kind: "sub", allowedChainIds: allowed }, lite, chainId) ? null : "このユーザーは対象外の系列の抽選を操作できません";
+}
+
+/** 編集前後の比較用: 要確認の注意と、相違の判定に使う項目（応募締切・当選発表・応募方法・受取方法） */
+async function readEditSnapshot(db: Db, lotteryId: string): Promise<{ cautions: Caution[]; snap: EditSnapshot } | null> {
+  const { data: r } = await db.from("lotteries").select("cautions,apply_deadline_at,apply_deadline_date,result_date,apply_method,receive_method").eq("id", lotteryId).maybeSingle();
+  if (!r) return null;
+  return {
+    cautions: (Array.isArray(r.cautions) ? r.cautions : []) as unknown as Caution[],
+    snap: { applyDeadline: r.apply_deadline_at ?? r.apply_deadline_date, resultDate: r.result_date, applyMethod: r.apply_method, receiveMethod: r.receive_method },
+  };
+}
+
+/**
+ * 要確認を「確認済みにする」（Stage 7N）。現在表示している注意（codes）に解除日時を保存する。
+ * 抽選の内容・応募記録には触れない。解除した注意は同じ内容では再表示されず、新しい注意（別のコード・内容が変わったもの）は通常どおり表示される。
+ */
+export async function acknowledgeCautions(db: Db, lotteryId: string, codes: string[]): Promise<ServiceResult> {
+  if (!uuid.safeParse(lotteryId).success || codes.length === 0 || codes.length > 50) return fail("リクエストが不正です");
+  const { data: r, error } = await db.from("lotteries").select("cautions").eq("id", lotteryId).maybeSingle();
+  if (error || !r) return fail("抽選が見つかりません");
+  const cur = (Array.isArray(r.cautions) ? r.cautions : []) as unknown as Caution[];
+  const next = ackCautions(cur, codes, new Date().toISOString());
+  const { error: e2 } = await db.from("lotteries").update({ cautions: next as unknown as Json }).eq("id", lotteryId);
+  if (e2) return fail(mapDbError(e2));
+  return ok(undefined);
 }
 
 async function chainOfLottery(db: Db, lotteryId: string): Promise<string | null> {
@@ -638,6 +665,7 @@ export async function saveLottery(
     }
   }
 
+  const prevSnap = id !== null ? await readEditSnapshot(db, id) : null;
   const payload = buildLotteryPayload(input, id, actor);
   const { data, error } = opts.asService && id === null
     ? await db.rpc("save_lottery_tx_as", { p: payload as never, p_actor: actor as string, p_household: householdId })
@@ -661,6 +689,18 @@ export async function saveLottery(
     })
     .eq("id", data as string);
   if (tax.error) return fail("抽選は保存しましたが、発表方法・応募条件の分類を保存できませんでした。もう一度保存してください");
+  // 編集後の再評価: 相違の注意は、該当項目を利用者が変更したときだけ解消する（失敗しても保存自体は成功のまま）
+  if (prevSnap) {
+    try {
+      const nextSnap = await readEditSnapshot(db, data as string);
+      if (nextSnap) {
+        const pruned = pruneCautionsOnEdit(prevSnap.cautions, prevSnap.snap, nextSnap.snap);
+        if (pruned.length !== prevSnap.cautions.length) await db.from("lotteries").update({ cautions: pruned as unknown as Json }).eq("id", data as string);
+      }
+    } catch {
+      /* 再評価できなくても保存は成功 */
+    }
+  }
   // 登録経路（新規）: 手動登録／AIを利用した手動登録。自動収集は収集処理が「自動収集」に上書きする
   if (id === null) await db.from("lotteries").update({ registration_path: input.aiFeedback ? "manual_ai" : "manual" }).eq("id", data as string);
   // AI読み取りから新規登録した場合: AIの抽出結果と最終内容の比較を1回だけ記録する（失敗しても登録自体は成功のまま）
