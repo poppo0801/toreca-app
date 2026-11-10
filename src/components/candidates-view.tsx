@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/app-provider";
-import { reviewTopics, type CandidateView } from "@/components/auto-collect-view";
+import type { CandidateView } from "@/components/auto-collect-view";
 import { candidateFacts, ExcludeReasonSheet, type ExcludeResult } from "@/components/exclude-reason-sheet";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { PageHeading } from "@/components/page-heading";
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { UndoToastProvider, useUndoToast } from "@/components/undo-toast";
 import { RANKS, type Rank } from "@/lib/collector/completeness";
+import { missingBadges } from "@/lib/collector/missing-badges";
 import { filterRows, rankCounts, SORT_LABEL, sortRows, type SortKey } from "@/lib/collector/review-list";
 import { EXCLUDE_REASON_LABEL } from "@/lib/collector/user-rules";
 import type { LotteryDraft } from "@/lib/lottery-match";
@@ -104,7 +105,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
     router.refresh();
     const ruleText = r.rule?.created ? `（${EXCLUDE_REASON_LABEL[r.reason]}のルールを追加）` : "";
     toast.show({
-      message: `除外しました（${EXCLUDE_REASON_LABEL[r.reason]}）${ruleText}`,
+      message: `除外しました（${EXCLUDE_REASON_LABEL[r.reason]}）${ruleText}${r.note ? `。${r.note}` : ""}`,
       undo: async () => {
         const u = await post({ action: "undoReason", actor: profile.id, items: r.prev, rule: r.rule });
         if (!u.ok) return u.error ?? "元に戻せませんでした";
@@ -169,7 +170,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
         {visible.map((c) => {
           const f = candidateFacts(c);
           const d = c.draft?.input as { applyStart?: Flex; applyDeadline?: Flex; resultDate?: Flex } | undefined;
-          const topics = reviewTopics(c);
+          const badges = missingBadges(c);
           const product = data.products.find((p) => f.productIds.includes(p.id));
           const title = [f.chainName, f.storeName].filter(Boolean).join(" ") || c.title;
           return (
@@ -194,17 +195,26 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
                   </span>
                   <span className="block truncate text-muted-foreground">
                     {c.assess?.sourceLabel || "情報源未確認"}
-                    {topics.length > 0 && <span className="ml-1.5 font-medium text-warn">要確認：{topics.slice(0, 4).join("・")}</span>}
                   </span>
                 </span>
               </button>
-              <div className="flex items-center justify-end gap-1.5 px-2.5 pb-2 pt-1">
-                <Button size="sm" variant="outline" onClick={() => setExcluding(c)} data-testid="candidate-exclude">
-                  除外
-                </Button>
-                <Button size="sm" disabled={!c.draft?.input} onClick={() => setEditing(c)} data-testid="candidate-register">
-                  確認・登録
-                </Button>
+              <div className="flex items-end gap-1.5 px-2.5 pb-2 pt-1">
+                {/* 不足している情報（重要度の順。件数で打ち切らず、幅に応じて折り返す）。操作ボタンとは別の領域 */}
+                <ul className="flex min-w-0 flex-1 flex-wrap content-end gap-1" aria-label="不足している情報" data-testid="candidate-badges">
+                  {badges.map((b) => (
+                    <li key={b.key} data-badge={b.key} className="rounded-full border border-warn/40 bg-warn/10 px-1.5 py-px text-[10px] font-medium leading-4 text-warn">
+                      {b.label}
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button size="sm" variant="outline" onClick={() => setExcluding(c)} data-testid="candidate-exclude">
+                    除外
+                  </Button>
+                  <Button size="sm" disabled={!c.draft?.input} onClick={() => setEditing(c)} data-testid="candidate-register">
+                    確認・登録
+                  </Button>
+                </div>
               </div>
             </li>
           );
@@ -225,6 +235,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
       {editing?.draft?.input && (
         <LotteryFormDialog
           key={editing.id}
+          candidateId={editing.id}
           open
           lottery={null}
           onOpenChange={(v) => !v && setEditing(null)}

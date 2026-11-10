@@ -15,8 +15,10 @@ import { MasterCombobox, NewMasterBadge } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { fingerprint, purgeLegacyDrafts, type FieldSource } from "@/lib/lottery-draft";
+import { clearResume, loadResume, mergeResume, resumeKeyLabel, saveResume, type ResumeStash } from "@/lib/lottery-resume";
 import { FlagChip, FlagPanel, type FlagEvidence } from "@/components/review-flag";
-import type { DraftDuplicate, LotteryDraft } from "@/lib/lottery-match";
+import { findDuplicates, type DraftDuplicate, type LotteryDraft } from "@/lib/lottery-match";
+import { loadCollectionAreaAction, saveLotteryBulkAction } from "@/app/(app)/lotteries/actions";
 import type { FieldKey } from "@/lib/ai/extraction";
 import { flexToJstDate } from "@/lib/finance";
 import { FEEDBACK_REASONS, REASON_LABEL, type FeedbackReason } from "@/lib/ai/feedback";
@@ -28,6 +30,12 @@ import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
 const field = "mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm";
+/** 画面の1回の操作ごとの操作ID（二重登録の防止に使う） */
+function newOpId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  const h = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, "0");
+  return `${h()}${h()}-${h()}-4${h().slice(1)}-8${h().slice(1)}-${h()}${h()}${h()}`;
+}
 /** 初期値のまま（未確認）の入力欄。点線の枠で、利用者が選んだ値と区別する */
 const defaultFieldClass = "border-dashed border-primary/60";
 
@@ -249,6 +257,7 @@ export function LotteryFormDialog({
   onOpenChange,
   lottery,
   prefill,
+  candidateId,
   onSaved,
 }: {
   open: boolean;
@@ -257,10 +266,12 @@ export function LotteryFormDialog({
   lottery: Lottery | null;
   /** 一括解析の結果など、AIの解析結果をあらかじめ入力して開く（新規登録のみ） */
   prefill?: { draft: LotteryDraft; runId: string | null };
+  /** 抽選候補から開いたときの候補ID（店舗別の一括登録で、作成した抽選との関連を保存する） */
+  candidateId?: string | null;
   /** 保存に成功したときに呼ばれる（新規登録なら作成した抽選のID） */
   onSaved?: (lotteryId: string | null) => void;
 }) {
-  const { data, actions, reload } = useApp();
+  const { data, actions, reload, profile } = useApp();
   const isEdit = lottery !== null;
   // 編集を始めた時点の更新日時。保存の直前に最新と比べ、他の端末で更新されていないか確認する
   const [baseVersion, setBaseVersion] = useState<string | null>(lottery?.updatedAt ?? null);
@@ -305,7 +316,84 @@ export function LotteryFormDialog({
   const [candidates, setCandidates] = useState<{ chain: Chain[]; store: Store[]; items: Product[][] }>({ chain: [], store: [], items: [] });
   const modeRef = useRef<HTMLSelectElement>(null);
 
+  // ---- 店舗別の一括登録（Stage 7L）。新規登録のみ。共通情報を入力し、系列マスターの店舗から対象を選んで、店舗ごとに独立した抽選を作る
+  const [bulk, setBulk] = useState(false);
+  const [bulkSel, setBulkSel] = useState<Record<string, boolean>>({});
+  const [bulkExtra, setBulkExtra] = useState<string[]>([]);
+  const [bulkNew, setBulkNew] = useState("");
+  const [bulkStep, setBulkStep] = useState<"edit" | "confirm" | "result">("edit");
+  const [bulkResult, setBulkResult] = useState<{ created: number; skipped: { storeName: string; reason: string }[]; firstId: string | null } | null>(null);
+  const [area, setArea] = useState<string[] | null>(null);
+  const bulkOp = useRef<{ fp: string; id: string } | null>(null);
+  useEffect(() => {
+    if (!bulk || area !== null) return;
+    let alive = true;
+    void loadCollectionAreaAction().then((r) => alive && setArea(r.ok ? r.prefectures : []));
+    return () => {
+      alive = false;
+    };
+  }, [bulk, area]);
+  const chainStores = useMemo(() => (v.chain.id ? data.stores.filter((s) => s.chainId === v.chain.id && !s.archived && s.salesKind !== "online_only") : []), [data.stores, v.chain.id]);
+  const dupOfStore = (st: { id: string | null; name: string }) => findDuplicates({ ...v, store: { id: st.id, name: st.name, prefecture: "" } } as never, data.lotteries, undefined, { chains: data.chains, stores: data.stores });
+  /** 店舗の行（既存の店舗＋新しく入力した店舗）。初期選択は、自動収集の対象地域内の店舗だけ（所在地が不明な店舗は推定せず未選択） */
+  const bulkRows = useMemo(() => {
+    const rows = chainStores.map((s) => {
+      const inArea = area !== null && !!s.prefecture && area.includes(s.prefecture);
+      const dup = dupOfStore({ id: s.id, name: s.name })[0];
+      return { key: s.id, id: s.id as string | null, name: s.name, prefecture: s.prefecture, inArea, dup: dup?.reason ?? null, def: inArea && !dup, isNew: false };
+    });
+    for (const name of bulkExtra) {
+      const dup = dupOfStore({ id: null, name })[0];
+      rows.push({ key: `n:${name}`, id: null, name, prefecture: "", inArea: false, dup: dup?.reason ?? null, def: !dup, isNew: true });
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainStores, bulkExtra, area, v.items, v.applyDeadline, v.chain]);
+  const bulkChecked = (r: { key: string; def: boolean; dup: string | null }) => !r.dup && (bulkSel[r.key] ?? r.def);
+  const bulkPicked = bulkRows.filter(bulkChecked);
+  const addBulkStore = () => {
+    const name = bulkNew.trim().slice(0, 80);
+    if (!name) return;
+    const key = name.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+    const exists = [...chainStores.map((s) => s.name), ...bulkExtra].some((n) => n.normalize("NFKC").toLowerCase().replace(/\s+/g, "") === key);
+    setBulkNew("");
+    if (exists) return setError("同じ店舗がすでに一覧にあります");
+    setBulkExtra((x) => [...x, name]);
+    setBulkSel((m) => ({ ...m, [`n:${name}`]: true }));
+    setError(null);
+  };
+
   const dirty = fingerprint({ i: v, u: urlsText }) !== initialFp;
+
+  // 編集の一時保存・再開（Stage 7L）: 直前に編集した抽選1件だけ、最後の編集から10分間、この端末内に保持する。開いた直後は常に保存済みの内容
+  const [resume, setResume] = useState<ResumeStash | null>(() => (lottery ? loadResume(lottery.id, profile.id, Date.now()) : null));
+  const [resumeNote, setResumeNote] = useState<string | null>(null);
+  const stashRef = useRef<() => void>(() => undefined);
+  const initialRef = useRef({ input: initial.input, urlsText: initial.urlsText });
+  // 最新の入力を保存する関数（描画のたびに更新する。ref への書き込みは描画後に行う）
+  useEffect(() => {
+    stashRef.current = () => {
+      if (!lottery || !dirty) return;
+      saveResume({ lotteryId: lottery.id, profileId: profile.id, baseUpdatedAt: baseVersion, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
+    };
+  });
+  // 編集中は少し間を置いて保存する（アプリを閉じる・バックグラウンドへ移っても内容が残る）
+  useEffect(() => {
+    if (!lottery || !dirty) return;
+    const t = window.setTimeout(() => stashRef.current(), 400);
+    return () => window.clearTimeout(t);
+  }, [lottery, dirty, v, urlsText]);
+  useEffect(() => {
+    if (!lottery) return;
+    const flush = () => stashRef.current();
+    const onHide = () => document.visibilityState === "hidden" && flush();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [lottery]);
 
   // 以前の版が端末に残した長期の下書きは不要になったので、一度だけ消す
   useEffect(() => {
@@ -314,7 +402,33 @@ export function LotteryFormDialog({
 
   const finish = () => onOpenChange(false);
   // 閉じる操作（×・背景・Esc・ハンドルのスワイプ）。入力が変更されていれば、破棄の確認を出す。変更が無ければそのまま閉じる
-  const requestClose = () => (dirty ? setPending("discard") : finish());
+  // 編集中の抽選は、確認なしで閉じて一時保存する（10分以内なら「編集を再開」で戻せる）。新規登録は従来どおり破棄の確認を出す
+  const requestClose = () => {
+    if (isEdit) {
+      stashRef.current();
+      return finish();
+    }
+    return dirty ? setPending("discard") : finish();
+  };
+
+  /** 「編集を再開」: 一時保存の未保存の内容を、最新の保存済みの内容に重ねて復元する（他で更新された項目は最新を残す）。入力欄へは自動でフォーカスしない */
+  const resumeEdit = async () => {
+    const s = resume;
+    if (!s || !lottery) return;
+    const fresh = await reload().catch(() => null);
+    const curLot = fresh?.lotteries.find((l) => l.id === lottery.id) ?? lottery;
+    const curInput = fromLottery(curLot, fresh ?? data);
+    const curUrls = curLot.sourceUrls.join("\n");
+    const m = mergeResume(s, curInput, curUrls);
+    setV(m.input);
+    setUrlsText(m.urlsText);
+    setSources({ ...sourcesFromLottery(curLot), ...s.sources });
+    setBaseVersion(curLot.updatedAt ?? null);
+    setInitialFp(fingerprint({ i: curInput, u: curUrls }));
+    initialRef.current = { input: curInput, urlsText: curUrls };
+    setResume(null);
+    setResumeNote(m.conflicts.length > 0 ? `他の端末などで更新されていた項目（${m.conflicts.map(resumeKeyLabel).join("・")}）は、最新の内容を残しました。` : null);
+  };
 
   const applyDraft = (d: LotteryDraft, runId: string | null = null) => {
     const next = { ...d.input };
@@ -457,6 +571,7 @@ export function LotteryFormDialog({
     e.preventDefault();
     if (savingRef.current) return;
     setError(null);
+    if (bulk) return bulkReview();
     if (modePending) {
       setError("複数商品の応募方式を選択してください（告知から判断できませんでした）");
       setDetailsOpen(true);
@@ -491,10 +606,47 @@ export function LotteryFormDialog({
     savingRef.current = false;
     setSaving(false);
     if (res.ok) {
+      if (isEdit) clearResume(); // 正式に保存したので、一時保存は不要
       onSaved?.(res.createdIds?.[0] ?? null);
       finish();
     }
     else setError(res.error);
+  };
+
+  /** 店舗別の一括登録: 入力を確認し、登録前に件数と店舗名を示す（簡潔な確認） */
+  const bulkReview = () => {
+    if (modePending) return setError("複数商品の応募方式を選択してください（告知から判断できませんでした）");
+    if (!v.chain.id && !v.chain.name.trim()) return setError("系列を選択してください");
+    if (bulkPicked.length === 0) return setError("登録する店舗を1つ以上選択してください");
+    const probe = lotteryInputSchema.safeParse({ ...buildInput(), store: { id: bulkPicked[0].id, name: bulkPicked[0].name, prefecture: "" }, storeMode: "fixed", noStore: false, applications: [], newCampaign: null, aiFeedback: undefined });
+    if (!probe.success) return setError(probe.error.issues[0]?.message ?? "入力内容を確認してください");
+    setBulkStep("confirm");
+  };
+  const bulkSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    const base = buildInput();
+    const inputs = bulkPicked.map((r) => ({ ...base, store: { id: r.id, name: r.name, prefecture: "" }, storeMode: "fixed" as const, noStore: false, selectableStores: [], applications: [], newCampaign: null, aiFeedback: undefined }));
+    // 画面の1回の操作ごとの操作ID。同じ内容の再実行（通信失敗後の再試行など）では同じIDで、二重に登録されない。内容を変えれば新しいID
+    const fp = fingerprint(inputs);
+    if (!bulkOp.current || bulkOp.current.fp !== fp) bulkOp.current = { fp, id: newOpId() };
+    const res = await saveLotteryBulkAction(inputs as never, bulkOp.current.id, candidateId ?? null, profile.id);
+    savingRef.current = false;
+    setSaving(false);
+    if (!res.ok) {
+      setBulkStep("edit");
+      return setError(res.error);
+    }
+    await reload();
+    const firstId = res.createdIds?.[0] ?? null;
+    if ((res.skipped ?? []).length === 0) {
+      onSaved?.(firstId);
+      return finish();
+    }
+    setBulkResult({ created: res.createdIds?.length ?? 0, skipped: res.skipped ?? [], firstId });
+    setBulkStep("result");
   };
 
   /** 他の端末での更新を取り込む: 最新の内容で入力し直し、比較の基準も最新にする（自分の入力は破棄される） */
@@ -554,6 +706,18 @@ export function LotteryFormDialog({
             </button>
           </div>
 
+          {isEdit && resume && !dirty && (
+            <div className="px-4 pb-2">
+              <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => void resumeEdit()} data-testid="resume-edit">
+                編集を再開
+              </Button>
+            </div>
+          )}
+          {resumeNote && (
+            <p role="status" className="mx-4 mb-2 rounded-md border border-warn p-2 text-xs text-warn" data-testid="resume-note">
+              {resumeNote}
+            </p>
+          )}
           {pending && (
             <div role="alert" className="mx-4 mb-2 space-y-2 rounded-md border border-warn p-2 text-sm" data-testid="form-confirm">
               {pending === "discard" ? (
@@ -596,6 +760,40 @@ export function LotteryFormDialog({
             </div>
           )}
 
+          {bulk && bulkStep === "confirm" && (
+            <div role="alert" className="mx-4 mb-2 space-y-2 rounded-md border border-primary p-2 text-sm" data-testid="bulk-confirm">
+              <p className="font-medium">{bulkPicked.length}店舗の抽選を登録します</p>
+              <ul className="list-disc pl-5 text-xs" data-testid="bulk-confirm-list">
+                {bulkPicked.map((r) => (
+                  <li key={r.key}>{r.name}</li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void bulkSave()} disabled={saving} data-testid="bulk-confirm-ok">
+                  {saving ? "登録中…" : "登録する"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setBulkStep("edit")} disabled={saving}>
+                  戻る
+                </Button>
+              </div>
+            </div>
+          )}
+          {bulk && bulkStep === "result" && bulkResult && (
+            <div role="status" className="mx-4 mb-2 space-y-2 rounded-md border border-warn p-2 text-sm" data-testid="bulk-result">
+              <p className="font-medium">{bulkResult.created}店舗の抽選を登録しました</p>
+              <p className="text-xs text-warn">登録済みのため対象から除いた店舗: {bulkResult.skipped.map((s) => s.storeName).join("・")}</p>
+              <Button
+                size="sm"
+                onClick={() => {
+                  onSaved?.(bulkResult.firstId);
+                  finish();
+                }}
+                data-testid="bulk-result-close"
+              >
+                閉じる
+              </Button>
+            </div>
+          )}
           <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
             <SheetBody className="space-y-3 border-t pt-3">
               {isEdit && (
@@ -675,7 +873,13 @@ export function LotteryFormDialog({
                     <NewMasterBadge show={!v.store.id && v.store.name.trim().length > 0} />
                     {flagChip("store", "店舗")}
                   </span>
-                  <MasterCombobox label="店舗" value={v.store} options={storeOptions} onChange={(store) => set("store", { ...store, prefecture: store.id ? "" : (v.store.prefecture ?? "") })} />
+                  {bulk ? (
+                    <span className="mt-1 flex min-h-11 items-center rounded-md border border-dashed bg-muted/40 px-3 text-xs text-muted-foreground" data-testid="bulk-store-cell">
+                      下で店舗を選択
+                    </span>
+                  ) : (
+                    <MasterCombobox label="店舗" value={v.store} options={storeOptions} onChange={(store) => set("store", { ...store, prefecture: store.id ? "" : (v.store.prefecture ?? "") })} />
+                  )}
                   {!v.store.id && !v.store.name.trim() && (v.chain.id || v.chain.name.trim()) && v.storeMode !== "select_on_apply" && <span className="mt-0.5 block text-[11px] text-muted-foreground" data-testid="no-store-hint">店舗なし（系列のみ）</span>}
                 </div>
               </div>
@@ -684,8 +888,18 @@ export function LotteryFormDialog({
                 <span className="text-[13px] font-medium">店舗の指定</span>
                 <select
                   aria-label="店舗の指定"
-                  value={v.storeMode ?? "fixed"}
+                  value={bulk ? "bulk" : (v.storeMode ?? "fixed")}
                   onChange={(e) => {
+                    if (e.target.value === "bulk") {
+                      // 店舗別に一括登録: 候補に店舗が読み取れていれば、その店舗を最初から選択する
+                      setBulk(true);
+                      setBulkStep("edit");
+                      setBulkSel(v.store.id ? { [v.store.id]: true } : {});
+                      setBulkExtra(!v.store.id && v.store.name.trim() && v.storeMode === "fixed" ? [v.store.name.trim()] : []);
+                      setV((st) => ({ ...st, storeMode: "fixed", store: { id: null, name: "", prefecture: "" } }));
+                      return;
+                    }
+                    setBulk(false);
                     const m = e.target.value as NonNullable<LotteryInput["storeMode"]>;
                     setV((st) => ({ ...st, storeMode: m, ...(m === "select_on_apply" ? { store: { id: null, name: "応募時に店舗選択", prefecture: "" } } : m === "none" ? { store: { id: null, name: "", prefecture: "" } } : st.storeMode === "select_on_apply" ? { store: { id: null, name: "", prefecture: "" } } : {}) }));
                   }}
@@ -695,6 +909,7 @@ export function LotteryFormDialog({
                   <option value="fixed">店舗固定</option>
                   <option value="select_on_apply">応募時に店舗選択</option>
                   <option value="none">店舗指定なし</option>
+                  {!isEdit && <option value="bulk">店舗別に一括登録</option>}
                 </select>
                 {/* 応募済みの抽選を店舗選択式に変更するとき: 既存の応募履歴は変更しない。応募店舗は、応募したプロフィールが詳細から入力する */}
                 {isEdit && lottery && v.storeMode === "select_on_apply" && lottery.storeMode !== "select_on_apply" && data.applications.some((a) => a.lotteryId === lottery.id && a.state === "applied") && (
@@ -703,6 +918,34 @@ export function LotteryFormDialog({
                   </span>
                 )}
               </label>
+              {bulk && (
+                <div className="space-y-2 rounded-md border p-2" data-testid="bulk-stores">
+                  <p className="text-xs font-medium">
+                    対象の店舗 <span data-testid="bulk-count">{bulkPicked.length}</span>店舗を選択中
+                  </p>
+                  {!v.chain.id && <p className="text-[11px] text-muted-foreground">系列マスターの店舗を選ぶには、系列を選択してください（未登録の系列は、店舗名を追加して登録できます）。</p>}
+                  {area !== null && area.length === 0 && <p className="text-[11px] text-muted-foreground">自動収集の対象地域が未設定のため、店舗は初期状態で未選択です。</p>}
+                  <ul className="space-y-1" data-testid="bulk-store-list">
+                    {bulkRows.map((r) => (
+                      <li key={r.key}>
+                        <label className={cn("flex min-h-10 items-center gap-2 rounded-md border bg-input px-2.5 py-1 text-sm", r.dup && "opacity-70")}>
+                          <input type="checkbox" className="size-4" checked={bulkChecked(r)} disabled={!!r.dup} onChange={(e) => setBulkSel((m) => ({ ...m, [r.key]: e.target.checked }))} aria-label={r.name} />
+                          <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">{r.dup ? "登録済み" : r.isNew ? "新規店舗" : r.prefecture ? (area !== null && area.length > 0 && !r.inArea ? `${r.prefecture}（対象地域外）` : r.prefecture) : "所在地未確認"}</span>
+                        </label>
+                        {r.dup && <p className="px-1 text-[11px] text-warn">{r.dup}。二重登録を防ぐため、対象から除いています。</p>}
+                      </li>
+                    ))}
+                    {bulkRows.length === 0 && <li className="text-[11px] text-muted-foreground">この系列の店舗はマスターに登録されていません。店舗名を追加してください。</li>}
+                  </ul>
+                  <div className="flex gap-2">
+                    <input className="min-h-10 min-w-0 flex-1 rounded-md border bg-input px-3 text-sm" value={bulkNew} onChange={(e) => setBulkNew(e.target.value)} placeholder="店舗名を追加" aria-label="追加する店舗名" data-testid="bulk-new-name" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addBulkStore())} />
+                    <Button type="button" variant="outline" size="sm" className="min-h-10" onClick={addBulkStore} data-testid="bulk-new-add">
+                      追加
+                    </Button>
+                  </div>
+                </div>
+              )}
               {(openFlag === "chain" || openFlag === "store" || (!v.chain.id && candidates.chain.length > 0) || (!v.store.id && candidates.store.length > 0)) && (
                 <div>
                   {flagPanel("chain")}
@@ -1186,8 +1429,8 @@ export function LotteryFormDialog({
               )}
             </SheetBody>
             <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-              <Button type="button" variant="outline" className="mr-auto" onClick={() => (dirty ? setPending("discard") : finish())} data-testid="form-discard">
-                破棄
+              <Button type="button" variant="outline" className="mr-auto" onClick={requestClose} data-testid="form-discard">
+                {isEdit ? "閉じる" : "破棄"}
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? "保存中…" : "保存"}

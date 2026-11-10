@@ -4,6 +4,8 @@ import { domainExcludable } from "@/lib/collector/triage";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import { appendSourceUrl } from "@/lib/server/collector/run";
 import { excludeCandidates, USER_EXCLUDED, type ExcludeSnapshot } from "@/lib/server/collector/review-actions";
+import { checkChainAliases } from "@/lib/chain-alias";
+import { normalizeAlias } from "@/lib/masters";
 import type { Db } from "@/lib/server/lottery-service";
 
 /**
@@ -29,9 +31,11 @@ export const excludeInputSchema = z.discriminatedUnion("reason", [
     city: text(40).default(""),
     note: text(500).default(""),
   }),
-  z.object({ reason: z.literal("untrusted"), target: z.enum(["chain", "x_account", "domain"]), key: text(300), label: text(120).default(""), note: text(500).default("") }),
+  // 信頼性なし: 系列（key=系列ID。未特定なら chainName から系列マスター・別名と照合。未登録なら registerChain で仮登録）／情報元（Xアカウント・サイト）
+  z.object({ reason: z.literal("untrusted"), target: z.enum(["chain", "x_account", "domain"]), key: text(300).default(""), label: text(120).default(""), note: text(500).default(""), chainName: text(120).optional(), registerChain: z.boolean().optional() }),
   z.object({ reason: z.literal("area_chain"), chainId: uuid, chainName: text(120).default(""), note: text(500).default("") }),
-  z.object({ reason: z.literal("duplicate"), target: z.object({ kind: z.enum(["lottery", "candidate"]), id: uuid }) }),
+  // 重複: 統合先（登録済みの抽選か、確認待ちの候補）。matchReason=画面で示した判定の理由（履歴に残す）。registerChainAlias=重複の原因が系列名の表記揺れのとき、利用者が確定した別名の登録
+  z.object({ reason: z.literal("duplicate"), target: z.object({ kind: z.enum(["lottery", "candidate"]), id: uuid }), matchReason: text(200).optional(), registerChainAlias: z.object({ chainId: uuid, alias: text(80) }).optional() }),
   z.object({ reason: z.literal("other_game"), keywords: z.array(text(40)).min(1).max(10), note: text(500).default("") }),
   z.object({ reason: z.literal("other") }),
 ]);
@@ -43,9 +47,10 @@ export interface RuleRef {
   /** この操作で新しく作った（取り消しで無効にしてよい）。既存のルールを再利用しただけなら false */
   created: boolean;
 }
-export type ExcludeOutcome = { ok: true; prev: ExcludeSnapshot[]; rule: RuleRef | null; reason: string } | { ok: false; error: string };
+export type ExcludeOutcome = { ok: true; prev: ExcludeSnapshot[]; rule: RuleRef | null; reason: string; note?: string } | { ok: false; error: string };
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
+const STORE_DIFFERS = "店舗が異なる抽選は、店舗ごとに独立した別の抽選のため、重複として統合できません";
 
 export async function excludeWithReason(db: Db, householdId: string, candidateId: string, actor: string | null, raw: ExcludeInput): Promise<ExcludeOutcome> {
   const parsed = excludeInputSchema.safeParse(raw);
@@ -56,10 +61,23 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
   if (cand.status === "auto_registered") return fail("登録済みの候補は除外できません");
 
   // ---- 1) ルールの検証と作成（候補の除外より前に検証だけ行う。作成は除外の後）
-  type Plan = { kind: "none" } | { kind: "rule"; row: Record<string, unknown>; dedupe: { col: string; val: string }[] } | { kind: "source"; row: Record<string, unknown> };
+  type Plan = { kind: "none" } | { kind: "rule"; row: Record<string, unknown>; dedupe: { col: string; val: string }[] } | { kind: "source"; row: Record<string, unknown>; createChain?: string };
   let plan: Plan = { kind: "none" };
   let dupLottery: string | null = null;
   let dupCandidate: string | null = null;
+  const candStoreId = ((cand.draft as { input?: { store?: { id?: string | null } } } | null)?.input?.store?.id ?? null) as string | null;
+  // 系列名の別名登録（重複の原因が表記揺れのとき。利用者が確定したものだけ。他の系列の名称・別名と衝突する場合は登録しない）
+  let aliasToAdd: { chainId: string; alias: string } | null = null;
+  if (input.reason === "duplicate" && input.registerChainAlias) {
+    const { chainId, alias } = input.registerChainAlias;
+    const [{ data: chains }, { data: als }] = await Promise.all([db.from("chains").select("id,name"), any(db).from("chain_aliases").select("chain_id,alias")]);
+    const own = (chains ?? []).find((c) => c.id === chainId);
+    if (!own) return fail("別名を登録する系列が見つかりません");
+    const mine = ((als ?? []) as { chain_id: string; alias: string }[]).filter((a) => a.chain_id === chainId).map((a) => a.alias);
+    const checked = checkChainAliases(chainId, own.name, [...mine, alias], chains ?? [], ((als ?? []) as { chain_id: string; alias: string }[]).map((a) => ({ chainId: a.chain_id, alias: a.alias })));
+    if (checked.problems.length > 0) return fail(checked.problems[0].message);
+    if (checked.values.some((v) => normalizeAlias(v) === normalizeAlias(alias)) && !mine.some((m) => normalizeAlias(m) === normalizeAlias(alias))) aliasToAdd = { chainId, alias };
+  }
 
   if (input.reason === "region") {
     if (!input.storeId && !input.storeName) return fail("店舗名を入力してください");
@@ -72,20 +90,41 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
     if (kws.length === 0) return fail("除外するキーワードを2文字以上で入力してください");
     plan = { kind: "rule", row: { kind: "other_game", label: kws.join("・").slice(0, 120), keywords: kws, note: input.note }, dedupe: [] };
   } else if (input.reason === "untrusted") {
-    if (input.target === "chain" && !uuid.safeParse(input.key).success) return fail("この系列はマスターに未登録のため、系列では除外できません。情報源（Xアカウント・サイト）で除外してください");
+    let chainKey = input.key;
+    let createChain: string | undefined;
+    if (input.target === "chain") {
+      // 系列ID → 系列名・別名の順に、系列マスターと照合する（本文に系列名があるだけの別の系列は対象にしない。確定は利用者）
+      const { data: chains } = await db.from("chains").select("id,name");
+      if (uuid.safeParse(chainKey).success) {
+        if (!(chains ?? []).some((c) => c.id === chainKey)) return fail("系列が見つかりません");
+      } else {
+        const name = (input.chainName ?? input.label).trim();
+        if (!name) return fail("除外する系列を特定できません。情報源（Xアカウント・サイト）で除外してください");
+        const { data: als } = await any(db).from("chain_aliases").select("chain_id,alias");
+        const key = normalizeAlias(name);
+        const hit = (chains ?? []).find((c) => normalizeAlias(c.name) === key)?.id ?? ((als ?? []) as { chain_id: string; alias: string }[]).find((a) => normalizeAlias(a.alias) === key)?.chain_id;
+        if (hit) chainKey = hit;
+        else if (input.registerChain) createChain = name;
+        else return fail("この系列は系列マスターに未登録です。系列マスターに登録して除外するか、情報源（Xアカウント・サイト）で除外してください");
+      }
+    }
     if (input.target === "x_account" && !/^[A-Za-z0-9_]{1,15}$/.test(input.key.replace(/^@/, ""))) return fail("Xアカウント名が正しくありません");
     if (input.target === "domain" && !domainExcludable(input.key.toLowerCase())) return fail("X・まとめサイト・短縮URL・共通の応募サービス全体は除外できません");
-    const key = input.target === "x_account" ? input.key.replace(/^@/, "") : input.target === "domain" ? input.key.toLowerCase() : input.key;
-    plan = { kind: "source", row: { household_id: householdId, scope: input.target, key, label: input.label.slice(0, 120), chain_id: input.target === "chain" ? key : null, reason_code: "untrusted_shop", reason_note: input.note, created_by_profile_id: actor } };
+    const key = input.target === "x_account" ? input.key.replace(/^@/, "") : input.target === "domain" ? input.key.toLowerCase() : chainKey;
+    plan = { kind: "source", createChain, row: { household_id: householdId, scope: input.target, key, label: (input.label || input.chainName || "").slice(0, 120), chain_id: input.target === "chain" && !createChain ? key : null, reason_code: "untrusted_shop", reason_note: input.note, created_by_profile_id: actor } };
   } else if (input.reason === "duplicate") {
     if (input.target.kind === "lottery") {
-      const { data: l } = await db.from("lotteries").select("id").eq("id", input.target.id).maybeSingle();
+      const { data: l } = await db.from("lotteries").select("id,store_id").eq("id", input.target.id).maybeSingle();
       if (!l) return fail("重複先の抽選が見つかりません");
+      // 店舗が異なる抽選は、店舗ごとに独立した応募が必要な別の抽選として扱う（誤統合しない）
+      if (candStoreId && l.store_id && candStoreId !== l.store_id) return fail(STORE_DIFFERS);
       dupLottery = l.id;
     } else {
       if (input.target.id === candidateId) return fail("同じ候補は重複先にできません");
-      const { data: t } = await db.from("collection_candidates").select("id").eq("id", input.target.id).maybeSingle();
+      const { data: t } = await db.from("collection_candidates").select("id,draft").eq("id", input.target.id).maybeSingle();
       if (!t) return fail("重複先の候補が見つかりません");
+      const tStore = ((t.draft as { input?: { store?: { id?: string | null } } } | null)?.input?.store?.id ?? null) as string | null;
+      if (candStoreId && tStore && candStoreId !== tStore) return fail(STORE_DIFFERS);
       dupCandidate = t.id;
     }
   }
@@ -129,6 +168,13 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
         rule = { table: "collection_rules", id: data.id, created: true };
       }
     } else if (plan.kind === "source") {
+      if (plan.createChain) {
+        // 系列マスターに仮登録してから、その系列を除外する（名称の照合は上で済み。未登録のときだけ）
+        const made = await db.from("chains").insert({ household_id: householdId, name: plan.createChain, is_provisional: true, updated_by_profile_id: actor }).select("id").single();
+        if (made.error || !made.data) throw made.error ?? new Error("chain");
+        plan.row.key = made.data.id;
+        plan.row.chain_id = made.data.id;
+      }
       const { data, error } = await any(db).from("collection_exclusions").insert(plan.row).select("id").single();
       if (error && error.code === "23505") {
         const ex = await any(db).from("collection_exclusions").select("id").eq("household_id", householdId).eq("scope", plan.row.scope as string).eq("key", plan.row.key as string).eq("active", true).maybeSingle();
@@ -142,6 +188,13 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
     return fail("除外ルールを保存できなかったため、除外を取り消しました");
   }
 
+  // 系列の別名（重複の原因が表記揺れのとき）。失敗しても除外は有効（別名だけ登録できなかった旨を返す）
+  let aliasNote: string | null = null;
+  if (aliasToAdd) {
+    const { error: aErr } = await any(db).from("chain_aliases").insert({ household_id: householdId, chain_id: aliasToAdd.chainId, alias: aliasToAdd.alias, normalized_alias: normalizeAlias(aliasToAdd.alias), updated_by_profile_id: actor });
+    if (aErr && aErr.code !== "23505") aliasNote = "重複として処理しましたが、系列の別名は登録できませんでした";
+  }
+
   // ---- 4) 履歴（追記のみ）
   const detail: Record<string, unknown> = { ...(input as Record<string, unknown>), title: cand.title, sourceUrl: cand.source_url };
   const { error: logErr } = await any(db).from("collection_exclusion_log").insert({ household_id: householdId, candidate_id: candidateId, reason_code: input.reason, detail, rule_table: rule?.table ?? null, rule_id: rule?.id ?? null, duplicate_lottery_id: dupLottery, duplicate_candidate_id: dupCandidate, created_by_profile_id: actor });
@@ -151,7 +204,7 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
     await restoreCandidate(db, prev);
     return fail("除外の履歴を保存できなかったため、除外を取り消しました");
   }
-  return { ok: true, prev, rule, reason: input.reason };
+  return { ok: true, prev, rule, reason: input.reason, ...(aliasNote ? { note: aliasNote } : {}) };
 }
 
 async function restoreCandidate(db: Db, prev: ExcludeSnapshot[]): Promise<void> {

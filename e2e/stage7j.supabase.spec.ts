@@ -89,17 +89,17 @@ test("抽選詳細のレイアウトと、応募済みの抽選を店舗選択�
     await detail.getByRole("button", { name: "編集" }).click();
     const form = page.getByTestId("lottery-form");
     await expect(form).toBeVisible();
-    // 入力途中の再開はしない: 何か入力して閉じる → 破棄の確認 → 破棄 → 開き直すと保存済みの内容から始まる
+    // 編集中の抽選は、確認なしで閉じて一時保存する（Stage 7L）。開き直した直後は保存済みの内容で、「編集を再開」を押したときだけ復元する
     await form.getByTestId("store-mode").selectOption("select_on_apply");
     await expect(form.getByTestId("store-mode-applied-note")).toContainText("応募の履歴は変わりません");
     await form.getByTestId("form-discard").click();
-    await expect(form.getByTestId("form-confirm")).toContainText("入力中の内容を破棄");
-    await form.getByRole("button", { name: "破棄して閉じる" }).click();
-    await expect(form).toHaveCount(0);
-    expect((await a.from("lotteries").select("store_mode").eq("id", lot).single()).data!.store_mode).toBe("fixed"); // 破棄したので保存されていない
+    await expect(form).toHaveCount(0); // 確認なしで閉じる
+    expect((await a.from("lotteries").select("store_mode").eq("id", lot).single()).data!.store_mode).toBe("fixed"); // 保存済みのデータは変わらない
     await detail.getByRole("button", { name: "編集" }).click();
-    await expect(page.getByTestId("lottery-form").getByTestId("store-mode")).toHaveValue("fixed"); // 前回の未保存の入力は復元されない
-    await page.getByTestId("lottery-form").getByTestId("store-mode").selectOption("select_on_apply");
+    await expect(page.getByTestId("lottery-form").getByTestId("store-mode")).toHaveValue("fixed"); // 開いた直後は保存済みの内容
+    await page.getByTestId("lottery-form").getByTestId("resume-edit").click();
+    await expect(page.getByTestId("lottery-form").getByTestId("store-mode")).toHaveValue("select_on_apply"); // 再開で復元
+    await expect(page.getByTestId("lottery-form").getByTestId("resume-edit")).toHaveCount(0);
     await page.getByTestId("lottery-form").getByRole("button", { name: "保存" }).click();
     await expect(page.getByTestId("lottery-form")).toHaveCount(0);
     await expect.poll(async () => (await a.from("lotteries").select("store_mode").eq("id", lot).single()).data?.store_mode).toBe("select_on_apply");

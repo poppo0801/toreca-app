@@ -186,10 +186,11 @@ describe("Stage 7H: 抽選候補ページ", () => {
   it("重複: 同じ系列の登録済み抽選・確認待ちの候補だけが重複先の候補になる（別系列は出ない）", async () => {
     const chain = data.chains[0];
     const lot = data.lotteries[0];
-    data = { ...data, lotteries: [{ ...lot, chainId: chain.id }] };
+    const st = { ...data.stores[0], chainId: chain.id, name: "梅田店" };
+    data = { ...data, stores: [st, ...data.stores.slice(1)], lotteries: [{ ...lot, chainId: chain.id, storeId: st.id }] };
     const mine = cand("c1", { chain: chain.name, chainId: chain.id, store: "梅田店", product: "テスト弾 BOX" });
-    const same = cand("c3", { chain: chain.name, chainId: chain.id, store: "なんば店", product: "テスト弾 BOX" });
-    const other = cand("c2", { chain: "別の系列", chainId: "other-chain", store: "豊橋店", product: "テスト弾 BOX" });
+    const same = cand("c3", { chain: chain.name, chainId: chain.id, store: "梅田店", product: "テスト弾 BOX" });
+    const other = cand("c2", { chain: "別の系列", chainId: "other-chain", store: "豊橋店", product: "テスト弾 BOX" }); // 店舗が異なる別の抽選
     mount([mine, same, other]);
     await click(qa("candidate-exclude")[0]);
     await click(q("reason-duplicate"));

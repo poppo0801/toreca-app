@@ -115,14 +115,16 @@ describe("Stage 7H: 補助", () => {
     expect(suggestKeywords(["他社カード 拡張パック BOX"], "")).toEqual(["他社カード"]);
     expect(suggestKeywords([], "【予約】別ゲーム スターター 抽選")).toEqual(["別ゲーム"]);
   });
-  it("重複先の候補: 同じ系列だけ。同じ商品・近い締切ほど上位。系列が違うものは候補にしない", () => {
+  it("重複先の候補: 同じ系列。同じ商品・近い締切ほど上位。系列名が違っても同じ商品・近い締切は表記揺れの可能性として候補にする（別の商品・締切の別系列は出さない）", () => {
     const me = { chainId: "c1", chainName: "A", productIds: ["p1"], productNames: ["商品A"], deadline: "2026-11-20T23:59:00+09:00" };
     const out = suggestDuplicates(me, [
       { kind: "lottery", id: "l1", label: "同じ系列・別商品", chainId: "c1", chainName: "A", productIds: ["p9"], productNames: ["商品Z"], deadline: "2026-12-30T00:00:00+09:00" },
       { kind: "lottery", id: "l2", label: "同じ系列・同じ商品・同じ締切", chainId: "c1", chainName: "A", productIds: ["p1"], productNames: ["商品A"], deadline: "2026-11-20T23:59:00+09:00" },
-      { kind: "candidate", id: "k1", label: "別系列", chainId: "c2", chainName: "B", productIds: ["p1"], productNames: ["商品A"], deadline: "2026-11-20T23:59:00+09:00" },
+      { kind: "candidate", id: "k1", label: "別系列・同じ商品・同じ締切", chainId: "c2", chainName: "B", productIds: ["p1"], productNames: ["商品A"], deadline: "2026-11-20T23:59:00+09:00" },
+      { kind: "candidate", id: "k2", label: "別系列・別商品", chainId: "c3", chainName: "C", productIds: ["p7"], productNames: ["商品Q"], deadline: "2026-11-20T23:59:00+09:00" },
     ]);
-    expect(out.map((x) => x.id)).toEqual(["l2", "l1"]);
+    expect(out.map((x) => x.id)).toEqual(["l2", "k1", "l1"]);
     expect(out[0].reason).toContain("同じ商品");
+    expect(out[1].reason).toContain("系列名が一致しません");
   });
 });

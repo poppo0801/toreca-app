@@ -131,46 +131,119 @@ export function suggestKeywords(productNames: string[], title: string): string[]
   return out.slice(0, 3);
 }
 
-// ---------------------------------------------------------------- 重複先の候補
+// ---------------------------------------------------------------- 重複先の候補（Stage 7L で拡張）
 export interface DupTarget {
   kind: "lottery" | "candidate";
   id: string;
   label: string;
   chainId?: string | null;
   chainName?: string;
+  /** 系列の別名（系列マスターの別名。名称の表記揺れでも同じ系列と判定する） */
+  chainAliases?: string[];
+  storeId?: string | null;
+  storeName?: string;
   productIds?: string[];
   productNames?: string[];
   deadline?: string | null;
+  /** 情報源URL・投稿ID・抽選URL（同じ情報源かの判定と検索に使う） */
+  urls?: string[];
 }
 export interface DupSuggestion extends DupTarget {
   score: number;
   reason: string;
+  sameChain: boolean;
+  /** 店舗が両方分かっていて異なる（店舗ごとに独立した別の抽選。統合しない） */
+  storeDiffers: boolean;
+}
+export interface DupMe {
+  chainId: string | null;
+  chainName: string;
+  chainAliases?: string[];
+  storeId?: string | null;
+  storeName?: string;
+  productIds: string[];
+  productNames: string[];
+  deadline: string | null;
+  urls?: string[];
 }
 
-/** 重複先の候補を、系列・商品・締切の近さで並べる（同じ系列でなければ候補にしない。確定は利用者） */
-export function suggestDuplicates(me: { chainId: string | null; chainName: string; productIds: string[]; productNames: string[]; deadline: string | null }, targets: DupTarget[], limit = 8): DupSuggestion[] {
+const chainKeys = (name: string | undefined, aliases: string[] | undefined) => [name ?? "", ...(aliases ?? [])].map(ruleNameKey).filter((k) => k !== "");
+/** URLの照合キー（クエリ・ハッシュ・末尾のスラッシュを除く） */
+const urlKey = (u: string) => u.trim().toLowerCase().replace(/[#?].*$/, "").replace(/\/+$/, "");
+
+/** 店舗が違うか: 店舗IDが両方あり異なる、または（IDが無く）店舗名が両方あり異なる。片方でも不明なら違うと断定しない */
+export function storeDiffers(a: { storeId?: string | null; storeName?: string }, b: { storeId?: string | null; storeName?: string }): boolean {
+  if (a.storeId && b.storeId) return a.storeId !== b.storeId;
+  const an = ruleNameKey(a.storeName ?? "");
+  const bn = ruleNameKey(b.storeName ?? "");
+  return an !== "" && bn !== "" && !an.includes(bn) && !bn.includes(an);
+}
+
+/**
+ * 重複先の候補を、系列（別名を含む）・商品・締切・情報源URL・店舗の近さで並べる。確定は利用者（似ているだけでは自動統合しない）。
+ *  - 同じ系列（ID・名称・別名）でなくても、同じ情報源URL、または同じ商品で締切が近いものは「系列名の表記揺れの可能性」として候補にする
+ *  - 店舗が異なるものは候補にしない（店舗ごとの独立した抽選）
+ */
+export function suggestDuplicates(me: DupMe, targets: DupTarget[], limit = 8): DupSuggestion[] {
+  const myKeys = new Set(chainKeys(me.chainName, me.chainAliases));
+  const myUrls = new Set((me.urls ?? []).map(urlKey).filter(Boolean));
   const out: DupSuggestion[] = [];
   for (const t of targets) {
-    const sameChain = me.chainId && t.chainId ? me.chainId === t.chainId : !!me.chainName && !!t.chainName && ruleNameKey(me.chainName) === ruleNameKey(t.chainName ?? "");
-    if (!sameChain) continue;
-    let score = 1;
-    const why: string[] = ["同じ系列"];
+    const sameChain = !!(me.chainId && t.chainId && me.chainId === t.chainId) || chainKeys(t.chainName, t.chainAliases).some((k) => myKeys.has(k));
+    if (storeDiffers(me, t)) continue;
+    const sameUrl = (t.urls ?? []).some((u) => myUrls.has(urlKey(u)));
+    let score = 0;
+    const why: string[] = [];
+    if (sameChain) {
+      score += 1;
+      why.push("同じ系列");
+    }
     const sameProduct = me.productIds.some((p) => (t.productIds ?? []).includes(p)) || me.productNames.some((a) => (t.productNames ?? []).some((b) => ruleNameKey(a) !== "" && ruleNameKey(a) === ruleNameKey(b)));
     if (sameProduct) {
       score += 3;
       why.push("同じ商品");
     }
+    let closeDeadline = false;
     if (me.deadline && t.deadline) {
       const d = Math.abs(new Date(me.deadline).getTime() - new Date(t.deadline).getTime()) / 86_400_000;
       if (d <= 1) {
         score += 2;
+        closeDeadline = true;
         why.push("締切が同じ");
       } else if (d <= 14) {
         score += 1;
+        closeDeadline = true;
         why.push("締切が近い");
       }
     }
-    out.push({ ...t, score, reason: why.join("・") });
+    if (sameUrl) {
+      score += 5;
+      why.push("同じ情報源URL");
+    }
+    if (me.storeId && t.storeId && me.storeId === t.storeId) {
+      score += 1;
+      why.push("同じ店舗");
+    }
+    // 系列が一致しない場合は、強い根拠（同じURL、または同じ商品で締切が近い）があるときだけ候補にする
+    if (!sameChain && !(sameUrl || (sameProduct && closeDeadline))) continue;
+    if (!sameChain) why.unshift("系列名が一致しません（別名・表記揺れの可能性）");
+    out.push({ ...t, score, reason: why.join("・"), sameChain, storeDiffers: false });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+/**
+ * 手動検索: 系列名（別名を含む）・店舗名・商品名・URL・ラベルを、空白区切りのすべての語で絞り込む。
+ * 自動候補が無くても、利用者が登録済みの抽選・確認待ちの候補から統合先を探せる。店舗が異なるものも表示する（選択は不可として知らせる）。
+ */
+export function searchDupTargets(query: string, targets: DupTarget[], me: { storeId?: string | null; storeName?: string }, limit = 20): DupSuggestion[] {
+  const words = query.split(/\s+/).map(ruleNameKey).filter((w) => w !== "");
+  if (words.length === 0) return [];
+  const out: DupSuggestion[] = [];
+  for (const t of targets) {
+    const hay = [t.label, t.chainName ?? "", ...(t.chainAliases ?? []), t.storeName ?? "", ...(t.productNames ?? []), ...(t.urls ?? [])].map(ruleNameKey).join("\u0000");
+    if (!words.every((w) => hay.includes(w))) continue;
+    out.push({ ...t, score: 0, reason: "検索に一致", sameChain: false, storeDiffers: storeDiffers(me, t) });
+  }
+  return out.slice(0, limit);
 }

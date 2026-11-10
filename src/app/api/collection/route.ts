@@ -234,7 +234,7 @@ export async function POST(request: NextRequest) {
       // 除外ルールの作成など、抽選候補の管理操作は管理者のプロフィールのみ（Stage 7J）
       if (!(await isAdminProfile(db as never, b.actor))) return json({ ok: false, error: ADMIN_ONLY_MESSAGE }, 403);
       const r = await excludeWithReason(db as never, householdId, b.id, b.actor ?? null, b.input as never);
-      return r.ok ? json({ ok: true, prev: r.prev, rule: r.rule, reason: r.reason }) : json({ ok: false, error: r.error }, 422);
+      return r.ok ? json({ ok: true, prev: r.prev, rule: r.rule, reason: r.reason, note: r.note }) : json({ ok: false, error: r.error }, 422);
     }
     case "undoReason": {
       if (!(await isAdminProfile(db as never, b.actor))) return json({ ok: false, error: ADMIN_ONLY_MESSAGE }, 403);

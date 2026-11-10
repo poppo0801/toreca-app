@@ -9,6 +9,7 @@ import {
   duplicateLottery,
   loadAppData,
   saveLottery,
+  saveLotteryBulk,
   setApplied,
   setAppliedStore,
   type ApplyOptions,
@@ -32,7 +33,7 @@ import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import type { AppData, EventState, FulfillmentStatus, ResultStatus } from "@/types/domain";
 
 /** 更新系の戻り値。成功時は最新のスナップショットを返し、クライアントは再取得なしで反映する。 */
-export type MutationResult = { ok: true; data: AppData; createdIds?: string[] } | { ok: false; error: string };
+export type MutationResult = { ok: true; data: AppData; createdIds?: string[]; /** 店舗別の一括登録で、登録済みのため対象から除いた店舗 */ skipped?: { storeName: string; reason: string }[] } | { ok: false; error: string };
 
 async function context(): Promise<{ db: Db; householdId: string } | null> {
   const db = (await createClient()) as unknown as Db;
@@ -69,6 +70,29 @@ export async function loadAppDataAction(): Promise<{ ok: true; data: AppData } |
 
 export async function saveLotteryAction(id: string | null, input: LotteryInput, actor: string | null): Promise<MutationResult> {
   return mutate((c) => saveLottery(c.db, c.householdId, id, input, actor));
+}
+
+/** 店舗別の一括登録。opId は画面の1回の操作ごとに発行し、再送・再実行でも二重に登録しない */
+export async function saveLotteryBulkAction(inputs: LotteryInput[], opId: string, candidateId: string | null, actor: string | null): Promise<MutationResult> {
+  const c = await context();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const res = await saveLotteryBulk(c.db, inputs, opId, candidateId, actor);
+  if (!res.ok) return { ok: false, error: res.error };
+  try {
+    const data = await loadAppData(c.db);
+    revalidatePath("/lotteries");
+    return { ok: true, data, createdIds: res.value.ids, skipped: res.value.skipped };
+  } catch {
+    return { ok: false, error: "登録しましたが、最新データの取得に失敗しました。再読み込みしてください" };
+  }
+}
+
+/** 自動収集の対象地域（都道府県）。店舗別の一括登録で、対象地域内の店舗を初期選択するために使う */
+export async function loadCollectionAreaAction(): Promise<{ ok: true; prefectures: string[] } | { ok: false }> {
+  const c = await context();
+  if (!c) return { ok: false };
+  const { data } = await c.db.from("collection_settings").select("prefectures").limit(1).maybeSingle();
+  return data ? { ok: true, prefectures: (data.prefectures as string[] | null) ?? [] } : { ok: false };
 }
 
 export async function duplicateLotteryAction(lotteryId: string, storeIds: string[], actor: string | null): Promise<MutationResult> {

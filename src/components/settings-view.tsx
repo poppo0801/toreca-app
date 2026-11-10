@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { signOut } from "@/app/login/actions";
+import { clearResume } from "@/lib/lottery-resume";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { AiQualitySection, AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
@@ -110,7 +111,7 @@ export function SettingsView() {
             <p className="text-xs text-muted-foreground">現在の操作プロフィール: {profile.label}</p>
             <p className="text-xs text-muted-foreground">操作中のユーザーはヘッダー右上のアイコンからも切り替えられます（この端末にのみ保存され、本人認証ではありません）。</p>
             {SUPABASE && (
-              <form action={signOut}>
+              <form action={signOut} onSubmit={() => clearResume()}>
                 <Button type="submit" variant="outline">
                   ログアウト
                 </Button>

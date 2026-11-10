@@ -11,6 +11,7 @@ import { chainLogoUrl } from "@/lib/chain-logo";
 import { isCondKind, isCondState, sanitizePurchaseParams, type CondKind, type CondState } from "@/lib/chain-conditions";
 import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
+import { findDuplicates } from "@/lib/lottery-match";
 import { validateLink } from "@/lib/profile-link";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
 import type { Database } from "@/types/database";
@@ -670,6 +671,83 @@ export async function saveLottery(
     }
   }
   return ok({ id: data as string });
+}
+
+/**
+ * 店舗別の一括登録（Stage 7L）。共通の抽選内容を、選んだ店舗ごとに独立した抽選として1トランザクションで登録する（DB関数 save_lottery_bulk_tx）。
+ *  - 1店舗でも失敗すれば全体を取り消す（途中までの不完全な登録を残さない）。同じ操作ID（opId）の再実行は、作成済みの結果を返す（二重登録しない）。
+ *  - 同じ店舗・同じ商品の抽選が登録済み（重複）の店舗は、新規登録の対象から除き、skipped として返す。既存の応募履歴には触れない。
+ *  - 作成した抽選は一括登録グループ（lottery_bulk_groups）で関連づける。各抽選のIDは独立で、1店舗の編集は他店舗に影響しない。
+ */
+export async function saveLotteryBulk(
+  db: Db,
+  rawInputs: LotteryInput[],
+  opId: string,
+  candidateId: string | null,
+  actor: string | null,
+): Promise<ServiceResult<{ ids: string[]; groupId: string; replayed: boolean; skipped: { storeName: string; reason: string }[] }>> {
+  if (!uuid.safeParse(opId).success || (candidateId !== null && !uuid.safeParse(candidateId).success) || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (!Array.isArray(rawInputs) || rawInputs.length < 1) return fail("登録する店舗を選択してください");
+  if (rawInputs.length > 30) return fail("一括登録できるのは30店舗までです");
+  const inputs: z.output<typeof lotteryInputSchema>[] = [];
+  for (const raw of rawInputs) {
+    const parsed = lotteryInputSchema.safeParse(raw);
+    if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
+    const input = parsed.data;
+    const modeError = validateMultiMode(input.multiMode, input.items.length);
+    if (modeError) return fail(modeError);
+    if (!input.store.id && !input.store.name.trim()) return fail("店舗を選択してください");
+    if (input.storeMode !== "fixed") return fail("店舗別の一括登録は、店舗固定の抽選にだけ使えます");
+    if (input.newCampaign || input.applications.length > 0) return fail("一括登録では、新しいキャンペーンの作成と応募状況の同時登録はできません");
+    inputs.push(input);
+  }
+  // 同じ店舗の重複選択（IDまたは名称）
+  const seen = new Set<string>();
+  for (const i of inputs) {
+    const key = i.store.id ?? `n:${i.store.name.normalize("NFKC").toLowerCase().replace(/\s+/g, "")}`;
+    if (seen.has(key)) return fail("同じ店舗が重複して選択されています");
+    seen.add(key);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表・関数は生成型に含まれない場合がある
+  const raw = db as any;
+  // 同じ操作の再実行: 作成済みの結果をそのまま返す
+  const prev = await raw.from("lottery_bulk_groups").select("id").eq("op_id", opId).maybeSingle();
+  if (prev.data) {
+    const { data: ls } = await db.from("lotteries").select("id").eq("bulk_group_id" as never, prev.data.id as never).order("created_at");
+    return ok({ ids: (ls ?? []).map((l) => l.id), groupId: prev.data.id as string, replayed: true, skipped: [] });
+  }
+  // 登録済みの同じ店舗・同じ商品の抽選は対象から除く
+  const app = await loadAppData(db);
+  const skipped: { storeName: string; reason: string }[] = [];
+  const todo: z.output<typeof lotteryInputSchema>[] = [];
+  const nk = (v: string) => v.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+  for (const i of inputs) {
+    // 名称だけで入力された店舗が、同じ系列の既存の店舗と同じなら、既存の店舗として扱う（DB側も名称で既存を使うため、重複の確認をそろえる）
+    if (!i.store.id && i.chain.id) {
+      const same = app.stores.find((st) => st.chainId === i.chain.id && !st.archived && nk(st.name) === nk(i.store.name));
+      if (same) i.store = { ...i.store, id: same.id, name: same.name };
+    }
+    const dup = findDuplicates(i as never, app.lotteries, undefined, { chains: app.chains, stores: app.stores });
+    if (dup.length > 0) skipped.push({ storeName: i.store.name || app.stores.find((s) => s.id === i.store.id)?.name || "", reason: dup[0].reason });
+    else todo.push(i);
+  }
+  if (todo.length === 0) return fail("選択した店舗は、すべて同じ抽選が登録済みです");
+  const ops = todo.map((input) => ({
+    save: buildLotteryPayload(input, null, actor),
+    unconfirmed: input.unconfirmedFields,
+    tax: {
+      announcement_methods: normalizeAnnounceMethods(input.announcementMethods),
+      announcement_target: input.announcementTarget,
+      announcement_inferred: input.announcementInferred,
+      requirement_tags: normalizeRequirementTags(input.requirementTags),
+      requirement_logic: input.requirementLogic,
+      requirement_details: sanitizeRequirementDetails(input.requirementDetails),
+    },
+  }));
+  const { data, error } = await raw.rpc("save_lottery_bulk_tx", { p_ops: ops, p_actor: actor, p_op_id: opId, p_chain: todo[0].chain.id, p_candidate: candidateId });
+  if (error) return fail(mapDbError(error));
+  const r = data as { group_id: string; ids: string[]; replayed: boolean };
+  return ok({ ids: r.ids, groupId: r.group_id, replayed: r.replayed, skipped });
 }
 
 /** 同系列の他店舗へ複製。店舗ごとに独立した抽選を作り、同じキャンペーンに関連づける（応募・当落は複製しない）。 */

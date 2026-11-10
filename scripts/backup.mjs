@@ -35,7 +35,7 @@ const TABLES_ALL = [
   // Stage 5C: Excel取り込み履歴（管理番号の採番カウンターは、復元時に商品・店舗の管理番号の最大値から自動で再構成される）
   "master_import_history", "profile_settings", "card_masters", "card_holdings", "card_prices", "card_market_prices", "card_market_links", "x_account_identities", "x_bookmark_links", "card_favorites", "ai_jobs", "ai_job_items",
   // Stage 7F: BOXコレクション・取得した相場と取得状況・カードの並び順・状態別の倍率・購入記録の標準画像
-  "box_settings", "box_lots", "box_movements", "box_prices", "box_receipts", "box_market_links", "box_market_prices", "market_status", "market_update_runs", "collection_rules", "collection_exclusion_log", "opening_records", "card_display_orders", "condition_multipliers", "item_default_images",
+  "box_settings", "box_lots", "box_movements", "box_prices", "box_receipts", "box_market_links", "box_market_prices", "market_status", "market_update_runs", "collection_rules", "collection_exclusion_log", "opening_records", "lottery_bulk_groups", "card_display_orders", "condition_multipliers", "item_default_images",
 ];
 
 const TABLES = TABLES_ALL.filter((t) => !SKIP.has(t));
