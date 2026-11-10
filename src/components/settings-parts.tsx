@@ -29,7 +29,7 @@ const ROW = "flex min-h-14 w-full items-center gap-3 px-3 text-left";
 /** 別ページへ移る項目 */
 export function MenuLink({ href, title, summary, testId }: { href: string; title: string; summary?: string; testId?: string }) {
   return (
-    <Link href={href} data-testid={testId} className={cn(ROW, "active:bg-muted/60")}>
+    <Link href={href} prefetch={false} data-testid={testId} className={cn(ROW, "active:bg-muted/60")}>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">{title}</span>
         {summary && <span className="block truncate text-xs text-muted-foreground">{summary}</span>}

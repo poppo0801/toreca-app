@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AppliedStoreDialog } from "@/components/applied-store-dialog";
 import type { StoreChoice } from "@/lib/applied-store";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { useApplyExit } from "@/components/apply-exit";
@@ -160,7 +160,7 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
           className,
         )}
       >
-        {applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <span aria-hidden="true" className="text-sm font-bold leading-none">未</span> : null}
+        {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" data-testid="my-apply-spinner" /> : applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <span aria-hidden="true" className="text-sm font-bold leading-none">未</span> : null}
         {!compact && (applied ? "応募済み" : "応募済みにする")}
       </button>
       {error && (

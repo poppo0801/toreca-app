@@ -315,6 +315,22 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     const q = (db as any).from(table).select("*");
     return householdId ? q.eq("household_id", householdId) : q;
   };
+  // 主要なテーブルの取得と同時に、設定・開封実績・標準画像も並行して取得する（以前は主要テーブルの後に順番に取得していた＝往復が3段増えていた。Stage 7O）
+  const optionalP = loadOptional(db, householdId);
+  const usageP = loadUsage(db, householdId);
+  // 購入記録の標準画像（Stage 7E）。取得できなくても他のデータは読み込む
+  const defaultImagesP = (async () => {
+    const out: NonNullable<AppData["defaultImages"]> = {};
+    try {
+      const di = await db.from("item_default_images").select("category,sha256");
+      for (const r of di.data ?? []) if (r.category === "single_card" || r.category === "other") out[r.category] = { url: `/api/default-image/${r.category}?v=${r.sha256.slice(0, 12)}` };
+    } catch {
+      /* 標準画像なしで続行 */
+    }
+    return out;
+  })();
+  // 主要テーブルの取得に失敗して先に例外になっても、未処理の拒否にならないようにする
+  for (const p of [optionalP, usageP, defaultImagesP]) void p.catch(() => undefined);
   const q = await Promise.all([
     sel("profiles").order("sort_order").order("created_at"),
     sel("profile_target_rules"),
@@ -382,16 +398,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   const imageUrl = (i: { id: string; sha256: string }, size: "full" | "thumb") => `/api/product-image/${i.id}?v=${i.sha256.slice(0, 12)}&s=${size}`;
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates } = await loadOptional(db, householdId);
-  const usage = await loadUsage(db, householdId);
-  // 購入記録の標準画像（Stage 7E）。取得できなくても他のデータは読み込む
-  const defaultImages: NonNullable<AppData["defaultImages"]> = {};
-  try {
-    const di = await db.from("item_default_images").select("category,sha256");
-    for (const r of di.data ?? []) if (r.category === "single_card" || r.category === "other") defaultImages[r.category] = { url: `/api/default-image/${r.category}?v=${r.sha256.slice(0, 12)}` };
-  } catch {
-    /* 標準画像なしで続行 */
-  }
+  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates }, usage, defaultImages] = await Promise.all([optionalP, usageP, defaultImagesP]);
 
   return {
     profiles: profiles.map((p) => {
@@ -667,18 +674,18 @@ export async function saveLottery(
     }
   }
 
-  const prevSnap = id !== null ? await readEditSnapshot(db, id) : null;
-  // 新規店舗の登録状態: 自動収集=未確認 / 手動=確認済み（既存の店舗を使う場合は変更しない）
+  // 保存前の確認は互いに独立なので、並行して行う（編集前の注意の状態・新規店舗かどうか。Stage 7O）
   const newStoreName = id === null && !input.store.id && !isDummyStoreName(input.store.name) && input.store.name !== SELECT_STORE_PLACEHOLDER ? input.store.name.trim() : "";
-  let storeExisted = true;
-  if (newStoreName) {
-    if (!input.chain.id) storeExisted = false;
-    else {
-      const { data: chain } = await db.from("chains").select("name").eq("id", input.chain.id).maybeSingle();
-      const { data: ss } = await db.from("stores").select("name").eq("chain_id", input.chain.id);
-      storeExisted = (ss ?? []).some((r) => storeKey(r.name, chain?.name) === storeKey(newStoreName, chain?.name));
-    }
-  }
+  const [prevSnap, storeExisted] = await Promise.all([
+    id !== null ? readEditSnapshot(db, id) : Promise.resolve(null),
+    (async () => {
+      // 新規店舗の登録状態: 自動収集=未確認 / 手動=確認済み（既存の店舗を使う場合は変更しない）
+      if (!newStoreName) return true;
+      if (!input.chain.id) return false;
+      const [{ data: chain }, { data: ss }] = await Promise.all([db.from("chains").select("name").eq("id", input.chain.id).maybeSingle(), db.from("stores").select("name").eq("chain_id", input.chain.id)]);
+      return (ss ?? []).some((r) => storeKey(r.name, chain?.name) === storeKey(newStoreName, chain?.name));
+    })(),
+  ]);
   const payload = buildLotteryPayload(input, id, actor);
   const { data, error } = opts.asService && id === null
     ? await db.rpc("save_lottery_tx_as", { p: payload as never, p_actor: actor as string, p_household: householdId })
@@ -686,11 +693,12 @@ export async function saveLottery(
   if (error) return fail(mapDbError(error));
   // 初期値のまま（利用者が確認していない）項目を記録する。確認済みの項目は外す（応募方法・受取方法の「初期値」表示用）。
   // 保存は主処理とは別の更新だが、失敗しても抽選自体は保存済み（表示上の印が付かないだけ）なのでエラーにはしない。
-  await db.from("lotteries").update({ unconfirmed_fields: input.unconfirmedFields }).eq("id", data as string);
-  // 発表方法・応募条件の標準分類（save_lottery_tx は分類列を持たないため、同じ操作の直後に保存する。失敗は利用者に伝える）
+  // 発表方法・応募条件の標準分類（save_lottery_tx は分類列を持たないため、同じ操作の直後に保存する。失敗は利用者に伝える）。
+  // 初期値の印（unconfirmed_fields）も同じ更新にまとめる（往復を1回減らす。Stage 7O）
   const tax = await db
     .from("lotteries")
     .update({
+      unconfirmed_fields: input.unconfirmedFields,
       announcement_methods: normalizeAnnounceMethods(input.announcementMethods),
       announcement_target: input.announcementTarget,
       announcement_inferred: input.announcementInferred,

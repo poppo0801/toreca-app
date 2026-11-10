@@ -1,4 +1,4 @@
-import { judgeLaunch, parseLifeMark, type LifeMark, type LifeState } from "@/lib/lifecycle";
+import { judgeLaunch, parseLifeMark, type LaunchVerdict, type LifeMark, type LifeState } from "@/lib/lifecycle";
 import { canAutoReload, classifyError, logPath, sanitizeLogText, shouldRecord, type ClientErrorEntry, type ErrorKind, type ReloadRecord } from "@/lib/resilience";
 
 /**
@@ -110,6 +110,9 @@ export function takeAutoRetry(): boolean {
 // ---------------------------------------------------------------- 画面の終了の検出（Stage 7D）
 const LIFE_KEY = "tcg.life";
 let refreshLife: (() => void) | null = null;
+/** この起動で判定した前回の終わり方（直前の画面の復元に使う） */
+let launchVerdict: LaunchVerdict = { kind: "normal" };
+export const getLaunchVerdict = (): LaunchVerdict => launchVerdict;
 /** 画面を移動したとき、最後にいた画面の印を更新する */
 export const touchLifecycle = (): void => refreshLife?.();
 
@@ -145,6 +148,7 @@ export function startLifecycleTracking(getPath: () => string): () => void {
   };
   try {
     const verdict = judgeLaunch(read(), Date.now());
+    launchVerdict = verdict;
     if (verdict.kind === "terminated_while_visible") recordClientEvent("terminated", "lifecycle", `前回の画面は表示中に終了した可能性（${verdict.path}・表示中になってから${Math.round(verdict.sinceMs / 60000)}分）`, getPath());
     else if (verdict.kind === "discarded_in_background") recordClientEvent("discarded", "lifecycle", `バックグラウンドの間にページが破棄された（${verdict.path}・${Math.round(verdict.awayMs / 60000)}分間）`, getPath());
   } catch {

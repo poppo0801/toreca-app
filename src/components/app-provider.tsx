@@ -7,6 +7,8 @@ import type { ExpenseInput, SaleInput } from "@/lib/finance-input";
 import type { ApplyOptions, ProfileSettingsInput } from "@/lib/server/lottery-service";
 import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import { createRepository } from "@/services";
+import * as local from "@/lib/mutations";
+import { reconcileData } from "@/lib/reconcile-data";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { rebindPushSubscription } from "@/app/(app)/settings/notifications/actions";
 import { copyProfileSettings, saveProfileSettings } from "@/app/(app)/settings/profile-settings-actions";
@@ -114,6 +116,14 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   const firstLoad = useRef(true);
   // 一度でも読み込めたあとの更新失敗では、画面全体をエラーにせず通知にとどめる（全面ローディング/エラーは起動時だけ）
   const hasData = useRef(false);
+  // 最新のデータ・「いま」・最後に取得できた時刻（再取得の判断と、保存の楽観的更新・失敗時の巻き戻しに使う）
+  const dataRef = useRef<AppData | null>(null);
+  const nowRef = useRef(0);
+  const lastLoadAt = useRef(0);
+  // 保存の順序づけ（押した順に1件ずつ）と、保存中に見送った再取得の印
+  const opQueue = useRef<Promise<void>>(Promise.resolve());
+  const pendingOps = useRef(0);
+  const resync = useRef(false);
 
   const loading = useRef(false);
   const load = useCallback(
@@ -127,10 +137,24 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
           try {
             const d = await withTimeout(repo.load(start), attempt === 0 ? LOAD_TIMEOUT_MS : 12_000);
             hasData.current = true;
-            setData(d);
-            setNow(start);
+            lastLoadAt.current = Date.now();
+            // 保存中の操作があるときは、古い取得結果で画面（楽観的な表示）を上書きしない。保存がすべて終わってから取り直す
+            if (pendingOps.current > 0) {
+              resync.current = true;
+              return d;
+            }
+            // 内容が前回と同じ部分は同じ参照のまま。すべて同じなら再描画しない（ページ移動・復帰のたびの全体の再描画を避ける。Stage 7O）
+            const merged = reconcileData(dataRef.current, d);
+            const changed = merged !== dataRef.current;
+            dataRef.current = merged;
+            if (changed) setData(merged);
+            // 「いま」（締切の残り時間の基準）は、内容が変わったとき、または30秒以上更新していないときだけ更新する
+            if (changed || start.getTime() - nowRef.current >= 30_000) {
+              nowRef.current = start.getTime();
+              setNow(start);
+            }
             setLoadError(null);
-            return d;
+            return merged;
           } catch (e) {
             lastError = e;
             // 時間切れ（すでに25秒待った）は繰り返さない。すぐ失敗する通信エラーだけやり直す
@@ -160,6 +184,11 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
     prevPath.current = pathname;
     if (firstLoad.current) firstLoad.current = false;
     else if (prev?.startsWith("/settings") && pathname.startsWith("/settings") && hasData.current) return;
+    // 画面の移動は、表示を止めずに裏で最新化する（取得済みの画面を先に出し、内容が変わったときだけ更新）。
+    // 保存の結果で最新になっているコア画面どうしの移動は、直近15秒以内なら取り直さない（連続した切り替えでサーバーへ何度も問い合わせない）。
+    // マスター管理・コレクション・一括登録など、画面の外でデータが変わりうる画面から戻るときは必ず取り直す
+    const CORE = ["/lotteries", "/purchases", "/finance", "/records", "/battles"];
+    if (prev && CORE.includes(prev) && CORE.includes(pathname) && hasData.current && Date.now() - lastLoadAt.current < 15_000) return;
     void load();
   }, [load, pathname]);
 
@@ -182,26 +211,64 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
   }, []);
 
   const run = useCallback(
-    async (fn: (actor: string) => Promise<Outcome>): Promise<Outcome> => {
+    async (fn: (actor: string) => Promise<Outcome>, optimistic?: (d: AppData, actor: string) => AppData): Promise<Outcome> => {
       // 操作者は、画面に表示している（操作中の）プロフィールと必ず同じにする。端末に保存した選択（再読み込み後など）も同じ規則で解決する。
       // 以前は state が未設定のとき先頭のプロフィールを使い、第二ユーザーの応募済み操作が「他のユーザーの応募状況は変更できません」になっていた（Stage 7E）
       const actor = resolveActorId(data?.profiles ?? [], profileId, localDeviceStore.getProfileId());
       if (!actor) return { ok: false, error: "操作プロフィールが選択されていません" };
+      // 楽観的更新: 押した直後に画面へ反映し、サーバーの結果で置き換える。失敗したら元の表示へ戻してエラーを通知する（応募状態などはサーバーの結果が常に正）
+      const before = dataRef.current;
+      let guess: AppData | null = null;
+      if (optimistic && before) {
+        const g = optimistic(before, actor);
+        if (g !== before) {
+          guess = g;
+          dataRef.current = g;
+          setData(g);
+        }
+      }
+      // 保存は押した順に1件ずつ実行する（画面は先に反映されるため、続けて押された操作がサーバーで入れ替わって、応募→取消が取消→応募の順に処理されるのを防ぐ）
+      pendingOps.current += 1;
+      const prevOp = opQueue.current;
+      let release!: () => void;
+      opQueue.current = new Promise<void>((r) => (release = r));
+      await prevOp;
       let res: Outcome;
       try {
         res = await fn(actor);
       } catch {
         res = { ok: false, error: "通信に失敗しました。接続を確認して再度お試しください" };
+      } finally {
+        release();
+        pendingOps.current -= 1;
       }
+      const last = pendingOps.current === 0; // 後ろに続く操作がなければ、このサーバーの結果が最新
       if (res.ok) {
-        setData(res.data);
+        if (last) {
+          const merged = reconcileData(dataRef.current, res.data);
+          dataRef.current = merged;
+          setData(merged);
+          lastLoadAt.current = Date.now();
+        }
         setNotice(null);
       } else {
+        resync.current = true;
+        if (last && guess && dataRef.current === guess && before) {
+          // 他の更新が間に入っていなければ元の表示へ戻す
+          dataRef.current = before;
+          setData(before);
+          resync.current = false;
+        }
         setNotice(res.error);
+      }
+      // 続く操作が無くなったとき、失敗や取得の見送りがあれば、最新の状態を取り直す
+      if (last && resync.current) {
+        resync.current = false;
+        void load({ silent: true });
       }
       return res;
     },
-    [profileId, data],
+    [profileId, data, load],
   );
 
   // モック（DB保存なし）では、設定を端末内に残す（画面の動作確認用）
@@ -313,7 +380,8 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
       notice,
       dismissNotice: () => setNotice(null),
       actions: {
-        setManaged: (id, v) => run((a) => repo.setManaged(a, id, v)),
+        setManaged: (id, v) => run((a) => repo.setManaged(a, id, v), repo.persistent ? (d, a) => local.setManaged(d, a, id, v, new Date()) : undefined),
+        // 応募状態は重要なデータのため、楽観的には切り替えない（押した直後にボタンへスピナーを出し、サーバーで保存できてから表示を変える）。★だけは楽観的に反映する
         setApplied: (id, acc, v, sel, opts) => run((a) => repo.setApplied(a, id, acc, v, sel, opts)),
         setItemResults: (id, r) => run((a) => repo.setItemResults(a, id, r)),
         setAppliedItems: (id, items) => run((a) => repo.setAppliedItems(a, id, items)),

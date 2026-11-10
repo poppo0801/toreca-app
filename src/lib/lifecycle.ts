@@ -36,3 +36,22 @@ export function parseLifeMark(raw: string | null): LifeMark | null {
   }
   return null;
 }
+
+/** 前回の画面へ戻してよい画面（IDやクエリを含まない一覧・設定の画面だけ。編集中の内容は復元しない） */
+const RESTORABLE = /^\/(lotteries|purchases|finance|records|battles|collection|settings(\/[a-z-]+)?)$/;
+/** 復元する最大の離席時間（これより長いときは、起動画面から始める） */
+export const RESTORE_WITHIN_MS = 30 * 60_000;
+
+/**
+ * iOSがバックグラウンドのページを破棄したあと、ホーム画面アプリが起動画面（/lotteries）から始まったときに、直前の画面へ戻すか（Stage 7O・純関数）。
+ * 戻すのは「バックグラウンドのまま破棄された（OSの通常のメモリ回収）」かつ30分以内で、いまが起動画面（クエリなし）で、直前の画面が別の一覧・設定のとき。
+ * 「表示中に終了した可能性」（クラッシュの疑い）のときは戻さない（同じ画面で繰り返し落ちるのを避け、起動画面から始める）。
+ * 戻り値は戻り先のパス（戻さないときは null）。
+ */
+export function restorePath(verdict: LaunchVerdict, current: { pathname: string; search: string }): string | null {
+  if (verdict.kind !== "discarded_in_background") return null;
+  if (verdict.awayMs > RESTORE_WITHIN_MS) return null;
+  if (current.pathname !== "/lotteries" || current.search !== "") return null;
+  if (verdict.path === "/lotteries" || !RESTORABLE.test(verdict.path)) return null;
+  return verdict.path;
+}

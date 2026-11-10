@@ -1,9 +1,10 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
-import { BUILD_ID, hasUnsavedInput, markResume, recordClientError, startLifecycleTracking, touchLifecycle, tryAutoReload } from "@/lib/client-resilience";
+import { restorePath } from "@/lib/lifecycle";
+import { BUILD_ID, getLaunchVerdict, hasUnsavedInput, markResume, recordClientError, startLifecycleTracking, touchLifecycle, tryAutoReload } from "@/lib/client-resilience";
 import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { resumeAction } from "@/lib/resilience";
 
@@ -15,6 +16,7 @@ import { resumeAction } from "@/lib/resilience";
 export function ResilienceWatcher() {
   const { reload } = useApp();
   const pathname = usePathname();
+  const router = useRouter();
   const hiddenAt = useRef<number | null>(null);
   const lastLoad = useRef(0);
   const busy = useRef(false);
@@ -46,6 +48,18 @@ export function ResilienceWatcher() {
   useEffect(() => startLifecycleTracking(() => window.location.pathname), []);
   useEffect(() => touchLifecycle(), [pathname]);
 
+  // iOSがバックグラウンドのページを破棄し、起動画面から始まったときは、直前の画面へ戻す（30分以内・一覧と設定の画面だけ。編集中の内容は復元しない）
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    // ホーム画面アプリ（スタンドアロン）として起動したときだけ。ブラウザで画面を移動しただけのとき（戻る/進むのキャッシュ等）は復元しない
+    const standalone = window.matchMedia?.("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (!standalone) return;
+    const to = restorePath(getLaunchVerdict(), { pathname: window.location.pathname, search: window.location.search });
+    if (to && !hasUnsavedInput()) router.replace(to);
+  }, [router]);
+
   const resumed = useCallback(async (force = false) => {
     // force: 切断中に復帰して待っていた場合（接続が戻ったので、離れていた時間にかかわらず取得する）
     const hiddenMs = force ? Number.POSITIVE_INFINITY : hiddenAt.current ? Date.now() - hiddenAt.current : 0;
@@ -58,6 +72,9 @@ export function ResilienceWatcher() {
     if (window.location.pathname.startsWith("/settings")) return;
     busy.current = true;
     try {
+      // 復帰直後は、画面の描画・通信の再開・タイマーの再開が重なる。少し待ってから取得し、処理を集中させない
+      await new Promise((r) => window.setTimeout(r, 600));
+      if (document.visibilityState === "hidden") return; // 待つ間にまた隠れたら、取得しない（次に戻ったときに判断）
       const d = await reloadRef.current({ silent: true });
       if (d) lastLoad.current = Date.now();
     } finally {

@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+// 更新系は最新のデータをそのまま返し、画面は自分の状態を更新する。revalidatePath はページ全体の再描画（認証・世帯準備のRPCを含む）と、全リンクの先読みの取り直しを起こすため使わない（Stage 7O）
 import { createClient } from "@/lib/supabase/server";
 import {
   addManualPurchase,
@@ -39,10 +39,20 @@ export type MutationResult = { ok: true; data: AppData; createdIds?: string[]; /
 
 async function context(): Promise<{ db: Db; householdId: string } | null> {
   const db = (await createClient()) as unknown as Db;
-  const { data: auth } = await db.auth.getUser();
+  // ログインの確認と世帯の取得は互いに独立（世帯はRLSで自分の世帯だけが返る）。順番に待たず同時に行う（Stage 7O）
+  const [{ data: auth }, householdId] = await Promise.all([db.auth.getUser(), currentHouseholdId(db)]);
   if (!auth.user) return null;
-  const householdId = await currentHouseholdId(db);
   return householdId ? { db, householdId } : null;
+}
+
+/**
+ * 読み取り専用の取得用。署名つきのトークン（JWT）をサーバー内で検証し、認証サーバーへの問い合わせ（getUser）を省く。
+ * 実際のデータの認可は、各クエリのRLS（DB側でJWTを検証）が担うため、読み取りの安全性は変わらない。更新系は従来どおり getUser で確認する。
+ */
+async function readContext(): Promise<{ db: Db } | null> {
+  const db = (await createClient()) as unknown as Db;
+  const { data } = await db.auth.getClaims();
+  return data?.claims ? { db } : null;
 }
 
 async function mutate<T>(fn: (c: { db: Db; householdId: string }) => Promise<ServiceResult<T>>): Promise<MutationResult> {
@@ -52,7 +62,6 @@ async function mutate<T>(fn: (c: { db: Db; householdId: string }) => Promise<Ser
   if (!res.ok) return { ok: false, error: res.error };
   try {
     const data = await loadAppData(c.db);
-    revalidatePath("/lotteries");
     const v = res.value as { id?: string; ids?: string[] } | undefined;
     return { ok: true, data, createdIds: v?.ids ?? (v?.id ? [v.id] : undefined) };
   } catch {
@@ -61,7 +70,7 @@ async function mutate<T>(fn: (c: { db: Db; householdId: string }) => Promise<Ser
 }
 
 export async function loadAppDataAction(): Promise<{ ok: true; data: AppData } | { ok: false; error: string }> {
-  const c = await context();
+  const c = await readContext();
   if (!c) return { ok: false, error: "ログインが必要です" };
   try {
     return { ok: true, data: await loadAppData(c.db) };
@@ -82,7 +91,6 @@ export async function saveLotteryBulkAction(inputs: LotteryInput[], opId: string
   if (!res.ok) return { ok: false, error: res.error };
   try {
     const data = await loadAppData(c.db);
-    revalidatePath("/lotteries");
     return { ok: true, data, createdIds: res.value.ids, skipped: res.value.skipped };
   } catch {
     return { ok: false, error: "登録しましたが、最新データの取得に失敗しました。再読み込みしてください" };

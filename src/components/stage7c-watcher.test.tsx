@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const reload = vi.fn(async (_o?: { silent?: boolean }) => ({}) as never);
 let path = "/lotteries";
-vi.mock("next/navigation", () => ({ usePathname: () => path }));
+vi.mock("next/navigation", () => ({ usePathname: () => path, useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/components/app-provider", () => ({ useApp: () => ({ reload }) }));
 vi.mock("@/lib/data-source", () => ({ IS_SUPABASE_MODE: true }));
 vi.mock("@/lib/client-resilience", async (orig) => {
@@ -26,7 +26,8 @@ const setVisibility = (v: "hidden" | "visible") => {
   Object.defineProperty(document, "visibilityState", { value: v, configurable: true });
   act(() => void document.dispatchEvent(new Event("visibilitychange")));
 };
-const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+// 復帰直後は処理を集中させないため、取得は少し待ってから行う（resilience-watcher の待ち時間より長く待つ）
+const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 700))));
 const q = (id: string) => document.body.querySelector(`[data-testid="${id}"]`);
 
 beforeEach(() => {

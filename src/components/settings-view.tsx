@@ -44,11 +44,11 @@ export function SettingsView() {
           <div className="flex flex-wrap gap-2">
             {SUPABASE && (
               <Button asChild variant="outline">
-                <Link href="/battles">対戦記録</Link>
+                <Link href="/battles" prefetch={false}>対戦記録</Link>
               </Button>
             )}
             <Button asChild variant="outline">
-              <Link href="/records">応募実績・当選率</Link>
+              <Link href="/records" prefetch={false}>応募実績・当選率</Link>
             </Button>
           </div>
         </Accordion>

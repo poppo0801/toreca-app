@@ -151,7 +151,7 @@ describe("起動後は全面ローディングを出さない", () => {
     await flush();
     expect(app()).not.toBeNull();
 
-    pathname = "/finance"; // ページ移動
+    pathname = "/collection"; // ページ移動（画面の外でデータが変わりうる画面。コア画面どうしの直近の移動は取り直さない）
     await render(fakeRepo(load));
     await flush();
     expect(load).toHaveBeenCalledTimes(2);
@@ -233,5 +233,66 @@ describe("操作者の解決（Stage 7E: 第二ユーザーの応募済みエラ
     await act(async () => void (await ctx!.actions.setApplied("L1", "b-c1", true)));
     expect(seen).toEqual(["pB"]);
     window.localStorage.removeItem("tcg.device.profileId");
+  });
+});
+
+describe("Stage 7O: ページ移動の再取得・楽観的更新", () => {
+  it("コア画面どうしの直近15秒以内の移動は取り直さない。マスター・コレクションなど画面の外で変わりうる画面からは取り直す", async () => {
+    const load = vi.fn(() => Promise.resolve(data()));
+    await render(fakeRepo(load));
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    pathname = "/purchases";
+    await render(fakeRepo(load));
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1); // 直近の取得があるので取り直さない
+    pathname = "/collection";
+    await render(fakeRepo(load));
+    await flush();
+    expect(load).toHaveBeenCalledTimes(2); // コレクションへは取り直す
+    pathname = "/finance";
+    await render(fakeRepo(load));
+    await flush();
+    expect(load).toHaveBeenCalledTimes(3); // コレクションから戻るときも取り直す
+  });
+
+  it("再取得した内容が同じなら、画面の状態（data の参照）は変わらず再描画されない", async () => {
+    const load = vi.fn(() => Promise.resolve(data()));
+    await render(fakeRepo(load));
+    await flush();
+    const before = ctx!.data;
+    await act(async () => {
+      await ctx!.reload();
+    });
+    expect(ctx!.data).toBe(before);
+  });
+
+  it("★の楽観的更新: 押した直後に画面へ反映し、失敗したら元の表示へ戻してエラーを通知する。応募状態は楽観的に切り替えない（サーバーで保存できてから）", async () => {
+    const d = data();
+    const lot = d.lotteries.find((l) => !(d.management.find((m) => m.lotteryId === l.id)?.isManaged))!;
+    const acc = d.accounts.find((x) => x.chainId === lot.chainId && x.profileId === d.profiles[0].id)!;
+    let finish!: (o: { ok: false; error: string }) => void;
+    const repo = { persistent: true, load: () => Promise.resolve(d), setManaged: () => new Promise((r) => (finish = r)), setApplied: () => new Promise(() => {}) } as unknown as LotteryRepository;
+    await render(repo);
+    await flush();
+    const managed = () => ctx!.data.management.find((m) => m.lotteryId === lot.id)?.isManaged === true;
+    expect(managed()).toBe(false);
+    let p!: Promise<unknown>;
+    await act(async () => {
+      p = ctx!.actions.setManaged(lot.id, true);
+    });
+    expect(managed()).toBe(true); // サーバーの応答前に反映（押した直後）
+    await act(async () => {
+      finish({ ok: false, error: "保存できませんでした" });
+      await p;
+    });
+    expect(managed()).toBe(false); // 失敗で元に戻る
+    expect(ctx!.notice).toBe("保存できませんでした");
+    // 応募状態: サーバーの応答まで画面は変わらない
+    const applied = () => ctx!.data.applications.some((x) => x.lotteryId === lot.id && x.accountId === acc.id && x.state === "applied");
+    await act(async () => {
+      void ctx!.actions.setApplied(lot.id, acc.id, true);
+    });
+    expect(applied()).toBe(false);
   });
 });

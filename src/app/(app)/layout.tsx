@@ -18,8 +18,9 @@ async function AuthGate({ children }: { children: React.ReactNode }) {
   if (isSupabaseMode) {
     const supabase = await createClient();
     // ログインの確認。通信の一時的な失敗ではログイン画面へ送らず、画面側の復旧（再試行）に任せる（Stage 7C）
-    const { data: auth, error: authError } = await supabase.auth.getUser();
-    if (!auth.user) {
+    // 署名つきトークンをサーバー内で検証する（認証サーバーへの問い合わせを省き、起動・復帰の再読み込みを速くする。データの認可は各クエリのRLSが行う。Stage 7O）
+    const { data: auth, error: authError } = await supabase.auth.getClaims();
+    if (!auth?.claims) {
       if (isTransientAuthError(authError)) throw new Error("通信に失敗しました（認証の確認）");
       redirect("/login");
     }

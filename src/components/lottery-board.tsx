@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useProgressiveCount } from "@/lib/use-progressive";
 import { PAGE_HEADING_ROW, PageHeading } from "@/components/page-heading";
 import { ApplyExitProvider, useApplyExitController } from "@/components/apply-exit";
 import { useSearchParams } from "next/navigation";
@@ -207,6 +208,10 @@ function LotteryBoardInner() {
   const lotteries = useMemo(() => selectLotteries(data, tab, filters, now, profile.id, exit.keepIds, viewScope), [data, tab, filters, now, profile.id, exit.keepIds, viewScope]);
   // 新着 = 全情報タブに出ている抽選（件数と同じ集合: 既定の絞り込み・スルー除外）のうち、まだ詳細を確認していないもの。必ず件数以下になる（Stage 6K）。
   // 以前は絞り込み前の全抽選から数えていたため、受付終了・応募済みの新着が混ざって件数を超えていた
+  // 件数が多くても最初の画面分だけをすぐ描画し、残りは続けて足す（フォーカス先は必ず含める）
+  const focusTarget = highlight ?? focusId;
+  const focusIdx = focusTarget ? lotteries.findIndex((l) => l.id === focusTarget) : -1;
+  const shownCount = useProgressiveCount(lotteries.length, tab, { needed: focusIdx >= 0 ? focusIdx + 1 : 0 });
   const newCount = useMemo(() => selectLotteries(data, "all", defaultFiltersFor("all"), now, profile.id).filter((l) => l.isNew).length, [data, now, profile.id]);
   const dots = useMemo(() => tabDots(data, profile.id, now, viewScope), [data, profile.id, now, viewScope]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
@@ -389,7 +394,7 @@ function LotteryBoardInner() {
             {/* カードが画面の横へはみ出して横スクロールや残像にならないよう、横方向をクリップする（ring が欠けないよう左右に1の余白）。
                 グリッドの列は minmax(0,1fr) で、中身の最小幅（折り返さない文字など）に引き伸ばされないようにする */}
             <ul className="-mx-1 space-y-2.5 overflow-x-clip px-1" aria-label="抽選一覧">
-              {lotteries.map((l) => {
+              {lotteries.slice(0, shownCount).map((l) => {
                 const phase = exit.phases[l.id];
                 const sliding = phase === "sliding";
                 const dir = exit.dirs[l.id] ?? "right";
