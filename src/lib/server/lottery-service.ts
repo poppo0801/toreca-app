@@ -11,6 +11,8 @@ import { chainLogoUrl } from "@/lib/chain-logo";
 import { isCondKind, isCondState, sanitizePurchaseParams, type CondKind, type CondState } from "@/lib/chain-conditions";
 import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMethods, normalizeRequirementTags, sanitizeRequirementDetails } from "@/lib/lottery-taxonomy";
 import { buildLotteryPayload } from "@/lib/lottery-payload";
+import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
+import { isDummyStoreName, storeKey } from "@/lib/store-name";
 import { ackCautions, pruneCautionsOnEdit, type EditSnapshot } from "@/lib/live-cautions";
 import type { Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
@@ -632,7 +634,7 @@ export async function saveLottery(
   raw: LotteryInput,
   actor: string | null,
   /** 定期実行（ログインなし・service_role）からの新規登録。世帯を引数で指定して登録する */
-  opts: { asService?: boolean } = {},
+  opts: { asService?: boolean; /** 自動収集による登録（新規店舗は未確認として登録する。手動登録は確認済み） */ autoCollected?: boolean } = {},
 ): Promise<ServiceResult<{ id: string }>> {
   const parsed = lotteryInputSchema.safeParse(raw);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
@@ -666,6 +668,17 @@ export async function saveLottery(
   }
 
   const prevSnap = id !== null ? await readEditSnapshot(db, id) : null;
+  // 新規店舗の登録状態: 自動収集=未確認 / 手動=確認済み（既存の店舗を使う場合は変更しない）
+  const newStoreName = id === null && !input.store.id && !isDummyStoreName(input.store.name) && input.store.name !== SELECT_STORE_PLACEHOLDER ? input.store.name.trim() : "";
+  let storeExisted = true;
+  if (newStoreName) {
+    if (!input.chain.id) storeExisted = false;
+    else {
+      const { data: chain } = await db.from("chains").select("name").eq("id", input.chain.id).maybeSingle();
+      const { data: ss } = await db.from("stores").select("name").eq("chain_id", input.chain.id);
+      storeExisted = (ss ?? []).some((r) => storeKey(r.name, chain?.name) === storeKey(newStoreName, chain?.name));
+    }
+  }
   const payload = buildLotteryPayload(input, id, actor);
   const { data, error } = opts.asService && id === null
     ? await db.rpc("save_lottery_tx_as", { p: payload as never, p_actor: actor as string, p_household: householdId })
@@ -689,6 +702,10 @@ export async function saveLottery(
     })
     .eq("id", data as string);
   if (tax.error) return fail("抽選は保存しましたが、発表方法・応募条件の分類を保存できませんでした。もう一度保存してください");
+  if (newStoreName && !storeExisted && !opts.autoCollected && !opts.asService) {
+    const { data: l } = await db.from("lotteries").select("store_id").eq("id", data as string).maybeSingle();
+    if (l?.store_id) await db.from("stores").update({ is_provisional: false }).eq("id", l.store_id).eq("is_provisional", true);
+  }
   // 編集後の再評価: 相違の注意は、該当項目を利用者が変更したときだけ解消する（失敗しても保存自体は成功のまま）
   if (prevSnap) {
     try {
@@ -934,6 +951,46 @@ export interface AppliedStoreInput {
 
 const appliedStoreSchema = z.object({ id: z.uuid().nullable(), name: z.string().trim().max(80), prefecture: z.string().trim().max(10).default("") });
 
+/**
+ * 応募時に入力した店舗を、店舗マスターへ登録する（Stage 7N）。応募の記録が成功した後にだけ呼ぶ。
+ *  - 同じ系列に同じ店舗（表記揺れを吸収: 全半角・空白・系列名の接頭・末尾の「店」）があれば再利用し、重複登録しない。都道府県が未設定なら補う
+ *  - 無ければ確認済みの正式登録として追加する。架空の名前（店舗未確認・不明 など）は登録しない
+ *  - 失敗しても応募の記録は有効（応募店舗は名前だけで保持される）。戻り値は店舗ID（登録できなかったときは null）
+ */
+export async function registerAppliedStore(db: Db, householdId: string, chainId: string, store: { name: string; prefecture: string }, actor: string | null): Promise<string | null> {
+  const name = store.name.trim();
+  if (isDummyStoreName(name)) return null;
+  const { data: chain } = await db.from("chains").select("name").eq("id", chainId).maybeSingle();
+  const key = storeKey(name, chain?.name);
+  if (!key) return null;
+  const { data: rows } = await db.from("stores").select("id,name,prefecture").eq("chain_id", chainId);
+  const hit = (rows ?? []).find((r) => storeKey(r.name, chain?.name) === key);
+  if (hit) {
+    if (!hit.prefecture && store.prefecture) await db.from("stores").update({ prefecture: store.prefecture }).eq("id", hit.id);
+    return hit.id;
+  }
+  const { data: created, error } = await db
+    .from("stores")
+    .insert({ household_id: householdId, chain_id: chainId, name, prefecture: store.prefecture, is_provisional: false, updated_by_profile_id: actor })
+    .select("id")
+    .single();
+  if (!error && created) return created.id;
+  // 同時に同じ店舗が登録された場合（一意制約）は、登録済みの店舗を使う
+  const { data: again } = await db.from("stores").select("id").eq("chain_id", chainId).eq("name", name).maybeSingle();
+  return again?.id ?? null;
+}
+
+/** 応募の記録が成功した後に、入力された店舗をマスターへ登録して応募記録に紐づける（失敗しても応募の記録は維持） */
+async function linkAppliedStore(db: Db, householdId: string, chainId: string, lotteryId: string, accountId: string, cols: { applied_store_id: string | null; applied_store_name: string; applied_store_prefecture: string } | null, actor: string | null): Promise<void> {
+  if (!cols || cols.applied_store_id || !cols.applied_store_name) return;
+  try {
+    const id = await registerAppliedStore(db, householdId, chainId, { name: cols.applied_store_name, prefecture: cols.applied_store_prefecture }, actor);
+    if (id) await db.from("applications").update({ applied_store_id: id }).eq("lottery_id", lotteryId).eq("service_account_id", accountId).eq("state", "applied");
+  } catch {
+    /* 店舗マスターへの登録に失敗しても、応募の記録（名前のみ）は有効 */
+  }
+}
+
 /** 応募店舗の列。店舗マスターを選んだときは名前・都道府県をマスターから補い、未設定は空にする */
 async function appliedStoreColumns(db: Db, chainId: string, raw: AppliedStoreInput | null | undefined): Promise<{ applied_store_id: string | null; applied_store_name: string; applied_store_prefecture: string } | null> {
   if (raw === undefined || raw === null) return null;
@@ -954,7 +1011,7 @@ function backfillAppliedAt(opts: ApplyOptions): string | null {
 }
 
 /** 応募の記録／取消。抽選×アカウントで一意。取消しても行は残す。 */
-async function setAppliedCore(
+async function setAppliedInner(
   db: Db,
   householdId: string,
   lotteryId: string,
@@ -1011,6 +1068,19 @@ async function setAppliedCore(
     household_id: householdId, lottery_id: lotteryId, service_account_id: accountId, applied_at: opts.backfill ? backfillAppliedAt(opts) : nowIso(), state: "applied", selected_item_id: selected, ...(appliedItems ? { applied_item_ids: appliedItems } : {}), updated_by_profile_id: actor, ...(storeCols ?? {}),
   });
   return error ? fail(mapDbError(error)) : ok(undefined);
+}
+
+/** 応募の記録／取消（店舗選択式は、応募の記録が成功した後に入力店舗を店舗マスターへ登録する） */
+async function setAppliedCore(db: Db, householdId: string, lotteryId: string, accountId: string, applied: boolean, actor: string | null, selectedItemId: string | null = null, opts: ApplyOptions = {}): Promise<ServiceResult> {
+  const r = await setAppliedInner(db, householdId, lotteryId, accountId, applied, actor, selectedItemId, opts);
+  if (r.ok && applied && opts.appliedStore?.name?.trim() && !opts.appliedStore.id) {
+    const { data: lot } = await db.from("lotteries").select("chain_id").eq("id", lotteryId).maybeSingle();
+    if (lot) {
+      const cols = await appliedStoreColumns(db, lot.chain_id, opts.appliedStore);
+      await linkAppliedStore(db, householdId, lot.chain_id, lotteryId, accountId, cols, actor);
+    }
+  }
+  return r;
 }
 
 async function setResultCore(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {
@@ -1198,7 +1268,20 @@ export async function setAppliedStore(db: Db, applicationId: string, store: Appl
   if (l.store_mode !== "select_on_apply") return fail("この抽選は応募時に店舗を選ぶ方式ではありません");
   const cols = (await appliedStoreColumns(db, l.chain_id, store ?? { id: null, name: "", prefecture: "" })) ?? { applied_store_id: null, applied_store_name: "", applied_store_prefecture: "" };
   const { error } = await db.from("applications").update({ ...cols, updated_by_profile_id: actor }).eq("id", applicationId);
-  return error ? fail(mapDbError(error)) : ok(undefined);
+  if (error) return fail(mapDbError(error));
+  // 入力した店舗を店舗マスターへ登録（既存なら再利用）。失敗しても応募店舗（名前）は保存済み
+  if (cols.applied_store_name && !cols.applied_store_id) {
+    try {
+      const { data: hh } = await db.from("applications").select("household_id,lottery_id,service_account_id").eq("id", applicationId).maybeSingle();
+      if (hh) {
+        const id = await registerAppliedStore(db, hh.household_id, l.chain_id, { name: cols.applied_store_name, prefecture: cols.applied_store_prefecture }, actor);
+        if (id) await db.from("applications").update({ applied_store_id: id }).eq("id", applicationId);
+      }
+    } catch {
+      /* 応募店舗は名前のみで有効 */
+    }
+  }
+  return ok(undefined);
 }
 
 export async function setResult(db: Db, applicationId: string, result: ResultStatus, actor: string | null): Promise<ServiceResult> {

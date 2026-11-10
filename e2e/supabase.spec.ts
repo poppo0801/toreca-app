@@ -184,7 +184,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await page.goto("/settings/masters");
   await page.getByRole("tab", { name: "系列", exact: true }).click();
   await expect(page.getByTestId("master-row").filter({ hasText: "E2E電機" })).toHaveCount(1);
-  await expect(page.getByTestId("master-row").filter({ hasText: "E2E電機" }).getByTestId("provisional-badge")).toBeVisible();
+  await expect(page.getByTestId("master-row").filter({ hasText: "E2E電機" }).getByTestId("unconfirmed-dot")).toBeVisible();
 
   // 収支: 抽選の購入が支出として入り（金額未入力は0円とみなさない）、実際の金額を修正できる
   await page.goto("/finance");
@@ -503,12 +503,12 @@ test("商品画像: 画像なしはプレースホルダー、手動アップロ
   await page.goto("/settings/masters");
   await page.getByRole("tab", { name: "商品", exact: true }).click();
   const r2 = page.getByTestId("master-row").filter({ hasText: "E2E画像商品" });
-  await expect(r2.getByTestId("provisional-badge")).toBeVisible();
+  await expect(r2.getByTestId("unconfirmed-dot")).toBeVisible();
   await r2.getByRole("button", { name: "編集" }).click();
   await page.getByLabel(/商品コード（任意/).fill("E2E-IMG");
   await page.getByLabel(/BOX定価/).fill("5400");
   await page.getByRole("button", { name: "保存" }).click();
-  await expect(r2.getByTestId("provisional-badge")).toHaveCount(0);
+  await expect(r2.getByTestId("unconfirmed-dot")).toHaveCount(0);
   await expect(r2).toContainText("E2E-IMG");
 });
 
@@ -1003,8 +1003,11 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   // 店舗: 住所・都道府県・位置・往復交通費を登録。緯度だけでは保存できない
   await page.goto("/settings/masters");
   await page.getByRole("tab", { name: "店舗", exact: true }).click();
-  const row = page.getByTestId("master-row").filter({ hasText: "E2E位置店" });
-  await expect(row.getByTestId("store-place")).toContainText("位置未設定");
+  // 店舗マスターは系列別の折りたたみ一覧。検索すると該当する系列が展開される（Stage 7N）
+  await page.getByTestId("master-search").fill("E2E位置店");
+  const row = page.getByTestId("store-row").filter({ hasText: "E2E位置店" });
+  await expect(row).toHaveCount(1);
+  await expect(row.getByTestId("store-distance")).toHaveCount(0); // 位置未設定
   await row.getByRole("button", { name: "編集" }).click();
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel(/都道府県/).fill("大阪府");
@@ -1016,8 +1019,10 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   await dlg.getByLabel(/往復交通費/).fill("1280");
   await dlg.getByRole("button", { name: "保存" }).click();
   await expect(dlg).toHaveCount(0);
-  await expect(row.getByTestId("store-place")).toContainText("往復交通費 1,280円");
-  await expect(row.getByTestId("store-place")).toContainText(/自宅から直線 \d+km/);
+  await expect(row.getByTestId("store-distance")).toContainText(/\d+(\.\d+)?\s?km/);
+  await row.getByRole("button", { name: "編集" }).click();
+  await expect(page.getByRole("dialog").getByLabel(/往復交通費/)).toHaveValue("1280"); // 交通費は一覧に出さず、編集画面で確認
+  await page.getByRole("dialog").getByRole("button", { name: "キャンセル" }).click();
 
   // 抽選カード: 受取方法が店頭なら都道府県ラベル（距離はカードに出さない）。交通費は既定では非表示
   await page.goto("/lotteries");

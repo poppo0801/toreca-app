@@ -169,7 +169,7 @@ describe("Stage 7A: 自動登録の判定（A=通常 / B=注意付き / C=確認
     expect(sel.patch?.storeMode).toBe("select_on_apply");
     expect(sel.cautions.map((c) => c.code)).toContain("store_select_assumed");
     const plain = decideRegistration(ctx({ storeResolved: false, missing: ["店舗を確実に特定できません"], chainStoreSelectDefault: false }));
-    expect(plain.patch?.store?.name).toBe("店舗未確認");
+    expect(plain.patch?.store).toEqual({ id: null, name: "", prefecture: "" }); // 架空の店舗は作らない（店舗は未設定のまま）
     expect(plain.cautions.map((c) => c.code)).toContain("store_unconfirmed");
   });
   it("店舗が告知の明示情報などで特定できているときは、系列の店舗選択式の設定を使わない（個別の情報が優先）。系列設定だけでは店舗選択式と確定しない", () => {

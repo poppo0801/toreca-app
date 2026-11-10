@@ -168,7 +168,8 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
       patch = { storeMode: "select_on_apply", noteStoreSelect: true };
       cautions.push({ code: "store_select_assumed", field: "store", message: "受取店舗が確定していません。この系列は応募時に店舗を選ぶ抽選が多いため、店舗選択式として登録しています（告知で確認してください）", at: c.now });
     } else {
-      patch = { store: { id: null, name: UNCONFIRMED_STORE, prefecture: "" } };
+      // 架空の店舗（「店舗未確認」など）は作らない。店舗は未設定のまま登録し、不足情報（注意）として残す
+      patch = { store: { id: null, name: "", prefecture: "" } };
       cautions.push({ code: "store_unconfirmed", field: "store", message: "受取店舗が確定していません", at: c.now });
     }
   }

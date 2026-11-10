@@ -814,7 +814,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
         input.storeMode = "select_on_apply";
         input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
       } else if (decision.patch?.store) input.store = decision.patch.store;
-      const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister });
+      const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister, autoCollected: true });
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする。注意付きの登録は、注意情報（項目別・理由別）と信頼度を保存する
         await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: decision.cautions as unknown as Json, confidence: decision.confidence, cautions_updated_at: nowIso }).eq("id", saved.value.id);

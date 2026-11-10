@@ -121,8 +121,11 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
       if (res && !res.ok) {
         setError(res.error);
         handle?.fail();
-      } else if (applied) handle?.ok();
+        return res.error;
+      }
+      if (applied) handle?.ok();
       else exit?.cancel(lottery.id);
+      return true as const;
     });
 
   if (control.kind === "blocked") {
@@ -207,8 +210,10 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
           onClose={() => setStoring(null)}
           onSubmit={async (store) => {
             const { itemId, itemIds } = storing;
-            setStoring(null);
-            await run(true, itemId, store, itemIds);
+            // 処理が完了するまでダイアログを開いたまま（ボタンはスピナー・無効）。成功したら閉じ、失敗したらエラーを出して再操作できる
+            const r = await run(true, itemId, store, itemIds);
+            if (r === true) setStoring(null);
+            else if (typeof r === "string") return { ok: false, error: r };
           }}
         />
       )}

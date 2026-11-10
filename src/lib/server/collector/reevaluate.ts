@@ -158,7 +158,7 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
           input.storeMode = "select_on_apply";
           input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
         } else if (patch?.store) input.store = patch.store;
-        const saved = await saveLottery(db, householdId, null, input, deps.actor, { asService: !deps.canRegister });
+        const saved = await saveLottery(db, householdId, null, input, deps.actor, { asService: !deps.canRegister, autoCollected: true });
         if (!saved.ok) {
           const m = mark(c, j, "rematch");
           await db.from("collection_candidates").update({ reasons: [`再評価で登録を試みましたが失敗しました: ${saved.error}`], draft: newDraft(c, j, {}, m) }).eq("id", c.id);

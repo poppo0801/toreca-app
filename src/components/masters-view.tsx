@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreHorizontal } from "lucide-react";
+import { ChevronDown, MoreHorizontal, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { useApp } from "@/components/app-provider";
@@ -20,6 +20,8 @@ import { retryFailedGeocoding, saveRecord, setRetired, setRetiredBulk, type Acti
 import { geocodeAddress, type GeoCandidate } from "@/app/(app)/settings/household-actions";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { storeDistance } from "@/lib/store-distance";
+import { groupStores, type MasterChainRow, type MasterStoreRow } from "@/lib/store-master-view";
+import { isMailOrderStore } from "@/lib/store-name";
 import { setProfileTargetsAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 
@@ -115,9 +117,11 @@ function GeoStatusBar({ stores }: { stores: Record<string, unknown>[] }) {
 const MASTER_PAGE = 40;
 
 export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[] }) {
-  const { profile } = useApp();
+  const { profile, data } = useApp();
   const router = useRouter();
   const [key, setKey] = useState<EntityKey>("chains");
+  /** 店舗マスターで展開している系列（検索中は該当した系列を自動で展開する） */
+  const [openChains, setOpenChains] = useState<Set<string>>(new Set());
   const [showRetired, setShowRetired] = useState(false);
   const [manage, setManage] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -151,9 +155,34 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
   const isProducts = key === "products";
   const nq = normName(q);
 
-  const visible = rows[key]
+  const chainAliases = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const a of rows.chain_aliases) m.set(String(a.chain_id), [...(m.get(String(a.chain_id)) ?? []), String(a.alias)]);
+    return m;
+  }, [rows.chain_aliases]);
+  // 店舗マスター: 系列別のグループ（系列は五十音順、店舗は 未確認 → 距離が近い順 → 距離不明）
+  const storeRowById = useMemo(() => new Map(rows.stores.map((r) => [r.id, r])), [rows.stores]);
+  const storeGroups = useMemo(
+    () =>
+      groupStores(rows.chains as unknown as MasterChainRow[], rows.stores as unknown as MasterStoreRow[], {
+        q,
+        showRetired,
+        distanceKm: (st) => {
+          const r = storeRowById.get(st.id);
+          return storeDistance(data, { lat: (r?.latitude ?? null) as number | null, lng: (r?.longitude ?? null) as number | null })?.km ?? null;
+        },
+        aliases: chainAliases,
+      }),
+    [rows.chains, rows.stores, q, showRetired, data, chainAliases, storeRowById],
+  );
+
+  const visible = (key === "stores" ? storeGroups.flatMap((g) => g.stores.map((st) => storeRowById.get(st.id)!)).filter(Boolean) : rows[key])
     .filter((r) => showRetired || !isRetired(entity, r))
     .filter((r) => (key === "chains" && logoFilter === "nologo" ? r.logo_sha256 == null : true))
+    .filter((r) => {
+      if (key !== "chains" || !nq) return true;
+      return [String(r.name ?? ""), ...(chainAliases.get(r.id) ?? [])].some((t) => normName(t).includes(nq));
+    })
     .filter((r) => {
       if (!isProducts) return true;
       if (category && r.category !== category) return false;
@@ -171,6 +200,7 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
 
   const changeKey = (k: EntityKey) => {
     setKey(k);
+    setQ("");
     setManage(false);
     setSelected(new Set());
     setBulkMsg(null);
@@ -236,6 +266,18 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
           <RecordDialog entity={entity} rows={rows} record={null} trigger={<Button size="sm">＋ 追加</Button>} />
         </div>
       </div>
+
+      {(key === "chains" || key === "stores") && (
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={key === "chains" ? "系列名で検索" : "系列名・店舗名・都道府県で検索"}
+          aria-label={key === "chains" ? "系列を検索" : "店舗を検索"}
+          className="min-h-11 w-full rounded-md border bg-input px-3 text-base"
+          data-testid="master-search"
+        />
+      )}
 
       {key === "chains" && (
         <div role="group" aria-label="ロゴの絞り込み" className="flex gap-1.5">
@@ -314,19 +356,39 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
 
       {key === "stores" && <GeoStatusBar stores={rows.stores} />}
 
+      {key === "stores" && (
+        <StoreGroups
+          groups={storeGroups}
+          rows={rows}
+          rowById={storeRowById}
+          open={openChains}
+          searching={nq !== ""}
+          onToggle={(id) =>
+            setOpenChains((o) => {
+              const n = new Set(o);
+              if (n.has(id)) n.delete(id);
+              else n.add(id);
+              return n;
+            })
+          }
+          manage={bulkable && manage}
+          selected={selected}
+          onSelect={toggleSel}
+        />
+      )}
       <ul className="space-y-2" aria-label={`${entity.label}一覧`}>
-        {visible.slice(0, shownCount).map((r) => (
+        {(key === "stores" ? [] : visible.slice(0, shownCount)).map((r) => (
           <MasterItem key={r.id} entity={entity} row={r} rows={rows} names={names} rules={rules} manage={bulkable && manage} selected={selected.has(r.id)} onSelect={() => toggleSel(r.id)} />
         ))}
       </ul>
-      {visible.length > shownCount && (
+      {visible.length > shownCount && key !== "stores" && (
         <Button variant="outline" className="w-full" onClick={() => setPage({ sig: pageSig, n: shownCount + MASTER_PAGE })} data-testid="masters-more">
           もっと見る（{shownCount}/{visible.length}）
         </Button>
       )}
       {visible.length === 0 && (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {key === "chains" && logoFilter === "nologo" ? "ロゴ未登録の系列はありません。" : `${entity.label}はまだ登録されていません。「＋ 追加」から登録してください。`}
+          {key === "chains" && logoFilter === "nologo" ? "ロゴ未登録の系列はありません。" : q && (key === "chains" || key === "stores") ? "該当する項目がありません。" : `${entity.label}はまだ登録されていません。「＋ 追加」から登録してください。`}
         </p>
       )}
     </div>
@@ -384,11 +446,7 @@ function MasterItem({
   const title = (entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ");
   const badges = (
     <>
-      {row.is_provisional === true && (
-        <span className="ml-1.5 inline-block rounded border border-info px-1 align-middle text-[10px] font-normal text-info" title="仮登録（情報を補完してください）" data-testid="provisional-badge">
-          仮
-        </span>
-      )}
+      {row.is_provisional === true && <UnconfirmedDot className="ml-1.5 align-middle" />}
       {retired && <span className="ml-1.5 align-middle text-xs font-normal text-muted-foreground">（{entity.retire === "active" ? "無効" : "非表示"}）</span>}
     </>
   );
@@ -507,11 +565,11 @@ function FieldInput({ field, rows, value, onChange }: { field: Field; rows: Mast
   );
 }
 
-function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows: MasterRows; record: Row | null; trigger: React.ReactNode }) {
+function RecordDialog({ entity, rows, record, trigger, preset }: { entity: Entity; rows: MasterRows; record: Row | null; trigger: React.ReactNode; /** 追加時の初期値（例: 系列の店舗を追加するときの chain_id） */ preset?: Record<string, string> }) {
   const { profile } = useApp();
   const router = useRouter();
   const initial = () =>
-    Object.fromEntries(entity.fields.map((f) => [f.name, record?.[f.name] != null ? String(record[f.name]) : String(f.default ?? "")]));
+    Object.fromEntries(entity.fields.map((f) => [f.name, record?.[f.name] != null ? String(record[f.name]) : String(preset?.[f.name] ?? f.default ?? "")]));
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -566,6 +624,11 @@ function RecordDialog({ entity, rows, record, trigger }: { entity: Entity; rows:
             {entity.label}を{record ? "編集" : "追加"}
           </DialogTitle>
           <DialogDescription className="sr-only">操作プロフィール「{profile.label}」として記録されます。</DialogDescription>
+          {record?.is_provisional === true && (
+            <p className="flex items-center gap-1.5 text-sm" data-testid="unconfirmed-note">
+              <UnconfirmedDot /> 未確認
+            </p>
+          )}
           <form onSubmit={submit} className="mt-3 space-y-3">
             {entity.fields.map((f) => (
               <label key={f.name} className="block text-sm">
@@ -772,5 +835,114 @@ function RulesDialog({ profile, chains, stores, rules }: { profile: Row; chains:
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** 未確認の印（小さなオレンジ色の●）。一覧では文字を出さない。スクリーンリーダー向けの名前だけ付ける */
+function UnconfirmedDot({ className }: { className?: string }) {
+  return <span role="img" aria-label="未確認" title="未確認" data-testid="unconfirmed-dot" className={cn("inline-block size-2 shrink-0 rounded-full bg-primary", className)} />;
+}
+
+/**
+ * 店舗マスターの系列別一覧。系列ごとのコンパクトなカード（系列名・店舗数・未確認数・展開）で、初期はすべて折りたたむ。
+ * 展開すると店舗を1行ずつ（店舗名・都道府県・直線距離・未確認の●・編集）。通販の店舗は距離・交通費を出さず「通販」と表示する。
+ */
+function StoreGroups({
+  groups,
+  rows,
+  rowById,
+  open,
+  searching,
+  onToggle,
+  manage,
+  selected,
+  onSelect,
+}: {
+  groups: ReturnType<typeof groupStores>;
+  rows: MasterRows;
+  rowById: Map<string, Row>;
+  open: Set<string>;
+  searching: boolean;
+  onToggle: (chainId: string) => void;
+  manage: boolean;
+  selected: Set<string>;
+  onSelect: (id: string) => void;
+}) {
+  const { data } = useApp();
+  const entity = ENTITIES.stores;
+  return (
+    <ul className="space-y-2" aria-label="系列別の店舗一覧" data-testid="store-groups">
+      {groups.map((g) => {
+        const expanded = searching || open.has(g.chain.id);
+        return (
+          <li key={g.chain.id} className="rounded-lg border bg-card" data-testid="store-group" data-chain={g.chain.id} data-open={expanded ? "1" : "0"}>
+            <button type="button" aria-expanded={expanded} onClick={() => onToggle(g.chain.id)} className="flex min-h-12 w-full items-center gap-2 px-3 text-left" data-testid="store-group-toggle">
+              <span className="min-w-0 flex-1 truncate text-sm font-bold">{g.chain.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground" data-testid="store-group-count">
+                {g.total}店舗
+              </span>
+              {g.unconfirmed > 0 && (
+                <span className="flex shrink-0 items-center gap-1 text-xs text-primary-ink" data-testid="store-group-unconfirmed" aria-label={`未確認${g.unconfirmed}店舗`}>
+                  <span aria-hidden="true" className="inline-block size-2 rounded-full bg-primary" />
+                  {g.unconfirmed}
+                </span>
+              )}
+              <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} aria-hidden="true" />
+            </button>
+            {expanded && (
+              <div className="border-t" data-testid="store-group-body">
+                <ul className="divide-y">
+                  {g.stores.map((st) => {
+                    const row = rowById.get(st.id);
+                    if (!row) return null;
+                    const mail = isMailOrderStore(st.name, st.sales_kind);
+                    const dist = mail ? null : storeDistance(data, { lat: row.latitude as number | null, lng: row.longitude as number | null });
+                    const retired = isRetired(entity, row);
+                    return (
+                      <li key={st.id} className={cn("flex min-h-11 items-center gap-2 px-3 py-1", retired && "opacity-60")} data-testid="store-row" data-unconfirmed={st.is_provisional ? "1" : undefined}>
+                        {manage && <input type="checkbox" className="size-5 shrink-0" checked={selected.has(st.id)} onChange={() => onSelect(st.id)} aria-label={`${st.name}を選択`} data-testid="master-select" />}
+                        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                          <span className="min-w-0 truncate text-sm">{st.name}</span>
+                          {st.is_provisional && <UnconfirmedDot />}
+                          {retired && <span className="shrink-0 text-xs text-muted-foreground">（非表示）</span>}
+                        </span>
+                        {st.prefecture && <span className="shrink-0 text-xs text-muted-foreground">{st.prefecture}</span>}
+                        {mail ? (
+                          <span className="shrink-0 text-xs text-muted-foreground" data-testid="store-mail-order">
+                            通販
+                          </span>
+                        ) : (
+                          dist && (
+                            <span className={cn("shrink-0 text-xs font-medium", BAND_CLASS[dist.band].split(" ")[1])} data-testid="store-distance">
+                              {formatKm(dist.km)}
+                            </span>
+                          )
+                        )}
+                        <RecordDialog entity={entity} rows={rows} record={row} trigger={<Button size="sm" variant="outline" className="shrink-0">編集</Button>} />
+                      </li>
+                    );
+                  })}
+                  {g.stores.length === 0 && <li className="px-3 py-2 text-xs text-muted-foreground">店舗はまだ登録されていません。</li>}
+                </ul>
+                <div className="border-t px-3 py-1">
+                  <RecordDialog
+                    entity={entity}
+                    rows={rows}
+                    record={null}
+                    preset={{ chain_id: g.chain.id }}
+                    trigger={
+                      <Button size="sm" variant="ghost" className="-ml-2 text-primary-ink" data-testid="store-add-in-chain">
+                        <Plus className="size-4" aria-hidden="true" />
+                        店舗を追加
+                      </Button>
+                    }
+                  />
+                </div>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

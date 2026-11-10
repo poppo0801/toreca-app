@@ -200,7 +200,11 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
   );
 
   // ---- ジェスチャ
+  // ダイアログ・シートは Portal で描画されるが、Reactのイベントは親（このカード）へ伝わる。ダイアログ内の操作（スクロール・選択・タップ）を
+  // スワイプとして扱わない（DOM上でカードの外にある要素のイベントは無視する）。iPhoneで店舗選択のシートを操作すると固まる原因になっていた
+  const inside = (e: React.SyntheticEvent) => !!root.current && root.current.contains(e.target as Node);
   const onPointerDown = (e: React.PointerEvent) => {
+    if (!inside(e)) return;
     if (!enabled || e.pointerType === "mouse" || !e.isPrimary) return;
     if (!rightOp && !leftOp) return;
     // 入力欄・選択欄の操作はスワイプにしない
@@ -208,6 +212,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
     g.current = { id: e.pointerId, x: e.clientX, y: e.clientY, axis: "pending" };
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (!inside(e)) return;
     const s = g.current;
     if (!s || s.id !== e.pointerId || s.axis === "vertical") return;
     const dx = e.clientX - s.x;
@@ -229,6 +234,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
     setOffset(allowed ? pullOffset(dx) : pullOffset(dx) * 0.2);
   };
   const finish = (e: React.PointerEvent, cancelled: boolean) => {
+    if (!inside(e)) return;
     const s = g.current;
     if (!s || s.id !== e.pointerId) return;
     g.current = null;
@@ -265,7 +271,7 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
       onPointerUp={(e) => finish(e, false)}
       onPointerCancel={(e) => finish(e, true)}
       onClickCapture={(e) => {
-        if (swallowClick.current) {
+        if (swallowClick.current && inside(e)) {
           e.preventDefault();
           e.stopPropagation();
         }
@@ -296,13 +302,14 @@ export function SwipeCard({ lottery, tab, children }: { lottery: Lottery; tab: T
           setDialog(null);
           void run(op, extra);
         }}
+        onRunWait={(op, extra) => run(op, extra)}
       />
     </div>
   );
 }
 
 /** 確認が必要なスワイプのダイアログ（発表前の当落・希望商品の選択・購入/受取の選択） */
-function SwipeDialogs({ lottery, dialog, onClose, onRun }: { lottery: Lottery; dialog: PendingDialog | null; onClose: () => void; onRun: (op: SwipeOp, extra?: { itemId?: string; itemIds?: string[]; store?: StoreChoice | null }) => void }) {
+function SwipeDialogs({ lottery, dialog, onClose, onRun, onRunWait }: { lottery: Lottery; dialog: PendingDialog | null; onClose: () => void; onRun: (op: SwipeOp, extra?: { itemId?: string; itemIds?: string[]; store?: StoreChoice | null }) => void; onRunWait: (op: SwipeOp, extra?: { itemId?: string; itemIds?: string[]; store?: StoreChoice | null }) => Promise<boolean> }) {
   const { data, profile, actions } = useApp();
   const toast = useUndoToast();
   const [busy, setBusy] = useState(false);
@@ -350,7 +357,17 @@ function SwipeDialogs({ lottery, dialog, onClose, onRun }: { lottery: Lottery; d
         </DialogContent>
       </Dialog>
       {dialog?.kind === "choose-items" && <ItemPickerDialog lottery={lottery} onClose={onClose} onSubmit={(ids) => onRun("mark_applied", { itemIds: ids })} />}
-      {dialog?.kind === "choose-store" && <AppliedStoreDialog lottery={lottery} confirmLabel="応募済みにする" onClose={onClose} onSubmit={(store) => onRun("mark_applied", { store })} />}
+      {dialog?.kind === "choose-store" && <AppliedStoreDialog
+          lottery={lottery}
+          confirmLabel="応募済みにする"
+          onClose={onClose}
+          onSubmit={async (store) => {
+            // 完了するまで開いたまま（スピナー）。成功で閉じ、失敗はエラーを出して再操作できる
+            const ok = await onRunWait("mark_applied", { store });
+            if (ok) onClose();
+            else return { ok: false, error: "応募を記録できませんでした。もう一度お試しください" };
+          }}
+        />}
       <Dialog open={dialog?.kind === "choose-fulfillment"} onOpenChange={(o) => !o && onClose()}>
         <DialogContent>
           <DialogTitle>何を記録しますか？</DialogTitle>

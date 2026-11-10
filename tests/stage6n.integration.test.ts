@@ -109,7 +109,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 6N: 店舗選択式・支出の系列＋
       const a0 = apps.find((a) => a.accountId === acc[0])!;
       const a1 = apps.find((a) => a.accountId === acc[1])!;
       expect(a0.appliedStore).toMatchObject({ id: storeA, name: "6N大阪店", prefecture: "大阪府" }); // マスターの店舗は名前・都道府県を補う
-      expect(a1.appliedStore).toMatchObject({ id: null, name: "京都店", prefecture: "京都府" }); // マスターに無い店舗は名前だけ
+      // マスターに無い店舗は、応募の成功後に店舗マスターへ確認済みで登録され、応募記録に紐づく（Stage 7N）
+      expect(a1.appliedStore).toMatchObject({ name: "京都店", prefecture: "京都府" });
+      expect(a1.appliedStore?.id).toBeTruthy();
     });
     it("応募後に店舗を変更でき、他のプロフィールの応募店舗は変わらない", async () => {
       const before = (await loadAppData(u1)).applications.filter((a) => a.lotteryId === lot);
@@ -143,7 +145,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 6N: 店舗選択式・支出の系列＋
       const p0 = purchases.find((p) => p.application_id === apps.find((a) => a.accountId === acc[0])!.id)!;
       const p1 = purchases.find((p) => p.application_id === apps.find((a) => a.accountId === acc[1])!.id)!;
       expect(p0).toMatchObject({ chain_id: chainId, store_id: storeB, store_label: null }); // 変更後の応募店舗（神戸店）
-      expect(p1).toMatchObject({ chain_id: chainId, store_id: null, store_label: "京都店" }); // マスターに無い店舗は名前だけ
+      expect(p1).toMatchObject({ chain_id: chainId, store_label: null }); // 入力した店舗は店舗マスターに登録され、購入記録にも店舗IDが入る（Stage 7N）
+      expect(p1.store_id).toBeTruthy();
     });
     it("店舗固定の抽選は従来どおり（応募店舗は使わず、抽選の店舗が購入記録に入る）", async () => {
       const r = await saveLottery(u1, hid, null, lotteryInput({ store: { id: storeA, name: "" }, storeMode: "fixed", selectableStores: [] }), profs[0].id);
