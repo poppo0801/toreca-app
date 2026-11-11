@@ -49,8 +49,5 @@ export async function mergeChainsAction(fromId: string, intoId: string, actor: s
   if (!db) return NEED;
   const r = await mergeChains(db, fromId, intoId, actor);
   if (!r.ok) return { ok: false, error: r.error };
-  revalidatePath("/settings/masters");
-  revalidatePath("/lotteries");
-  revalidatePath("/purchases");
   return { ok: true, result: r.value };
 }

@@ -1,0 +1,502 @@
+{
+  "version": 1,
+  "gold": [
+    {
+      "id": "E01",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト書店",
+        "store": "テスト書店 駅前店",
+        "products": [
+          {
+            "name": "テストパック 第1弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-13",
+        "resultDate": "2027-01-16",
+        "receiveMethod": "store",
+        "requirementTags": [
+          "member_registration"
+        ]
+      },
+      "conditions": [
+        "本文に締切・発表日・受取方法・会員登録の記載がある"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E02",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト通販ショップ",
+        "store": "通販",
+        "products": [
+          {
+            "name": "テストパック 第2弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-15",
+        "resultDate": "2027-01-18",
+        "receiveMethod": "shipping",
+        "applyMethod": "web"
+      },
+      "conditions": [
+        "通販は店舗名『通販』に統一する"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E03",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト家電",
+        "store": "テスト家電 本店",
+        "products": [
+          {
+            "name": "テストパック 第1弾",
+            "quantity": 1,
+            "unit": "box"
+          },
+          {
+            "name": "テストパック 第2弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-14",
+        "resultDate": "2027-01-17",
+        "multiMode": "one_win",
+        "requirementTags": [
+          "app_member"
+        ]
+      },
+      "conditions": [
+        "複数商品は multiMode=one_win（どれか1点のみ当選）"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E04",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト家電",
+        "storeMode": "select_on_apply",
+        "selectableStores": [
+          "テスト家電 本店",
+          "テスト家電 西口店"
+        ],
+        "products": [
+          {
+            "name": "テストスターターデッキ",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-16",
+        "resultDate": "2027-01-19"
+      },
+      "conditions": [
+        "受取店舗は応募時選択。store は未確定のまま登録する"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E05",
+      "decision": "register",
+      "fields": {
+        "chain": "テストカード専門店",
+        "store": "テストカード 中央店",
+        "products": [
+          {
+            "name": "テスト拡張セット",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "lotteryKind": "ongoing",
+        "applyDeadline": null,
+        "resultDate": null
+      },
+      "conditions": [
+        "継続抽選。締切・発表日は定まらないので null（日付を作らない）"
+      ],
+      "unresolvable": [
+        "applyDeadline",
+        "resultDate"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E06",
+      "decision": "register",
+      "allowedDecisions": [
+        "register",
+        "needs_human"
+      ],
+      "fields": {
+        "chain": "テストBOOKS",
+        "store": "テストBOOKS 本店",
+        "products": [
+          {
+            "name": "テストパック 第2弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": null,
+        "resultDate": null,
+        "applyMethod": null
+      },
+      "conditions": [
+        "日程・応募方法は未発表。推測で埋めず、不明のまま登録（または要確認）"
+      ],
+      "unresolvable": [
+        "applyDeadline",
+        "resultDate",
+        "applyMethod"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E07",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト百貨店",
+        "store": "テスト百貨店 中央館",
+        "products": [
+          {
+            "name": "テスト拡張セット",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-14",
+        "resultDate": "2027-01-17",
+        "receiveMethod": "either"
+      },
+      "conditions": [
+        "公式（input）と非公式（secondary）で日付が食い違う場合は公式を採用する"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        },
+        {
+          "ref": "secondary[0]",
+          "authority": "third_party"
+        }
+      ]
+    },
+    {
+      "id": "E08",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト書店",
+        "store": "テスト書店 郊外店",
+        "products": [
+          {
+            "name": "テストパック 第1弾",
+            "quantity": 1,
+            "unit": "box"
+          },
+          {
+            "name": "テスト拡張セット",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-11",
+        "resultDate": "2027-01-13",
+        "applyMethod": "store",
+        "requirementTags": [
+          "purchase_history",
+          "id_check",
+          "app_member"
+        ],
+        "requirementLogic": "or"
+      },
+      "conditions": [
+        "条件は『（購入履歴 かつ 本人確認）または（アプリ会員）』。タグ集合と論理（or）を再現する"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E09",
+      "decision": "register",
+      "fields": {
+        "chain": "テストBOOKS",
+        "store": "テストBOOKS 本店",
+        "products": [
+          {
+            "name": "テストパック 第1弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-14",
+        "resultDate": "2027-01-16",
+        "applyMethod": "web",
+        "receiveMethod": "store"
+      },
+      "conditions": [
+        "『ＴＥＳＴ　ＢＯＯＫＳ』は既存の系列『テストBOOKS』の別名。新しい系列を作らない"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E10",
+      "decision": "register",
+      "fields": {
+        "chain": "テストモール",
+        "store": "本店",
+        "products": [
+          {
+            "name": "テストパック 第1弾",
+            "quantity": 2,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-12",
+        "resultDate": "2027-01-14",
+        "applyMethod": "web",
+        "receiveMethod": "store"
+      },
+      "conditions": [
+        "『本店』は系列ごとに別店舗。系列=テストモール の本店（東京都）を選ぶ（テスト家電の本店ではない）"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E11",
+      "decision": "duplicate",
+      "duplicateOf": "X01",
+      "fields": {},
+      "conditions": [
+        "既存 X01（同一店舗・同一商品・同一期間）と同じ抽選。非公式のまとめだが内容は一致"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "third_party"
+        }
+      ]
+    },
+    {
+      "id": "E12",
+      "decision": "register",
+      "mustNotMarkDuplicate": true,
+      "fields": {
+        "chain": "テスト家電",
+        "store": "テスト家電 西口店",
+        "products": [
+          {
+            "name": "テストパック 第1弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-20",
+        "resultDate": "2027-01-22",
+        "applyMethod": "store",
+        "receiveMethod": "store"
+      },
+      "conditions": [
+        "同一店舗・同一商品でも、応募期間が違う別回の抽選（X02 は 1/10 締切）。重複として除外しない"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E13",
+      "decision": "needs_human",
+      "mustNotRegister": true,
+      "fields": {},
+      "conditions": [
+        "店舗が特定できない（『各店舗』）。店舗を推測して登録してはならない"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E14",
+      "decision": "exclude",
+      "allowedDecisions": [
+        "exclude",
+        "needs_human"
+      ],
+      "mustNotRegister": true,
+      "fields": {},
+      "conditions": [
+        "店・商品・日程のいずれも特定できない。登録してはならない"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "third_party"
+        }
+      ]
+    },
+    {
+      "id": "E15",
+      "decision": "exclude",
+      "allowedDecisions": [
+        "exclude",
+        "needs_human"
+      ],
+      "mustNotRegister": true,
+      "fields": {},
+      "conditions": [
+        "マスターにない商品名（第9弾 プレミアム）・抽選でない配布・非公式の投稿。誤情報として登録しない"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "third_party"
+        }
+      ]
+    },
+    {
+      "id": "E16",
+      "decision": "exclude",
+      "allowedDecisions": [
+        "exclude"
+      ],
+      "mustNotRegister": true,
+      "fields": {},
+      "conditions": [
+        "対象地域（東京・神奈川・埼玉・千葉）外の店舗（沖縄県）。除外する"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E17",
+      "decision": "register",
+      "allowedDecisions": [
+        "register",
+        "needs_human"
+      ],
+      "requiresCaution": true,
+      "fields": {
+        "chain": "テスト書店",
+        "store": "テスト書店 港北店",
+        "products": [
+          {
+            "name": "テストパック 第2弾",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-12",
+        "resultDate": "2027-01-14"
+      },
+      "conditions": [
+        "閉店予定の注意があるが、抽選期間は閉店前。登録する場合は注意（cautions）を付ける"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        }
+      ]
+    },
+    {
+      "id": "E18",
+      "decision": "register",
+      "fields": {
+        "chain": "テスト書店",
+        "store": "テスト書店 駅前店",
+        "products": [
+          {
+            "name": "テスト拡張セット",
+            "quantity": 1,
+            "unit": "box"
+          }
+        ],
+        "applyDeadline": "2027-01-15",
+        "resultDate": "2027-01-18",
+        "applyMethod": "web"
+      },
+      "missingResolvable": [
+        "applyDeadline",
+        "resultDate",
+        "applyMethod"
+      ],
+      "conditions": [
+        "本文に日程がない。公式サイトのお知らせ（corpus C-E18）を調べると、締切・発表日・応募方法が分かる"
+      ],
+      "sources": [
+        {
+          "ref": "input",
+          "authority": "official"
+        },
+        {
+          "ref": "corpus:C-E18",
+          "authority": "official"
+        }
+      ]
+    }
+  ]
+}

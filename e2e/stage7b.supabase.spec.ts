@@ -158,6 +158,8 @@ test("設定とタブ切替スワイプ: スワイプ操作・日付表示はプ
     await page.goto("/settings/display");
     await page.getByTestId("swipe-mode-tab").click();
     await page.getByTestId("date-layout-b").click();
+    // 設定の保存は1件ずつ順に行われる（Stage 7O）。2つ目（日付表示）の保存完了まで待ってから再読み込みする
+    await expect.poll(async () => JSON.stringify((await a.from("profile_settings").select("profile_id,settings").eq("household_id", hid)).data ?? [])).toContain("\"dateLayout\":\"b\"");
     await expect.poll(async () => JSON.stringify((await a.from("profile_settings").select("profile_id,settings").eq("household_id", hid)).data ?? [])).toContain("\"swipeMode\":\"tab\"");
     await page.reload();
     await expect(page.getByTestId("swipe-mode-tab")).toHaveAttribute("aria-checked", "true");

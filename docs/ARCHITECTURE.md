@@ -49,7 +49,8 @@
 **開発・テストはローカルの Supabase（Docker）で行い、本番には繋がない。**使い方は `docs/DEV_ENVIRONMENT.md`、記録は `docs/stage8c.md`。
 - **環境の構成**: 開発 = ローカルSupabase（`.dev-supabase/`、ポート553xx、マイグレーション94本、架空のテストデータ、`.env.local`）／本番 = Supabase `toreca-app` ＋ Vercel（設定は Vercel の環境変数と `.env.production-ops`）。Vercel の Preview・Development には環境変数が無い（プレビューは本番DBに繋がらない）。
 - **誤接続の防止（仕組み）**: ① `.env.local` に本番の鍵を置かない ② 接続先の検証（URLのプロジェクトID・鍵のJWT `ref`。`scripts/lib/target.mjs`・`src/lib/supabase/target.ts`）③ `dev`・`test:db`・`test:e2e:supabase`・`cleanup:testdata`・`db:*` は本番なら実行前に停止（解除手段なし）④ アプリは `next dev`／`TOREMANE_ENV=local` で本番の Supabase を拒否 ⑤ 本番への作用は `npm run prod -- … --yes-production` のみ ⑥ Claude Code は `db push`・`--linked`・force push・`.env.production-ops` の読み取りを設定で禁止（`.claude/settings.json`）。
-- **残るリスク**: 人間が端末で `npx supabase db push` を打つと、リンク済みの本番に届く（CLI の仕様）。`main` への push は自動で本番に反映され、CI 合格を条件にする設定（GitHub のブランチ保護・Vercel）は**未確認・未設定**（利用者の操作が必要。`docs/stage8c.md` §6）。ローカルDBは本番データを持たない（性能・件数の挙動は本番と異なる）。
+- **Git・Vercel（2026-11-11 確認。`docs/stage8d1.md` §4）**: Vercel の Production Branch は `main`、Git 連携で `main` への push が自動で本番に反映される（直近のデプロイはすべて `git`・`main` 由来）。Preview・Development の環境変数は 0 個（プレビューは本番DBに繋がらない）。この端末では `.githooks/pre-push` が `main` への push を止め、Claude Code は設定で `main` への push を禁止。**GitHub のブランチ保護（CI 必須・直接 push 禁止）は未設定**（認証が要るため利用者の操作。リポジトリは公開）。
+- **残るリスク**: 人が端末で `npx supabase db push` を打つと、リンク済みの本番に届く（CLI の仕様）。GitHub 側で保護されていない間、他の端末・他の手段からの `main` への push は止まらず、CI を待たずに本番へ反映される。ローカルDBは本番データを持たない（性能・件数の挙動は本番と異なる）。
 - 安全に使える層: ローカルDB・`NEXT_PUBLIC_DATA_SOURCE=mock` の単体テスト・画面 E2E・CI。
 - 本番の変更・削除は、**自律型 AI の実験とは別の、明示的な手順**（承認 → `backup:full` → `npm run prod`）。本番データを変更する AI の試験は禁止（`CLAUDE.md`）。
 

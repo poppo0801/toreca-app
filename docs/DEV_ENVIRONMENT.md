@@ -12,7 +12,7 @@
 | 初期化（全削除→マイグレーション再適用）→ 再投入 | `npm run db:reset` → `npm run db:seed` |
 | 状態・接続先の確認 | `npm run db:status` / `npm run db:check` |
 | 型・lint・単体テスト・ビルド | `npm run typecheck` / `lint` / `test` / `build`（本番に触れない） |
-| DB結合テスト・Supabase E2E | `npm run test:db` / `E2E_SPEC=<spec> npm run test:e2e:supabase`（ローカルDB限定。本番なら実行前に停止） |
+| DB結合テスト・Supabase E2E | `npm run test:db` / `E2E_SPEC=<ファイル名> npm run test:e2e:supabase`。全件は `E2E_SPEC="*.supabase.spec.ts"`（ファイルごとに世帯を作り直す。約13分）。ローカルDB限定・本番なら実行前に停止 |
 | テストデータの掃除 | `npm run cleanup:testdata -- --execute`（ローカルのみ） |
 
 - ローカルDBは `.dev-supabase/`（Git管理外）で動く。ポートは **553xx**（家計簿アプリが標準の 54321〜 を使うため。家計簿には触れない）。`db:up` のたびに `supabase/config.toml` と `supabase/migrations/`（94本）を同期する。
@@ -64,3 +64,24 @@ AI の実接続を開発で試す場合（後の Stage）: `.env.local` に実�
 ## 6. 本番の復元・反映（別手順）
 - バックアップ・復元: [RESTORE.md](RESTORE.md)（復元用の本番設定は `.env.production-ops`）。
 - 本番へのマイグレーション・データ変更: 利用者の承認 → `npm run backup:full` → `npm run prod -- …`（または承認つきの個別手順）。実行内容と接続先（プロジェクトID）を確認してから行う。
+
+## 7. テストデータ（Stage 8D-1）
+`npm run db:seed`（何度実行しても同じ状態。`db:reset` 後に再投入できる）。データ本体は `scripts/lib/dev-seed-data.mjs`（すべて架空。本番データは複製しない）。
+| 種類 | 内容（現在の総数: 系列7・店舗15・商品4・抽選18・収集元2・候補8） |
+|---|---|
+| 系列 | 直営・その他・運営形態が未確認、通販専業、表記ゆれ（別名: カナ・全角英字） |
+| 店舗 | 同一系列の複数店舗／同名店舗（「本店」が系列違いで2つ）／通販専用・実店舗系列の通販／住所と座標あり・住所不明／閉店・移転の可能性（要確認の印）／地域外（北海道・沖縄）／別名つき |
+| 抽選（`import_key=dev-seed:L01〜L15` ＋従来の3件） | 通常の店舗・通販・複数商品（どれか1つ当選）・店舗選択式・継続・日程不明（未確認項目つき）・同名店舗・複雑な応募条件（3タグ・or）・情報源で日付が食い違う（注意つき）・閉店の可能性・地域外・同一店舗同一商品の別回 |
+| 収集元・候補（無効=自動実行されない） | 自動登録・重複・保留（締切不明／店舗未確定／日付の食い違い／誤情報の疑い）・除外（地域外）・失敗 |
+- ログイン: `dev-user@example.invalid` / `dev-local-password-1`。DB結合テスト `tests/dev-seed.integration.test.ts` が、読み込み・種類の網羅・冪等性を検査する。
+- 日付は実行日からの相対（期限切れで一覧が空にならない）。新しい種類を足すときはデータ側（`dev-seed-data.mjs`）に1行足す。既存のキー（`dev-seed:L01`…）は変えない。
+
+## 8. 新旧AI比較の評価基盤（Stage 8D-1）
+`eval/`（入力18件・正解・既存データの断面・調査用資料・採点）と `npm run eval:validate|baseline|score|compare`。構成・出力形式・評価7項目・接続方法は [../eval/README.md](../eval/README.md)。**正解はシステムに渡さない**（`gold/` は採点だけが読む）。AI の実接続は未実施。
+
+## 9. Git の誤 push 防止（この端末）
+- `.githooks/pre-push` が `main` への push を止める（`git config core.hooksPath .githooks` が設定済み。新しく clone したら `npm run setup:hooks`）。利用者が反映を決めたときだけ `TOREMANE_ALLOW_MAIN_PUSH=1` を付けて実行する。Claude Code は `main` への push・`TOREMANE_ALLOW_MAIN_PUSH`・`--mirror`・`--delete` を設定で禁止（`.claude/settings.json`）。
+- GitHub 側のブランチ保護・Vercel の設定は [stage8d1.md](stage8d1.md) §4。
+
+## 10. 安全性の自動テスト
+`src/lib/dev-safety.test.ts`（単体テストに含まれ、CI でも動く）が、実スクリプトを子プロセスで起動して、本番の URL・鍵を注入した場合に**接続前に停止**することを確認する（`dev`・`db:check/seed`・`test:db`・`test:e2e:supabase`・`cleanup:testdata`・バックアップ・`verify:prod`・`npm run prod` の確認フラグと本番判定）。本番への通信は行わない。

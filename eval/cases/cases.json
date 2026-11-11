@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "E01",
+      "category": "normal_store",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト書店 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-bookstore/news/1",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【テスト書店 駅前店】テストパック 第1弾 抽選販売のお知らせ。応募期間：1月6日〜1月13日 23:59。当選発表：1月16日。店頭でのお受け取り、1人1口（1BOX）。会員登録が必要です。"
+      }
+    },
+    {
+      "id": "E02",
+      "category": "online",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト通販ショップ 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-mall/lottery/2",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テスト通販ショップ：テストパック 第2弾 抽選販売（通販）。応募：1/7〜1/15 12:00、結果は1/18にメールで通知、配送のみ。1口1BOX。"
+      }
+    },
+    {
+      "id": "E03",
+      "category": "multi_product",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "テスト家電 公式（架空）",
+        "sourceUrl": "https://example.invalid/x/test_denki_x/status/3",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【テスト家電 本店】抽選受付中！ 対象：テストパック 第1弾 1BOX／テストパック 第2弾 1BOX（どちらか1点のみ当選）。応募は1/6〜1/14、発表1/17。アプリ会員限定です。"
+      }
+    },
+    {
+      "id": "E04",
+      "category": "store_select",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト家電 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-denki/campaign/4",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テスト家電 春の抽選キャンペーン：テストスターターデッキ 1BOX。応募は1/8〜1/16。受取店舗は応募時に「テスト家電 本店」「テスト家電 西口店」から選択。発表1/19。"
+      }
+    },
+    {
+      "id": "E05",
+      "category": "ongoing",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テストカード専門店 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-card/lottery/5",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テストカード 中央店では、テスト拡張セットの抽選を毎週土曜に店頭で受け付けています（終了日未定）。当日店頭で整理券を配布、その場で抽選。"
+      }
+    },
+    {
+      "id": "E06",
+      "category": "unknown_dates",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "テストBOOKS 公式（架空）",
+        "sourceUrl": "https://example.invalid/x/test_books/status/6",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テストBOOKS 本店でテストパック 第2弾の抽選販売を行います！ 応募方法・日程は後日お知らせします。"
+      }
+    },
+    {
+      "id": "E07",
+      "category": "source_conflict",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト百貨店 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-depart/news/7",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テスト百貨店 中央館：テスト拡張セット 抽選販売。応募は1/9〜1/14 17:00、発表は1/17。受取は店頭または配送を選べます。",
+        "secondary": [
+          {
+            "sourceKind": "x",
+            "sourceName": "個人の投稿（架空・非公式）",
+            "sourceUrl": "https://example.invalid/x/someone/status/7",
+            "text": "テスト百貨店のテスト拡張セット抽選、締切1/12らしい。発表は1/15だって。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "E08",
+      "category": "complex_conditions",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト書店 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-bookstore/news/8",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【テスト書店 郊外店】テストパック 第1弾・テスト拡張セット 抽選販売（各1BOX、2点セット）。応募：1/7〜1/11（店頭で用紙を提出）。発表1/13。対象：過去6か月に対象商品の購入履歴があり、かつ本人確認書類を提示できる方。またはアプリ会員で来店済みの方。"
+      }
+    },
+    {
+      "id": "E09",
+      "category": "chain_variant",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "テストBOOKS 公式（架空）",
+        "sourceUrl": "https://example.invalid/x/test_books/status/9",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "ＴＥＳＴ　ＢＯＯＫＳ 本店｜テストパック 第1弾 抽選 1BOX。1/8〜1/14応募、1/16発表。店頭受取。応募はWebフォームから。"
+      }
+    },
+    {
+      "id": "E10",
+      "category": "same_name_store",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テストモール 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-mall-store/lottery/10",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テストモール「本店」にて、テストパック 第1弾 2BOX の抽選を実施。応募：1/6〜1/12、発表：1/14。Web応募・店頭受取。"
+      }
+    },
+    {
+      "id": "E11",
+      "category": "duplicate_other_source",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "まとめアカウント（架空・非公式）",
+        "sourceUrl": "https://example.invalid/x/matome/status/11",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テスト書店 駅前店でテストパック第1弾の抽選！ 1/12まで応募OK、結果は1/15だそうです。会員登録が必要。"
+      }
+    },
+    {
+      "id": "E12",
+      "category": "same_store_product_other_lottery",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト家電 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-denki/news/12",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【テスト家電 西口店】テストパック 第1弾 追加抽選（第2回）。応募：1/16〜1/20、発表1/22。店頭で応募・受取。"
+      }
+    },
+    {
+      "id": "E13",
+      "category": "store_unresolved",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "テスト家電 公式（架空）",
+        "sourceUrl": "https://example.invalid/x/test_denki_x/status/13",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テストパック 第2弾の抽選販売を各店舗で実施します！ 応募は1/10まで。詳細は店頭ポスターで。"
+      }
+    },
+    {
+      "id": "E14",
+      "category": "insufficient_info",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "個人の投稿（架空・非公式）",
+        "sourceUrl": "https://example.invalid/x/someone/status/14",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "どこかの店でカード抽選やってるらしい。急いだほうがいいかも"
+      }
+    },
+    {
+      "id": "E15",
+      "category": "misinformation",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "個人の投稿（架空・非公式）",
+        "sourceUrl": "https://example.invalid/x/someone/status/15",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【超速報】テスト書店 駅前店で「テストパック 第9弾 プレミアム」を全員に配布！ 抽選なし、先着100名。"
+      }
+    },
+    {
+      "id": "E16",
+      "category": "out_of_area",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テストBOOKS 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-books/news/16",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【テストBOOKS 沖縄店】テストスターターデッキ 抽選販売。応募 1/9〜1/15、発表 1/18。店頭受取のみ。"
+      }
+    },
+    {
+      "id": "E17",
+      "category": "closed_store_possible",
+      "input": {
+        "sourceKind": "web",
+        "sourceName": "テスト書店 公式（架空）",
+        "sourceUrl": "https://example.invalid/test-bookstore/news/17",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "【テスト書店 港北店】テストパック 第2弾 抽選。応募 1/7〜1/12、発表1/14。※港北店は1月末で閉店予定のためご注意ください（架空）。"
+      }
+    },
+    {
+      "id": "E18",
+      "category": "resolvable_by_research",
+      "input": {
+        "sourceKind": "x",
+        "sourceName": "テスト書店 公式（架空）",
+        "sourceUrl": "https://example.invalid/x/test_books_x/status/18",
+        "fetchedAt": "2027-01-05T09:00:00+09:00",
+        "text": "テスト書店 駅前店 テスト拡張セットの抽選について、応募期間・発表日・応募方法は公式サイトのお知らせをご確認ください。"
+      }
+    }
+  ]
+}
