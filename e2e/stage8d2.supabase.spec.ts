@@ -51,6 +51,8 @@ test("所在地の調査: 店舗を選んで調査（モック）。結果・情
   await expect(src).toHaveAttribute("rel", /noopener/);
   await expect(page.getByTestId("research-usage")).toContainText("推定費用");
   await expect(page.getByTestId("research-usage")).toContainText("検索");
+  await expect(page.getByTestId("research-official")).toContainText("公式（登録済み）"); // 登録済みの公式サイト（store_url）の判定が根拠つきで出る
+  await expect(page.getByTestId("research-official")).toContainText("store_url）は更新されません");
   await expect(page.getByTestId("research-more")).toHaveCount(0); // 確認済みなら追加調査は出ない
 
   // 保存: 専用の表に1件。店舗マスターは1文字も変わらない

@@ -13,6 +13,8 @@
  */
 import { isCompleteAddress, normalizeForMatch, pickCandidate, type GeoHit } from "@/lib/geocode";
 import { prefectureOf } from "@/lib/geo";
+import { distinctiveToken, domainOf, norm } from "@/lib/agent/store-location/common";
+import { assessOfficialSites, isOfficialUrl, type OfficialSiteAssessment, type OfficialStatus } from "@/lib/agent/store-location/official";
 
 export type ResearchStatus = "confirmed" | "candidate" | "insufficient" | "conflict" | "not_found" | "limit_reached" | "failed";
 export const STATUS_LABEL: Record<ResearchStatus, string> = {
@@ -34,6 +36,8 @@ export interface StoreTarget {
   knownDomains: string[];
   /** 同じ系列の他の店舗名（取り違え防止） */
   siblingNames: string[];
+  /** 系列の別名・旧称・運営ブランド名（店舗マスターの系列別名。例: ふるいち=古本市場）。ページの表記ゆれの吸収に使う */
+  chainAliases?: string[];
 }
 
 export interface PageEvidence {
@@ -41,6 +45,8 @@ export interface PageEvidence {
   finalUrl?: string;
   title?: string;
   text: string;
+  /** ページ内のリンク（公式サイトの根拠: 信頼済みサイトからのリンクの確認に使う） */
+  links?: { text: string; href: string }[];
   /** 本文中に命令らしき文面を検出したか */
   injection: boolean;
 }
@@ -67,6 +73,8 @@ export interface EvaluatedCandidate {
   nameMatch: boolean;
   prefectureMismatch: boolean;
   official: boolean;
+  /** 情報源ドメインの公式性（trusted=登録済み / verified=根拠で検証 / candidate / rejected / null=未評価） */
+  officialStatus: OfficialStatus | null;
   closure: boolean;
   injection: boolean;
   geoMatch: boolean;
@@ -78,7 +86,10 @@ export interface EvaluatedCandidate {
   problems: string[];
 }
 
+export type { OfficialSiteAssessment, OfficialStatus };
 export interface ResearchResult {
+  /** 公式サイトの評価（根拠つき）。店舗マスターの store_url は更新しない */
+  officialSites: OfficialSiteAssessment[];
   status: ResearchStatus;
   address: string | null;
   prefecture: string | null;
@@ -93,27 +104,7 @@ export interface ResearchResult {
   candidates: EvaluatedCandidate[];
 }
 
-const REGISTRABLE = /([a-z0-9-]+\.(?:co|or|ne|ac|go|ed)\.jp|[a-z0-9-]+\.[a-z]{2,})$/i;
-/** URL のホスト（登録ドメイン相当）。第三者サイトの「独立性」の判定に使う */
-export function domainOf(url: string): string {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return REGISTRABLE.exec(host)?.[1] ?? host;
-  } catch {
-    return "";
-  }
-}
-
-const norm = (s: string) => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
-/** 店舗名から系列名と「店」を除いた、店舗を見分ける語（例: 「テスト書店 駅前店」→「駅前」） */
-export function distinctiveToken(chain: string, store: string): string {
-  let s = norm(store);
-  const c = norm(chain);
-  if (c && s.startsWith(c)) s = s.slice(c.length);
-  s = s.replace(/店$/, "");
-  // 短すぎる語（例: 「本店」→「本」）は他の語に紛れるため、店舗名そのものを使う
-  return s.length >= 2 ? s : norm(store);
-}
+export { domainOf, distinctiveToken };
 
 export function parseCity(address: string): string | null {
   const a = address.normalize("NFKC").replace(/\s+/g, "");
@@ -135,7 +126,7 @@ export interface VerifyInput {
   limitReached: boolean;
 }
 
-function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[]): EvaluatedCandidate {
+function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[], sites: OfficialSiteAssessment[]): EvaluatedCandidate {
   const problems: string[] = [];
   const page = pages.find((p) => p.url === c.sourceUrl || p.finalUrl === c.sourceUrl);
   const text = page ? page.text.normalize("NFKC") : "";
@@ -161,7 +152,7 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[])
     const window = flat.slice(Math.max(0, quotePos - 250), quotePos + flatQ.length + 250).toLowerCase();
     const tok = distinctiveToken(store.chain, store.name);
     // 系列を示す語: 系列名、および店舗名の先頭の語（系列名と店舗名の表記が違う場合: 例「テストカード専門店」と「テストカード 中央店」）
-    const chainKeys = [norm(store.chain), norm(store.name.split(/[\s　]+/)[0] ?? "")].filter((k) => k.length >= 2 && k !== norm(tok));
+    const chainKeys = [norm(store.chain), ...(store.chainAliases ?? []).map(norm), norm(store.name.split(/[\s　]+/)[0] ?? "")].filter((k) => k.length >= 2 && k !== norm(tok));
     const ownInWindow = window.includes(norm(tok));
     const chainOnPage = chainKeys.length === 0 || chainKeys.some((k) => flat.toLowerCase().includes(k));
     const otherNearer = store.siblingNames
@@ -185,7 +176,9 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[])
   if (prefectureMismatch) problems.push(`登録済みの都道府県（${store.prefecture}）と異なる`);
 
   const domain = domainOf(c.sourceUrl);
-  const official = store.knownDomains.some((d) => domainOf(`https://${d}`) === domain || domain.endsWith(`.${d}`) || domain === d);
+  // 公式性は、取得したページの根拠で決める（AIの主張は使わない）。登録済み(trusted)か、根拠で検証済み(verified)のみ公式として扱う
+  const officialStatus = isOfficialUrl(sites, page?.finalUrl ?? c.sourceUrl);
+  const official = officialStatus === "trusted" || officialStatus === "verified";
   const injection = !!page?.injection;
   if (injection) problems.push("取得したページに命令らしき文面があった（無視した。信頼度を下げる）");
 
@@ -199,12 +192,13 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[])
   const closure = !!c.closureHint || (quoteVerified && CLOSURE.test(collapsed(text).slice(Math.max(0, quotePos - 300), quotePos + collapsed(q).length + 300))) || closureElsewhere;
   if (closure) problems.push("閉店・移転の記載がある（現在の住所とは限らない）");
 
-  return { address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, quoteVerified, addressInQuote, complete, nameMatch, prefectureMismatch, official, closure, injection, geoMatch: false, lat: null, lng: null, domain, score: 0, problems };
+  return { address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, quoteVerified, addressInQuote, complete, nameMatch, prefectureMismatch, official, officialStatus, closure, injection, geoMatch: false, lat: null, lng: null, domain, score: 0, problems };
 }
 
 export async function verifyResearch(input: VerifyInput): Promise<ResearchResult> {
   const { store, proposal, pages } = input;
-  const evaluated = (proposal?.candidates ?? []).slice(0, 5).map((c) => evaluate(c, store, pages));
+  const officialSites = assessOfficialSites({ store, pages });
+  const evaluated = (proposal?.candidates ?? []).slice(0, 5).map((c) => evaluate(c, store, pages, officialSites));
 
   // 地図の照合（引用が実在する候補だけ。無駄な通信を避ける）
   for (const e of evaluated.filter((x) => x.quoteVerified && x.addressInQuote)) {
@@ -222,7 +216,20 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
   for (const e of valid) groups.set(key(e), [...(groups.get(key(e)) ?? []), e]);
   // 別々の住所が検証を通った＝矛盾（片方がもう片方の前方一致なら同じ場所の表記の細かさの違いとみなす）
   const keys = [...groups.keys()];
-  const conflict = keys.some((a) => keys.some((b) => a !== b && !a.startsWith(b) && !b.startsWith(a)));
+  const rawConflict = keys.some((a) => keys.some((b) => a !== b && !a.startsWith(b) && !b.startsWith(a)));
+  // 公式優先: 別々の住所のうち、公式（登録済み・根拠で検証済み）の情報源に支えられた住所がちょうど1つなら、それを採る（非公式の異なる住所は参考として理由に残す）。
+  // 公式が複数の住所を示す、または公式がない場合は、矛盾のまま確定しない
+  let conflict = rawConflict;
+  let ignoredByOfficial: string[] = [];
+  let validUse = valid;
+  if (rawConflict) {
+    const officialKeys = keys.filter((k) => groups.get(k)!.some((e) => e.official));
+    if (officialKeys.length === 1) {
+      conflict = false;
+      validUse = valid.filter((e) => key(e) === officialKeys[0]);
+      ignoredByOfficial = keys.filter((k) => k !== officialKeys[0]).map((k) => groups.get(k)![0].address);
+    }
+  }
 
   for (const e of evaluated) {
     const sameAddress = valid.filter((v) => key(v) === key(e));
@@ -232,7 +239,8 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
     if (e.nameMatch) s += 15;
     if (e.complete) s += 10;
     if (e.geoMatch) s += 15;
-    if (e.official) s += 35;
+    if (e.officialStatus === "trusted") s += 35;
+    else if (e.officialStatus === "verified") s += 30;
     if (independent >= 2) s += 20;
     if (e.closure) s -= 40;
     if (e.injection) s -= 30;
@@ -243,7 +251,7 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
   }
 
   const reasons: string[] = [];
-  const ranked = [...valid].sort((a, b) => b.score - a.score);
+  const ranked = [...validUse].sort((a, b) => b.score - a.score);
   const best = ranked[0] ?? null;
   const out = (status: ResearchStatus, c: EvaluatedCandidate | null, confidence: number): ResearchResult => ({
     status,
@@ -253,7 +261,8 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
     lat: c && status === "confirmed" ? c.lat : c?.lat ?? null,
     lng: c && status === "confirmed" ? c.lng : c?.lng ?? null,
     confidence,
-    sources: (c ? sourcesFor(c, valid) : []).map((v) => ({ url: v.sourceUrl, quote: v.quote.slice(0, 200), official: v.official, domain: v.domain })),
+    officialSites,
+    sources: (c ? sourcesFor(c, validUse) : []).map((v) => ({ url: v.sourceUrl, quote: v.quote.slice(0, 200), official: v.official, domain: v.domain })),
     reasons,
     candidates: evaluated,
   });
@@ -263,10 +272,11 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
     return out("conflict", best, Math.min(best?.score ?? 0, 20));
   }
   if (best) {
-    const independent = new Set(valid.filter((v) => key(v) === key(best)).map((v) => v.domain)).size;
+    const independent = new Set(validUse.filter((v) => key(v) === key(best)).map((v) => v.domain)).size;
+    if (ignoredByOfficial.length) reasons.push(`公式の情報源と異なる住所（${ignoredByOfficial.join(" / ")}）が公式でない情報源にあったが、公式の情報を優先した`);
     const ok = best.complete && best.geoMatch && !best.closure && !best.injection && !best.prefectureMismatch && (best.official || independent >= 2);
     if (ok) {
-      reasons.push(best.official ? "公式の情報源に、店舗名と住所が載っている" : `独立した${independent}つの情報源で、同じ住所が見つかった`);
+      reasons.push(best.official ? (best.officialStatus === "verified" ? "公式サイト（店舗一覧・運営元などの根拠で検証済み）に、店舗名と住所が載っている" : "公式の情報源（登録済み）に、店舗名と住所が載っている") : `独立した${independent}つの情報源で、同じ住所が見つかった`);
       reasons.push("引用が取得したページの本文に実在し、住所は番地まで揃い、国土地理院の住所検索とも一致した");
       return out("confirmed", best, Math.min(100, Math.max(best.score, 70)));
     }

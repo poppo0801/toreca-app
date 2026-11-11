@@ -152,6 +152,34 @@
         "maxSearches": 1,
         "maxFetches": 1
       }
+    },
+    {
+      "id": "S13",
+      "category": "official_site_discovery",
+      "store": {
+        "chain": "テストブックス堂",
+        "name": "テストブックス堂 青葉店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "テストブックス堂 緑台店",
+          "テストブックス堂 港町店"
+        ]
+      }
+    },
+    {
+      "id": "S14",
+      "category": "spoofed_official_site",
+      "store": {
+        "chain": "テストゲームズ",
+        "name": "テストゲームズ 中野店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "テストゲームズ 新宿店",
+          "テストゲームズ 池袋店"
+        ]
+      }
     }
   ]
 }

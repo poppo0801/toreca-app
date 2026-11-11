@@ -16,6 +16,7 @@ const STATUS_CLASS: Record<string, string> = {
   conflict: "bg-danger/15 text-danger",
   failed: "bg-danger/15 text-danger",
 };
+const OFFICIAL_LABEL: Record<string, string> = { trusted: "公式（登録済み）", verified: "公式（検証済み）", candidate: "公式候補（根拠不十分）", rejected: "公式ではない（第三者）" };
 const STATUS_LABEL: Record<string, string> = { confirmed: "確認済み", candidate: "候補あり", insufficient: "情報不足", conflict: "情報矛盾", not_found: "該当店舗なし", limit_reached: "検索上限到達", failed: "調査失敗" };
 
 export function StoreResearchView() {
@@ -158,6 +159,20 @@ export function StoreResearchView() {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+          {result.officialSites.length > 0 && (
+            <div data-testid="research-official" className="text-xs">
+              <p className="font-bold">公式サイトの判定（取得したページの根拠による。AIの主張ではない）</p>
+              <ul className="space-y-0.5">
+                {result.officialSites.map((o) => (
+                  <li key={o.domain}>
+                    {o.domain}: {OFFICIAL_LABEL[o.status] ?? o.status}
+                    <span className="text-muted-foreground"> {o.signals.length ? `（根拠: ${o.signals.join(" / ")}）` : ""}{o.status !== "verified" && o.status !== "trusted" && o.problems.length ? `（不足: ${o.problems.join(" / ")}）` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-muted-foreground">店舗マスターの公式サイト（store_url）は更新されません。</p>
             </div>
           )}
           <details className="text-xs">

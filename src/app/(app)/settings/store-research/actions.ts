@@ -6,6 +6,7 @@ import { DEFAULT_LIMITS, type AgentLimits } from "@/lib/agent/core";
 import { isStoreResearchEnabled } from "@/lib/agent/dev-flag";
 import { checkRealApi } from "@/lib/agent/real-gate";
 import { EVAL_WORLD } from "@/lib/agent/store-location/world";
+import { CachedFetcher, CachedSearch, MemoryCache } from "@/lib/agent/store-location/tools";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
 import { researchStoreLocation, type ResearchDeps } from "@/lib/agent/store-location/run";
 import { STATUS_LABEL, type ResearchResult } from "@/lib/agent/store-location/verify";
@@ -19,6 +20,9 @@ import { createClient } from "@/lib/supabase/server";
  * 権限: 読み取り（店舗情報・過去の調査）・Web検索/取得・調査結果の保存（専用の表のみ）。店舗マスター・抽選の更新、任意のSQL・コマンドは無い。
  * 既定はモック（実APIを使わない）。実APIは real-gate.ts の条件（開発専用キー・費用上限・実行回数上限・確認）を満たした場合だけ。
  */
+/** 検索結果・取得ページの再利用（同じ検索・同じページで無駄にAPI・通信を使わない。プロセス内・24時間） */
+const sharedCache = new MemoryCache();
+
 type R<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 async function ctx(): Promise<Db | null> {
@@ -61,6 +65,7 @@ export interface ResearchView {
   sources: ResearchResult["sources"];
   reasons: string[];
   candidates: { address: string; sourceUrl: string; score: number; problems: string[] }[];
+  officialSites: { domain: string; status: string; signals: string[]; problems: string[] }[];
   usage: { steps: number; searches: number; fetches: number; inputTokens: number; outputTokens: number; costJpy: number; ms: number; retries: number; rejectedCalls: number; injectionFlags: number };
   engine: string;
   trace: { label: string; ok: boolean }[];
@@ -80,7 +85,7 @@ export async function runStoreResearchAction(input: { storeId: string; additiona
     const gate = checkRealApi({ env: process.env, confirm: input.confirmCost, runsToday: await countRealRunsToday(db) });
     if (!gate.ok) return { ok: false, error: gate.reason };
     const client = new Anthropic({ apiKey: gate.apiKey });
-    deps = { llm: new AnthropicAgentLLM(client, gate.model), search: new AnthropicWebSearch(client, gate.model), fetcher: new SafePageFetcher(), geocode: realGeocode, limits: gate.limits, past: async () => past };
+    deps = { llm: new AnthropicAgentLLM(client, gate.model), search: new CachedSearch(new AnthropicWebSearch(client, gate.model), sharedCache), fetcher: new CachedFetcher(new SafePageFetcher(), sharedCache), geocode: realGeocode, limits: gate.limits, past: async () => past };
   } else {
     deps = { llm: new MockStoreBrain(t.value.target), search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD), past: async () => past };
   }
@@ -102,6 +107,7 @@ export async function runStoreResearchAction(input: { storeId: string; additiona
       sources: r.sources,
       reasons: r.reasons,
       candidates: r.candidates.map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, score: c.score, problems: c.problems })),
+      officialSites: r.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })),
       usage: { ...out.usage, ms: Math.round(out.usage.ms), costJpy: Math.round(out.usage.costJpy * 100) / 100 },
       engine: out.engine,
       trace: out.run.trace.map((e) => ({ label: e.t === "tool" ? `${e.name}${e.ok ? "" : "（失敗）"}${e.injection ? " ⚠命令らしき文面を無視" : ""}` : e.t === "rejected" ? `拒否: ${e.name}` : e.t === "limit" ? e.detail : e.t === "retry" ? "再試行" : e.t === "error" ? `エラー: ${e.message}` : `ステップ${e.n}`, ok: e.t === "tool" ? e.ok : e.t === "step" })),

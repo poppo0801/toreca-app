@@ -56,6 +56,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 8D-2: 店舗所在地の調査結果", (
     expect(rows[0]).toMatchObject({ chain_name: "テスト書店", store_name: "テスト書店 駅前店", engine: "mock-brain" });
     expect(rows[0].address).toBe("東京都架空区駅前1-2-3");
     expect((rows[0].sources as unknown[]).length).toBeGreaterThan(0);
+    expect(Array.isArray(rows[0].official_sites)).toBe(true); // 公式サイトの評価（根拠つき）も専用の表に保存される
     expect(rows[0].usage).toMatchObject({ searches: expect.any(Number), costJpy: expect.any(Number) });
     expect((await listResearch(db1, storeId))[0].status).toBe(rows[0].status);
   });

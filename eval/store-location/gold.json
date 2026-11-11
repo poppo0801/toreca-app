@@ -9,6 +9,9 @@
       ],
       "conditions": [
         "公式の店舗一覧に店舗名と住所があり、地図とも一致する"
+      ],
+      "officialDomains": [
+        "test-bookstore.test"
       ]
     },
     {
@@ -126,6 +129,41 @@
       ],
       "conditions": [
         "検索1回・取得1回の上限。確認済みにできるのは、その範囲で条件を満たした場合だけ"
+      ]
+    },
+    {
+      "id": "S13",
+      "expectedAddress": "東京都架空区青葉2-2-2",
+      "acceptableStatuses": [
+        "confirmed"
+      ],
+      "officialDomains": [
+        "tbd-official.test"
+      ],
+      "notOfficialDomains": [
+        "tbd-official-shop.test"
+      ],
+      "mustNotAdopt": [
+        "東京都架空区偽町9-9-9"
+      ],
+      "improvedByAdditionalSearch": true,
+      "conditions": [
+        "公式サイトが未登録。検索で公式サイトを見つけ、店舗一覧（同じ系列の他店舗の一致）と会社概要（運営会社の一致）で公式と検証できた場合だけ確認済み。公式を名乗るなりすまし風サイト（別の住所）は公式にしない"
+      ]
+    },
+    {
+      "id": "S14",
+      "expectedAddress": "東京都架空区中野3-3-3",
+      "acceptableStatuses": [
+        "candidate"
+      ],
+      "mustNotConfirm": true,
+      "officialDomains": [],
+      "notOfficialDomains": [
+        "tg-official-store.test"
+      ],
+      "conditions": [
+        "「公式ストア」を名乗るサイトしか見つからない。店舗一覧は複製できるが、運営会社の情報も信頼済みサイトからのリンクも無い。公式と検証できないので確認済みにしない（公式候補として保持）"
       ]
     }
   ]

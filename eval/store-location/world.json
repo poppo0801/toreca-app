@@ -60,6 +60,54 @@
       "url": "https://test-bookstore.test/shop-info/kogai",
       "title": "テスト書店 郊外店 店舗情報",
       "text": "テスト書店 郊外店　神奈川県架空市緑町4-5-6　駐車場あり"
+    },
+    {
+      "url": "https://tbd-official.test/",
+      "title": "テストブックス堂 公式サイト",
+      "text": "テストブックス堂 公式サイト\nお知らせ・キャンペーン情報\n[リンク] 店舗一覧 /shops 会社概要 /company",
+      "links": [
+        {
+          "text": "店舗一覧",
+          "href": "https://tbd-official.test/shops"
+        },
+        {
+          "text": "会社概要",
+          "href": "https://tbd-official.test/company"
+        }
+      ]
+    },
+    {
+      "url": "https://tbd-official.test/shops",
+      "title": "テストブックス堂 店舗一覧",
+      "text": "テストブックス堂 店舗一覧\nテストブックス堂 青葉店　東京都架空区青葉2-2-2　営業時間 10:00-21:00\nテストブックス堂 緑台店　神奈川県架空市緑台5-5-5\nテストブックス堂 港町店　千葉県架空市港町1-1-1",
+      "links": [
+        {
+          "text": "会社概要",
+          "href": "https://tbd-official.test/company"
+        },
+        {
+          "text": "トップ",
+          "href": "https://tbd-official.test/"
+        }
+      ]
+    },
+    {
+      "url": "https://tbd-official.test/company",
+      "title": "会社概要 | テストブックス堂",
+      "text": "会社概要\n運営会社：株式会社テストブックス堂\n所在地：東京都架空区本社1-1-1\n© テストブックス堂",
+      "links": []
+    },
+    {
+      "url": "https://tbd-official-shop.test/",
+      "title": "テストブックス堂 公式ストア 店舗一覧（非公式）",
+      "text": "テストブックス堂 公式ストア 店舗一覧\nテストブックス堂 青葉店　東京都架空区偽町9-9-9\nテストブックス堂 緑台店　神奈川県架空市緑台5-5-5\nテストブックス堂 港町店　千葉県架空市港町1-1-1",
+      "links": []
+    },
+    {
+      "url": "https://tg-official-store.test/",
+      "title": "テストゲームズ 公式ストア 店舗一覧",
+      "text": "テストゲームズ 公式ストア 店舗一覧\nテストゲームズ 中野店　東京都架空区中野3-3-3\nテストゲームズ 新宿店　東京都架空区新宿4-4-4\nテストゲームズ 池袋店　東京都架空区池袋6-6-6",
+      "links": []
     }
   ],
   "geocode": [
@@ -112,6 +160,16 @@
       "title": "神奈川県架空市緑町4-5",
       "lat": 35.4801,
       "lng": 139.5901
+    },
+    {
+      "title": "東京都架空区青葉2-2",
+      "lat": 35.6101,
+      "lng": 139.7101
+    },
+    {
+      "title": "東京都架空区中野3-3",
+      "lat": 35.6201,
+      "lng": 139.7201
     }
   ]
 }

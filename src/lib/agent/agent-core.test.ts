@@ -196,7 +196,7 @@ describe("Anthropic 接続部（偽のクライアントで検証。実APIには
   it("検索は web_search（サーバー側ツール）を max_uses=1 で呼ぶ。一時障害は検索の失敗として扱う", async () => {
     const created: { tools: { max_uses?: number; type: string }[] }[] = [];
     const ok = new AnthropicWebSearch({ messages: { create: async (p: never) => (created.push(p), msg([])) } } as never, "m");
-    expect(await ok.search("q")).toEqual([]);
+    expect(await ok.search("q")).toMatchObject({ hits: [] });
     expect(created[0].tools[0]).toMatchObject({ type: "web_search_20250305", max_uses: 1 });
     const down = new AnthropicWebSearch({ messages: { create: async () => { throw Object.assign(new Error("x"), { status: 529 }); } } } as never, "m");
     await expect(down.search("q")).rejects.toThrow(/一時的/);

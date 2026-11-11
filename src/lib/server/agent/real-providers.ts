@@ -20,7 +20,7 @@ export class SafePageFetcher implements PageFetcher {
     const r = await fetchRespectingRobots(url, { timeoutMs: 10_000, maxBytes: 1_000_000 });
     if (!r.ok) return { ok: false, message: r.message };
     const page = extractPageText(r.body, r.finalUrl, 20_000);
-    return { ok: true, url, finalUrl: r.finalUrl, title: page.title ?? "", text: page.text };
+    return { ok: true, url, finalUrl: r.finalUrl, title: page.title ?? "", text: page.text, links: page.links };
   }
 }
 

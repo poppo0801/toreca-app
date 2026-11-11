@@ -12,6 +12,7 @@ export interface WorldPage {
   url: string;
   title: string;
   text: string;
+  links?: { text: string; href: string }[];
 }
 export interface MockWorldData {
   pages: WorldPage[];
@@ -48,7 +49,7 @@ export class MockFetcher implements PageFetcher {
   async fetchPage(url: string): Promise<FetchedPage> {
     this.fetched.push(url);
     const p = this.world.pages.find((x) => x.url === url);
-    return p ? { ok: true, url, finalUrl: url, title: p.title, text: p.text } : { ok: false, message: "ページが見つかりません" };
+    return p ? { ok: true, url, finalUrl: url, title: p.title, text: p.text, links: p.links } : { ok: false, message: "ページが見つかりません" };
   }
 }
 
@@ -96,11 +97,27 @@ export class MockStoreBrain implements AgentLLM {
 
     // 提案: 取得したページから、店舗名の近くにある住所を集める
     const found = this.collect(messages);
+    // 公式サイトの検証: 住所を見つけたサイトに会社概要へのリンクがあれば、運営会社の情報を取得して裏付ける（公式かどうかの根拠集め）
+    const company = found.length > 0 && !askedFetchLimit ? this.companyLink(messages, fetchedUrls, found.map((x) => x.sourceUrl)) : null;
+    if (company) return calls({ name: "fetch_page", input: { url: company } });
     // 何も見つからず、検索語をまだ変えていなければ、別の検索語で追加検索する（情報不足時の追加調査）
     if (found.length === 0 && searches.length < 2) return calls({ name: "web_search", input: { query: `${this.target.chain} 店舗一覧 ${this.target.name.replace(this.target.chain, "").trim()} 所在地` } });
     // 住所の候補が1つだけで、まだ別の情報源を調べていなければ、公式情報を探して裏付けを取る
     if (found.length === 1 && searches.length < 2 && !askedFetchLimit) return calls({ name: "web_search", input: { query: `${this.target.chain} 公式 ${this.target.name.replace(this.target.chain, "").trim()} 店舗情報` } });
     return { kind: "final", output: { candidates: found, summary: `${found.length}件の候補` }, usage: usageOf(messages, JSON.stringify(found)) };
+  }
+
+  private companyLink(messages: AgentMessage[], fetched: Set<string>, sources: string[]): string | null {
+    const hosts = new Set(sources.map((u) => { try { return new URL(u).hostname; } catch { return ""; } }));
+    for (const m of messages) {
+      if (m.role !== "tool" || m.name !== "fetch_page" || m.isError) continue;
+      for (const mm of m.content.matchAll(/(?:会社概要|企業情報|運営会社|会社情報)\s*→\s*(https?:\/\/\S+)/g)) {
+        let host = "";
+        try { host = new URL(mm[1]).hostname; } catch { /* 無効 */ }
+        if (hosts.has(host) && !fetched.has(mm[1])) return mm[1];
+      }
+    }
+    return null;
   }
 
   private has(line: string, tok: string): boolean {

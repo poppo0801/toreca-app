@@ -17,7 +17,7 @@ export interface AgentLimits {
   maxSearches: number;
   /** ページ取得の最大回数 */
   maxFetches: number;
-  /** 入力＋出力トークンの合計上限 */
+  /** 入力＋出力トークンの累計上限（各ステップで会話全体を再送するため、累計は膨らむ。費用上限が主な安全装置） */
   maxTokens: number;
   /** 推定費用（円）の上限。実際の請求額とは差が出うる推定値 */
   maxCostJpy: number;
@@ -28,7 +28,7 @@ export interface AgentLimits {
 }
 
 /** 既定の上限（保守的）。呼び出し側で変更できる */
-export const DEFAULT_LIMITS: AgentLimits = { maxSteps: 12, maxSearches: 4, maxFetches: 6, maxTokens: 60_000, maxCostJpy: 15, maxMs: 90_000, maxRetries: 2 };
+export const DEFAULT_LIMITS: AgentLimits = { maxSteps: 12, maxSearches: 4, maxFetches: 6, maxTokens: 300_000, maxCostJpy: 15, maxMs: 90_000, maxRetries: 2 };
 
 export type LimitKind = "steps" | "searches" | "fetches" | "tokens" | "cost" | "time" | "retries";
 export const LIMIT_LABEL: Record<LimitKind, string> = { steps: "実行回数", searches: "Web検索回数", fetches: "ページ取得回数", tokens: "トークン量", cost: "推定費用", time: "処理時間", retries: "再試行回数" };
@@ -181,10 +181,10 @@ export interface ToolCall {
 }
 export type AgentMessage =
   | { role: "user"; text: string }
-  | { role: "assistant"; text?: string; calls: ToolCall[] }
+  | { role: "assistant"; text?: string; calls: ToolCall[]; /** モデルの応答の原本（思考ブロックなどを次の要求へそのまま戻すため。実API用） */ raw?: unknown[] }
   | { role: "tool"; callId: string; name: string; content: string; isError?: boolean };
 
-export type LlmStep = { kind: "tool_calls"; calls: ToolCall[]; text?: string; usage: LlmUsage } | { kind: "final"; output: unknown; usage: LlmUsage };
+export type LlmStep = { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage } | { kind: "final"; output: unknown; usage: LlmUsage };
 
 export class TransientLlmError extends Error {}
 
@@ -251,7 +251,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     trace.push({ t: "step", n: budget.usage.steps, text: step.kind === "tool_calls" ? step.text : undefined });
     if (step.kind === "final") return finish("completed", "submitted", step.output);
 
-    messages.push({ role: "assistant", text: step.text, calls: step.calls });
+    messages.push({ role: "assistant", text: step.text, calls: step.calls, raw: step.raw });
     for (const call of step.calls) {
       const tool = input.tools.get(call.name);
       if (!tool) {

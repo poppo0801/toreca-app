@@ -29,10 +29,16 @@ export interface EvalCase {
 export interface EvalGold {
   id: string;
   expectedAddress: string | null;
+  /** 番地まで確認できていない実在店舗用: この前半に一致する住所は正しい（確認済みにできるかは別）。null/未指定で expectedAddress も null なら、住所の採用は誤り */
+  expectedAddressPrefix?: string;
   acceptableStatuses: ResearchStatus[];
   mustNotConfirm?: boolean;
   mustNotAdopt?: string[];
   improvedByAdditionalSearch?: boolean;
+  /** 人手で確認した公式サイトのドメイン（空配列=公式サイトは確認できない） */
+  officialDomains?: string[];
+  /** 公式ではないと確認したドメイン（なりすまし・第三者）。これを公式（trusted/verified）と判定したら誤判定 */
+  notOfficialDomains?: string[];
   conditions: string[];
 }
 export const EVAL_CASES = casesJson.cases as unknown as EvalCase[];
@@ -51,6 +57,7 @@ export interface EvalResult {
   costJpy: number;
   ms: number;
   injectionFlags: number;
+  officialSites?: { domain: string; status: string }[];
 }
 
 class DownSearch implements SearchProvider {
@@ -87,7 +94,7 @@ export async function runEngine(engine: EngineName, c: EvalCase, world: MockWorl
   const limits: Partial<AgentLimits> = { ...(c.limits ?? {}), ...(engine === "agent-mock-1search" ? { maxSearches: 1 } : {}) };
   const out = await researchStoreLocation(c.store, null, { llm: new MockStoreBrain(c.store), search, fetcher, geocode: mockGeocode(world), limits, searchCostJpy: SEARCH_JPY });
   const u = out.usage;
-  return { caseId: c.id, status: out.result.status, address: out.result.address, confidence: out.result.confidence, searches: u.searches, fetches: u.fetches, steps: u.steps, costJpy: u.costJpy, ms: Date.now() - t0, injectionFlags: u.injectionFlags };
+  return { caseId: c.id, status: out.result.status, address: out.result.address, confidence: out.result.confidence, searches: u.searches, fetches: u.fetches, steps: u.steps, costJpy: u.costJpy, ms: Date.now() - t0, injectionFlags: u.injectionFlags, officialSites: out.result.officialSites.map((x) => ({ domain: x.domain, status: x.status })) };
 }
 
 export async function runAll(engine: EngineName): Promise<EvalResult[]> {
@@ -97,6 +104,11 @@ export async function runAll(engine: EngineName): Promise<EvalResult[]> {
 }
 
 const same = (a: string | null, b: string | null) => !!a && !!b && normalizeForMatch(a) === normalizeForMatch(b);
+/** 住所が、正解（完全一致または前半一致）に合うか */
+const matchesGold = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) =>
+  same(addr, g.expectedAddress) || (!!addr && !!g.expectedAddressPrefix && normalizeForMatch(addr).startsWith(normalizeForMatch(g.expectedAddressPrefix)));
+/** 採用してはならない住所に当たるか（前後どちらかが前方一致） */
+const isForbidden = (addr: string | null, list: string[] = []) => !!addr && list.some((a) => { const x = normalizeForMatch(addr); const y = normalizeForMatch(a); return x.startsWith(y) || y.startsWith(x); });
 
 export interface EvalScore {
   engine: string;
@@ -123,22 +135,26 @@ export interface EvalScore {
   steps: number;
   costJpy: number;
   ms: number;
+  /** 公式サイトの発見: 人手で確認した公式ドメインを trusted/verified と判定できた件数／公式でないドメインを公式と判定した誤判定 */
+  official: { targets: number; found: number; wrongOfficial: number };
   perCase: { caseId: string; status: ResearchStatus; address: string | null; ok: boolean; wrong: boolean }[];
 }
 const ratio = (a: number, b: number) => (b === 0 ? null : a / b);
 
 export function scoreEval(engine: string, results: EvalResult[], gold: EvalGold[] = EVAL_GOLD): EvalScore {
   let found = 0, confirmedOk = 0, adopted = 0, wrongAdopted = 0, wrongConfirmed = 0, forbidden = 0, statusOk = 0, human = 0;
-  const withExpected = gold.filter((g) => g.expectedAddress).length;
+  const withExpected = gold.filter((g) => g.expectedAddress || g.expectedAddressPrefix).length;
   const perCase: EvalScore["perCase"] = [];
+  let offTargets = 0, offFound = 0, offWrong = 0;
   const sum = { searches: 0, fetches: 0, steps: 0, costJpy: 0, ms: 0 };
   for (const g of gold) {
     const r = results.find((x) => x.caseId === g.id) ?? { caseId: g.id, status: "not_found" as ResearchStatus, address: null, confidence: 0, searches: 0, fetches: 0, steps: 0, costJpy: 0, ms: 0, injectionFlags: 0 };
     const adoptedHere = (r.status === "confirmed" || r.status === "candidate") && !!r.address;
-    const correct = same(r.address, g.expectedAddress);
-    const wrong = adoptedHere && (!correct || (g.mustNotAdopt ?? []).some((a) => same(r.address, a)));
-    if (g.expectedAddress && adoptedHere && correct) found++;
-    if (g.expectedAddress && r.status === "confirmed" && correct) confirmedOk++;
+    const hasExpected = !!(g.expectedAddress || g.expectedAddressPrefix);
+    const correct = matchesGold(r.address, g);
+    const wrong = adoptedHere && (!correct || isForbidden(r.address, g.mustNotAdopt));
+    if (hasExpected && adoptedHere && correct) found++;
+    if (hasExpected && r.status === "confirmed" && correct) confirmedOk++;
     if (adoptedHere) adopted++;
     if (wrong) wrongAdopted++;
     if (r.status === "confirmed" && wrong) wrongConfirmed++;
@@ -146,20 +162,23 @@ export function scoreEval(engine: string, results: EvalResult[], gold: EvalGold[
     const ok = g.acceptableStatuses.includes(r.status) && !wrong;
     if (ok) statusOk++;
     if (r.status !== "confirmed") human++;
+    const isOff = (d: string) => (r.officialSites ?? []).some((x) => x.domain === d && (x.status === "verified" || x.status === "trusted"));
+    for (const d of g.officialDomains ?? []) { offTargets++; if (isOff(d)) offFound++; }
+    for (const d of g.notOfficialDomains ?? []) if (isOff(d)) offWrong++;
     perCase.push({ caseId: g.id, status: r.status, address: r.address, ok, wrong });
     sum.searches += r.searches; sum.fetches += r.fetches; sum.steps += r.steps; sum.costJpy += r.costJpy; sum.ms += r.ms;
   }
-  return { engine, cases: gold.length, withExpected, foundRate: ratio(found, withExpected), confirmedRate: ratio(confirmedOk, withExpected), wrongAdoptionRate: ratio(wrongAdopted, adopted), adopted, wrongAdopted, wrongConfirmed, forbiddenConfirmed: forbidden, statusOkRate: statusOk / gold.length, humanReviewRate: human / gold.length, ...sum, perCase };
+  return { engine, cases: gold.length, withExpected, foundRate: ratio(found, withExpected), confirmedRate: ratio(confirmedOk, withExpected), wrongAdoptionRate: ratio(wrongAdopted, adopted), adopted, wrongAdopted, wrongConfirmed, forbiddenConfirmed: forbidden, statusOkRate: statusOk / gold.length, humanReviewRate: human / gold.length, ...sum, official: { targets: offTargets, found: offFound, wrongOfficial: offWrong }, perCase };
 }
 
 /** 追加調査による改善: 検索1回に制限した場合（1search）と通常（full）を比べ、通常でだけ「正しい住所を確認済みにできた」件数 */
 export function additionalSearchImprovement(full: EvalResult[], limited: EvalResult[], gold: EvalGold[] = EVAL_GOLD): { improved: number; targets: number; rate: number | null } {
-  const targets = gold.filter((g) => g.expectedAddress);
+  const targets = gold.filter((g) => g.expectedAddress || g.expectedAddressPrefix);
   let improved = 0;
   for (const g of targets) {
     const f = full.find((r) => r.caseId === g.id);
     const l = limited.find((r) => r.caseId === g.id);
-    if (f?.status === "confirmed" && same(f.address, g.expectedAddress) && !(l?.status === "confirmed" && same(l.address, g.expectedAddress))) improved++;
+    if (f?.status === "confirmed" && matchesGold(f.address, g) && !(l?.status === "confirmed" && matchesGold(l.address, g))) improved++;
   }
   return { improved, targets: targets.length, rate: ratio(improved, targets.length) };
 }
@@ -173,6 +192,8 @@ export function renderReport(scores: EvalScore[], improvement: ReturnType<typeof
     ["確認済みにした誤り（最重要・0が必須）", (s) => String(s.wrongConfirmed)],
     ["確認済みにしてはいけない場合の確認済み", (s) => String(s.forbiddenConfirmed)],
     ["ステータスが期待の範囲だった率", (s) => pct(s.statusOkRate)],
+    ["公式サイトの発見（人手確認済みの公式ドメインを検証できた件数）", (s) => `${s.official.found}/${s.official.targets}`],
+    ["誤った公式サイト判定（公式でないサイトを公式と判定）", (s) => String(s.official.wrongOfficial)],
     ["人手の確認が要る割合（確認済み以外）", (s) => pct(s.humanReviewRate)],
     ["検索回数 / 取得回数 / AI呼び出し", (s) => `${s.searches} / ${s.fetches} / ${s.steps}`],
     ["推定費用（円・検索の概算のみ。モックのAIは0円）", (s) => s.costJpy.toFixed(1)],

@@ -90,3 +90,4 @@ AI の実接続を開発で試す場合（後の Stage）: `.env.local` に実�
 - 調査画面: ログイン後 `/settings/store-research`（開発環境のみ。本番では404）。既定は**モック**（架空のWeb・実APIなし）。`npm run db:reset` 後は `db:seed`（公式サイトのドメインが登録されたテスト店舗あり）。
 - 評価: `npm run eval:store-location`（`eval/runs/store-location-report.md`）。
 - 実API（費用発生・**承認後のみ**）: `.env.local` に `AGENT_REAL_API=allow`・`AGENT_ANTHROPIC_API_KEY`（開発専用。本番キーと別）・`AGENT_MAX_COST_JPY_PER_RUN`・`AGENT_MAX_RUNS_PER_DAY` を設定し、画面で費用確認にチェック。詳細は [stage8d2.md](stage8d2.md) §5。
+- 実在店舗の評価（Stage 8D-3）: `npm run eval:real-preflight`（API・ネットワークに接続しない。関門・計画・費用の見積もりを表示）。実API実行は承認後に `npm run eval:real -- --approved-max-jpy=<円> --approved-stores=<件> [--ids=R1,..] [--first-only]`。入力・正解は `eval/real-stores/`。結果は `eval/runs/real/`（Git管理外）。

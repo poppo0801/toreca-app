@@ -52,13 +52,15 @@ export async function loadStoreTarget(db: Db, storeId: string): Promise<ServiceR
   const a = any(db);
   const { data: s } = await a.from("stores").select("id,name,prefecture,address_optional,chain_id,store_url").eq("id", storeId).maybeSingle();
   if (!s) return fail("店舗が見つかりません");
-  const [{ data: chain }, { data: siblings }] = await Promise.all([
+  const [{ data: chain }, { data: aliasRows }, { data: siblings }] = await Promise.all([
     a.from("chains").select("name").eq("id", s.chain_id).maybeSingle(),
+    a.from("chain_aliases").select("alias").eq("chain_id", s.chain_id).limit(20),
     a.from("stores").select("name,store_url").eq("chain_id", s.chain_id).neq("id", storeId).is("archived_at", null).limit(100),
   ]);
-  const known = new Set<string>([...hostOf(s.store_url)]);
+  // 信頼済みの公式サイト: この店舗と、同じ系列の他店舗に登録済みの store_url（利用者が登録したもの）
+  const known = new Set<string>([...hostOf(s.store_url), ...(siblings ?? []).flatMap((x: { store_url: string | null }) => hostOf(x.store_url))]);
   return ok({
-    target: { chain: chain?.name ?? "", name: s.name, prefecture: s.prefecture ?? "", knownDomains: [...known], siblingNames: (siblings ?? []).map((x: { name: string }) => x.name) },
+    target: { chain: chain?.name ?? "", name: s.name, prefecture: s.prefecture ?? "", knownDomains: [...known], siblingNames: (siblings ?? []).map((x: { name: string }) => x.name), chainAliases: (aliasRows ?? []).map((x: { alias: string }) => x.alias) },
     existingAddress: s.address_optional || null,
   });
 }
@@ -113,6 +115,8 @@ export async function saveResearch(db: Db, storeId: string, target: StoreTarget,
     confidence: Math.max(0, Math.min(100, Math.round(result.confidence))),
     sources: result.sources.slice(0, 20),
     reasons: result.reasons.slice(0, 30),
+    // 公式サイトの評価（根拠つき）。店舗マスターの store_url は更新しない
+    official_sites: result.officialSites.slice(0, 20).map((o) => ({ domain: o.domain, status: o.status, signals: o.signals.slice(0, 6), problems: o.problems.slice(0, 6), urls: o.urls.slice(0, 5) })),
     candidates: result.candidates.slice(0, 10).map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote.slice(0, 200), score: c.score, problems: c.problems.slice(0, 6), official: c.official, geoMatch: c.geoMatch })),
     usage: run.usage,
     trace: compactTrace(run),
