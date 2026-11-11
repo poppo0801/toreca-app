@@ -7,6 +7,7 @@
 4. `database-schema.md`：DB設計草案。実装前に制約・日時・認可を修正
 5. `implementation-plan.md`：実装順序と合格条件
 6. `user-checklist.md`：人が行う必要がある操作
+7. `docs/RESTORE.md`：バックアップからの復元手順（復元基準タグ `pre-agent-stage8a`）。本番DBの変更・マイグレーション適用の前は `npm run backup:full`。調査結果は `docs/stage8a.md`
 
 ## 作業スタイル
 - 個人用だが本番データは慎重に扱い、実用性と進行速度を重視する。細かな確認で停止せず、要件内の合理的な判断は自分で行う。

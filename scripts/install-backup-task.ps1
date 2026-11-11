@@ -1,4 +1,4 @@
-# Windows タスクスケジューラに「毎日のローカルバックアップ」を登録する（ユーザー権限・管理者不要・パスワード保存なし）。
+﻿# Windows タスクスケジューラに「毎日のローカルバックアップ」を登録する（ユーザー権限・管理者不要・パスワード保存なし）。
 #   登録:   powershell -ExecutionPolicy Bypass -File scripts\install-backup-task.ps1
 #   解除:   powershell -ExecutionPolicy Bypass -File scripts\install-backup-task.ps1 -Remove
 # - 毎日 03:30 と、ログオン時に実行。PCが止まっていて取り逃した場合は、起動後できるだけ早く実行（StartWhenAvailable）

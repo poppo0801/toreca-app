@@ -33,3 +33,29 @@ export function decryptFiles(buf, passphrase) {
     throw new Error("復号できません（パスフレーズが違うか、ファイルが壊れています）");
   }
 }
+
+// ---- Stage 8A: バイナリ対応（完全バックアップ用）。形式: "TCGBAK2"(7B) | salt(16B) | iv(12B) | GCM認証タグ(16B) | 暗号文
+// 中身は ZIP などの任意のバイト列。鍵導出・認証付き暗号は上と同じ。改ざん・誤ったパスフレーズは復号時に必ず失敗する。
+const MAGIC2 = Buffer.from("TCGBAK2");
+
+export function encryptBuffer(plain, passphrase) {
+  if (typeof passphrase !== "string" || passphrase.length < 16) throw new Error("パスフレーズは16文字以上が必要です");
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const c = createCipheriv("aes-256-gcm", key(passphrase, salt), iv);
+  c.setAAD(MAGIC2);
+  const body = Buffer.concat([c.update(plain), c.final()]);
+  return Buffer.concat([MAGIC2, salt, iv, c.getAuthTag(), body]);
+}
+
+export function decryptBuffer(buf, passphrase) {
+  if (buf.length < 51 || !buf.subarray(0, 7).equals(MAGIC2)) throw new Error("バックアップファイルの形式が正しくありません");
+  const d = createDecipheriv("aes-256-gcm", key(passphrase, buf.subarray(7, 23)), buf.subarray(23, 35));
+  d.setAAD(MAGIC2);
+  d.setAuthTag(buf.subarray(35, 51));
+  try {
+    return Buffer.concat([d.update(buf.subarray(51)), d.final()]);
+  } catch {
+    throw new Error("復号できません（パスフレーズが違うか、ファイルが壊れています）");
+  }
+}

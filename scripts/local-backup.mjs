@@ -6,12 +6,11 @@
 // 設定（.env.local または環境変数）:
 //   BACKUP_PASSPHRASE  必須・16文字以上。暗号化に使う。紛失するとバックアップを開けないため、別の場所にも必ず控える
 //   BACKUP_DIR         任意。保存先（既定: ユーザーフォルダ\TorecaBackups）。リポジトリ内・Vercelの公開領域は不可
-//   BACKUP_KEEP_DAILY / BACKUP_KEEP_MONTHLY  任意。保持する直近の世代数・月次の数（既定 14 / 12）
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { decryptFiles, encryptFiles } from "./lib/backup-crypto.mjs";
+
 
 try {
   process.loadEnvFile(".env.local");
@@ -22,8 +21,6 @@ try {
 const args = new Set(process.argv.slice(2));
 const repoRoot = resolve(".");
 const BACKUP_DIR = resolve(process.env.BACKUP_DIR ?? join(homedir(), "TorecaBackups"));
-const KEEP_DAILY = Number(process.env.BACKUP_KEEP_DAILY ?? 14);
-const KEEP_MONTHLY = Number(process.env.BACKUP_KEEP_MONTHLY ?? 12);
 const MIN_INTERVAL_H = 20; // 直近にこの時間以内の成功があれば、通常実行はスキップ（ログオン時の再実行などで重複取得しない）
 const STALE_H = 36; // 最終成功からこの時間を超えたら警告
 const STATUS = join(BACKUP_DIR, "last-status.json");
@@ -120,47 +117,16 @@ if (!args.has("--force") && before?.lastSuccessAt && hoursSince(before.lastSucce
 const work = mkdtempSync(join(tmpdir(), "tcg-backup-"));
 try {
   log("取得開始");
-  const run = (script, extra = [], env = {}) =>
-    spawnSync(process.execPath, [script, ...extra], { encoding: "utf8", env: { ...process.env, ...env } });
-
-  const b = run("scripts/backup.mjs", [], { BACKUP_OUT_DIR: work });
-  if (b.status !== 0) throw new Error(`取得に失敗しました: ${(b.stderr || b.stdout || "").split("\n").find((l) => /Error|失敗|必要|一致/.test(l)) ?? "原因不明"}`);
-
-  const dir = join(work, readdirSync(work).sort().pop());
-  const v = run("scripts/verify-backup.mjs", ["--dir", dir]);
-  if (v.status !== 0) throw new Error(`検証に失敗しました: ${(v.stderr || v.stdout).trim().split("\n").slice(0, 4).join(" / ")}`);
-
-  const files = Object.fromEntries(readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-  const manifest = JSON.parse(files["_manifest.json"]);
-  const enc = encryptFiles(files, pass);
-  // 暗号化したファイルが実際に復号でき、内容が一致することを確認してから保存する
-  const round = decryptFiles(enc, pass);
-  if (round["_manifest.json"] !== files["_manifest.json"] || Object.keys(round).length !== Object.keys(files).length) throw new Error("暗号化の復号確認に失敗しました");
-
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
-  const name = `tcg-backup-${stamp}.tcgbak`;
-  writeFileSync(join(BACKUP_DIR, `${name}.tmp`), enc);
-  renameSync(join(BACKUP_DIR, `${name}.tmp`), join(BACKUP_DIR, name));
-  const rows = Object.values(manifest.counts).reduce((a, n) => a + n, 0);
-  log(`成功: ${name}（${Object.keys(manifest.counts).length}テーブル・${rows}行・${(enc.length / 1024).toFixed(0)}KB）`);
-
-  // ---------------------------------------------------------------- 世代管理: 直近N世代 + 月ごとの最新M個
-  const all = readdirSync(BACKUP_DIR).filter((f) => /^tcg-backup-\d{8}-\d{6}\.tcgbak$/.test(f)).sort().reverse();
-  const keep = new Set(all.slice(0, KEEP_DAILY));
-  const months = new Set();
-  for (const f of all) {
-    const m = f.slice(11, 17);
-    if (!months.has(m) && months.size < KEEP_MONTHLY) {
-      months.add(m);
-      keep.add(f);
-    }
-  }
-  for (const f of all) if (!keep.has(f)) {
-    unlinkSync(join(BACKUP_DIR, f));
-    log(`世代管理: 削除 ${f}`);
-  }
-
-  writeStatus({ ok: true, lastSuccessAt: new Date().toISOString(), file: name, rows, generations: keep.size });
+  // Stage 8A: 取得・検証・暗号化・保存・世代管理は完全バックアップ（full-backup.mjs --no-source）に一本化した。
+  // 以前の方式（backup.mjs の JSON）は商品画像の保存フォルダを読めずに失敗しており、また 95 テーブル中 68 しか対象でなかった。
+  // このスクリプトは、定期実行に必要な「重複取得の回避・失敗の検知（通知・フラグ）・状態記録」だけを担う。
+  const r = spawnSync(process.execPath, ["scripts/full-backup.mjs", "--no-source"], { encoding: "utf8", env: process.env });
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  if (r.status !== 0) throw new Error(`取得に失敗しました: ${out.split(String.fromCharCode(10)).find((l) => /失敗|必要|一致|中止/.test(l)) ?? "原因不明"}`);
+  const name = /本体: (tcg-[\w-]+\.tcgbak2)/.exec(out)?.[1] ?? "不明";
+  const rows = Number(/(\d+)テーブル・(\d+)行/.exec(out)?.[2] ?? 0);
+  log(`成功: ${name}（${/(\d+)テーブル/.exec(out)?.[1] ?? "?"}テーブル・${rows}行）`);
+  writeStatus({ ok: true, lastSuccessAt: new Date().toISOString(), file: name, rows });
   if (existsSync(FAILED_FLAG)) rmSync(FAILED_FLAG);
 } catch (e) {
   rmSync(work, { recursive: true, force: true }); // 平文は必ず削除（process.exit は finally を通らないため先に消す）

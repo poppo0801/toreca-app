@@ -26,6 +26,10 @@
     "restore:drill": "node scripts/restore-drill.mjs",
     "restore": "node scripts/restore.mjs",
     "restore:images": "node scripts/restore-images.mjs",
+    "backup:full": "node scripts/full-backup.mjs",
+    "backup:inspect": "node scripts/inspect-backup.mjs",
+    "restore:full-drill": "node scripts/restore-full-drill.mjs",
+    "restore:storage": "node scripts/restore-storage.mjs",
     "verify:prod": "node scripts/verify-production.mjs",
     "merge:chains": "node scripts/merge-chains.mjs"
   },
