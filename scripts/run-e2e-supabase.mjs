@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import { freePort } from "./lib/port.mjs";
+import { assertTargetForRun } from "./lib/target.mjs";
 
 process.loadEnvFile(".env.local");
+assertTargetForRun("test:e2e:supabase"); // 開発用ローカルDBのみ（Stage 8C）
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });

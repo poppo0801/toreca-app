@@ -40,20 +40,18 @@
 ## 5. 設計上の制約（守ること）
 - 応募可否の判定は単一のロジックを、バッジ・マトリクス・通知・完了率で共用する（`architecture-decisions.md`）。
 - 下部メニュー・ヘッダー・シートの固定配置と Safe Area（AppShell）は専用工程以外で変えない。`statusBarStyle` は `"default"`（`docs/UI_UX_GUIDELINES.md`）。
-- アプリは `NEXT_PUBLIC_SUPABASE_URL` が `https://*.supabase.co`（`.in`）以外だと動かない（`src/lib/supabase/url.ts`）。ローカルの Supabase には向けられない（Stage 8C の課題）。
+- アプリは `NEXT_PUBLIC_SUPABASE_URL` が `https://*.supabase.co`（`.in`）以外だと動かない（`src/lib/supabase/url.ts`）。ローカルの Supabase へは、開発・テスト環境（`next dev` または `TOREMANE_ENV=local`）でのみ `http://127.0.0.1:ポート` を許可する（Stage 8C）。
 - DB の変更はマイグレーションのみ。前進のみで、元に戻せない。
-- 秘密は Vercel の環境変数と `.env.local` のみ。ブラウザ向けコードに含めない（`verify:prod` が検査）。
+- 秘密は Vercel の環境変数と、Git管理外の `.env.production-ops`（本番）・`.env.local`（開発用のローカル値のみ）。ブラウザ向けコードに含めない（`verify:prod` が検査）。
 - 家計簿アプリとプロジェクト・データを混ぜない。
 
-## 6. 開発環境と本番環境の現状（**重要な未解決リスク**）
-**開発環境は本番 Supabase に直結している。開発用 DB は存在しない。**
-- `.env.local` が本番の Supabase URL と `SUPABASE_SERVICE_ROLE_KEY`（全権）を指す。`npm run dev`・各 `scripts/*.mjs`・`supabase db push` はすべて本番に作用する。
-- DB 結合テストと Supabase E2E は、本番 DB に `rls-test-*@example.invalid` の世帯を作って後で掃除する。掃除の失敗で残ることがある。
-- 安全の拠り所は運用規約（dry-run 既定、`--execute`、事前バックアップ、接続先の照合）のみ。仕組みによる防止（読み取り専用ロール、環境ごとの鍵、保護ブランチ）は無い。
-- `main` への push は自動で本番に反映される。CI 合格をデプロイの条件にする設定は確認できていない（ブランチ保護・Vercel 側は未確認）。
-- 安全に使える層: `NEXT_PUBLIC_DATA_SOURCE=mock` の単体テスト・画面 E2E・CI（本番に触れない）。
-- 改善案（Stage 8C で実施予定。`docs/stage8a.md` §5）: ローカル Supabase（Docker・無料。94本のマイグレーションが空から通ることを確認済み）を開発用 DB にする／`.env.local` を開発用に切替／開発時のみローカル接続先を許可／`main` を保護／`db push` 前のバックアップ必須化。
-- **この分離が完了するまで、自律型 AI の本番データ変更テストは禁止**（`CLAUDE.md`）。
+## 6. 開発環境と本番環境（Stage 8C で分離）
+**開発・テストはローカルの Supabase（Docker）で行い、本番には繋がない。**使い方は `docs/DEV_ENVIRONMENT.md`、記録は `docs/stage8c.md`。
+- **環境の構成**: 開発 = ローカルSupabase（`.dev-supabase/`、ポート553xx、マイグレーション94本、架空のテストデータ、`.env.local`）／本番 = Supabase `toreca-app` ＋ Vercel（設定は Vercel の環境変数と `.env.production-ops`）。Vercel の Preview・Development には環境変数が無い（プレビューは本番DBに繋がらない）。
+- **誤接続の防止（仕組み）**: ① `.env.local` に本番の鍵を置かない ② 接続先の検証（URLのプロジェクトID・鍵のJWT `ref`。`scripts/lib/target.mjs`・`src/lib/supabase/target.ts`）③ `dev`・`test:db`・`test:e2e:supabase`・`cleanup:testdata`・`db:*` は本番なら実行前に停止（解除手段なし）④ アプリは `next dev`／`TOREMANE_ENV=local` で本番の Supabase を拒否 ⑤ 本番への作用は `npm run prod -- … --yes-production` のみ ⑥ Claude Code は `db push`・`--linked`・force push・`.env.production-ops` の読み取りを設定で禁止（`.claude/settings.json`）。
+- **残るリスク**: 人間が端末で `npx supabase db push` を打つと、リンク済みの本番に届く（CLI の仕様）。`main` への push は自動で本番に反映され、CI 合格を条件にする設定（GitHub のブランチ保護・Vercel）は**未確認・未設定**（利用者の操作が必要。`docs/stage8c.md` §6）。ローカルDBは本番データを持たない（性能・件数の挙動は本番と異なる）。
+- 安全に使える層: ローカルDB・`NEXT_PUBLIC_DATA_SOURCE=mock` の単体テスト・画面 E2E・CI。
+- 本番の変更・削除は、**自律型 AI の実験とは別の、明示的な手順**（承認 → `backup:full` → `npm run prod`）。本番データを変更する AI の試験は禁止（`CLAUDE.md`）。
 
 ## 7. バックアップ・復元（Stage 8A）
 完全バックアップ `npm run backup:full`（95テーブル・認証・Storage・Git 履歴）、復元検証 `npm run restore:full-drill`、手順 `docs/RESTORE.md`、復元基準タグ `pre-agent-stage8a`。日次バックアップのタスク登録は利用者の操作待ち。ホスト版 Supabase の新規プロジェクトへの復元は未検証。

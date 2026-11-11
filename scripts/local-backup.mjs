@@ -12,11 +12,9 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
 
-try {
-  process.loadEnvFile(".env.local");
-} catch {
-  /* 環境変数が既に設定されている場合 */
-}
+import { loadProductionEnv } from "./lib/prod-env.mjs";
+
+loadProductionEnv("local-backup.mjs"); // 本番の設定（.env.production-ops）。開発用の .env.local は読まない（Stage 8C）
 
 const args = new Set(process.argv.slice(2));
 const repoRoot = resolve(".");

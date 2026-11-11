@@ -7,11 +7,9 @@ import { dirname } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 // ローカルでは .env.local、なければ環境変数から読む
-try {
-  process.loadEnvFile(".env.local");
-} catch {
-  /* 環境変数が既に設定されている場合 */
-}
+import { loadProductionEnv } from "./lib/prod-env.mjs";
+
+loadProductionEnv("backup.mjs"); // 本番の設定（.env.production-ops）。開発用の .env.local は読まない（Stage 8C）
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) throw new Error(".env.local に URL と SUPABASE_SERVICE_ROLE_KEY が必要です");

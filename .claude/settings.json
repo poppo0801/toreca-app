@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(npx supabase db push*)",
+      "Bash(npx supabase db reset*--linked*)",
+      "Bash(npx supabase db remote*)",
+      "Bash(npx supabase migration repair*)",
+      "Bash(npx supabase link*)",
+      "Bash(supabase db push*)",
+      "Bash(* --linked*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Read(./.env.production-ops)",
+      "Read(./.env.local.bak)",
+      "Read(./.env)"
+    ]
+  }
+}

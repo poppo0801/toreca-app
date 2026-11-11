@@ -3,6 +3,7 @@
 // RLS・外部キー・監査ログの追記専用トリガーは一切無効化しない。
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { assertTargetForRun } from "./target.mjs";
 
 export const TEST_EMAIL = /^rls-test-.+@example\.invalid$/;
 
@@ -15,9 +16,8 @@ export function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error(".env.local に URL と SUPABASE_SERVICE_ROLE_KEY が必要です");
-  // 家計簿など別プロジェクトへ誤接続しないための照合
-  const linked = readFileSync("supabase/.temp/project-ref", "utf8").trim();
-  if (!url.includes(linked)) throw new Error("接続先がリンク済みのトレカ専用プロジェクトと一致しません。中止します。");
+  // 接続先の照合（Stage 8C）: 既定はローカルのみ。本番は scripts/prod.mjs 経由（--yes-production）のときだけ。家計簿など別プロジェクトも拒否される
+  assertTargetForRun("test-cleanup");
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 

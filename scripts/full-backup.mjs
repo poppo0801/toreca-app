@@ -23,11 +23,9 @@ import { createClient } from "@supabase/supabase-js";
 import { decryptBuffer, encryptBuffer } from "./lib/backup-crypto.mjs";
 import { extractCopySql } from "./lib/pg-copy.mjs";
 
-try {
-  process.loadEnvFile(".env.local");
-} catch {
-  /* 環境変数が既に設定されている場合 */
-}
+import { loadProductionEnv } from "./lib/prod-env.mjs";
+
+loadProductionEnv("full-backup.mjs"); // 本番の設定（.env.production-ops）。開発用の .env.local は読まない（Stage 8C）
 
 const repoRoot = resolve(".");
 const pass = process.env.BACKUP_PASSPHRASE;
@@ -41,10 +39,10 @@ const PREFIX = NO_SOURCE ? "tcg-db" : "tcg-full";
 const KEEP = NO_SOURCE ? Number(process.env.BACKUP_KEEP_DAILY ?? 14) : Number(process.env.BACKUP_KEEP_FULL ?? 5);
 
 if (!pass || pass.length < 16) {
-  console.error("BACKUP_PASSPHRASE（16文字以上）が未設定です。.env.local に設定してください。");
+  console.error("BACKUP_PASSPHRASE（16文字以上）が未設定です。.env.production-ops に設定してください。");
   process.exit(2);
 }
-if (!url || !serviceKey) throw new Error(".env.local に NEXT_PUBLIC_SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY が必要です");
+if (!url || !serviceKey) throw new Error(".env.production-ops に NEXT_PUBLIC_SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY が必要です");
 for (const d of DIRS) {
   if (d === repoRoot || d.startsWith(repoRoot + sep)) {
     console.error("保存先にリポジトリ内は指定できません（誤って公開・コミットしないため）。");
@@ -216,7 +214,7 @@ try {
   } catch {
     warnings.push("Vercel の情報を取得できませんでした");
   }
-  const localEnvNames = existsSync(".env.local") ? readFileSync(".env.local", "utf8").split("\n").map((l) => /^([A-Z][A-Z0-9_]*)=/.exec(l)?.[1]).filter(Boolean) : [];
+  const localEnvNames = existsSync(".env.production-ops") ? readFileSync(".env.production-ops", "utf8").split("\n").map((l) => /^([A-Z][A-Z0-9_]*)=/.exec(l)?.[1]).filter(Boolean) : [];
   let authSettings = null;
   try {
     const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: anonKey ?? "" } });
@@ -264,8 +262,9 @@ try {
 
   // 復元用の秘密（本体とは別ファイル。BACKUP_PASSPHRASE 自体は含めない）
   const secretZip = new JSZip();
-  if (existsSync(".env.local")) {
-    secretZip.file(".env.local", readFileSync(".env.local", "utf8").split("\n").filter((l) => !/^BACKUP_PASSPHRASE=/.test(l)).join("\n"));
+  if (existsSync(".env.production-ops")) {
+    // 復元時は .env.production-ops（本番の設定）として戻す。アーカイブ内の名前は従来どおり .env.local
+    secretZip.file(".env.local", readFileSync(".env.production-ops", "utf8").split("\n").filter((l) => !/^BACKUP_PASSPHRASE=/.test(l)).join("\n"));
   }
   secretZip.file("README.txt", "復元用の秘密情報。BACKUP_PASSPHRASE は含まれません（別途保管）。Vercel にだけある秘密値（X_*, ANTHROPIC_API_KEY など）は取得できないため、各サービスの管理画面または利用者の控えから再設定が必要です。\n");
   const secretEnc = encryptBuffer(await secretZip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }), pass);

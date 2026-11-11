@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Db } from "@/lib/server/lottery-service";
+import { classifyTarget } from "@/lib/supabase/target";
 
 /**
  * 結合テスト共通。固定のテストユーザー(rls-test-<suite>-<n>@example.invalid)を再利用し、
@@ -13,6 +14,11 @@ try {
 }
 
 export const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+// Stage 8C: DB結合テストはローカルの開発用DBにだけ繋ぐ（本番の URL・鍵を検出したら実行前に止める）
+if (process.env.RUN_DB_TESTS === "1") {
+  const kind = classifyTarget(url, process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
+  if (kind !== "local") throw new Error(`[接続先ガード] DB結合テストは開発用ローカルDB限定です（判定: ${kind}）。npm run db:up && npm run db:env`);
+}
 export const publishable = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 export const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export const dbTestsEnabled = process.env.RUN_DB_TESTS === "1" && !!url && !!publishable && !!serviceKey;

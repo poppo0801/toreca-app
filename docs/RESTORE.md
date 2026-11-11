@@ -8,8 +8,8 @@
 | 対象 | 場所 | 内容 |
 |---|---|---|
 | 完全バックアップ本体 | `C:\Users\<ユーザー>\TorecaBackups\full\tcg-full-<日時>.tcgbak2`、複製 `D:\TorecaBackups\full\` | DB全体（スキーマ・全95テーブル・認証ユーザー）、Storage全バケットの実ファイル、Gitの全履歴(bundle)、構成情報(manifest.json)。AES-256-GCM で暗号化 |
-| 復元用の秘密 | `…\TorecaBackups\secrets\tcg-secrets-<日時>.tcgbak2` | `.env.local`（`BACKUP_PASSPHRASE` を除く）。本体とは別ファイル |
-| パスフレーズ | `.env.local` の `BACKUP_PASSPHRASE`（**利用者がパスワードマネージャー等へ控える**） | 紛失するとバックアップは開けない。バックアップ本体には含まれない |
+| 復元用の秘密 | `…\TorecaBackups\secrets\tcg-secrets-<日時>.tcgbak2` | `.env.production-ops`（`BACKUP_PASSPHRASE` を除く。アーカイブ内の名前は `.env.local`）。本体とは別ファイル |
+| パスフレーズ | `.env.production-ops` の `BACKUP_PASSPHRASE`（**利用者がパスワードマネージャー等へ控える**） | 紛失するとバックアップは開けない。バックアップ本体には含まれない |
 | 取得履歴 | `…\full\INDEX.jsonl` | 日時・サイズ・SHA-256・Gitコミット（秘密は含まない） |
 | ソースコード | GitHub `poppo0801/toreca-app`（タグ `pre-agent-stage8a`）、バックアップ内 `source/repo.bundle` | |
 | JSONの論理バックアップ（日次） | `…\TorecaBackups\tcg-backup-*.tcgbak`（`npm run backup:local`） | 68テーブルのみ。完全バックアップが正 |
@@ -38,7 +38,7 @@ npm run typecheck && npm test      # 依存が再現できていることの確�
 バージョンの記録は `manifest.json` の `versions` と `packageLockSha256`。
 
 ## 3. 環境変数の設定
-1. 秘密のアーカイブを展開: `npm run backup:inspect -- <tcg-secrets-….tcgbak2> --extract restored-secrets` → `.env.local` を取り出す（使い終えたら削除）。
+1. 秘密のアーカイブを展開: `npm run backup:inspect -- <tcg-secrets-….tcgbak2> --extract restored-secrets` → `.env.local` を取り出す（使い終えたら削除）。（Stage 8C 以降は、取り出した `.env.local` を `.env.production-ops` として戻す。開発用の `.env.local` は `npm run db:env` で作る）
 2. 復元先が**新しい Supabase プロジェクト**の場合は、次の3つを新しい値に変える（ダッシュボード > Project Settings > API）: `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`、`SUPABASE_SERVICE_ROLE_KEY`。`BACKUP_PASSPHRASE` を追記する。
 3. **Vercel にしか無い秘密値**（`.env.local` に無いため、このバックアップでは復元できない）: `ANTHROPIC_API_KEY`、`X_BEARER_TOKEN`、`X_OAUTH_CLIENT_ID`、`X_OAUTH_CLIENT_SECRET`、`X_OAUTH_ENCRYPTION_KEY`。各サービスの管理画面で再発行するか、利用者の控えから設定する。`X_OAUTH_ENCRYPTION_KEY` を失うと、DB内の X 連携トークン（`x_oauth_tokens`）は復号できなくなるため、X の連携を設定画面からやり直す。
 4. Vercel の環境変数の一覧（名前のみ）は `manifest.json` の `vercel.productionEnvVarNames`。**Environment は Production のみ**に設定する（`docs/deploy-vercel.md`）。
