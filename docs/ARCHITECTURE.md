@@ -54,6 +54,9 @@
 - 安全に使える層: ローカルDB・`NEXT_PUBLIC_DATA_SOURCE=mock` の単体テスト・画面 E2E・CI。
 - 本番の変更・削除は、**自律型 AI の実験とは別の、明示的な手順**（承認 → `backup:full` → `npm run prod`）。本番データを変更する AI の試験は禁止（`CLAUDE.md`）。
 
+## 6.5 自律型エージェント基盤（Stage 8D-2。開発環境のみ・実APIは未使用）
+`src/lib/agent/`（基盤・検証層・モック）と `src/lib/server/agent/`（調査結果の保存・安全な取得）。ツールは読み取り専用のみ、実行上限つき、外部文面はデータ扱い、保存先は専用の表 `store_location_research`（追記専用・RLS・店舗マスターと分離。マイグレーション94の次の `20261212000094` は**開発用DBのみ適用・本番未適用**）。画面 `/settings/store-research` と調査アクションは開発環境でのみ有効（本番は404/拒否）。既存のAI解析（`src/lib/ai/`）・自動収集とは独立（関数の再利用のみ）。詳細: `docs/stage8d2.md`。
+
 ## 7. バックアップ・復元（Stage 8A）
 完全バックアップ `npm run backup:full`（95テーブル・認証・Storage・Git 履歴）、復元検証 `npm run restore:full-drill`、手順 `docs/RESTORE.md`、復元基準タグ `pre-agent-stage8a`。日次バックアップのタスク登録は利用者の操作待ち。ホスト版 Supabase の新規プロジェクトへの復元は未検証。
 

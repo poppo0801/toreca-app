@@ -19,8 +19,8 @@ export const CHAINS = [
 
 // 店舗: [chain, name, prefecture, extra]  extra: address/lat/lng（住所登録済み）, sales_kind, memo, location_review_needed, aliases
 export const STORES = [
-  ["テスト書店", "テスト書店 駅前店", "東京都", { address: "東京都架空区1-2-3（架空）", lat: 35.6, lng: 139.7 }],
-  ["テスト書店", "テスト書店 郊外店", "神奈川県", {}], // 住所不明
+  ["テスト書店", "テスト書店 駅前店", "東京都", { address: "東京都架空区1-2-3（架空）", lat: 35.6, lng: 139.7, url: "https://test-bookstore.test/" }],
+  ["テスト書店", "テスト書店 郊外店", "神奈川県", { url: "https://test-bookstore.test/" }], // 住所不明
   ["テスト書店", "テスト書店 港北店", "神奈川県", { address: "神奈川県架空市4-5-6（架空）", lat: 35.5, lng: 139.6, memo: "閉店の可能性あり（架空の注意）", location_review_needed: true }],
   ["テスト書店", "テスト書店 旧市街店", "埼玉県", { memo: "移転の可能性あり（架空）", location_review_needed: true }],
   ["テスト家電", "テスト家電 本店", "東京都", { address: "東京都架空区7-8-9（架空）", lat: 35.7, lng: 139.8 }],
@@ -33,7 +33,7 @@ export const STORES = [
   ["テスト家電", "本店", "神奈川県", {}], // 同名店舗
   ["テスト通販ショップ", "通販", "", { sales_kind: "online_only" }],
   ["テスト書店", "通販", "", { sales_kind: "online_only" }], // 実店舗系列の通販
-  ["テスト百貨店", "テスト百貨店 中央館", "東京都", { sales_kind: "both", address: "東京都架空区10-11-12（架空）", lat: 35.65, lng: 139.75 }],
+  ["テスト百貨店", "テスト百貨店 中央館", "東京都", { url: "https://test-depart.test/", sales_kind: "both", address: "東京都架空区10-11-12（架空）", lat: 35.65, lng: 139.75 }],
 ];
 
 // 商品: [name, { product_code, category, release_offset_days, list_price_box }]

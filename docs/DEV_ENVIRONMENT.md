@@ -85,3 +85,8 @@ AI の実接続を開発で試す場合（後の Stage）: `.env.local` に実�
 
 ## 10. 安全性の自動テスト
 `src/lib/dev-safety.test.ts`（単体テストに含まれ、CI でも動く）が、実スクリプトを子プロセスで起動して、本番の URL・鍵を注入した場合に**接続前に停止**することを確認する（`dev`・`db:check/seed`・`test:db`・`test:e2e:supabase`・`cleanup:testdata`・バックアップ・`verify:prod`・`npm run prod` の確認フラグと本番判定）。本番への通信は行わない。
+
+## 11. 自律型エージェント（Stage 8D-2）
+- 調査画面: ログイン後 `/settings/store-research`（開発環境のみ。本番では404）。既定は**モック**（架空のWeb・実APIなし）。`npm run db:reset` 後は `db:seed`（公式サイトのドメインが登録されたテスト店舗あり）。
+- 評価: `npm run eval:store-location`（`eval/runs/store-location-report.md`）。
+- 実API（費用発生・**承認後のみ**）: `.env.local` に `AGENT_REAL_API=allow`・`AGENT_ANTHROPIC_API_KEY`（開発専用。本番キーと別）・`AGENT_MAX_COST_JPY_PER_RUN`・`AGENT_MAX_RUNS_PER_DAY` を設定し、画面で費用確認にチェック。詳細は [stage8d2.md](stage8d2.md) §5。

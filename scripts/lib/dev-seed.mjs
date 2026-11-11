@@ -45,7 +45,7 @@ for (const [name, x] of CHAINS) {
 }
 const storeIds = {}; // "系列/店舗名" → id
 for (const [chain, name, prefecture, x] of STORES) {
-  const row = { chain_id: chains[chain], name, prefecture, address_optional: x.address ?? "", sales_kind: x.sales_kind ?? "physical", memo: x.memo ?? "", location_review_needed: !!x.location_review_needed };
+  const row = { chain_id: chains[chain], name, prefecture, address_optional: x.address ?? "", sales_kind: x.sales_kind ?? "physical", memo: x.memo ?? "", store_url: x.url ?? null, location_review_needed: !!x.location_review_needed };
   if (x.lat != null) Object.assign(row, { latitude: x.lat, longitude: x.lng });
   storeIds[`${chain}/${name}`] = await ensure("stores", { chain_id: chains[chain], name }, row);
   counts.stores++;

@@ -17,6 +17,7 @@
     "eval:baseline": "node scripts/eval.mjs baseline",
     "eval:score": "node scripts/eval.mjs score",
     "eval:compare": "node scripts/eval.mjs compare",
+    "eval:store-location": "node scripts/eval-store-location.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
