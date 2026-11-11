@@ -21,6 +21,10 @@ import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
 import { saveCandidateRows } from "@/lib/server/collector/save-rows";
+import { excludedChainReason, matchExcludedChain, type ExcludedChain } from "@/lib/collector/chain-exclusion";
+import { loadExcludedChains } from "@/lib/server/collector/chain-exclusion-load";
+import { reconcileAutoRegistered, recordMergedSource } from "@/lib/server/collector/dedupe-guard";
+import { snapshotOfInput } from "@/lib/merged-sources";
 import { deepClean, safeSlice, safeSliceEnd } from "@/lib/text-safe";
 import { emptyFunnel, funnelLine, judgeXPost, type XFunnel } from "@/lib/collector/x-relevance";
 import type { ImageStats } from "@/lib/server/collector/x-rich";
@@ -103,6 +107,8 @@ export interface CollectDeps {
   xIdentities?: Map<string, SavedIdentity>;
   /** 情報源の分類に使う文脈（解析の開始時に読み込む） */
   sourceCtx?: SourceContext;
+  /** 「信頼性なし」で除外した系列（解析の開始時に読み込む。Stage 7Q） */
+  excludedChains?: ExcludedChain[];
 }
 
 export interface SourceReport {
@@ -686,6 +692,13 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       mergeLog = { at: nowIso, from: old.source.url, fromId: old.id, kind: "same_lottery", filled: m.filled, updated: m.updated, conflicts: m.conflicts };
     }
   }
+  // 「信頼性なし」で除外した系列（系列マスターのID・系列名・別名・表記ゆれ。情報源のアカウントが不明でも適用）。登録前に必ず判定する（Stage 7Q）
+  const exChain = matchExcludedChain((deps.excludedChains ??= await loadExcludedChains(db, deps.householdId).catch(() => [])), { chainId: input.chain.id, chainName: input.chain.name || result.extraction.chainName, texts: [q.title, q.post?.text, q.card], textMode: "unresolved" });
+  if (exChain) {
+    await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "信頼性なしの系列に一致", reasons: [excludedChainReason(exChain)], draft: { input, summary: draft.summary, confirmedAt: nowIso, excludedChain: { ruleId: exChain.chain.ruleId, chainId: exChain.chain.chainId, via: exChain.via, at: nowIso } } as unknown as Json, resolved_at: nowIso, completed_at: nowIso, ...acct, ...clear }).eq("id", c.id);
+    await bumpStats(db, deps.householdId, deps.now, { excluded: 1 });
+    return { usedAi: true, registered: false, aiFailed: false };
+  }
   const exRule = matchExclusion(rules, { storeId: input.store.id, chainId: input.chain.id, url: q.url });
   if (exRule && (exRule.scope === "store" || exRule.scope === "chain")) {
     await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "収集元の除外ルールに一致", reasons: [`収集元の除外ルール（${exRule.label || exRule.scope}）に一致したため登録しませんでした`], draft: { input, summary: draft.summary, confirmedAt: nowIso } as unknown as Json, resolved_at: nowIso, completed_at: nowIso, ...acct, ...clear }).eq("id", c.id);
@@ -767,6 +780,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const high = dups.find((d) => d.level === "high");
   if (high) {
     const added = await appendSourceUrl(db, high.lotteryId, q.url);
+    await recordMergedSource(db, high.lotteryId, { url: q.url, collectedAt: c.fetched_at ?? nowIso, chainName: input.chain.name, mergedAt: nowIso, reason: high.reason, candidateId: c.id, snapshot: snapshotOfInput(input) }).catch(() => false);
     // 注意付きで登録した抽選は、新しい情報で不足を補い、相違を再評価する（値のある項目・手動編集した抽選は上書きしない）（Stage 7A）
     const completed = await autoCompleteLottery(db, high.lotteryId, input, { official: mySource.kind === "official_site" || mySource.kind === "official_x", now: deps.now }).catch(() => null);
     await supersede("duplicate", high.lotteryId);
@@ -826,10 +840,19 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
           await db.from("lotteries").update({ archived_at: nowIso }).eq("id", saved.value.id);
           if (existing) {
             const added = await appendSourceUrl(db, existing.id, q.url);
+            await recordMergedSource(db, existing.id, { url: q.url, collectedAt: c.fetched_at ?? nowIso, chainName: input.chain.name, mergedAt: nowIso, reason: "並行して登録された同じ抽選（同一性キー）", candidateId: c.id, fromLotteryId: saved.value.id, snapshot: snapshotOfInput(input) }).catch(() => false);
             await supersede("duplicate", existing.id);
             await finish("completed", { status: "duplicate", lottery_id: existing.id, reasons: ["並行して登録された同じ抽選があるため、新規カードは作らず統合しました", added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due }, { duplicates: 1 });
             return { usedAi: true, registered: false, aiFailed: false };
           }
+        }
+        // 登録直後に、同じ系列の最新の登録状況で共通の重複判定をやり直す（並行して登録された、締切日だけ違う同じ抽選を、先に作られた方に統合する）（Stage 7Q）
+        const rec = await reconcileAutoRegistered(db, deps.householdId, saved.value.id, input, data, { now: deps.now, candidateId: c.id, sourceUrl: q.url, newRound: !!q.newRound }).catch(() => null);
+        if (rec) {
+          const added = await appendSourceUrl(db, rec.survivorId, q.url);
+          await supersede("duplicate", rec.survivorId);
+          await finish("completed", { status: "duplicate", lottery_id: rec.survivorId, reasons: [rec.reason, added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due }, { duplicates: 1 });
+          return { usedAi: true, registered: false, aiFailed: false };
         }
         // 店舗の都道府県が空のままにならないよう、確実な根拠のある都道府県だけを補う（既に入っている値は変えない）
         await fillStorePrefecture(db, saved.value.id, input.receiveMethod === "shipping" ? "" : knownPref);
@@ -1004,7 +1027,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
           if (rows.length >= MAX_NEW_PER_SOURCE * 3) break;
         }
         for (let i = 0; i < unchangedIds.length; i += 100) await db.from("collection_candidates").update({ last_checked_at: now.toISOString() }).in("id", unchangedIds.slice(i, i + 100));
-        const saveRes = await saveCandidateRows(db, rows);
+        const saveRes = await saveCandidateRows(db, rows, deps.excludedChains ?? []);
         const added = saveRes.saved;
         if (saveRes.failed > 0) {
           errors++;
@@ -1194,6 +1217,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   let fails = ctx.settings.consecutive_failures ?? 0;
   const lease = 150;
   const rules = await activeExclusions(db, householdId);
+  deps.excludedChains = rules.some((r) => r.scope === "chain") ? await loadExcludedChains(db, householdId).catch(() => []) : [];
   const userRules = await activeUserRules(db, householdId);
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
@@ -1224,6 +1248,15 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
       const exRule = matchExclusion(rules, { url: q.kind === "x_post" ? null : q.url, xUsername: q.kind === "x_post" ? q.sourceName : null });
       if (exRule) {
         await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "収集元の除外ルールに一致", reasons: [`収集元の除外ルール（${exRule.label || exRule.scope}）に一致したため除外しました`], resolved_at: now.toISOString(), completed_at: now.toISOString(), lease_until: null, locked_by: null }).eq("id", c.id);
+        out.screened++;
+        await bumpStats(db, householdId, now, { excluded: 1 });
+        continue;
+      }
+      // 「信頼性なし」で除外した系列: 公式アカウントの対応づけが除外系列なら、AIを呼ばずに除外する。Webページ・一覧は題名の系列名でも判定する（X投稿の本文は解析後の系列で判定）
+      const acctChain = q.kind === "x_post" ? ((): string | null => { const u = (q.post?.username ?? usernameFromPostUrl(q.url) ?? "").toLowerCase().replace(/^@/, ""); return u ? (deps.xLinks?.get(u)?.chainId ?? deps.xIdentities?.get(u)?.chainId ?? null) : null; })() : null;
+      const exCh = matchExcludedChain(deps.excludedChains ?? [], { chainId: acctChain, texts: [q.kind === "x_post" ? null : q.title], textMode: "always" });
+      if (exCh) {
+        await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", triage: "auto_exclude", triage_reason: "信頼性なしの系列に一致", reasons: [excludedChainReason(exCh)], resolved_at: now.toISOString(), completed_at: now.toISOString(), lease_until: null, locked_by: null }).eq("id", c.id);
         out.screened++;
         await bumpStats(db, householdId, now, { excluded: 1 });
         continue;

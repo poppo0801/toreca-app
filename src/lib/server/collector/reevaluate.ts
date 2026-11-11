@@ -9,6 +9,11 @@ import { autoDedupeKey } from "@/lib/lottery-dedupe-key";
 import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { bumpStats } from "@/lib/server/collector/run";
 import type { Json } from "@/types/database";
+import { excludedChainReason, matchExcludedChain } from "@/lib/collector/chain-exclusion";
+import { loadExcludedChains } from "@/lib/server/collector/chain-exclusion-load";
+import { reconcileAutoRegistered, recordMergedSource } from "@/lib/server/collector/dedupe-guard";
+import { appendSourceUrl } from "@/lib/server/collector/run";
+import { snapshotOfInput } from "@/lib/merged-sources";
 
 /**
  * 確認待ち候補の再評価の実行（Stage 4C 追加）。判定は src/lib/collector/reevaluate.ts（純関数）。
@@ -101,6 +106,8 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
   const wantClass = (c: ReevalClass) => !opts.classes || opts.classes.includes(c);
 
   const budgetBefore = await monthBudget(db, householdId).catch(() => null);
+  // 「信頼性なし」で除外した系列（登録の前に必ず判定する。Stage 7Q）
+  const excludedChains = await loadExcludedChains(db, householdId).catch(() => []);
 
   const judgeAll = (cands: CandidateLite[]) =>
     cands
@@ -140,8 +147,17 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
         continue;
       }
       const nowIso = now.toISOString();
+      // 除外した系列の抽選は、再評価でも登録しない（候補は残し、除外として記録する）
+      const exChain = j.action === "register" ? matchExcludedChain(excludedChains, { chainId: j.rematched.input.chain.id, chainName: j.rematched.input.chain.name, texts: [c.title], textMode: "unresolved" }) : null;
+      if (exChain) {
+        const m = mark(c, j, "rule");
+        await db.from("collection_candidates").update({ status: "excluded", job_state: "skipped", reasons: [excludedChainReason(exChain)], draft: newDraft(c, j, {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
+        note(c, j, "excluded_offtarget", "rule");
+        continue;
+      }
       if (j.action === "duplicate" && j.duplicateOf) {
         const m = mark(c, j, "rule");
+        await recordMergedSource(db, j.duplicateOf.lotteryId, { url: c.source_url, collectedAt: nowIso, chainName: j.rematched.input.chain.name, mergedAt: nowIso, reason: j.duplicateOf.reason, candidateId: c.id, snapshot: snapshotOfInput(j.rematched.input) }).catch(() => false);
         await db.from("collection_candidates").update({ status: "duplicate", job_state: "completed", lottery_id: j.duplicateOf.lotteryId, reasons: [...j.reasons, "確認待ち候補の再評価: 既存の抽選と同じ内容のため統合しました（既存の抽選は変更していません）"], draft: newDraft(c, j, {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
         note(c, j, "duplicate", "rule");
       } else if (j.action === "exclude") {
@@ -168,12 +184,25 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
         }
         const withCaution = j.decision?.grade === "B";
         const dedupeKey = autoDedupeKey(input);
+        const reconcile = async (): Promise<boolean> => {
+          // 登録直後に、同じ系列の最新の登録状況で共通の重複判定をやり直す（並行登録された、締切日だけ違う同じ抽選を、先に作られた方へ統合する）
+          const rec = await reconcileAutoRegistered(db, householdId, saved.value.id, input, data, { now, candidateId: c.id, sourceUrl: c.source_url }).catch(() => null);
+          if (!rec) return false;
+          if (c.source_url) await appendSourceUrl(db, rec.survivorId, c.source_url);
+          const m = mark(c, j, "rule");
+          await db.from("collection_candidates").update({ status: "duplicate", job_state: "completed", lottery_id: rec.survivorId, reasons: [...j.reasons, rec.reason], draft: newDraft(c, j, {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
+          note(c, j, "duplicate", "rule");
+          data = await loadAppData(db, householdId);
+          return true;
+        };
         const marked = await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: (j.decision?.cautions ?? []) as unknown as Json, confidence: j.decision?.confidence ?? null, cautions_updated_at: nowIso, ...(dedupeKey ? { auto_dedupe_key: dedupeKey } : {}) }).eq("id", saved.value.id);
         if (marked.error?.code === "23505" && dedupeKey) {
           // 並行して実行された別の処理が、同じ抽選を先に登録していた。今回の登録はアーカイブして、既存の抽選に統合する（Stage 7P）
           const existing = (await db.from("lotteries").select("id").eq("household_id", householdId).eq("auto_dedupe_key", dedupeKey).is("archived_at", null).maybeSingle()).data;
           await db.from("lotteries").update({ archived_at: nowIso }).eq("id", saved.value.id);
           if (existing) {
+            if (c.source_url) await appendSourceUrl(db, existing.id, c.source_url);
+            await recordMergedSource(db, existing.id, { url: c.source_url, collectedAt: nowIso, chainName: input.chain.name, mergedAt: nowIso, reason: "並行して登録された同じ抽選（同一性キー）", candidateId: c.id, fromLotteryId: saved.value.id, snapshot: snapshotOfInput(input) }).catch(() => false);
             const m = mark(c, j, "rule");
             await db.from("collection_candidates").update({ status: "duplicate", job_state: "completed", lottery_id: existing.id, reasons: [...j.reasons, "並行して登録された同じ抽選があるため、新規カードは作らず統合しました"], draft: newDraft(c, j, {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
             note(c, j, "duplicate", "rule");
@@ -181,6 +210,7 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
             continue;
           }
         }
+        if (await reconcile()) continue;
         await bumpStats(db, householdId, now, { registered_new: 1, registered_caution: withCaution ? 1 : 0 });
         const via: ReevalMarker["via"] = markers.get(c.id)?.via ?? (j.cls === "B" ? "rematch" : "rule");
         const m = mark(c, j, via, { registeredLotteryId: saved.value.id });

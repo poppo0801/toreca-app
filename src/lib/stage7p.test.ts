@@ -46,28 +46,7 @@ const input = (o: Partial<LotteryInput> & { products?: (string | null)[] } = {})
 };
 const dup = (i: LotteryInput, ls: Lottery[]) => findDuplicates(i, ls, undefined, master, { now: NOW });
 
-describe("Stage 7P: 店舗が未確定の抽選も重複判定の対象（以前は判定自体を行わず二重登録されていた）", () => {
-  it("店舗未確定どうし・同じ商品構成・同じ締切 → 別の告知（別URL）でも重複として検出する（要確認）", () => {
-    const d = dup(input(), [lot("L1")]);
-    expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ lotteryId: "L1", level: "medium" });
-    // 同じ投稿・応募URLなら確定（high）
-    const same = dup(input({ sourceUrls: ["https://twitter.com/z/status/100000001"] }), [lot("L1")]);
-    expect(same[0]).toMatchObject({ level: "high", reason: "同じ情報源URLで登録済みです" });
-  });
-  it("店舗未確定の登録（要確認）に回るため、新規カードは作られない（high でなくても重複の疑いは decideRegistration で確認待ちになる）", () => {
-    expect(dup(input({ applyDeadline: flex(null) }), [lot("L1")])[0]?.level).toBe("medium");
-  });
-  it("店舗が未確定のものと、店舗が確定しているものは同一にしない", () => {
-    expect(dup(input({ chain: { id: "ds", name: "ドラゴンスター" }, store: { id: "ds1", name: "三宮店", prefecture: "" } }), [lot("L1", { chainId: "ds" })])).toEqual([]);
-  });
-  it("応募時に店舗選択（店舗未確定扱い）と、店舗未確定の抽選は同じ区分", () => {
-    const sel = input({ chain: { id: "geo", name: "GEO" }, storeMode: "select_on_apply", store: { id: "geoph", name: "応募時に店舗選択", prefecture: "" } });
-    expect(dup(sel, [lot("L1", { chainId: "geo", storeId: "geoph", storeMode: "select_on_apply" })])[0]).toMatchObject({ level: "high" }); // 同じ店舗（プレースホルダ）
-    expect(dup({ ...sel, store: { id: null, name: "", prefecture: "" } }, [lot("L1", { chainId: "geo" })])[0]?.level).toBe("medium");
-  });
-});
-
+// 店舗未確定の扱いは Stage 7Q で変更（同じ系列・商品なら原則重複）。stage7q.test.ts を参照
 describe("Stage 7P: 系列・店舗・商品が同じなら、応募期間・情報元が違っても重複", () => {
   const ds = { chain: { id: "ds", name: "ドラゴンスター" }, store: { id: "ds1", name: "三宮店", prefecture: "" } };
   it("別URL・別の締切日（期間が重なる）でも high（開催回を判断できない場合は重複を優先）", () => {

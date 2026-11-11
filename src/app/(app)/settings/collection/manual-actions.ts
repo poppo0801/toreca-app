@@ -43,6 +43,19 @@ export async function manualDismissAction(candidateId: string, code: ExclusionRe
     .from("collection_candidates")
     .update({ status: "excluded", job_state: "skipped", manual_state: "dismissed", manual_resolved_at: nowIso, manual_resolved_by: c.userId, reasons: [`利用者が対象外として除外（${EXCLUSION_LABEL[p.data.code]}）${p.data.text ? `: ${p.data.text}` : ""}`.slice(0, 300)], resolved_at: nowIso, completed_at: nowIso })
     .eq("id", candidateId);
+  // 「信頼性なし」で除外したときは、その系列を今後の自動収集の対象から除外する（Stage 7Q）。以前は候補1件を除外するだけで、同じ系列の次の告知が再び登録されていた。
+  // 系列マスターで確定している系列だけ（系列が特定できないときは作らない）。系列の既存の抽選カードには触れない・手動登録は禁止しない
+  if (!error && p.data.code === "untrusted_shop") {
+    const cand = (await c.db.from("collection_candidates").select("draft").eq("id", candidateId).maybeSingle()).data;
+    const chainId = (cand?.draft as { input?: { chain?: { id?: string | null } } } | null)?.input?.chain?.id ?? null;
+    if (chainId && id.safeParse(chainId).success) {
+      const chain = (await c.db.from("chains").select("id,name").eq("id", chainId).maybeSingle()).data;
+      if (chain) {
+        const row = { household_id: c.householdId, scope: "chain", key: chain.id, label: chain.name.slice(0, 120), reason_code: "untrusted_shop", reason_note: (p.data.text || "候補の除外（信頼性なし）から系列を除外").slice(0, 500), chain_id: chain.id, created_by_profile_id: null };
+        await c.db.from("collection_exclusions").insert(row as never);
+      }
+    }
+  }
   revalidatePath("/settings/collection");
   return error ? { ok: false, error: "更新できませんでした" } : { ok: true };
 }

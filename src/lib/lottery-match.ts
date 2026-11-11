@@ -6,6 +6,7 @@ import { flexToJstDate } from "@/lib/finance";
 import { jstDateString } from "@/lib/datetime";
 import type { AppData, Chain, Lottery, Product, Store } from "@/types/domain";
 import { splitNotes } from "@/lib/notes";
+import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { classifyRequirements, foldAnnounceNote, resolveAnnouncement } from "@/lib/lottery-taxonomy";
 
 /**
@@ -506,8 +507,20 @@ export function urlIdentity(raw: string): string | null {
   return `url:${host}${u.pathname.replace(/\/+$/, "")}`;
 }
 
-/** 店舗の判定: same=同じ店舗（または双方がオンライン）／unresolved=双方とも店舗が未確定（店舗名が読み取れない・応募時に店舗選択）／null=別の店舗 */
-type StoreBucket = "same" | "unresolved" | null;
+/**
+ * 店舗の区分（Stage 7Q）。店舗IDが無いというだけで同じ扱いにしない。
+ *   fixed=店舗固定式（特定の店舗で実施）/ select=店舗選択式（応募時に応募者が店舗を選ぶ。GEO など）/ online=通販・オンライン / unconfirmed=店舗未確定（本来の対象店舗が不明）
+ */
+export type StoreClass = "fixed" | "select" | "online" | "unconfirmed";
+/** 店舗の関係: same=同じ（同じ店舗・双方オンライン・双方が店舗選択式・双方が店舗未確定）/ weak=店舗固定式と店舗未確定（同じ抽選かもしれないが断定できない）/ null=別の店舗・別の区分 */
+type StoreBucket = "same" | "weak" | null;
+
+export function storeRelation(a: { cls: StoreClass; id: string | null }, b: { cls: StoreClass; id: string | null }): StoreBucket {
+  if (a.cls === "fixed" && b.cls === "fixed") return a.id === b.id ? "same" : null;
+  if (a.cls === b.cls) return "same"; // online/online, select/select, unconfirmed/unconfirmed
+  if ((a.cls === "fixed" && b.cls === "unconfirmed") || (a.cls === "unconfirmed" && b.cls === "fixed")) return "weak";
+  return null; // 店舗選択式と店舗固定式・店舗未確定、通販と店舗は別の抽選
+}
 
 /**
  * 明確に別の開催回か。双方の応募期間が分かっていて、一方の応募開始がもう一方の応募締切より後（期間が重ならない）ときだけ true。
@@ -525,23 +538,28 @@ export function isClearlyOtherRound(mine: { start: string | null; deadline: stri
 }
 
 /**
- * 同じ抽選を二重登録しないための候補検出（自動収集・抽選候補の再評価・手動登録・一括登録で共通）。
- * 系列が同じ（ID、または「通販」等の語を除いた名称が同じ）・店舗が同じ・商品構成が同じなら、応募期間・情報元URLが違っても同一（high）とする。
- *   ・明確に別の開催回（応募期間が重ならない）と確認できるときだけ、別の抽選として登録を許可する
- *   ・商品の一部だけが一致する抽選は、無条件に同一とせず、同じ情報源（URL）のとき high、締切が同日・不明のとき要確認（medium）にとどめる
- *   ・双方とも店舗が未確定（店舗名が読み取れない・応募時に店舗選択）のときは、同じ情報源（同じ投稿・応募URL）だけ high。商品構成と締切が同じでも、別の店舗の告知の可能性があるため要確認（medium）
- * 商品と締切日だけが一致する別の店舗・別の系列の抽選は、同一にしない。
+ * 同じ抽選を二重登録しないための候補検出（自動収集・抽選候補の再評価・手動登録・一括登録・登録直後の再確認で共通）。
+ * 系列が同じ（ID、または「通販」等の語を除いた名称が同じ）・商品構成が同じ・店舗が同じ区分なら、応募期間・情報元URLが違っても同一（high）とする。
+ * 店舗が特定できない（未確定）どうしも同じ区分として同一にする。店舗固定式と店舗選択式（GEO など）、通販と店舗は別の抽選。店舗が明確に違う独立した抽選は別カード。
+ *   ・明確に別の開催回（応募期間が重ならない等）と確認できるときだけ、別の抽選として登録を許可する
+ *   ・締切が不明なとき、店舗固定式と店舗未確定の組、商品の一部だけが共通する抽選は、同一か判断できないので要確認（medium。抽選候補で確認）
+ *   ・商品構成が違うものは原則別カード（同じ店舗・同じ締切日で一部の商品が共通するときだけ要確認）
  */
 export function findDuplicates(input: LotteryInput, lotteries: Lottery[], sourceUrl?: string, master?: { chains: Chain[]; stores: Store[] }, opts: { now?: Date } = {}): DraftDuplicate[] {
   const today = jstDateString(opts.now ?? new Date());
   const chainName = input.chain.name || (master?.chains.find((c) => c.id === input.chain.id)?.name ?? "");
   if (!input.chain.id && !chainName.trim()) return [];
   const storeOf = (id: string | null) => (id ? master?.stores.find((s) => s.id === id) : undefined);
-  const myStore = storeOf(input.store.id);
-  const isOnline = (s: Store | undefined, name = "") => isOnlineLikeName(name || s?.name || "") || s?.salesKind === "online_only";
-  const myOnline = isOnline(myStore, input.store.name);
-  const myUnresolved = !input.store.id && !myOnline;
-  const mySelect = input.storeMode === "select_on_apply";
+  const classify = (id: string | null, name: string, mode: string | undefined): { cls: StoreClass; id: string | null } => {
+    const st = storeOf(id);
+    const nm = name || st?.name || "";
+    if (mode === "select_on_apply" || nm === SELECT_STORE_PLACEHOLDER) return { cls: "select", id };
+    if (isOnlineLikeName(nm) || st?.salesKind === "online_only") return { cls: "online", id };
+    if (id) return { cls: "fixed", id };
+    // 店舗名だけが入力された店舗（マスターに未登録の新しい店舗）は、名前のある別の店舗。店舗未確定（店舗名なし）とは区別する
+    return nm.trim() ? { cls: "fixed", id: `n:${normName(nm)}` } : { cls: "unconfirmed", id: null };
+  };
+  const mine = classify(input.store.id, input.store.name, input.storeMode);
   const resolved = input.items.map((i) => i.product.id).filter((x): x is string => !!x);
   const productIds = new Set(resolved);
   if (productIds.size === 0) return [];
@@ -552,15 +570,10 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
   const myKeys = new Set([sourceUrl, ...(input.sourceUrls ?? [])].filter((u): u is string => !!u).flatMap((u) => [urlIdentity(u), u]).filter((k): k is string => !!k));
   const out: DraftDuplicate[] = [];
   for (const l of lotteries) {
-    const lStore = storeOf(l.storeId);
     const lChainName = master?.chains.find((c) => c.id === l.chainId)?.name ?? "";
     const sameChain = l.chainId === input.chain.id || (!!lChainName && !!chainName.trim() && chainKey(lChainName) === chainKey(chainName));
     if (!sameChain) continue;
-    const lOnline = lStore ? isOnline(lStore) : false;
-    const lUnresolved = !l.storeId && !lOnline;
-    const lSelect = l.storeMode === "select_on_apply";
-    const bucket: StoreBucket =
-      (!!input.store.id && l.storeId === input.store.id) || (myOnline && lOnline) ? "same" : (myUnresolved || mySelect) && (lUnresolved || lSelect) && !myOnline && !lOnline ? "unresolved" : null;
+    const bucket = storeRelation(mine, classify(l.storeId, "", l.storeMode));
     if (!bucket) continue;
     const theirIds = l.items.map((i) => i.productId);
     const overlap = theirIds.some((id) => productIds.has(id));
@@ -571,17 +584,27 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     const theirStart = l.applyStart ? flexToJstDate(l.applyStart) : null;
     const sameDay = myDeadline !== null && theirDeadline === myDeadline;
     const unknownEither = myDeadline === null || theirDeadline === null;
+    // 同じ情報源URLは、店舗が違わなければ（同じ区分なら）同じ告知。店舗固定式と店舗未確定の組は、店舗が確定していない側の告知なので同一
     if (sameUrl) {
       out.push({ lotteryId: l.id, level: "high", reason: "同じ情報源URLで登録済みです" });
       continue;
     }
     if (isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: theirStart, deadline: theirDeadline }, today)) continue;
+    const unconf = mine.cls === "unconfirmed" && bucket === "same";
     if (bucket === "same" && sameSet && !unknownEither) {
-      out.push({ lotteryId: l.id, level: "high", reason: sameDay ? "同じ店舗・同じ商品・同じ応募締切の抽選が登録済みです" : "同じ店舗・同じ商品の抽選が登録済みです（応募期間が異なりますが、別の開催回と確認できないため同じ抽選として扱います）" });
+      out.push({
+        lotteryId: l.id,
+        level: "high",
+        reason: unconf
+          ? "店舗が未確定ですが、同じ系列・同じ商品の抽選が登録済みです（別の店舗・別の開催回と確認できないため同じ抽選として扱います）"
+          : sameDay
+            ? "同じ店舗・同じ商品・同じ応募締切の抽選が登録済みです"
+            : "同じ店舗・同じ商品の抽選が登録済みです（応募期間が異なりますが、別の開催回と確認できないため同じ抽選として扱います）",
+      });
     } else if (bucket === "same" && (sameDay || unknownEither) && (sameSet || sameDay)) {
-      out.push({ lotteryId: l.id, level: "medium", reason: "同じ店舗で一部の商品が共通する抽選が登録済みです（商品構成が異なるため同一か判断できません）" });
-    } else if (bucket === "unresolved" && sameSet && (sameDay || unknownEither)) {
-      out.push({ lotteryId: l.id, level: "medium", reason: "店舗が未確定で、同じ系列・同じ商品・同じ締切の抽選が登録済みです（同じ告知か別の店舗か判断できません）" });
+      out.push({ lotteryId: l.id, level: "medium", reason: sameSet ? "同じ商品の抽選が登録済みですが、応募締切が不明なため同一か判断できません" : "同じ店舗で一部の商品が共通する抽選が登録済みです（商品構成が異なるため同一か判断できません）" });
+    } else if (bucket === "weak" && sameSet && (sameDay || unknownEither)) {
+      out.push({ lotteryId: l.id, level: "medium", reason: "店舗が確定している抽選と、店舗が未確定の抽選で、同じ系列・同じ商品・同じ締切です（同じ告知か別の店舗か判断できません）" });
     }
   }
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === "high" ? -1 : 1));
