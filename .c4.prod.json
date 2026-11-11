@@ -1,0 +1,713 @@
+{
+ "ok": true,
+ "execute": false,
+ "before": {
+  "review": 59
+ },
+ "after": {
+  "review": 59
+ },
+ "counts": {
+  "review": 33,
+  "excluded_past": 5,
+  "requeued": 20
+ },
+ "byClass": {
+  "B": 17,
+  "D": 22,
+  "E": 5,
+  "C": 14
+ },
+ "rows": [
+  {
+   "id": "d3286100-9f19-47ae-9ad2-b0105b33bd57",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "系列を確実に特定できません",
+   "deadline": "open"
+  },
+  {
+   "id": "aea80f5d-342e-42a8-83d9-f1c81e2d5a80",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "商品「MEGA 拡張パック 30thCELEBRATION 30thCELEBRATION　エーフィ・ブラッキー」を確実に判別できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "bb8d5987-a9ac-46c6-bf99-d9c1e25af2a0",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "ef5d7e2c-d70e-475a-89d5-50f884d1c41f",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "系列を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "945ec27d-024a-48b1-9838-a6ee505da2ae",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "商品「30thCELEBRATIONカードセット全種」を確実に判別できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "d194245c-ed01-4d1e-b2cf-5555b8a73075",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "商品「ポケモンカード 「スペシャルデッキセットMEGA」」を確実に判別できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "ac966d69-eac2-4855-a536-8c814af35f7b",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "系列を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "a18174aa-1ff8-44d2-b2ca-e37763491a32",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "f304cc0e-fef0-4f07-97de-4b991942ea15",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "7a95de58-14ab-45ab-9747-af152036a5bf",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "8482408a-0574-46e8-b217-38ae39918211",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "326e9a0a-7f28-4a88-8fe2-45a1400b34c3",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "65969f42-764e-4e6f-8477-b3d884538424",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open"
+  },
+  {
+   "id": "f6ac2fe7-3cbb-4a92-ad0c-5a9b2aba605a",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "系列を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "f315987b-a19e-4544-a717-2dada0d83361",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "系列を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "380d48e9-2575-43dd-9f0a-370752d5aa7c",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "82749572-7ec0-4873-a4d1-08e3795a27e3",
+   "cls": "B",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "57b24745-54ca-4452-b936-ebf540b833e3",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "受取方法（店頭・発送）が不明です",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像あり・未取得（本文のみで解析）"
+   }
+  },
+  {
+   "id": "0392bab0-ea97-4779-a3e5-42f8cb3a34f6",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "対象地域（都道府県）が不明です",
+   "deadline": "open"
+  },
+  {
+   "id": "7ecd04f7-8d6f-4272-94d3-abcdc6ba5328",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "対象地域（都道府県）が不明です",
+   "deadline": "open"
+  },
+  {
+   "id": "5980fefa-eedd-46d1-a976-7391b0890da2",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "対象地域（都道府県）が不明です",
+   "deadline": "open"
+  },
+  {
+   "id": "ac9385a8-3a66-48c1-a85a-83864ff78338",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "対象地域（都道府県）が不明です",
+   "deadline": "open"
+  },
+  {
+   "id": "e0ae7de6-1439-4adf-ba13-1ec2ad601040",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "対象地域（都道府県）が不明です",
+   "deadline": "open"
+  },
+  {
+   "id": "158e4ff9-7e9f-49d6-af5a-d6a9085ba2d5",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "結果発表日が本文と受付欄で異なります。本文は「2026年11月10日（火）までに発表予定」、受付欄は「11/9～10に発表予定」のため、発表の開始日は確定できず",
+   "deadline": "open"
+  },
+  {
+   "id": "62898b30-d49e-4396-9471-13732a172c76",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "発表日が本文（「2026年11月10日（火）までに発表予定」）とリンク先（「11/9～10に発表予定」）で異なります。発表期間は11/9〜11/10として記録し",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "96ddd6d3-1521-4848-953d-3e7d1d2ac298",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "対象地域（都道府県）が不明です",
+   "deadline": "open"
+  },
+  {
+   "id": "fc023657-a7b6-4a71-a41b-4fcc2c3c92a4",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "受取方法（店頭・発送）が不明です",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像あり・未取得（本文のみで解析）"
+   }
+  },
+  {
+   "id": "0c56d559-a4de-4272-aedc-653fdfe51b61",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "受取方法（店頭・発送）が不明です",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像あり・未取得（本文のみで解析）"
+   }
+  },
+  {
+   "id": "fbacc584-83d3-42d9-8d4f-8ec97b0aa256",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "受取方法（店頭・発送）が不明です",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "e170e310-6b6e-4165-8c5e-37d5a0ae3672",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "受取方法（店頭・発送）が不明です",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "3301ca24-50ed-4aa0-a1c6-995945b55850",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "当選発表は「2026年11月27日 12:00以降、順次発表」と書かれており、発表の終わりの日は明記されていません。",
+   "deadline": "open"
+  },
+  {
+   "id": "0f58b741-b93d-4d00-9acf-e1818115b259",
+   "cls": "D",
+   "action": "keep",
+   "outcome": "review",
+   "via": "rule",
+   "reason": "告知が途中で切れている（応募方法の③以降、応募期間、当選発表、受取方法の詳細が読み取れません）。",
+   "deadline": "open",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "5f928c42-a129-476b-b290-79bc23c121db",
+   "cls": "E",
+   "action": "exclude",
+   "outcome": "excluded_past",
+   "via": "rule",
+   "reason": "受付終了（応募締切を過ぎており、既存の抽選・応募・当落とも紐づかないため、履歴登録は不要として除外しました）",
+   "deadline": "past",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "7512a929-8ed8-452f-988c-b954599e688e",
+   "cls": "E",
+   "action": "exclude",
+   "outcome": "excluded_past",
+   "via": "rule",
+   "reason": "受付終了（応募締切を過ぎており、既存の抽選・応募・当落とも紐づかないため、履歴登録は不要として除外しました）",
+   "deadline": "past",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "14ac7c60-8cb6-40bf-8fa0-aec2929841f8",
+   "cls": "E",
+   "action": "exclude",
+   "outcome": "excluded_past",
+   "via": "rule",
+   "reason": "受付終了（応募締切を過ぎており、既存の抽選・応募・当落とも紐づかないため、履歴登録は不要として除外しました）",
+   "deadline": "past",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "5ce4ee9d-9917-4dc8-a78c-bea7a6f71e16",
+   "cls": "E",
+   "action": "exclude",
+   "outcome": "excluded_past",
+   "via": "rule",
+   "reason": "受付終了（応募締切を過ぎており、既存の抽選・応募・当落とも紐づかないため、履歴登録は不要として除外しました）",
+   "deadline": "past",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "1cfce4af-ff75-4a52-8aa6-6f8c6156d345",
+   "cls": "E",
+   "action": "exclude",
+   "outcome": "excluded_past",
+   "via": "rule",
+   "reason": "受付終了（応募締切を過ぎており、既存の抽選・応募・当落とも紐づかないため、履歴登録は不要として除外しました）",
+   "deadline": "past"
+  },
+  {
+   "id": "b20a1c49-646e-46ba-ba11-b626e82d3dc4",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "af554a6c-0ee6-45d4-afd0-f49e4ca990ad",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "商品「MEGA 30th CELEBRATION カードセット」を確実に判別できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "186134e6-d2f5-4b97-949b-d33476fd29e0",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "商品「『30th CELEBRATION　カードセット』」を確実に判別できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "5734a27a-5878-4f7e-bb84-230c7df494f1",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "a18d272e-f8e8-4ea4-b125-7896fe965a8f",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "319bc81a-e0f1-4644-9caa-ee11fb1b78f4",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "商品「不明」を確実に判別できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "不明"
+   }
+  },
+  {
+   "id": "04278a84-e282-496f-937d-bfcf513a44a9",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "61a4e7c3-ff00-4aca-9f46-64d4f430a235",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "15edf8ae-379f-4edc-8d3f-2c5bbe8c84ea",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "6cacc175-4e13-46ef-8c5b-eb206dac13ee",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "e37cb1b8-171e-40d2-be15-f7d4ad4d0a7d",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "878f6bdb-6a76-4294-bcff-01ab63e9ac04",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "商品「30th CELEBRATION プレミアムデッキセット」を確実に判別できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "dae19fc8-a119-4a72-8d64-d22e608b5514",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "画像なし（本文のみ）"
+   }
+  },
+  {
+   "id": "daeaf2af-e69e-47a8-a991-59380af5f879",
+   "cls": "C",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "x_image",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "unknown",
+   "x": {
+    "source": true,
+    "imageStatus": "本文取得済み"
+   }
+  },
+  {
+   "id": "1d61da85-d85d-49b0-b848-9a862b76ee7f",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "refetch",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open"
+  },
+  {
+   "id": "45129b47-009d-4d02-aea3-914645cd0658",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "refetch",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "open"
+  },
+  {
+   "id": "59854a3f-6e05-4c74-ae85-bef67496d7f5",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "refetch",
+   "reason": "系列を確実に特定できません",
+   "deadline": "unknown"
+  },
+  {
+   "id": "e3e32023-c2c0-4410-8c1b-135f59aa236f",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "refetch",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "unknown"
+  },
+  {
+   "id": "d7cb59fd-2e9b-4ee9-9d3e-2fb9c5c7908f",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "refetch",
+   "reason": "応募締切が不明です",
+   "deadline": "unknown"
+  },
+  {
+   "id": "c71f1bb7-f0c1-4eda-88cb-30c2c2134666",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "requeued",
+   "via": "refetch",
+   "reason": "系列を確実に特定できません",
+   "deadline": "unknown"
+  },
+  {
+   "id": "b6508eb5-5f03-4f8f-89c4-7278ddac1c75",
+   "cls": "D",
+   "action": "requeue",
+   "outcome": "review",
+   "via": "refetch",
+   "reason": "店舗を確実に特定できません",
+   "deadline": "unknown"
+  }
+ ],
+ "ai": {
+  "requested": 21,
+  "allowed": 20,
+  "calls": 0,
+  "stop": "AI読み取りの利用上限に近いため、続きは次回に回します",
+  "costJpyDelta": null
+ },
+ "xCostNote": "X APIは、収集設定のX月額予算・APIキーの範囲内でのみ呼びます（予算0円・キー未設定のときは呼ばず、本文のみで解析します）"
+}

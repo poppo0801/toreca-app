@@ -1,3 +1,4 @@
+import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
 import { normalizeConditions, evaluateCandidate, preScreenFromList, type CollectionConditions } from "@/lib/collector/conditions";
@@ -633,11 +634,11 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   // オンライン販売で店舗名が無い場合は、既存の運用に合わせて店舗名「オンライン」を使う（既存の店舗があればそれに紐付ける）
   if (!input.store.name.trim() && input.receiveMethod === "shipping" && input.chain.id) {
-    const online = data.stores.find((s) => s.chainId === input.chain.id && !s.archived && (s.name === "オンライン" || s.salesKind === "online_only"));
-    input.store = online ? { id: online.id, name: online.name, prefecture: "" } : { id: null, name: "オンライン", prefecture: "" };
+    const online = data.stores.find((s) => s.chainId === input.chain.id && !s.archived && isOnlineStore(s, input.chain.name));
+    input.store = online ? { id: online.id, name: online.name, prefecture: "" } : { id: null, name: ONLINE_STORE_NAME, prefecture: "" };
     draft.summary.store = online ? "exact" : "none";
   } else if (!input.store.name.trim() && input.receiveMethod === "shipping") {
-    input.store = { id: null, name: "オンライン", prefecture: "" };
+    input.store = { id: null, name: ONLINE_STORE_NAME, prefecture: "" };
   }
   // 店舗名「オンライン」を補ったあとで重複を判定し直す（buildDraft の時点では店舗が未確定で重複候補が空になり、同じオンライン抽選が二重登録されていた）
   draft.duplicates = findDuplicates(input, data.lotteries, q.url, data, { now: deps.now });

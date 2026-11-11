@@ -19,8 +19,8 @@ export function isReady(draft: LotteryDraft, input: LotteryInput = draft.input):
     /* 既存の系列 */
   } else if (draft.summary.chain === "none" && draft.candidates.chain.length === 0 && clearName(input.chain.name)) provisional.push(`系列「${input.chain.name.trim()}」`);
   else missing.push("系列を確実に特定できません");
-  // オンライン販売で店舗名が無い場合は、既存の運用に合わせて店舗名「オンライン」を使う
-  const storeName = input.store.name.trim() || (online ? "オンライン" : "");
+  // オンライン販売で店舗名が無い場合は、既存の運用に合わせて店舗名「通販」を使う（Stage 7S）
+  const storeName = input.store.name.trim() || (online ? "通販" : "");
   if (sure(draft.summary.store) && input.store.id) {
     /* 既存の店舗 */
   } else if (!input.store.id && storeName && (draft.summary.store === "none" || !input.store.name.trim()) && draft.candidates.store.length === 0 && clearName(storeName)) provisional.push(`店舗「${storeName}」`);

@@ -1,4 +1,5 @@
 import type { ExtractedFlex, ExtractedLottery, FieldKey } from "@/lib/ai/extraction";
+import { isOnlineStoreName } from "@/lib/store-online";
 import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { normName } from "@/lib/norm";
 import { productNameCandidates, tidyProductName } from "@/lib/product-name";
@@ -160,7 +161,8 @@ export function refineBrandChain(r: MatchResult<Chain>, chains: Chain[], hint: {
   if (!item?.brandGroup || !(r.kind === "exact" || r.kind === "alias")) return r;
   const siblings = chains.filter((c) => !c.archived && c.brandGroup === item.brandGroup);
   if (siblings.length < 2) return r;
-  const unconfirmed = siblings.find((c) => c.operationKind === "unconfirmed") ?? item;
+  // 所属未確認の系列は廃止済み（Stage 7S）。残っていればそれを、無ければ未確定（item なし）として返す
+  const unconfirmed = siblings.find((c) => c.operationKind === "unconfirmed") ?? null;
   // 所属を決められないとき（店舗名が無い・店舗がマスターに無い・複数の系列に同名の店舗がある）は、直営/その他を推測しない。
   // 「部分一致」の候補として返し、自動登録せず抽選候補で確認できるようにする（Stage 7R）。確定済みの2系列は選択肢として添える
   const undecided = (): MatchResult<Chain> => ({ kind: "partial", item: unconfirmed, candidates: siblings.filter((c) => c.operationKind === "direct" || c.operationKind === "other") });
@@ -205,6 +207,13 @@ function matchChainBase(name: string, chains: Chain[], hint: { stores?: Store[];
 
 export function matchStore(name: string, chainId: string | null, stores: Store[], chainName = ""): MatchResult<Store> {
   if (!chainId) return { ...NO_MATCH, candidates: [] };
+  // 「オンライン」「通販」「通販店」などの表記ゆれは、同じ系列のオンライン店舗（営業形態がオンライン専用、または名称がオンライン系）と同じ店舗（Stage 7S）
+  if (isOnlineStoreName(name, chainName)) {
+    const online = stores.filter((s) => s.chainId === chainId && !s.archived && (s.salesKind === "online_only" || isOnlineStoreName(s.name, chainName)));
+    if (online.length === 1) return { kind: "alias", item: online[0], candidates: [] };
+    if (online.length > 1) return { kind: "partial", item: null, candidates: online };
+    return { ...NO_MATCH, candidates: [] };
+  }
   // 「○○電機 梅田店」のように系列名が先頭に付く表記は、系列名を除いて照合する
   let n = name;
   const cn = cleanName(chainName);

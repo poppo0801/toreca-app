@@ -14,6 +14,7 @@ import { isAnnounceTarget, isRequirementLogic, isStoreKind, normalizeAnnounceMet
 import { buildLotteryPayload } from "@/lib/lottery-payload";
 import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { isDummyStoreName, storeKey } from "@/lib/store-name";
+import { ONLINE_STORE_NAME, isOnlineStore, isOnlineStoreName } from "@/lib/store-online";
 import { ackCautions, pruneCautionsOnEdit, type EditSnapshot } from "@/lib/live-cautions";
 import type { Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
@@ -675,6 +676,14 @@ export async function saveLottery(
     }
   }
 
+  // 「オンライン」「通販」「通販店」などの店舗名は、同じ系列の既存のオンライン店舗に寄せる。無ければ標準の店舗名「通販」で登録する（Stage 7S）
+  const onlineInput = !input.store.id && isOnlineStoreName(input.store.name);
+  if (onlineInput && input.chain.id) {
+    const [{ data: ch }, { data: ss }] = await Promise.all([db.from("chains").select("name").eq("id", input.chain.id).maybeSingle(), db.from("stores").select("id,name,sales_kind").eq("chain_id", input.chain.id).is("archived_at", null)]);
+    const online = (ss ?? []).filter((r) => isOnlineStore({ name: r.name, salesKind: r.sales_kind }, ch?.name));
+    if (online.length === 1) input.store = { id: online[0].id, name: online[0].name, prefecture: "" };
+    else if (online.length === 0) input.store = { id: null, name: ONLINE_STORE_NAME, prefecture: "" };
+  }
   // 保存前の確認は互いに独立なので、並行して行う（編集前の注意の状態・新規店舗かどうか。Stage 7O）
   const newStoreName = id === null && !input.store.id && !isDummyStoreName(input.store.name) && input.store.name !== SELECT_STORE_PLACEHOLDER ? input.store.name.trim() : "";
   const [prevSnap, storeExisted] = await Promise.all([

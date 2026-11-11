@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { chainStoreLine, isOnlineStore } from "@/lib/store-online";
 import { markLotterySeen } from "@/app/(app)/lotteries/seen-actions";
 import { ChevronDown, ExternalLink, Star, TriangleAlert } from "lucide-react";
 import { useApp } from "@/components/app-provider";
@@ -300,7 +301,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
           <div className="flex items-start gap-2 px-4 pb-2 pt-1">
             <div className="min-w-0 flex-1">
               <SheetTitle className="text-sm">
-                {chain?.name} {lottery.storeMode === "select_on_apply" ? "" : store?.name}
+                {lottery.storeMode !== "select_on_apply" && chain && store && isOnlineStore(store, chain.name) ? chainStoreLine(chain.name, store, data.stores.filter((s) => s.chainId === chain.id)) : <>{chain?.name} {lottery.storeMode === "select_on_apply" ? "" : store?.name}</>}
                 {lottery.storeMode === "select_on_apply" && (
                   <span className="ml-1 rounded border border-info px-1 py-0.5 text-[10px] font-medium text-info" data-testid="store-select-badge">
                     応募時に店舗選択

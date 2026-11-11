@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { chainStoreLine, isOnlineStore } from "@/lib/store-online";
 import { AtSign, CalendarCheck, Clock, Globe, Mail, MapPin, Megaphone, MessageSquare, Phone, ShoppingBag, Smartphone, Star, Store as StoreIcon, Truck, type LucideIcon } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { EXIT_STAR_WAIT_MS, useApplyExit } from "@/components/apply-exit";
@@ -178,7 +179,8 @@ export function LotteryCard({
   const firstProduct = data.products.find((p) => p.id === sum.firstProductId);
   // 店舗選択式の抽選は、応募前は「店舗選択式」、応募後は現在のプロフィールが応募した店舗を出す（カードは1枚のまま）
   const selectStore = selectStoreDisplay(data, lottery, profile.id, viewScope);
-  const storeLine = `${chain?.name ?? ""} ${selectStore ? selectStore.text : (store?.name ?? "")}`.trim();
+  const onlineLine = !selectStore && chain && store && isOnlineStore(store, chain.name) ? chainStoreLine(chain.name, store, data.stores.filter((s) => s.chainId === chain.id)) : null;
+  const storeLine = onlineLine ?? `${chain?.name ?? ""} ${selectStore ? selectStore.text : (store?.name ?? "")}`.trim();
   const dist = storeDistance(data, store);
   const placeI = placeInfo({ receiveMethod: lottery.receiveMethod, prefecture: store?.prefecture, storeKind: store?.salesKind });
   const place = placeI.label;

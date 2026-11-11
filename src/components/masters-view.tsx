@@ -9,6 +9,9 @@ import { ChainLogoButton } from "@/components/chain-logo-manager";
 import { ProductImagesButton, ProductThumbById } from "@/components/product-image";
 import { ChainDeleteButton, ChainMergeButton } from "@/components/chain-merge-dialog";
 import { ChainStoreSelectToggle } from "@/components/chain-store-select-toggle";
+import { StoreDeleteDialog } from "@/components/store-delete-dialog";
+import { useScrollInputIntoView } from "@/lib/use-scroll-input-into-view";
+import { MAIN_MASTER_KEYS, isMainMasterKey } from "@/lib/masters-tabs";
 import { ProductDeleteButton, ProductMergeButton } from "@/components/product-merge-dialog";
 import { SetCompositionButton } from "@/components/product-set-dialog";
 import { chainDisplayName, chainKindTag } from "@/lib/chain-display";
@@ -124,6 +127,8 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
   /** 店舗マスターで展開している系列（検索中は該当した系列を自動で展開する） */
   const [openChains, setOpenChains] = useState<Set<string>>(new Set());
   const [showRetired, setShowRetired] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const scrollIntoView = useScrollInputIntoView();
   const [manage, setManage] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [logoFilter, setLogoFilter] = useState<"all" | "nologo">("all");
@@ -225,23 +230,51 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
 
   return (
     <div className="space-y-3">
-      <div role="tablist" aria-label="マスターの種類" className="flex flex-wrap gap-1">
-        {ENTITY_KEYS.map((k) => (
+      {/* 1行目: プロフィール／系列／店舗／商品＋「その他」。その他の種類は初期状態で畳み、選択中はボタンに現在の種類を出す（Stage 7S） */}
+      <div role="tablist" aria-label="マスターの種類" className="flex gap-1" data-testid="master-tabs">
+        {MAIN_MASTER_KEYS.map((k) => (
           <button
             key={k}
             role="tab"
             type="button"
             aria-selected={k === key}
             onClick={() => changeKey(k)}
-            className={cn(
-              "min-h-10 rounded-md border px-3 text-sm",
-              k === key ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted",
-            )}
+            className={cn("min-h-10 min-w-0 flex-1 truncate rounded-md border px-1 text-sm", k === key ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}
           >
             {ENTITIES[k].label}
           </button>
         ))}
+        <button
+          type="button"
+          aria-expanded={moreOpen || !isMainMasterKey(key)}
+          aria-controls="master-more-tabs"
+          onClick={() => setMoreOpen((v) => !v)}
+          data-testid="master-more-toggle"
+          className={cn("flex min-h-10 min-w-0 flex-[1.4] items-center justify-center gap-0.5 rounded-md border px-1 text-sm", !isMainMasterKey(key) ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}
+        >
+          <span className="truncate">{isMainMasterKey(key) ? "その他" : ENTITIES[key].label}</span>
+          <ChevronDown className={cn("size-3.5 shrink-0 transition-transform", (moreOpen || !isMainMasterKey(key)) && moreOpen && "rotate-180")} aria-hidden="true" />
+        </button>
       </div>
+      {moreOpen && (
+        <div id="master-more-tabs" role="tablist" aria-label="その他のマスター" className="flex flex-wrap gap-1" data-testid="master-more-tabs">
+          {ENTITY_KEYS.filter((k) => !isMainMasterKey(k)).map((k) => (
+            <button
+              key={k}
+              role="tab"
+              type="button"
+              aria-selected={k === key}
+              onClick={() => {
+                changeKey(k);
+                setMoreOpen(false);
+              }}
+              className={cn("min-h-9 rounded-md border px-2.5 text-xs", k === key ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}
+            >
+              {ENTITIES[k].label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label className="flex min-h-10 items-center gap-2 text-sm">
@@ -276,6 +309,7 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
           placeholder={key === "chains" ? "系列名で検索" : "系列名・店舗名・都道府県で検索"}
           aria-label={key === "chains" ? "系列を検索" : "店舗を検索"}
           className="min-h-11 w-full rounded-md border bg-input px-3 text-base"
+          onFocus={scrollIntoView}
           data-testid="master-search"
         />
       )}
@@ -310,6 +344,7 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
             onChange={(e) => setQ(e.target.value)}
             placeholder="名称・コード・略称で検索"
             aria-label="商品を検索"
+            onFocus={scrollIntoView}
             className="col-span-2 min-h-11 w-full rounded-md border bg-input px-3 text-sm"
           />
           <select aria-label="シリーズ・区分で絞り込み" value={category} onChange={(e) => setCategory(e.target.value)} className="min-h-11 rounded-md border bg-input px-2 text-sm">
@@ -583,6 +618,7 @@ function RecordDialog({ entity, rows, record, trigger, preset }: { entity: Entit
   const initial = () =>
     Object.fromEntries(entity.fields.map((f) => [f.name, record?.[f.name] != null ? String(record[f.name]) : String(preset?.[f.name] ?? f.default ?? "")]));
   const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -724,7 +760,12 @@ function RecordDialog({ entity, rows, record, trigger, preset }: { entity: Entit
                 {error}
               </p>
             )}
-            <div className="flex justify-end gap-2">
+            <div className="flex items-center justify-end gap-2">
+              {entity.key === "stores" && record && (
+                <Button type="button" variant="ghost" className="mr-auto text-danger" onClick={() => setDeleting(true)} data-testid="store-delete-open">
+                  削除
+                </Button>
+              )}
               <DialogClose asChild>
                 <Button type="button" variant="outline">
                   キャンセル
@@ -737,6 +778,17 @@ function RecordDialog({ entity, rows, record, trigger, preset }: { entity: Entit
           </form>
         </DialogContent>
       </Dialog>
+      {deleting && record && (
+        <StoreDeleteDialog
+          storeId={record.id}
+          name={String(record.name ?? "")}
+          archived={record.archived_at != null}
+          onClose={() => {
+            setDeleting(false);
+            setOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }
