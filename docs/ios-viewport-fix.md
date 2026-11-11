@@ -1,5 +1,7 @@
 # iPhone表示不具合・多重反応の修正（Stage 5I と 5J の間の別工程）
 
+> **歴史的文書（Stage 8B で注記）**: 下部メニューの「測定して補正する」構造（`--vp-gap` など）は、Stage 6J で構造的な解決に置き換わり、真因は `statusBarStyle: "black-translucent"` だった（Stage 6L）。**現行の構造は [stage6j-viewport.md](stage6j-viewport.md) と [UI_UX_GUIDELINES.md](UI_UX_GUIDELINES.md) §4**。§2「多重反応」の記述は現在も有効。
+
 **実機（iPhone 15 Pro / iOS 18.4.1 のホーム画面PWA）では未確認。** 下の「事実」はコード・テストで確かめたこと、「仮説」は実機の診断で確かめる必要があること。診断モード（`?diag=1`）は実機で確認できるまで残す。
 
 ## 1. 下部メニュー・ボトムシートの表示欠け
