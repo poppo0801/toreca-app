@@ -28,3 +28,4 @@ e2e/ai-live-output
 .testdb.log
 .e2e-*.log
 .db-*.log
+.c4.*.json
