@@ -5,6 +5,7 @@ import { rebuildQueued } from "@/lib/collector/queued";
 import { aiAllowance, conditionsFromRow, processQueue, type CollectDeps } from "@/lib/server/collector/run";
 import { monthBudget } from "@/lib/server/ai-budget";
 import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service";
+import { autoDedupeKey } from "@/lib/lottery-dedupe-key";
 import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { bumpStats } from "@/lib/server/collector/run";
 import type { Json } from "@/types/database";
@@ -166,7 +167,20 @@ export async function runReevaluation(deps: CollectDeps, opts: ReevalOptions): P
           continue;
         }
         const withCaution = j.decision?.grade === "B";
-        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: (j.decision?.cautions ?? []) as unknown as Json, confidence: j.decision?.confidence ?? null, cautions_updated_at: nowIso }).eq("id", saved.value.id);
+        const dedupeKey = autoDedupeKey(input);
+        const marked = await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: (j.decision?.cautions ?? []) as unknown as Json, confidence: j.decision?.confidence ?? null, cautions_updated_at: nowIso, ...(dedupeKey ? { auto_dedupe_key: dedupeKey } : {}) }).eq("id", saved.value.id);
+        if (marked.error?.code === "23505" && dedupeKey) {
+          // 並行して実行された別の処理が、同じ抽選を先に登録していた。今回の登録はアーカイブして、既存の抽選に統合する（Stage 7P）
+          const existing = (await db.from("lotteries").select("id").eq("household_id", householdId).eq("auto_dedupe_key", dedupeKey).is("archived_at", null).maybeSingle()).data;
+          await db.from("lotteries").update({ archived_at: nowIso }).eq("id", saved.value.id);
+          if (existing) {
+            const m = mark(c, j, "rule");
+            await db.from("collection_candidates").update({ status: "duplicate", job_state: "completed", lottery_id: existing.id, reasons: [...j.reasons, "並行して登録された同じ抽選があるため、新規カードは作らず統合しました"], draft: newDraft(c, j, {}, m), resolved_at: nowIso, completed_at: nowIso }).eq("id", c.id);
+            note(c, j, "duplicate", "rule");
+            data = await loadAppData(db, householdId);
+            continue;
+          }
+        }
         await bumpStats(db, householdId, now, { registered_new: 1, registered_caution: withCaution ? 1 : 0 });
         const via: ReevalMarker["via"] = markers.get(c.id)?.via ?? (j.cls === "B" ? "rematch" : "rule");
         const m = mark(c, j, via, { registeredLotteryId: saved.value.id });

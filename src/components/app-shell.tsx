@@ -13,57 +13,9 @@ import { NotificationBell } from "@/components/notification-bell";
 import { iconOf } from "@/components/page-heading";
 import { ProfileChip } from "@/components/profile-switcher";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { keyboardInset } from "@/lib/viewport-insets";
+import { useKeyboardInset } from "@/lib/use-keyboard-inset";
 import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
-
-/**
- * キーボードが隠している下側の高さを --kb-inset に反映する（ボトムシートの位置・最大高さの調整用）。イベント駆動のみ（常時のタイマー・ポーリングはしない）。
- *
- * 下部メニューの位置はここでは扱わない。以前は fixed の下部メニューの bottom を、測定値（--vp-gap / --vv-shift）で動かして表示領域に合わせていたが、
- * iOS のホーム画面アプリは起動直後・復帰・キーボード開閉・バウンスのたびに innerHeight / 100vh / visualViewport が互いに食い違う一時的な値を取り、
- * 測定→補正は常に動く標的を追う形で、補正が残る（下が切れる）・過剰に効く（浮く）のどちらかに必ずなった（docs/stage6j-viewport.md）。
- * 現在は画面全体を固定の入れ物にして下部メニューをその最下段に置くため、メニューの位置に測定は不要。
- */
-function useKeyboardInset() {
-  useEffect(() => {
-    const root = document.documentElement;
-    const vv = window.visualViewport;
-    const apply = () => {
-      const px = keyboardInset(window.innerHeight, vv ?? null);
-      if (px > 0) root.style.setProperty("--kb-inset", `${px}px`);
-      else root.style.removeProperty("--kb-inset");
-    };
-    // キーボードの出入りのアニメーション中だけ、フレームごとに追従する（約0.6秒。終われば止める）
-    let raf = 0;
-    let until = 0;
-    const tick = () => {
-      apply();
-      raf = performance.now() < until ? requestAnimationFrame(tick) : 0;
-    };
-    const follow = () => {
-      until = performance.now() + 600;
-      if (!raf) raf = requestAnimationFrame(tick);
-    };
-    apply();
-    vv?.addEventListener("resize", follow);
-    vv?.addEventListener("scroll", apply);
-    window.addEventListener("focusin", follow);
-    window.addEventListener("focusout", follow);
-    window.addEventListener("orientationchange", follow);
-    document.addEventListener("visibilitychange", follow);
-    return () => {
-      cancelAnimationFrame(raf);
-      vv?.removeEventListener("resize", follow);
-      vv?.removeEventListener("scroll", apply);
-      window.removeEventListener("focusin", follow);
-      window.removeEventListener("focusout", follow);
-      window.removeEventListener("orientationchange", follow);
-      document.removeEventListener("visibilitychange", follow);
-      root.style.removeProperty("--kb-inset");
-    };
-  }, []);
-}
 
 /** プロフィールに保存されたテーマを、そのプロフィールに切り替えたときに適用する */
 function useProfileTheme() {

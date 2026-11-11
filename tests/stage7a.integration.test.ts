@@ -69,7 +69,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 7A: 自動収集の改善", () => {
   it("抽選の注意情報（cautions/confidence）を保存できる。配列以外・不正な信頼度は拒否される。通常の抽選は空配列", async () => {
     const base: LegacyInput = {
       chainId, storeId, campaignId: null, newCampaign: null, items: [{ productId, quantity: 1, unit: "box" }], multiMode: "single",
-      applyStart: EMPTY_FLEX, applyDeadline: { precision: "date_only", date: ymd(30), time: "" }, resultDate: EMPTY_FLEX, procedureStart: EMPTY_FLEX, procedureDeadline: EMPTY_FLEX,
+      applyStart: EMPTY_FLEX, applyDeadline: { precision: "date_only", date: ymd(-60), time: "" }, resultDate: EMPTY_FLEX, procedureStart: EMPTY_FLEX, procedureDeadline: EMPTY_FLEX,
       receiveMethod: "store", applyMethod: "web", conditionsText: "手動登録", verificationText: "", announcementMethod: "", announcementUrl: "", sourceUrls: [url("manual")],
       eventState: "open", limitBasis: "account", limitMaxCount: 1, memo: "", applications: [], appliedAt: "",
     };

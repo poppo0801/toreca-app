@@ -76,7 +76,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C 追加: 確認待ち候補の再評�
     await u1.from("collection_settings").insert({ household_id: hid, auto_register: true, worker_enabled: false });
     const base: LegacyInput = {
       chainId, storeId, campaignId: null, newCampaign: null, items: [{ productId, quantity: 1, unit: "box" }], multiMode: "single",
-      applyStart: EMPTY_FLEX, applyDeadline: { precision: "date_only", date: ymd(40), time: "" }, resultDate: EMPTY_FLEX, procedureStart: EMPTY_FLEX, procedureDeadline: EMPTY_FLEX,
+      applyStart: EMPTY_FLEX, applyDeadline: { precision: "date_only", date: ymd(-30), time: "" }, resultDate: EMPTY_FLEX, procedureStart: EMPTY_FLEX, procedureDeadline: EMPTY_FLEX,
       receiveMethod: "store", applyMethod: "web", conditionsText: "手動登録", verificationText: "", announcementMethod: "", announcementUrl: "", sourceUrls: [url("manual")],
       eventState: "open", limitBasis: "account", limitMaxCount: 1, memo: "手動のメモ", applications: [], appliedAt: "",
     };

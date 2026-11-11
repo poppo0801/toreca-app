@@ -7,6 +7,7 @@ import { isReady } from "@/lib/collector/ready";
 import { extractPageText } from "@/lib/ai/page-text";
 import { PROMPT_VERSION, type LotteryExtractor } from "@/lib/ai/provider";
 import { buildDraft, findDuplicates, urlIdentity } from "@/lib/lottery-match";
+import { autoDedupeKey } from "@/lib/lottery-dedupe-key";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { storeDistance } from "@/lib/store-distance";
 import { extractFromRequest, runExtraction, type ExtractResult } from "@/lib/server/lottery-extract-service";
@@ -633,7 +634,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     input.store = { id: null, name: "オンライン", prefecture: "" };
   }
   // 店舗名「オンライン」を補ったあとで重複を判定し直す（buildDraft の時点では店舗が未確定で重複候補が空になり、同じオンライン抽選が二重登録されていた）
-  draft.duplicates = findDuplicates(input, data.lotteries, q.url, data);
+  draft.duplicates = findDuplicates(input, data.lotteries, q.url, data, { now: deps.now });
   if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
     const note = "二次情報（まとめサイトの一覧・公式アカウントの対応づけ）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
@@ -817,7 +818,19 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       const saved = await saveLottery(db, deps.householdId, null, input, deps.actor, { asService: !deps.canRegister, autoCollected: true });
       if (saved.ok) {
         // 自動収集の印。NEW表示は新規に把握した時点を基準にする。注意付きの登録は、注意情報（項目別・理由別）と信頼度を保存する
-        await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: decision.cautions as unknown as Json, confidence: decision.confidence, cautions_updated_at: nowIso }).eq("id", saved.value.id);
+        const dedupeKey = autoDedupeKey(input);
+        const marked = await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto", cautions: decision.cautions as unknown as Json, confidence: decision.confidence, cautions_updated_at: nowIso, ...(dedupeKey ? { auto_dedupe_key: dedupeKey } : {}) }).eq("id", saved.value.id);
+        if (marked.error?.code === "23505" && dedupeKey) {
+          // 並行して実行された別の処理が、同じ抽選を先に登録していた（DBの同一性キーの制約）。今回の登録はアーカイブして、既存の抽選に統合する
+          const existing = (await db.from("lotteries").select("id").eq("household_id", deps.householdId).eq("auto_dedupe_key", dedupeKey).is("archived_at", null).maybeSingle()).data;
+          await db.from("lotteries").update({ archived_at: nowIso }).eq("id", saved.value.id);
+          if (existing) {
+            const added = await appendSourceUrl(db, existing.id, q.url);
+            await supersede("duplicate", existing.id);
+            await finish("completed", { status: "duplicate", lottery_id: existing.id, reasons: ["並行して登録された同じ抽選があるため、新規カードは作らず統合しました", added ? "既存の抽選に情報源URLを追加しました" : "既存の抽選と同じ情報です"], draft: stored, ...due }, { duplicates: 1 });
+            return { usedAi: true, registered: false, aiFailed: false };
+          }
+        }
         // 店舗の都道府県が空のままにならないよう、確実な根拠のある都道府県だけを補う（既に入っている値は変えない）
         await fillStorePrefecture(db, saved.value.id, input.receiveMethod === "shipping" ? "" : knownPref);
         const storedReg = trackingObj ? ({ ...(stored as object), tracking: { ...trackingObj, promotedAt: nowIso, promotedLotteryId: saved.value.id } } as unknown as Json) : stored;

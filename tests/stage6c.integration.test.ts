@@ -68,7 +68,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
     await u1.from("collection_settings").insert({ household_id: hid, auto_register: true, worker_enabled: false });
     const chainId = (await u1.from("chains").insert({ household_id: hid, name: "テスト玩具6C" }).select("id").single()).data!.id;
     await u1.from("stores").insert({ household_id: hid, chain_id: chainId, name: "本店", prefecture: "東京都" });
-    await u1.from("products").insert({ household_id: hid, official_name: "6C商品", packs_per_box: 20 });
+    await u1.from("products").insert(["6C商品", "6C商品B", "6C商品C"].map((n) => ({ household_id: hid, official_name: n, packs_per_box: 20 })));
   });
   afterAll(async () => {
     await sys.from("collection_candidates").delete().like("dedupe_key", "%q6c.example.invalid%");
@@ -200,8 +200,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
 
   // ------------------------------------------------------------ 設定との整合
   it("9) 追跡OFF＋現在応募可能のみ: 受付前は従来どおり除外。『受付前も含む』: 詳細確定の受付前抽選は通常条件で登録される", async () => {
-    plan = { chain: "テスト玩具6C", product: "6C商品", store: "本店", start: jst(3, 10), deadline: jst(7, 23, 59) };
-    await add("off", "テスト玩具6C本店 6C商品 抽選（追跡OFF）");
+    plan = { chain: "テスト玩具6C", product: "6C商品B", store: "本店", start: jst(3, 10), deadline: jst(7, 23, 59) };
+    await add("off", "テスト玩具6C本店 6C商品B 抽選（追跡OFF）");
     await run(cond({ trackUpcoming: false }));
     const c = await cand("off");
     expect(c.status).toBe("excluded");
@@ -218,13 +218,13 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
   });
 
   it("11) 情報に矛盾（画像同士の食い違い）がある告知は、確認待ちにせず注意付きで自動登録し、矛盾を注意として残す（Stage 7A）", async () => {
-    plan = { chain: "テスト玩具6C", product: "6C商品", store: "本店", start: jst(-1, 10), deadline: jst(9, 23, 59) };
+    plan = { chain: "テスト玩具6C", product: "6C商品C", store: "本店", start: jst(-1, 10), deadline: jst(9, 23, 59) };
     const base = extractor.extract;
     extractor.extract = async (r: never) => {
       const o = await base(r);
       return { ...o, raw: { ...(o.raw as object), warnings: ["画像1と画像3で応募期間に矛盾があります"] } };
     };
-    await add("conf", "テスト玩具6C本店 6C商品 抽選受付中（画像の内容が食い違う告知）");
+    await add("conf", "テスト玩具6C本店 6C商品C 抽選受付中（画像の内容が食い違う告知）");
     await run();
     extractor.extract = base;
     const c = await cand("conf");

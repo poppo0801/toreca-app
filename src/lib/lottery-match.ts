@@ -3,6 +3,7 @@ import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-inp
 import { normName } from "@/lib/norm";
 import { productNameCandidates, tidyProductName } from "@/lib/product-name";
 import { flexToJstDate } from "@/lib/finance";
+import { jstDateString } from "@/lib/datetime";
 import type { AppData, Chain, Lottery, Product, Store } from "@/types/domain";
 import { splitNotes } from "@/lib/notes";
 import { classifyRequirements, foldAnnounceNote, resolveAnnouncement } from "@/lib/lottery-taxonomy";
@@ -505,22 +506,49 @@ export function urlIdentity(raw: string): string | null {
   return `url:${host}${u.pathname.replace(/\/+$/, "")}`;
 }
 
+/** 店舗の判定: same=同じ店舗（または双方がオンライン）／unresolved=双方とも店舗が未確定（店舗名が読み取れない・応募時に店舗選択）／null=別の店舗 */
+type StoreBucket = "same" | "unresolved" | null;
+
 /**
- * 同じ抽選を二重登録しないための候補検出。
- * 系列が同じ（ID、または「通販」等の語を除いた名称が同じ）・同じ商品を含む・店舗が同じ（または双方が「オンライン」等の販売形態）が前提で、
- *   情報源が同じ（同じ投稿・同じ応募フォーム・同じURL）または応募締切が同日 → 同一（high）／締切が不明 → 要確認（medium）。
+ * 明確に別の開催回か。双方の応募期間が分かっていて、一方の応募開始がもう一方の応募締切より後（期間が重ならない）ときだけ true。
+ * 既存の抽選の応募締切がすでに過ぎていて、新しい告知の締切がそれより後のときも、前回が終わったあとの別の開催回とみなす（開始日が告知にない場合）。
+ * 開始日が不明・期間が重なる・締切が同じときは、別の開催回とは言い切れないので false（重複として扱う側に倒す）。
+ */
+export function isClearlyOtherRound(mine: { start: string | null; deadline: string | null }, theirs: { start: string | null; deadline: string | null }, today?: string): boolean {
+  if (mine.deadline && theirs.deadline && mine.deadline === theirs.deadline) return false;
+  if (today && mine.deadline && theirs.deadline && theirs.deadline < today && mine.deadline > theirs.deadline) return true;
+  // 新しい告知の締切がすでに過ぎている（受付終了として除外される）別の日の抽選は、重複ではなく受付終了として扱う
+  if (today && mine.deadline && theirs.deadline && mine.deadline < today && mine.deadline !== theirs.deadline) return true;
+  if (mine.start && theirs.deadline && mine.start > theirs.deadline) return true;
+  if (theirs.start && mine.deadline && theirs.start > mine.deadline) return true;
+  return false;
+}
+
+/**
+ * 同じ抽選を二重登録しないための候補検出（自動収集・抽選候補の再評価・手動登録・一括登録で共通）。
+ * 系列が同じ（ID、または「通販」等の語を除いた名称が同じ）・店舗が同じ・商品構成が同じなら、応募期間・情報元URLが違っても同一（high）とする。
+ *   ・明確に別の開催回（応募期間が重ならない）と確認できるときだけ、別の抽選として登録を許可する
+ *   ・商品の一部だけが一致する抽選は、無条件に同一とせず、同じ情報源（URL）のとき high、締切が同日・不明のとき要確認（medium）にとどめる
+ *   ・双方とも店舗が未確定（店舗名が読み取れない・応募時に店舗選択）のときは、同じ情報源（同じ投稿・応募URL）だけ high。商品構成と締切が同じでも、別の店舗の告知の可能性があるため要確認（medium）
  * 商品と締切日だけが一致する別の店舗・別の系列の抽選は、同一にしない。
  */
-export function findDuplicates(input: LotteryInput, lotteries: Lottery[], sourceUrl?: string, master?: { chains: Chain[]; stores: Store[] }): DraftDuplicate[] {
+export function findDuplicates(input: LotteryInput, lotteries: Lottery[], sourceUrl?: string, master?: { chains: Chain[]; stores: Store[] }, opts: { now?: Date } = {}): DraftDuplicate[] {
+  const today = jstDateString(opts.now ?? new Date());
   const chainName = input.chain.name || (master?.chains.find((c) => c.id === input.chain.id)?.name ?? "");
   if (!input.chain.id && !chainName.trim()) return [];
   const storeOf = (id: string | null) => (id ? master?.stores.find((s) => s.id === id) : undefined);
   const myStore = storeOf(input.store.id);
-  const myOnline = isOnlineLikeName(input.store.name || myStore?.name || "") || myStore?.salesKind === "online_only";
-  if (!input.store.id && !myOnline) return [];
-  const productIds = new Set(input.items.map((i) => i.product.id).filter((x): x is string => !!x));
+  const isOnline = (s: Store | undefined, name = "") => isOnlineLikeName(name || s?.name || "") || s?.salesKind === "online_only";
+  const myOnline = isOnline(myStore, input.store.name);
+  const myUnresolved = !input.store.id && !myOnline;
+  const mySelect = input.storeMode === "select_on_apply";
+  const resolved = input.items.map((i) => i.product.id).filter((x): x is string => !!x);
+  const productIds = new Set(resolved);
   if (productIds.size === 0) return [];
-  const myDeadline = input.applyDeadline.precision === "unknown" ? null : input.applyDeadline.date;
+  // 未登録の商品（ID なし）を含むときは、商品構成が同じとは言い切れない
+  const mySetComplete = resolved.length === input.items.length;
+  const myDeadline = input.applyDeadline.precision === "unknown" ? null : input.applyDeadline.date || null;
+  const myStart = input.applyStart.precision === "unknown" ? null : input.applyStart.date || null;
   const myKeys = new Set([sourceUrl, ...(input.sourceUrls ?? [])].filter((u): u is string => !!u).flatMap((u) => [urlIdentity(u), u]).filter((k): k is string => !!k));
   const out: DraftDuplicate[] = [];
   for (const l of lotteries) {
@@ -528,17 +556,33 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     const lChainName = master?.chains.find((c) => c.id === l.chainId)?.name ?? "";
     const sameChain = l.chainId === input.chain.id || (!!lChainName && !!chainName.trim() && chainKey(lChainName) === chainKey(chainName));
     if (!sameChain) continue;
-    const lOnline = lStore ? isOnlineLikeName(lStore.name) || lStore.salesKind === "online_only" : false;
-    const sameStore = (!!input.store.id && l.storeId === input.store.id) || (myOnline && lOnline);
-    if (!sameStore) continue;
-    if (!l.items.some((i) => productIds.has(i.productId))) continue;
+    const lOnline = lStore ? isOnline(lStore) : false;
+    const lUnresolved = !l.storeId && !lOnline;
+    const lSelect = l.storeMode === "select_on_apply";
+    const bucket: StoreBucket =
+      (!!input.store.id && l.storeId === input.store.id) || (myOnline && lOnline) ? "same" : (myUnresolved || mySelect) && (lUnresolved || lSelect) && !myOnline && !lOnline ? "unresolved" : null;
+    if (!bucket) continue;
+    const theirIds = l.items.map((i) => i.productId);
+    const overlap = theirIds.some((id) => productIds.has(id));
+    if (!overlap) continue;
+    const sameSet = mySetComplete && theirIds.length === productIds.size && theirIds.every((id) => productIds.has(id));
     const sameUrl = l.sourceUrls.some((u) => myKeys.has(u) || (urlIdentity(u) !== null && myKeys.has(urlIdentity(u) as string)));
-    const theirDeadline = flexToJstDate(l.applyDeadline);
+    const theirDeadline = l.applyDeadline ? flexToJstDate(l.applyDeadline) : null;
+    const theirStart = l.applyStart ? flexToJstDate(l.applyStart) : null;
     const sameDay = myDeadline !== null && theirDeadline === myDeadline;
     const unknownEither = myDeadline === null || theirDeadline === null;
-    if (sameUrl) out.push({ lotteryId: l.id, level: "high", reason: "同じ情報源URLで登録済みです" });
-    else if (sameDay) out.push({ lotteryId: l.id, level: "high", reason: "同じ店舗・同じ商品・同じ応募締切の抽選が登録済みです" });
-    else if (unknownEither) out.push({ lotteryId: l.id, level: "medium", reason: "同じ店舗・同じ商品の抽選が登録済みです（締切が不明のため同一か判断できません）" });
+    if (sameUrl) {
+      out.push({ lotteryId: l.id, level: "high", reason: "同じ情報源URLで登録済みです" });
+      continue;
+    }
+    if (isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: theirStart, deadline: theirDeadline }, today)) continue;
+    if (bucket === "same" && sameSet && !unknownEither) {
+      out.push({ lotteryId: l.id, level: "high", reason: sameDay ? "同じ店舗・同じ商品・同じ応募締切の抽選が登録済みです" : "同じ店舗・同じ商品の抽選が登録済みです（応募期間が異なりますが、別の開催回と確認できないため同じ抽選として扱います）" });
+    } else if (bucket === "same" && (sameDay || unknownEither) && (sameSet || sameDay)) {
+      out.push({ lotteryId: l.id, level: "medium", reason: "同じ店舗で一部の商品が共通する抽選が登録済みです（商品構成が異なるため同一か判断できません）" });
+    } else if (bucket === "unresolved" && sameSet && (sameDay || unknownEither)) {
+      out.push({ lotteryId: l.id, level: "medium", reason: "店舗が未確定で、同じ系列・同じ商品・同じ締切の抽選が登録済みです（同じ告知か別の店舗か判断できません）" });
+    }
   }
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === "high" ? -1 : 1));
 }

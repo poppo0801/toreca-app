@@ -71,3 +71,17 @@ export const TOUCH_STALE_MS = 1500;
 export function isTouchingNow(flag: boolean, lastTouchAt: number, now: number): boolean {
   return flag && now - lastTouchAt < TOUCH_STALE_MS;
 }
+
+/**
+ * キーボードを閉じたあとに残った「表示のずれ」があるか（Stage 7P）。
+ * iOS はキーボードを出すとき、入力欄を見せるためにレイアウトビューポート（ページ）を押し上げる（window.scrollY / visualViewport.offsetTop が 0 でなくなる）。
+ * 閉じるときに元へ戻らないことがあり、そのまま残ると、描画位置とタップ判定の位置が一致しなくなる。
+ * このアプリは画面全体が固定の入れ物で、ページ自体はスクロールできないため、利用者のスクロールでは戻せない（再びキーボードを開閉すると戻る）。
+ * 入力中（キーボード表示中）・ピンチ拡大中は対象外。ページの位置が 0 から1px以上ずれていれば、戻す必要がある。
+ */
+export function needsViewportReset(s: { editing: boolean; scrollX: number; scrollY: number; vv: { offsetTop: number; offsetLeft: number; scale: number } | null }): boolean {
+  if (s.editing) return false;
+  if (s.vv && Math.abs(s.vv.scale - 1) > 0.01) return false;
+  const off = Math.max(Math.abs(s.scrollX), Math.abs(s.scrollY), Math.abs(s.vv?.offsetTop ?? 0), Math.abs(s.vv?.offsetLeft ?? 0));
+  return off >= 1;
+}

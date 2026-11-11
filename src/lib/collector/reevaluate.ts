@@ -165,7 +165,7 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
   const base = { rematched: rm, deadline, improved: rm.improved } as const;
 
   // 既存の抽選との重複（確実な一致のみ）
-  const dups = findDuplicates(input, data.lotteries, c.source_url ?? undefined, data);
+  const dups = findDuplicates(input, data.lotteries, c.source_url ?? undefined, data, { now });
   const high = dups.find((d) => d.level === "high");
   if (high) return { ...base, cls: "F", action: "duplicate", reasons: [`既存の抽選と一致します（${high.reason}）`], priority: 6, duplicateOf: { lotteryId: high.lotteryId, reason: high.reason }, missing: [] };
 

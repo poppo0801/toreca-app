@@ -3834,6 +3834,7 @@ export type Database = {
           receive_start_date: string | null
           receive_start_precision: string
           registration_path: string | null
+          auto_dedupe_key: string | null
           requirement_details: Json
           requirement_logic: string
           requirement_tags: string[]
@@ -3903,6 +3904,7 @@ export type Database = {
           receive_start_date?: string | null
           receive_start_precision?: string
           registration_path?: string | null
+          auto_dedupe_key?: string | null
           requirement_details?: Json
           requirement_logic?: string
           requirement_tags?: string[]
@@ -3972,6 +3974,7 @@ export type Database = {
           receive_start_date?: string | null
           receive_start_precision?: string
           registration_path?: string | null
+          auto_dedupe_key?: string | null
           requirement_details?: Json
           requirement_logic?: string
           requirement_tags?: string[]
