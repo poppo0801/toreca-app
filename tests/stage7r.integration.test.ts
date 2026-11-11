@@ -70,7 +70,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 7R: 同名の2系列（直営/その他�
     const app = await loadAppData(db, hid);
     expect(matchChain(BRAND, app.chains, { stores: app.stores, storeName: "7R本店" }).item?.id).toBe(direct);
     expect(matchChain(BRAND, app.chains, { stores: app.stores, storeName: "7R支店" }).item?.id).toBe(other);
-    const u = matchChain(BRAND, app.chains, { stores: app.stores, storeName: "7R不明店" });
+    const o = matchChain(BRAND, app.chains, { stores: app.stores, storeName: "7R不明店" });
+    expect(o.item?.id).toBe(other); // 直営の一覧に無い店舗は「その他」
+    const u = matchChain(BRAND, app.chains, { stores: app.stores, storeName: "" });
     expect(u.kind).toBe("partial");
     expect(u.item?.id).toBe(unk);
   });

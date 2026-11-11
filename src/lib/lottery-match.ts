@@ -171,6 +171,10 @@ export function refineBrandChain(r: MatchResult<Chain>, chains: Chain[], hint: {
   });
   // 一致が1つの系列だけ（確認済みの店舗に基づいて決める）。複数・なしは所属未確認
   if (hits.length === 1) return { kind: r.kind, item: hits[0], candidates: [] };
+  // どの系列の店舗にも無い店舗名: 直営は公式の一覧で全店が登録済み（利用者の確認・Stage 7R）なので、一覧に無い店舗は「その他」
+  const directC = siblings.find((c) => c.operationKind === "direct");
+  const otherC = siblings.find((c) => c.operationKind === "other");
+  if (hits.length === 0 && directC && otherC && hint.storeName.trim() && (hint.stores as Store[]).some((s) => s.chainId === directC.id && !s.archived)) return { kind: r.kind, item: otherC, candidates: [] };
   return undecided();
 }
 

@@ -53,12 +53,15 @@ describe("店舗名からの所属系列の判定（自動収集・手動登録�
     expect(matchChain(BRAND, chains, { stores, storeName: "日本橋店" }).item?.id).toBe("d");
     expect(matchChain(BRAND, chains, { stores, storeName: "カードボックス江坂店" }).item?.id).toBe("o");
   });
-  it("店舗名が不明・未登録・複数系列に同名があるときは、直営/その他を推測せず「部分一致」（確認が必要）にする", () => {
+  it("店舗名が不明、または複数系列に同名があるときは、直営/その他を推測せず「部分一致」（確認が必要）にする", () => {
     const none = matchChain(BRAND, chains, { stores, storeName: "" });
     expect(none.kind).toBe("partial");
     expect(none.item?.id).toBe("u");
     expect(none.candidates.map((c) => c.id).sort()).toEqual(["d", "o"]);
-    expect(matchChain(BRAND, chains, { stores, storeName: "秋葉原店" }).kind).toBe("partial");
+    // 直営の一覧に無い店舗は「その他」（確定）
+    const ot = matchChain(BRAND, chains, { stores, storeName: "秋葉原店" });
+    expect(ot.item?.id).toBe("o");
+    expect(ot.kind).toBe("exact");
     const dup = [...stores, st("sd2", "o", "日本橋店")];
     expect(matchChain(BRAND, chains, { stores: dup, storeName: "日本橋店" }).kind).toBe("partial");
   });

@@ -19,9 +19,10 @@ describe("カードボックスの直営/その他/所属未確認", () => {
     expect(matchChain("カードボックス", chains, { stores, storeName: "日本橋店" }).item?.id).toBe("d");
     expect(matchChain("カードボックス", chains, { stores, storeName: "カードボックス江坂店" }).item?.id).toBe("o");
   });
-  it("直営店一覧に無いという理由だけで『その他』と断定しない（不明は所属未確認）", () => {
+  it("直営店の一覧（登録済み）に無い店舗は『その他』（利用者の指示・Stage 7R）。店舗名が無いときは所属未確認のまま", () => {
     const stores = [store("s1", "d", "日本橋店")];
-    expect(matchChain("カードボックス", chains, { stores, storeName: "秋葉原店" }).item?.id).toBe("u");
+    expect(matchChain("カードボックス", chains, { stores, storeName: "秋葉原店" }).item?.id).toBe("o");
+    expect(matchChain("カードボックス", chains, { stores, storeName: "" }).item?.id).toBe("u");
   });
   it("同じ店舗名が複数の系列にあって決められないときは所属未確認のまま", () => {
     const stores = [store("s1", "d", "梅田店"), store("s2", "o", "梅田店")];
