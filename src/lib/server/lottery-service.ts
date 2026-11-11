@@ -1,3 +1,4 @@
+import { chainDisplayName } from "@/lib/chain-display";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { deriveBoxOpenings, type MovementRow } from "@/lib/usage-records";
 import { z } from "zod";
@@ -422,7 +423,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
         blockedStoreIds: mine.filter((r) => r.mode === "block" && r.store_id !== null).map((r) => r.store_id as string),
       };
     }),
-    chains: chains.map((c) => ({ id: c.id, name: c.name, provisional: c.is_provisional, archived: c.archived_at != null, logoSrc: c.logo_path && c.logo_sha256 ? chainLogoUrl(c.id, c.logo_sha256) : null, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null, boxShrinkHint: (c.box_shrink_hint ?? null) as BoxShrinkHint | null, storeSelectDefault: !!c.store_select_default, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
+    chains: chains.map((c) => ({ id: c.id, name: chainDisplayName({ name: c.name, brandGroup: c.brand_group, operationKind: c.operation_kind as "direct" | "other" | "unconfirmed" | null }), provisional: c.is_provisional, archived: c.archived_at != null, logoSrc: c.logo_path && c.logo_sha256 ? chainLogoUrl(c.id, c.logo_sha256) : null, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null, boxShrinkHint: (c.box_shrink_hint ?? null) as BoxShrinkHint | null, storeSelectDefault: !!c.store_select_default, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
     stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null, salesKind: isStoreKind(s.sales_kind) ? s.sales_kind : "physical" })),
     products: products.map((p) => ({
       id: p.id,

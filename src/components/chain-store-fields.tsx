@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { chainKindTag } from "@/lib/chain-display";
 import { useApp } from "@/components/app-provider";
 import { MasterCombobox, type MasterRef } from "@/components/master-combobox";
 import { normName } from "@/lib/norm";
@@ -19,7 +20,7 @@ export interface ChainStoreValue {
 export function ChainStoreFields({ value, onChange, chainLabel = "系列", storeLabel = "購入店舗" }: { value: ChainStoreValue; onChange: (v: ChainStoreValue) => void; chainLabel?: string; storeLabel?: string }) {
   const { data } = useApp();
   const { chain, store } = value;
-  const chainOptions = useMemo(() => data.chains.filter((c) => !c.archived || c.id === chain.id).map((c) => ({ id: c.id, name: c.name })), [data.chains, chain.id]);
+  const chainOptions = useMemo(() => data.chains.filter((c) => !c.archived || c.id === chain.id).map((c) => ({ id: c.id, name: c.name, hint: chainKindTag(c) ?? undefined })), [data.chains, chain.id]);
   const storeOptions = useMemo(
     () => data.stores.filter((s) => (!s.archived || s.id === store.id) && (!chain.id || s.chainId === chain.id)).map((s) => ({ id: s.id, name: s.name, hint: chain.id ? undefined : data.chains.find((c) => c.id === s.chainId)?.name })),
     [data.stores, data.chains, store.id, chain.id],

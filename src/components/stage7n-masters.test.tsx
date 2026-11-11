@@ -76,7 +76,7 @@ describe("Stage 7N: 店舗マスターの系列別一覧", () => {
     expect(qa("store-row")).toHaveLength(0);
     const geo = groups.find((g) => g.textContent?.includes("GEO"))!;
     expect(geo.querySelector('[data-testid="store-group-count"]')!.textContent).toBe("3店舗");
-    expect(geo.querySelector('[data-testid="store-group-unconfirmed"]')!.textContent).toBe("1");
+    expect(geo.querySelector('[data-testid="store-group-unconfirmed"]')!.textContent).toBe("1件");
     // 未確認のない系列には出さない
     expect(groups.find((g) => g.textContent?.includes("ドラゴンスター"))!.querySelector('[data-testid="store-group-unconfirmed"]')).toBeNull();
     // 「仮」の文字バッジは出さない
@@ -174,5 +174,57 @@ describe("Stage 7N: 応募店舗の入力（フリーズ対策・スピナー）
     expect((q("applied-store-ok") as HTMLButtonElement).disabled).toBe(false);
     await act(async () => (q("applied-store-ok") as HTMLButtonElement).click());
     expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Stage 7R: 系列行のレイアウトとカードボックスの2系列", () => {
+  const cardboxRows = (): MasterRows => {
+    const r = rows();
+    r.chains = [
+      ...r.chains,
+      { id: "c-cd", name: "カードボックス（直営）", brand_group: "カードボックス", operation_kind: "direct", archived_at: null },
+      { id: "c-co", name: "カードボックス（その他）", brand_group: "カードボックス", operation_kind: "other", archived_at: null },
+      { id: "c-cu", name: "カードボックス", brand_group: "カードボックス", operation_kind: "unconfirmed", archived_at: null },
+    ] as Row[];
+    r.stores = [...r.stores, store("s5", "c-cd", "日本橋店"), store("s6", "c-co", "江坂店"), store("s7", "c-cu", "京都", { is_provisional: true })];
+    return r;
+  };
+  it("店舗数は固定幅の右端に置かれ、未確認の有無で店舗数の列が変わらない（未確認は店舗数の左。0件なら●を出さない）", () => {
+    act(() => root.render(createElement(MastersView, { rows: cardboxRows(), rules: [] })));
+    click([...document.body.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === "店舗"));
+    const groups = qa("store-group");
+    const geo = groups.find((g) => g.textContent?.includes("GEO"))!;
+    const dragon = groups.find((g) => g.textContent?.includes("ドラゴンスター"))!;
+    const countOf = (g: HTMLElement) => g.querySelector<HTMLElement>('[data-testid="store-group-count"]')!;
+    expect(countOf(geo).className).toBe(countOf(dragon).className);
+    expect(countOf(geo).className).toContain("w-[3.75rem]");
+    expect(countOf(geo).className).toContain("text-right");
+    // 未確認は店舗数の直前（左）にあり、0件の系列には無い
+    expect(countOf(geo).previousElementSibling?.getAttribute("data-testid")).toBe("store-group-unconfirmed");
+    expect(dragon.querySelector('[data-testid="store-group-unconfirmed"]')).toBeNull();
+    // 系列の行は1行（ボタン直下の子は横並びで、折り返さない/縮めない設定）
+    const btn = geo.querySelector("button")!;
+    expect(btn.className).toContain("flex");
+    expect(btn.className).not.toContain("flex-col");
+    expect(btn.querySelector('[data-testid="group-logo-placeholder"], img')).not.toBeNull();
+  });
+  it("カードボックスの直営/その他はどちらも「カードボックス」と表示し、内部では別の系列。所属未確認の系列は区別して表示する", () => {
+    act(() => root.render(createElement(MastersView, { rows: cardboxRows(), rules: [] })));
+    click([...document.body.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === "店舗"));
+    const names = qa("store-group").map((g) => g.querySelector('[data-testid="store-group-name"]')!.textContent);
+    expect(names.filter((n) => n?.startsWith("カードボックス") && !n.includes("所属未確認"))).toHaveLength(2);
+    expect(names.some((n) => n?.includes("カードボックス（所属未確認）"))).toBe(true);
+    const ids = qa("store-group").map((g) => g.getAttribute("data-chain"));
+    expect(ids).toEqual(expect.arrayContaining(["c-cd", "c-co", "c-cu"]));
+    // 系列名で検索すると、2系列とも見つかる
+    type(q("master-search") as HTMLInputElement, "カードボックス");
+    expect(qa("store-group").map((g) => g.getAttribute("data-chain")).sort()).toEqual(["c-cd", "c-co", "c-cu"]);
+  });
+  it("展開した系列の店舗は個別に編集・追加でき、他の系列の店舗は混ざらない", () => {
+    act(() => root.render(createElement(MastersView, { rows: cardboxRows(), rules: [] })));
+    click([...document.body.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === "店舗"));
+    click(qa("store-group-toggle").find((b) => b.closest('[data-chain="c-cd"]')));
+    expect(qa("store-row").map((r) => r.textContent)).toEqual([expect.stringContaining("日本橋店")]);
+    expect(q("store-add-in-chain")).not.toBeNull();
   });
 });

@@ -161,16 +161,17 @@ export function refineBrandChain(r: MatchResult<Chain>, chains: Chain[], hint: {
   const siblings = chains.filter((c) => !c.archived && c.brandGroup === item.brandGroup);
   if (siblings.length < 2) return r;
   const unconfirmed = siblings.find((c) => c.operationKind === "unconfirmed") ?? item;
-  if (!hint.storeName || !hint.stores) return { kind: r.kind, item: unconfirmed, candidates: [] };
+  // 所属を決められないとき（店舗名が無い・店舗がマスターに無い・複数の系列に同名の店舗がある）は、直営/その他を推測しない。
+  // 「部分一致」の候補として返し、自動登録せず抽選候補で確認できるようにする（Stage 7R）。確定済みの2系列は選択肢として添える
+  const undecided = (): MatchResult<Chain> => ({ kind: "partial", item: unconfirmed, candidates: siblings.filter((c) => c.operationKind === "direct" || c.operationKind === "other") });
+  if (!hint.storeName || !hint.stores) return undecided();
   const hits = siblings.filter((c) => {
     const m = matchStore(hint.storeName as string, c.id, hint.stores as Store[], item.brandGroup as string);
     return m.item && (m.kind === "exact" || m.kind === "alias");
   });
-  // 一致が1つの系列だけ（直営・その他を確認済みの店舗に基づいて決める）。複数・なしは所属未確認
-  const confirmed = hits.filter((c) => c.operationKind === "direct" || c.operationKind === "other");
+  // 一致が1つの系列だけ（確認済みの店舗に基づいて決める）。複数・なしは所属未確認
   if (hits.length === 1) return { kind: r.kind, item: hits[0], candidates: [] };
-  if (confirmed.length === 1 && hits.length === 1) return { kind: r.kind, item: confirmed[0], candidates: [] };
-  return { kind: r.kind, item: unconfirmed, candidates: [] };
+  return undecided();
 }
 
 export function matchChain(name: string, chains: Chain[], hint: { stores?: Store[]; storeName?: string } = {}): MatchResult<Chain> {
@@ -316,6 +317,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   const chainRef = chainM.item ? { id: chainM.item.id, name: chainM.item.name } : { id: null, name: chainName };
   if (derivedChain) flags.chain = `店舗名の先頭から系列「${derivedChain}」と推定しました。違う場合は修正してください`;
   else if (!chainName) flags.chain = "系列名が読み取れませんでした";
+  else if (chainM.item?.operationKind === "unconfirmed" && chainM.kind === "partial") flags.chain = `「${chainM.item.brandGroup ?? chainM.item.name}」の所属（直営／その他）を店舗名から判定できません。店舗を確認して系列を選んでください`;
   else if (chainM.item && chainM.kind === "partial") flags.chain = `既存の系列「${chainM.item.name}」を候補にしました（${MATCH_LABEL[chainM.kind]}）`;
   else if (chainM.candidates.length > 0) flags.chain = `既存の系列に近い名称があります（${chainM.candidates.map((c) => c.name).join("、")}）。該当するものを選んでください`;
   else if (chainM.kind === "none") flags.chain = "マスターに無い系列です。保存すると仮登録されます";
@@ -571,7 +573,9 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
   const out: DraftDuplicate[] = [];
   for (const l of lotteries) {
     const lChainName = master?.chains.find((c) => c.id === l.chainId)?.name ?? "";
-    const sameChain = l.chainId === input.chain.id || (!!lChainName && !!chainName.trim() && chainKey(lChainName) === chainKey(chainName));
+    // 共通ブランドの系列（カードボックスの直営/その他）は表示名が同じでも別の系列。系列IDが同じときだけ同じ系列とする（名称の一致では結び付けない。Stage 7R）
+    const brandChain = master?.chains.find((c) => c.id === l.chainId)?.brandGroup || master?.chains.find((c) => c.id === input.chain.id)?.brandGroup;
+    const sameChain = brandChain ? !!input.chain.id && l.chainId === input.chain.id : l.chainId === input.chain.id || (!!lChainName && !!chainName.trim() && chainKey(lChainName) === chainKey(chainName));
     if (!sameChain) continue;
     const bucket = storeRelation(mine, classify(l.storeId, "", l.storeMode));
     if (!bucket) continue;

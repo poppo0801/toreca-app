@@ -11,6 +11,7 @@ import { ChainDeleteButton, ChainMergeButton } from "@/components/chain-merge-di
 import { ChainStoreSelectToggle } from "@/components/chain-store-select-toggle";
 import { ProductDeleteButton, ProductMergeButton } from "@/components/product-merge-dialog";
 import { SetCompositionButton } from "@/components/product-set-dialog";
+import { chainDisplayName, chainKindTag } from "@/lib/chain-display";
 import { normName } from "@/lib/norm";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
@@ -137,7 +138,7 @@ export function MastersView({ rows, rules }: { rows: MasterRows; rules: RuleRow[
   const names = useMemo(() => {
     const m: Record<string, string> = {};
     for (const k of ENTITY_KEYS) {
-      for (const r of rows[k]) m[r.id] = String(r[ENTITIES[k].titleField] ?? "");
+      for (const r of rows[k]) m[r.id] = k === "chains" ? rowChainName(r) : String(r[ENTITIES[k].titleField] ?? "");
     }
     return m;
   }, [rows]);
@@ -443,7 +444,8 @@ function MasterItem({
       else setError(res.error);
     });
 
-  const title = (entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ");
+  const title = entity.key === "chains" ? rowChainName(row) : (entity.titleFields ?? [entity.titleField]).map((f) => (f.endsWith("_id") ? names[String(row[f])] : String(row[f] ?? "日付不明"))).join(" / ");
+  const kindTag = entity.key === "chains" ? chainKindTag({ name: String(row.name), brandGroup: (row.brand_group as string | null) ?? null, operationKind: (row.operation_kind as "direct" | "other" | "unconfirmed" | null) ?? null }) : null;
   const badges = (
     <>
       {row.is_provisional === true && <UnconfirmedDot className="ml-1.5 align-middle" />}
@@ -462,6 +464,11 @@ function MasterItem({
         <div className="min-w-0 flex-1">
           <p className={cn("text-sm font-bold", entity.key === "products" ? "line-clamp-2 break-words" : "break-words")}>
             {title}
+            {kindTag && (
+              <span className="ml-1.5 align-middle text-xs font-normal text-muted-foreground" data-testid="chain-kind-tag">
+                {kindTag}
+              </span>
+            )}
             {badges}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
@@ -519,6 +526,11 @@ function MasterItem({
 }
 
 /** 系列ロゴの表示枠（32〜36px四方）。未登録なら頭文字のプレースホルダー */
+/** 系列の表示名（共通ブランドの2系列はどちらも同じブランド名。Stage 7R） */
+function rowChainName(r: Row): string {
+  return chainDisplayName({ name: String(r.name ?? ""), brandGroup: (r.brand_group as string | null) ?? null, operationKind: (r.operation_kind as "direct" | "other" | "unconfirmed" | null) ?? null });
+}
+
 function ChainLogoTile({ src, name }: { src: string | null; name: string }) {
   if (src) return <ChainLogo src={src} name={name} className="!m-0 size-9 rounded-md p-0.5" />;
   return (
@@ -843,6 +855,18 @@ function UnconfirmedDot({ className }: { className?: string }) {
   return <span role="img" aria-label="未確認" title="未確認" data-testid="unconfirmed-dot" className={cn("inline-block size-2 shrink-0 rounded-full bg-primary", className)} />;
 }
 
+/** 系列行の小さなロゴ（28px四方）。未登録なら頭文字 */
+function GroupLogo({ src, name }: { src: string | null; name: string }) {
+  if (src) return <ChainLogo src={src} name={name} className="!m-0 size-7 shrink-0 rounded p-0.5" />;
+  return (
+    <span aria-hidden="true" data-testid="group-logo-placeholder" className="inline-flex size-7 shrink-0 items-center justify-center rounded border border-dashed bg-muted text-xs font-bold text-muted-foreground">
+      {name.slice(0, 1)}
+    </span>
+  );
+}
+const chainLike = (c: { name: string; brand_group?: string | null; operation_kind?: string | null }) => ({ name: c.name, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null });
+const chainName = (c: { name: string; brand_group?: string | null; operation_kind?: string | null }) => chainDisplayName(chainLike(c));
+
 /**
  * 店舗マスターの系列別一覧。系列ごとのコンパクトなカード（系列名・店舗数・未確認数・展開）で、初期はすべて折りたたむ。
  * 展開すると店舗を1行ずつ（店舗名・都道府県・直線距離・未確認の●・編集）。通販の店舗は距離・交通費を出さず「通販」と表示する。
@@ -870,6 +894,7 @@ function StoreGroups({
 }) {
   const { data } = useApp();
   const entity = ENTITIES.stores;
+  const logoById = useMemo(() => new Map(data.chains.map((c) => [c.id, c.logoSrc ?? null])), [data.chains]);
   return (
     <ul className="space-y-2" aria-label="系列別の店舗一覧" data-testid="store-groups">
       {groups.map((g) => {
@@ -877,16 +902,21 @@ function StoreGroups({
         return (
           <li key={g.chain.id} className="rounded-lg border bg-card" data-testid="store-group" data-chain={g.chain.id} data-open={expanded ? "1" : "0"}>
             <button type="button" aria-expanded={expanded} onClick={() => onToggle(g.chain.id)} className="flex min-h-12 w-full items-center gap-2 px-3 text-left" data-testid="store-group-toggle">
-              <span className="min-w-0 flex-1 truncate text-sm font-bold">{g.chain.name}</span>
-              <span className="shrink-0 text-xs text-muted-foreground" data-testid="store-group-count">
-                {g.total}店舗
+              <GroupLogo src={logoById.get(g.chain.id) ?? null} name={chainName(g.chain)} />
+              <span className="min-w-0 flex-1 truncate text-sm font-bold" data-testid="store-group-name">
+                {chainName(g.chain)}
+                {chainKindTag(chainLike(g.chain)) && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{chainKindTag(chainLike(g.chain))}</span>}
               </span>
+              {/* 未確認の件数（0件なら出さない）は店舗数の左。店舗数は右端の固定幅に揃え、未確認の有無で位置が動かない */}
               {g.unconfirmed > 0 && (
-                <span className="flex shrink-0 items-center gap-1 text-xs text-primary-ink" data-testid="store-group-unconfirmed" aria-label={`未確認${g.unconfirmed}店舗`}>
-                  <span aria-hidden="true" className="inline-block size-2 rounded-full bg-primary" />
-                  {g.unconfirmed}
+                <span className="flex shrink-0 items-center gap-0.5 text-[11px] leading-none text-primary-ink" data-testid="store-group-unconfirmed" aria-label={`未確認${g.unconfirmed}店舗`}>
+                  <span aria-hidden="true" className="inline-block size-1.5 rounded-full bg-primary" />
+                  {g.unconfirmed}件
                 </span>
               )}
+              <span className="w-[3.75rem] shrink-0 text-right text-xs tabular-nums text-muted-foreground" data-testid="store-group-count">
+                {g.total}店舗
+              </span>
               <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} aria-hidden="true" />
             </button>
             {expanded && (

@@ -5,6 +5,7 @@
  */
 import { isMailOrderStore } from "@/lib/store-name";
 import { normName } from "@/lib/norm";
+import { chainDisplayName } from "@/lib/chain-display";
 
 export interface MasterStoreRow {
   id: string;
@@ -19,6 +20,9 @@ export interface MasterChainRow {
   id: string;
   name: string;
   archived_at: string | null;
+  /** 共通ブランドの系列（カードボックスの直営/その他）。表示名はブランド名になる（Stage 7R） */
+  brand_group?: string | null;
+  operation_kind?: string | null;
 }
 export interface StoreGroup<S extends MasterStoreRow = MasterStoreRow, C extends MasterChainRow = MasterChainRow> {
   chain: C;
@@ -40,10 +44,12 @@ export function groupStores<S extends MasterStoreRow, C extends MasterChainRow>(
 ): StoreGroup<S, C>[] {
   const nq = normName(opts.q);
   const out: StoreGroup<S, C>[] = [];
-  const sortedChains = [...chains].filter((c) => opts.showRetired || !c.archived_at).sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const label = (c: C) => chainDisplayName({ name: c.name, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null });
+  // 同じ表示名（カードボックスの2系列）は、内部の名称順で安定して並べる
+  const sortedChains = [...chains].filter((c) => opts.showRetired || !c.archived_at).sort((a, b) => label(a).localeCompare(label(b), "ja") || a.name.localeCompare(b.name, "ja"));
   for (const chain of sortedChains) {
     const own = stores.filter((s) => s.chain_id === chain.id && s.name !== PLACEHOLDER && (opts.showRetired || !s.archived_at));
-    const chainHit = !!nq && [chain.name, ...(opts.aliases?.get(chain.id) ?? [])].some((t) => normName(t).includes(nq));
+    const chainHit = !!nq && [chain.name, label(chain), ...(opts.aliases?.get(chain.id) ?? [])].some((t) => normName(t).includes(nq));
     const shown = !nq || chainHit ? own : own.filter((s) => normName(s.name).includes(nq) || normName(s.prefecture ?? "").includes(nq));
     if (nq && !chainHit && shown.length === 0) continue;
     out.push({ chain, stores: sortStores(shown, opts.distanceKm), total: own.length, unconfirmed: own.filter((s) => s.is_provisional).length });
