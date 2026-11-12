@@ -90,6 +90,11 @@ function compactTrace(run: AgentRun) {
         return { t: "rejected", name: e.name, reason: e.reason };
       case "limit":
         return { t: "limit", kind: e.kind, detail: e.detail };
+      case "duplicate":
+        return { t: "duplicate", name: e.name, detail: e.detail };
+      case "review":
+        // 検証システムが返した不足の理由（再調査の履歴）。AIの文章ではなく、検証の結果
+        return { t: "review", round: e.round, feedback: e.feedback.slice(0, 600), meta: e.meta ?? null };
       case "retry":
         return { t: "retry", reason: e.reason };
       case "error":

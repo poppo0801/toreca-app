@@ -1,0 +1,944 @@
+{
+  "frozenOn": "2026-11-12",
+  "note": "実行前に固定した正解（Stage 8D-6。未知の店舗30件）。実行結果を見て書き換えない。変更が必要な場合は revision として理由を残し、初回の集計は元の正解で行う。unknownGold は正解不明で、正解率の分母に含めない",
+  "gold": [
+    {
+      "id": "T01",
+      "expectedAddress": "兵庫県神戸市北区上津台8丁目1-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "ふるいちイオンモール神戸北店 住所 兵庫県神戸市北区上津台８丁目１−１イオンモール神戸北3階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「ふるいちイオンモール神戸北店」（店舗名の表記が違う）"
+    },
+    {
+      "id": "T02",
+      "expectedAddress": "兵庫県神戸市西区枝吉5丁目163-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場西神戸店 住所 兵庫県神戸市西区枝吉５丁目１６３-１",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "T03",
+      "expectedAddress": "兵庫県加古川市野口町長砂860",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場野口店 住所 兵庫県加古川市野口町長砂８６０",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "T04",
+      "expectedAddress": "兵庫県伊丹市南町3丁目1-6",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場猪名寺店 住所 兵庫県伊丹市南町３丁目１-６",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "T05",
+      "expectedAddress": "大阪府堺市北区長曽根町3079-2",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場中百舌鳥店 住所 大阪府堺市北区長曽根町３０７９-２",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "T06",
+      "expectedAddress": "大阪府大阪市東成区東今里2丁目1-4",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場緑橋店 住所 大阪府大阪市東成区東今里２丁目１-４",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "T07",
+      "expectedAddress": "大阪府大阪市中央区西心斎橋1-6-14",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "mint-web.jp",
+        "mint-mall.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://mint-web.jp/?pid=182458297",
+          "quote": "住所 〒542-0086 大阪府大阪市中央区西心斎橋1-6-14 心斎橋ビッグステップ B1F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "T08",
+      "expectedAddress": "大阪府大阪市北区芝田1-1-3",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "mint-web.jp",
+        "mint-mall.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://mint-web.jp/?pid=4246343",
+          "quote": "住所 〒530-0012 大阪府大阪市北区芝田1-1-3 阪急三番街北館 B1F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「MINT UMEDA」。トイコンプ梅田店（梅田1-1-3）と番地が似るが別の店舗"
+    },
+    {
+      "id": "T09",
+      "expectedAddress": "兵庫県神戸市中央区三宮町1-5-10",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "mint-web.jp",
+        "mint-mall.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://mint-web.jp/?pid=122209528",
+          "quote": "住所 〒650-0021 兵庫県神戸市中央区三宮町1-5-10 三宮オーパ別館",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "「三宮店」は晴れる屋2・トレカチャンピオンなど他系列にも同名がある（同名店舗の取り違えに注意）"
+    },
+    {
+      "id": "T10",
+      "expectedAddress": "兵庫県神戸市須磨区中落合2-2-2",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "joshin.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://store.joshin.co.jp/detail/1865/",
+          "quote": "住所 〒654-0154 兵庫県神戸市須磨区 中落合2-2-2 ダイエー名谷店3F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「ジョーシン名谷ダイエー店」。ふるいち名谷店（別系列・別の場所）と取り違えない"
+    },
+    {
+      "id": "T11",
+      "expectedAddress": "兵庫県神戸市兵庫区中之島2-1-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "joshin.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://store.joshin.co.jp/detail/1864/",
+          "quote": "住所 〒652-0844 兵庫県神戸市兵庫区 中之島2-1-1 イオンモール神戸南2F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「ジョーシン神戸南イオンモール店」"
+    },
+    {
+      "id": "T12",
+      "expectedAddress": "大阪府大阪市北区梅田1-1-3",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "toy-comp.com"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.toy-comp.com/umeda",
+          "quote": "大阪駅前第３ビル店 住所 大阪市北区梅田 1-1-3 大阪駅前第3ビル 2F-21",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「大阪駅前第3ビル店」。公式ページの住所に都道府県の記載がない"
+    },
+    {
+      "id": "T13",
+      "expectedAddress": "大阪府八尾市光町2丁目3",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "toy-comp.com"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.toy-comp.com/yao",
+          "quote": "アリオ八尾店 住所 大阪府八尾市光町2丁目3番アリオ八尾１F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「アリオ八尾店」。TSUTAYAリノアス八尾店（光町2-60）と別の店舗"
+    },
+    {
+      "id": "T14",
+      "expectedAddress": "兵庫県神戸市中央区三宮町1丁目9-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "hareruya2.com"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.hareruya2.com/en/pages/store_menu",
+          "quote": "晴れる屋2 三宮店 兵庫県神戸市中央区三宮町1丁目9-1 センタープラザ2F 44号",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "「三宮店」は他系列にも同名がある"
+    },
+    {
+      "id": "T15",
+      "expectedAddress": "京都府京都市下京区東洞院通七条下る東塩小路町557番地1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "hareruya2.com"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.hareruya2.com/en/pages/store_kyoto",
+          "quote": "晴れる屋2 京都店 住所 〒600-8216 京都市下京区東洞院通七条下る東塩小路町 557 番地1 YU-AIビル 6階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "別の店舗「晴れる屋 京都店」（MTG専門店・別の住所）と取り違えない。公式ページの住所に都道府県の記載がない"
+    },
+    {
+      "id": "T16",
+      "expectedAddress": "大阪府大阪市北区梅田3-1-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "pokemon.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://shop.pokemon.co.jp/en/shop/pokemoncenter-osaka/",
+          "quote": "Pokémon Center OSAKA LUCUA SOUTH 13F 3-1-1, Umeda, Kita-ku, Osaka-shi, Osaka 530-8373",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式ページは英語表記（日本語の住所の記載がない）。「オーサカ」と「オーサカDX」の取り違えに注意"
+    },
+    {
+      "id": "T17",
+      "expectedAddress": "大阪府大阪市中央区心斎橋筋1-7-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "pokemon.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://shop.pokemon.co.jp/en/shop/pokemoncenter-osakadx/",
+          "quote": "Pokémon Center OSAKA DX DAIMARU SHINSAIBASHI Main Building 9F 1-7-1, Shinsaibashisuji, Chuo-ku, Osaka-shi, Osaka 542-8501",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式ページは英語表記。「オーサカ」と「オーサカDX」の取り違えに注意"
+    },
+    {
+      "id": "T18",
+      "expectedAddress": "大阪府八尾市光町2-60",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "linoas.jp",
+        "tsite.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://linoas.jp/",
+          "quote": "LINOAS（リノアス） 〒581-0803 大阪府八尾市光町2-60（1F TSUTAYA）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "店舗自身の公式ページ（store-tsutaya.tsite.jp）は自動取得できず、運営する商業施設の公式サイトの所在地で確認した（施設内の店舗）"
+    },
+    {
+      "id": "T19",
+      "expectedAddress": "東京都台東区上野6-14-6",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "e-yamashiroya.com"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://e-yamashiroya.com/info/",
+          "quote": "店舗のご案内 〒110-0005 東京都台東区上野6－14－6",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "単一店舗の公式サイト（「上野店」という名称の記載がない）"
+    },
+    {
+      "id": "T20",
+      "expectedAddress": "兵庫県神戸市中央区東川崎町1-7-2",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "kojima.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp",
+        "pokemon-card.com",
+        "machitoku.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき（第三者の一致だけでは候補止まり）"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.kojima.net/shop/shoplist/kobeharborland.html",
+          "quote": "コジマ×ソフマップ 神戸ハーバーランド店 〒650-0044 兵庫県神戸市中央区 東川崎町１－７－２ umie NORTH MALL内 ６階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「コジマ×ソフマップ 神戸ハーバーランド店」"
+    },
+    {
+      "id": "W01",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。ドラゴンスターの公式サイト（dorasuta.jp）は自動取得を拒否する。神戸三宮店の住所は公式で確認できなかった"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の他系列の「三宮店」との取り違えに注意。第三者のみなら候補止まりが妥当"
+    },
+    {
+      "id": "W02",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。公式サイトは自動取得を拒否する。くずはモール店の住所は公式で確認できなかった"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "商業施設（くずはモール）の住所と店舗の住所の混同に注意"
+    },
+    {
+      "id": "W03",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。公式サイトは自動取得を拒否する。なんば なんさん通り店の住所は公式で確認できなかった"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "なんさん通り商店会（登録済みドメインに含まれる第三者）の情報を公式扱いしないこと"
+    },
+    {
+      "id": "W04",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。GIRAFULLの公式サイトを特定できなかった（登録済みドメインは第三者の一覧サイト）"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の「日本橋店」（他系列・オタロード店・日本橋3号店）との取り違えに注意。第三者のみなら候補止まりが妥当"
+    },
+    {
+      "id": "W05",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。GIRAFULLの公式サイトを特定できなかった"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の「なんば店」（カードラボ・ビックカメラ・BIG MAGIC）との取り違えに注意。第三者のみなら候補止まりが妥当"
+    },
+    {
+      "id": "W06",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。BIG MAGICの公式サイト（bigmagic.net）はイベントサイトへ転送され、なんば店のページを確認できなかった。登録済みドメインは地図サービス"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の「なんば店」との取り違えに注意"
+    },
+    {
+      "id": "W07",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。ビックカメラの公式サイトがタイムアウトし、なんば店のページを確認できなかった"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の「なんば店」との取り違えに注意。公式の表記が「ビックカメラなんば」等で店舗名が違う可能性"
+    },
+    {
+      "id": "W08",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。「トレカキャピタル」の公式情報を確認できなかった（登録済みドメインはエディオン）"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "運営元・店舗名の整合が取れない可能性。第三者のみなら候補止まりが妥当"
+    },
+    {
+      "id": "W09",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。「トレカチャンピオン」の公式情報を確認できなかった（登録済みドメインは第三者の地図サイト）"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の「三宮店」（MINT・晴れる屋2）との取り違えに注意"
+    },
+    {
+      "id": "W10",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。「フルコンプ」の公式情報を確認できなかった"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の「日本橋店」との取り違えに注意"
+    }
+  ]
+}

@@ -171,6 +171,24 @@ describe("Anthropic 接続部（偽のクライアントで検証。実APIには
     const sent = created[0] as { tools: { name: string }[] };
     expect(sent.tools.map((t) => t.name)).toEqual(["web_search", SUBMIT_TOOL]); // 提出ツール以外に、書き込みの能力を持つツールは渡さない
   });
+  it("再調査（Stage 8D-6）: 提出のあと、検証結果が提出の呼び出しへの結果として返り（思考ブロックの原本も維持）、同じ応答の他の呼び出しは実行されない", async () => {
+    const sent: { messages: unknown[] }[] = [];
+    const thinking = { type: "thinking", thinking: "考え中", signature: "sig" };
+    const first = [thinking, { type: "tool_use", id: "p1", name: "fetch_page", input: { url: "https://x.test/" } }, { type: "tool_use", id: "s1", name: SUBMIT_TOOL, input: { candidates: [] } }];
+    const second = [{ type: "tool_use", id: "s2", name: SUBMIT_TOOL, input: { candidates: [{ address: "a", sourceUrl: "u", quote: "q" }] } }];
+    const client = { messages: { create: async (p: { messages: unknown[] }) => (sent.push(JSON.parse(JSON.stringify(p))), sent.length === 1 ? msg(first) : msg(second)) } };
+    const llm = new AnthropicAgentLLM(client as never, "claude-haiku-5-5");
+    const out = await runAgent({ llm, tools: new ToolRegistry(), system: "s", task: "t", maxReviews: 1, review: async (i) => (i.round === 0 ? { feedback: "【検証システムの結果】公式サイトである根拠が不足" } : null) });
+    expect(out.status).toBe("completed");
+    expect(out.usage.followUps).toBe(1);
+    expect(out.output).toMatchObject({ candidates: [{ address: "a" }] });
+    const m = sent[1].messages as { role: string; content: unknown }[];
+    expect(m).toHaveLength(3); // 依頼 → 応答の原本（思考・提出を含む） → 検証結果
+    expect((m[1].content as unknown[])[0]).toMatchObject({ type: "thinking" });
+    const results = m[2].content as { type: string; tool_use_id: string; content: string; is_error?: boolean }[];
+    expect(results.map((r) => [r.tool_use_id, r.is_error ?? false])).toEqual([["p1", true], ["s1", false]]); // 提出と同時の取得は実行しない。提出には検証結果を返す
+    expect(results.find((r) => r.tool_use_id === "s1")!.content).toMatch(/公式サイトである根拠が不足/);
+  });
   it("429・529・5xx・通信エラーは一時的なエラー（再試行の対象）、それ以外はそのまま", async () => {
     for (const status of [429, 529, 500, 503]) {
       const llm = new AnthropicAgentLLM({ messages: { create: async () => { throw Object.assign(new Error("x"), { status }); } } } as never, "m");

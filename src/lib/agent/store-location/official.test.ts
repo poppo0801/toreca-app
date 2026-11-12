@@ -182,3 +182,13 @@ describe("AIの提出の解釈（parseProposal）", () => {
     expect(parseProposal({ candidates: [] }).proposal?.candidates).toEqual([]);
   });
 });
+
+describe("Stage 8D-6: 店舗マスターに登録された第三者の一覧サイト・商店会サイトは、公式（trusted）にしない", () => {
+  it("TCGマップ・なんさん通り商店会が登録済みドメインでも trusted にならない（rejected）", () => {
+    const s: StoreTarget = { ...store, knownDomains: ["tcg-map.com", "nansan.com", "tbd.test"] };
+    const st = (d: string, u: string) => assessOfficialSites({ store: s, pages: [page(u, "テストブックス堂 青葉店", "テストブックス堂 青葉店 東京都架空区青葉2-2-2")] }).find((x) => x.domain === d)?.status;
+    expect(st("tcg-map.com", "https://tcg-map.com/shop/1")).toBe("rejected");
+    expect(st("nansan.com", "https://nansan.com/shop/1")).toBe("rejected");
+    expect(st("tbd.test", "https://tbd.test/shop/1")).toBe("trusted"); // 登録済みの系列自身のサイトは従来どおり
+  });
+});

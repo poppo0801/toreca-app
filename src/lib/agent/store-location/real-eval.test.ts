@@ -1,11 +1,13 @@
 // @vitest-environment node
 import Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
-import { SYSTEM_PROMPT } from "@/lib/agent/store-location/run";
+import { mergeSubmissions, SYSTEM_PROMPT } from "@/lib/agent/store-location/run";
 import { checkRealApi } from "@/lib/agent/real-gate";
-import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, collectRecords, isFatalProblem, autonomyOf, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
+import { readLedger, pagesForStore } from "@/lib/agent/store-location/evidence-store";
+import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, newRunId, summarizeFollowUps, collectRecords, isFatalProblem, autonomyOf, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
 import { matchesGoldV1, scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
 import { verifyResearch } from "@/lib/agent/store-location/verify";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
@@ -53,7 +55,7 @@ describe("実在店舗の評価データ", () => {
     const hay = JSON.stringify(REAL_TARGETS.map((t) => t.store)) + SYSTEM_PROMPT;
     const flat = (s: string) => s.normalize("NFKC").replace(/[\s　]+/g, "");
     const haystack = flat(hay);
-    for (const g of REAL_GOLD.filter((x) => /^[NUPQ][0-9]+$/.test(x.id))) {
+    for (const g of REAL_GOLD.filter((x) => /^[NUPQTW][0-9]+$/.test(x.id))) {
       if (g.expectedAddress) expect(haystack.includes(flat(g.expectedAddress)), `${g.id} の正解住所が入力に含まれる`).toBe(false);
       for (const e of (g.evidence ?? []) as { url: string; quote: string }[]) {
         expect(haystack.includes(flat(e.url)), `${g.id} の出典URLが入力に含まれる`).toBe(false);
@@ -87,6 +89,31 @@ describe("実在店舗の評価データ", () => {
     for (const g of REAL_GOLD.filter((x) => /^Q[0-9]+$/.test(x.id))) expect(g.expectedAddress ?? null).toBeNull();
     const cats = pq.map((t) => t.category).join(",");
     for (const c of ["official_stated", "official_hard", "similar_name", "name_differs", "closure_relocated", "unknown_gold_official_down", "unknown_gold_official_blocked", "unknown_gold_ambiguous"]) expect(cats, c).toContain(c);
+  });
+  it("Stage 8D-6: 未知の30件（正解あり20・正解不明10）。過去の組（R・N・U・P・Q）の店舗を含まず、入力に住所を含まない。対象と正解は実行前に固定（内容のハッシュ）", () => {
+    const tw = REAL_TARGETS.filter((t) => /^[TW][0-9]+$/.test(t.id));
+    expect(tw).toHaveLength(30);
+    expect(REAL_GOLD.filter((g) => /^T[0-9]+$/.test(g.id) && !g.unknownGold)).toHaveLength(20);
+    expect(REAL_GOLD.filter((g) => /^W[0-9]+$/.test(g.id) && g.unknownGold)).toHaveLength(10);
+    const key = (t: { store: { chain: string; name: string } }) => `${t.store.chain} ${t.store.name}`;
+    const prev = new Set(REAL_TARGETS.filter((t) => /^[RNUPQ][0-9]+$/.test(t.id)).map(key));
+    expect(tw.some((t) => prev.has(key(t)))).toBe(false);
+    expect(new Set(tw.map(key)).size).toBe(30);
+    for (const t of tw) expect(Object.keys(t.store).sort()).toEqual(["chain", "chainAliases", "knownDomains", "name", "prefecture", "siblingNames"]);
+    for (const g of REAL_GOLD.filter((x) => /^T[0-9]+$/.test(x.id))) {
+      expect(g.expectedAddress, g.id).toMatch(/[都道府県]/);
+      const ev = (g.evidence ?? []) as { url: string; verifiedOn: string }[];
+      expect(ev.length, g.id).toBeGreaterThan(0);
+      expect(ev.every((e) => e.url.startsWith("https://") && e.verifiedOn === "2026-11-12"), g.id).toBe(true);
+    }
+    for (const g of REAL_GOLD.filter((x) => /^W[0-9]+$/.test(x.id))) expect(g.expectedAddress ?? null).toBeNull();
+    // 同名・別系列・公式情報が乏しい・名称が違う店舗が含まれる
+    const cats = tw.map((t) => t.category).join(",");
+    for (const c of ["same_name_other_chain", "name_differs", "official_poor", "closure_possible", "relocation_possible"]) expect(cats, c).toContain(c);
+    // 凍結: 実行前に固定した内容。変更するなら理由を残して新しい組にする（結果を見て書き換えない）
+    const hash = (f: string) => createHash("sha256").update(readFileSync(f)).digest("hex");
+    expect(hash("eval/real-stores/targets-8d6.json")).toBe("a6f9d5d422d2b4500b3b5091d178034e1476a46af39d536298f16700a7d7433c");
+    expect(hash("eval/real-stores/gold-8d6.json")).toBe("ca9bbd9d13ba0fecd2bcd81afb7884475e929e6a34f20a81eb196a8fcac3f0cc");
   });
   it("Stage 8D-4: 評価対象に、公式に明記・公式が見つけにくい・類似名・系列名と店舗名が違う・閉店/移転・住所の一部・公式情報不足（正解不明）の各種が含まれる", () => {
     const cats = REAL_TARGETS.filter((t) => /^[NU][0-9]+$/.test(t.id)).map((t) => t.category).join(",");
@@ -235,10 +262,12 @@ describe.skipIf(process.env.REAL_EVAL !== "1")("実API評価（承認済みの�
     const gate = checkRealApi({ env, confirm: true, runsToday });
     if (!gate.ok) throw new Error(`実APIの関門: ${gate.reason}`);
     const ids = (env.REAL_EVAL_IDS ?? "R1").split(",").map((x) => x.trim()).filter(Boolean);
-    const plan: RealEvalPlan = { ids, approvedMaxJpy: Number(env.REAL_EVAL_APPROVED_MAX_JPY) || 0, approvedStores: Number(env.REAL_EVAL_APPROVED_STORES) || 0, firstOnly: env.REAL_EVAL_FIRST_ONLY === "1", phase: env.REAL_EVAL_PHASE === "rerun" ? "rerun" : "initial", continueOnProblem: env.REAL_EVAL_CONTINUE === "1", maxProblems: Number(env.REAL_EVAL_MAX_PROBLEMS) || undefined };
+    const plan: RealEvalPlan = { ids, approvedMaxJpy: Number(env.REAL_EVAL_APPROVED_MAX_JPY) || 0, approvedStores: Number(env.REAL_EVAL_APPROVED_STORES) || 0, firstOnly: env.REAL_EVAL_FIRST_ONLY === "1", phase: env.REAL_EVAL_PHASE === "rerun" ? "rerun" : "initial", continueOnProblem: env.REAL_EVAL_CONTINUE === "1", maxProblems: Number(env.REAL_EVAL_MAX_PROBLEMS) || undefined, followUps: Number(env.REAL_EVAL_FOLLOWUPS) || 0 };
     const maxRuns = Number(env.AGENT_MAX_RUNS_PER_DAY) || 0;
     const client = new Anthropic({ apiKey: gate.apiKey }); // キーは出力・保存しない
-    const cache = new FileCache("eval/runs/real/cache.json");
+    // 実行ごとに分けたキャッシュ（実行をまたいで同じURLの内容が上書き・混入しない。取得したページは台帳 pages-<実行ID>.jsonl にも残る）
+    const runId = newRunId();
+    const cache = new FileCache(`eval/runs/real/cache-${runId}.json`);
     const rep = await runRealEval(
       plan,
       () => ({
@@ -247,7 +276,7 @@ describe.skipIf(process.env.REAL_EVAL !== "1")("実API評価（承認済みの�
         fetcher: new CachedFetcher(new SafePageFetcher(), cache),
         geocode: realGeocode,
       }),
-      { limits: gate.limits, remainingRuns: Math.max(0, maxRuns - runsToday), onRecord: (r) => console.log(`[real] ${r.target.id} ${r.outcome.status} ${r.outcome.address ?? "-"} cost=${r.usage.costJpy.toFixed(2)}円 searches=${r.usage.searches} fetches=${r.usage.fetches}${r.problem ? ` 問題: ${r.problem}` : ""}`) },
+      { limits: gate.limits, runId, remainingRuns: Math.max(0, maxRuns - runsToday), onRecord: (r) => console.log(`[real] ${r.target.id} ${r.outcome.status} ${r.outcome.address ?? "-"} cost=${r.usage.costJpy.toFixed(2)}円 searches=${r.usage.searches} fetches=${r.usage.fetches} followUps=${r.usage.followUps ?? 0}${r.problem ? ` 問題: ${r.problem}` : ""}`) },
     );
     writeFileSync(counterPath, JSON.stringify({ date: today, n: runsToday + rep.records.length }));
     console.log(`[real] 実行 ${rep.records.length} 件 / 推定費用 ${rep.spentJpy.toFixed(2)}円 / ${rep.stoppedReason ?? "完了"}`);
@@ -273,7 +302,7 @@ describe("集計: 初回の主要評価値。正解不明は分母に含めな�
     return {
       target, result: { caseId: id, status: status as never, address, confidence: 70, searches: 2, fetches: 1, steps: 4, costJpy: 3, ms: 1000, injectionFlags: 0 },
       outcome: { status, address, confidence: 70, reasons: [], officialSites: sites.map((s) => ({ ...s, signals: [], problems: [] })), sources: [] },
-      usage: { steps: 4, searches: 2, fetches: 1, inputTokens: 1000, outputTokens: 100, costJpy: 3, ms: 1000, retries: 0, rejectedCalls: 0, injectionFlags: 0, ...over },
+      usage: { steps: 4, searches: 2, fetches: 1, inputTokens: 1000, outputTokens: 100, costJpy: 3, ms: 1000, retries: 0, rejectedCalls: 0, injectionFlags: 0, duplicateCalls: 0, followUps: 0, ...over },
       actions: actions.map((name) => ({ name, ok: true, arg: "" })), engine: "anthropic:test", problem: null,
     };
   };
@@ -314,47 +343,61 @@ describe("集計: 初回の主要評価値。正解不明は分母に含めな�
 // 集計の出力（REAL_REPORT=1。API・ネットワークには接続しない）
 describe.skipIf(process.env.REAL_REPORT !== "1")("集計の出力（表示のみ）", () => {
   it("評価の組（8D-4: N・U／8D-5: P・Q）ごと、初回・再実行を別に集計して eval/runs/real/summary-<組>-*.json に書く", () => {
-    for (const [set, re] of [["8d4", /^[NU][0-9]+$/], ["8d5", /^[PQ][0-9]+$/]] as const) {
+    for (const [set, re] of [["8d4", /^[NU][0-9]+$/], ["8d5", /^[PQ][0-9]+$/], ["8d6", /^[TW][0-9]+$/]] as const) {
       for (const phase of ["initial", "rerun"] as const) {
         const recs = collectRecords("eval/runs/real", phase, (id) => re.test(id));
         if (!recs.length) continue;
         writeFileSync(`eval/runs/real/summary-${set}-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
         writeFileSync(`eval/runs/real/summary-${set}-${phase}-original-scorer.json`, JSON.stringify(summarizeRecords(recs, matchesGoldV1), null, 2)); // 旧採点（8D-4 の初回の再現用）
+        if (recs.some((r) => (r.rounds?.length ?? 0) > 0)) writeFileSync(`eval/runs/real/summary-${set}-${phase}-followup.json`, JSON.stringify(summarizeFollowUps(recs), null, 2)); // 再調査の効果（最初の提出 vs 最終）
       }
     }
   });
 });
 
 // ---------------------------------------------------------------- 保存済みデータでの再検証（REAL_REPLAY=1。有料APIは使わない）
-// 実行記録（eval/runs/real/real-*.json）に残した「AIの提出（住所・情報源・引用）」と、取得済みのページ（cache.json）を使い、
-// 検証層（verifyResearch）だけを現在のコードでやり直す。AIの出力・取得したページは変えない（検索・AI呼び出しは行わない）。
+// 実行記録（eval/runs/real/real-*.json）に残した「AIの提出（住所・情報源・引用）」と、取得済みのページを使い、検証層（verifyResearch）だけを現在のコードでやり直す。
+// AIの出力・取得したページは変えない（検索・AI呼び出しは行わない）。ページの出どころ: 台帳（pages-<実行ID>.jsonl。8D-6 以降の実行。実行ごとに分離・整合性検査つき）を優先し、
+// 台帳が無い旧記録（8D-3〜8D-5）だけ、従来の共有キャッシュ（cache.json。実行をまたいで上書きされるため、実行時と異なる時点のページが混ざる可能性がある）を使う。
 describe.skipIf(process.env.REAL_REPLAY !== "1")("保存済みデータでの再検証（有料API・検索なし）", () => {
   it("初回の記録を、現在の検証層で再判定して eval/runs/real/replay-8d4.json に書く", async () => {
-    const cache = JSON.parse(readFileSync("eval/runs/real/cache.json", "utf8")) as Record<string, { v: { ok?: boolean; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[] } }>;
+    const cachePath = "eval/runs/real/cache.json";
+    const cache = existsSync(cachePath) ? (JSON.parse(readFileSync(cachePath, "utf8")) as Record<string, { v: { ok?: boolean; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[] } }>) : {};
     const pageFor = (arg: string) => {
       const key = Object.keys(cache).find((k) => k.startsWith(`page:${arg}`));
       const v = key ? cache[key].v : null;
       return v && v.ok !== false ? { url: v.url, finalUrl: v.finalUrl, title: v.title, text: v.text, links: v.links, injection: false } : null;
     };
-    // 各店舗の最初の記録（N・U は初回の実行、R は最後の実行）
-    const first = new Map<string, RealRecord>();
+    // 各店舗の最初の記録（N・U・P・Q・T・W は初回の実行、R は最後の実行）
+    const first = new Map<string, { r: RealRecord; ledger: string | null }>();
     for (const f of readdirSync("eval/runs/real").filter((x) => /^real-.*json$/.test(x)).sort()) {
-      const rep = JSON.parse(readFileSync(`eval/runs/real/${f}`, "utf8")) as { phase?: string; records: RealRecord[] };
+      const rep = JSON.parse(readFileSync(`eval/runs/real/${f}`, "utf8")) as { phase?: string; ledgerFile?: string; records: RealRecord[] };
       for (const r of rep.records) {
-        if (/^[NUPQ]/.test(r.target.id)) { if ((rep.phase ?? "initial") === "initial" && !first.has(r.target.id)) first.set(r.target.id, r); }
-        else first.set(r.target.id, r); // R1〜R5: 最後の記録（修正後の再実行）
+        const entry = { r, ledger: rep.ledgerFile ?? null };
+        if (/^[NUPQTW]/.test(r.target.id)) { if ((rep.phase ?? "initial") === "initial" && !first.has(r.target.id)) first.set(r.target.id, entry); }
+        else first.set(r.target.id, entry); // R1〜R5: 最後の記録（修正後の再実行）
       }
     }
+    const ledgers = new Map<string, ReturnType<typeof readLedger>>();
     const rows: Record<string, unknown>[] = [];
     const replayed: RealRecord[] = [];
-    for (const r of first.values()) {
-      const pages = r.actions.filter((a) => a.name === "fetch_page" && a.ok).map((a) => pageFor(a.arg)).filter((p): p is NonNullable<typeof p> => !!p);
-      const proposal = { candidates: (r.outcome.candidates ?? []).map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, closureHint: c.closureHint ?? null })) };
-      const res = await verifyResearch({ store: r.target.store, proposal, pages, geocode: realGeocode, limitReached: false });
-      rows.push({ id: r.target.id, before: { status: r.outcome.status, address: r.outcome.address, confidence: r.outcome.confidence }, after: { status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => `${o.domain}:${o.status}`) }, pages: pages.length, candidates: proposal.candidates.length });
+    for (const { r, ledger } of first.values()) {
+      let pages;
+      let source = "cache.json（旧記録。実行時と異なる時点のページが混ざる可能性）";
+      if (ledger) {
+        if (!ledgers.has(ledger)) ledgers.set(ledger, readLedger(`eval/runs/real/${ledger}`));
+        pages = pagesForStore(ledgers.get(ledger)!, r.target.id);
+        source = `台帳 ${ledger}`;
+      } else {
+        pages = r.actions.filter((a) => a.name === "fetch_page" && a.ok).map((a) => pageFor(a.arg)).filter((p): p is NonNullable<typeof p> => !!p);
+      }
+      // 提出: 台帳の記録（proposals＝AIの出力そのもの）があればそれを、旧記録は保存した候補を使う
+      const cands = r.proposals && r.proposals.length ? mergeSubmissions(r.proposals) : (r.outcome.candidates ?? []).map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, closureHint: c.closureHint ?? null }));
+      const res = await verifyResearch({ store: r.target.store, proposal: { candidates: cands }, pages, geocode: realGeocode, limitReached: false });
+      rows.push({ id: r.target.id, source, before: { status: r.outcome.status, address: r.outcome.address, confidence: r.outcome.confidence }, after: { status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => `${o.domain}:${o.status}`) }, pages: pages.length, candidates: cands.length });
       replayed.push({ ...r, outcome: { ...r.outcome, status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })) } });
     }
-    writeFileSync(process.env.REAL_REPLAY_OUT ?? "eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryPQ: summarizeRecords(replayed.filter((r) => /^[PQ]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
+    writeFileSync(process.env.REAL_REPLAY_OUT ?? "eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryPQ: summarizeRecords(replayed.filter((r) => /^[PQ]/.test(r.target.id))), summaryTW: summarizeRecords(replayed.filter((r) => /^[TW]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
     expect(rows.length).toBeGreaterThan(0);
   }, 600_000);
 });
@@ -363,7 +406,7 @@ describe("自律性の判定（調査の経過から機械的に判定。検索�
   const rec = (status: string, actions: [string, string][], cands: string[] = [], usage: Partial<RealRecord["usage"]> = {}): RealRecord => ({
     target: REAL_TARGETS.find((x) => x.id === "N01")!, result: { caseId: "N01", status: status as never, address: null, confidence: 0, searches: 0, fetches: 0, steps: 4, costJpy: 1, ms: 1, injectionFlags: 0 },
     outcome: { status, address: null, confidence: 0, reasons: [], officialSites: [], sources: [], candidates: cands.map((a) => ({ address: a, sourceUrl: "https://x.test/", quote: a, problems: [] })) },
-    usage: { steps: 4, searches: actions.filter((a) => a[0] === "web_search").length, fetches: actions.filter((a) => a[0] === "fetch_page").length, inputTokens: 1, outputTokens: 1, costJpy: 1, ms: 1, retries: 0, rejectedCalls: 0, injectionFlags: 0, ...usage },
+    usage: { steps: 4, searches: actions.filter((a) => a[0] === "web_search").length, fetches: actions.filter((a) => a[0] === "fetch_page").length, inputTokens: 1, outputTokens: 1, costJpy: 1, ms: 1, retries: 0, rejectedCalls: 0, injectionFlags: 0, duplicateCalls: 0, followUps: 0, ...usage },
     actions: actions.map(([name, arg]) => ({ name, ok: true, arg })), engine: "t", problem: null,
   });
   it("検索語の変更・情報源の追加・矛盾後の継続・早期終了・安全な保留を判定する", () => {

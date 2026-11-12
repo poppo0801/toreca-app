@@ -2,7 +2,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
-import { DEFAULT_LIMITS, type AgentLimits } from "@/lib/agent/core";
+import { DEFAULT_LIMITS, type AgentLimits, type TraceEvent } from "@/lib/agent/core";
 import { isStoreResearchEnabled } from "@/lib/agent/dev-flag";
 import { checkRealApi } from "@/lib/agent/real-gate";
 import { EVAL_WORLD } from "@/lib/agent/store-location/world";
@@ -33,6 +33,19 @@ async function ctx(): Promise<Db | null> {
     return (await currentHouseholdId(db)) ? db : null;
   } catch {
     return null;
+  }
+}
+
+function traceLabel(e: TraceEvent): string {
+  switch (e.t) {
+    case "tool": return `${e.name}${e.ok ? "" : "（失敗）"}${e.injection ? " ⚠命令らしき文面を無視" : ""}`;
+    case "rejected": return `拒否: ${e.name}`;
+    case "limit": return e.detail;
+    case "duplicate": return `重複を断った: ${e.name}`;
+    case "review": return `検証の結果を受けて再調査（${e.round}回目）`;
+    case "retry": return "再試行";
+    case "error": return `エラー: ${e.message}`;
+    case "step": return `ステップ${e.n}`;
   }
 }
 
@@ -85,9 +98,9 @@ export async function runStoreResearchAction(input: { storeId: string; additiona
     const gate = checkRealApi({ env: process.env, confirm: input.confirmCost, runsToday: await countRealRunsToday(db) });
     if (!gate.ok) return { ok: false, error: gate.reason };
     const client = new Anthropic({ apiKey: gate.apiKey });
-    deps = { llm: new AnthropicAgentLLM(client, gate.model), search: new CachedSearch(new AnthropicWebSearch(client, gate.model), sharedCache), fetcher: new CachedFetcher(new SafePageFetcher(), sharedCache), geocode: realGeocode, limits: gate.limits, past: async () => past };
+    deps = { llm: new AnthropicAgentLLM(client, gate.model), search: new CachedSearch(new AnthropicWebSearch(client, gate.model), sharedCache), fetcher: new CachedFetcher(new SafePageFetcher(), sharedCache), geocode: realGeocode, limits: gate.limits, past: async () => past, followUps: 2 };
   } else {
-    deps = { llm: new MockStoreBrain(t.value.target), search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD), past: async () => past };
+    deps = { llm: new MockStoreBrain(t.value.target), search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD), past: async () => past, followUps: 2 };
   }
   const retryNote = input.additional && past[0] ? `${past[0].status}（信頼度${past[0].confidence}）${past[0].address ?? "住所なし"}` : undefined;
   const out = await researchStoreLocation(t.value.target, t.value.existingAddress, deps, { retryNote });
@@ -110,7 +123,7 @@ export async function runStoreResearchAction(input: { storeId: string; additiona
       officialSites: r.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })),
       usage: { ...out.usage, ms: Math.round(out.usage.ms), costJpy: Math.round(out.usage.costJpy * 100) / 100 },
       engine: out.engine,
-      trace: out.run.trace.map((e) => ({ label: e.t === "tool" ? `${e.name}${e.ok ? "" : "（失敗）"}${e.injection ? " ⚠命令らしき文面を無視" : ""}` : e.t === "rejected" ? `拒否: ${e.name}` : e.t === "limit" ? e.detail : e.t === "retry" ? "再試行" : e.t === "error" ? `エラー: ${e.message}` : `ステップ${e.n}`, ok: e.t === "tool" ? e.ok : e.t === "step" })),
+      trace: out.run.trace.map((e) => ({ label: traceLabel(e), ok: e.t === "tool" ? e.ok : e.t === "step" || e.t === "review" })),
     },
     history: (await listResearch(db, input.storeId, 5)).map((h) => ({ status: h.status, address: h.address, confidence: h.confidence, researchedAt: h.researchedAt })),
   };

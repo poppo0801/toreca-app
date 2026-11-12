@@ -25,13 +25,15 @@ export interface AgentLimits {
   maxMs: number;
   /** LLM の一時的なエラーに対する再試行の最大回数（タスク全体） */
   maxRetries: number;
+  /** 同じ検索・同じURLの重複した呼び出し（実行せずに断った回数）の上限。超えたら無駄な繰り返しとして終了する（Stage 8D-6） */
+  maxDuplicates: number;
 }
 
-/** 既定の上限（保守的）。呼び出し側で変更できる */
-export const DEFAULT_LIMITS: AgentLimits = { maxSteps: 12, maxSearches: 4, maxFetches: 6, maxTokens: 300_000, maxCostJpy: 15, maxMs: 90_000, maxRetries: 2 };
+/** 既定の上限（保守的）。呼び出し側で変更できる。再調査（検証結果を受けた追加調査）も、同じ上限の中で行う（上限は追加されない） */
+export const DEFAULT_LIMITS: AgentLimits = { maxSteps: 12, maxSearches: 4, maxFetches: 6, maxTokens: 300_000, maxCostJpy: 15, maxMs: 90_000, maxRetries: 2, maxDuplicates: 3 };
 
-export type LimitKind = "steps" | "searches" | "fetches" | "tokens" | "cost" | "time" | "retries";
-export const LIMIT_LABEL: Record<LimitKind, string> = { steps: "実行回数", searches: "Web検索回数", fetches: "ページ取得回数", tokens: "トークン量", cost: "推定費用", time: "処理時間", retries: "再試行回数" };
+export type LimitKind = "steps" | "searches" | "fetches" | "tokens" | "cost" | "time" | "retries" | "duplicates";
+export const LIMIT_LABEL: Record<LimitKind, string> = { steps: "実行回数", searches: "Web検索回数", fetches: "ページ取得回数", tokens: "トークン量", cost: "推定費用", time: "処理時間", retries: "再試行回数", duplicates: "重複した呼び出し" };
 
 export interface AgentUsage {
   steps: number;
@@ -47,9 +49,13 @@ export interface AgentUsage {
   rejectedCalls: number;
   /** 外部情報の中に命令らしき文面を検出した数（実行はしない） */
   injectionFlags: number;
+  /** 実行せずに断った、同じ検索・同じURLの重複した呼び出しの数（費用・検索回数は消費しない） */
+  duplicateCalls: number;
+  /** 検証結果を受けて再調査した回数（Stage 8D-6）。再調査の費用・検索・取得も、上の合計に含まれる */
+  followUps: number;
 }
 
-export const emptyUsage = (): AgentUsage => ({ steps: 0, searches: 0, fetches: 0, inputTokens: 0, outputTokens: 0, costJpy: 0, ms: 0, retries: 0, rejectedCalls: 0, injectionFlags: 0 });
+export const emptyUsage = (): AgentUsage => ({ steps: 0, searches: 0, fetches: 0, inputTokens: 0, outputTokens: 0, costJpy: 0, ms: 0, retries: 0, rejectedCalls: 0, injectionFlags: 0, duplicateCalls: 0, followUps: 0 });
 
 /** 上限の管理。consume の前に canStart で確認し、超えるなら実行しない */
 export class Budget {
@@ -85,6 +91,21 @@ export class Budget {
     this.usage.inputTokens += u.inputTokens;
     this.usage.outputTokens += u.outputTokens;
     this.usage.costJpy += u.costJpy;
+  }
+  /**
+   * もう1往復（再調査: 少なくとも「検索または取得」と「提出」の2ステップ）を始めても、上限を超えないと予測できるか。
+   * 1ステップの平均（費用・トークン・時間）の1.5倍を見込む。予測で超えるなら、再調査は始めない（上限に当たって途中で止まらないように）。
+   */
+  hasHeadroom(minSteps = 2): boolean {
+    const u = this.usage;
+    const l = this.limits;
+    const n = Math.max(u.steps, 1);
+    const elapsed = this.elapsed();
+    if (l.maxSteps - u.steps < minSteps) return false;
+    if (l.maxCostJpy - u.costJpy < Math.max((u.costJpy / n) * 1.5, 0.5)) return false;
+    if (l.maxTokens - (u.inputTokens + u.outputTokens) < ((u.inputTokens + u.outputTokens) / n) * 1.5) return false;
+    if (l.maxMs - elapsed < Math.max((elapsed / n) * 1.5, 5_000)) return false;
+    return true;
   }
   addCost(jpy: number): void {
     this.usage.costJpy += jpy;
@@ -124,6 +145,8 @@ export interface AgentTool extends ToolSpec {
   consumes?: "search" | "fetch";
   /** 1回あたりの概算費用（円。検索など料金のかかるもの） */
   costJpy?: number;
+  /** 同じ呼び出しの判定キー（正規化した検索語・URLなど）。同じキーの呼び出しは、実行せず・上限も消費せずに断る（無意味な繰り返しの防止）。null は重複判定なし */
+  dedupeKey?(input: Record<string, unknown>): string | null;
   run(input: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput>;
 }
 
@@ -184,7 +207,10 @@ export type AgentMessage =
   | { role: "assistant"; text?: string; calls: ToolCall[]; /** モデルの応答の原本（思考ブロックなどを次の要求へそのまま戻すため。実API用） */ raw?: unknown[] }
   | { role: "tool"; callId: string; name: string; content: string; isError?: boolean };
 
-export type LlmStep = { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage } | { kind: "final"; output: unknown; usage: LlmUsage };
+export type LlmStep =
+  | { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage }
+  /** 提出。calls・raw は、提出のあとに検証結果を返して会話を続けるとき（再調査）に使う（提出を含む同じ応答の呼び出しと、応答の原本）。無ければ会話側で補う */
+  | { kind: "final"; output: unknown; usage: LlmUsage; calls?: ToolCall[]; raw?: unknown[] };
 
 export class TransientLlmError extends Error {}
 
@@ -198,6 +224,9 @@ export type TraceEvent =
   | { t: "tool"; name: string; input: Record<string, unknown>; ok: boolean; summary: string; untrusted?: boolean; injection?: string[]; data?: unknown }
   | { t: "rejected"; name: string; reason: string }
   | { t: "limit"; kind: LimitKind; detail: string }
+  | { t: "duplicate"; name: string; detail: string }
+  /** 提出を独立した検証にかけた結果、不足があるため追加調査を求めた（検証システムが書いた文面。AIは書き換えられない） */
+  | { t: "review"; round: number; feedback: string; meta?: unknown }
   | { t: "retry"; reason: string }
   | { t: "error"; message: string };
 
@@ -218,6 +247,24 @@ export interface RunAgentInput {
   task: string;
   limits?: Partial<AgentLimits>;
   now?: () => number;
+  /**
+   * 提出（submit）を受け取ったあとの「独立した検証」（Stage 8D-6）。不足があれば、その具体的な理由（検証システムの文面）を返すと、
+   * 同じ会話・同じ予算のまま、AIが追加調査・保留・終了を選べる。null を返すか、回数・予算の余力が無ければ、そこで終了する。
+   * 検証はAIの外側（呼び出し側）で行い、AIは結果を書き換えられない。
+   */
+  review?: (info: ReviewInfo) => Promise<{ feedback: string; meta?: unknown } | null>;
+  /** 検証を受けた再調査の最大回数（既定 0＝再調査しない） */
+  maxReviews?: number;
+}
+export interface ReviewInfo {
+  /** 今回の提出（検証前。信用しない） */
+  output: unknown;
+  /** これまでの再調査の回数 */
+  round: number;
+  trace: TraceEvent[];
+  /** 現時点の使用量と、残りの上限 */
+  usage: AgentUsage;
+  remaining: { steps: number; searches: number; fetches: number; costJpy: number; ms: number };
 }
 
 /** エージェントを1タスク実行する。例外を投げず、必ず AgentRun を返す（上限・API障害でも安全に終了） */
@@ -225,7 +272,11 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
   const budget = new Budget({ ...DEFAULT_LIMITS, ...input.limits }, input.now);
   const trace: TraceEvent[] = [];
   const messages: AgentMessage[] = [{ role: "user", text: input.task }];
-  const finish = (status: AgentStatus, stopReason: string, output?: unknown): AgentRun => ({ status, stopReason, output, trace, usage: budget.snapshot() });
+  /** 直近の提出（再調査の途中で上限・障害に当たっても、それまでの提出は失わない） */
+  let lastSubmitted: unknown;
+  let rounds = 0;
+  const seen = new Set<string>();
+  const finish = (status: AgentStatus, stopReason: string, output?: unknown): AgentRun => ({ status, stopReason, output: output ?? lastSubmitted, trace, usage: { ...budget.snapshot(), followUps: rounds } });
 
   for (;;) {
     const over = budget.exceeded();
@@ -249,7 +300,34 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     }
     budget.addLlm(step.usage);
     trace.push({ t: "step", n: budget.usage.steps, text: step.kind === "tool_calls" ? step.text : undefined });
-    if (step.kind === "final") return finish("completed", "submitted", step.output);
+    if (step.kind === "final") {
+      lastSubmitted = step.output;
+      // 独立した検証 → 不足があれば、具体的な理由を返して追加調査を促す。回数の上限・予算の余力（予測）が無ければ再調査しない
+      if (input.review && rounds < (input.maxReviews ?? 0) && !budget.exceeded() && budget.hasHeadroom()) {
+        const u = budget.snapshot();
+        const l = budget.limits;
+        let r: { feedback: string; meta?: unknown } | null = null;
+        try {
+          r = await input.review({ output: step.output, round: rounds, trace, usage: u, remaining: { steps: l.maxSteps - u.steps, searches: l.maxSearches - u.searches, fetches: l.maxFetches - u.fetches, costJpy: Math.max(0, l.maxCostJpy - u.costJpy), ms: Math.max(0, l.maxMs - u.ms) } });
+        } catch {
+          r = null; // 検証の失敗では再調査しない（提出はそのまま最終の検証にかかる）
+        }
+        if (r) {
+          rounds += 1;
+          trace.push({ t: "review", round: rounds, feedback: r.feedback.slice(0, 1500), meta: r.meta });
+          const submitCall: ToolCall = { id: `submit-${rounds}`, name: "submit_findings", input: (step.output ?? {}) as Record<string, unknown> };
+          const calls = step.calls && step.calls.length > 0 ? step.calls : [submitCall];
+          messages.push({ role: "assistant", calls, raw: step.raw });
+          // 提出の呼び出しには検証結果を返す。同じ応答にあった他の呼び出しは、提出と同時のため実行しない
+          for (const c of calls) {
+            const isSubmit = c.name === "submit_findings" || c === submitCall;
+            messages.push({ role: "tool", callId: c.id, name: c.name, content: isSubmit ? r.feedback : "提出と同時に呼び出されたため実行していません。必要なら、あらためて呼び出してください", isError: !isSubmit });
+          }
+          continue;
+        }
+      }
+      return finish("completed", "submitted", step.output);
+    }
 
     messages.push({ role: "assistant", text: step.text, calls: step.calls, raw: step.raw });
     for (const call of step.calls) {
@@ -260,6 +338,21 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
         trace.push({ t: "rejected", name: call.name, reason: "登録されていないツール（使えません）" });
         messages.push({ role: "tool", callId: call.id, name: call.name, content: `エラー: ツール「${call.name}」は使えません。使えるツール: ${input.tools.names().join(", ")}`, isError: true });
         continue;
+      }
+      // 同じ検索・同じURLの繰り返し: 実行せず、上限（検索・取得の回数・費用）も消費せずに断る。繰り返しが続くなら、無駄な調査として終了する
+      const key = tool.dedupeKey?.(call.input) ?? null;
+      if (key !== null) {
+        if (seen.has(`${tool.name}:${key}`)) {
+          budget.usage.duplicateCalls += 1;
+          trace.push({ t: "duplicate", name: call.name, detail: "同じ呼び出しは実行済みのため断った（上限は消費しない）" });
+          messages.push({ role: "tool", callId: call.id, name: call.name, content: `エラー: 同じ「${call.name}」は実行済みです（結果は会話の中にあります）。別の検索語・別のURLにするか、集めた情報で結論を出してください`, isError: true });
+          if (budget.usage.duplicateCalls >= budget.limits.maxDuplicates) {
+            trace.push({ t: "limit", kind: "duplicates", detail: "同じ呼び出しの繰り返しが続いたため終了" });
+            return finish("limit_reached", "duplicates");
+          }
+          continue;
+        }
+        seen.add(`${tool.name}:${key}`);
       }
       if ((tool.consumes === "search" && !budget.canSearch()) || (tool.consumes === "fetch" && !budget.canFetch())) {
         const kind: LimitKind = tool.consumes === "search" ? "searches" : "fetches";

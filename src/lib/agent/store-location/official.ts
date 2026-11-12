@@ -34,7 +34,7 @@ const THIRD_PARTY = [
   "note.com", "ameblo.jp", "hatenablog.com", "hatenablog.jp", "livedoor.jp", "fc2.com", "blogspot.com", "wordpress.com", "medium.com",
   "wikipedia.org", "google.com", "google.co.jp", "goo.ne.jp", "yahoo.co.jp", "bing.com", "tabelog.com", "retty.me", "navitime.co.jp", "mapion.co.jp", "ekiten.jp", "jalan.net",
   // 店舗・施設の一覧、電話帳、トレカ店のまとめ・地図・口コミなどの第三者の一覧サイト（転載元が同じ可能性があるため、公式にも、独立した根拠にもしない。店舗マスターに登録されていても公式扱いにしない）
-  "pokemon-card.com", "machitoku.jp", "torecamap.co.jp", "hikakaku.com", "uridoki.net", "itp.ne.jp", "recyclemap.jp", "tokubai.co.jp", "shufoo.net", "homemate-research-shopping.com", "toreca-hack.com", "kj-weekly.jp", "nuimap.com", "charagoo.jp", "docomo.ne.jp",
+  "pokemon-card.com", "machitoku.jp", "torecamap.co.jp", "hikakaku.com", "uridoki.net", "itp.ne.jp", "recyclemap.jp", "tokubai.co.jp", "shufoo.net", "homemate-research-shopping.com", "toreca-hack.com", "kj-weekly.jp", "nuimap.com", "charagoo.jp", "docomo.ne.jp", "tcg-map.com", "nansan.com",
   "amazon.co.jp", "rakuten.co.jp", "mercari.com", "yahoo.jp", "paypayfleamarket.yahoo.co.jp", "kakaku.com", "price.com", "togetter.com", "matome.naver.jp",
 ];
 

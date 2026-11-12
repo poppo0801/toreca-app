@@ -40,7 +40,7 @@ if (cmd === "preflight") {
   const r = spawnSync("npx", ["vitest", "run", "src/lib/agent/store-location/real-eval.test.ts", "-t", "実API評価"], {
     stdio: "inherit",
     shell: true,
-    env: { ...env, REAL_EVAL: "1", REAL_EVAL_APPROVED_MAX_JPY: String(max), REAL_EVAL_APPROVED_STORES: String(stores), ...(rest.includes("--first-only") ? { REAL_EVAL_FIRST_ONLY: "1" } : {}), REAL_EVAL_PHASE: arg("phase") === "rerun" ? "rerun" : "initial", ...(rest.includes("--continue") ? { REAL_EVAL_CONTINUE: "1" } : {}) },
+    env: { ...env, REAL_EVAL: "1", REAL_EVAL_FOLLOWUPS: arg("followups") ?? "0", REAL_EVAL_APPROVED_MAX_JPY: String(max), REAL_EVAL_APPROVED_STORES: String(stores), ...(rest.includes("--first-only") ? { REAL_EVAL_FIRST_ONLY: "1" } : {}), REAL_EVAL_PHASE: arg("phase") === "rerun" ? "rerun" : "initial", ...(rest.includes("--continue") ? { REAL_EVAL_CONTINUE: "1" } : {}) },
   });
   process.exit(r.status ?? 1);
 } else {

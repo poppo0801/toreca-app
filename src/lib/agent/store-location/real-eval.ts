@@ -8,6 +8,8 @@ import { DEFAULT_LIMITS, type AgentLimits } from "@/lib/agent/core";
 import { checkRealApi } from "@/lib/agent/real-gate";
 import { type EvalGold, type EvalResult, matchesGold, matchesGoldV1, scoreEval, type EvalScore } from "@/lib/agent/store-location/eval";
 import { researchStoreLocation, type ResearchDeps, type ResearchOutcome } from "@/lib/agent/store-location/run";
+import { ledgerEntriesFromTrace, RunLedgerWriter } from "@/lib/agent/store-location/evidence-store";
+import type { RoundRecord } from "@/lib/agent/store-location/followup";
 import type { ResultCache } from "@/lib/agent/store-location/tools";
 import type { StoreTarget } from "@/lib/agent/store-location/verify";
 import goldJson from "../../../../eval/real-stores/gold.json";
@@ -16,6 +18,8 @@ import gold8d4 from "../../../../eval/real-stores/gold-8d4.json";
 import targets8d4 from "../../../../eval/real-stores/targets-8d4.json";
 import gold8d5 from "../../../../eval/real-stores/gold-8d5.json";
 import targets8d5 from "../../../../eval/real-stores/targets-8d5.json";
+import gold8d6 from "../../../../eval/real-stores/gold-8d6.json";
+import targets8d6 from "../../../../eval/real-stores/targets-8d6.json";
 
 export interface RealTarget {
   id: string;
@@ -23,9 +27,9 @@ export interface RealTarget {
   store: StoreTarget;
 }
 export type RealGold = EvalGold & { evidence?: unknown[]; unknown?: string[]; /** 正解不明。正解率の分母に含めず、調査結果と確認状況を別に報告する */ unknownGold?: boolean };
-/** Stage 8D-3（R1〜R5）・8D-4（N01〜N20・U01〜U10）・8D-5（P01〜P20・Q01〜Q10）。ID で区別する */
-export const REAL_TARGETS = [...(targetsJson.targets as unknown as RealTarget[]), ...(targets8d4.targets as unknown as RealTarget[]), ...(targets8d5.targets as unknown as RealTarget[])];
-export const REAL_GOLD = [...(goldJson.gold as unknown as RealGold[]), ...(gold8d4.gold as unknown as RealGold[]), ...(gold8d5.gold as unknown as RealGold[])];
+/** Stage 8D-3（R1〜R5）・8D-4（N01〜N20・U01〜U10）・8D-5（P01〜P20・Q01〜Q10）・8D-6（T01〜T20・W01〜W10）。ID で区別する */
+export const REAL_TARGETS = [...(targetsJson.targets as unknown as RealTarget[]), ...(targets8d4.targets as unknown as RealTarget[]), ...(targets8d5.targets as unknown as RealTarget[]), ...(targets8d6.targets as unknown as RealTarget[])];
+export const REAL_GOLD = [...(goldJson.gold as unknown as RealGold[]), ...(gold8d4.gold as unknown as RealGold[]), ...(gold8d5.gold as unknown as RealGold[]), ...(gold8d6.gold as unknown as RealGold[])];
 
 // ---------------------------------------------------------------- 費用の見積もり（実行前の報告用）
 export interface CostEstimate {
@@ -99,6 +103,8 @@ export interface RealEvalPlan {
   /** 誤住所などの問題があっても続ける（API障害・ツールの不正使用・費用超過では必ず止まる）。問題が maxProblems 件に達したら止まる */
   continueOnProblem?: boolean;
   maxProblems?: number;
+  /** 検証結果を受けた再調査の最大回数（既定 0）。再調査も1店舗の費用・時間・検索・取得の上限の中で行う（上限は増えない）。Stage 8D-6 */
+  followUps?: number;
 }
 
 export function validatePlan(plan: RealEvalPlan, limits: AgentLimits = DEFAULT_LIMITS): string | null {
@@ -114,8 +120,8 @@ export function validatePlan(plan: RealEvalPlan, limits: AgentLimits = DEFAULT_L
 
 /** 最初の店舗で問題があれば、残りを止める（誤住所の採用・確認済みの誤り・ツールの不正使用・費用超過・実行失敗） */
 /** 続行できない問題（API障害・ツールの不正使用・費用超過）。これが起きたら常に止める */
-export function isFatalProblem(r: { status: string; rejectedCalls: number; costJpy: number }, capJpy: number): string | null {
-  if (r.status === "failed") return "調査が失敗した（API障害・実行エラー）";
+export function isFatalProblem(r: { status: string; rejectedCalls: number; costJpy: number; /** 実行の途中でAPI障害・実行エラーが起きた（再調査の途中を含む） */ runError?: boolean }, capJpy: number): string | null {
+  if (r.status === "failed" || r.runError) return "調査が失敗した（API障害・実行エラー）";
   if (r.rejectedCalls > 0) return "登録されていないツールを呼び出そうとした";
   if (r.costJpy > capJpy * 1.2) return "推定費用が上限を大きく超えた";
   return null;
@@ -137,7 +143,16 @@ export interface RealRecord {
   actions: { name: string; ok: boolean; arg: string }[];
   engine: string;
   problem: string | null;
+  /** AIが提出した候補（提出ごと。引用は全文）。検証をやり直す（replay）ときの入力。AIの出力そのもの */
+  proposals?: { address: string; sourceUrl: string; quote: string; closureHint?: string | null }[][];
+  /** 提出ごとの検証と再調査の記録（0番目＝最初の提出。再調査しない実行では空または1件） */
+  rounds?: RoundRecord[];
+  /** 実行の終了状態（completed / limit_reached / error）と終了の理由 */
+  runStatus?: string;
+  stopReason?: string;
 }
+/** 実行ID（時刻。ファイル名にそのまま使える） */
+export const newRunId = (): string => new Date().toISOString().replace(/[:.]/g, "-");
 export interface UnknownGoldRow {
   id: string;
   store: string;
@@ -156,6 +171,8 @@ export interface RealRunReport {
   plan: RealEvalPlan;
   /** 正解不明の店舗: 正解率の分母に含めず、調査結果と確認状況だけを記録する */
   unknown: UnknownGoldRow[];
+  /** 取得したページの台帳（pages-<実行ID>.jsonl）のファイル名。実行ごとに分離。再判定の証拠はこれだけを使う */
+  ledgerFile?: string;
   records: RealRecord[];
   stoppedReason: string | null;
   spentJpy: number;
@@ -163,14 +180,18 @@ export interface RealRunReport {
 }
 
 /** 実在店舗を1件ずつ実行する。1件ごとに結果を保存（途中で失敗しても履歴が残る）。承認範囲を超えない */
-export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) => ResearchDeps, opts: { limits?: AgentLimits; outDir?: string; onRecord?: (r: RealRecord) => void; /** 本日あと何回まで実行できるか（1日の上限）。超える実行はしない */ remainingRuns?: number } = {}): Promise<RealRunReport> {
+export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) => ResearchDeps, opts: { limits?: AgentLimits; outDir?: string; onRecord?: (r: RealRecord) => void; /** 本日あと何回まで実行できるか（1日の上限）。超える実行はしない */ remainingRuns?: number; /** 実行ID（指定すると、その実行専用のキャッシュと台帳を呼び出し側が用意できる）。既存の実行と重複したら失敗する */ runId?: string } = {}): Promise<RealRunReport> {
   const limits = opts.limits ?? DEFAULT_LIMITS;
   const bad = validatePlan(plan, limits);
   if (bad) throw new Error(bad);
   const outDir = opts.outDir ?? "eval/runs/real";
   mkdirSync(outDir, { recursive: true });
-  const runId = new Date().toISOString().replace(/[:.]/g, "-");
-  const report: RealRunReport = { runId, startedAt: new Date().toISOString(), phase: plan.phase ?? "initial", plan, unknown: [], records: [], stoppedReason: null, spentJpy: 0, score: null };
+  const runId = opts.runId ?? newRunId();
+  if (existsSync(`${outDir}/real-${runId}.json`)) throw new Error("同じ実行IDの結果が既にあります（過去の結果を上書きしません）");
+  const startedAt = new Date().toISOString();
+  // 取得したページの台帳（実行ごとに新規作成。既存のファイルは上書きしない）
+  const ledger = new RunLedgerWriter(outDir, runId, startedAt);
+  const report: RealRunReport = { runId, startedAt, phase: plan.phase ?? "initial", plan, unknown: [], ledgerFile: ledger.path.replace(/^.*[\/]/, ""), records: [], stoppedReason: null, spentJpy: 0, score: null };
   let problems = 0;
   const save = () => writeFileSync(`${outDir}/real-${runId}.json`, JSON.stringify(report, null, 2));
   const ids = plan.firstOnly ? plan.ids.slice(0, 1) : plan.ids;
@@ -186,13 +207,14 @@ export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) 
       break;
     }
     const t0 = Date.now();
-    const out = await researchStoreLocation(target.store, null, { ...makeDeps(target), limits });
+    const out = await researchStoreLocation(target.store, null, { ...makeDeps(target), limits, followUps: plan.followUps ?? 0 });
+    ledger.append(ledgerEntriesFromTrace(runId, id, out.run.trace));
     const gold = REAL_GOLD.find((g) => g.id === id)!;
     const one = scoreEval("real", [toEvalResult(id, out, Date.now() - t0)], [gold]);
     const unknownGold = !!gold.unknownGold;
     // 誤った住所を「確認済み」にした（最重要の安全指標）: 継続指定でも即停止して、原因を調べる（Stage 8D-5）
     const wrongConfirmed = !unknownGold && out.result.status === "confirmed" && one.perCase[0].wrong;
-    const fatal = isFatalProblem({ status: out.result.status, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy) ?? (wrongConfirmed ? "誤った住所を確認済みにした（重大な安全上の問題）" : null);
+    const fatal = isFatalProblem({ status: out.result.status, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy, runError: out.run.status === "error" }, limits.maxCostJpy) ?? (wrongConfirmed ? "誤った住所を確認済みにした（重大な安全上の問題）" : null);
     const problem = fatal ?? (unknownGold ? null : isProblem({ status: out.result.status, wrong: one.perCase[0].wrong, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy));
     const rec: RealRecord = {
       target,
@@ -205,9 +227,14 @@ export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) 
         candidates: out.result.candidates.map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote.slice(0, 200), closureHint: c.closureHint ?? null, problems: c.problems })),
       },
       usage: out.usage,
-      actions: out.run.trace.flatMap((e) => (e.t === "tool" ? [{ name: e.name, ok: e.ok, arg: String(e.input.query ?? e.input.url ?? "").slice(0, 120) }] : [])),
+      // ツール呼び出し・重複して断った呼び出し・検証結果を受けた再調査の依頼（review）を、起きた順に記録する
+      actions: out.run.trace.flatMap((e) => (e.t === "tool" ? [{ name: e.name, ok: e.ok, arg: String(e.input.query ?? e.input.url ?? "").slice(0, 120) }] : e.t === "duplicate" ? [{ name: "duplicate", ok: false, arg: e.name }] : e.t === "review" ? [{ name: "review", ok: true, arg: String((e.meta as { gaps?: string[] } | undefined)?.gaps?.join(",") ?? "") }] : [])),
       engine: out.engine,
       problem,
+      proposals: out.submissions,
+      rounds: out.rounds,
+      runStatus: out.run.status,
+      stopReason: out.run.stopReason,
     };
     report.records.push(rec);
     report.spentJpy += out.usage.costJpy;
@@ -432,4 +459,113 @@ export function collectRecords(dir: string, phase: "initial" | "rerun", idFilter
     for (const r of rep.records) if (idFilter(r.target.id) && !out.has(r.target.id)) out.set(r.target.id, r);
   }
   return [...out.values()];
+}
+
+// ---------------------------------------------------------------- 再調査の効果（Stage 8D-6）
+/** 検証結果を受けた再調査のあと、AIが実際に追加調査をしたか（review のあと、次の review までに検索・取得があったか）を、実行の経過から数える */
+export function followUpActions(actions: { name: string; ok: boolean; arg: string }[]): { acted: number; resubmittedWithoutAction: number } {
+  let acted = 0;
+  let held = 0;
+  for (let i = 0; i < actions.length; i++) {
+    if (actions[i].name !== "review") continue;
+    let did = false;
+    for (let j = i + 1; j < actions.length && actions[j].name !== "review"; j++) if (actions[j].name === "web_search" || (actions[j].name === "fetch_page" && actions[j].ok)) did = true;
+    if (did) acted++;
+    else held++;
+  }
+  return { acted, resubmittedWithoutAction: held };
+}
+
+export interface FollowUpSummary {
+  /** 再調査を有効にして実行した店舗数 */
+  stores: number;
+  /** 1回以上、再調査した店舗 */
+  followedUp: number;
+  totalRounds: number;
+  /** 再調査の依頼のあと、AIが実際に追加の検索・取得をした回数／追加調査せず再提出した回数 */
+  acted: number;
+  resubmittedWithoutAction: number;
+  /** 最終の提出に対する、再調査の判断（終了の理由）の内訳 */
+  stopCodes: Record<string, number>;
+  /** 同じ検索・URLの重複を断った回数 */
+  duplicateCalls: number;
+  known: {
+    n: number;
+    /** 最初の提出だけの結果（再調査しなかった場合に相当）と、最終の結果 */
+    first: { correct: number; confirmedSuccess: number; wrongAdopted: number; wrongConfirmed: number };
+    final: { correct: number; confirmedSuccess: number; wrongAdopted: number; wrongConfirmed: number };
+    /** 再調査により、確認済みで正しい結果になった店舗／最初は正しかったが最終は正しくなくなった店舗 */
+    improved: string[];
+    worsened: string[];
+  };
+  /** 再調査した店舗の、最初の提出からの追加（最終 − 最初の提出時点）。再調査は同じ予算の中で行うため、1店舗の上限は超えない */
+  added: { costJpy: number; ms: number; searches: number; fetches: number; steps: number };
+  /** 再調査しなかった店舗も含めた、全体の合計 */
+  totalCostJpy: number;
+}
+
+/** 再調査（followUps）を有効にした実行の記録から、最初の提出と最終の結果の違い・追加費用・時間・AIの行動を集計する。初回の主要評価値は最初の提出ではなく最終の結果 */
+export function summarizeFollowUps(records: RealRecord[], scorer: typeof matchesGold = matchesGold): FollowUpSummary {
+  const withRounds = records.filter((r) => (r.rounds?.length ?? 0) > 0);
+  const stopCodes: Record<string, number> = {};
+  let acted = 0;
+  let held = 0;
+  let duplicateCalls = 0;
+  let totalRounds = 0;
+  const added = { costJpy: 0, ms: 0, searches: 0, fetches: 0, steps: 0 };
+  const first = { correct: 0, confirmedSuccess: 0, wrongAdopted: 0, wrongConfirmed: 0 };
+  const final = { correct: 0, confirmedSuccess: 0, wrongAdopted: 0, wrongConfirmed: 0 };
+  const improved: string[] = [];
+  const worsened: string[] = [];
+  let n = 0;
+  const judge = (status: string, address: string | null, gold: RealGold) => {
+    const adopted = (status === "confirmed" || status === "candidate") && !!address;
+    const correct = adopted && scorer(address, gold);
+    return { correct, adopted, wrongAdopted: adopted && !correct, wrongConfirmed: status === "confirmed" && adopted && !correct, confirmedSuccess: status === "confirmed" && correct };
+  };
+  for (const r of withRounds) {
+    const rounds = r.rounds!;
+    const r0 = rounds[0];
+    const fr = rounds.filter((x) => x.continued).length;
+    totalRounds += fr;
+    const last = rounds[rounds.length - 1];
+    if (last.stopCode) stopCodes[last.stopCode] = (stopCodes[last.stopCode] ?? 0) + 1;
+    const fu = followUpActions(r.actions);
+    acted += fu.acted;
+    held += fu.resubmittedWithoutAction;
+    duplicateCalls += r.usage.duplicateCalls ?? 0;
+    if (fr > 0) {
+      added.costJpy += r.usage.costJpy - r0.usage.costJpy;
+      added.ms += r.usage.ms - r0.usage.ms;
+      added.searches += r.usage.searches - r0.usage.searches;
+      added.fetches += r.usage.fetches - r0.usage.fetches;
+      added.steps += r.usage.steps - r0.usage.steps;
+    }
+    const g = REAL_GOLD.find((x) => x.id === r.target.id);
+    if (!g || g.unknownGold) continue;
+    n++;
+    const a = judge(r0.status, r0.address, g);
+    const b = judge(r.outcome.status, r.outcome.address, g);
+    for (const [acc, j] of [[first, a], [final, b]] as const) {
+      if (j.correct) acc.correct++;
+      if (j.confirmedSuccess) acc.confirmedSuccess++;
+      if (j.wrongAdopted) acc.wrongAdopted++;
+      if (j.wrongConfirmed) acc.wrongConfirmed++;
+    }
+    if (!a.confirmedSuccess && b.confirmedSuccess) improved.push(r.target.id);
+    if ((a.correct && !b.correct) || (a.confirmedSuccess && !b.confirmedSuccess)) worsened.push(r.target.id);
+  }
+  const rd = (x: number) => Math.round(x * 100) / 100;
+  return {
+    stores: withRounds.length,
+    followedUp: withRounds.filter((r) => r.rounds!.some((x) => x.continued)).length,
+    totalRounds,
+    acted,
+    resubmittedWithoutAction: held,
+    stopCodes,
+    duplicateCalls,
+    known: { n, first, final, improved, worsened },
+    added: { costJpy: rd(added.costJpy), ms: Math.round(added.ms), searches: added.searches, fetches: added.fetches, steps: added.steps },
+    totalCostJpy: rd(records.reduce((t, r) => t + r.usage.costJpy, 0)),
+  };
 }

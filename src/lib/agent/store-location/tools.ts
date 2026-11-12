@@ -25,7 +25,7 @@ export interface SearchProvider {
   readonly name: string;
   search(query: string): Promise<SearchHit[] | SearchOutcome>;
 }
-export type FetchedPage = { ok: true; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[]; cached?: boolean } | { ok: false; message: string };
+export type FetchedPage = { ok: true; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[]; cached?: boolean; /** 本文を実際に取得した日時（ISO）。キャッシュから返したときは、最初に取得した日時 */ fetchedAt?: string } | { ok: false; message: string };
 /** ページ本文の取得。実装は SSRF 対策つきの安全な取得（本番側）か、モック */
 export interface PageFetcher {
   fetchPage(url: string): Promise<FetchedPage>;
@@ -94,8 +94,11 @@ export class CachedFetcher implements PageFetcher {
     const hit = this.cache.get(key) as FetchedPage | undefined;
     if (hit) return { ...(hit as Extract<FetchedPage, { ok: true }>), cached: true };
     const r = await this.inner.fetchPage(url);
-    if (r.ok) this.cache.set(key, r);
-    return r;
+    if (!r.ok) return r;
+    // 取得した日時を、本文と一緒に保存する（どの時点の内容かを後から確認できるように。Stage 8D-6）
+    const stamped: FetchedPage = { ...r, fetchedAt: r.fetchedAt ?? new Date().toISOString() };
+    this.cache.set(key, stamped);
+    return stamped;
   }
 }
 
@@ -133,6 +136,8 @@ export function buildStoreLocationTools(deps: StoreToolDeps): ToolRegistry {
     inputSchema: { type: "object", properties: { query: { type: "string", description: "検索語" } }, required: ["query"] },
     access: "read_external",
     consumes: "search",
+    // 空白・全角半角・大文字小文字の違いだけの同じ検索語は、同じ検索として断る（無駄な再検索の防止）
+    dedupeKey: (input) => flat(str(input.query, 120)).toLowerCase() || null,
     async run(input, ctx) {
       const query = str(input.query, 120);
       if (!query) throw new Error("検索語が空です");
@@ -153,6 +158,8 @@ export function buildStoreLocationTools(deps: StoreToolDeps): ToolRegistry {
     inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
     access: "read_external",
     consumes: "fetch",
+    // 同じページ（#以降・末尾の/の違いだけ）の再取得は断る
+    dedupeKey: (input) => str(input.url, 500).replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase() || null,
     async run(input) {
       const url = str(input.url, 500);
       if (![...allowed].some((a) => a === url || (url.startsWith(a) && a.split("/").length <= 3))) {
@@ -166,7 +173,7 @@ export function buildStoreLocationTools(deps: StoreToolDeps): ToolRegistry {
       const links = (r.links ?? []).filter((l) => domainOf(l.href) === dom).slice(0, 30);
       for (const l of links) allowed.add(l.href);
       const linkLines = links.length ? `\n[同じサイト内のリンク]\n${links.slice(0, 15).map((l) => `${l.text} → ${l.href}`).join("\n")}` : "";
-      return { content: `${r.title}${r.cached ? "（保存済みの本文を再利用）" : ""}\n${excerptForAddress(text, tokenOf())}${linkLines}`, untrusted: true, data: { url, finalUrl: r.finalUrl, title: r.title, text, domain: dom, links: r.links ?? [] } };
+      return { content: `${r.title}${r.cached ? "（保存済みの本文を再利用）" : ""}\n${excerptForAddress(text, tokenOf())}${linkLines}`, untrusted: true, data: { url, finalUrl: r.finalUrl, title: r.title, text, domain: dom, links: r.links ?? [], cached: !!r.cached, fetchedAt: r.fetchedAt ?? new Date().toISOString() } };
     },
   };
 

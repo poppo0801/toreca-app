@@ -79,7 +79,8 @@ export class AnthropicAgentLLM implements AgentLLM {
     const usage = { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, costJpy: estimateCostJpy(this.model, res.usage.input_tokens, res.usage.output_tokens) ?? 0 };
     const uses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
     const submit = uses.find((u) => u.name === SUBMIT_TOOL);
-    if (submit) return { kind: "final", output: submit.input, usage };
+    // 提出のあとに検証結果を返して会話を続ける（再調査）ときのため、同じ応答の呼び出しと原本（思考ブロックを含む）も渡す
+    if (submit) return { kind: "final", output: submit.input, usage, calls: uses.map((u) => ({ id: u.id, name: u.name, input: (u.input ?? {}) as Record<string, unknown> })), raw: res.content as unknown[] };
     if (res.stop_reason === "max_tokens") {
       // 出力が上限で途切れた（ツール呼び出しが不完全な可能性）。実行せずに終了させる
       return { kind: "final", output: { candidates: [], summary: "出力が上限に達したため中断" }, usage };
