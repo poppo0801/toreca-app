@@ -341,7 +341,7 @@ describe.skipIf(process.env.REAL_REPLAY !== "1")("保存済みデータでの再
     for (const f of readdirSync("eval/runs/real").filter((x) => /^real-.*json$/.test(x)).sort()) {
       const rep = JSON.parse(readFileSync(`eval/runs/real/${f}`, "utf8")) as { phase?: string; records: RealRecord[] };
       for (const r of rep.records) {
-        if (/^[NU]/.test(r.target.id)) { if ((rep.phase ?? "initial") === "initial" && !first.has(r.target.id)) first.set(r.target.id, r); }
+        if (/^[NUPQ]/.test(r.target.id)) { if ((rep.phase ?? "initial") === "initial" && !first.has(r.target.id)) first.set(r.target.id, r); }
         else first.set(r.target.id, r); // R1〜R5: 最後の記録（修正後の再実行）
       }
     }
@@ -354,7 +354,7 @@ describe.skipIf(process.env.REAL_REPLAY !== "1")("保存済みデータでの再
       rows.push({ id: r.target.id, before: { status: r.outcome.status, address: r.outcome.address, confidence: r.outcome.confidence }, after: { status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => `${o.domain}:${o.status}`) }, pages: pages.length, candidates: proposal.candidates.length });
       replayed.push({ ...r, outcome: { ...r.outcome, status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })) } });
     }
-    writeFileSync("eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
+    writeFileSync(process.env.REAL_REPLAY_OUT ?? "eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryPQ: summarizeRecords(replayed.filter((r) => /^[PQ]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
     expect(rows.length).toBeGreaterThan(0);
   }, 600_000);
 });

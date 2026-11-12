@@ -46,6 +46,7 @@ test("承認フロー: 調査 → 反映候補 → 保留 → 解除 → 承認�
   await page.getByTestId("research-propose").click();
   await expect(page.getByTestId("research-propose-msg")).toContainText("反映候補にしました");
 
+  await page.getByTestId("proposal-filter-state").selectOption("all"); // 既定の「要対応」では、反映・却下した候補は一覧から消える（8D-5 の一覧の絞り込み）。状態の変化を見るため「すべて」にする
   const card = page.getByTestId("proposal-card").first();
   await expect(card).toContainText("テスト書店／テスト書店 駅前店");
   await expect(card.getByTestId("proposal-status")).toHaveText("承認待ち");
@@ -84,6 +85,7 @@ test("承認フロー: 候補の作成後に店舗が編集されたら反映さ
   await page.getByTestId("research-run").click();
   await expect(page.getByTestId("research-status")).toHaveText("候補あり");
   await page.getByTestId("research-propose").click();
+  await page.getByTestId("proposal-filter-state").selectOption("all"); // 既定の「要対応」では、反映・却下した候補は一覧から消える（8D-5 の一覧の絞り込み）。状態の変化を見るため「すべて」にする
   const card = page.getByTestId("proposal-card").first();
   await expect(card.getByTestId("proposal-status")).toHaveText("承認待ち");
   await expect(card).toContainText("公式");

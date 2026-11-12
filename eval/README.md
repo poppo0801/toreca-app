@@ -56,3 +56,6 @@
 
 ## 実在店舗30件の評価（Stage 8D-4）
 `eval/real-stores/targets-8d4.json`（入力。本番の店舗マスターから読み取り専用で凍結）と `gold-8d4.json`（正解あり20件 N01〜N20＋正解不明10件 U01〜U10。実行前にコミットして固定）。正解不明は正解率の分母に含めず別に報告。初回の結果（`real-*.json` の phase=initial）が主要評価値で、再実行は別集計。`npm run eval:real-report`・`eval:real-replay`。結果と分析は `docs/stage8d4.md`。
+
+## 未知30件の評価（Stage 8D-5）
+`eval/real-stores/targets-8d5.json`・`gold-8d5.json`（正解あり P01〜P20＋正解不明 Q01〜Q10。実行前にコミットして固定）。`npm run eval:real-report`（組・初回/再実行ごとに集計。自律性の指標つき）・`eval:real-replay`。結果は `docs/stage8d5.md`。

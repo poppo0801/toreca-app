@@ -71,3 +71,9 @@
 - 3層: `store_location_research`（調査結果＝ログ。追記専用）→ `store_location_proposals`（反映候補。承認待ち・保留・却下・反映済み・取消済み）→ `stores`（確定データ）。履歴は `store_location_proposal_events`（追記専用）。マイグレーション `20261214000096`（開発DBのみ）。
 - `stores` を更新するのは DB 関数 `apply_/revert_store_location_proposal`（security definer）だけ。アプリ側は `src/lib/server/agent/store-location-proposals.ts`（関数を呼ぶ薄い層）と `settings/store-research/proposal-actions.ts`（`canApplyToStoreMaster` = `TOREMANE_ENV=local` のときだけ動く）。
 - 評価: `eval/real-stores/targets-8d4.json`・`gold-8d4.json`（30件。正解は実行前に固定）。`npm run eval:real-report`（初回/再実行を別集計）・`eval:real-replay`（保存済みデータで検証層だけ再判定。有料APIなし）。詳細は `docs/stage8d4.md`。
+
+## Stage 8D-5 の追加
+- 確認済み = 公式の情報源のみ（`verify.ts`）。第三者の一覧サイトは `official.ts` の `THIRD_PARTY` に含め、登録済みでも trusted にしない。番地までの比較 `addressCore`・番地の続きは別の場所。
+- 承認フローの一括操作: `bulkBlockReason`（`proposal-types.ts`。UI とサーバーで同じ判定）・`bulkProcess`（1件ずつ DB 関数で検証）・`bulkAction`。
+- 評価: `eval/real-stores/targets-8d5.json`・`gold-8d5.json`（未知30件）。自律性の集計 `autonomyOf`。誤確認で即停止。E2E は `AGENT_*` を空文字で分離（`scripts/lib/e2e-env.mjs`）。
+- 本番導入の準備: `docs/PRODUCTION_ROLLOUT_8D.md`（未実行）。

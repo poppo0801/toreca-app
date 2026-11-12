@@ -12,7 +12,7 @@
  * 「確認済み」は、すべての必須条件を満たした場合だけ。それ以外は候補・情報不足・矛盾などにとどめ、住所を推測で確定しない。
  */
 import { isCompleteAddress, normalizeForMatch, pickCandidate, type GeoHit } from "@/lib/geocode";
-import { prefectureOf } from "@/lib/geo";
+import { PREFECTURE_LIST, prefectureOf } from "@/lib/geo";
 import { distinctiveToken, domainOf, norm } from "@/lib/agent/store-location/common";
 import { assessOfficialSites, isOfficialUrl, type OfficialSiteAssessment, type OfficialStatus } from "@/lib/agent/store-location/official";
 
@@ -126,10 +126,19 @@ export function cleanAddress(a: string): string {
   return out.replace(/ {2,}/g, " ").trim();
 }
 
+/** 住所の「番地まで」（建物名・階数を除く）の正規化。都道府県名のあとの最初の番地（数字とハイフン）までを残す */
+export function addressCore(a: string): string {
+  const n = normalizeForMatch(cleanAddress(a));
+  const pref = PREFECTURE_LIST.map((p) => normalizeForMatch(p)).find((p) => n.startsWith(p)) ?? "";
+  const rest = n.slice(pref.length);
+  const m = /^(.*?[0-9]+(?:-[0-9]+)*)/.exec(rest);
+  return pref + (m ? m[1] : rest);
+}
+
 const CLOSURE_WORDS = /(閉店|移転|営業終了|閉館|リニューアル休業|閉鎖)/;
 /** 閉店・移転の記載か。営業時間の表示（「営業中 / 営業終了 22:00」）とオンラインストアの閉店は、店舗の閉店ではないので除く */
 const CLOSURE = {
-  test: (s: string) => CLOSURE_WORDS.test(s.replace(/営業中\s*営業終了/g, "").replace(/営業終了\s*\d/g, "").replace(/オンライン(?:ストア|ショップ)?閉店/g, "")),
+  test: (s: string) => CLOSURE_WORDS.test(s.replace(/営業中\s*営業終了/g, "").replace(/営業終了\s*\d/g, "").replace(/オンライン(?:ストア|ショップ)?閉店/g, "").replace(/閉店[0-9０-９]*時間(?:前|後)|閉店時間|閉店後|閉店前|閉店間際|閉店まで/g, "")),
 };
 
 export interface VerifyInput {
@@ -182,7 +191,10 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
     const chainKeys = [norm(store.chain), ...(store.chainAliases ?? []).map(norm), norm(store.name.split(/[\s　]+/)[0] ?? "")].filter((k) => k.length >= 2 && k !== norm(tok));
     // 店舗を見分ける語が、そのまま、または文字の種類（漢字・カタカナ・英数字）ごとの部分がすべて近くにある（語順の違う表記: 「マルイ海老名」と「海老名マルイ」）
     const tokParts = (norm(tok).match(/[\p{Script=Han}]+|[\p{Script=Katakana}ー]+|[\p{Script=Hiragana}]+|[a-z0-9]+/gu) ?? []).filter((p) => p.length >= 2);
-    const ownInWindow = window.includes(norm(tok)) || (tokParts.length >= 2 && tokParts.every((p) => window.includes(p)));
+    // 「〜本店」: 住所の近くに「本店」の2文字が無くても、店舗を見分ける語の本体（5文字以上）が近くにあれば同じ店舗とみなす（例: 「秋葉原ラジオ会館本店」と、ページの「秋葉原ラジオ会館9F」）
+    const nTok = norm(tok);
+    const honten = nTok.endsWith("本") && nTok.length >= 6 && window.includes(nTok.slice(0, -1));
+    const ownInWindow = window.includes(nTok) || honten || (tokParts.length >= 2 && tokParts.every((p) => window.includes(p)));
     const chainOnPage = chainKeys.length === 0 || chainKeys.some((k) => flat.toLowerCase().includes(k));
     const otherNearer = store.siblingNames
       .map((n) => distinctiveToken(store.chain, n))
@@ -195,7 +207,9 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
     // 店舗名として現れる形（「吉祥寺店」）だけを見る。建物名（「コピス吉祥寺」）や地名の一部は店舗名ではない
     const needle = norm(store.name).endsWith("店") ? (norm(tok).endsWith("店") ? norm(tok) : `${norm(tok)}店`) : norm(tok);
     const at = flatQLower.indexOf(needle);
-    const pre = at > 0 ? flatQLower.slice(0, at).replace(/[【】\[\]()（）「」『』・:：|｜\-－ 0-9.]/g, "") : "";
+    // 店舗名の前の文字から、日付・お知らせの語（「2026/3/28移転オープン」など）は除く。系列名の判定に関係しない
+    const notice = /[0-9]{4}[/年][0-9]{1,2}[/月][0-9]{1,2}日?|移転オープン|リニューアルオープン|グランドオープン|newopen|サテライト|オープン/g;
+    const pre = at > 0 ? flatQLower.slice(0, at).replace(notice, "").replace(/[【】\[\]()（）「」『』・:：|｜\-－ 0-9./]/g, "") : "";
     const otherChain = pre.length >= 3 && !chainKeys.some((k) => pre.endsWith(k));
     if (otherChain) problems.push("引用の店舗が別の系列の可能性（同名の店舗）");
     nameMatch = ownInWindow && chainOnPage && !otherNearer && !otherChain;
@@ -262,12 +276,19 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
   }
 
   const valid = evaluated.filter((e) => e.quoteVerified && e.addressInQuote && e.nameMatch);
-  const key = (e: EvaluatedCandidate) => normalizeForMatch(e.address);
+  // 同じ場所の表記ゆれ（建物名・階数の書き方: 「North 2階」と「North 2F」など）で別の住所とみなさない: 番地までを比べる
+  const key = (e: EvaluatedCandidate) => addressCore(e.address);
   const groups = new Map<string, EvaluatedCandidate[]>();
   for (const e of valid) groups.set(key(e), [...(groups.get(key(e)) ?? []), e]);
   // 別々の住所が検証を通った＝矛盾（片方がもう片方の前方一致なら同じ場所の表記の細かさの違いとみなす）
   const keys = [...groups.keys()];
-  const rawConflict = keys.some((a) => keys.some((b) => a !== b && !a.startsWith(b) && !b.startsWith(a)));
+  // 同じ場所とみなすのは、同じ番地、または一方が町名まで・もう一方が番地つきの場合だけ。番地の続きの数字（1-23-1 と 1-23-10）は別の場所
+  const sameArea = (a: string, b: string) => {
+    if (a === b) return true;
+    const [short, long] = a.length < b.length ? [a, b] : [b, a];
+    return long.startsWith(short) && !/^[-0-9]/.test(long.slice(short.length));
+  };
+  const rawConflict = keys.some((a) => keys.some((b) => a !== b && !sameArea(a, b)));
   // 公式優先: 別々の住所のうち、公式（登録済み・根拠で検証済み）の情報源に支えられた住所がちょうど1つなら、それを採る（非公式の異なる住所は参考として理由に残す）。
   // 公式が複数の住所を示す、または公式がない場合は、矛盾のまま確定しない
   let conflict = rawConflict;
