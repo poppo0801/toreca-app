@@ -115,14 +115,14 @@ test("ログイン→ユーザー切替→マスター登録・非表示→ロ�
   await page.getByRole("tab", { name: "系列", exact: true }).click();
   await page.getByRole("button", { name: "＋ 追加" }).click();
   await page.getByLabel(/系列名/).fill(name);
-  await page.getByRole("button", { name: "保存" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   const row = page.getByTestId("master-row").filter({ hasText: name });
   await expect(row).toBeVisible();
 
   // 同名は重複エラー
   await page.getByRole("button", { name: "＋ 追加" }).click();
   await page.getByLabel(/系列名/).fill(name);
-  await page.getByRole("button", { name: "保存" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("既に登録");
   await page.getByRole("button", { name: "キャンセル" }).click();
 
@@ -161,7 +161,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await dialog.getByLabel("Aは応募済み").check();
   await dialog.getByLabel("Aの結果").selectOption("won");
   await page.screenshot({ path: "docs/screenshots/stage35-form-mobile.png" });
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   // 期限切れの管理対象は「要チェック」から自動整理され、当選タブ・全情報に残る
@@ -196,7 +196,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   const exp = page.getByRole("dialog");
   await expect(exp).toContainText("抽選の当選から作成された購入");
   await exp.getByLabel("購入金額1").fill("5400");
-  await exp.getByRole("button", { name: "保存" }).click();
+  await exp.getByRole("button", { name: "保存", exact: true }).click();
   await expect(exp).toHaveCount(0);
   await expect(rows).toContainText("-5,400円");
   await expect(page.getByTestId("sum-expense")).toHaveText("5,400円");
@@ -211,7 +211,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await add.getByLabel("数量1").fill("6"); // 金額は手入力済みなので900のまま
   await expect(add.getByLabel("購入金額1")).toHaveValue("900");
   await add.getByRole("combobox", { name: "購入店舗" }).fill("マスターにない店");
-  await add.getByRole("button", { name: "保存" }).click();
+  await add.getByRole("button", { name: "保存", exact: true }).click();
   await expect(add).toHaveCount(0);
   await expect(page.getByTestId("sum-expense")).toHaveText("6,300円");
   await expect(page.getByTestId("ledger-row").filter({ hasText: "E2Eテスト商品 6パック" })).toContainText("-900円");
@@ -227,7 +227,7 @@ test("マスター未登録でも抽選を登録→当選→購入済み→収�
   await sale.getByText("購入履歴から選ぶ").click();
   await sale.getByLabel("原価にする購入").selectOption({ index: 1 });
   await sale.getByLabel("原価にする数量").fill("1");
-  await sale.getByRole("button", { name: "保存" }).click();
+  await sale.getByRole("button", { name: "保存", exact: true }).click();
   await expect(sale).toHaveCount(0);
   await expect(page.getByTestId("sum-income")).toHaveText("8,000円");
   await expect(page.getByTestId("sum-net")).toHaveText("1,700円");
@@ -298,7 +298,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
   await dialog.getByLabel("応募締切の日付").fill(dl.date);
   await dialog.getByLabel("応募締切の時刻").fill(dl.time);
   await dialog.getByLabel("応募制限", { exact: true }).selectOption("account");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   // 未応募の締切間近はベルに集約される（画面上部にアラートを縦に並べない）。件数バッジ→一覧→該当抽選へ
@@ -374,7 +374,7 @@ test("スルー・応募ルール・ベルの通知・マトリクス", async ({
   const chainBox = page.getByTestId("chain-rules").filter({ hasText: "E2E電機" });
   await chainBox.getByRole("button", { name: "ルールを追加" }).click();
   await chainBox.getByLabel("E2E電機のルール1の基準").selectOption("family");
-  await chainBox.getByRole("button", { name: "保存" }).click();
+  await chainBox.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("標準応募制限を保存しました");
   await page.screenshot({ path: "docs/screenshots/stage3-rules-mobile.png", fullPage: true });
 });
@@ -390,7 +390,7 @@ test("複数商品の抽選（B方式）: 商品ごとの当落→当選した�
   await dialog.getByLabel("単位2").selectOption("pack");
   await dialog.getByLabel("数量2").fill("3");
   await dialog.getByLabel("Aは応募済み").check();
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   // 登録時に応募済みにした抽選は、応募済みタブに表示される（Stage 6L）
@@ -437,7 +437,7 @@ test("ユーザー設定: 表示名・色・マーク・通知先を変更でき
   await dlg.getByLabel("自由な色").fill("#ff8800");
   await dlg.getByLabel("指定したユーザー（例: A・B 両方）").check();
   await dlg.getByRole("checkbox", { name: "A", exact: true }).check();
-  await dlg.getByRole("button", { name: "保存" }).click();
+  await dlg.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dlg).toHaveCount(0);
   await expect(page.getByText("通知先: A").first()).toBeVisible();
 
@@ -453,7 +453,7 @@ test("商品画像: 画像なしはプレースホルダー、手動アップロ
   await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E画像電機", "E2E画像店", "E2E画像商品");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   // 抽選カード: 画像が無くても問題なく表示（共通プレースホルダー）
   await page.getByRole("tab", { name: /要チェック/ }).click();
@@ -507,7 +507,7 @@ test("商品画像: 画像なしはプレースホルダー、手動アップロ
   await r2.getByRole("button", { name: "編集" }).click();
   await page.getByLabel(/商品コード（任意/).fill("E2E-IMG");
   await page.getByLabel(/BOX定価/).fill("5400");
-  await page.getByRole("button", { name: "保存" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(r2.getByTestId("unconfirmed-dot")).toHaveCount(0);
   await expect(r2).toContainText("E2E-IMG");
 });
@@ -548,7 +548,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
     await expect(fail).toContainText("設定されていません");
     await ai.getByRole("button", { name: "閉じる", exact: true }).click();
     await fillMasters(dialog, "E2E電機", "E2E店", "E2Eテスト商品");
-    await expect(dialog.getByRole("button", { name: "保存" })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
     return;
   }
 
@@ -570,7 +570,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   await expect(dialog.getByTestId("ai-flag-detail")).toBeVisible();
   await expect(dialog.getByLabel("抽選の方式", { exact: true })).toHaveValue("");
   await expect(dialog.getByRole("combobox", { name: "商品2", exact: true })).toHaveValue("サンプル拡張パック「ほしぞら」");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog.getByRole("alert").filter({ hasText: "応募方式" })).toBeVisible();
   await page.screenshot({ path: "docs/screenshots/stage4b-ai-form-mobile.png" });
 
@@ -578,7 +578,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   await dialog.getByLabel("抽選の方式", { exact: true }).selectOption({ label: "C. 複数商品が対象（当選はいずれか1商品まで）" });
   await dialog.getByLabel("応募締切の日付").fill("2027-01-20");
   await dialog.getByLabel("応募締切の時刻").fill("23:59");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   const card = page.getByTestId("lottery-card").filter({ hasText: "テスト拡張パック「ひかりの森」" });
   await expect(card).toHaveCount(1);
@@ -594,7 +594,7 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   await ai2.getByRole("button", { name: "フォームに入力" }).click();
   await expect(d2.getByTestId("dup-warning")).toContainText("重複");
   await d2.getByLabel("抽選の方式", { exact: true }).selectOption({ label: "C. 複数商品が対象（当選はいずれか1商品まで）" });
-  await d2.getByRole("button", { name: "保存" }).click();
+  await d2.getByRole("button", { name: "保存", exact: true }).click();
   await expect(d2.getByTestId("dup-warning")).toBeVisible();
   await expect(d2.getByText("「重複ではないことを確認した」にチェックしてください")).toBeVisible();
 });
@@ -608,7 +608,7 @@ test("商品マスター: 検索・絞り込み、セット構成の登録、画
   await dialog.getByTestId("add-item").click(); // 商品を追加 → 2商品になると、その近くに抽選方式が出る
   await dialog.getByLabel("抽選の方式", { exact: true }).selectOption({ label: "B. 1回の応募で複数商品に参加（商品ごとに当落）" });
   await dialog.getByRole("combobox", { name: "商品2", exact: true }).fill("E2E構成商品");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   await page.goto("/settings/masters");
@@ -633,7 +633,7 @@ test("商品マスター: 検索・絞り込み、セット構成の登録、画
   await dlg.getByLabel("構成に追加する商品").selectOption({ label: "E2E構成商品" });
   await dlg.getByRole("button", { name: "追加" }).click();
   await dlg.getByLabel("E2E構成商品の数量").fill("3");
-  await dlg.getByRole("button", { name: "保存" }).click();
+  await dlg.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dlg).toHaveCount(0);
   await openSetMenu();
   await expect(setRow.getByRole("button", { name: /セット構成を管理/ })).toContainText("(1)");
@@ -694,13 +694,13 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await form.getByLabel("当選発表の時刻").fill("00:00"); // 0:00 は「時刻あり」
   // 時刻だけで日付が空の項目は保存できない
   await form.getByLabel("購入・受取終了の時刻").fill("10:00");
-  await form.getByRole("button", { name: "保存" }).click();
+  await form.getByRole("button", { name: "保存", exact: true }).click();
   await expect(form.getByRole("alert").filter({ hasText: "時刻だけでは登録できません" })).toBeVisible();
   await form.getByLabel("購入・受取終了の時刻").fill("");
   // 購入・受取の開始が終了より後ろなら保存できない
   await form.getByLabel("購入・受取開始の日付").fill("2026-02-20");
   await form.getByLabel("購入・受取終了の日付").fill("2026-02-10");
-  await form.getByRole("button", { name: "保存" }).click();
+  await form.getByRole("button", { name: "保存", exact: true }).click();
   await expect(form.getByRole("alert").filter({ hasText: "購入・受取の開始が終了より後" })).toBeVisible();
   await form.getByLabel("購入・受取終了の日付").fill("2026-02-25");
 
@@ -746,7 +746,7 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await form2.getByLabel("購入・受取終了の日付").fill("2026-02-25");
   await form2.getByLabel("受取方法", { exact: true }).selectOption("shipping"); // 選び直した項目は確認済み（印が外れる）
   await expect(form2.getByTestId("tag-default")).toHaveCount(1);
-  await form2.getByRole("button", { name: "保存" }).click();
+  await form2.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByTestId("lottery-form")).toHaveCount(0);
 
   await page.getByRole("tab", { name: /要チェック/ }).click();
@@ -778,7 +778,7 @@ test("抽選フォーム: 日時は空欄=不明/日付のみ/0:00を区別、�
   await sheetB.getByRole("button", { name: "発表延期にする" }).click();
   await expect(other.getByTestId("lottery-card").filter({ hasText: "E2Eフォーム店" })).toContainText("発表延期");
   // 端末A: 保存しようとすると競合を知らせる。最新を読み込むと自分の入力は破棄、上書きなら保存される
-  await edit.getByRole("button", { name: "保存" }).click();
+  await edit.getByRole("button", { name: "保存", exact: true }).click();
   const conflict = edit.getByRole("alert").filter({ hasText: "別の端末などで更新されました" });
   await expect(conflict).toBeVisible();
   await edit.getByRole("button", { name: "このまま上書き保存" }).click();
@@ -800,7 +800,7 @@ test("購入記録: 開封した商品・購入したシングルカードの記
   await fillMasters(form, "E2E購入電機", "E2E購入店", "E2E購入商品");
   await form.getByLabel("Aは応募済み").check();
   await form.getByLabel("Aの結果").selectOption("won");
-  await form.getByRole("button", { name: "保存" }).click();
+  await form.getByRole("button", { name: "保存", exact: true }).click();
   await expect(form).toHaveCount(0);
   await page.getByRole("tab", { name: /当選/ }).click();
   const card = page.getByTestId("lottery-card").filter({ hasText: "E2E購入商品" });
@@ -866,7 +866,7 @@ test("購入記録: 開封した商品・購入したシングルカードの記
   await exp.getByLabel("単位1").selectOption("pack");
   await exp.getByLabel("数量1").fill("3");
   await exp.getByLabel("購入金額1").fill("1200");
-  await exp.getByRole("button", { name: "保存" }).click();
+  await exp.getByRole("button", { name: "保存", exact: true }).click();
   await expect(exp).toHaveCount(0);
   await expect(page.getByTestId("sum-expense")).toHaveText(`${(expenseBefore + 1200).toLocaleString("ja-JP")}円`);
   await page.goto("/purchases");
@@ -926,7 +926,7 @@ test("対戦記録: 登録→一覧・勝率→編集→削除。再読込でも
     await f.getByLabel("使用デッキ").fill(myDeck);
     await f.getByLabel("相手デッキ").fill(oppDeck);
     await f.getByLabel("対戦形式").fill("ジムバトル");
-    await f.getByRole("button", { name: "保存" }).click();
+    await f.getByRole("button", { name: "保存", exact: true }).click();
     await expect(f).toHaveCount(0);
   };
   await record("勝ち", "E2Eデッキ", "相手デッキX");
@@ -948,14 +948,14 @@ test("対戦記録: 登録→一覧・勝率→編集→削除。再読込でも
 
   // 必須項目（勝敗）が無いと保存できない
   await page.getByRole("button", { name: "＋対戦を記録" }).click();
-  await page.getByTestId("battle-form").getByRole("button", { name: "保存" }).click();
+  await page.getByTestId("battle-form").getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByTestId("battle-form").getByRole("alert")).toContainText("勝敗");
   await page.getByTestId("battle-form").getByRole("button", { name: "閉じる", exact: true }).click();
 
   // 編集: 負け → 勝ち に変更すると勝率が変わる
   await page.getByTestId("battle-row").filter({ hasText: "相手デッキY" }).click();
   await page.getByTestId("battle-form").getByRole("radio", { name: "勝ち" }).click();
-  await page.getByTestId("battle-form").getByRole("button", { name: "保存" }).click();
+  await page.getByTestId("battle-form").getByRole("button", { name: "保存", exact: true }).click();
   expect((await rate()).v).toBe("100%");
 
   // 再読込しても保持
@@ -982,7 +982,7 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   await page.getByRole("button", { name: "＋登録" }).click();
   const form = page.getByTestId("lottery-form");
   await fillMasters(form, "E2E位置電機", "E2E位置店", "E2E位置商品");
-  await form.getByRole("button", { name: "保存" }).click();
+  await form.getByRole("button", { name: "保存", exact: true }).click();
   await expect(form).toHaveCount(0);
 
   // 自宅の位置: 未設定 → 住所は普段は表示されない。手入力で設定（外部の住所検索は押さない限り使わない）
@@ -1013,11 +1013,11 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   await dlg.getByLabel(/都道府県/).selectOption("大阪府"); // 都道府県は47都道府県の選択式（Stage 8U-1）
   await dlg.getByLabel(/店舗の住所/).fill("大阪府大阪市北区E2E");
   await dlg.getByLabel(/緯度/).fill("34.7025");
-  await dlg.getByRole("button", { name: "保存" }).click();
+  await dlg.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dlg.getByRole("alert")).toContainText("緯度と経度は両方");
   await dlg.getByLabel(/経度/).fill("135.4959");
   await dlg.getByLabel(/往復交通費/).fill("1280");
-  await dlg.getByRole("button", { name: "保存" }).click();
+  await dlg.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dlg).toHaveCount(0);
   await expect(row.getByTestId("store-distance")).toContainText(/\d+(\.\d+)?\s?km/);
   await row.getByRole("button", { name: "編集" }).click();
@@ -1437,7 +1437,7 @@ test("まとめてAI読み取り: 文章・画像（A=1件に複数枚/B=1枚ず
   await form.getByLabel("応募締切の日付").fill("2027-01-20");
   // 同じ内容の抽選が既にある場合（他のテストの登録）は、重複ではないことの確認が必要
   if (await form.getByLabel("重複ではないことを確認した").count()) await form.getByLabel("重複ではないことを確認した").check();
-  await form.getByRole("button", { name: "保存" }).click();
+  await form.getByRole("button", { name: "保存", exact: true }).click();
   await expect(form).toHaveCount(0);
   await expect(d3.locator('[data-testid="job-item"][data-status="saved"]')).toHaveCount(1, { timeout: 15000 });
 
@@ -1572,10 +1572,10 @@ test("Stage 5I: 当落発表を期間で指定でき（チェックした時だ�
   // 終了日が開始日より前のときは保存できない
   await dialog.getByLabel("期間で指定").check();
   await dialog.getByLabel("当選発表の終了日", { exact: true }).fill("2099-02-05");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog.getByRole("alert").filter({ hasText: "終了日が開始日より前" })).toBeVisible();
   await dialog.getByLabel("当選発表の終了日", { exact: true }).fill("2099-02-10");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   await page.getByRole("tab", { name: /要チェック/ }).click();
@@ -1595,7 +1595,7 @@ test("Stage 5I: 当落発表を期間で指定でき（チェックした時だ�
   await expect(edit.getByLabel("当選発表の終了日", { exact: true })).toHaveValue("2099-02-10"); // 期間のある抽選は最初から開いている
   await edit.getByLabel("期間で指定").uncheck();
   await expect(edit.getByLabel("当選発表の終了日", { exact: true })).toHaveCount(0);
-  await edit.getByRole("button", { name: "保存" }).click();
+  await edit.getByRole("button", { name: "保存", exact: true }).click();
   await expect(edit).toHaveCount(0);
   await page.reload();
   await page.getByRole("tab", { name: /要チェック/ }).click();
@@ -1637,7 +1637,7 @@ test("Stage 5I: 商品画像は軽量サムネイルを内容ハッシュ入りU
   await page.getByRole("button", { name: "＋登録" }).click();
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, "E2E速度電機", "E2E速度店", "E2E速度商品");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await page.goto("/settings/masters");
   await page.getByRole("tab", { name: "商品", exact: true }).click();
@@ -1693,7 +1693,7 @@ test("表示領域: 抽選登録のボトムシートは、開いた直後・最
   await login(page);
   const vpBottom = () => page.evaluate(() => (window.visualViewport ? window.visualViewport.offsetTop + window.visualViewport.height : window.innerHeight));
   const check = async (dialog: ReturnType<Page["getByRole"]>) => {
-    const save = dialog.getByRole("button", { name: "保存" });
+    const save = dialog.getByRole("button", { name: "保存", exact: true });
     await expect(save).toBeVisible();
     await expect
       .poll(async () => {
@@ -1728,7 +1728,7 @@ test("表示領域: 抽選登録のボトムシートは、開いた直後・最
           return Math.round((await vpBottom()) - (b.y + b.height));
         })
         .toBe(300);
-      const sb = (await dialog.getByRole("button", { name: "保存" }).boundingBox())!;
+      const sb = (await dialog.getByRole("button", { name: "保存", exact: true }).boundingBox())!;
       const db = (await dialog.boundingBox())!;
       expect(sb.y + sb.height, `dialog=${JSON.stringify(db)} save=${JSON.stringify(sb)} vp=${await vpBottom()}`).toBeLessThanOrEqual((await vpBottom()) - 300 + 0.5); // キーボードの上に出る
       await page.evaluate(() => document.documentElement.style.removeProperty("--kb-inset"));
@@ -1765,7 +1765,7 @@ test("Stage 5J 登録フォーム: 仮登録は項目名の横の小さなバッ
   const mode = dialog.getByLabel("抽選の方式", { exact: true });
   await expect(mode).toHaveValue("");
   await dialog.getByRole("combobox", { name: "商品2", exact: true }).fill("E2E5J商品2");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog.getByRole("alert").filter({ hasText: "応募方式" })).toBeVisible(); // 方式を選ぶまで保存できない
   // 戻す: 商品を1つに減らすと単一商品の表示に戻る
   await dialog.getByRole("button", { name: "商品2を削除" }).click();
@@ -1774,7 +1774,7 @@ test("Stage 5J 登録フォーム: 仮登録は項目名の横の小さなバッ
   await dialog.getByTestId("add-item").click();
   await dialog.getByRole("combobox", { name: "商品2", exact: true }).fill("E2E5J商品2");
   await dialog.getByLabel("抽選の方式", { exact: true }).selectOption({ label: "C. 複数商品が対象（当選はいずれか1商品まで）" });
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   const card = page.getByTestId("lottery-card").filter({ hasText: "E2E5J商品" }).first();
   await page.getByRole("tab", { name: /要チェック/ }).click();
@@ -1849,7 +1849,7 @@ test("Stage 5L 登録フォーム: 発表方法・応募条件は標準分類の
   await dialog.getByTestId("req-logic-or").click();
   await dialog.getByLabel("購入金額（円以上）").fill("3000");
   await expect(dialog.getByTestId("requirement-logic-label")).toContainText("いずれか");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   await page.getByRole("tab", { name: /要チェック/ }).click();
@@ -2027,7 +2027,7 @@ test("Stage 5M 系列ロゴ: マスター管理で登録→抽選カードの店
   const dialog = page.getByRole("dialog");
   await fillMasters(dialog, chain, `E2E5M店${stamp}`, `E2E5M商品${stamp}`);
   await dialog.getByLabel("応募締切の日付").fill("2099-04-01");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   await page.goto("/settings/masters");
@@ -2218,7 +2218,7 @@ test("Stage 5P 設定とサブユーザー: 会員番号はユーザー管理の
   const box = targets.getByRole("checkbox").first();
   const chainName = ((await box.locator("xpath=ancestor::label").innerText()) ?? "").trim();
   await box.check();
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByTestId("sub-badge")).toHaveCount(1);
   await expect(page.getByTestId("sub-badge")).toHaveText("サブ・1系列");
@@ -2240,7 +2240,7 @@ test("Stage 5P 設定とサブユーザー: 会員番号はユーザー管理の
   await page.goto("/settings/users");
   await page.getByTestId("profile-row").nth(2).getByRole("button", { name: /の設定を編集/ }).click();
   await dialog.getByTestId("profile-kind").getByLabel("メイン", { exact: true }).check();
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByTestId("sub-badge")).toHaveCount(0);
 });
@@ -2272,7 +2272,7 @@ test("Stage 5P 支出を登録: 開いた直後に購入日が入力状態にな
   await exp.getByLabel("単位1").selectOption("piece");
   await exp.getByLabel("数量1").fill("2");
   await exp.getByLabel("購入金額1").fill("2400");
-  await exp.getByRole("button", { name: "保存" }).click();
+  await exp.getByRole("button", { name: "保存", exact: true }).click();
   await expect(exp).toHaveCount(0);
   // 収支の支出として保存される（購入記録は開封・シングルカードの記録のため、未確認の購入として扱われる）。編集で開き直しても「個」のまま
   await page.goto("/finance");
