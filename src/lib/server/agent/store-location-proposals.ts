@@ -1,5 +1,5 @@
 import "server-only";
-import type { ProposalStatus, ProposalView } from "@/lib/agent/store-location/proposal-types";
+import { bulkBlockReason, type BulkOp, type BulkResult, type ProposalStatus, type ProposalView } from "@/lib/agent/store-location/proposal-types";
 import type { Db, ServiceResult } from "@/lib/server/lottery-service";
 
 /**
@@ -67,4 +67,30 @@ export async function listProposals(db: Db, limit = 50): Promise<ProposalView[]>
     createdAt: r.created_at as string,
     events: byProposal.get(r.id as string) ?? [],
   }));
+}
+
+/**
+ * 複数の反映候補の一括操作（Stage 8D-5）。1件ずつ、承認可否（一括の条件）を再判定してから、DB関数（整合性の検証・監査履歴つき）を呼ぶ。
+ * 1件の失敗・拒否が他の件に影響しない（途中で止めない）。対象外・失敗した理由は結果に明示する。同じ候補が重複して渡されても1回だけ処理する。
+ */
+export async function bulkProcess(db: Db, ids: string[], op: BulkOp, note: string | null, profileId: string | null): Promise<BulkResult[]> {
+  const unique = [...new Set(ids)].slice(0, 100);
+  const byId = new Map((await listProposals(db, 500)).map((p) => [p.id, p]));
+  const results: BulkResult[] = [];
+  for (const id of unique) {
+    const p = byId.get(id);
+    if (!p) {
+      results.push({ id, storeLabel: "（見つからない候補）", ok: false, message: "反映候補が見つかりません" });
+      continue;
+    }
+    const label = `${p.chainName}／${p.storeName}`;
+    const blocked = bulkBlockReason(p, op);
+    if (blocked) {
+      results.push({ id, storeLabel: label, ok: false, message: blocked });
+      continue;
+    }
+    const r = op === "apply" ? await applyProposal(db, id, { allowOverwrite: false, note, profileId }) : await decideProposal(db, id, op === "hold" ? "hold" : "reject", note, profileId);
+    results.push({ id, storeLabel: label, ok: r.ok, message: r.ok ? null : r.error });
+  }
+  return results;
 }

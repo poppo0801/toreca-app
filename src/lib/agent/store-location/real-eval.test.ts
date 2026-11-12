@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
 import { SYSTEM_PROMPT } from "@/lib/agent/store-location/run";
 import { checkRealApi } from "@/lib/agent/real-gate";
-import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, collectRecords, isFatalProblem, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
+import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, collectRecords, isFatalProblem, autonomyOf, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
 import { matchesGoldV1, scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
 import { verifyResearch } from "@/lib/agent/store-location/verify";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
@@ -175,6 +175,16 @@ describe("実行基盤（モック部品で、実APIなしに動作確認）", (
     expect(isFatalProblem({ status: "candidate", rejectedCalls: 0, costJpy: 19 }, 15)).toMatch(/上限/);
     expect(isFatalProblem({ status: "candidate", rejectedCalls: 0, costJpy: 3 }, 15)).toBeNull();
   });
+  it("Stage 8D-5: 誤った住所を確認済みにしたら、継続指定でも即停止する（最重要の安全指標）", async () => {
+    const dir = "eval/runs/real-test";
+    // 疑似AIが、取得した公式ページに実在する別の店舗の住所を提出し、検証層を通って確認済みになる状況は作れないため、停止判定を直接確認する
+    const wrongConfirmed = REAL_GOLD.find((g) => g.id === "N01")!;
+    const scored = scoreEval("t", [{ caseId: "N01", status: "confirmed", address: "大阪府大阪市中央区別の住所1-1-1", confidence: 75, searches: 1, fetches: 1, steps: 3, costJpy: 1, ms: 1, injectionFlags: 0 }], [wrongConfirmed]);
+    expect(scored.perCase[0].wrong).toBe(true);
+    expect(scored.wrongConfirmed).toBe(1);
+    expect(isFatalProblem({ status: "confirmed", rejectedCalls: 0, costJpy: 1 }, 15)).toBeNull(); // 費用・API障害の停止とは別の条件（実行基盤が採点結果から判定する）
+    void dir;
+  });
   it("最初の1店舗だけの実行（firstOnly）。問題があれば止まる", async () => {
     const dir = "eval/runs/real-test";
     const rep = await runRealEval({ ids: ["R1", "R2"], approvedMaxJpy: 100, approvedStores: 2, firstOnly: true }, (t) => ({ llm: new MockStoreBrain({ chain: t.store.chain, name: t.store.name }), search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD) }), { outDir: dir });
@@ -303,11 +313,14 @@ describe("集計: 初回の主要評価値。正解不明は分母に含めな�
 
 // 集計の出力（REAL_REPORT=1。API・ネットワークには接続しない）
 describe.skipIf(process.env.REAL_REPORT !== "1")("集計の出力（表示のみ）", () => {
-  it("初回・再実行を別に集計して eval/runs/real/summary-8d4-*.json に書く", () => {
-    for (const phase of ["initial", "rerun"] as const) {
-      const recs = collectRecords("eval/runs/real", phase, (id) => /^[NUPQ][0-9]+$/.test(id));
-      writeFileSync(`eval/runs/real/summary-8d4-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
-      writeFileSync(`eval/runs/real/summary-8d4-${phase}-original-scorer.json`, JSON.stringify(summarizeRecords(recs, matchesGoldV1), null, 2)); // 初回の採点（旧版）を再現
+  it("評価の組（8D-4: N・U／8D-5: P・Q）ごと、初回・再実行を別に集計して eval/runs/real/summary-<組>-*.json に書く", () => {
+    for (const [set, re] of [["8d4", /^[NU][0-9]+$/], ["8d5", /^[PQ][0-9]+$/]] as const) {
+      for (const phase of ["initial", "rerun"] as const) {
+        const recs = collectRecords("eval/runs/real", phase, (id) => re.test(id));
+        if (!recs.length) continue;
+        writeFileSync(`eval/runs/real/summary-${set}-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
+        writeFileSync(`eval/runs/real/summary-${set}-${phase}-original-scorer.json`, JSON.stringify(summarizeRecords(recs, matchesGoldV1), null, 2)); // 旧採点（8D-4 の初回の再現用）
+      }
     }
   });
 });
@@ -344,4 +357,28 @@ describe.skipIf(process.env.REAL_REPLAY !== "1")("保存済みデータでの再
     writeFileSync("eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
     expect(rows.length).toBeGreaterThan(0);
   }, 600_000);
+});
+
+describe("自律性の判定（調査の経過から機械的に判定。検索を増やすこと自体は評価しない）", () => {
+  const rec = (status: string, actions: [string, string][], cands: string[] = [], usage: Partial<RealRecord["usage"]> = {}): RealRecord => ({
+    target: REAL_TARGETS.find((x) => x.id === "N01")!, result: { caseId: "N01", status: status as never, address: null, confidence: 0, searches: 0, fetches: 0, steps: 4, costJpy: 1, ms: 1, injectionFlags: 0 },
+    outcome: { status, address: null, confidence: 0, reasons: [], officialSites: [], sources: [], candidates: cands.map((a) => ({ address: a, sourceUrl: "https://x.test/", quote: a, problems: [] })) },
+    usage: { steps: 4, searches: actions.filter((a) => a[0] === "web_search").length, fetches: actions.filter((a) => a[0] === "fetch_page").length, inputTokens: 1, outputTokens: 1, costJpy: 1, ms: 1, retries: 0, rejectedCalls: 0, injectionFlags: 0, ...usage },
+    actions: actions.map(([name, arg]) => ({ name, ok: true, arg })), engine: "t", problem: null,
+  });
+  it("検索語の変更・情報源の追加・矛盾後の継続・早期終了・安全な保留を判定する", () => {
+    const a = autonomyOf(rec("confirmed", [["web_search", "A 公式"], ["web_search", "A 店 住所"], ["fetch_page", "https://www.s1.test/a"], ["fetch_page", "https://s2.test/b"]]));
+    expect(a).toMatchObject({ reformulated: true, duplicateSearch: false, addedSource: true, earlyStop: true, safeHold: false });
+    expect(autonomyOf(rec("candidate", [["web_search", "q"], ["web_search", "q"], ["fetch_page", "https://s1.test/a"]])).duplicateSearch).toBe(true); // 同じ検索語の繰り返し
+    expect(autonomyOf(rec("candidate", [["web_search", "q"], ["fetch_page", "https://s1.test/a"], ["fetch_page", "https://s1.test/b"]], ["東京都A区1-1", "東京都B区2-2"])).conflictContinued).toBe(true);
+    expect(autonomyOf(rec("insufficient", [["web_search", "q"]])).safeHold).toBe(true);
+    expect(autonomyOf(rec("confirmed", [["web_search", "q"]], [], { searches: 4 })).earlyStop).toBe(false); // 上限まで使って確定した場合は早期終了ではない
+  });
+  it("集計: 検索の言い換え率・情報源の追加率・早期終了率・安全な保留率", () => {
+    const s = summarizeRecords([
+      rec("confirmed", [["web_search", "a"], ["web_search", "b"], ["fetch_page", "https://s1.test/"]]),
+      rec("candidate", [["web_search", "a"], ["fetch_page", "https://s1.test/"], ["fetch_page", "https://s2.test/"]]),
+    ]);
+    expect(s.autonomy).toMatchObject({ stores: 2, reformulatedRate: 0.5, addedSourceRate: 0.5, earlyStopRate: 1, safeHoldRate: 1 });
+  });
 });

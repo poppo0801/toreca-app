@@ -190,7 +190,9 @@ export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) 
     const gold = REAL_GOLD.find((g) => g.id === id)!;
     const one = scoreEval("real", [toEvalResult(id, out, Date.now() - t0)], [gold]);
     const unknownGold = !!gold.unknownGold;
-    const fatal = isFatalProblem({ status: out.result.status, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy);
+    // 誤った住所を「確認済み」にした（最重要の安全指標）: 継続指定でも即停止して、原因を調べる（Stage 8D-5）
+    const wrongConfirmed = !unknownGold && out.result.status === "confirmed" && one.perCase[0].wrong;
+    const fatal = isFatalProblem({ status: out.result.status, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy) ?? (wrongConfirmed ? "誤った住所を確認済みにした（重大な安全上の問題）" : null);
     const problem = fatal ?? (unknownGold ? null : isProblem({ status: out.result.status, wrong: one.perCase[0].wrong, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy));
     const rec: RealRecord = {
       target,
@@ -279,6 +281,22 @@ export interface StoreMetric {
   ms: number;
   humanReview: boolean;
   problem: string | null;
+  /** 自律性（調査の経過から機械的に判定。検索回数を増やすこと自体は評価しない） */
+  autonomy: Autonomy;
+}
+export interface Autonomy {
+  /** 別の検索語で検索し直した（最初の検索で足りないとき別の方法を選べた） */
+  reformulated: boolean;
+  /** 同じ検索語を繰り返した（無駄な再検索。少ないほどよい） */
+  duplicateSearch: boolean;
+  /** 複数のサイトを調べた（公式情報が不十分なとき、別の情報源を追加できた） */
+  addedSource: boolean;
+  /** 異なる住所が見つかったあとも調査を続けた（矛盾の発見後の継続） */
+  conflictContinued: boolean;
+  /** 確認済みの根拠が揃い、上限に達する前に終了した（無駄な検索の打ち切り） */
+  earlyStop: boolean;
+  /** 根拠が不十分で確認済みにせず、候補・保留にとどめた（安全な保留） */
+  safeHold: boolean;
 }
 export interface RunSummary {
   stores: number;
@@ -294,12 +312,31 @@ export interface RunSummary {
     humanReviewRate: number | null;
     additionalSearchRate: number | null;
   };
+  autonomy: { stores: number; reformulatedRate: number | null; duplicateSearchRate: number | null; addedSourceRate: number | null; conflictContinuedCount: number; earlyStopRate: number | null; safeHoldRate: number | null };
   unknown: { n: number; confirmed: number; candidate: number; other: number; officialVerified: number };
   totals: { costJpy: number; avgCostJpy: number; searches: number; ms: number; avgMs: number; p50Ms: number; p95Ms: number; inputTokens: number; outputTokens: number };
   perStore: StoreMetric[];
 }
 const rate = (a: number, b: number) => (b === 0 ? null : a / b);
 const pct = (xs: number[], q: number) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))] : 0);
+
+const SEARCH_LIMIT = 4;
+const FETCH_LIMIT = 6;
+/** 調査の経過（ツール呼び出しの順序・検索語・取得先）から、自律的な調査行動を判定する */
+export function autonomyOf(r: RealRecord): Autonomy {
+  const searches = r.actions.filter((a) => a.name === "web_search").map((a) => a.arg.trim());
+  const hosts = new Set(r.actions.filter((a) => a.name === "fetch_page").map((a) => { try { return new URL(a.arg).hostname.replace(/^www\./, ""); } catch { return a.arg; } }));
+  const addrs = new Set((r.outcome.candidates ?? []).map((c) => c.address.replace(/[ 　]+/g, "")));
+  const status = r.outcome.status;
+  return {
+    reformulated: searches.length >= 2 && new Set(searches).size >= 2,
+    duplicateSearch: searches.length !== new Set(searches).size,
+    addedSource: hosts.size >= 2,
+    conflictContinued: (status === "conflict" || addrs.size >= 2) && r.usage.searches + r.usage.fetches >= 3,
+    earlyStop: status === "confirmed" && r.usage.searches < SEARCH_LIMIT && r.usage.fetches < FETCH_LIMIT,
+    safeHold: status !== "confirmed",
+  };
+}
 
 export function summarizeRecords(records: RealRecord[], scorer: typeof matchesGold = matchesGold): RunSummary {
   const perStore: StoreMetric[] = records.map((r) => {
@@ -334,6 +371,7 @@ export function summarizeRecords(records: RealRecord[], scorer: typeof matchesGo
       ms: r.usage.ms,
       humanReview: r.outcome.status !== "confirmed",
       problem: r.problem,
+      autonomy: autonomyOf(r),
     };
   });
   const k = perStore.filter((s) => s.known);
@@ -355,6 +393,19 @@ export function summarizeRecords(records: RealRecord[], scorer: typeof matchesGo
       humanReviewRate: rate(k.filter((s) => s.humanReview).length, k.length),
       additionalSearchRate: rate(k.filter((s) => s.additionalSearch).length, k.length),
     },
+    autonomy: (() => {
+      const a = perStore.map((p) => p.autonomy);
+      const held = perStore.filter((p) => p.status !== "confirmed");
+      return {
+        stores: perStore.length,
+        reformulatedRate: rate(a.filter((x) => x.reformulated).length, a.length),
+        duplicateSearchRate: rate(a.filter((x) => x.duplicateSearch).length, a.length),
+        addedSourceRate: rate(a.filter((x) => x.addedSource).length, a.length),
+        conflictContinuedCount: a.filter((x) => x.conflictContinued).length,
+        earlyStopRate: rate(perStore.filter((p) => p.status === "confirmed" && p.autonomy.earlyStop).length, perStore.filter((p) => p.status === "confirmed").length),
+        safeHoldRate: rate(held.filter((p) => p.autonomy.safeHold && p.wrongAdopted !== true).length, held.length),
+      };
+    })(),
     unknown: { n: u.length, confirmed: u.filter((s) => s.status === "confirmed").length, candidate: u.filter((s) => s.status === "candidate").length, other: u.filter((s) => s.status !== "confirmed" && s.status !== "candidate").length, officialVerified: u.filter((s) => records.find((r) => r.target.id === s.id)?.outcome.officialSites.some((o) => o.status === "verified" || o.status === "trusted")).length },
     totals: {
       costJpy: Math.round(cost * 100) / 100,

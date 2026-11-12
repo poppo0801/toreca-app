@@ -1,8 +1,8 @@
 "use server";
 
 import { canApplyToStoreMaster } from "@/lib/agent/dev-flag";
-import type { ProposalView } from "@/lib/agent/store-location/proposal-types";
-import { applyProposal, decideProposal, listProposals, proposeFromResearch, revertProposal } from "@/lib/server/agent/store-location-proposals";
+import type { BulkOp, BulkResult, ProposalView } from "@/lib/agent/store-location/proposal-types";
+import { applyProposal, bulkProcess, decideProposal, listProposals, proposeFromResearch, revertProposal } from "@/lib/server/agent/store-location-proposals";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
 import { createClient } from "@/lib/supabase/server";
 
@@ -60,4 +60,10 @@ export async function revertAction(input: { id: string; note: string | null; pro
     const r = await revertProposal(db, input.id, input.note, input.profileId);
     return r.ok ? { ok: true as const } : r;
   });
+}
+
+/** 一括操作（承認・保留・却下）。開発環境のみ。1件ずつ整合性を検証し、結果を件ごとに返す */
+export async function bulkAction(input: { ids: string[]; op: BulkOp; profileId: string | null }): Promise<R<{ results: BulkResult[] }>> {
+  if (!["apply", "hold", "reject"].includes(input.op) || !Array.isArray(input.ids) || input.ids.length === 0) return { ok: false, error: "対象の候補を選んでください" };
+  return guarded(async (db) => ({ ok: true as const, results: await bulkProcess(db, input.ids, input.op, null, input.profileId) }));
 }

@@ -283,8 +283,6 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
   }
 
   for (const e of evaluated) {
-    const sameAddress = valid.filter((v) => key(v) === key(e));
-    const independent = new Set(sameAddress.map((v) => v.domain).filter(Boolean)).size;
     let s = 0;
     if (e.quoteVerified) s += 5;
     if (e.nameMatch) s += 15;

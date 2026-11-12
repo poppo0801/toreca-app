@@ -22,3 +22,33 @@ export interface ProposalView {
   events: { action: string; fromStatus: string | null; toStatus: string | null; note: string | null; occurredAt: string; detail: Record<string, unknown> }[];
 }
 
+
+/** 一括操作の種類。承認は反映（開発DBの店舗マスターを更新）、保留・却下は状態の変更だけ */
+export type BulkOp = "apply" | "hold" | "reject";
+export const BULK_OP_LABEL: Record<BulkOp, string> = { apply: "承認して反映", hold: "保留", reject: "却下" };
+
+/**
+ * 一括操作できない理由（できるなら null）。UI の事前確認とサーバーの両方で同じ判定を使う（サーバー側でも必ず再判定する）。
+ * 一括の承認は、根拠が最も強いものに限る: 調査が「確認済み」・公式（登録済み／検証済み）の情報源・既存の住所が無い。
+ * それ以外（候補・公式を確認できない・既存の住所の置き換え）は、情報源と差異を見て個別に承認する。
+ * （店舗の同一性・編集の競合・二重反映などの整合性は、一括でも1件ずつ DB 関数が検証し、拒否した理由を履歴に残す）
+ */
+export function bulkBlockReason(p: ProposalView, op: BulkOp): string | null {
+  if (op === "apply") {
+    if (p.status !== "pending" && p.status !== "on_hold") return "この状態では承認できません";
+    if (p.researchStatus !== "confirmed") return "調査が「確認済み」でないため、個別に承認してください";
+    if (p.officialStatus !== "trusted" && p.officialStatus !== "verified") return "公式の情報源を確認できないため、個別に承認してください";
+    if (p.current.address.trim() !== "") return "既存の住所があるため、個別に承認してください";
+    return null;
+  }
+  if (op === "hold") return p.status === "pending" ? null : "承認待ちの候補だけ保留にできます";
+  return p.status === "pending" || p.status === "on_hold" ? null : "この状態では却下できません";
+}
+
+export interface BulkResult {
+  id: string;
+  storeLabel: string;
+  ok: boolean;
+  /** 失敗・対象外の理由（利用者向け） */
+  message: string | null;
+}
