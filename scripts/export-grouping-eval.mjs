@@ -2,7 +2,7 @@
 //   npm run prod -- scripts/export-grouping-eval.mjs --yes-production --out=eval/lottery-grouping-real [--max=30]
 // 本番DBは読むだけ（何も書き込まない）。正解の根拠は利用者自身の手動のグループ化・手動の分離だけ（AIの判定結果は使わない）。
 // 出力: <out>/cases.json（入力）・<out>/gold.json（正解。AIに渡さない）。抽選IDは連番に置換し、住所・個人情報・鍵は含まない。
-// 書き出した後、内容を確認してから凍結（npm run eval:grouping-real -- freeze）→ 承認 → 実行の順に進める。
+// 取得するのは評価に必要な項目だけ（応募・当選の記録、利用者・世帯の情報、認証情報は読まない）。書き出した後、内容を確認してから凍結（npm run eval:grouping-real -- freeze）→ 承認 → 実行の順に進める。
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { buildCases, textsOfDraft } from "./lib/grouping-eval-export.mjs";
@@ -35,20 +35,26 @@ const stores = await all("stores", "id,name");
 const chains = await all("chains", "id,name");
 const groups = await all("lottery_bulk_groups", "id,origin,chain_id,title", (q) => q.is("dissolved_at", null));
 const events = (await all("lottery_group_events", "lottery_id,detail,action,origin")).filter((e) => e.action === "removed" && e.origin === "manual");
-const apps = await byIds("applications", "lottery_id", "lottery_id", ids);
 const cands = await byIds("collection_candidates", "lottery_id,draft", "lottery_id", ids);
 const evidenceByLottery = {};
 for (const c of cands) if (c.lottery_id) evidenceByLottery[c.lottery_id] = [...(evidenceByLottery[c.lottery_id] ?? []), ...textsOfDraft(c.draft)].slice(0, 6);
 
-const { cases, gold } = buildCases({
+const result = buildCases({
   lotteries, items, groups, events, evidenceByLottery,
   productNames: Object.fromEntries(products.map((p) => [p.id, p.official_name])),
   storeNames: Object.fromEntries(stores.map((s) => [s.id, s.name])),
   chainNames: Object.fromEntries(chains.map((c) => [c.id, c.name])),
-  applied: apps.map((a) => a.lottery_id),
+  applied: [],
   now: new Date().toISOString(),
-}, { max });
+}, { max, pool: process.argv.includes("--pool") });
+if (process.argv.includes("--pool")) {
+  mkdirSync(out, { recursive: true });
+  writeFileSync(out + "/pool.json", JSON.stringify({ note: "候補の洗い出し用（正解なし）", pool: result.pool }, null, 2) + "\n");
+  console.log(result.pool.length + " 件の抽選を pool.json に書き出しました");
+  process.exit(0);
+}
 
+const { cases, gold } = result;
 mkdirSync(out, { recursive: true });
 writeFileSync(`${out}/cases.json`, JSON.stringify({ version: 1, note: "実データ評価の入力（本番の記録を読み取り専用で書き出し）。正解は含まない", cases }, null, 2) + "\n");
 writeFileSync(`${out}/gold.json`, JSON.stringify({ version: 1, note: "正解。AIに渡さない（採点だけが読む）。根拠は利用者の手動のグループ化・手動の分離", labels: gold }, null, 2) + "\n");

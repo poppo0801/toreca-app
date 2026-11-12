@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "note": "正解。AIに渡さない（採点だけが読む）。根拠は公式・販売元の一次情報（取得日つき）。確認できないものは unknown",
+  "labels": {
+    "K01": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/624225",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623986",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "カードラボ津田沼店の30th CELEBRATION抽選。各店のブログは『下記の期間、○○店にて抽選を行います』等の店舗別告知で、チェーン共通の記述なし。なんば店・NAMBA・オタロード本店は別日程。比較相手のうち秋葉原ラジオ会館本店は告知（X）を確認できていないが、締切が異なり、確認できた4店舗がすべて店舗別であることから、共通企画とは考えにくい"
+    },
+    "K02": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623986",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "カードラボなんば店の30th（再販）。販売買取センターNAMBAとは別々の告知・別日程"
+    },
+    "K03": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/624225",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "カードラボオタロード本店の30th『再抽選』。『カードラボオタロード本店Xにて抽選を行います』で店舗別"
+    },
+    "K04": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/u6fu3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/fz4f0",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "ふるいち泉大津店。読めた7店舗のLivePocketページは、販売元（promoter）が店舗ごとに別で、期間が店舗ごとに異なり、他店舗への言及・共通企画の記述なし"
+    },
+    "K05": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/fz4f0",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/u6fu3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "ふるいち鶴見店（応募 11/3 の1日のみ）。店舗別の別ページ・別日程"
+    },
+    "K06": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "ふるいち（古本市場）野口店。店舗別の別ページ・別日程"
+    },
+    "K07": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/1j91f",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/u6fu3",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "古本市場宝塚店の30th拡張パック（別商品のエーフィ・ブラッキーセットは別の抽選）。他店舗とは別ページ・別日程"
+    },
+    "K08": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://shoplottery.e-starbox.com/lottery/entry?code=mP3lHYSNT5",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://shoplottery.e-starbox.com/lottery/entry?code=vWjDlyL9hp",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "カードボックス オーサカ店と日本橋店の30th。店舗・応募期間・発表日・購入期間がすべて異なる別々の抽選として掲載（ページに『1抽選につき1口』）"
+    },
+    "K09": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://card.luruna.jp/items/164670243",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://card.luruna.jp/items/163162690",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "Luruna Cardの30th。①10/17〜11/15（購入履歴2000円以上）と②11/1〜11/30（1000円以上）で、期間・条件・発表日が異なる別の受付（ページ上に番号①②）"
+    },
+    "K10": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/luo8lp88-d",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "イトーヨーカドーネット通販（7iD・配送・11/12〜11/13）は、LivePocketの店頭受取の抽選（TOYLO・11/6〜11/8）とは、販売元・方式・期間が異なり、相互の言及もない"
+    },
+    "K11": {
+      "label": "review",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/wjv4a",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/mkpvg",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "キデイランド吉祥寺店と二子玉川店のスペシャルデッキセットMEGA。同じ販売元・同じ商品・同じ期間・同じ条件の文面で、『同販売期間にキデイランド複数店舗より同商品の案内があった場合、重複応募は無効』と店舗横断の規定がある（同一企画とみなせる強い根拠）。ただし『同一企画』と明記する記述はなく、各店は別イベントページ"
+    },
+    "K12": {
+      "label": "review",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/s2dtfw7rvo",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/luo8lp88-d",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "イトーヨーカドーのハドウシーカー（TOYLO）。2つのURLは同じイベント（event_id 1135507・同名・同期間・同条件）で、店舗一覧だけが異なる（甲子園店は片方のみ）。同一企画の根拠は強いが、L023は店舗が未特定のため、利用者の確認が必要"
+    },
+    "K13": {
+      "label": "unknown",
+      "basis": [],
+      "note": "ドラゴンスターのハドウシーカー（10店舗・同じ応募期間・条件・共通の情報源URL）。公式の抽選ページ（403）とX投稿（402）を取得できず、一次情報で同一企画かを確認できなかった。共通の情報源URLは登録時の記録で、独立した根拠ではない"
+    },
+    "K14": {
+      "label": "unknown",
+      "basis": [],
+      "note": "BOOKOFF蒲田駅東口店の30th。BOOKOFFの各店は店舗ごとのXアカウントで告知する形式だが、X投稿（402）を取得できず、豊中三国店等との関係を確認できなかった"
+    },
+    "K15": {
+      "label": "unknown",
+      "basis": [],
+      "note": "GEOの30th（news/790）。ハドウシーカー（news/789）・両方（L122）と期間が同じだが、公式ページ（403）を取得できず、1つの企画か別企画かを確認できなかった"
+    },
+    "K16": {
+      "label": "unknown",
+      "basis": [],
+      "note": "DMMマイカの30th（店舗未特定・集約アカウント経由）と通販（公式Xの投稿）。X投稿（402）を取得できず、同じ抽選の別経路の収集（重複）かを確認できなかった"
+    },
+    "K17": {
+      "label": "unknown",
+      "basis": [],
+      "note": "トレカショップフロントの9種セット。公式Xと集約アカウントの別投稿由来の可能性があるが、X投稿（402）を取得できず確認できなかった"
+    }
+  }
+}

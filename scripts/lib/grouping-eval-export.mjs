@@ -45,7 +45,7 @@ const dateOf = (precision, date, at) => {
  *   groups: [{id, origin, chain_id, title}]  events: [{lottery_id, detail}]（removed・origin=manual）
  *   evidenceByLottery: {lotteryId: string[]}（collection_candidates の下書き由来の文章）
  */
-export function buildCases(rows, { max = 30 } = {}) {
+export function buildCases(rows, { max = 30, pool = false } = {}) {
   const live = rows.lotteries.filter((l) => !l.archived_at);
   const byId = new Map(live.map((l) => [l.id, l]));
   const itemsBy = new Map();
@@ -100,6 +100,9 @@ export function buildCases(rows, { max = 30 } = {}) {
     for (const id of ids) for (const u of byId.get(id)?.source_urls ?? []) if (/^https?:\/\//.test(u) && !seen.has(u)) { seen.add(u); out.push({ url: u, fetchedAt: byId.get(id).created_at ?? now }); }
     return out;
   };
+
+  // 候補の洗い出し用: 有効な抽選をそのまま（正解なし）。人が一次情報で正解を確定するための材料
+  if (pool) return { pool: live.map((l) => ({ ...spec(l, null), sources: sourcesFor([l.id]), text: evidenceFor([l.id])[aid(l.id)] ?? "" })), cases: [], gold: {} };
 
   const cases = [];
   const gold = {};
