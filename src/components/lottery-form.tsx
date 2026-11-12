@@ -26,6 +26,7 @@ import type { Product, Chain, Store } from "@/types/domain";
 import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker";
 import { classifyAnnouncement, classifyRequirements, foldAnnounceNote, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
 import { InfoTip } from "@/components/ui/info-tip";
+import { StoreMultiPicker, type NewStoreDraft } from "@/components/store-multi-picker";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -320,6 +321,11 @@ export function LotteryFormDialog({
 
   // ---- 店舗別の一括登録（Stage 7L）。新規登録のみ。共通情報を入力し、系列マスターの店舗から対象を選んで、店舗ごとに独立した抽選を作る
   const [bulk, setBulk] = useState(false);
+  // 保存して複製（Stage 8U-2）: 新規登録の内容を保存し、続けて複製先の店舗を選んで店舗別の抽選を一括作成する（1つの抽選グループにまとめる）
+  const [dupStep, setDupStep] = useState<null | "pick" | "result">(null);
+  const [dupPicked, setDupPicked] = useState<string[]>([]);
+  const [dupNew, setDupNew] = useState<NewStoreDraft[]>([]);
+  const [dupResult, setDupResult] = useState<{ created: number; skipped: { storeName: string; reason: string }[]; firstId: string | null } | null>(null);
   const [bulkSel, setBulkSel] = useState<Record<string, boolean>>({});
   const [bulkExtra, setBulkExtra] = useState<string[]>([]);
   const [bulkNew, setBulkNew] = useState("");
@@ -587,6 +593,38 @@ export function LotteryFormDialog({
     aiFeedback: !isEdit && aiRun ? { runId: aiRun.runId, filled: aiRun.filled as unknown as Record<string, unknown>, reason: reason || null } : undefined,
   });
 
+  /** 「保存して複製」: 保存前と同じ確認を行い、複製先の選択へ進む（まだ保存しない）。入力内容は失われない */
+  const startDup = () => {
+    setError(null);
+    if (modePending) return setError("複数商品の応募方式を選択してください（告知から判断できませんでした）");
+    if (duplicates.some((d) => d.level === "high") && !dupAck) return setError("同じ抽選が登録済みの可能性があります。内容を確認し、「重複ではないことを確認した」にチェックしてください");
+    const parsed = lotteryInputSchema.safeParse(buildInput());
+    if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
+    setDupStep("pick");
+  };
+  const runDup = async () => {
+    if (savingRef.current || dupPicked.length + dupNew.length === 0) return;
+    const input = buildInput();
+    const parsed = lotteryInputSchema.safeParse(input);
+    if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    // 元の保存と複製は1つの操作。複製に失敗したら元の保存も取り消される（失敗しても入力内容はこの画面に残る）
+    const res = await actions.saveLotteryAndDuplicate(input, dupPicked, dupNew);
+    savingRef.current = false;
+    setSaving(false);
+    if (!res.ok) return setError(res.error);
+    const skipped = res.skipped ?? [];
+    const firstId = res.createdIds?.[0] ?? null;
+    if (skipped.length === 0) {
+      onSaved?.(firstId);
+      return finish();
+    }
+    setDupResult({ created: Math.max(0, (res.createdIds?.length ?? 1) - 1), skipped, firstId });
+    setDupStep("result");
+  };
+
   const submit = async (e: React.FormEvent, overwrite = false) => {
     e.preventDefault();
     if (savingRef.current) return;
@@ -739,6 +777,53 @@ export function LotteryFormDialog({
             <p role="status" className="mx-4 mb-2 rounded-md border border-warn p-2 text-xs text-warn" data-testid="resume-note">
               {resumeNote}
             </p>
+          )}
+          {dupStep === "pick" && (
+            <div className="mx-4 mb-2 space-y-2 rounded-md border p-2 text-sm" data-testid="dup-panel">
+              <p className="font-bold">保存して複製</p>
+              <p className="text-xs text-muted-foreground">この内容を保存し、選んだ店舗にも同じ内容の抽選を作ります（店舗ごとに独立。1つのグループにまとめます）。応募・メモは複製しません。</p>
+              <StoreMultiPicker
+                chainName={data.chains.find((c) => c.id === v.chain.id)?.name ?? v.chain.name}
+                candidates={data.stores.filter((s) => s.chainId === v.chain.id && !s.archived && s.id !== v.store.id)}
+                picked={dupPicked}
+                onPick={setDupPicked}
+                newStores={dupNew}
+                onNewStores={setDupNew}
+                blockedNames={v.store.name.trim() ? [v.store.name.trim()] : []}
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setDupStep(null)} disabled={saving}>
+                  戻る
+                </Button>
+                <Button type="button" size="sm" onClick={() => void runDup()} disabled={saving || dupPicked.length + dupNew.length === 0} data-testid="dup-run">
+                  {saving ? "保存中…" : `保存して${dupPicked.length + dupNew.length}店舗に複製`}
+                </Button>
+              </div>
+            </div>
+          )}
+          {dupStep === "result" && dupResult && (
+            <div className="mx-4 mb-2 space-y-2 rounded-md border p-2 text-sm" data-testid="dup-result">
+              <p>保存して、{dupResult.created}店舗に複製しました。</p>
+              <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {dupResult.skipped.map((s) => (
+                  <li key={s.storeName}>
+                    {s.storeName}: {s.reason}（作りませんでした）
+                  </li>
+                ))}
+              </ul>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    onSaved?.(dupResult.firstId);
+                    finish();
+                  }}
+                >
+                  閉じる
+                </Button>
+              </div>
+            </div>
           )}
           {pending && (
             <div role="alert" className="mx-4 mb-2 space-y-2 rounded-md border border-warn p-2 text-sm" data-testid="form-confirm">
@@ -1455,7 +1540,13 @@ export function LotteryFormDialog({
               <Button type="button" variant="outline" className="mr-auto" onClick={requestClose} data-testid="form-discard">
                 {isEdit || candMode ? "閉じる" : "破棄"}
               </Button>
-              <Button type="submit" disabled={saving}>
+              {/* 保存して複製: 新規登録で、店舗が決まっている（店舗固定）ときだけ。候補・編集・まとめて登録では出さない */}
+              {!isEdit && !candMode && !bulk && v.storeMode === "fixed" && v.chain.id && (v.store.id || v.store.name.trim()) && dupStep === null && (
+                <Button type="button" variant="outline" disabled={saving} onClick={startDup} data-testid="save-and-duplicate">
+                  保存して複製
+                </Button>
+              )}
+              <Button type="submit" disabled={saving || dupStep === "pick" || dupStep === "result"}>
                 {saving ? "保存中…" : "保存"}
               </Button>
             </div>

@@ -13,6 +13,9 @@ import { useAiJobs } from "@/components/ai-jobs-provider";
 import { countActiveFilters, FilterSheet } from "@/components/lottery-filter-sheet";
 import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
+import { LotteryGroupCard } from "@/components/lottery-group-card";
+import { LotteryGroupSheet } from "@/components/lottery-group-sheet";
+import { buildListRows } from "@/lib/lottery-group";
 import { LotteryMatrix } from "@/components/lottery-matrix";
 import { OngoingSection } from "@/components/ongoing-section";
 import { SwipeCard } from "@/components/swipe-card";
@@ -115,6 +118,8 @@ function LotteryBoardInner() {
   const focusId = params.get("focus");
   const { unseen: unseenJobs } = useAiJobs();
   const [registering, setRegistering] = useState(false);
+  // 抽選グループの管理画面（親カードの「グループを管理」）。一覧側で持つ（子が減って親カードが通常のカードに戻っても、画面が消えない）
+  const [groupManaging, setGroupManaging] = useState<import("@/types/domain").Lottery | null>(null);
   // ＋登録は抽選情報の登録画面を直接開く
   const [tab, setTab] = useState<Tab>("managed");
   // 地域は端末に保存した選択（未保存は関西3県）を既定にする。通販・所在地不明は地域では除外しない
@@ -209,9 +214,11 @@ function LotteryBoardInner() {
   // 新着 = 全情報タブに出ている抽選（件数と同じ集合: 既定の絞り込み・スルー除外）のうち、まだ詳細を確認していないもの。必ず件数以下になる（Stage 6K）。
   // 以前は絞り込み前の全抽選から数えていたため、受付終了・応募済みの新着が混ざって件数を超えていた
   // 件数が多くても最初の画面分だけをすぐ描画し、残りは続けて足す（フォーカス先は必ず含める）
+  // 複数店舗抽選は、グループの親カード1枚にまとめる（子は従来どおり独立した抽選。Stage 8U-2）。段階描画・フォーカスは行（親カード1枚＝1行）の単位
+  const rows = useMemo(() => buildListRows(lotteries, data), [lotteries, data]);
   const focusTarget = highlight ?? focusId;
-  const focusIdx = focusTarget ? lotteries.findIndex((l) => l.id === focusTarget) : -1;
-  const shownCount = useProgressiveCount(lotteries.length, tab, { needed: focusIdx >= 0 ? focusIdx + 1 : 0 });
+  const focusIdx = focusTarget ? rows.findIndex((r) => (r.kind === "single" ? r.lottery.id === focusTarget : r.members.some((m) => m.id === focusTarget))) : -1;
+  const shownCount = useProgressiveCount(rows.length, tab, { needed: focusIdx >= 0 ? focusIdx + 1 : 0 });
   const newCount = useMemo(() => selectLotteries(data, "all", defaultFiltersFor("all"), now, profile.id).filter((l) => l.isNew).length, [data, now, profile.id]);
   const dots = useMemo(() => tabDots(data, profile.id, now, viewScope), [data, profile.id, now, viewScope]);
   const prefectures = useMemo(() => [...new Set(data.stores.map((s) => s.prefecture).filter(Boolean))], [data.stores]);
@@ -222,6 +229,30 @@ function LotteryBoardInner() {
   const activeCount = countActiveFilters(filters, baseFilters, { tab, showSkip, userScope });
   const filterKey = JSON.stringify(filters);
   const hasFilter = activeCount > 0 || filters.query.trim() !== "";
+
+  /** 抽選1件のカード（スワイプ・退出アニメーション込み）。通常の一覧と、グループの展開後の子カードで共通 */
+  const renderLottery = (l: (typeof lotteries)[number]) => {
+        const phase = exit.phases[l.id];
+        const sliding = phase === "sliding";
+        const dir = exit.dirs[l.id] ?? "right";
+        const collapsing = phase === "collapsing";
+        return (
+          <li
+            key={l.id}
+            data-exit={phase}
+            // 高さを詰める（collapsing）のは、横へのスライドが終わって画面外へ出たあと。スライド中は高さを変えない
+            className={cn("grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,margin] duration-[280ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
+            style={collapsing ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
+          >
+            <div className={cn("min-h-0 min-w-0", collapsing && "overflow-hidden", sliding && (dir === "left" ? "animate-[apply-exit-slide-left_0.32s_cubic-bezier(0.4,0,1,1)_forwards]" : "animate-[apply-exit-slide-right_0.32s_cubic-bezier(0.4,0,1,1)_forwards]"), "motion-reduce:animate-none")}>
+              <SwipeCard lottery={l} tab={tab}>
+                <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
+              </SwipeCard>
+            </div>
+          </li>
+        );
+
+  };
 
   return (
     <UserScopeProvider pref={userScope}>
@@ -295,6 +326,7 @@ function LotteryBoardInner() {
         </div>
       </div>
       {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
+      {groupManaging && <LotteryGroupSheet anchor={groupManaging} onClose={() => setGroupManaging(null)} />}
 
       <div className={cn("space-y-2 pt-2", slide && "motion-safe:animate-[tab-slide-in-from-right_0.22s_ease-out]", slide === "prev" && "motion-safe:animate-[tab-slide-in-from-left_0.22s_ease-out]")} data-testid="board-content" data-swipe-mode={tabSwipe ? "tab" : "card"} onAnimationEnd={() => setSlide(null)}>
         {legend && (
@@ -394,27 +426,15 @@ function LotteryBoardInner() {
             {/* カードが画面の横へはみ出して横スクロールや残像にならないよう、横方向をクリップする（ring が欠けないよう左右に1の余白）。
                 グリッドの列は minmax(0,1fr) で、中身の最小幅（折り返さない文字など）に引き伸ばされないようにする */}
             <ul className="-mx-1 space-y-2.5 overflow-x-clip px-1" aria-label="抽選一覧">
-              {lotteries.slice(0, shownCount).map((l) => {
-                const phase = exit.phases[l.id];
-                const sliding = phase === "sliding";
-                const dir = exit.dirs[l.id] ?? "right";
-                const collapsing = phase === "collapsing";
-                return (
-                  <li
-                    key={l.id}
-                    data-exit={phase}
-                    // 高さを詰める（collapsing）のは、横へのスライドが終わって画面外へ出たあと。スライド中は高さを変えない
-                    className={cn("grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,margin] duration-[280ms] ease-out motion-reduce:transition-none", collapsing && "invisible")}
-                    style={collapsing ? { gridTemplateRows: "0fr", marginBottom: 0 } : { gridTemplateRows: "1fr" }}
-                  >
-                    <div className={cn("min-h-0 min-w-0", collapsing && "overflow-hidden", sliding && (dir === "left" ? "animate-[apply-exit-slide-left_0.32s_cubic-bezier(0.4,0,1,1)_forwards]" : "animate-[apply-exit-slide-right_0.32s_cubic-bezier(0.4,0,1,1)_forwards]"), "motion-reduce:animate-none")}>
-                      <SwipeCard lottery={l} tab={tab}>
-                        <LotteryCard lottery={l} tab={tab} view={cardView} highlighted={highlight === l.id} />
-                      </SwipeCard>
-                    </div>
+              {rows.slice(0, shownCount).map((r) =>
+                r.kind === "single" ? (
+                  renderLottery(r.lottery)
+                ) : (
+                  <li key={r.key} className="grid grid-cols-[minmax(0,1fr)]">
+                    <LotteryGroupCard row={r} renderChild={renderLottery} forceOpen={focusTarget ? r.members.some((m) => m.id === focusTarget) : false} onManage={setGroupManaging} />
                   </li>
-                );
-              })}
+                ),
+              )}
             </ul>
           </ApplyExitProvider>
         )}

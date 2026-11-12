@@ -27,9 +27,10 @@ create table public.lottery_exclusions (
   facts jsonb not null default '{}'::jsonb,
   excluded_by_profile_id uuid,
   created_at timestamptz not null default now(),
-  foreign key (lottery_id, household_id) references public.lotteries (id, household_id),
-  foreign key (duplicate_of_lottery_id, household_id) references public.lotteries (id, household_id),
-  foreign key (excluded_by_profile_id, household_id) references public.profiles (id, household_id),
+  -- 抽選は物理削除しない運用（アーカイブ）。テスト世帯の削除（purge_test_households）など、抽選を消す場合だけ、記録も一緒に消える（cascade）
+  foreign key (lottery_id, household_id) references public.lotteries (id, household_id) on delete cascade,
+  foreign key (duplicate_of_lottery_id, household_id) references public.lotteries (id, household_id) on delete set null (duplicate_of_lottery_id),
+  foreign key (excluded_by_profile_id, household_id) references public.profiles (id, household_id) on delete set null (excluded_by_profile_id),
   check (duplicate_of_lottery_id is null or reason = 'duplicate'),
   check (duplicate_of_lottery_id is distinct from lottery_id)
 );
@@ -114,9 +115,9 @@ create table public.lottery_group_events (
   detail jsonb not null default '{}'::jsonb,
   actor_profile_id uuid,
   created_at timestamptz not null default now(),
-  foreign key (group_id, household_id) references public.lottery_bulk_groups (id, household_id),
-  foreign key (lottery_id, household_id) references public.lotteries (id, household_id),
-  foreign key (actor_profile_id, household_id) references public.profiles (id, household_id)
+  foreign key (group_id, household_id) references public.lottery_bulk_groups (id, household_id) on delete cascade,
+  foreign key (lottery_id, household_id) references public.lotteries (id, household_id) on delete cascade,
+  foreign key (actor_profile_id, household_id) references public.profiles (id, household_id) on delete set null (actor_profile_id)
 );
 create index lottery_group_events_group on public.lottery_group_events (group_id, created_at);
 create index lottery_group_events_lottery on public.lottery_group_events (lottery_id, created_at);

@@ -5,6 +5,7 @@ import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EXCLUDE_REASONS, type ExcludeReason } from "@/lib/collector/user-rules";
+import { lotteryLabel } from "@/lib/lottery-group";
 import { cn } from "@/lib/utils";
 import type { Lottery } from "@/types/domain";
 
@@ -22,13 +23,7 @@ export function LotteryExcludeSheet({ lottery, onClose, onDone }: { lottery: Lot
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const label = (l: Lottery) => {
-    const store = data.stores.find((s) => s.id === l.storeId)?.name ?? "";
-    const products = l.items.map((i) => data.products.find((p) => p.id === i.productId)?.officialName ?? "").filter(Boolean).join("・");
-    const d = l.applyDeadline.precision === "date_time" ? l.applyDeadline.at.slice(0, 10) : l.applyDeadline.precision === "date_only" ? l.applyDeadline.date : "";
-    const deadline = d ? `〜${d.slice(5).replace("-", "/")}` : "";
-    return [store, products, deadline].filter(Boolean).join(" ") || "（名称なし）";
-  };
+  const label = (l: Lottery) => lotteryLabel(l, data);
   // 重複の参照先: 同じ系列の、ほかの（除外されていない）抽選。同じ商品のものを先頭に
   const dupTargets = useMemo(() => {
     const mine = new Set(lottery.items.map((i) => i.productId));

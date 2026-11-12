@@ -25,6 +25,7 @@ import { canOperateOwner, ownerIdOf, scopedApplications } from "@/lib/profile-li
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { LotteryExcludeSheet } from "@/components/lottery-exclude-sheet";
+import { LotteryGroupSheet } from "@/components/lottery-group-sheet";
 import { APPLY_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL, SERIAL_STEPS } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
@@ -246,6 +247,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const boxHint = boxHintOf(lottery, data.chains.find((c) => c.id === lottery.chainId));
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [grouping, setGrouping] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
   const [confirmChainSkip, setConfirmChainSkip] = useState(false);
@@ -645,6 +647,11 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                     他店舗に複製
                   </Button>
                 )}
+                {persistent && (
+                  <Button size="sm" variant="outline" onClick={() => setGrouping(true)} data-testid="lottery-group-open">
+                    {lottery.groupId ? "グループを管理" : "グループにまとめる"}
+                  </Button>
+                )}
                 {lottery.eventState !== "postponed" ? (
                   <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "postponed")}>
                     発表延期にする
@@ -676,6 +683,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
       {editing && <LotteryFormDialog open lottery={lottery} onOpenChange={setEditing} />}
       {duplicating && <DuplicateDialog open lottery={lottery} onOpenChange={setDuplicating} />}
+      {grouping && <LotteryGroupSheet anchor={lottery} onClose={() => setGrouping(false)} />}
       {/* 除外（理由つき。Stage 8U-1）: 抽選候補の除外と同じ理由の分類。削除はせず、応募・当落・購入の記録は保持される */}
       {confirmArchive && (
         <LotteryExcludeSheet

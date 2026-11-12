@@ -167,3 +167,97 @@ describe("Stage 8U-1: 入力欄の自動スクロール（共通処理）", () =
     vi.useRealTimers();
   });
 });
+
+// ---------------------------------------------------------------- 複数店舗抽選のグループ（表示ロジック）
+import { createMockData } from "@/data/mock";
+import { buildListRows, commonalityKey, groupBasis, suggestGroupMates, summarizeGroup, type GroupRow } from "@/lib/lottery-group";
+import type { AppData, LotteryGroup } from "@/types/domain";
+
+describe("Stage 8U-2: 抽選グループの表示ロジック", () => {
+  const NOW = new Date("2026-11-03T03:00:00Z");
+  const mk = (): { data: AppData; ids: string[] } => {
+    const data = createMockData(NOW);
+    const same = data.lotteries.filter((l) => l.chainId === "c1");
+    return { data, ids: same.map((l) => l.id) };
+  };
+  const withGroup = (data: AppData, ids: string[], g: Partial<LotteryGroup> = {}): AppData => ({
+    ...data,
+    lotteryGroups: [{ id: "G1", chainId: "c1", title: "", origin: "manual", basis: {}, ...g }],
+    lotteries: data.lotteries.map((l) => (ids.includes(l.id) ? { ...l, groupId: "G1" } : l)),
+  });
+
+  it("グループの子が一覧に2件以上あれば、先頭の子の位置に親カード1枚へまとめる（子は独立した抽選のまま）", () => {
+    const { data, ids } = mk();
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const g = withGroup(data, ids.slice(0, 2));
+    const rows = buildListRows(g.lotteries, g);
+    const grp = rows.filter((r) => r.kind === "group") as GroupRow[];
+    expect(grp).toHaveLength(1);
+    expect(grp[0].members.map((l) => l.id)).toEqual(ids.slice(0, 2));
+    expect(grp[0].all).toHaveLength(2);
+    expect(rows.filter((r) => r.kind === "single").length).toBe(g.lotteries.length - 2);
+    // 親が出る位置は、先頭の子の位置
+    expect(rows.findIndex((r) => r.kind === "group")).toBe(g.lotteries.findIndex((l) => l.id === ids[0]));
+    // 子の抽選IDは変わらない
+    expect(g.lotteries.filter((l) => l.groupId === "G1").map((l) => l.id).sort()).toEqual(ids.slice(0, 2).sort());
+  });
+  it("一覧に出ている子が1件だけ（他は別のタブ・絞り込み）なら、通常のカード。グループ情報が無いデータ・解散済み（グループ定義なし）も通常のカード", () => {
+    const { data, ids } = mk();
+    const g = withGroup(data, ids.slice(0, 2));
+    const onlyOne = g.lotteries.filter((l) => l.id !== ids[1]);
+    expect(buildListRows(onlyOne, g).every((r) => r.kind === "single")).toBe(true);
+    expect(buildListRows(g.lotteries, { ...g, lotteryGroups: undefined }).every((r) => r.kind === "single")).toBe(true);
+    expect(buildListRows(g.lotteries, { ...g, lotteryGroups: [] }).every((r) => r.kind === "single")).toBe(true);
+  });
+  it("単に系列が同じというだけではグループにならない（所属が明示されたものだけ）", () => {
+    const { data } = mk();
+    expect(buildListRows(data.lotteries, { ...data, lotteryGroups: [] }).every((r) => r.kind === "single")).toBe(true);
+    expect(data.lotteries.every((l) => !l.groupId)).toBe(true);
+  });
+  it("親カードの内容: 系列名・対象商品（省略表示）・応募期間・発表日・対象店舗数・応募済み店舗数（現在のプロフィールの子の応募から導出）", () => {
+    const { data, ids } = mk();
+    const g = withGroup(data, ids);
+    const row = buildListRows(g.lotteries, g).find((r) => r.kind === "group") as GroupRow;
+    const profile = g.profiles[0];
+    const s = summarizeGroup(row, g, profile.id);
+    expect(s.chainName).toBe(g.chains.find((c) => c.id === "c1")?.name);
+    expect(s.storeCount).toBe(ids.length);
+    expect(s.productsText).not.toBe("");
+    expect(s.periodText).toMatch(/〜/);
+    expect(s.appliedCount).toBeLessThanOrEqual(s.storeCount);
+    // 子の応募状態が親へ反映される（親は状態を持たない）
+    const acc = g.accounts.find((a) => a.profileId === profile.id)!;
+    const target = ids[0];
+    const applied: AppData = { ...g, applications: [...g.applications.filter((a) => !(a.lotteryId === target && a.accountId === acc.id)), { id: "A-new", lotteryId: target, accountId: acc.id, state: "applied", result: "pending", fulfillment: "none", appliedAt: NOW.toISOString() } as never] };
+    const before = summarizeGroup(row, g, profile.id).appliedCount;
+    const after = summarizeGroup(buildListRows(applied.lotteries, applied).find((r) => r.kind === "group") as GroupRow, applied, profile.id).appliedCount;
+    expect(after).toBeGreaterThanOrEqual(before);
+  });
+  it("複数商品は2つまで表示して「ほかN」に省略。店舗ごとに期間が違えば範囲を示し、店舗により異なることを明示する", () => {
+    const { data, ids } = mk();
+    const prods = data.products.slice(0, 4).map((p) => p.id);
+    let g = withGroup(data, ids.slice(0, 2));
+    g = { ...g, lotteries: g.lotteries.map((l) => (l.id === ids[0] ? { ...l, items: prods.map((productId) => ({ productId, quantity: 1, unit: "box" as const })) } : l)) };
+    const row = buildListRows(g.lotteries, g).find((r) => r.kind === "group") as GroupRow;
+    const s = summarizeGroup(row, g, g.profiles[0].id);
+    expect(s.products.length).toBeGreaterThanOrEqual(3);
+    expect(s.productsText).toMatch(/ほか\d+$/);
+    g = { ...g, lotteries: g.lotteries.map((l) => (l.id === ids[1] ? { ...l, applyDeadline: { precision: "date_only" as const, date: "2099-12-31" } } : l)) };
+    const s2 = summarizeGroup(buildListRows(g.lotteries, g).find((r) => r.kind === "group") as GroupRow, g, g.profiles[0].id);
+    expect(s2.periodVaries).toBe(true);
+    expect(s2.periodText).toContain("12/31");
+  });
+  it("手動グループ化の候補: 系列・商品・応募期間・発表日・応募方式が同じで、まだグループに入っていない抽選。別企画（商品・期間が違う）は候補にしない。根拠（共通・相違の項目）を記録できる", () => {
+    const { data, ids } = mk();
+    const a = data.lotteries.find((l) => l.id === ids[0])!;
+    const b = { ...data.lotteries.find((l) => l.id === ids[1])!, applyDeadline: a.applyDeadline, resultDate: a.resultDate, applyStart: a.applyStart, applyMethod: a.applyMethod, items: a.items };
+    const c = { ...b, id: "LX", applyDeadline: { precision: "date_only" as const, date: "2099-01-01" } };
+    const d = { ...b, id: "LY", groupId: "G9" };
+    expect(commonalityKey(a)).toBe(commonalityKey(b));
+    expect(suggestGroupMates(a, [a, b, c, d]).map((l) => l.id)).toEqual([b.id]);
+    const basis = groupBasis([a, b, c]);
+    expect(basis.common).toEqual(expect.arrayContaining(["chain", "products"]));
+    expect(basis.differs).toContain("deadline");
+    expect(basis.lotteryCount).toBe(3);
+  });
+});
