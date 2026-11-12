@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
+import { SYSTEM_PROMPT } from "@/lib/agent/store-location/run";
 import { checkRealApi } from "@/lib/agent/real-gate";
 import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, collectRecords, isFatalProblem, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
 import { scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
@@ -45,6 +46,25 @@ describe("実在店舗の評価データ", () => {
       expect(g.expectedAddress, g.id).toMatch(/[都道府県]/);
       const ev = (g.evidence ?? []) as { url: string; verifiedOn: string }[];
       expect(ev.every((e) => e.url.startsWith("https://") && e.verifiedOn === "2026-11-12"), g.id).toBe(true);
+    }
+  });
+  it("Stage 8D-4: 正解データ（住所・出典URL・注意書き）が、AIに渡す入力（店舗情報・システム指示・タスク文）に混入していない", () => {
+    const hay = JSON.stringify(REAL_TARGETS.map((t) => t.store)) + SYSTEM_PROMPT;
+    const flat = (s: string) => s.normalize("NFKC").replace(/[\s　]+/g, "");
+    const haystack = flat(hay);
+    for (const g of REAL_GOLD.filter((x) => /^[NU][0-9]+$/.test(x.id))) {
+      if (g.expectedAddress) expect(haystack.includes(flat(g.expectedAddress)), `${g.id} の正解住所が入力に含まれる`).toBe(false);
+      for (const e of (g.evidence ?? []) as { url: string; quote: string }[]) {
+        expect(haystack.includes(flat(e.url)), `${g.id} の出典URLが入力に含まれる`).toBe(false);
+      }
+      for (const a of g.mustNotAdopt ?? []) expect(haystack.includes(flat(a)), `${g.id} の禁止住所が入力に含まれる`).toBe(false);
+    }
+    // 入力の店舗情報は、系列名・店舗名・都道府県・登録済みドメイン・同じ系列の他店舗名・系列の別名だけ
+    for (const t of REAL_TARGETS) expect(Object.keys(t.store).sort()).toEqual(["chain", "chainAliases", "knownDomains", "name", "prefecture", "siblingNames"]);
+    // 調査の実行基盤（run.ts・tools.ts・verify.ts）は、正解データ・評価データを読み込まない
+    for (const f of ["run.ts", "tools.ts", "verify.ts", "official.ts", "mock.ts"]) {
+      const src = readFileSync(`src/lib/agent/store-location/${f}`, "utf8");
+      expect(src, f).not.toMatch(/real-stores|gold\.json|gold-8d4|REAL_GOLD/);
     }
   });
   it("Stage 8D-4: 評価対象に、公式に明記・公式が見つけにくい・類似名・系列名と店舗名が違う・閉店/移転・住所の一部・公式情報不足（正解不明）の各種が含まれる", () => {
