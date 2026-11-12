@@ -27,7 +27,7 @@ export default defineConfig({
     stderr: "pipe",
     timeout: 240_000,
     // AI読み取りはテストではモックエンジン（固定のサンプル）を使う。実際のAI APIは呼ばない
-    env: { NEXT_PUBLIC_DATA_SOURCE: mode, AI_PROVIDER: "mock" },
+    env: { NEXT_PUBLIC_DATA_SOURCE: mode, AI_PROVIDER: "mock", AGENT_REAL_API: "", AGENT_ANTHROPIC_API_KEY: "", AGENT_MAX_COST_JPY_PER_RUN: "", AGENT_MAX_RUNS_PER_DAY: "", AGENT_MODEL: "", AGENT_MAX_SEARCHES: "", AGENT_MAX_FETCHES: "", AGENT_MAX_STEPS: "" }, // 実API評価用の設定（AGENT_*）を E2E に渡さない（Stage 8D-5）
   },
   projects: [
     { name: "mobile", use: { ...devices["Pixel 7"] } },

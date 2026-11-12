@@ -14,6 +14,8 @@ import goldJson from "../../../../eval/real-stores/gold.json";
 import targetsJson from "../../../../eval/real-stores/targets.json";
 import gold8d4 from "../../../../eval/real-stores/gold-8d4.json";
 import targets8d4 from "../../../../eval/real-stores/targets-8d4.json";
+import gold8d5 from "../../../../eval/real-stores/gold-8d5.json";
+import targets8d5 from "../../../../eval/real-stores/targets-8d5.json";
 
 export interface RealTarget {
   id: string;
@@ -21,9 +23,9 @@ export interface RealTarget {
   store: StoreTarget;
 }
 export type RealGold = EvalGold & { evidence?: unknown[]; unknown?: string[]; /** 正解不明。正解率の分母に含めず、調査結果と確認状況を別に報告する */ unknownGold?: boolean };
-/** Stage 8D-3（R1〜R5）と Stage 8D-4（N01〜N20・U01〜U10）。ID で区別する */
-export const REAL_TARGETS = [...(targetsJson.targets as unknown as RealTarget[]), ...(targets8d4.targets as unknown as RealTarget[])];
-export const REAL_GOLD = [...(goldJson.gold as unknown as RealGold[]), ...(gold8d4.gold as unknown as RealGold[])];
+/** Stage 8D-3（R1〜R5）・8D-4（N01〜N20・U01〜U10）・8D-5（P01〜P20・Q01〜Q10）。ID で区別する */
+export const REAL_TARGETS = [...(targetsJson.targets as unknown as RealTarget[]), ...(targets8d4.targets as unknown as RealTarget[]), ...(targets8d5.targets as unknown as RealTarget[])];
+export const REAL_GOLD = [...(goldJson.gold as unknown as RealGold[]), ...(gold8d4.gold as unknown as RealGold[]), ...(gold8d5.gold as unknown as RealGold[])];
 
 // ---------------------------------------------------------------- 費用の見積もり（実行前の報告用）
 export interface CostEstimate {

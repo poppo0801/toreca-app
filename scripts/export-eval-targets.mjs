@@ -22,7 +22,8 @@ for (const s of spec) {
   const chain = (chains ?? []).find((c) => c.name === s.chain);
   const store = chain ? stores.find((x) => x.chain_id === chain.id && x.name === s.store) : null;
   if (!chain || !store) throw new Error(`店舗が見つかりません: ${s.chain} ${s.store}`);
-  if (store.address_optional) throw new Error(`住所が登録済みです（評価対象にしない）: ${s.chain} ${s.store}`);
+  if (store.address_optional && !process.argv.includes("--allow-address")) throw new Error(`住所が登録済みです（--allow-address なしでは評価対象にしない）: ${s.chain} ${s.store}`);
+  // 住所が登録済みの店舗を使う場合も、住所は出力しない（入力は店舗名・都道府県・登録済みドメイン等だけ。正解は公式ページで別に確認する）
   const siblings = stores.filter((x) => x.chain_id === chain.id && x.id !== store.id);
   targets.push({
     id: s.id,

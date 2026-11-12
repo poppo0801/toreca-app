@@ -53,7 +53,7 @@ describe("実在店舗の評価データ", () => {
     const hay = JSON.stringify(REAL_TARGETS.map((t) => t.store)) + SYSTEM_PROMPT;
     const flat = (s: string) => s.normalize("NFKC").replace(/[\s　]+/g, "");
     const haystack = flat(hay);
-    for (const g of REAL_GOLD.filter((x) => /^[NU][0-9]+$/.test(x.id))) {
+    for (const g of REAL_GOLD.filter((x) => /^[NUPQ][0-9]+$/.test(x.id))) {
       if (g.expectedAddress) expect(haystack.includes(flat(g.expectedAddress)), `${g.id} の正解住所が入力に含まれる`).toBe(false);
       for (const e of (g.evidence ?? []) as { url: string; quote: string }[]) {
         expect(haystack.includes(flat(e.url)), `${g.id} の出典URLが入力に含まれる`).toBe(false);
@@ -67,6 +67,26 @@ describe("実在店舗の評価データ", () => {
       const src = readFileSync(`src/lib/agent/store-location/${f}`, "utf8");
       expect(src, f).not.toMatch(/real-stores|gold\.json|gold-8d4|REAL_GOLD/);
     }
+  });
+  it("Stage 8D-5: 未知の30件（正解あり20・正解不明10）。R・N・U の店舗を含まず、入力に住所を含まない。正解は実行前に固定", () => {
+    const pq = REAL_TARGETS.filter((t) => /^[PQ][0-9]+$/.test(t.id));
+    expect(pq).toHaveLength(30);
+    expect(REAL_GOLD.filter((g) => /^P[0-9]+$/.test(g.id) && !g.unknownGold)).toHaveLength(20);
+    expect(REAL_GOLD.filter((g) => /^Q[0-9]+$/.test(g.id) && g.unknownGold)).toHaveLength(10);
+    const key = (t: { store: { chain: string; name: string } }) => `${t.store.chain} ${t.store.name}`;
+    const prev = new Set(REAL_TARGETS.filter((t) => /^[RNU][0-9]+$/.test(t.id)).map(key));
+    expect(pq.some((t) => prev.has(key(t)))).toBe(false);
+    expect(new Set(pq.map(key)).size).toBe(30);
+    for (const t of pq) expect(Object.keys(t.store).sort()).toEqual(["chain", "chainAliases", "knownDomains", "name", "prefecture", "siblingNames"]);
+    for (const g of REAL_GOLD.filter((x) => /^P[0-9]+$/.test(x.id))) {
+      expect(g.expectedAddress, g.id).toMatch(/[都道府県]/);
+      const ev = (g.evidence ?? []) as { url: string; verifiedOn: string }[];
+      expect(ev.length, g.id).toBeGreaterThan(0);
+      expect(ev.every((e) => e.url.startsWith("https://") && e.verifiedOn === "2026-11-12"), g.id).toBe(true);
+    }
+    for (const g of REAL_GOLD.filter((x) => /^Q[0-9]+$/.test(x.id))) expect(g.expectedAddress ?? null).toBeNull();
+    const cats = pq.map((t) => t.category).join(",");
+    for (const c of ["official_stated", "official_hard", "similar_name", "name_differs", "closure_relocated", "unknown_gold_official_down", "unknown_gold_official_blocked", "unknown_gold_ambiguous"]) expect(cats, c).toContain(c);
   });
   it("Stage 8D-4: 評価対象に、公式に明記・公式が見つけにくい・類似名・系列名と店舗名が違う・閉店/移転・住所の一部・公式情報不足（正解不明）の各種が含まれる", () => {
     const cats = REAL_TARGETS.filter((t) => /^[NU][0-9]+$/.test(t.id)).map((t) => t.category).join(",");
@@ -285,7 +305,7 @@ describe("集計: 初回の主要評価値。正解不明は分母に含めな�
 describe.skipIf(process.env.REAL_REPORT !== "1")("集計の出力（表示のみ）", () => {
   it("初回・再実行を別に集計して eval/runs/real/summary-8d4-*.json に書く", () => {
     for (const phase of ["initial", "rerun"] as const) {
-      const recs = collectRecords("eval/runs/real", phase, (id) => /^[NU][0-9]+$/.test(id));
+      const recs = collectRecords("eval/runs/real", phase, (id) => /^[NUPQ][0-9]+$/.test(id));
       writeFileSync(`eval/runs/real/summary-8d4-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
       writeFileSync(`eval/runs/real/summary-8d4-${phase}-original-scorer.json`, JSON.stringify(summarizeRecords(recs, matchesGoldV1), null, 2)); // 初回の採点（旧版）を再現
     }

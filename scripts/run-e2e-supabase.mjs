@@ -8,6 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { freePort } from "./lib/port.mjs";
+import { ISOLATED_AGENT_ENV } from "./lib/e2e-env.mjs";
 import { assertLocalTarget } from "./lib/target.mjs";
 
 process.loadEnvFile(".env.local");
@@ -32,7 +33,7 @@ async function prepareUser() {
   return password;
 }
 const playwright = (args, extraEnv) =>
-  spawnSync("npx", ["playwright", "test", ...args], { stdio: "inherit", shell: true, env: { ...process.env, E2E_MODE: "supabase", ...extraEnv } });
+  spawnSync("npx", ["playwright", "test", ...args], { stdio: "inherit", shell: true, env: { ...process.env, ...ISOLATED_AGENT_ENV, E2E_MODE: "supabase", ...extraEnv } });
 
 const spec = process.env.E2E_SPEC ?? "";
 const isolate = spec.includes("*");
@@ -53,7 +54,7 @@ if (!isolate) {
   console.log(`[e2e] ${files.length} ファイルを1つずつ実行します（ファイルごとに世帯を作り直す）`);
   freePort();
   // ビルドと起動は1回。playwright.config.ts の webServer は使わず、起動済みのサーバーへ繋ぐ（E2E_BASE_URL）
-  const appEnv = { ...process.env, NEXT_PUBLIC_DATA_SOURCE: "supabase", AI_PROVIDER: "mock" };
+  const appEnv = { ...process.env, ...ISOLATED_AGENT_ENV, NEXT_PUBLIC_DATA_SOURCE: "supabase", AI_PROVIDER: "mock" };
   const build = spawnSync("npm", ["run", "build"], { stdio: "inherit", shell: true, env: appEnv });
   if (build.status !== 0) process.exit(build.status ?? 1);
   const server = spawn("npx", ["next", "start", "-p", String(PORT)], { stdio: "ignore", shell: true, env: appEnv });

@@ -114,8 +114,16 @@ if (cmd === "up") {
     "CRON_SECRET=dev-local-cron-secret-not-for-production",
     "",
   ];
+  // 実API評価用の開発専用設定（AGENT_*）は、書き換えても消さずに引き継ぐ（Stage 8D-5。以前は消えて、開発用キーの再設定が必要だった）。値は表示しない
+  const kept = existsSync(".env.local.bak")
+    ? readFileSync(".env.local.bak", "utf8")
+        .split(/\r?\n/)
+        .filter((l) => /^AGENT_[A-Z_]+=/.test(l))
+    : [];
+  if (kept.length) lines.splice(lines.length - 1, 0, "# 実API評価用の開発専用設定（db:env が引き継いだもの。本番のキーは入れない）", ...kept);
   writeFileSync(".env.local", lines.join("\n"));
   console.log(".env.local を開発用（ローカルDB）に書き換えました。元の内容は .env.local.bak に退避（本番の値はコミットされません）。");
+  if (kept.length) console.log(`実API評価用の設定（AGENT_*）${kept.length} 件を引き継ぎました（値は表示しません）。`);
 } else if (cmd === "seed") {
   loadLocalEnv();
   assertLocalTarget("db:seed");

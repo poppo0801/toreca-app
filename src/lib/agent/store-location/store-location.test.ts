@@ -49,13 +49,16 @@ describe("検証層（AIの提案をそのまま信じない）", () => {
     expect(r.confidence).toBeLessThan(70);
     expect(r.reasons.join()).toMatch(/第三者の情報だけでは確定しない/);
   });
-  it("独立した2つのドメインが同じ住所なら確認済み。同じドメインの2ページは独立とみなさない", async () => {
+  it("第三者の2つのドメインが同じ住所でも、公式の情報源が無ければ確認済みにしない（候補）。同じドメインの2ページも同様。登録済みの公式ドメインなら確認済み", async () => {
     const q = "テスト書店 駅前店　所在地：東京都架空区駅前1-2-3";
     const p1: PageEvidence = { url: "https://blog.test/a", text: goodPage.text, injection: false };
     const p2: PageEvidence = { url: "https://map.test/b", text: goodPage.text, injection: false };
     const p3: PageEvidence = { url: "https://blog.test/c", text: goodPage.text, injection: false };
     const two = await verifyResearch({ store, proposal: { candidates: [{ address: "東京都架空区駅前1-2-3", quote: q, sourceUrl: p1.url }, { address: "東京都架空区駅前1-2-3", quote: q, sourceUrl: p2.url }] }, pages: [p1, p2], geocode: geo, limitReached: false });
-    expect(two.status).toBe("confirmed");
+    expect(two.status).toBe("candidate"); // 第三者の一致は転載の可能性があるため確定しない（Stage 8D-5）
+    expect(two.reasons.join()).toMatch(/転載/);
+    const official = await verifyResearch({ store: { ...store, knownDomains: ["blog.test"] }, proposal: { candidates: [{ address: "東京都架空区駅前1-2-3", quote: q, sourceUrl: p1.url }] }, pages: [p1], geocode: geo, limitReached: false });
+    expect(official.status).toBe("confirmed"); // 公式（登録済み）の情報源に店舗名と住所が載っていれば確認済み
     const same = await verifyResearch({ store, proposal: { candidates: [{ address: "東京都架空区駅前1-2-3", quote: q, sourceUrl: p1.url }, { address: "東京都架空区駅前1-2-3", quote: q, sourceUrl: p3.url }] }, pages: [p1, p3], geocode: geo, limitReached: false });
     expect(same.status).toBe("candidate");
   });

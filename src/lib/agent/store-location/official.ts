@@ -33,6 +33,8 @@ const THIRD_PARTY = [
   "x.com", "twitter.com", "instagram.com", "facebook.com", "youtube.com", "tiktok.com", "line.me", "threads.net",
   "note.com", "ameblo.jp", "hatenablog.com", "hatenablog.jp", "livedoor.jp", "fc2.com", "blogspot.com", "wordpress.com", "medium.com",
   "wikipedia.org", "google.com", "google.co.jp", "goo.ne.jp", "yahoo.co.jp", "bing.com", "tabelog.com", "retty.me", "navitime.co.jp", "mapion.co.jp", "ekiten.jp", "jalan.net",
+  // 店舗・施設の一覧、電話帳、トレカ店のまとめ・地図・口コミなどの第三者の一覧サイト（転載元が同じ可能性があるため、公式にも、独立した根拠にもしない。店舗マスターに登録されていても公式扱いにしない）
+  "pokemon-card.com", "machitoku.jp", "torecamap.co.jp", "hikakaku.com", "uridoki.net", "itp.ne.jp", "recyclemap.jp", "tokubai.co.jp", "shufoo.net", "homemate-research-shopping.com", "toreca-hack.com", "kj-weekly.jp", "nuimap.com", "charagoo.jp", "docomo.ne.jp",
   "amazon.co.jp", "rakuten.co.jp", "mercari.com", "yahoo.jp", "paypayfleamarket.yahoo.co.jp", "kakaku.com", "price.com", "togetter.com", "matome.naver.jp",
 ];
 
@@ -52,7 +54,9 @@ const hostOf = (u: string): string => {
 };
 
 export function assessOfficialSites({ store, pages }: OfficialInput): OfficialSiteAssessment[] {
-  const trusted = new Set(store.knownDomains.map((d) => domainOf(`https://${d}`)).filter(Boolean));
+  // 店舗マスターに登録された公式サイト。ただし、第三者の一覧サイト（地図・電話帳・まとめ等）が登録されていても、公式（trusted）にはしない
+  const isThird = (d: string) => THIRD_PARTY.some((x) => d === x || d.endsWith(`.${x}`));
+  const trusted = new Set(store.knownDomains.map((d) => domainOf(`https://${d}`)).filter((d) => !!d && !isThird(d)));
   const chainN = norm(store.chain);
   const chainKeys = [chainN, ...(store.chainAliases ?? []).map(norm), norm(store.name.split(/[\s　]+/)[0] ?? "")].filter((k) => k.length >= 2);
   const own = norm(distinctiveToken(store.chain, store.name));

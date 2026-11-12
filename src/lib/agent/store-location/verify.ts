@@ -292,7 +292,7 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
     if (e.geoMatch) s += 15;
     if (e.officialStatus === "trusted") s += 35;
     else if (e.officialStatus === "verified") s += 30;
-    if (independent >= 2) s += 20;
+    // 独立した複数の情報源の一致は、確認済みの根拠にも加点にもしない（地図・口コミ・まとめは同じデータの転載の可能性があり、独立した根拠として過大評価しない。Stage 8D-5）
     if (e.closure) s -= 40;
     if (e.injection) s -= 30;
     if (e.prefectureMismatch) s -= 30;
@@ -325,14 +325,14 @@ export async function verifyResearch(input: VerifyInput): Promise<ResearchResult
   if (best) {
     const independent = new Set(validUse.filter((v) => key(v) === key(best)).map((v) => v.domain)).size;
     if (ignoredByOfficial.length) reasons.push(`公式の情報源と異なる住所（${ignoredByOfficial.join(" / ")}）が公式でない情報源にあったが、公式の情報を優先した`);
-    const ok = best.complete && best.geoMatch && !best.closure && !best.injection && !best.prefectureMismatch && (best.official || independent >= 2);
+    const ok = best.complete && best.geoMatch && !best.closure && !best.injection && !best.prefectureMismatch && best.official;
     if (ok) {
-      reasons.push(best.official ? (best.officialStatus === "verified" ? "公式サイト（店舗一覧・運営元などの根拠で検証済み）に、店舗名と住所が載っている" : "公式の情報源（登録済み）に、店舗名と住所が載っている") : `独立した${independent}つの情報源で、同じ住所が見つかった`);
+      reasons.push(best.officialStatus === "verified" ? "公式サイト（店舗一覧・運営元などの根拠で検証済み）に、店舗名と住所が載っている" : "公式の情報源（登録済み）に、店舗名と住所が載っている");
       reasons.push("引用が取得したページの本文に実在し、住所は番地まで揃い、国土地理院の住所検索とも一致した");
       return out("confirmed", best, Math.min(100, Math.max(best.score, 70)));
     }
     reasons.push(...best.problems);
-    if (!best.official && independent < 2) reasons.push("公式の情報源を確認できず、独立した2つ目の情報源もない（第三者の情報だけでは確定しない）");
+    if (!best.official) reasons.push(independent >= 2 ? `${independent}つの情報源で同じ住所だが、公式の情報源を確認できない（第三者の情報は同じデータの転載の可能性があるため、一致しても確定しない）` : "公式の情報源を確認できず、第三者の情報だけでは確定しない");
     return out("candidate", best, Math.min(best.score, 60));
   }
   // 検証を通った候補が無い
