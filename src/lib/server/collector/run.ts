@@ -25,6 +25,7 @@ import { saveCandidateRows } from "@/lib/server/collector/save-rows";
 import { excludedChainReason, matchExcludedChain, type ExcludedChain } from "@/lib/collector/chain-exclusion";
 import { loadExcludedChains } from "@/lib/server/collector/chain-exclusion-load";
 import { reconcileAutoRegistered, recordMergedSource } from "@/lib/server/collector/dedupe-guard";
+import { afterCollectedRegistration } from "@/lib/server/collector/grouping-hook";
 import { snapshotOfInput } from "@/lib/merged-sources";
 import { deepClean, safeSlice, safeSliceEnd } from "@/lib/text-safe";
 import { emptyFunnel, funnelLine, judgeXPost, type XFunnel } from "@/lib/collector/x-relevance";
@@ -857,6 +858,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
         }
         // 店舗の都道府県が空のままにならないよう、確実な根拠のある都道府県だけを補う（既に入っている値は変えない）
         await fillStorePrefecture(db, saved.value.id, input.receiveMethod === "shipping" ? "" : knownPref);
+        // 既存の抽選グループとの関係を調べる（Stage 8F。開発環境のみ。本番では即座に戻る。失敗しても収集は止めない）
+        await afterCollectedRegistration(db, deps.householdId, saved.value.id, { asService: !deps.canRegister, actor: deps.actor });
         const storedReg = trackingObj ? ({ ...(stored as object), tracking: { ...trackingObj, promotedAt: nowIso, promotedLotteryId: saved.value.id } } as unknown as Json) : stored;
         await supersede("registered", saved.value.id);
         const withCaution = decision.grade === "B";
@@ -1515,6 +1518,7 @@ export async function registerCandidate(db: Db, householdId: string, actor: stri
   if (!saved.ok) return { ok: false, message: saved.error };
   await db.from("lotteries").update({ source_kind: "auto", is_new: true, registration_path: "auto_confirmed", confirmed_at: new Date().toISOString(), confirmed_by_profile_id: actor }).eq("id", saved.value.id);
   await bumpStats(db, householdId, new Date(), { registered_new: 1 });
+  await afterCollectedRegistration(db, householdId, saved.value.id, { asService: false, actor }); // Stage 8F（開発環境のみ。本番では何もしない）
   await db.from("collection_candidates").update({ status: "auto_registered", job_state: "completed", lottery_id: saved.value.id, reasons: ["確認のうえ登録しました"], manual_state: "resolved", manual_resolved_at: new Date().toISOString(), manual_resolved_by: actor, resolved_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq("id", candidateId);
   return { ok: true, lotteryId: saved.value.id };
 }

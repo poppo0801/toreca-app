@@ -68,8 +68,10 @@ interface AppContextValue {
     archiveLottery: (lotteryId: string) => Promise<Outcome>;
     excludeLottery: (lotteryId: string, ex: import("@/lib/server/lottery-service").ExclusionInput) => Promise<Outcome>;
     groupLotteries: (lotteryIds: string[], opts?: import("@/lib/server/lottery-service").GroupOptions) => Promise<Outcome>;
-    ungroupLottery: (lotteryId: string) => Promise<Outcome>;
-    dissolveLotteryGroup: (groupId: string) => Promise<Outcome>;
+    ungroupLottery: (lotteryId: string, reason?: import("@/lib/server/lottery-service").UngroupReason) => Promise<Outcome>;
+    dissolveLotteryGroup: (groupId: string, reason?: import("@/lib/server/lottery-service").UngroupReason) => Promise<Outcome>;
+    /** AIが提示したグループ候補の承認・却下（Stage 8F） */
+    decideGroupProposal: (proposalId: string, decision: "approve" | "reject", note?: string | null) => Promise<Outcome>;
     addManualPurchase: (input: ManualPurchaseInput) => Promise<Outcome>;
   };
 }
@@ -417,8 +419,9 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         archiveLottery: (id) => run((a) => repo.archiveLottery(a, id)),
         excludeLottery: (id, ex) => run((a) => repo.excludeLottery(a, id, ex)),
         groupLotteries: (ids, opts) => run((a) => repo.groupLotteries(a, ids, opts)),
-        ungroupLottery: (id) => run((a) => repo.ungroupLottery(a, id)),
-        dissolveLotteryGroup: (id) => run((a) => repo.dissolveLotteryGroup(a, id)),
+        ungroupLottery: (id, reason) => run((a) => repo.ungroupLottery(a, id, reason)),
+        dissolveLotteryGroup: (id, reason) => run((a) => repo.dissolveLotteryGroup(a, id, reason)),
+        decideGroupProposal: (id, decision, note) => run((a) => repo.decideGroupProposal(a, id, decision, note ?? null)),
         addManualPurchase: (input) => run((a) => repo.addManualPurchase(a, input)),
       },
     };

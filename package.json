@@ -22,6 +22,7 @@
     "eval:real-report": "node scripts/eval-real.mjs report",
     "eval:real-preflight": "node scripts/eval-real.mjs preflight",
     "eval:real": "node scripts/eval-real.mjs run",
+    "eval:grouping": "vitest run src/lib/agent/lottery-grouping/eval.test.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

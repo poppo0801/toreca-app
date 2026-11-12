@@ -50,8 +50,10 @@ export interface LotteryRepository {
   excludeLottery(actorId: string, lotteryId: string, ex: import("@/lib/server/lottery-service").ExclusionInput): Promise<Outcome>;
   /** 抽選グループ（複数店舗抽選の表示グループ）。応募・当選の記録は変えない */
   groupLotteries(actorId: string, lotteryIds: string[], opts?: import("@/lib/server/lottery-service").GroupOptions): Promise<Outcome>;
-  ungroupLottery(actorId: string, lotteryId: string): Promise<Outcome>;
-  dissolveLotteryGroup(actorId: string, groupId: string): Promise<Outcome>;
+  ungroupLottery(actorId: string, lotteryId: string, reason?: import("@/lib/server/lottery-service").UngroupReason): Promise<Outcome>;
+  dissolveLotteryGroup(actorId: string, groupId: string, reason?: import("@/lib/server/lottery-service").UngroupReason): Promise<Outcome>;
+  /** AIが提示したグループ候補の承認・却下（Stage 8F） */
+  decideGroupProposal(actorId: string, proposalId: string, decision: "approve" | "reject", note?: string | null): Promise<Outcome>;
   addManualPurchase(actorId: string, input: ManualPurchaseInput): Promise<Outcome>;
 }
 

@@ -27,6 +27,7 @@ import type {
   EventState,
   FulfillmentStatus,
   ItemUnit,
+  LotteryGroupProposal,
   MultiMode,
   ProductKind,
   ProfileColor,
@@ -220,6 +221,66 @@ async function loadUsage(db: Db, householdId?: string): Promise<Pick<AppData, "b
  * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
  * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
  */
+// ---- グループ候補の決定（承認・却下・自動実行。Stage 8F。AIは使わない DB 操作）
+export interface ResolveResult {
+  status: string;
+  groupId: string | null;
+  replayed: boolean;
+  reason: string | null;
+}
+/** 提案の決定。asHouseholdId が指定されたときは service_role 専用の入口（自動収集）を使う */
+export async function resolveProposal(db: Db, proposalId: string, action: "approve" | "reject" | "auto_apply", note: string | null, actor: string | null, asHouseholdId: string | null = null): Promise<ServiceResult<ResolveResult>> {
+  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return fail("リクエストが不正です");
+  const a = db as any; // eslint-disable-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に無い
+  const { data, error } = asHouseholdId
+    ? await a.rpc("resolve_lottery_group_proposal_as", { p_id: proposalId, p_action: action, p_note: note, p_actor: actor, p_household: asHouseholdId })
+    : await a.rpc("resolve_lottery_group_proposal_tx", { p_id: proposalId, p_action: action, p_note: note, p_actor: actor });
+  if (error) {
+    const m = error.message ?? "";
+    if (/already belongs/.test(m)) return fail("すでに別のグループに所属している抽選が含まれています。グループ管理で調整してください");
+    if (/same chain/.test(m)) return fail("同じ系列の抽選だけをグループにできます");
+    if (/not found/.test(m)) return fail("提案が見つかりません");
+    return fail(mapDbError(error));
+  }
+  const r = data as { ok: boolean; status: string; groupId?: string; replayed?: boolean; reason?: string };
+  return ok({ status: r.status, groupId: r.groupId ?? null, replayed: !!r.replayed, reason: r.reason ?? null });
+}
+
+const DECISION_ERROR: Record<string, string> = {
+  members_changed: "対象の抽選が除外・変更されたため、提案は無効になりました",
+  group_gone: "追加先のグループが解除されたため、提案は無効になりました",
+  already_grouped: "対象の抽選がすでに別のグループに所属しているため、提案は無効になりました",
+  separated_before: "以前に手動で分けた組を含むため、提案は無効になりました",
+  not_pending: "この提案はすでに処理されています",
+};
+export async function decideGroupProposal(db: Db, proposalId: string, action: "approve" | "reject", note: string | null, actor: string | null): Promise<ServiceResult<{ status: string; groupId: string | null }>> {
+  const r = await resolveProposal(db, proposalId, action, note ? note.slice(0, 500) : null, actor);
+  if (!r.ok) return r;
+  if (action === "approve" && !["approved", "applied"].includes(r.value.status)) return fail(DECISION_ERROR[r.value.reason ?? r.value.status] ?? "提案を実行できませんでした");
+  return ok({ status: r.value.status, groupId: r.value.groupId });
+}
+
+
+/** 承認待ちのグループ候補（画面の一覧用。Stage 8F）。表が無い（未適用）環境・本番では空（読み込みを失敗させない） */
+export async function loadPendingGroupProposals(db: Db, householdId?: string): Promise<LotteryGroupProposal[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表は生成型に無い
+    let q = (db as any).from("lottery_group_proposals").select("id,kind,subject_lottery_id,lottery_ids,target_group_id,confidence,rationale,common,mismatches,missing,evidence,engine,created_at").eq("status", "pending").eq("tier", "suggest").in("kind", ["new_group", "add_to_group"]).order("created_at", { ascending: false }).limit(50);
+    if (householdId) q = q.eq("household_id", householdId);
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return (data as { id: string; kind: string; subject_lottery_id: string; lottery_ids: string[]; target_group_id: string | null; confidence: number; rationale: string; common: string[]; mismatches: { field: string; detail: string; severity: string }[]; missing: string[]; evidence: { strongSignals?: string[] } | null; engine: string; created_at: string }[]).map((p) => ({
+      id: p.id, kind: p.kind as "new_group" | "add_to_group", subjectId: p.subject_lottery_id, lotteryIds: p.lottery_ids, targetGroupId: p.target_group_id, confidence: p.confidence, rationale: p.rationale,
+      common: Array.isArray(p.common) ? p.common : [],
+      mismatches: Array.isArray(p.mismatches) ? p.mismatches.map((m) => ({ field: m.field, detail: m.detail, severity: m.severity as "hard" | "gap" | "soft" })) : [],
+      missing: Array.isArray(p.missing) ? p.missing : [], strongSignals: p.evidence?.strongSignals ?? [], engine: p.engine, createdAt: p.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+
 async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"]; chainConditions: AppData["chainConditions"]; chainConditionStates: AppData["chainConditionStates"]; lotteryGroups: AppData["lotteryGroups"] }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
   const from = (t: string): any => {
@@ -337,6 +398,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   };
   // 主要なテーブルの取得と同時に、設定・開封実績・標準画像も並行して取得する（以前は主要テーブルの後に順番に取得していた＝往復が3段増えていた。Stage 7O）
   const optionalP = loadOptional(db, householdId);
+  const proposalsP = loadPendingGroupProposals(db, householdId); // 承認待ちのグループ候補（Stage 8F。表が無い・本番では空）
   const usageP = loadUsage(db, householdId);
   // 購入記録の標準画像（Stage 7E）。取得できなくても他のデータは読み込む
   const defaultImagesP = (async () => {
@@ -350,7 +412,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     return out;
   })();
   // 主要テーブルの取得に失敗して先に例外になっても、未処理の拒否にならないようにする
-  for (const p of [optionalP, usageP, defaultImagesP]) void p.catch(() => undefined);
+  for (const p of [optionalP, usageP, defaultImagesP, proposalsP]) void p.catch(() => undefined);
   const q = await Promise.all([
     sel("profiles").order("sort_order").order("created_at"),
     sel("profile_target_rules"),
@@ -418,7 +480,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   const imageUrl = (i: { id: string; sha256: string }, size: "full" | "thumb") => `/api/product-image/${i.id}?v=${i.sha256.slice(0, 12)}&s=${size}`;
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates, lotteryGroups }, usage, defaultImages] = await Promise.all([optionalP, usageP, defaultImagesP]);
+  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates, lotteryGroups }, usage, defaultImages, groupProposals] = await Promise.all([optionalP, usageP, defaultImagesP, proposalsP]);
 
   return {
     profiles: profiles.map((p) => {
@@ -485,6 +547,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     })),
     campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, chainId: c.chain_id, storeRule: c.store_rule as "one_store" | "multi" })),
     ...(lotteryGroups ? { lotteryGroups } : {}),
+    ...(groupProposals.length > 0 ? { groupProposals } : {}),
     lotteries: lotteries.map((l) => ({
       id: l.id,
       groupId: (l as unknown as { bulk_group_id?: string | null }).bulk_group_id ?? undefined,
@@ -1045,16 +1108,27 @@ export async function groupLotteries(db: Db, lotteryIds: string[], opts: GroupOp
   }
   return ok({ groupId: data as string });
 }
-export async function ungroupLottery(db: Db, lotteryId: string, actor: string | null): Promise<ServiceResult> {
+/** 解除の理由（Stage 8F）。分類（別の企画・期間が違う・条件が違う・その他）と自由記述。今後のAIの判断に使う（同じ組を自動でまとめ直さない） */
+export interface UngroupReason {
+  code?: "different_campaign" | "period_differs" | "conditions_differ" | "other";
+  note?: string;
+}
+const REASON_CODES = ["different_campaign", "period_differs", "conditions_differ", "other"];
+/** 理由があるときだけ、DB関数へ渡す（理由の引数が無い旧い構造でも、理由なしなら動く） */
+const reasonArgs = (r?: UngroupReason): Record<string, string> => ({
+  ...(r?.code && REASON_CODES.includes(r.code) ? { p_reason: r.code } : {}),
+  ...(r?.note?.trim() ? { p_note: r.note.trim().slice(0, 300) } : {}),
+});
+export async function ungroupLottery(db: Db, lotteryId: string, actor: string | null, reason?: UngroupReason): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
-  const { error } = await (db as any).rpc("ungroup_lottery_tx", { p_lottery: lotteryId, p_actor: actor });
+  const { error } = await (db as any).rpc("ungroup_lottery_tx", { p_lottery: lotteryId, p_actor: actor, ...reasonArgs(reason) });
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
-export async function dissolveLotteryGroup(db: Db, groupId: string, actor: string | null): Promise<ServiceResult> {
+export async function dissolveLotteryGroup(db: Db, groupId: string, actor: string | null, reason?: UngroupReason): Promise<ServiceResult> {
   if (!uuid.safeParse(groupId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
-  const { error } = await (db as any).rpc("dissolve_lottery_group_tx", { p_group: groupId, p_actor: actor });
+  const { error } = await (db as any).rpc("dissolve_lottery_group_tx", { p_group: groupId, p_actor: actor, ...reasonArgs(reason) });
   if (error) return fail(/group not found/.test(error.message ?? "") ? "グループが見つかりません（解除済みです）" : mapDbError(error));
   return ok(undefined);
 }

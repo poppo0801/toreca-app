@@ -313,6 +313,30 @@ export interface LotteryGroup {
   basis: Record<string, unknown>;
 }
 
+/**
+ * AIが提示したグループ候補（Stage 8F）。利用者が承認すると、既存の手動グループと同じ親子カードになる（origin = "ai"）。
+ * 理由・共通点・相違点・信頼度は、AIの文章ではなく検証層が事実と照合して決めたもの。
+ */
+export interface LotteryGroupProposal {
+  id: string;
+  /** new_group=新規グループ / add_to_group=既存グループへ追加 */
+  kind: "new_group" | "add_to_group";
+  /** 判定の対象になった抽選 */
+  subjectId: string;
+  /** グループに入れる抽選（新規は対象＋相手、追加は対象のみ） */
+  lotteryIds: string[];
+  targetGroupId: string | null;
+  /** 0〜100。事実の一致の度合い（AIの自己申告ではない） */
+  confidence: number;
+  rationale: string;
+  common: string[];
+  mismatches: { field: string; detail: string; severity: "hard" | "gap" | "soft" }[];
+  missing: string[];
+  strongSignals: string[];
+  engine: string;
+  createdAt: string;
+}
+
 export interface Management {
   lotteryId: string;
   isManaged: boolean;
@@ -498,6 +522,8 @@ export interface AppData {
   campaigns: Campaign[];
   /** 抽選グループ（解散していないもの。Stage 8U-2）。未適用の環境・モックでは省略 */
   lotteryGroups?: LotteryGroup[];
+  /** 承認待ちのグループ候補（AIの判定。Stage 8F。開発環境のみで作られる。表が無い・本番では省略） */
+  groupProposals?: LotteryGroupProposal[];
   lotteries: Lottery[];
   management: Management[];
   applications: Application[];

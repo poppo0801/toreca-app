@@ -11,6 +11,8 @@ import {
   groupLotteries,
   ungroupLottery,
   dissolveLotteryGroup,
+  decideGroupProposal,
+  type UngroupReason,
   saveLotteryAndDuplicate,
   lotteryOperationResult,
   type DuplicateOptions,
@@ -165,11 +167,15 @@ export async function groupLotteriesAction(lotteryIds: string[], opts: GroupOpti
     return { ok: false, error: "グループ化しましたが、最新データの取得に失敗しました。再読み込みしてください" };
   }
 }
-export async function ungroupLotteryAction(lotteryId: string, actor: string | null): Promise<MutationResult> {
-  return mutate((c) => ungroupLottery(c.db, lotteryId, actor));
+export async function ungroupLotteryAction(lotteryId: string, actor: string | null, reason?: UngroupReason): Promise<MutationResult> {
+  return mutate((c) => ungroupLottery(c.db, lotteryId, actor, reason));
 }
-export async function dissolveLotteryGroupAction(groupId: string, actor: string | null): Promise<MutationResult> {
-  return mutate((c) => dissolveLotteryGroup(c.db, groupId, actor));
+export async function dissolveLotteryGroupAction(groupId: string, actor: string | null, reason?: UngroupReason): Promise<MutationResult> {
+  return mutate((c) => dissolveLotteryGroup(c.db, groupId, actor, reason));
+}
+/** AIが提示したグループ候補の承認・却下（Stage 8F）。承認で、手動と同じグループ（出所: ai）になる。店舗ごとの抽選・応募・当選は変わらない */
+export async function decideGroupProposalAction(proposalId: string, decision: "approve" | "reject", note: string | null, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => decideGroupProposal(c.db, proposalId, decision, note, actor));
 }
 
 export async function setEventStateAction(lotteryId: string, state: EventState, actor: string | null): Promise<MutationResult> {

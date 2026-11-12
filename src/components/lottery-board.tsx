@@ -16,6 +16,7 @@ import { LotteryCard } from "@/components/lottery-card";
 import { LotteryGroupCard } from "@/components/lottery-group-card";
 import { LotteryGroupSheet } from "@/components/lottery-group-sheet";
 import { GroupManageContext } from "@/components/group-manage-context";
+import { GroupProposalsSheet } from "@/components/group-proposals-sheet";
 import { buildListRows } from "@/lib/lottery-group";
 import { LotteryMatrix } from "@/components/lottery-matrix";
 import { OngoingSection } from "@/components/ongoing-section";
@@ -121,6 +122,8 @@ function LotteryBoardInner() {
   const [registering, setRegistering] = useState(false);
   // 抽選グループの管理画面（親カードの「グループを管理」）。一覧側で持つ（子が減って親カードが通常のカードに戻っても、画面が消えない）
   const [groupManaging, setGroupManaging] = useState<import("@/types/domain").Lottery | null>(null);
+  const [proposalsOpen, setProposalsOpen] = useState(false);
+  const proposalCount = data.groupProposals?.length ?? 0; // AIのグループ候補（開発環境のみ。本番では常に0＝表示されない）
   // ＋登録は抽選情報の登録画面を直接開く
   const [tab, setTab] = useState<Tab>("managed");
   // 地域は端末に保存した選択（未保存は関西3県）を既定にする。通販・所在地不明は地域では除外しない
@@ -329,6 +332,7 @@ function LotteryBoardInner() {
       </div>
       {registering && <LotteryFormDialog open lottery={null} onOpenChange={setRegistering} />}
       {groupManaging && <LotteryGroupSheet anchor={groupManaging} onClose={() => setGroupManaging(null)} />}
+      {proposalsOpen && <GroupProposalsSheet onClose={() => setProposalsOpen(false)} />}
 
       <div className={cn("space-y-2 pt-2", slide && "motion-safe:animate-[tab-slide-in-from-right_0.22s_ease-out]", slide === "prev" && "motion-safe:animate-[tab-slide-in-from-left_0.22s_ease-out]")} data-testid="board-content" data-swipe-mode={tabSwipe ? "tab" : "card"} onAnimationEnd={() => setSlide(null)}>
         {legend && (
@@ -427,6 +431,12 @@ function LotteryBoardInner() {
           <ApplyExitProvider value={exit.api}>
             {/* カードが画面の横へはみ出して横スクロールや残像にならないよう、横方向をクリップする（ring が欠けないよう左右に1の余白）。
                 グリッドの列は minmax(0,1fr) で、中身の最小幅（折り返さない文字など）に引き伸ばされないようにする */}
+            {proposalCount > 0 && persistent && (
+              <button type="button" onClick={() => setProposalsOpen(true)} className="mb-2 flex min-h-10 w-full items-center justify-between rounded-lg border border-info px-3 text-left text-xs" data-testid="group-proposals-open">
+                <span>まとめられそうな抽選が{proposalCount}件あります</span>
+                <span className="font-bold text-info">確認 ›</span>
+              </button>
+            )}
             <ul className="-mx-1 space-y-2.5 overflow-x-clip px-1" aria-label="抽選一覧">
               {rows.slice(0, shownCount).map((r) =>
                 r.kind === "single" ? (
