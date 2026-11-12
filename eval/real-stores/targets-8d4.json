@@ -1,0 +1,712 @@
+{
+  "frozenOn": "2026-11-12",
+  "note": "店舗マスターから凍結した評価入力（住所は含まない）。公式サイトの登録（knownDomains）は本番の状態そのまま",
+  "targets": [
+    {
+      "id": "N01",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "泉大津店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "N02",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "名谷店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "N03",
+      "category": "similar_name",
+      "store": {
+        "chain": "ふるいち",
+        "name": "小平店",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "N04",
+      "category": "similar_name",
+      "store": {
+        "chain": "ふるいち",
+        "name": "高野店",
+        "prefecture": "京都府",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "N05",
+      "category": "similar_name",
+      "store": {
+        "chain": "BOOKOFF",
+        "name": "JR蒲田駅東口店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [
+          "京都伏見店",
+          "豊中三国店",
+          "お宝大陸和泉中央店",
+          "新宿駅西口店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N06",
+      "category": "name_differs",
+      "store": {
+        "chain": "BOOKOFF",
+        "name": "新宿駅西口店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [
+          "JR蒲田駅東口店",
+          "京都伏見店",
+          "豊中三国店",
+          "お宝大陸和泉中央店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N07",
+      "category": "name_differs",
+      "store": {
+        "chain": "BOOKOFF",
+        "name": "豊中三国店",
+        "prefecture": "大阪府",
+        "knownDomains": [],
+        "siblingNames": [
+          "JR蒲田駅東口店",
+          "京都伏見店",
+          "お宝大陸和泉中央店",
+          "新宿駅西口店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N08",
+      "category": "name_differs_closure",
+      "store": {
+        "chain": "BOOKOFF",
+        "name": "お宝大陸和泉中央店",
+        "prefecture": "大阪府",
+        "knownDomains": [],
+        "siblingNames": [
+          "JR蒲田駅東口店",
+          "京都伏見店",
+          "豊中三国店",
+          "新宿駅西口店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N09",
+      "category": "official_hard",
+      "store": {
+        "chain": "カードラボ",
+        "name": "マルイ海老名店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [
+          "大阪日本橋店",
+          "なんば店",
+          "販売買取センターNAMBA",
+          "姫路店",
+          "川崎店",
+          "秋葉原ラジオ会館本店",
+          "津田沼店",
+          "オタロード本店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N10",
+      "category": "official_hard",
+      "store": {
+        "chain": "カードラボ",
+        "name": "川崎店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [
+          "マルイ海老名店",
+          "大阪日本橋店",
+          "なんば店",
+          "販売買取センターNAMBA",
+          "姫路店",
+          "秋葉原ラジオ会館本店",
+          "津田沼店",
+          "オタロード本店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N11",
+      "category": "similar_name_closure",
+      "store": {
+        "chain": "カードラボ",
+        "name": "なんば店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [
+          "マルイ海老名店",
+          "大阪日本橋店",
+          "販売買取センターNAMBA",
+          "姫路店",
+          "川崎店",
+          "秋葉原ラジオ会館本店",
+          "津田沼店",
+          "オタロード本店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N12",
+      "category": "name_differs",
+      "store": {
+        "chain": "カードラボ",
+        "name": "販売買取センターNAMBA",
+        "prefecture": "大阪府",
+        "knownDomains": [],
+        "siblingNames": [
+          "マルイ海老名店",
+          "大阪日本橋店",
+          "なんば店",
+          "姫路店",
+          "川崎店",
+          "秋葉原ラジオ会館本店",
+          "津田沼店",
+          "オタロード本店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N13",
+      "category": "similar_name",
+      "store": {
+        "chain": "カードラボ",
+        "name": "大阪日本橋店",
+        "prefecture": "大阪府",
+        "knownDomains": [],
+        "siblingNames": [
+          "マルイ海老名店",
+          "なんば店",
+          "販売買取センターNAMBA",
+          "姫路店",
+          "川崎店",
+          "秋葉原ラジオ会館本店",
+          "津田沼店",
+          "オタロード本店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N14",
+      "category": "similar_name",
+      "store": {
+        "chain": "カードボックス（直営）",
+        "name": "ヨコハマ本店",
+        "prefecture": "神奈川県",
+        "knownDomains": [
+          "cardbox.nextone-iga.co.jp"
+        ],
+        "siblingNames": [
+          "日本橋店",
+          "オーサカ店",
+          "津店",
+          "名張店",
+          "広島店",
+          "池袋店",
+          "京都店",
+          "横浜西口店",
+          "横浜西口2号店"
+        ],
+        "chainAliases": [
+          "カードボックス"
+        ]
+      }
+    },
+    {
+      "id": "N15",
+      "category": "partial_address",
+      "store": {
+        "chain": "カードボックス（直営）",
+        "name": "津店",
+        "prefecture": "三重県",
+        "knownDomains": [
+          "cardbox.nextone-iga.co.jp"
+        ],
+        "siblingNames": [
+          "日本橋店",
+          "オーサカ店",
+          "ヨコハマ本店",
+          "名張店",
+          "広島店",
+          "池袋店",
+          "京都店",
+          "横浜西口店",
+          "横浜西口2号店"
+        ],
+        "chainAliases": [
+          "カードボックス"
+        ]
+      }
+    },
+    {
+      "id": "N16",
+      "category": "official_stated",
+      "store": {
+        "chain": "カードボックス（直営）",
+        "name": "名張店",
+        "prefecture": "三重県",
+        "knownDomains": [
+          "cardbox.nextone-iga.co.jp"
+        ],
+        "siblingNames": [
+          "日本橋店",
+          "オーサカ店",
+          "ヨコハマ本店",
+          "津店",
+          "広島店",
+          "池袋店",
+          "京都店",
+          "横浜西口店",
+          "横浜西口2号店"
+        ],
+        "chainAliases": [
+          "カードボックス"
+        ]
+      }
+    },
+    {
+      "id": "N17",
+      "category": "closure",
+      "store": {
+        "chain": "カードボックス（直営）",
+        "name": "広島店",
+        "prefecture": "広島県",
+        "knownDomains": [
+          "cardbox.nextone-iga.co.jp"
+        ],
+        "siblingNames": [
+          "日本橋店",
+          "オーサカ店",
+          "ヨコハマ本店",
+          "津店",
+          "名張店",
+          "池袋店",
+          "京都店",
+          "横浜西口店",
+          "横浜西口2号店"
+        ],
+        "chainAliases": [
+          "カードボックス"
+        ]
+      }
+    },
+    {
+      "id": "N18",
+      "category": "official_stated",
+      "store": {
+        "chain": "カードボックス（直営）",
+        "name": "池袋店",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "cardbox.nextone-iga.co.jp"
+        ],
+        "siblingNames": [
+          "日本橋店",
+          "オーサカ店",
+          "ヨコハマ本店",
+          "津店",
+          "名張店",
+          "広島店",
+          "京都店",
+          "横浜西口店",
+          "横浜西口2号店"
+        ],
+        "chainAliases": [
+          "カードボックス"
+        ]
+      }
+    },
+    {
+      "id": "N19",
+      "category": "official_stated",
+      "store": {
+        "chain": "キデイランド",
+        "name": "二子玉川店",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "www.kiddyland.co.jp"
+        ],
+        "siblingNames": [
+          "三宮店",
+          "神戸店",
+          "吉祥寺店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "N20",
+      "category": "official_hard",
+      "store": {
+        "chain": "イエローサブマリン",
+        "name": "三宮店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U01",
+      "category": "unknown_gold_similar_name",
+      "store": {
+        "chain": "ドラゴンスター",
+        "name": "日本橋2号店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "dorasuta.jp"
+        ],
+        "siblingNames": [
+          "通販",
+          "神戸三宮店",
+          "くずはモール",
+          "ららぽーと甲子園",
+          "ららぽーと堺",
+          "なんば なんさん通り店",
+          "オタロード中央店",
+          "日本橋本店",
+          "日本橋3号店",
+          "泉佐野店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U02",
+      "category": "unknown_gold_similar_name",
+      "store": {
+        "chain": "ドラゴンスター",
+        "name": "日本橋3号店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "dorasuta.jp"
+        ],
+        "siblingNames": [
+          "日本橋2号店",
+          "通販",
+          "神戸三宮店",
+          "くずはモール",
+          "ららぽーと甲子園",
+          "ららぽーと堺",
+          "なんば なんさん通り店",
+          "オタロード中央店",
+          "日本橋本店",
+          "泉佐野店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U03",
+      "category": "unknown_gold_official_blocked",
+      "store": {
+        "chain": "ドラゴンスター",
+        "name": "ららぽーと堺",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "dorasuta.jp"
+        ],
+        "siblingNames": [
+          "日本橋2号店",
+          "通販",
+          "神戸三宮店",
+          "くずはモール",
+          "ららぽーと甲子園",
+          "なんば なんさん通り店",
+          "オタロード中央店",
+          "日本橋本店",
+          "日本橋3号店",
+          "泉佐野店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U04",
+      "category": "unknown_gold_ambiguous",
+      "store": {
+        "chain": "TSUTAYA",
+        "name": "松戸",
+        "prefecture": "千葉県",
+        "knownDomains": [
+          "store-tsutaya.tsite.jp",
+          "linoas.jp"
+        ],
+        "siblingNames": [
+          "姫路広峰店",
+          "枚方ベルパルレ店",
+          "リノアス八尾店",
+          "北千住店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U05",
+      "category": "unknown_gold_official_down",
+      "store": {
+        "chain": "TSUTAYA",
+        "name": "北千住店",
+        "prefecture": "",
+        "knownDomains": [
+          "store-tsutaya.tsite.jp",
+          "linoas.jp"
+        ],
+        "siblingNames": [
+          "松戸",
+          "姫路広峰店",
+          "枚方ベルパルレ店",
+          "リノアス八尾店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U06",
+      "category": "unknown_gold_official_hard",
+      "store": {
+        "chain": "GEO",
+        "name": "伊川谷店",
+        "prefecture": "兵庫県",
+        "knownDomains": [],
+        "siblingNames": [
+          "応募時に店舗選択"
+        ],
+        "chainAliases": [
+          "ゲオ"
+        ]
+      }
+    },
+    {
+      "id": "U07",
+      "category": "unknown_gold_closure",
+      "store": {
+        "chain": "文教堂書店",
+        "name": "浦安西友店",
+        "prefecture": "千葉県",
+        "knownDomains": [],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U08",
+      "category": "unknown_gold_closure",
+      "store": {
+        "chain": "イトーヨーカドー",
+        "name": "甲子園店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [
+          "通販"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U09",
+      "category": "unknown_gold_ambiguous",
+      "store": {
+        "chain": "大垣書店",
+        "name": "伏見店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "U10",
+      "category": "unknown_gold_official_hard",
+      "store": {
+        "chain": "ヤマダデンキ",
+        "name": "Tech LIFE SELECT 神戸垂水店",
+        "prefecture": "",
+        "knownDomains": [],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    }
+  ]
+}
