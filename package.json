@@ -18,6 +18,7 @@
     "eval:score": "node scripts/eval.mjs score",
     "eval:compare": "node scripts/eval.mjs compare",
     "eval:store-location": "node scripts/eval-store-location.mjs",
+    "eval:real-report": "node scripts/eval-real.mjs report",
     "eval:real-preflight": "node scripts/eval-real.mjs preflight",
     "eval:real": "node scripts/eval-real.mjs run",
     "build": "next build",

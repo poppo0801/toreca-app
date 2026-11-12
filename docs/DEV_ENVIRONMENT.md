@@ -91,3 +91,8 @@ AI の実接続を開発で試す場合（後の Stage）: `.env.local` に実�
 - 評価: `npm run eval:store-location`（`eval/runs/store-location-report.md`）。
 - 実API（費用発生・**承認後のみ**）: `.env.local` に `AGENT_REAL_API=allow`・`AGENT_ANTHROPIC_API_KEY`（開発専用。本番キーと別）・`AGENT_MAX_COST_JPY_PER_RUN`・`AGENT_MAX_RUNS_PER_DAY` を設定し、画面で費用確認にチェック。詳細は [stage8d2.md](stage8d2.md) §5。
 - 実在店舗の評価（Stage 8D-3）: `npm run eval:real-preflight`（API・ネットワークに接続しない。関門・計画・費用の見積もりを表示）。実API実行は承認後に `npm run eval:real -- --approved-max-jpy=<円> --approved-stores=<件> [--ids=R1,..] [--first-only]`。入力・正解は `eval/real-stores/`。結果は `eval/runs/real/`（Git管理外）。
+
+## 注意: db:env は .env.local を上書きする（Stage 8D-4 で判明）
+- `npm run db:env` は `.env.local` を全面的に再生成する。実API評価用に追記した `AGENT_REAL_API`・`AGENT_ANTHROPIC_API_KEY`・`AGENT_MAX_*` は消える。
+- マイグレーションを足したあとの開発DBの更新は `db:up` → `db:reset` → `db:seed` で足りる（`db:env` は不要）。`db:env` を実行する前に AGENT_* の設定を控えておく。
+- 実API評価の1日の上限（`AGENT_MAX_RUNS_PER_DAY`）は、評価の件数に合わせて開発環境だけで設定する（本番には反映しない）。

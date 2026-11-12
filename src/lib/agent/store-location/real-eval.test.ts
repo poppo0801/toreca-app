@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
 import { checkRealApi } from "@/lib/agent/real-gate";
-import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, isFatalProblem, isProblem, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
+import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, collectRecords, isFatalProblem, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
 import { scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
 import { EVAL_WORLD } from "@/lib/agent/store-location/world";
@@ -212,5 +212,60 @@ describe.skipIf(process.env.REAL_PREFLIGHT !== "1")("実行前の確認（表示
     mkdirSync("eval/runs/real", { recursive: true });
     writeFileSync("eval/runs/real/preflight.json", JSON.stringify(p, null, 2)); // 表示は scripts/eval-real.mjs が行う（キーは含まない）
     expect(p.estimate.stores).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------- 集計（Stage 8D-4）
+describe("集計: 初回の主要評価値。正解不明は分母に含めない", () => {
+  const rec = (id: string, status: string, address: string | null, over: Partial<RealRecord["usage"]> = {}, sites: { domain: string; status: string }[] = [], actions: string[] = ["web_search", "fetch_page"]): RealRecord => {
+    const target = REAL_TARGETS.find((x) => x.id === id)!;
+    return {
+      target, result: { caseId: id, status: status as never, address, confidence: 70, searches: 2, fetches: 1, steps: 4, costJpy: 3, ms: 1000, injectionFlags: 0 },
+      outcome: { status, address, confidence: 70, reasons: [], officialSites: sites.map((s) => ({ ...s, signals: [], problems: [] })), sources: [] },
+      usage: { steps: 4, searches: 2, fetches: 1, inputTokens: 1000, outputTokens: 100, costJpy: 3, ms: 1000, retries: 0, rejectedCalls: 0, injectionFlags: 0, ...over },
+      actions: actions.map((name) => ({ name, ok: true, arg: "" })), engine: "anthropic:test", problem: null,
+    };
+  };
+  it("正しい住所・誤住所・確認済みの誤り・公式判定・人手確認・追加調査を、正解ありの店舗だけで数える", () => {
+    const s = summarizeRecords([
+      rec("N16", "confirmed", "三重県名張市夏見3303", {}, [{ domain: "nextone-iga.co.jp", status: "trusted" }]), // 正しい・確認済み・公式OK
+      rec("N18", "candidate", "東京都豊島区東池袋1丁目31-1", { searches: 3 }), // 正しい・候補・追加調査（検索3回）
+      rec("N19", "confirmed", "東京都世田谷区玉川9-9-9", {}, [{ domain: "kiddyland.co.jp", status: "verified" }]), // 誤りを確認済みにした
+      rec("N05", "insufficient", null, {}, [], ["web_search", "fetch_page", "web_search"]), // 情報不足・追加調査（取得のあとに検索）
+      rec("U01", "confirmed", "大阪府大阪市中央区日本橋1-1-1"), // 正解不明: 分母に含めない
+    ]);
+    expect(s.stores).toBe(5);
+    expect(s.known.n).toBe(4);
+    expect(s.known.correctRate).toBe(2 / 4);
+    expect(s.known.confirmedSuccessRate).toBe(1 / 4);
+    expect(s.known.wrongAdopted).toBe(1);
+    expect(s.known.wrongConfirmed).toBe(1);
+    expect(s.known.officialFound).toBe(2);
+    expect(s.known.humanReviewRate).toBe(2 / 4);
+    expect(s.known.additionalSearchRate).toBe(2 / 4);
+    expect(s.unknown).toMatchObject({ n: 1, confirmed: 1 });
+    expect(s.totals.costJpy).toBe(15);
+    expect(s.perStore.find((x) => x.id === "U01")!.correct).toBeNull();
+  });
+  it("collectRecords: 同じ店舗の最初の実行だけを数え、初回と再実行を混ぜない", () => {
+    const dir = "eval/runs/real-test-collect";
+    mkdirSync(dir, { recursive: true });
+    const base = { plan: {}, unknown: [], stoppedReason: null, spentJpy: 0, score: null, startedAt: "x" };
+    writeFileSync(`${dir}/real-1.json`, JSON.stringify({ ...base, runId: "1", phase: "initial", records: [rec("N01", "candidate", "A")] }));
+    writeFileSync(`${dir}/real-2.json`, JSON.stringify({ ...base, runId: "2", phase: "initial", records: [rec("N01", "confirmed", "B"), rec("N02", "candidate", "C")] }));
+    writeFileSync(`${dir}/real-3.json`, JSON.stringify({ ...base, runId: "3", phase: "rerun", records: [rec("N01", "confirmed", "D")] }));
+    const initial = collectRecords(dir, "initial", (id) => id.startsWith("N"));
+    expect(initial.map((r) => [r.target.id, r.outcome.address])).toEqual([["N01", "A"], ["N02", "C"]]); // 同じ店舗は最初の結果
+    expect(collectRecords(dir, "rerun", (id) => id.startsWith("N")).map((r) => r.outcome.address)).toEqual(["D"]);
+  });
+});
+
+// 集計の出力（REAL_REPORT=1。API・ネットワークには接続しない）
+describe.skipIf(process.env.REAL_REPORT !== "1")("集計の出力（表示のみ）", () => {
+  it("初回・再実行を別に集計して eval/runs/real/summary-8d4-*.json に書く", () => {
+    for (const phase of ["initial", "rerun"] as const) {
+      const recs = collectRecords("eval/runs/real", phase, (id) => /^[NU][0-9]+$/.test(id));
+      writeFileSync(`eval/runs/real/summary-8d4-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
+    }
   });
 });

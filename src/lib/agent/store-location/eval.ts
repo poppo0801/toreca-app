@@ -112,7 +112,7 @@ const extendsExpected = (addr: string | null, expected: string | null | undefine
   const e = normalizeForMatch(expected);
   return a.startsWith(e) && !/^[0-9０-９\-ー－丁目番号]/.test(a.slice(e.length));
 };
-const matchesGold = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) =>
+export const matchesGold = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) =>
   same(addr, g.expectedAddress) || extendsExpected(addr, g.expectedAddress) || (!!addr && !!g.expectedAddressPrefix && normalizeForMatch(addr).startsWith(normalizeForMatch(g.expectedAddressPrefix)));
 /** 採用してはならない住所に当たるか（前後どちらかが前方一致） */
 const isForbidden = (addr: string | null, list: string[] = []) => !!addr && list.some((a) => { const x = normalizeForMatch(addr); const y = normalizeForMatch(a); return x.startsWith(y) || y.startsWith(x); });

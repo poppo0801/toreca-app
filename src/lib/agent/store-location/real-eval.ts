@@ -3,10 +3,10 @@
  * 入力は eval/real-stores/targets.json（店舗マスターの凍結した断面）、正解は gold.json（採点だけが読む。システムには渡さない）。
  * モックの評価（eval.ts）とは別に集計し、結果は eval/runs/real/ に書く（Git管理外）。APIキーは出力・保存しない。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { DEFAULT_LIMITS, type AgentLimits } from "@/lib/agent/core";
 import { checkRealApi } from "@/lib/agent/real-gate";
-import { type EvalGold, type EvalResult, scoreEval, type EvalScore } from "@/lib/agent/store-location/eval";
+import { type EvalGold, type EvalResult, matchesGold, scoreEval, type EvalScore } from "@/lib/agent/store-location/eval";
 import { researchStoreLocation, type ResearchDeps, type ResearchOutcome } from "@/lib/agent/store-location/run";
 import type { ResultCache } from "@/lib/agent/store-location/tools";
 import type { StoreTarget } from "@/lib/agent/store-location/verify";
@@ -246,4 +246,137 @@ export function preflight(env: Record<string, string | undefined>, ids: string[]
     estimate: estimateRealCost(plan.firstOnly ? 1 : ids.length, limits),
     targets: ids.map((id) => ({ id, store: REAL_TARGETS.find((t) => t.id === id)?.store.chain + " " + REAL_TARGETS.find((t) => t.id === id)?.store.name })),
   };
+}
+
+// ---------------------------------------------------------------- 集計（Stage 8D-4）: 初回の実行を主要評価値とし、再実行は別集計
+export interface StoreMetric {
+  id: string;
+  store: string;
+  category: string;
+  /** 正解あり（true）／正解不明（false） */
+  known: boolean;
+  status: string;
+  address: string | null;
+  confidence: number;
+  /** 正解ありのとき: 正しい住所を採用したか（確認済み・候補）。正解不明は null */
+  correct: boolean | null;
+  /** 正解ありのとき: 誤った住所を採用したか */
+  wrongAdopted: boolean | null;
+  wrongConfirmed: boolean | null;
+  /** 正解ありのとき: 公式サイトを（trusted/verified と）判定できたか。公式ドメインの正解が無ければ null */
+  officialFound: boolean | null;
+  wrongOfficial: boolean;
+  /** 自律的な追加調査（最初の取得のあとに検索した／検索3回以上）をしたか */
+  additionalSearch: boolean;
+  searches: number;
+  fetches: number;
+  steps: number;
+  inputTokens: number;
+  outputTokens: number;
+  costJpy: number;
+  ms: number;
+  humanReview: boolean;
+  problem: string | null;
+}
+export interface RunSummary {
+  stores: number;
+  known: {
+    n: number;
+    correctRate: number | null;
+    confirmedSuccessRate: number | null;
+    wrongAdopted: number;
+    wrongConfirmed: number;
+    officialFound: number;
+    officialTargets: number;
+    wrongOfficial: number;
+    humanReviewRate: number | null;
+    additionalSearchRate: number | null;
+  };
+  unknown: { n: number; confirmed: number; candidate: number; other: number; officialVerified: number };
+  totals: { costJpy: number; avgCostJpy: number; searches: number; ms: number; avgMs: number; p50Ms: number; p95Ms: number; inputTokens: number; outputTokens: number };
+  perStore: StoreMetric[];
+}
+const rate = (a: number, b: number) => (b === 0 ? null : a / b);
+const pct = (xs: number[], q: number) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))] : 0);
+
+export function summarizeRecords(records: RealRecord[]): RunSummary {
+  const perStore: StoreMetric[] = records.map((r) => {
+    const g = REAL_GOLD.find((x) => x.id === r.target.id);
+    const known = !!g && !g.unknownGold;
+    const adopted = (r.outcome.status === "confirmed" || r.outcome.status === "candidate") && !!r.outcome.address;
+    const correct = known && g ? adopted && matchesGold(r.outcome.address, g) : null;
+    const isOff = (d: string) => r.outcome.officialSites.some((o) => o.domain === d && (o.status === "verified" || o.status === "trusted"));
+    const offDomains = known && g ? g.officialDomains ?? [] : [];
+    const a = r.actions;
+    const firstFetch = a.findIndex((x) => x.name === "fetch_page");
+    return {
+      id: r.target.id,
+      store: `${r.target.store.chain} ${r.target.store.name}`,
+      category: r.target.category,
+      known,
+      status: r.outcome.status,
+      address: r.outcome.address,
+      confidence: r.outcome.confidence,
+      correct,
+      wrongAdopted: known ? adopted && correct === false : null,
+      wrongConfirmed: known ? r.outcome.status === "confirmed" && correct === false : null,
+      officialFound: known && offDomains.length ? offDomains.some(isOff) : null,
+      wrongOfficial: known && g ? (g.notOfficialDomains ?? []).some(isOff) : false,
+      additionalSearch: r.usage.searches >= 3 || (firstFetch >= 0 && a.slice(firstFetch).some((x) => x.name === "web_search")),
+      searches: r.usage.searches,
+      fetches: r.usage.fetches,
+      steps: r.usage.steps,
+      inputTokens: r.usage.inputTokens,
+      outputTokens: r.usage.outputTokens,
+      costJpy: r.usage.costJpy,
+      ms: r.usage.ms,
+      humanReview: r.outcome.status !== "confirmed",
+      problem: r.problem,
+    };
+  });
+  const k = perStore.filter((s) => s.known);
+  const u = perStore.filter((s) => !s.known);
+  const offT = k.filter((s) => s.officialFound !== null);
+  const ms = perStore.map((s) => s.ms);
+  const cost = perStore.reduce((t, s) => t + s.costJpy, 0);
+  return {
+    stores: perStore.length,
+    known: {
+      n: k.length,
+      correctRate: rate(k.filter((s) => s.correct).length, k.length),
+      confirmedSuccessRate: rate(k.filter((s) => s.status === "confirmed" && s.correct).length, k.length),
+      wrongAdopted: k.filter((s) => s.wrongAdopted).length,
+      wrongConfirmed: k.filter((s) => s.wrongConfirmed).length,
+      officialFound: offT.filter((s) => s.officialFound).length,
+      officialTargets: offT.length,
+      wrongOfficial: k.filter((s) => s.wrongOfficial).length,
+      humanReviewRate: rate(k.filter((s) => s.humanReview).length, k.length),
+      additionalSearchRate: rate(k.filter((s) => s.additionalSearch).length, k.length),
+    },
+    unknown: { n: u.length, confirmed: u.filter((s) => s.status === "confirmed").length, candidate: u.filter((s) => s.status === "candidate").length, other: u.filter((s) => s.status !== "confirmed" && s.status !== "candidate").length, officialVerified: u.filter((s) => records.find((r) => r.target.id === s.id)?.outcome.officialSites.some((o) => o.status === "verified" || o.status === "trusted")).length },
+    totals: {
+      costJpy: Math.round(cost * 100) / 100,
+      avgCostJpy: perStore.length ? Math.round((cost / perStore.length) * 100) / 100 : 0,
+      searches: perStore.reduce((t, s) => t + s.searches, 0),
+      ms: Math.round(ms.reduce((t, x) => t + x, 0)),
+      avgMs: ms.length ? Math.round(ms.reduce((t, x) => t + x, 0) / ms.length) : 0,
+      p50Ms: Math.round(pct(ms, 0.5)),
+      p95Ms: Math.round(pct(ms, 0.95)),
+      inputTokens: perStore.reduce((t, s) => t + s.inputTokens, 0),
+      outputTokens: perStore.reduce((t, s) => t + s.outputTokens, 0),
+    },
+    perStore,
+  };
+}
+
+/** eval/runs/real/ の実行結果から、指定した phase の各店舗の「最初の実行」を集める（初回の集計＝主要評価値。再実行は別に集計） */
+export function collectRecords(dir: string, phase: "initial" | "rerun", idFilter: (id: string) => boolean): RealRecord[] {
+  const out = new Map<string, RealRecord>();
+  const files = existsSync(dir) ? readdirSync(dir).filter((f) => /^real-.*\.json$/.test(f)).sort() : [];
+  for (const f of files) {
+    const rep = JSON.parse(readFileSync(`${dir}/${f}`, "utf8")) as RealRunReport;
+    if ((rep.phase ?? "initial") !== phase) continue;
+    for (const r of rep.records) if (idFilter(r.target.id) && !out.has(r.target.id)) out.set(r.target.id, r);
+  }
+  return [...out.values()];
 }

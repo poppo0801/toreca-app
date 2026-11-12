@@ -20,6 +20,10 @@ if (cmd === "preflight") {
   const r = spawnSync("npx", ["vitest", "run", "src/lib/agent/store-location/real-eval.test.ts", "-t", "実行前の確認"], { stdio: "inherit", shell: true, env: { ...env, REAL_PREFLIGHT: "1" } });
   if (r.status === 0) console.log(readFileSync("eval/runs/real/preflight.json", "utf8"));
   process.exit(r.status ?? 1);
+} else if (cmd === "report") {
+  // 集計（API・ネットワークには接続しない）: 初回(initial)と再実行(rerun)を別に集計して eval/runs/real/summary-8d4-*.json に書く
+  const r = spawnSync("npx", ["vitest", "run", "src/lib/agent/store-location/real-eval.test.ts", "-t", "集計の出力"], { stdio: "inherit", shell: true, env: { ...env, REAL_REPORT: "1" } });
+  process.exit(r.status ?? 1);
 } else if (cmd === "run") {
   // 開発用ローカルの設定であることを確認（本番の設定では実行しない）
   if (process.env.NEXT_PUBLIC_SUPABASE_URL) assertLocalTarget("eval:real");
@@ -36,6 +40,6 @@ if (cmd === "preflight") {
   });
   process.exit(r.status ?? 1);
 } else {
-  console.error("使い方: node scripts/eval-real.mjs preflight | run --approved-max-jpy=<円> --approved-stores=<件> [--ids=R1,..] [--first-only]");
+  console.error("使い方: node scripts/eval-real.mjs preflight | report | run --approved-max-jpy=<円> --approved-stores=<件> [--ids=R1,..] [--first-only]");
   process.exit(1);
 }
