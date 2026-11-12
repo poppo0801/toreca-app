@@ -115,9 +115,12 @@ test("相場の取得: 手動価格が無いカード・BOXも、取得した相
     await page.getByTestId("box-tile").filter({ hasText: "7F相場BOX" }).getByRole("button").first().click();
     const detail = page.getByTestId("box-detail");
     const info = detail.getByTestId("box-market-info");
-    await expect(info).toContainText("買取・未開封（状態の指定なし） 6,000円（2店舗）");
-    await expect(info).toContainText("買取・シュリンクなし 4,000円（1店舗のみ）"); // 1店舗だけの価格はそう示す
-    await expect(info).toContainText("販売・未開封（状態の指定なし） 9,000円（1店舗のみ）"); // ポケモンセンターセット(20,000円)は混ざらない
+    // 相場詳細の整理（Stage 8U-1）: 主要な金額（買取＝売る価格・販売＝買う価格）を別々に大きく表示し、状態別は折りたたみ。金額・店舗数の検証内容は同じ
+    await expect(info.getByTestId("market-buyback-base")).toContainText("6,000円");
+    await expect(info.getByTestId("market-buyback-base")).toContainText("2店舗");
+    await expect(info.getByTestId("market-buyback-no_shrink")).toContainText("買取・シュリンクなし 4,000円（1店舗のみ）"); // 1店舗だけの価格はそう示す（状態別の折りたたみの中）
+    await expect(info.getByTestId("market-sale-base")).toContainText("9,000円"); // ポケモンセンターセット(20,000円)は混ざらない
+    await expect(info.getByTestId("market-sale-base")).toContainText("1店舗のみ");
     await expect(info).toContainText("照合: 商品コード");
     await expect(detail.getByTestId("state-shrink")).toContainText("取得相場");
     await page.keyboard.press("Escape");

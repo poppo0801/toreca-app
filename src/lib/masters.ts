@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizePrefecture, PREFECTURE_LIST } from "@/lib/geo";
 
 /**
  * マスター管理の定義（フォーム・検証・保存先の単一の正）。
@@ -20,6 +21,8 @@ export interface Field {
   optionalRef?: boolean;
   options?: { value: string; label: string }[];
   default?: string | number;
+  /** 入力値の正規化（都道府県: 「兵庫」→「兵庫県」など。保存前・検証前に適用する） */
+  normalize?: "prefecture";
 }
 
 export const ENTITY_KEYS = [
@@ -121,7 +124,8 @@ export const ENTITIES: Record<EntityKey, Entity> = {
           { value: "both", label: "実店舗・オンライン兼用" },
         ],
       },
-      { name: "prefecture", label: "都道府県（例: 兵庫県）", type: "text", max: 10 },
+      // 47都道府県の選択式（Stage 8U-1）。未設定（空）も可。「兵庫」などの略記は保存時に正式名へそろえる
+      { name: "prefecture", label: "都道府県", type: "select", normalize: "prefecture", options: [{ value: "", label: "未設定" }, ...PREFECTURE_LIST.map((p) => ({ value: p, label: p }))] },
       { name: "address_optional", label: "店舗の住所（任意。不明でも登録できます）", type: "text", max: 200 },
       { name: "latitude", label: "緯度（内部情報・任意。住所から取得できます）", type: "number", min: -90, max: 90, step: 0.000001 },
       { name: "longitude", label: "経度（内部情報・任意）", type: "number", min: -180, max: 180, step: 0.000001 },
@@ -363,7 +367,7 @@ export function buildSchema(entity: Entity) {
           ? f.optionalRef
             ? z.preprocess(emptyToNull, z.uuid("選択してください").nullable())
             : z.uuid("選択してください")
-          : z.preprocess((v) => (v === undefined && f.default !== undefined ? f.default : v), z.enum(f.options!.map((o) => o.value) as [string, ...string[]], "選択してください"));
+          : z.preprocess((v) => (f.normalize === "prefecture" ? normalizePrefecture(v ?? "") : v === undefined && f.default !== undefined ? f.default : v), z.enum(f.options!.map((o) => o.value) as [string, ...string[]], "選択してください"));
         break;
       default: {
         const t = z.string().trim().max(f.max ?? 200, `${f.label}は${f.max ?? 200}文字以内で入力してください`);

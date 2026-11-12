@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "_note": "実在店舗の正解（採点専用。システムに渡さない）。公式ページから確認できた範囲のみ。確認できないものは unknown。",
+  "gold": [
+    {
+      "id": "R1",
+      "expectedAddress": "東京都武蔵野市吉祥寺本町1-11-5",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "kiddyland.co.jp"
+      ],
+      "notOfficialDomains": [
+        "x.com",
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "jalan.net",
+        "kichijoji88.com",
+        "nuimap.com",
+        "kj-weekly.jp"
+      ],
+      "mustNotAdopt": [
+        "東京都武蔵野市吉祥寺"
+      ],
+      "mustNotAdoptNote": "番地まで一致しない住所（町名だけ等）は採用しない",
+      "conditions": [
+        "公式ショップリストの店舗ページに住所の記載がある（コピス吉祥寺 6階/A館）。同じ吉祥寺に、運営が同じ別業態（キッズユーエスランド／キッズランドUS mini、カピバラさん キュルッとショップ吉祥寺店）があり、取り違えない"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.kiddyland.co.jp/shoplist/kichijyouji/",
+          "quote": "〒180-0004 東京都武蔵野市吉祥寺本町1-11-5 コピス吉祥寺 6階/A館",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+        },
+        {
+          "url": "https://www.kiddyland.co.jp/company/data/",
+          "quote": "会社概要（運営会社情報）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "closure": "公式ページに閉店・移転の告知は無い（2026-11-12 確認）"
+    },
+    {
+      "id": "R2",
+      "expectedAddress": "東京都足立区東伊興1-16-9",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "torecamap.co.jp",
+        "lipscosme.com",
+        "navitime.co.jp"
+      ],
+      "mustNotAdopt": [
+        "東京都足立区竹の塚6丁目9-1",
+        "東京都足立区竹の塚7丁目6-1"
+      ],
+      "mustNotAdoptNote": "竹ノ塚の別のカードショップ（キントレ竹の塚店・カイトリワールド）の住所",
+      "conditions": [
+        "公式の店舗一覧では「古本市場竹の塚店」（ふるいちの旧称・併設ブランド）として載り、住所は『東伊興』。店名の地名（竹の塚）と住所の町名が一致しない。竹ノ塚周辺の別のカードショップの住所を採らない",
+        "公式サイトの候補が複数ある（furu1.net 店舗情報サイト／furu1.info／運営会社テイツーの tay2.co.jp）。運営会社: 株式会社テイツー"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場竹の塚店 東京都足立区東伊興１-１６-９",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "closure": "店舗一覧に掲載されている（閉店の記載は確認していない）"
+    },
+    {
+      "id": "R3",
+      "expectedAddress": "大阪府大阪市鶴見区鶴見5-11-17",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "torecamap.co.jp"
+      ],
+      "mustNotAdopt": [
+        "神奈川県横浜市鶴見区"
+      ],
+      "mustNotAdoptNote": "同名の「鶴見」（横浜市鶴見区）と取り違えない。登録済みの都道府県は大阪府",
+      "conditions": [
+        "公式の店舗一覧に「古本市場鶴見店」として大阪府大阪市鶴見区の住所がある。神奈川県の鶴見には、ふるいちの店舗は一覧に無い"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場鶴見店 大阪府大阪市鶴見区鶴見５丁目１１-１７",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "closure": "店舗一覧に掲載されている（閉店の記載は確認していない）"
+    },
+    {
+      "id": "R4",
+      "expectedAddress": null,
+      "expectedAddressPrefix": "京都府京都市伏見区横大路芝生",
+      "acceptableStatuses": [
+        "candidate",
+        "insufficient",
+        "confirmed",
+        "not_found",
+        "limit_reached"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "torecamap.co.jp"
+      ],
+      "conditions": [
+        "住所の前半（京都市伏見区横大路芝生）は、NAVITIME（第三者）と京都市の2020年の公文書（ブックオフ伏見店 所在地 京都市伏見区横大路芝生１番ほか）で一致するが、番地・現在の営業状況・公式の店舗ページは人手で確認できていない（unknown）。『BOOKOFF SUPER BAZAAR 1号京都伏見店』という別表記がある",
+        "確認済みにできるのは、公式の店舗ページで番地まで確認できた場合だけ。それ以外は候補止まりが正しい。前半が異なる住所は誤り"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.navitime.co.jp/category/02/26109/",
+          "quote": "BOOKOFF SUPER BAZAAR 1号京都伏見店 京都府京都市伏見区横大路芝生1（第三者）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+        },
+        {
+          "url": "https://www.city.kyoto.lg.jp/sankan/cmsfiles/contents/0000267/267356/021201shiiken-bookoff.pdf",
+          "quote": "ブックオフ伏見店 京都市伏見区横大路芝生１番ほか（2020年12月の公文書）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "closure": "不明（閉店・移転の記載は見つかっていないが、最新の状況は未確認）",
+      "unknown": [
+        "番地",
+        "公式の店舗ページ",
+        "現在の営業状況"
+      ]
+    },
+    {
+      "id": "R5",
+      "expectedAddress": "兵庫県神戸市兵庫区吉田町2-38-10",
+      "acceptableStatuses": [
+        "candidate",
+        "confirmed",
+        "insufficient",
+        "not_found",
+        "limit_reached"
+      ],
+      "officialDomains": [
+        "kaitori-alto.com"
+      ],
+      "notOfficialDomains": [
+        "oikura.jp",
+        "hikakaku.com"
+      ],
+      "mustNotAdopt": [
+        "兵庫県尼崎市立花町1-26-12"
+      ],
+      "mustNotAdoptNote": "同じ系列の別店舗（尼崎本店）の住所。ライフ神戸店の住所ではない",
+      "conditions": [
+        "『買取アルト ライフ神戸店』の住所は、運営会社（株式会社アルトホープ）の会社概要ページ、系列の店舗一覧ページ（kaitori-alto.com）、ポケモンカード公式の店舗検索の3つで一致する（兵庫県神戸市兵庫区吉田町2丁目38-10）。系列の別店舗（尼崎本店 など）の住所を採用してはならない",
+        "公式サイトの検証（システムの規則）は、店舗マスターに同じ系列の他店舗が無い場合は成立しにくく、候補止まりになりうる。独立した2つ目の情報源で一致すれば確認済みにできる"
+      ],
+      "evidence": [
+        {
+          "url": "https://altohope.co.jp/company/",
+          "quote": "【買取アルト ライフ神戸店】〒652-0872 兵庫県神戸市兵庫区吉田町2丁目38-10（運営会社の会社概要）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（HTTPで取得して照合）。利用者による再確認は未実施"
+        },
+        {
+          "url": "https://map.pokemon-card.com/map/22682",
+          "quote": "買取アルト ライフ神戸店 兵庫県神戸市兵庫区吉田町2丁目38-10",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（HTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "closure": "不明（営業中の表示はあるが、最新の状況は未確認）",
+      "unknown": [
+        "営業状況"
+      ],
+      "revision": "2026-11-12 修正: 当初は「住所不明・別店舗の住所とみられる」としていたが、AIの初回の実行結果（系列の店舗一覧ページ）を受けて公式の会社概要ページ等を取得し直したところ、当初の想定が誤りだった。正解を変えた理由と根拠は上記"
+    }
+  ]
+}

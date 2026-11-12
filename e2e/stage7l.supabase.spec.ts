@@ -150,9 +150,19 @@ test("抽選候補→店舗別一括登録→店舗ごとの編集・編集の�
     await page.goto("/lotteries");
     const openDetail = async (id: string) => {
       const cardOf = page.locator(`[data-lottery-id="${id}"]`);
+      // 店舗別の一括登録で作った抽選は1つの抽選グループ（親カード）にまとまる（Stage 8U-2）。タブごとに、閉じている親カードを展開してから探す
+      const expandGroups = async () => {
+        // 一覧の描画を待ってから（描画前だと親カードが見つからず、展開されないまま探してしまう）
+        await page.locator('[data-testid="lottery-card"], [data-testid="group-card"]').first().waitFor({ timeout: 4000 }).catch(() => undefined);
+        for (const t of await page.getByTestId("group-toggle").all()) {
+          if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+        }
+      };
+      await expandGroups();
       for (const tab of await page.getByRole("tab").all()) {
         if ((await cardOf.count()) > 0) break;
         await tab.click();
+        await expandGroups();
       }
       await cardOf.getByRole("button", { name: /の詳細を開く/ }).first().click();
       return page.getByTestId("lottery-detail-sheet");

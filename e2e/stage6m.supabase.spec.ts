@@ -122,12 +122,13 @@ test("コレクション: カード／BOXの切替。BOXの手動登録・集計
   await page.getByTestId("box-tile").filter({ hasText: "テラスタルフェスex" }).getByRole("button").first().click();
   const detail = page.getByTestId("box-detail");
   await expect(detail.getByTestId("state-shrink")).toContainText("2BOX");
-  await expect(detail.getByTestId("box-lot")).toContainText("12,000円");
+  await expect(detail.getByTestId("box-lot")).toContainText("10,800円"); // 購入単価（定価 5,400円×2BOX）。購入時点の市場相場 12,000円 ではなく、実際の購入額を表示する（Stage 7K 以降）
   // 開封済みにする（1BOX）→ 所有数1。履歴の取り消しで2に戻る
   await detail.getByTestId("box-open-btn").click();
   await page.getByTestId("box-open-dialog").getByLabel("開封する数量").fill("1");
   await page.getByTestId("box-open-dialog").getByTestId("box-dialog-save").click();
   await expect(detail.getByTestId("state-shrink")).toContainText("1BOX");
+  await detail.getByTestId("box-history-summary").click(); // 在庫履歴は折りたたみ（初期は閉じている）。開いてから取り消す
   await detail.getByTestId("undo-op").first().click();
   await expect(detail.getByTestId("state-shrink")).toContainText("2BOX");
 

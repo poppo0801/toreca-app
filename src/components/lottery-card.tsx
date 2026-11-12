@@ -272,7 +272,9 @@ export function LotteryCard({
         </span>,
       );
     }
-    if (display.applyMethod) rightB.push(<span key="am">応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>);
+    // シリアルコード応募は、表示項目の設定に関わらず小さく示す（店頭でコードを入手する必要があるため。Stage 8U-1）
+    if (lottery.applyMethod === "serial") rightB.push(<span key="am" data-testid="serial-badge" title="店頭でシリアルコードを受け取り、Webで入力して応募">{APPLY_LABEL.serial}</span>);
+    else if (display.applyMethod) rightB.push(<span key="am">応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>);
     if (appliedTab && announceShort(lottery.announcementMethods)) {
       rightB.push(
         <span key="an" className="inline-flex items-center gap-1" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods)}`}>
@@ -424,7 +426,11 @@ export function LotteryCard({
                         {RECEIVE_SHORT[lottery.receiveMethod]}
                       </span>
                     )}
-                    {display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>}
+                    {lottery.applyMethod === "serial" ? (
+                      <span data-testid="serial-badge" title="店頭でシリアルコードを受け取り、Webで入力して応募">{APPLY_LABEL.serial}</span>
+                    ) : (
+                      display.applyMethod && <span>応募:{lottery.applyMethod === "unknown" ? "—" : APPLY_LABEL[lottery.applyMethod]}</span>
+                    )}
                     {/* 発表方法が未確認のときは、アイコン・文字とも項目ごと出さない */}
                     {appliedTab && announceShort(lottery.announcementMethods) && (
                       <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="announce-method" title="当落の発表方法（補足は詳細で確認できます）" aria-label={`当落発表方法 ${announceShort(lottery.announcementMethods)}`}>

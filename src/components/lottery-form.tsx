@@ -15,9 +15,9 @@ import { MasterCombobox, NewMasterBadge } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { fingerprint, purgeLegacyDrafts, type FieldSource } from "@/lib/lottery-draft";
-import { clearResume, loadResume, mergeResume, resumeKeyLabel, saveResume, type ResumeStash } from "@/lib/lottery-resume";
+import { clearCandidateResume, clearResume, loadCandidateResume, loadResume, mergeResume, resumeKeyLabel, saveCandidateResume, saveResume, type ResumeStash } from "@/lib/lottery-resume";
 import { FlagChip, FlagPanel, type FlagEvidence } from "@/components/review-flag";
-import { findDuplicates, type DraftDuplicate, type LotteryDraft } from "@/lib/lottery-match";
+import { findDuplicates, matchChain, type DraftDuplicate, type LotteryDraft } from "@/lib/lottery-match";
 import { loadCollectionAreaAction, saveLotteryBulkAction } from "@/app/(app)/lotteries/actions";
 import type { FieldKey } from "@/lib/ai/extraction";
 import { flexToJstDate } from "@/lib/finance";
@@ -26,6 +26,8 @@ import type { Product, Chain, Store } from "@/types/domain";
 import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker";
 import { classifyAnnouncement, classifyRequirements, foldAnnounceNote, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
 import { InfoTip } from "@/components/ui/info-tip";
+import { StoreMultiPicker, type NewStoreDraft } from "@/components/store-multi-picker";
+import { opKeeper, recoverUncertain } from "@/lib/operation-id";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -131,7 +133,7 @@ function FlexField({ label, value, onChange, chip }: { label: string; value: Fle
 }
 
 /** 同系列の直近の抽選から確かな設定を引き継ぐ。なければ標準の初期値（どちらも未確認として扱う） */
-export function methodDefaults(data: AppData, chainId: string | null): { applyMethod: "web" | "store" | "app"; receiveMethod: "store" | "shipping" | "either" } {
+export function methodDefaults(data: AppData, chainId: string | null): { applyMethod: "web" | "store" | "app" | "serial"; receiveMethod: "store" | "shipping" | "either" } {
   const same = chainId
     ? data.lotteries.filter((l) => l.chainId === chainId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     : [];
@@ -273,6 +275,8 @@ export function LotteryFormDialog({
 }) {
   const { data, actions, reload, profile } = useApp();
   const isEdit = lottery !== null;
+  /** 抽選候補の編集（Stage 8U-1）。閉じても破棄の確認は出さず、最後に編集した候補1件を10分間、端末内に一時保存する（再開は利用者が押したときだけ） */
+  const candMode = !isEdit && !!candidateId;
   // 編集を始めた時点の更新日時。保存の直前に最新と比べ、他の端末で更新されていないか確認する
   const [baseVersion, setBaseVersion] = useState<string | null>(lottery?.updatedAt ?? null);
   const freshRef = useRef<{ data: AppData; lottery: Lottery } | null>(null);
@@ -318,6 +322,19 @@ export function LotteryFormDialog({
 
   // ---- 店舗別の一括登録（Stage 7L）。新規登録のみ。共通情報を入力し、系列マスターの店舗から対象を選んで、店舗ごとに独立した抽選を作る
   const [bulk, setBulk] = useState(false);
+  // 保存して複製（Stage 8U-2）: 新規登録の内容を保存し、続けて複製先の店舗を選んで店舗別の抽選を一括作成する（1つの抽選グループにまとめる）
+  const [dupStep, setDupStep] = useState<null | "pick" | "result">(null);
+  const [dupPicked, setDupPicked] = useState<string[]>([]);
+  const [dupNew, setDupNew] = useState<NewStoreDraft[]>([]);
+  // 保存して複製の対象の系列: 選んだ系列、または入力した系列名が登録済みの系列（名称・別名）と一致するもの。未登録の系列は、新しい店舗だけを追加できる
+  const dupChain = useMemo(() => {
+    if (v.chain.id) return data.chains.find((c) => c.id === v.chain.id) ?? null;
+    if (!v.chain.name.trim()) return null;
+    const m = matchChain(v.chain.name, data.chains, { stores: data.stores, storeName: v.store.name });
+    return (m.kind === "exact" || m.kind === "alias") && m.item ? m.item : null;
+  }, [v.chain.id, v.chain.name, v.store.name, data.chains, data.stores]);
+  const dupOps = useRef(opKeeper()); // 同じ内容の再送には同じ操作ID（二重に作らない）
+  const [dupResult, setDupResult] = useState<{ created: number; skipped: { storeName: string; reason: string }[]; firstId: string | null } | null>(null);
   const [bulkSel, setBulkSel] = useState<Record<string, boolean>>({});
   const [bulkExtra, setBulkExtra] = useState<string[]>([]);
   const [bulkNew, setBulkNew] = useState("");
@@ -366,25 +383,26 @@ export function LotteryFormDialog({
   const dirty = fingerprint({ i: v, u: urlsText }) !== initialFp;
 
   // 編集の一時保存・再開（Stage 7L）: 直前に編集した抽選1件だけ、最後の編集から10分間、この端末内に保持する。開いた直後は常に保存済みの内容
-  const [resume, setResume] = useState<ResumeStash | null>(() => (lottery ? loadResume(lottery.id, profile.id, Date.now()) : null));
+  const [resume, setResume] = useState<ResumeStash | null>(() => (lottery ? loadResume(lottery.id, profile.id, Date.now()) : candidateId ? loadCandidateResume(candidateId, profile.id, Date.now()) : null));
   const [resumeNote, setResumeNote] = useState<string | null>(null);
   const stashRef = useRef<() => void>(() => undefined);
   const initialRef = useRef({ input: initial.input, urlsText: initial.urlsText });
   // 最新の入力を保存する関数（描画のたびに更新する。ref への書き込みは描画後に行う）
   useEffect(() => {
     stashRef.current = () => {
-      if (!lottery || !dirty) return;
-      saveResume({ lotteryId: lottery.id, profileId: profile.id, baseUpdatedAt: baseVersion, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
+      if (!dirty) return;
+      if (lottery) saveResume({ lotteryId: lottery.id, profileId: profile.id, baseUpdatedAt: baseVersion, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
+      else if (candMode && candidateId) saveCandidateResume({ lotteryId: candidateId, profileId: profile.id, baseUpdatedAt: null, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
     };
   });
   // 編集中は少し間を置いて保存する（アプリを閉じる・バックグラウンドへ移っても内容が残る）
   useEffect(() => {
-    if (!lottery || !dirty) return;
+    if ((!lottery && !candMode) || !dirty) return;
     const t = window.setTimeout(() => stashRef.current(), 400);
     return () => window.clearTimeout(t);
-  }, [lottery, dirty, v, urlsText]);
+  }, [lottery, candMode, dirty, v, urlsText]);
   useEffect(() => {
-    if (!lottery) return;
+    if (!lottery && !candMode) return;
     const flush = () => stashRef.current();
     const onHide = () => document.visibilityState === "hidden" && flush();
     document.addEventListener("visibilitychange", onHide);
@@ -393,7 +411,7 @@ export function LotteryFormDialog({
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", flush);
     };
-  }, [lottery]);
+  }, [lottery, candMode]);
 
   // 以前の版が端末に残した長期の下書きは不要になったので、一度だけ消す
   useEffect(() => {
@@ -404,7 +422,7 @@ export function LotteryFormDialog({
   // 閉じる操作（×・背景・Esc・ハンドルのスワイプ）。入力が変更されていれば、破棄の確認を出す。変更が無ければそのまま閉じる
   // 編集中の抽選は、確認なしで閉じて一時保存する（10分以内なら「編集を再開」で戻せる）。新規登録は従来どおり破棄の確認を出す
   const requestClose = () => {
-    if (isEdit) {
+    if (isEdit || candMode) {
       stashRef.current();
       return finish();
     }
@@ -414,7 +432,15 @@ export function LotteryFormDialog({
   /** 「編集を再開」: 一時保存の未保存の内容を、最新の保存済みの内容に重ねて復元する（他で更新された項目は最新を残す）。入力欄へは自動でフォーカスしない */
   const resumeEdit = async () => {
     const s = resume;
-    if (!s || !lottery) return;
+    if (!s) return;
+    if (!lottery) {
+      // 抽選候補: 保存した未保存の内容をそのまま戻す（候補の下書きには「他で更新された内容」との統合が無い）
+      setV(s.edited);
+      setUrlsText(s.editedUrls);
+      setSources((cur) => ({ ...cur, ...s.sources }));
+      setResume(null);
+      return;
+    }
     const fresh = await reload().catch(() => null);
     const curLot = fresh?.lotteries.find((l) => l.id === lottery.id) ?? lottery;
     const curInput = fromLottery(curLot, fresh ?? data);
@@ -470,6 +496,15 @@ export function LotteryFormDialog({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 抽選候補: AIの下書き（prefill）を入力したあとの状態を「変更なし」の基準にする（開いただけで変更ありにならない）
+  const candBaseline = useRef(false);
+  useEffect(() => {
+    if (!candMode || !prefilled.current || candBaseline.current || v === initial.input) return;
+    candBaseline.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 下書き入力後の基準の確定（1回だけ）
+    setInitialFp(fingerprint({ i: v, u: urlsText }));
+    initialRef.current = { input: v, urlsText };
+  }, [candMode, v, urlsText, initial.input]);
 
   const set = <K extends keyof LotteryInput>(k: K, val: LotteryInput[K]) => setV((s) => ({ ...s, [k]: val }));
   /** 初期値を持つ項目を利用者が選んだ: 以降は「利用者が選んだ値」として扱う */
@@ -567,6 +602,57 @@ export function LotteryFormDialog({
     aiFeedback: !isEdit && aiRun ? { runId: aiRun.runId, filled: aiRun.filled as unknown as Record<string, unknown>, reason: reason || null } : undefined,
   });
 
+  /** 「保存して複製」: 保存前と同じ確認を行い、複製先の選択へ進む（まだ保存しない）。入力内容は失われない */
+  const startDup = () => {
+    setError(null);
+    if (modePending) return setError("複数商品の応募方式を選択してください（告知から判断できませんでした）");
+    if (duplicates.some((d) => d.level === "high") && !dupAck) return setError("同じ抽選が登録済みの可能性があります。内容を確認し、「重複ではないことを確認した」にチェックしてください");
+    const parsed = lotteryInputSchema.safeParse(buildInput());
+    if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
+    setDupStep("pick");
+  };
+  const runDup = async () => {
+    if (savingRef.current || dupPicked.length + dupNew.length === 0) return;
+    const input = buildInput();
+    const parsed = lotteryInputSchema.safeParse(input);
+    if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    // 元の保存・店舗の追加・複製・グループ化は、サーバー側の1つのトランザクション（途中で失敗すれば全体が取り消され、何も保存されない。失敗しても入力内容はこの画面に残る）。
+    // 操作IDで、再送・連続タップ・通信の途中切断でも二重に作らない
+    const opId = dupOps.current.idFor(fingerprint({ i: input, p: dupPicked, n: dupNew }));
+    let res = await actions.saveLotteryAndDuplicate(input, dupPicked, dupNew, opId);
+    if (!res.ok && res.uncertain) {
+      // 通信が途切れた: 保存されたか分からない。失敗と断定せず、操作IDで結果を確認する
+      const rec = await recoverUncertain((id) => actions.lotteryOperationResult(id), opId);
+      if (rec.state === "done") {
+        const fresh = await reload().catch(() => null);
+        res = { ok: true, data: fresh ?? data, createdIds: [rec.result.lotteryId ?? "", ...rec.result.ids].filter(Boolean) };
+      } else {
+        savingRef.current = false;
+        setSaving(false);
+        return setError(
+          rec.state === "not_done"
+            ? "通信が途切れました。確認したところ、保存されていませんでした。もう一度「保存して複製」を押してください（二重には登録されません）。"
+            : "通信が途切れ、保存されたか確認できませんでした。通信が回復してから、もう一度「保存して複製」を押してください（保存済みなら二重には登録されず、結果を受け取れます）。",
+        );
+      }
+    }
+    savingRef.current = false;
+    setSaving(false);
+    if (!res.ok) return setError(res.error);
+    dupOps.current.reset();
+    const skipped = res.skipped ?? [];
+    const firstId = res.createdIds?.[0] ?? null;
+    if (skipped.length === 0) {
+      onSaved?.(firstId);
+      return finish();
+    }
+    setDupResult({ created: Math.max(0, (res.createdIds?.length ?? 1) - 1), skipped, firstId });
+    setDupStep("result");
+  };
+
   const submit = async (e: React.FormEvent, overwrite = false) => {
     e.preventDefault();
     if (savingRef.current) return;
@@ -607,6 +693,7 @@ export function LotteryFormDialog({
     setSaving(false);
     if (res.ok) {
       if (isEdit) clearResume(); // 正式に保存したので、一時保存は不要
+      else if (candMode) clearCandidateResume();
       onSaved?.(res.createdIds?.[0] ?? null);
       finish();
     }
@@ -640,6 +727,7 @@ export function LotteryFormDialog({
       return setError(res.error);
     }
     await reload();
+    if (candMode) clearCandidateResume(); // 店舗別の一括登録も、正式な登録なので一時保存は不要
     const firstId = res.createdIds?.[0] ?? null;
     if ((res.skipped ?? []).length === 0) {
       onSaved?.(firstId);
@@ -706,7 +794,7 @@ export function LotteryFormDialog({
             </button>
           </div>
 
-          {isEdit && resume && !dirty && (
+          {(isEdit || candMode) && resume && !dirty && (
             <div className="px-4 pb-2">
               <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => void resumeEdit()} data-testid="resume-edit">
                 編集を再開
@@ -717,6 +805,53 @@ export function LotteryFormDialog({
             <p role="status" className="mx-4 mb-2 rounded-md border border-warn p-2 text-xs text-warn" data-testid="resume-note">
               {resumeNote}
             </p>
+          )}
+          {dupStep === "pick" && (
+            <div className="mx-4 mb-2 space-y-2 rounded-md border p-2 text-sm" data-testid="dup-panel">
+              <p className="font-bold">保存して複製</p>
+              <p className="text-xs text-muted-foreground">この内容を保存し、選んだ店舗にも同じ内容の抽選を作ります（店舗ごとに独立。1つのグループにまとめます）。応募・メモは複製しません。</p>
+              <StoreMultiPicker
+                chainName={dupChain?.name ?? v.chain.name}
+                candidates={data.stores.filter((s) => dupChain && s.chainId === dupChain.id && !s.archived && s.id !== v.store.id && s.name !== v.store.name.trim())}
+                picked={dupPicked}
+                onPick={setDupPicked}
+                newStores={dupNew}
+                onNewStores={setDupNew}
+                blockedNames={v.store.name.trim() ? [v.store.name.trim()] : []}
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setDupStep(null)} disabled={saving}>
+                  戻る
+                </Button>
+                <Button type="button" size="sm" onClick={() => void runDup()} disabled={saving || dupPicked.length + dupNew.length === 0} data-testid="dup-run">
+                  {saving ? "保存中…" : `保存して${dupPicked.length + dupNew.length}店舗に複製`}
+                </Button>
+              </div>
+            </div>
+          )}
+          {dupStep === "result" && dupResult && (
+            <div className="mx-4 mb-2 space-y-2 rounded-md border p-2 text-sm" data-testid="dup-result">
+              <p>保存して、{dupResult.created}店舗に複製しました。</p>
+              <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {dupResult.skipped.map((s) => (
+                  <li key={s.storeName}>
+                    {s.storeName}: {s.reason}（作りませんでした）
+                  </li>
+                ))}
+              </ul>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    onSaved?.(dupResult.firstId);
+                    finish();
+                  }}
+                >
+                  閉じる
+                </Button>
+              </div>
+            </div>
           )}
           {pending && (
             <div role="alert" className="mx-4 mb-2 space-y-2 rounded-md border border-warn p-2 text-sm" data-testid="form-confirm">
@@ -1130,6 +1265,7 @@ export function LotteryFormDialog({
                       { value: "web", label: "Web" },
                       { value: "store", label: "店頭" },
                       { value: "app", label: "アプリ" },
+                      { value: "serial", label: "シリアル（店頭でコード入手）" },
                     ]}
                   />
                 </div>
@@ -1430,9 +1566,15 @@ export function LotteryFormDialog({
             </SheetBody>
             <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
               <Button type="button" variant="outline" className="mr-auto" onClick={requestClose} data-testid="form-discard">
-                {isEdit ? "閉じる" : "破棄"}
+                {isEdit || candMode ? "閉じる" : "破棄"}
               </Button>
-              <Button type="submit" disabled={saving}>
+              {/* 保存して複製: 新規登録で、店舗が決まっている（店舗固定）ときだけ。候補・編集・まとめて登録では出さない */}
+              {!isEdit && !candMode && !bulk && (v.storeMode ?? "fixed") === "fixed" && (v.chain.id || v.chain.name.trim()) && (v.store.id || v.store.name.trim()) && dupStep === null && (
+                <Button type="button" variant="outline" disabled={saving} onClick={startDup} data-testid="save-and-duplicate">
+                  保存して複製
+                </Button>
+              )}
+              <Button type="submit" disabled={saving || dupStep === "pick" || dupStep === "result"}>
                 {saving ? "保存中…" : "保存"}
               </Button>
             </div>

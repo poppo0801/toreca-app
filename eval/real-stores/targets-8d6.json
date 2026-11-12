@@ -1,0 +1,732 @@
+{
+  "frozenOn": "2026-11-12",
+  "note": "店舗マスターから凍結した評価入力（住所は含まない）。公式サイトの登録（knownDomains）は本番の状態そのまま。T01〜T20=正解あり／W01〜W10=正解不明",
+  "targets": [
+    {
+      "id": "T01",
+      "category": "name_differs",
+      "store": {
+        "chain": "ふるいち",
+        "name": "イオンモール神戸北店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "T02",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "西神戸店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "T03",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "野口店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "T04",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "猪名寺店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "T05",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "中百舌鳥店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "T06",
+      "category": "official_stated",
+      "store": {
+        "chain": "ふるいち",
+        "name": "緑橋店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "www.furu1.net",
+          "furu1.net"
+        ],
+        "siblingNames": [
+          "鶴見店",
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "T07",
+      "category": "similar_name",
+      "store": {
+        "chain": "MINT GAMES",
+        "name": "心斎橋アメリカ村店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "mint-web.jp",
+          "www.mint-mall.net"
+        ],
+        "siblingNames": [
+          "梅田店",
+          "三宮店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T08",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "MINT GAMES",
+        "name": "梅田店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "www.mint-mall.net",
+          "mint-web.jp"
+        ],
+        "siblingNames": [
+          "心斎橋アメリカ村店",
+          "三宮店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T09",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "MINT GAMES",
+        "name": "三宮店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.mint-mall.net",
+          "mint-web.jp"
+        ],
+        "siblingNames": [
+          "心斎橋アメリカ村店",
+          "梅田店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T10",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "Joshin",
+        "name": "名谷店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "store.joshin.co.jp"
+        ],
+        "siblingNames": [
+          "神戸南店",
+          "応募時に店舗選択"
+        ],
+        "chainAliases": [
+          "ジョーシン",
+          "Joshin(ジョーシン)"
+        ]
+      }
+    },
+    {
+      "id": "T11",
+      "category": "official_stated",
+      "store": {
+        "chain": "Joshin",
+        "name": "神戸南店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "store.joshin.co.jp"
+        ],
+        "siblingNames": [
+          "名谷店",
+          "応募時に店舗選択"
+        ],
+        "chainAliases": [
+          "ジョーシン",
+          "Joshin(ジョーシン)"
+        ]
+      }
+    },
+    {
+      "id": "T12",
+      "category": "name_differs",
+      "store": {
+        "chain": "トイコンプ",
+        "name": "梅田店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "dm.takaratomy.co.jp",
+          "www.toy-comp.com"
+        ],
+        "siblingNames": [
+          "八尾店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T13",
+      "category": "name_differs",
+      "store": {
+        "chain": "トイコンプ",
+        "name": "八尾店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "www.toy-comp.com",
+          "dm.takaratomy.co.jp"
+        ],
+        "siblingNames": [
+          "梅田店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T14",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "晴れる屋2",
+        "name": "三宮店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.hareruya2.com"
+        ],
+        "siblingNames": [
+          "通販",
+          "京都店"
+        ],
+        "chainAliases": [
+          "ハレツー通販",
+          "ハレツー"
+        ]
+      }
+    },
+    {
+      "id": "T15",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "晴れる屋2",
+        "name": "京都店",
+        "prefecture": "京都府",
+        "knownDomains": [
+          "www.hareruya2.com"
+        ],
+        "siblingNames": [
+          "通販",
+          "三宮店"
+        ],
+        "chainAliases": [
+          "ハレツー通販",
+          "ハレツー"
+        ]
+      }
+    },
+    {
+      "id": "T16",
+      "category": "relocation_possible",
+      "store": {
+        "chain": "ポケモンセンター",
+        "name": "オーサカ",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "shop.pokemon.co.jp"
+        ],
+        "siblingNames": [
+          "通販",
+          "オーサカDX"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T17",
+      "category": "relocation_possible",
+      "store": {
+        "chain": "ポケモンセンター",
+        "name": "オーサカDX",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "shop.pokemon.co.jp"
+        ],
+        "siblingNames": [
+          "通販",
+          "オーサカ"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T18",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "TSUTAYA",
+        "name": "リノアス八尾店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "linoas.jp",
+          "store-tsutaya.tsite.jp"
+        ],
+        "siblingNames": [
+          "松戸",
+          "姫路広峰店",
+          "枚方ベルパルレ店",
+          "北千住店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T19",
+      "category": "official_poor",
+      "store": {
+        "chain": "ヤマシロヤ",
+        "name": "上野店",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "e-yamashiroya.com"
+        ],
+        "siblingNames": [
+          "通販"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "T20",
+      "category": "closure_possible",
+      "store": {
+        "chain": "コジマ",
+        "name": "神戸ハーバーランド",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.kojima.net"
+        ],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W01",
+      "category": "similar_name",
+      "store": {
+        "chain": "ドラゴンスター",
+        "name": "神戸三宮店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "dorasuta.jp"
+        ],
+        "siblingNames": [
+          "日本橋2号店",
+          "通販",
+          "くずはモール",
+          "ららぽーと甲子園",
+          "ららぽーと堺",
+          "なんば なんさん通り店",
+          "オタロード中央店",
+          "日本橋本店",
+          "日本橋3号店",
+          "泉佐野店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W02",
+      "category": "similar_name",
+      "store": {
+        "chain": "ドラゴンスター",
+        "name": "くずはモール",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "dorasuta.jp"
+        ],
+        "siblingNames": [
+          "日本橋2号店",
+          "通販",
+          "神戸三宮店",
+          "ららぽーと甲子園",
+          "ららぽーと堺",
+          "なんば なんさん通り店",
+          "オタロード中央店",
+          "日本橋本店",
+          "日本橋3号店",
+          "泉佐野店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W03",
+      "category": "similar_name",
+      "store": {
+        "chain": "ドラゴンスター",
+        "name": "なんば なんさん通り店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "dorasuta.jp"
+        ],
+        "siblingNames": [
+          "日本橋2号店",
+          "通販",
+          "神戸三宮店",
+          "くずはモール",
+          "ららぽーと甲子園",
+          "ららぽーと堺",
+          "オタロード中央店",
+          "日本橋本店",
+          "日本橋3号店",
+          "泉佐野店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W04",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "GIRAFULL",
+        "name": "日本橋店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "machitoku.jp",
+          "map.pokemon-card.com",
+          "nansan.com"
+        ],
+        "siblingNames": [
+          "オタロード店",
+          "なんば店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W05",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "GIRAFULL",
+        "name": "なんば店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "nansan.com",
+          "machitoku.jp",
+          "map.pokemon-card.com"
+        ],
+        "siblingNames": [
+          "日本橋店",
+          "オタロード店"
+        ],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W06",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "BIG MAGIC",
+        "name": "なんば店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "map.yahoo.co.jp"
+        ],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W07",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "ビックカメラ",
+        "name": "なんば店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "biccamera.rakuten.co.jp"
+        ],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W08",
+      "category": "official_poor",
+      "store": {
+        "chain": "トレカキャピタル",
+        "name": "垂水店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "www.edion.com"
+        ],
+        "siblingNames": [],
+        "chainAliases": [
+          "エディオン",
+          "EDION"
+        ]
+      }
+    },
+    {
+      "id": "W09",
+      "category": "official_poor",
+      "store": {
+        "chain": "トレカチャンピオン",
+        "name": "三宮店",
+        "prefecture": "兵庫県",
+        "knownDomains": [
+          "tcg-map.com"
+        ],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    },
+    {
+      "id": "W10",
+      "category": "official_poor",
+      "store": {
+        "chain": "フルコンプ",
+        "name": "日本橋店",
+        "prefecture": "大阪府",
+        "knownDomains": [
+          "inspire-jp.net"
+        ],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    }
+  ]
+}

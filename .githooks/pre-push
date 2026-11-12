@@ -1,0 +1,16 @@
+#!/bin/sh
+# Stage 8D-1: main への直接 push を止める（main への push は本番に自動デプロイされるため）。
+# 利用者が本番反映を決めたときだけ、明示して実行する: TOREMANE_ALLOW_MAIN_PUSH=1 git push origin main
+# 有効化: git config core.hooksPath .githooks（npm run setup:hooks）。GitHub 側のブランチ保護の代わりではなく、この端末での誤操作防止。
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      if [ "$TOREMANE_ALLOW_MAIN_PUSH" != "1" ]; then
+        echo "[push ガード] main への push は本番に自動デプロイされます。中止しました。" >&2
+        echo "  開発は dev ブランチで行い、反映は利用者が決めたときだけ（TOREMANE_ALLOW_MAIN_PUSH=1 を付けて実行）。" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+exit 0

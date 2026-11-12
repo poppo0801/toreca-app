@@ -50,35 +50,73 @@ const parseYen = (s: string): number | null | undefined => {
   return /^\d{1,9}$/.test(t) ? Number(t) : undefined;
 };
 
-/** 取得した相場（CSV）の内訳。手動の相場とは別。店舗数・取得日時・照合の根拠・取得できなかった理由を示す */
+/**
+ * 取得した相場（CSV）の内訳（Stage 8U-1 で整理）。情報の優先順位: ①主要な相場金額（買取＝売る価格・販売＝買う価格を、種類を混同しないよう別々に大きく）
+ * ②更新日時・情報源・照合方法（常に小さく表示） ③補助情報（状態別・基準の見方）は折りたたみ。取得できていないときは、その状態と理由を明確に示す。手動の相場とは別。
+ */
 function MarketInfo({ productId, market, status, hasManual }: { productId: string; market: BoxMarketRow[]; status: MarketStatusRow | null; hasManual: boolean }) {
   const mine = market.filter((m) => m.productId === productId);
   if (mine.length === 0 && !status) return null;
   const fetched = mine.map((m) => m.fetchedAt).sort().at(-1) ?? null;
   const method = mine[0]?.matchMethod;
   const order = ["base", "no_shrink", "shrink"] as const;
-  const line = (m: BoxMarketRow) => `${m.kind === "sale" ? "販売" : "買取"}・${BOX_BASIS_LABEL[m.basis]} ${yen(m.medianYen)}（${m.sampleCount === 1 ? "1店舗のみ" : `${m.sampleCount}店舗`}）`;
   const rows = mine.slice().sort((a, b) => (a.kind === b.kind ? order.indexOf(a.basis) - order.indexOf(b.basis) : a.kind === "sale" ? -1 : 1));
+  // 主要な金額: 買取・販売それぞれの「基準」（状態の指定なし）。基準が無い種類は、その種類で最初の行
+  const primary = (["buyback", "sale"] as const).map((k) => {
+    const of = rows.filter((m) => m.kind === k);
+    return { kind: k, row: of.find((m) => m.basis === "base") ?? of[0] ?? null };
+  });
+  const rest = rows.filter((m) => !primary.some((p) => p.row === m));
+  const KIND_TEXT = { buyback: "買取相場（売る価格）", sale: "販売相場（買う価格）" } as const;
   return (
-    <section className="space-y-1 rounded-lg border p-3 text-xs" aria-label="取得した相場" data-testid="box-market-info">
-      <p className="text-[13px] font-bold">取得した相場（ポケカ価格比較）</p>
+    <section className="space-y-2 rounded-lg border p-3" aria-label="取得した相場" data-testid="box-market-info">
       {rows.length > 0 ? (
-        <ul className="space-y-0.5">
-          {rows.map((m) => (
-            <li key={`${m.kind}${m.basis}`} data-testid={`market-${m.kind}-${m.basis}`} className={m.sampleCount === 1 ? "text-warn" : undefined}>
-              {line(m)}
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {primary.map(({ kind, row }) => (
+              <div key={kind} data-testid={row ? `market-${kind}-${row.basis}` : `market-${kind}-none`} className={row?.sampleCount === 1 ? "text-warn" : undefined}>
+                <p className="text-[11px] text-muted-foreground">{KIND_TEXT[kind]}</p>
+                {row ? (
+                  <>
+                    <p className="text-lg font-bold tabular-nums leading-tight">{yen(row.medianYen)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {BOX_BASIS_LABEL[row.basis]}・{row.sampleCount === 1 ? "1店舗のみ" : `${row.sampleCount}店舗`}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm font-bold text-muted-foreground">未取得</p>
+                )}
+              </div>
+            ))}
+          </div>
+          {rest.length > 0 && (
+            <details className="text-xs" data-testid="box-market-more">
+              <summary className="min-h-8 cursor-pointer text-muted-foreground">状態別の相場（{rest.length}件）</summary>
+              <ul className="space-y-0.5 pt-1">
+                {rest.map((m) => (
+                  <li key={`${m.kind}${m.basis}`} data-testid={`market-${m.kind}-${m.basis}`} className={m.sampleCount === 1 ? "text-warn" : undefined}>
+                    {m.kind === "sale" ? "販売" : "買取"}・{BOX_BASIS_LABEL[m.basis]} {yen(m.medianYen)}（{m.sampleCount === 1 ? "1店舗のみ" : `${m.sampleCount}店舗`}）
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
       ) : (
-        <p className="text-muted-foreground">{status ? status.reason || STATUS_TEXT[status.status] : "未取得"}</p>
+        <div data-testid="box-market-none">
+          <p className="text-sm font-bold text-warn">相場は未取得です</p>
+          <p className="text-xs text-muted-foreground">{status ? status.reason || STATUS_TEXT[status.status] : "取得した相場がありません"}</p>
+        </div>
       )}
-      <p className="text-[11px] text-muted-foreground">
-        {fetched ? `最終取得 ${md(jstDateOf(fetched))}` : "未取得"}
+      <p className="text-[11px] text-muted-foreground" data-testid="box-market-meta">
+        {fetched ? `更新 ${md(jstDateOf(fetched))}` : "更新: 未取得"} ・ 情報源: ポケカ価格比較
         {method ? ` ・ 照合: ${BOX_METHOD_LABEL[method]}` : ""}
         {hasManual ? " ・ 手動の相場があるため、評価には手動の相場を使います" : ""}
       </p>
-      <p className="text-[11px] text-muted-foreground">「未開封」「新品」の掲載は、シュリンクの有無を断定しない基準の価格として扱います。シュリンクの有無が明示された価格だけ、状態別の実価格にします。</p>
+      <details className="text-[11px] text-muted-foreground">
+        <summary className="min-h-8 cursor-pointer">相場の見方</summary>
+        <p className="pt-1">「未開封」「新品」の掲載は、シュリンクの有無を断定しない基準の価格として扱います。シュリンクの有無が明示された価格だけ、状態別の実価格に使います。1店舗のみの価格は参考値です。</p>
+      </details>
     </section>
   );
 }

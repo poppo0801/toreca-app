@@ -81,13 +81,14 @@ describe.skipIf(!dbTestsEnabled)("Stage 3.5: 仮登録マスター・複数商�
   });
 
   // ---------------------------------------------------------------- マスター未登録での抽選登録
-  it("マスターが空でも、名称の入力だけで抽選を登録でき、系列・店舗・商品が仮登録される", async () => {
+  it("マスターが空でも、名称の入力だけで抽選を登録でき、系列・商品が仮登録される（店舗は手動入力なので確認済み。Stage 7N以降の仕様）", async () => {
     expect(await count("chains")).toBe(0);
     const id = ok(await saveLottery(db, hid, null, input(), profA)).id;
     const d = await loadAppData(db);
     const lot = d.lotteries.find((l) => l.id === id)!;
     expect(d.chains).toMatchObject([{ name: "新規テスト電機", provisional: true }]);
-    expect(d.stores).toMatchObject([{ name: "新規テスト店", provisional: true }]);
+    // Stage 7N: 手動・応募時に入力した店舗は確認済み（自動収集の新規店舗だけが仮登録=未確認）。docs/stage7n-stores.md
+    expect(d.stores).toMatchObject([{ name: "新規テスト店", provisional: false }]);
     expect(d.products).toMatchObject([{ officialName: "新規テスト商品", provisional: true }]);
     expect(lot.chainId).toBe(d.chains[0].id);
     expect(lot.items[0].productId).toBe(d.products[0].id);
@@ -137,13 +138,13 @@ describe.skipIf(!dbTestsEnabled)("Stage 3.5: 仮登録マスター・複数商�
     expect([await count("chains"), await count("stores"), await count("products")]).toEqual(before);
   });
 
-  it("仮登録マスターはマスター管理で編集でき、保存すると確定扱いになる／他世帯には見えない", async () => {
+  it("仮登録マスター（系列）はマスター管理で編集でき、保存すると確定扱いになる／他世帯には見えない", async () => {
     const d = await loadAppData(db);
-    const store = d.stores[0];
-    expect(store.provisional).toBe(true);
-    const { error } = await db.from("stores").update({ prefecture: "兵庫県", is_provisional: false }).eq("id", store.id);
+    const chain = d.chains[0];
+    expect(chain.provisional).toBe(true);
+    const { error } = await db.from("chains").update({ memo: "確認済み", is_provisional: false }).eq("id", chain.id);
     expect(error).toBeNull();
-    expect((await loadAppData(db)).stores[0]).toMatchObject({ prefecture: "兵庫県", provisional: false });
+    expect((await loadAppData(db)).chains[0]).toMatchObject({ provisional: false });
     expect((await loadAppData(other)).chains).toHaveLength(0);
   });
 

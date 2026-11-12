@@ -7,6 +7,15 @@ import {
   archiveLottery,
   currentHouseholdId,
   duplicateLottery,
+  excludeLottery,
+  groupLotteries,
+  ungroupLottery,
+  dissolveLotteryGroup,
+  saveLotteryAndDuplicate,
+  lotteryOperationResult,
+  type DuplicateOptions,
+  type ExclusionInput,
+  type GroupOptions,
   loadAppData,
   saveLottery,
   saveLotteryBulk,
@@ -35,7 +44,7 @@ import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import type { AppData, EventState, FulfillmentStatus, ResultStatus } from "@/types/domain";
 
 /** 更新系の戻り値。成功時は最新のスナップショットを返し、クライアントは再取得なしで反映する。 */
-export type MutationResult = { ok: true; data: AppData; createdIds?: string[]; /** 店舗別の一括登録で、登録済みのため対象から除いた店舗 */ skipped?: { storeName: string; reason: string }[] } | { ok: false; error: string };
+export type MutationResult = { ok: true; data: AppData; createdIds?: string[]; /** 店舗別の一括登録で、登録済みのため対象から除いた店舗 */ skipped?: { storeName: string; reason: string }[]; /** 作成・変更した抽選グループ */ groupId?: string | null } | { ok: false; error: string };
 
 async function context(): Promise<{ db: Db; householdId: string } | null> {
   const db = (await createClient()) as unknown as Db;
@@ -105,8 +114,62 @@ export async function loadCollectionAreaAction(): Promise<{ ok: true; prefecture
   return data ? { ok: true, prefectures: (data.prefectures as string[] | null) ?? [] } : { ok: false };
 }
 
-export async function duplicateLotteryAction(lotteryId: string, storeIds: string[], actor: string | null): Promise<MutationResult> {
-  return mutate((c) => duplicateLottery(c.db, c.householdId, lotteryId, storeIds, actor));
+/** 他店舗への複製（店舗の追加・グループ化を含む。1トランザクション） */
+export async function duplicateLotteryAction(lotteryId: string, storeIds: string[], actor: string | null, opts: DuplicateOptions = {}): Promise<MutationResult> {
+  const c = await context();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const res = await duplicateLottery(c.db, c.householdId, lotteryId, storeIds, actor, opts);
+  if (!res.ok) return { ok: false, error: res.error };
+  try {
+    return { ok: true, data: await loadAppData(c.db), createdIds: res.value.ids, skipped: res.value.skipped, groupId: res.value.groupId };
+  } catch {
+    return { ok: false, error: "複製しましたが、最新データの取得に失敗しました。再読み込みしてください" };
+  }
+}
+
+/** 新規登録して他店舗へ複製（保存して複製）。複製に失敗したら、保存した元の抽選も取り消す */
+export async function saveLotteryAndDuplicateAction(input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[], actor: string | null, opId: string): Promise<MutationResult> {
+  const c = await context();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const res = await saveLotteryAndDuplicate(c.db, c.householdId, input, storeIds, newStores, actor, opId);
+  if (!res.ok) return { ok: false, error: res.error };
+  try {
+    return { ok: true, data: await loadAppData(c.db), createdIds: [res.value.lotteryId, ...res.value.ids], skipped: res.value.skipped, groupId: res.value.groupId };
+  } catch {
+    return { ok: false, error: "保存しましたが、最新データの取得に失敗しました。再読み込みしてください" };
+  }
+}
+
+/** 保存して複製・他店舗に複製の結果の確認（操作ID）。通信が途切れて結果が分からないときに使う。found=false は、実行されていない（または失敗してロールバックされた） */
+export async function lotteryOperationResultAction(opId: string): Promise<{ ok: true; found: boolean; result?: { ids: string[]; lotteryId?: string } } | { ok: false; error: string }> {
+  const c = await readContext();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const r = await lotteryOperationResult(c.db, opId);
+  if (!r.ok) return { ok: false, error: r.error };
+  return r.value ? { ok: true, found: true, result: { ids: r.value.ids, lotteryId: r.value.lotteryId } } : { ok: true, found: false };
+}
+
+/** 登録済み抽選の除外（理由つき。物理削除はしない） */
+export async function excludeLotteryAction(lotteryId: string, ex: ExclusionInput, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => excludeLottery(c.db, lotteryId, ex, actor));
+}
+
+export async function groupLotteriesAction(lotteryIds: string[], opts: GroupOptions, actor: string | null): Promise<MutationResult> {
+  const c = await context();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const res = await groupLotteries(c.db, lotteryIds, opts, actor);
+  if (!res.ok) return { ok: false, error: res.error };
+  try {
+    return { ok: true, data: await loadAppData(c.db), groupId: res.value.groupId };
+  } catch {
+    return { ok: false, error: "グループ化しましたが、最新データの取得に失敗しました。再読み込みしてください" };
+  }
+}
+export async function ungroupLotteryAction(lotteryId: string, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => ungroupLottery(c.db, lotteryId, actor));
+}
+export async function dissolveLotteryGroupAction(groupId: string, actor: string | null): Promise<MutationResult> {
+  return mutate((c) => dissolveLotteryGroup(c.db, groupId, actor));
 }
 
 export async function setEventStateAction(lotteryId: string, state: EventState, actor: string | null): Promise<MutationResult> {

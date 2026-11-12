@@ -22,7 +22,8 @@ export type EventState = "before" | "open" | "closed" | "cancelled" | "postponed
 export type LotteryKind = "normal" | "ongoing" | "invite";
 
 export type ReceiveMethod = "store" | "shipping" | "either" | "unknown";
-export type ApplyMethod = "web" | "store" | "app" | "unknown";
+/** 応募方法。serial=店舗でシリアルコードを受け取り、Webでコードを入力して応募する（コード自体は保存しない。Stage 8U-1） */
+export type ApplyMethod = "web" | "store" | "app" | "serial" | "unknown";
 /** 数量の単位。box/pack は拡張パック、piece(個) は構築済みデッキ・プレミアムセット・その他。set(セット)は旧データの単位で、変換せずそのまま扱う */
 export type ItemUnit = "box" | "pack" | "set" | "piece";
 /** 購入・売却の数量単位（抽選の商品明細と同じ） */
@@ -296,6 +297,20 @@ export interface Lottery {
   confidence?: import("@/lib/collector/attention").Confidence | null;
   /** 最終更新（他端末での更新を検出するため）。モックでは未設定 */
   updatedAt?: string;
+  /** 所属する抽選グループ（複数店舗抽選の表示グループ。Stage 8U-2）。未所属は省略。応募・当選などは常に抽選ごとに独立して管理する */
+  groupId?: string;
+}
+
+/** 複数店舗抽選のグループ（表示・展開専用の親）。子の抽選は従来どおり独立して管理される（Stage 8U-2） */
+export interface LotteryGroup {
+  id: string;
+  chainId: string | null;
+  /** 任意の見出し（空なら商品名から表示する） */
+  title: string;
+  /** bulk_registration=一括登録 / manual=手動 / save_and_duplicate=保存して複製 / duplicate=他店舗に複製 / ai=AI（将来） */
+  origin: "bulk_registration" | "manual" | "save_and_duplicate" | "duplicate" | "ai";
+  /** グループ化の根拠（共通の項目・複製元など） */
+  basis: Record<string, unknown>;
 }
 
 export interface Management {
@@ -481,6 +496,8 @@ export interface AppData {
   identities: Identity[];
   accounts: ServiceAccount[];
   campaigns: Campaign[];
+  /** 抽選グループ（解散していないもの。Stage 8U-2）。未適用の環境・モックでは省略 */
+  lotteryGroups?: LotteryGroup[];
   lotteries: Lottery[];
   management: Management[];
   applications: Application[];

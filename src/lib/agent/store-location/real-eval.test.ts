@@ -1,0 +1,428 @@
+// @vitest-environment node
+import Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
+import { mergeSubmissions, SYSTEM_PROMPT } from "@/lib/agent/store-location/run";
+import { checkRealApi } from "@/lib/agent/real-gate";
+import { readLedger, pagesForStore } from "@/lib/agent/store-location/evidence-store";
+import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, newRunId, summarizeFollowUps, collectRecords, isFatalProblem, autonomyOf, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
+import { matchesGoldV1, scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
+import { verifyResearch } from "@/lib/agent/store-location/verify";
+import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
+import { EVAL_WORLD } from "@/lib/agent/store-location/world";
+import { CachedFetcher, CachedSearch } from "@/lib/agent/store-location/tools";
+import { SafePageFetcher, realGeocode } from "@/lib/server/agent/real-providers";
+
+/**
+ * 実在店舗の評価（Stage 8D-3）。
+ *  - 通常のテスト（常に実行）: データの整合・費用の見積もり・承認範囲の検査・停止条件・実行基盤（モック部品）の動作。実APIは使わない。
+ *  - 実API（REAL_EVAL=1 のときだけ。scripts/eval-real.mjs 経由。承認された件数・費用の範囲のみ）。
+ */
+describe("実在店舗の評価データ", () => {
+  it("入力（targets）と正解（gold）は1対1で、入力に正解・住所が混入していない", () => {
+    expect(REAL_TARGETS.map((t) => t.id).sort()).toEqual(REAL_GOLD.map((g) => g.id).sort());
+    expect(JSON.stringify(REAL_TARGETS)).not.toMatch(/expectedAddress|acceptableStatuses|mustNotAdopt|officialDomains|evidence|東京都武蔵野市|足立区東伊興|鶴見区鶴見|unknownGold|reviewNote/);
+    expect(REAL_TARGETS.filter((t) => t.id.startsWith("R")).every((t) => t.store.knownDomains.length === 0)).toBe(true); // 8D-3: 公式サイトの発見を評価するため、登録済みの公式ドメインは空（8D-4 は店舗マスターの実際の登録のまま）
+  });
+  it("正解は人手（公式ページの取得）で確認した根拠つき。確認できないものは unknown と明記", () => {
+    for (const g of REAL_GOLD) {
+      expect(g.conditions.length, g.id).toBeGreaterThan(0);
+      if (!g.unknownGold) expect((g as { evidence?: unknown[] }).evidence?.length, g.id).toBeGreaterThan(0);
+    }
+    expect(REAL_GOLD.filter((g) => !g.expectedAddress).every((g) => (g as { unknown?: string[] }).unknown?.length)).toBe(true);
+  });
+  it("Stage 8D-4: 新規30件（正解あり20・正解不明10）。R1〜R5 の店舗を含まず、全件が住所未登録の実店舗。正解は実行前に固定", () => {
+    const n = REAL_TARGETS.filter((t) => /^[NU][0-9]+$/.test(t.id));
+    expect(n).toHaveLength(30);
+    expect(REAL_GOLD.filter((g) => /^N[0-9]+$/.test(g.id) && !g.unknownGold)).toHaveLength(20);
+    expect(REAL_GOLD.filter((g) => /^U[0-9]+$/.test(g.id) && g.unknownGold)).toHaveLength(10);
+    const key = (t: { store: { chain: string; name: string } }) => `${t.store.chain} ${t.store.name}`;
+    const r5 = new Set(REAL_TARGETS.filter((t) => /^R[0-9]$/.test(t.id)).map(key));
+    expect(n.some((t) => r5.has(key(t)))).toBe(false);
+    expect(new Set(n.map(key)).size).toBe(30);
+    // 正解不明は、正解を持たない（作らない）
+    for (const g of REAL_GOLD.filter((x) => x.unknownGold)) expect(g.expectedAddress ?? null).toBeNull();
+    // 正解あり20件は、番地までの住所と、公式ページの出典・確認日を持つ
+    for (const g of REAL_GOLD.filter((x) => /^N[0-9]+$/.test(x.id))) {
+      expect(g.expectedAddress, g.id).toMatch(/[都道府県]/);
+      const ev = (g.evidence ?? []) as { url: string; verifiedOn: string }[];
+      expect(ev.every((e) => e.url.startsWith("https://") && e.verifiedOn === "2026-11-12"), g.id).toBe(true);
+    }
+  });
+  it("Stage 8D-4: 正解データ（住所・出典URL・注意書き）が、AIに渡す入力（店舗情報・システム指示・タスク文）に混入していない", () => {
+    const hay = JSON.stringify(REAL_TARGETS.map((t) => t.store)) + SYSTEM_PROMPT;
+    const flat = (s: string) => s.normalize("NFKC").replace(/[\s　]+/g, "");
+    const haystack = flat(hay);
+    for (const g of REAL_GOLD.filter((x) => /^[NUPQTW][0-9]+$/.test(x.id))) {
+      if (g.expectedAddress) expect(haystack.includes(flat(g.expectedAddress)), `${g.id} の正解住所が入力に含まれる`).toBe(false);
+      for (const e of (g.evidence ?? []) as { url: string; quote: string }[]) {
+        expect(haystack.includes(flat(e.url)), `${g.id} の出典URLが入力に含まれる`).toBe(false);
+      }
+      for (const a of g.mustNotAdopt ?? []) expect(haystack.includes(flat(a)), `${g.id} の禁止住所が入力に含まれる`).toBe(false);
+    }
+    // 入力の店舗情報は、系列名・店舗名・都道府県・登録済みドメイン・同じ系列の他店舗名・系列の別名だけ
+    for (const t of REAL_TARGETS) expect(Object.keys(t.store).sort()).toEqual(["chain", "chainAliases", "knownDomains", "name", "prefecture", "siblingNames"]);
+    // 調査の実行基盤（run.ts・tools.ts・verify.ts）は、正解データ・評価データを読み込まない
+    for (const f of ["run.ts", "tools.ts", "verify.ts", "official.ts", "mock.ts"]) {
+      const src = readFileSync(`src/lib/agent/store-location/${f}`, "utf8");
+      expect(src, f).not.toMatch(/real-stores|gold\.json|gold-8d4|REAL_GOLD/);
+    }
+  });
+  it("Stage 8D-5: 未知の30件（正解あり20・正解不明10）。R・N・U の店舗を含まず、入力に住所を含まない。正解は実行前に固定", () => {
+    const pq = REAL_TARGETS.filter((t) => /^[PQ][0-9]+$/.test(t.id));
+    expect(pq).toHaveLength(30);
+    expect(REAL_GOLD.filter((g) => /^P[0-9]+$/.test(g.id) && !g.unknownGold)).toHaveLength(20);
+    expect(REAL_GOLD.filter((g) => /^Q[0-9]+$/.test(g.id) && g.unknownGold)).toHaveLength(10);
+    const key = (t: { store: { chain: string; name: string } }) => `${t.store.chain} ${t.store.name}`;
+    const prev = new Set(REAL_TARGETS.filter((t) => /^[RNU][0-9]+$/.test(t.id)).map(key));
+    expect(pq.some((t) => prev.has(key(t)))).toBe(false);
+    expect(new Set(pq.map(key)).size).toBe(30);
+    for (const t of pq) expect(Object.keys(t.store).sort()).toEqual(["chain", "chainAliases", "knownDomains", "name", "prefecture", "siblingNames"]);
+    for (const g of REAL_GOLD.filter((x) => /^P[0-9]+$/.test(x.id))) {
+      expect(g.expectedAddress, g.id).toMatch(/[都道府県]/);
+      const ev = (g.evidence ?? []) as { url: string; verifiedOn: string }[];
+      expect(ev.length, g.id).toBeGreaterThan(0);
+      expect(ev.every((e) => e.url.startsWith("https://") && e.verifiedOn === "2026-11-12"), g.id).toBe(true);
+    }
+    for (const g of REAL_GOLD.filter((x) => /^Q[0-9]+$/.test(x.id))) expect(g.expectedAddress ?? null).toBeNull();
+    const cats = pq.map((t) => t.category).join(",");
+    for (const c of ["official_stated", "official_hard", "similar_name", "name_differs", "closure_relocated", "unknown_gold_official_down", "unknown_gold_official_blocked", "unknown_gold_ambiguous"]) expect(cats, c).toContain(c);
+  });
+  it("Stage 8D-6: 未知の30件（正解あり20・正解不明10）。過去の組（R・N・U・P・Q）の店舗を含まず、入力に住所を含まない。対象と正解は実行前に固定（内容のハッシュ）", () => {
+    const tw = REAL_TARGETS.filter((t) => /^[TW][0-9]+$/.test(t.id));
+    expect(tw).toHaveLength(30);
+    expect(REAL_GOLD.filter((g) => /^T[0-9]+$/.test(g.id) && !g.unknownGold)).toHaveLength(20);
+    expect(REAL_GOLD.filter((g) => /^W[0-9]+$/.test(g.id) && g.unknownGold)).toHaveLength(10);
+    const key = (t: { store: { chain: string; name: string } }) => `${t.store.chain} ${t.store.name}`;
+    const prev = new Set(REAL_TARGETS.filter((t) => /^[RNUPQ][0-9]+$/.test(t.id)).map(key));
+    expect(tw.some((t) => prev.has(key(t)))).toBe(false);
+    expect(new Set(tw.map(key)).size).toBe(30);
+    for (const t of tw) expect(Object.keys(t.store).sort()).toEqual(["chain", "chainAliases", "knownDomains", "name", "prefecture", "siblingNames"]);
+    for (const g of REAL_GOLD.filter((x) => /^T[0-9]+$/.test(x.id))) {
+      expect(g.expectedAddress, g.id).toMatch(/[都道府県]/);
+      const ev = (g.evidence ?? []) as { url: string; verifiedOn: string }[];
+      expect(ev.length, g.id).toBeGreaterThan(0);
+      expect(ev.every((e) => e.url.startsWith("https://") && e.verifiedOn === "2026-11-12"), g.id).toBe(true);
+    }
+    for (const g of REAL_GOLD.filter((x) => /^W[0-9]+$/.test(x.id))) expect(g.expectedAddress ?? null).toBeNull();
+    // 同名・別系列・公式情報が乏しい・名称が違う店舗が含まれる
+    const cats = tw.map((t) => t.category).join(",");
+    for (const c of ["same_name_other_chain", "name_differs", "official_poor", "closure_possible", "relocation_possible"]) expect(cats, c).toContain(c);
+    // 凍結: 実行前に固定した内容。変更するなら理由を残して新しい組にする（結果を見て書き換えない）
+    // 改行コードだけは正規化する（Windows の git は autocrlf で作業ツリーを CRLF にするため、LF のリポジトリ内容・CIと一致させる）。内容が1文字でも変われば不一致になる
+    const hash = (f: string) => createHash("sha256").update(readFileSync(f, "utf8").replace(/\r\n/g, "\n")).digest("hex");
+    expect(hash("eval/real-stores/targets-8d6.json")).toBe("a6f9d5d422d2b4500b3b5091d178034e1476a46af39d536298f16700a7d7433c");
+    expect(hash("eval/real-stores/gold-8d6.json")).toBe("ca9bbd9d13ba0fecd2bcd81afb7884475e929e6a34f20a81eb196a8fcac3f0cc");
+  });
+  it("Stage 8D-4: 評価対象に、公式に明記・公式が見つけにくい・類似名・系列名と店舗名が違う・閉店/移転・住所の一部・公式情報不足（正解不明）の各種が含まれる", () => {
+    const cats = REAL_TARGETS.filter((t) => /^[NU][0-9]+$/.test(t.id)).map((t) => t.category).join(",");
+    for (const c of ["official_stated", "official_hard", "similar_name", "name_differs", "closure", "partial_address", "unknown_gold_official_down", "unknown_gold_official_blocked"]) expect(cats, c).toContain(c);
+  });
+  it("評価対象に、公式サイトが明記された店舗・同名の別地域・名称と住所の地名が違う店舗・公式が見つけにくい店舗・特定できない店舗が含まれる", () => {
+    const cats = REAL_TARGETS.map((t) => t.category);
+    for (const c of ["official_easy_confusable", "name_differs_from_address_area", "same_name_other_region", "no_official_page_found_easily", "may_be_unidentifiable"]) expect(cats).toContain(c);
+  });
+});
+
+describe("費用の見積もりと承認範囲", () => {
+  it("見積もり: 1店舗の上限は15円。5件で上限75円。典型値は上限以下", () => {
+    const e = estimateRealCost(5);
+    expect(e.perStoreCapJpy).toBe(15);
+    expect(e.totalCapJpy).toBe(75);
+    expect(e.perStoreTypicalJpy).toBeGreaterThan(2);
+    expect(e.perStoreTypicalJpy).toBeLessThan(15);
+    expect(e.assumptions.join()).toMatch(/Haiku|haiku/);
+  });
+  const ok: RealEvalPlan = { ids: ["R1"], approvedMaxJpy: 20, approvedStores: 1, firstOnly: true };
+  it("承認された件数・費用の範囲内だけ実行できる", () => {
+    expect(validatePlan(ok)).toBeNull();
+    expect(validatePlan({ ...ok, approvedMaxJpy: 0 })).toMatch(/承認/);
+    expect(validatePlan({ ...ok, approvedStores: 0 })).toMatch(/承認/);
+    expect(validatePlan({ ...ok, ids: ["R1", "R2"], firstOnly: false })).toMatch(/件数/);
+    expect(validatePlan({ ...ok, approvedMaxJpy: 10 })).toMatch(/超えています/); // 1店舗の上限15円が承認額を超える
+    expect(validatePlan({ ...ok, ids: ["R9"] })).toMatch(/未知/);
+  });
+  it("停止条件: 失敗・誤住所・ツールの不正使用・費用の大幅超過", () => {
+    const base = { status: "candidate", wrong: false, rejectedCalls: 0, costJpy: 5 };
+    expect(isProblem(base, 15)).toBeNull();
+    expect(isProblem({ ...base, status: "failed" }, 15)).toMatch(/失敗/);
+    expect(isProblem({ ...base, wrong: true }, 15)).toMatch(/誤った住所/);
+    expect(isProblem({ ...base, rejectedCalls: 1 }, 15)).toMatch(/ツール/);
+    expect(isProblem({ ...base, costJpy: 19 }, 15)).toMatch(/費用/);
+  });
+  it("実行前の確認は、API・ネットワークに接続せず、キーを出力しない。承認が無ければ計画に問題が出る", () => {
+    const env = { TOREMANE_ENV: "local", AGENT_REAL_API: "allow", AGENT_ANTHROPIC_API_KEY: "secret-key-value", AGENT_MAX_COST_JPY_PER_RUN: "15", AGENT_MAX_RUNS_PER_DAY: "5" };
+    const p = preflight(env, ["R1"]);
+    expect(p.gate.ok).toBe(true);
+    expect(JSON.stringify(p)).not.toContain("secret-key-value");
+    expect(p.planProblem).toMatch(/承認/);
+    const none = preflight({}, ["R1"]);
+    expect(none.gate.ok).toBe(false);
+  });
+});
+
+describe("実行基盤（モック部品で、実APIなしに動作確認）", () => {
+  it("1件ごとに保存し、停止条件で残りを止め、承認額を超える実行はしない", async () => {
+    const dir = "eval/runs/real-test";
+    mkdirSync(dir, { recursive: true });
+    // 1店舗あたり16円かかる疑似AI（上限15円の範囲内の超過）。承認額45円では、3件目の前に（32円使用済み+上限15円）が承認額を超えるため止まる
+    const costly = { name: "costly", async step() { return { kind: "final" as const, output: { candidates: [] }, usage: { inputTokens: 1, outputTokens: 1, costJpy: 16 } }; } };
+    const plan: RealEvalPlan = { ids: ["R1", "R2", "R3"], approvedMaxJpy: 45, approvedStores: 3, firstOnly: false };
+    const seen: string[] = [];
+    const rep = await runRealEval(plan, () => ({ llm: costly, search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD) }), { outDir: dir, onRecord: (r) => seen.push(r.target.id) });
+    expect(seen).toEqual(["R1", "R2"]); // 3件目は、承認額を超える可能性があるため実行しない
+    expect(rep.stoppedReason).toMatch(/承認された総費用/);
+    expect(existsSync(`${dir}/real-${rep.runId}.json`)).toBe(true);
+    expect(JSON.parse(readFileSync(`${dir}/real-${rep.runId}.json`, "utf8")).records).toHaveLength(2);
+    expect(JSON.stringify(rep)).not.toMatch(/api[_-]?key|sk-ant/i);
+  });
+  it("Stage 8D-4: 正解不明（U）は正解率の分母に含めず別に記録。初回/再実行を区別し、1日の実行回数の上限を超えない", async () => {
+    const dir = "eval/runs/real-test";
+    const empty = { name: "empty", async step() { return { kind: "final" as const, output: { candidates: [] }, usage: { inputTokens: 1, outputTokens: 1, costJpy: 0.1 } }; } };
+    const deps = () => ({ llm: empty, search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD) });
+    const rep = await runRealEval({ ids: ["N01", "U01", "U02"], approvedMaxJpy: 100, approvedStores: 3, firstOnly: false, continueOnProblem: true }, deps, { outDir: dir });
+    expect(rep.phase).toBe("initial");
+    expect(rep.records).toHaveLength(3);
+    expect(rep.score?.cases).toBe(1); // 正解ありの N01 だけが採点される
+    expect(rep.unknown.map((x) => x.id)).toEqual(["U01", "U02"]); // 正解不明は、調査結果と確認状況だけを別に記録
+    const again = await runRealEval({ ids: ["N01", "N02", "N03"], approvedMaxJpy: 100, approvedStores: 3, firstOnly: false, phase: "rerun" }, deps, { outDir: dir, remainingRuns: 2 });
+    expect(again.phase).toBe("rerun");
+    expect(again.records).toHaveLength(2);
+    expect(again.stoppedReason).toMatch(/実行回数/);
+  });
+  it("Stage 8D-4: 誤住所は記録して続けるが、API障害は継続指定でも必ず止まる。不正なツール使用・費用超過も止まる", async () => {
+    const dir = "eval/runs/real-test";
+    const down = { name: "down", async step() { throw new Error("認証エラー"); } };
+    const rep = await runRealEval({ ids: ["N01", "N02", "N03"], approvedMaxJpy: 100, approvedStores: 3, firstOnly: false, continueOnProblem: true }, () => ({ llm: down, search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD) }), { outDir: dir });
+    expect(rep.records).toHaveLength(1);
+    expect(rep.stoppedReason).toMatch(/停止/);
+    expect(isFatalProblem({ status: "failed", rejectedCalls: 0, costJpy: 1 }, 15)).toMatch(/API障害/);
+    expect(isFatalProblem({ status: "candidate", rejectedCalls: 1, costJpy: 1 }, 15)).toMatch(/ツール/);
+    expect(isFatalProblem({ status: "candidate", rejectedCalls: 0, costJpy: 19 }, 15)).toMatch(/上限/);
+    expect(isFatalProblem({ status: "candidate", rejectedCalls: 0, costJpy: 3 }, 15)).toBeNull();
+  });
+  it("Stage 8D-5: 誤った住所を確認済みにしたら、継続指定でも即停止する（最重要の安全指標）", async () => {
+    const dir = "eval/runs/real-test";
+    // 疑似AIが、取得した公式ページに実在する別の店舗の住所を提出し、検証層を通って確認済みになる状況は作れないため、停止判定を直接確認する
+    const wrongConfirmed = REAL_GOLD.find((g) => g.id === "N01")!;
+    const scored = scoreEval("t", [{ caseId: "N01", status: "confirmed", address: "大阪府大阪市中央区別の住所1-1-1", confidence: 75, searches: 1, fetches: 1, steps: 3, costJpy: 1, ms: 1, injectionFlags: 0 }], [wrongConfirmed]);
+    expect(scored.perCase[0].wrong).toBe(true);
+    expect(scored.wrongConfirmed).toBe(1);
+    expect(isFatalProblem({ status: "confirmed", rejectedCalls: 0, costJpy: 1 }, 15)).toBeNull(); // 費用・API障害の停止とは別の条件（実行基盤が採点結果から判定する）
+    void dir;
+  });
+  it("最初の1店舗だけの実行（firstOnly）。問題があれば止まる", async () => {
+    const dir = "eval/runs/real-test";
+    const rep = await runRealEval({ ids: ["R1", "R2"], approvedMaxJpy: 100, approvedStores: 2, firstOnly: true }, (t) => ({ llm: new MockStoreBrain({ chain: t.store.chain, name: t.store.name }), search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD) }), { outDir: dir });
+    expect(rep.records).toHaveLength(1);
+    const failing = await runRealEval({ ids: ["R1", "R2"], approvedMaxJpy: 100, approvedStores: 2, firstOnly: false }, () => ({ llm: { name: "down", async step() { throw new Error("認証エラー"); } }, search: new MockSearch(EVAL_WORLD), fetcher: new MockFetcher(EVAL_WORLD), geocode: mockGeocode(EVAL_WORLD) }), { outDir: dir });
+    expect(failing.records).toHaveLength(1); // 最初の店舗が失敗 → 残りは停止
+    expect(failing.stoppedReason).toMatch(/停止/);
+    expect(failing.records[0].outcome.status).toBe("failed");
+  });
+  it("採点: 前半一致の正解（R4）は前半が合えば正しい、R5 は同じ系列の別店舗（尼崎本店）の住所を採用すると誤り", () => {
+    const r = (caseId: string, address: string | null, status = "candidate"): EvalResult => ({ caseId, status: status as never, address, confidence: 40, searches: 1, fetches: 1, steps: 3, costJpy: 5, ms: 1000, injectionFlags: 0 });
+    const s = scoreEval("t", [r("R4", "京都府京都市伏見区横大路芝生1-1"), r("R5", "兵庫県尼崎市立花町1丁目26-12"), r("R3", "神奈川県横浜市鶴見区鶴見1-1-1")], REAL_GOLD.filter((g) => ["R3", "R4", "R5"].includes(g.id)));
+    expect(s.perCase.find((p) => p.caseId === "R4")!.wrong).toBe(false);
+    expect(s.perCase.find((p) => p.caseId === "R5")!.wrong).toBe(true);
+    expect(s.perCase.find((p) => p.caseId === "R3")!.wrong).toBe(true);
+    const ok = scoreEval("t", [r("R5", "兵庫県神戸市兵庫区吉田町2丁目38-10")], REAL_GOLD.filter((x) => x.id === "R5"));
+    expect(ok.perCase[0].wrong).toBe(false);
+  });
+  it("採点: 正解の後ろに建物名・階数が付いた住所（R1）は正しい。番地の続きや町名だけは誤り", () => {
+    const r = (address: string): EvalResult => ({ caseId: "R1", status: "confirmed", address, confidence: 75, searches: 1, fetches: 1, steps: 3, costJpy: 1, ms: 1000, injectionFlags: 0 });
+    const g = REAL_GOLD.filter((x) => x.id === "R1");
+    const wrongOf = (a: string) => scoreEval("t", [r(a)], g).perCase[0].wrong;
+    expect(wrongOf("東京都武蔵野市吉祥寺本町1-11-5 コピス吉祥寺 6階/A館")).toBe(false);
+    expect(wrongOf("東京都武蔵野市吉祥寺本町1-11-5")).toBe(false);
+    expect(wrongOf("東京都武蔵野市吉祥寺本町1-11-50")).toBe(true);
+    expect(wrongOf("東京都武蔵野市吉祥寺")).toBe(true);
+  });
+  it("FileCache: 保存・再読み込み・期限切れ", () => {
+    const path = "eval/runs/real-test/cache.json";
+    let t = 0;
+    const c1 = new FileCache(path, 1000, () => t);
+    c1.set("k", { a: 1 });
+    expect(new FileCache(path, 1000, () => t).get("k")).toEqual({ a: 1 });
+    t = 5000;
+    expect(new FileCache(path, 1000, () => t).get("k")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------- 実API（承認済みの範囲のみ）
+describe.skipIf(process.env.REAL_EVAL !== "1")("実API評価（承認済みの件数・費用の範囲のみ）", () => {
+  it("実在店舗を実行して結果を保存する", async () => {
+    const env = process.env as Record<string, string | undefined>;
+    mkdirSync("eval/runs/real", { recursive: true });
+    const counterPath = "eval/runs/real/.day-count.json";
+    const today = new Date().toISOString().slice(0, 10);
+    const counter = existsSync(counterPath) ? JSON.parse(readFileSync(counterPath, "utf8")) : { date: today, n: 0 };
+    const runsToday = counter.date === today ? counter.n : 0;
+    const gate = checkRealApi({ env, confirm: true, runsToday });
+    if (!gate.ok) throw new Error(`実APIの関門: ${gate.reason}`);
+    const ids = (env.REAL_EVAL_IDS ?? "R1").split(",").map((x) => x.trim()).filter(Boolean);
+    const plan: RealEvalPlan = { ids, approvedMaxJpy: Number(env.REAL_EVAL_APPROVED_MAX_JPY) || 0, approvedStores: Number(env.REAL_EVAL_APPROVED_STORES) || 0, firstOnly: env.REAL_EVAL_FIRST_ONLY === "1", phase: env.REAL_EVAL_PHASE === "rerun" ? "rerun" : "initial", continueOnProblem: env.REAL_EVAL_CONTINUE === "1", maxProblems: Number(env.REAL_EVAL_MAX_PROBLEMS) || undefined, followUps: Number(env.REAL_EVAL_FOLLOWUPS) || 0 };
+    const maxRuns = Number(env.AGENT_MAX_RUNS_PER_DAY) || 0;
+    const client = new Anthropic({ apiKey: gate.apiKey }); // キーは出力・保存しない
+    // 実行ごとに分けたキャッシュ（実行をまたいで同じURLの内容が上書き・混入しない。取得したページは台帳 pages-<実行ID>.jsonl にも残る）
+    const runId = newRunId();
+    const cache = new FileCache(`eval/runs/real/cache-${runId}.json`);
+    const rep = await runRealEval(
+      plan,
+      () => ({
+        llm: new AnthropicAgentLLM(client, gate.model),
+        search: new CachedSearch(new AnthropicWebSearch(client, gate.model), cache),
+        fetcher: new CachedFetcher(new SafePageFetcher(), cache),
+        geocode: realGeocode,
+      }),
+      { limits: gate.limits, runId, remainingRuns: Math.max(0, maxRuns - runsToday), onRecord: (r) => console.log(`[real] ${r.target.id} ${r.outcome.status} ${r.outcome.address ?? "-"} cost=${r.usage.costJpy.toFixed(2)}円 searches=${r.usage.searches} fetches=${r.usage.fetches} followUps=${r.usage.followUps ?? 0}${r.problem ? ` 問題: ${r.problem}` : ""}`) },
+    );
+    writeFileSync(counterPath, JSON.stringify({ date: today, n: runsToday + rep.records.length }));
+    console.log(`[real] 実行 ${rep.records.length} 件 / 推定費用 ${rep.spentJpy.toFixed(2)}円 / ${rep.stoppedReason ?? "完了"}`);
+    expect(rep.records.length).toBeGreaterThan(0);
+  }, 3_600_000);
+});
+
+// ---------------------------------------------------------------- 実行前の確認の表示（REAL_PREFLIGHT=1。API・ネットワークには接続しない）
+describe.skipIf(process.env.REAL_PREFLIGHT !== "1")("実行前の確認（表示のみ）", () => {
+  it("関門・計画・費用の見積もりを表示する", () => {
+    const ids = (process.env.REAL_EVAL_IDS ?? REAL_TARGETS.map((t) => t.id).join(",")).split(",").map((x) => x.trim()).filter(Boolean);
+    const p = preflight(process.env as Record<string, string | undefined>, ids);
+    mkdirSync("eval/runs/real", { recursive: true });
+    writeFileSync("eval/runs/real/preflight.json", JSON.stringify(p, null, 2)); // 表示は scripts/eval-real.mjs が行う（キーは含まない）
+    expect(p.estimate.stores).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------- 集計（Stage 8D-4）
+describe("集計: 初回の主要評価値。正解不明は分母に含めない", () => {
+  const rec = (id: string, status: string, address: string | null, over: Partial<RealRecord["usage"]> = {}, sites: { domain: string; status: string }[] = [], actions: string[] = ["web_search", "fetch_page"]): RealRecord => {
+    const target = REAL_TARGETS.find((x) => x.id === id)!;
+    return {
+      target, result: { caseId: id, status: status as never, address, confidence: 70, searches: 2, fetches: 1, steps: 4, costJpy: 3, ms: 1000, injectionFlags: 0 },
+      outcome: { status, address, confidence: 70, reasons: [], officialSites: sites.map((s) => ({ ...s, signals: [], problems: [] })), sources: [] },
+      usage: { steps: 4, searches: 2, fetches: 1, inputTokens: 1000, outputTokens: 100, costJpy: 3, ms: 1000, retries: 0, rejectedCalls: 0, injectionFlags: 0, duplicateCalls: 0, followUps: 0, ...over },
+      actions: actions.map((name) => ({ name, ok: true, arg: "" })), engine: "anthropic:test", problem: null,
+    };
+  };
+  it("正しい住所・誤住所・確認済みの誤り・公式判定・人手確認・追加調査を、正解ありの店舗だけで数える", () => {
+    const s = summarizeRecords([
+      rec("N16", "confirmed", "三重県名張市夏見3303", {}, [{ domain: "nextone-iga.co.jp", status: "trusted" }]), // 正しい・確認済み・公式OK
+      rec("N18", "candidate", "東京都豊島区東池袋1丁目31-1", { searches: 3 }), // 正しい・候補・追加調査（検索3回）
+      rec("N19", "confirmed", "東京都世田谷区玉川9-9-9", {}, [{ domain: "kiddyland.co.jp", status: "verified" }]), // 誤りを確認済みにした
+      rec("N05", "insufficient", null, {}, [], ["web_search", "fetch_page", "web_search"]), // 情報不足・追加調査（取得のあとに検索）
+      rec("U01", "confirmed", "大阪府大阪市中央区日本橋1-1-1"), // 正解不明: 分母に含めない
+    ]);
+    expect(s.stores).toBe(5);
+    expect(s.known.n).toBe(4);
+    expect(s.known.correctRate).toBe(2 / 4);
+    expect(s.known.confirmedSuccessRate).toBe(1 / 4);
+    expect(s.known.wrongAdopted).toBe(1);
+    expect(s.known.wrongConfirmed).toBe(1);
+    expect(s.known.officialFound).toBe(2);
+    expect(s.known.humanReviewRate).toBe(2 / 4);
+    expect(s.known.additionalSearchRate).toBe(2 / 4);
+    expect(s.unknown).toMatchObject({ n: 1, confirmed: 1 });
+    expect(s.totals.costJpy).toBe(15);
+    expect(s.perStore.find((x) => x.id === "U01")!.correct).toBeNull();
+  });
+  it("collectRecords: 同じ店舗の最初の実行だけを数え、初回と再実行を混ぜない", () => {
+    const dir = "eval/runs/real-test-collect";
+    mkdirSync(dir, { recursive: true });
+    const base = { plan: {}, unknown: [], stoppedReason: null, spentJpy: 0, score: null, startedAt: "x" };
+    writeFileSync(`${dir}/real-1.json`, JSON.stringify({ ...base, runId: "1", phase: "initial", records: [rec("N01", "candidate", "A")] }));
+    writeFileSync(`${dir}/real-2.json`, JSON.stringify({ ...base, runId: "2", phase: "initial", records: [rec("N01", "confirmed", "B"), rec("N02", "candidate", "C")] }));
+    writeFileSync(`${dir}/real-3.json`, JSON.stringify({ ...base, runId: "3", phase: "rerun", records: [rec("N01", "confirmed", "D")] }));
+    const initial = collectRecords(dir, "initial", (id) => id.startsWith("N"));
+    expect(initial.map((r) => [r.target.id, r.outcome.address])).toEqual([["N01", "A"], ["N02", "C"]]); // 同じ店舗は最初の結果
+    expect(collectRecords(dir, "rerun", (id) => id.startsWith("N")).map((r) => r.outcome.address)).toEqual(["D"]);
+  });
+});
+
+// 集計の出力（REAL_REPORT=1。API・ネットワークには接続しない）
+describe.skipIf(process.env.REAL_REPORT !== "1")("集計の出力（表示のみ）", () => {
+  it("評価の組（8D-4: N・U／8D-5: P・Q）ごと、初回・再実行を別に集計して eval/runs/real/summary-<組>-*.json に書く", () => {
+    for (const [set, re] of [["8d4", /^[NU][0-9]+$/], ["8d5", /^[PQ][0-9]+$/], ["8d6", /^[TW][0-9]+$/]] as const) {
+      for (const phase of ["initial", "rerun"] as const) {
+        const recs = collectRecords("eval/runs/real", phase, (id) => re.test(id));
+        if (!recs.length) continue;
+        writeFileSync(`eval/runs/real/summary-${set}-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
+        writeFileSync(`eval/runs/real/summary-${set}-${phase}-original-scorer.json`, JSON.stringify(summarizeRecords(recs, matchesGoldV1), null, 2)); // 旧採点（8D-4 の初回の再現用）
+        if (recs.some((r) => (r.rounds?.length ?? 0) > 0)) writeFileSync(`eval/runs/real/summary-${set}-${phase}-followup.json`, JSON.stringify(summarizeFollowUps(recs), null, 2)); // 再調査の効果（最初の提出 vs 最終）
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------- 保存済みデータでの再検証（REAL_REPLAY=1。有料APIは使わない）
+// 実行記録（eval/runs/real/real-*.json）に残した「AIの提出（住所・情報源・引用）」と、取得済みのページを使い、検証層（verifyResearch）だけを現在のコードでやり直す。
+// AIの出力・取得したページは変えない（検索・AI呼び出しは行わない）。ページの出どころ: 台帳（pages-<実行ID>.jsonl。8D-6 以降の実行。実行ごとに分離・整合性検査つき）を優先し、
+// 台帳が無い旧記録（8D-3〜8D-5）だけ、従来の共有キャッシュ（cache.json。実行をまたいで上書きされるため、実行時と異なる時点のページが混ざる可能性がある）を使う。
+describe.skipIf(process.env.REAL_REPLAY !== "1")("保存済みデータでの再検証（有料API・検索なし）", () => {
+  it("初回の記録を、現在の検証層で再判定して eval/runs/real/replay-8d4.json に書く", async () => {
+    const cachePath = "eval/runs/real/cache.json";
+    const cache = existsSync(cachePath) ? (JSON.parse(readFileSync(cachePath, "utf8")) as Record<string, { v: { ok?: boolean; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[] } }>) : {};
+    const pageFor = (arg: string) => {
+      const key = Object.keys(cache).find((k) => k.startsWith(`page:${arg}`));
+      const v = key ? cache[key].v : null;
+      return v && v.ok !== false ? { url: v.url, finalUrl: v.finalUrl, title: v.title, text: v.text, links: v.links, injection: false } : null;
+    };
+    // 各店舗の最初の記録（N・U・P・Q・T・W は初回の実行、R は最後の実行）
+    const first = new Map<string, { r: RealRecord; ledger: string | null }>();
+    for (const f of readdirSync("eval/runs/real").filter((x) => /^real-.*json$/.test(x)).sort()) {
+      const rep = JSON.parse(readFileSync(`eval/runs/real/${f}`, "utf8")) as { phase?: string; ledgerFile?: string; records: RealRecord[] };
+      for (const r of rep.records) {
+        const entry = { r, ledger: rep.ledgerFile ?? null };
+        if (/^[NUPQTW]/.test(r.target.id)) { if ((rep.phase ?? "initial") === "initial" && !first.has(r.target.id)) first.set(r.target.id, entry); }
+        else first.set(r.target.id, entry); // R1〜R5: 最後の記録（修正後の再実行）
+      }
+    }
+    const ledgers = new Map<string, ReturnType<typeof readLedger>>();
+    const rows: Record<string, unknown>[] = [];
+    const replayed: RealRecord[] = [];
+    for (const { r, ledger } of first.values()) {
+      let pages;
+      let source = "cache.json（旧記録。実行時と異なる時点のページが混ざる可能性）";
+      if (ledger) {
+        if (!ledgers.has(ledger)) ledgers.set(ledger, readLedger(`eval/runs/real/${ledger}`));
+        pages = pagesForStore(ledgers.get(ledger)!, r.target.id);
+        source = `台帳 ${ledger}`;
+      } else {
+        pages = r.actions.filter((a) => a.name === "fetch_page" && a.ok).map((a) => pageFor(a.arg)).filter((p): p is NonNullable<typeof p> => !!p);
+      }
+      // 提出: 台帳の記録（proposals＝AIの出力そのもの）があればそれを、旧記録は保存した候補を使う
+      const cands = r.proposals && r.proposals.length ? mergeSubmissions(r.proposals) : (r.outcome.candidates ?? []).map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, closureHint: c.closureHint ?? null }));
+      const res = await verifyResearch({ store: r.target.store, proposal: { candidates: cands }, pages, geocode: realGeocode, limitReached: false });
+      rows.push({ id: r.target.id, source, before: { status: r.outcome.status, address: r.outcome.address, confidence: r.outcome.confidence }, after: { status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => `${o.domain}:${o.status}`) }, pages: pages.length, candidates: cands.length });
+      replayed.push({ ...r, outcome: { ...r.outcome, status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })) } });
+    }
+    writeFileSync(process.env.REAL_REPLAY_OUT ?? "eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryPQ: summarizeRecords(replayed.filter((r) => /^[PQ]/.test(r.target.id))), summaryTW: summarizeRecords(replayed.filter((r) => /^[TW]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
+    expect(rows.length).toBeGreaterThan(0);
+  }, 600_000);
+});
+
+describe("自律性の判定（調査の経過から機械的に判定。検索を増やすこと自体は評価しない）", () => {
+  const rec = (status: string, actions: [string, string][], cands: string[] = [], usage: Partial<RealRecord["usage"]> = {}): RealRecord => ({
+    target: REAL_TARGETS.find((x) => x.id === "N01")!, result: { caseId: "N01", status: status as never, address: null, confidence: 0, searches: 0, fetches: 0, steps: 4, costJpy: 1, ms: 1, injectionFlags: 0 },
+    outcome: { status, address: null, confidence: 0, reasons: [], officialSites: [], sources: [], candidates: cands.map((a) => ({ address: a, sourceUrl: "https://x.test/", quote: a, problems: [] })) },
+    usage: { steps: 4, searches: actions.filter((a) => a[0] === "web_search").length, fetches: actions.filter((a) => a[0] === "fetch_page").length, inputTokens: 1, outputTokens: 1, costJpy: 1, ms: 1, retries: 0, rejectedCalls: 0, injectionFlags: 0, duplicateCalls: 0, followUps: 0, ...usage },
+    actions: actions.map(([name, arg]) => ({ name, ok: true, arg })), engine: "t", problem: null,
+  });
+  it("検索語の変更・情報源の追加・矛盾後の継続・早期終了・安全な保留を判定する", () => {
+    const a = autonomyOf(rec("confirmed", [["web_search", "A 公式"], ["web_search", "A 店 住所"], ["fetch_page", "https://www.s1.test/a"], ["fetch_page", "https://s2.test/b"]]));
+    expect(a).toMatchObject({ reformulated: true, duplicateSearch: false, addedSource: true, earlyStop: true, safeHold: false });
+    expect(autonomyOf(rec("candidate", [["web_search", "q"], ["web_search", "q"], ["fetch_page", "https://s1.test/a"]])).duplicateSearch).toBe(true); // 同じ検索語の繰り返し
+    expect(autonomyOf(rec("candidate", [["web_search", "q"], ["fetch_page", "https://s1.test/a"], ["fetch_page", "https://s1.test/b"]], ["東京都A区1-1", "東京都B区2-2"])).conflictContinued).toBe(true);
+    expect(autonomyOf(rec("insufficient", [["web_search", "q"]])).safeHold).toBe(true);
+    expect(autonomyOf(rec("confirmed", [["web_search", "q"]], [], { searches: 4 })).earlyStop).toBe(false); // 上限まで使って確定した場合は早期終了ではない
+  });
+  it("集計: 検索の言い換え率・情報源の追加率・早期終了率・安全な保留率", () => {
+    const s = summarizeRecords([
+      rec("confirmed", [["web_search", "a"], ["web_search", "b"], ["fetch_page", "https://s1.test/"]]),
+      rec("candidate", [["web_search", "a"], ["fetch_page", "https://s1.test/"], ["fetch_page", "https://s2.test/"]]),
+    ]);
+    expect(s.autonomy).toMatchObject({ stores: 2, reformulatedRate: 0.5, addedSourceRate: 0.5, earlyStopRate: 1, safeHoldRate: 1 });
+  });
+});

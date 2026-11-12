@@ -1,0 +1,932 @@
+{
+  "frozenOn": "2026-11-12",
+  "note": "実行前に固定した正解（Stage 8D-4）。実行結果を見て書き換えない。変更が必要な場合は revision として理由を残し、初回の集計は元の正解で行う。unknownGold は正解不明で、正解率の分母に含めない",
+  "gold": [
+    {
+      "id": "N01",
+      "expectedAddress": "大阪府泉大津市北豊中町2丁目17-36",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場泉大津店 住所 大阪府泉大津市北豊中町２丁目１７-３６",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "master に公式ドメイン登録済み（trusted）"
+    },
+    {
+      "id": "N02",
+      "expectedAddress": "兵庫県神戸市垂水区名谷町猿倉677-5",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場名谷店 住所 兵庫県神戸市垂水区名谷町猿倉６７７−５",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "N03",
+      "expectedAddress": "東京都小平市小川町1丁目911",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "古本市場小平店 住所 東京都小平市小川町１丁目９１１",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "別の小平市・小平町の候補に注意"
+    },
+    {
+      "id": "N04",
+      "expectedAddress": "京都府京都市左京区高野東開町12-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "furu1.net"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.furu1.net/shop.html",
+          "quote": "ふるいち高野店 住所 京都府京都市左京区高野東開町１２-１",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "高野（和歌山県高野町など）と取り違えない"
+    },
+    {
+      "id": "N05",
+      "expectedAddress": "東京都大田区蒲田5-26-8",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "bookoff.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.bookoff.co.jp/shop/pref-list/13.html",
+          "quote": "BOOKOFF ＪＲ蒲田駅東口店 所在地 東京都大田区蒲田5-26-8",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        },
+        {
+          "url": "https://www.bookoff.co.jp/shop/pref-list/13.html",
+          "quote": "（別店）Japan TCG Center 蒲田駅東口店 所在地 東京都大田区蒲田5丁目18-5 下川ビル６F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "mustNotAdopt": [
+        "東京都大田区蒲田5丁目18-5"
+      ],
+      "mustNotAdoptNote": "同名に近い別店（Japan TCG Center 蒲田駅東口店）の住所"
+    },
+    {
+      "id": "N06",
+      "expectedAddress": "東京都新宿区西新宿1-10-2",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "bookoff.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.bookoff.co.jp/shop/pref-list/13.html",
+          "quote": "BOOKOFF PLUS 新宿駅西口店 所在地 東京都新宿区西新宿1-10-2 110ビル3F～6F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「BOOKOFF PLUS 新宿駅西口店」（店舗名が違う）"
+    },
+    {
+      "id": "N07",
+      "expectedAddress": "大阪府豊中市日出町2-2-18",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "bookoff.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.bookoff.co.jp/shop/pref-list/27.html",
+          "quote": "BOOKOFF SUPER BAZAAR 豊中三国店 2026年6月25日グランドオープン 所在地 大阪府豊中市日出町2‐2‐18 エディオン豊中店 3F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "公式の表記は「SUPER BAZAAR 豊中三国店」。開店が新しい"
+    },
+    {
+      "id": "N08",
+      "expectedAddress": "大阪府和泉市いぶき野5-6-17",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "bookoff.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.bookoff.co.jp/shop/pref-list/27.html",
+          "quote": "BOOKOFF 和泉中央店 所在地 大阪府和泉市いぶき野5-6-17",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        },
+        {
+          "url": "https://www.bookoff.co.jp/shop/pref-list/27.html",
+          "quote": "B・STYLE 和泉中央店 所在地 大阪府和泉市いぶき野5-6-17",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "「お宝大陸」は旧名称とみられ、公式では BOOKOFF／B・STYLE 和泉中央店が同じ住所。名称の変更・閉店の可能性があるため、確認済みなら理由に注意が必要",
+      "closure": "名称変更の可能性（旧ブランド名）。現在の営業状況は公式一覧にある（同住所）"
+    },
+    {
+      "id": "N09",
+      "expectedAddress": "神奈川県海老名市中央1-6-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "c-labo.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.c-labo.jp/shop/",
+          "quote": "マルイ海老名店 〒243-0432 神奈川県海老名市中央1-6-1 海老名マルイ 5F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "N10",
+      "expectedAddress": "神奈川県川崎市川崎区小川町2-3",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "c-labo.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.c-labo.jp/shop/",
+          "quote": "川崎店 〒210-0023 神奈川県川崎市川崎区小川町2-3 川崎アオキビル第10 4階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "N11",
+      "expectedAddress": "大阪府大阪市浪速区日本橋3-8-16",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "c-labo.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.c-labo.jp/shop/",
+          "quote": "なんば店 556-0005 大阪府大阪市浪速区日本橋3-8-16 安田ビル 1F （B1から1Fに移転しております）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "mustNotAdopt": [
+        "大阪府大阪市浪速区日本橋西1-1-3",
+        "大阪府大阪市浪速区日本橋4-16-1",
+        "大阪府大阪市浪速区難波中2-6-1"
+      ],
+      "mustNotAdoptNote": "同じ系列の別店舗（大阪日本橋店・オタロード本店・販売買取センターNAMBA）",
+      "closure": "同じ建物内（B1→1F）の移転あり。住所は変わらない"
+    },
+    {
+      "id": "N12",
+      "expectedAddress": "大阪府大阪市浪速区難波中2-6-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "c-labo.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.c-labo.jp/shop/",
+          "quote": "販売買取センターNAMBA 〒556-0011 大阪府大阪市浪速区難波中2-6-1 壽ビル 2F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "店舗名に系列名（カードラボ）が入っていない"
+    },
+    {
+      "id": "N13",
+      "expectedAddress": "大阪府大阪市浪速区日本橋西1-1-3",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "c-labo.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.c-labo.jp/shop/",
+          "quote": "大阪日本橋店 〒556-0004 大阪府大阪市浪速区日本橋西1-1-3 池田ビル2号館 5F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "mustNotAdopt": [
+        "大阪府大阪市浪速区日本橋3-8-16",
+        "大阪府大阪市浪速区日本橋4-16-1"
+      ],
+      "mustNotAdoptNote": "近い名前の別店舗（なんば店・オタロード本店）"
+    },
+    {
+      "id": "N14",
+      "expectedAddress": "神奈川県横浜市西区南幸2丁目11番3",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "nextone-iga.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://cardbox.nextone-iga.co.jp/dmstore/",
+          "quote": "ヨコハマ本店 〒220-0005 神奈川県横浜市西区南幸2丁目11番3 プライムメゾン横浜WEST2階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "mustNotAdopt": [
+        "神奈川県横浜市西区南幸2丁目12-5",
+        "神奈川県横浜市西区南幸2-17-7"
+      ],
+      "mustNotAdoptNote": "同じ地区の別店舗（横浜西口店・横浜西口2号店）",
+      "note": "master に公式ドメイン登録済み（trusted）"
+    },
+    {
+      "id": "N15",
+      "expectedAddress": "三重県津市一身田上津部田字口の坪115-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "nextone-iga.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://cardbox.nextone-iga.co.jp/dmstore/",
+          "quote": "津店 〒514-0061 三重県津市一身田上津部田字口の坪115-1（本の王国文化センター前店内）",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "住所が字名つきで長い。店名が一字で他と取り違えやすい"
+    },
+    {
+      "id": "N16",
+      "expectedAddress": "三重県名張市夏見3303",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "nextone-iga.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://cardbox.nextone-iga.co.jp/dmstore/",
+          "quote": "名張店 〒518-0441 三重県名張市夏見3303",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "N17",
+      "expectedAddress": "広島県広島市中区大手町1-4-32",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "nextone-iga.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://cardbox.nextone-iga.co.jp/dmstore/",
+          "quote": "広島店 2025/7/18移転オープン 〒730-0051 広島県広島市中区大手町1-4-32 大手町ビル1階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "closure": "2025-07-18 に移転オープン。旧所在地の記載が残る第三者の情報に注意（現住所のみが正しい）"
+    },
+    {
+      "id": "N18",
+      "expectedAddress": "東京都豊島区東池袋1丁目31-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "nextone-iga.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://cardbox.nextone-iga.co.jp/dmstore/",
+          "quote": "池袋店 〒170-0013 東京都豊島区東池袋1丁目31-1 バロックコート池袋2F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ]
+    },
+    {
+      "id": "N19",
+      "expectedAddress": "東京都世田谷区玉川2-21-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "kiddyland.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://www.kiddyland.co.jp/shoplist/",
+          "quote": "キデイランド 二子玉川店 〒158-0094 東京都世田谷区玉川2-21-1 二子玉川ライズ・ショッピングセンター タウンフロント6階",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "master に公式ドメイン登録済み（trusted）"
+    },
+    {
+      "id": "N20",
+      "expectedAddress": "兵庫県神戸市中央区三宮町2-11-1",
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate"
+      ],
+      "officialDomains": [
+        "yellowsubmarine.co.jp"
+      ],
+      "notOfficialDomains": [
+        "navitime.co.jp",
+        "mapion.co.jp",
+        "torecamap.co.jp",
+        "x.com",
+        "twitter.com",
+        "hikakaku.com",
+        "ekiten.jp",
+        "tokubai.co.jp"
+      ],
+      "conditions": [
+        "公式サイトの店舗一覧・店舗ページに、店舗名と番地までの住所が載っている（確認日 2026-11-12）。確認済みにできるのは、公式性の根拠が揃い、引用が本文に実在するとき"
+      ],
+      "evidence": [
+        {
+          "url": "https://yellowsubmarine.co.jp/shop/%e4%b8%89%e5%ae%ae%e5%ba%97/",
+          "quote": "三宮店 所在地 兵庫県神戸市中央区三宮町2-11-1 センタープラザ西館2F",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（公式ページをHTTPで取得して照合）。利用者による再確認は未実施"
+        }
+      ],
+      "note": "master に公式ドメイン未登録（発見が必要）"
+    },
+    {
+      "id": "U01",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。ドラゴンスターの公式サイト（dorasuta.jp）は自動取得を拒否する（Cloudflare）。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "日本橋の「2号店」「3号店」「本店」の取り違えに注意。AIの結果は人手で確認する"
+    },
+    {
+      "id": "U02",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。同上。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "日本橋2号店・本店との取り違えに注意"
+    },
+    {
+      "id": "U03",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。同上。ららぽーと堺は店名が施設名。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "施設名のみの店名。堺市の別店舗との取り違えに注意"
+    },
+    {
+      "id": "U04",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。TSUTAYA の店舗検索サイトは停止中（メンテナンス）。「松戸」は店名が地名のみで、松戸市内に複数ある可能性。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "店名が曖昧。複数の候補なら確認済みにしてはならない"
+    },
+    {
+      "id": "U05",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。TSUTAYA の店舗検索サイトは停止中。第三者の情報では北千住マルイ5階とされる（未確認）。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "TSUTAYA CROSSBOOKS EQUiA北千住南店など別店舗との取り違えに注意"
+    },
+    {
+      "id": "U06",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。GEO の公式サイトは自動取得を拒否する（403）。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "公式の確認が難しい。第三者のみなら候補止まりが妥当"
+    },
+    {
+      "id": "U07",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。文教堂の公式の店舗ページを取得できなかった。閉店の可能性（未確認）。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "閉店・移転の記載があれば確認済みにしない"
+    },
+    {
+      "id": "U08",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。イトーヨーカドー甲子園店の現況（閉店の可能性）を公式で確認できなかった。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "閉店の記載があれば確認済みにしない"
+    },
+    {
+      "id": "U09",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。大垣書店の店舗ページを取得できなかった。「伏見店」は京都市伏見区の店舗か不明。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "同名の別地域に注意"
+    },
+    {
+      "id": "U10",
+      "unknownGold": true,
+      "expectedAddress": null,
+      "acceptableStatuses": [
+        "confirmed",
+        "candidate",
+        "insufficient",
+        "not_found",
+        "limit_reached",
+        "conflict"
+      ],
+      "officialDomains": [],
+      "notOfficialDomains": [],
+      "conditions": [
+        "正解は不明（実行前に公式で確認できなかった）。ヤマダデンキ Tech LIFE SELECT 神戸垂水店の店舗ページを取得できなかった。"
+      ],
+      "unknown": [
+        "住所",
+        "公式サイト",
+        "営業状況"
+      ],
+      "reviewNote": "別業態（ヤマダ電機の通常店）との取り違えに注意"
+    }
+  ]
+}

@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "_note": "実在店舗の評価対象（入力）。店舗マスター（2026-11-12 時点）から名称・都道府県だけを凍結。住所・個人情報・認証情報を含まない。正解は gold.json（システムに渡さない）。",
+  "targets": [
+    {
+      "id": "R1",
+      "category": "official_easy_confusable",
+      "store": {
+        "chain": "キデイランド",
+        "name": "吉祥寺店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "二子玉川店",
+          "三宮店",
+          "神戸店"
+        ],
+        "chainAliases": [
+          "KIDDY LAND"
+        ]
+      }
+    },
+    {
+      "id": "R2",
+      "category": "name_differs_from_address_area",
+      "store": {
+        "chain": "ふるいち",
+        "name": "竹の塚店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "鶴見店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "R3",
+      "category": "same_name_other_region",
+      "store": {
+        "chain": "ふるいち",
+        "name": "鶴見店",
+        "prefecture": "大阪府",
+        "knownDomains": [],
+        "siblingNames": [
+          "竹の塚店",
+          "泉大津店",
+          "魚住店",
+          "深井店",
+          "イオンモール神戸北店",
+          "西神戸店",
+          "イオンモールりんくう泉南店",
+          "三宮店",
+          "三田店",
+          "宝塚店",
+          "富田林店",
+          "川西店",
+          "庄内店",
+          "灘店",
+          "イオンモール伊丹店",
+          "名谷店",
+          "野口店",
+          "香里園店",
+          "門真店",
+          "小平店",
+          "高野店",
+          "原山台店",
+          "中百舌鳥店",
+          "南茨木店",
+          "東住吉店",
+          "猪名寺店",
+          "緑橋店",
+          "西淀川店",
+          "西宮店",
+          "千里丘店"
+        ],
+        "chainAliases": [
+          "古本市場"
+        ]
+      }
+    },
+    {
+      "id": "R4",
+      "category": "no_official_page_found_easily",
+      "store": {
+        "chain": "BOOKOFF",
+        "name": "京都伏見店",
+        "prefecture": "京都府",
+        "knownDomains": [],
+        "siblingNames": [
+          "JR蒲田駅東口店",
+          "豊中三国店",
+          "お宝大陸和泉中央店",
+          "新宿駅西口店"
+        ],
+        "chainAliases": [
+          "ブックオフ"
+        ]
+      }
+    },
+    {
+      "id": "R5",
+      "category": "may_be_unidentifiable",
+      "store": {
+        "chain": "買取アルト",
+        "name": "ライフ神戸店",
+        "prefecture": "兵庫県",
+        "knownDomains": [],
+        "siblingNames": [],
+        "chainAliases": []
+      }
+    }
+  ]
+}

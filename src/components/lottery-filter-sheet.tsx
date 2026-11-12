@@ -167,6 +167,7 @@ const APPLY_METHODS: FilterOption[] = [
   { value: "web", label: "Web" },
   { value: "store", label: "店頭" },
   { value: "app", label: "アプリ" },
+  { value: "serial", label: "シリアル" },
   { value: "unknown", label: "不明" },
 ];
 const RECEIVE_METHODS: FilterOption[] = [

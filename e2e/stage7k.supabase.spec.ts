@@ -104,6 +104,7 @@ test("購入記録: BOXは開封した時点で記録（購入単価の金額・
   // 開封の取り消し（BOXコレクション）→ 購入記録から除かれ、在庫は3BOXに戻る
   await page.goto("/collection?tab=box");
   await page.getByTestId("box-tile").filter({ hasText: "7K正式名称BOX" }).getByRole("button").first().click();
+  await page.getByTestId("box-detail").getByTestId("box-history-summary").click(); // 在庫履歴は折りたたみ（初期は閉じている）。開いてから取り消す
   await page.getByTestId("box-detail").getByTestId("undo-op").first().click();
   await expect(page.getByTestId("box-detail").getByTestId("state-unknown")).toContainText("3BOX");
   await page.goto("/purchases");

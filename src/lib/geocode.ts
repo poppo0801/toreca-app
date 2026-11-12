@@ -45,7 +45,8 @@ export function buildQuery(address: string, prefecture: string | null | undefine
 export function isCompleteAddress(query: string): boolean {
   const q = normalizeForMatch(query);
   if (q.length < 9) return false;
-  if (!PREFECTURE_LIST.some((p) => q.startsWith(p))) return false;
+  // 都道府県名も同じ正規化をかけて比べる（漢数字の変換で「三重県」が「3重県」になるため。三重県の住所が常に不完全と判定されていた）
+  if (!PREFECTURE_LIST.some((p) => q.startsWith(p) || q.startsWith(normalizeForMatch(p)))) return false;
   return /[市区町村郡]/.test(q.slice(2));
 }
 

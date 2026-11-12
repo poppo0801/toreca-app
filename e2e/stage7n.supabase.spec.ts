@@ -81,7 +81,7 @@ test("店舗選択式の応募で入力した店舗が店舗マスターに登�
     await expect(group).toHaveCount(1);
     await expect(group).toHaveAttribute("data-open", "0");
     await expect(group.getByTestId("store-group-count")).toHaveText("4店舗"); // 応募時に店舗選択（仮の店舗）は数えない
-    await expect(group.getByTestId("store-group-unconfirmed")).toHaveText("1");
+    await expect(group.getByTestId("store-group-unconfirmed")).toHaveText("1件"); // Stage 7R 以降は「n件」表記
     await group.getByTestId("store-group-toggle").click();
     const rows = group.getByTestId("store-row");
     await expect(rows.first()).toContainText("7N未確認店"); // 未確認が先頭

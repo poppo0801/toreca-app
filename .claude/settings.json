@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(npx supabase db push*)",
+      "Bash(npx supabase db reset*--linked*)",
+      "Bash(npx supabase db remote*)",
+      "Bash(npx supabase migration repair*)",
+      "Bash(npx supabase link*)",
+      "Bash(supabase db push*)",
+      "Bash(* --linked*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Read(./.env.production-ops)",
+      "Read(./.env.local.bak)",
+      "Read(./.env)",
+      "Bash(git push origin main*)",
+      "Bash(git push origin HEAD:main*)",
+      "Bash(git push origin dev:main*)",
+      "Bash(git push * main)",
+      "Bash(TOREMANE_ALLOW_MAIN_PUSH=*)",
+      "Bash(* TOREMANE_ALLOW_MAIN_PUSH=*)",
+      "Bash(git push --mirror*)",
+      "Bash(git push --delete*)"
+    ]
+  }
+}

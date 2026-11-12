@@ -1,5 +1,5 @@
 /**
- * 抽選編集フォームの一時保存・再開（Stage 7L・純関数＋sessionStorage）。
+ * 抽選編集フォームの一時保存・再開（Stage 7L・純関数＋sessionStorage）。Stage 8U-1 で、抽選候補の編集の一時保存（候補1件・10分・localStorage）を追加した（保存先は別。互いに影響しない）。
  *  - 対象は「直前に編集した抽選1件」だけ。端末内（sessionStorage）に保持し、別端末には同期しない。
  *  - 最後の編集操作から10分で無効。別の抽選を編集する・正式保存・ログアウトで破棄する。プロフィールが違えば復元しない。
  *  - 復元は利用者が「編集を再開」を押したときだけ。保存後に他で更新されていた項目は、新しい内容を残して上書きしない（3方向の比較）。
@@ -36,20 +36,27 @@ function defaultStore(): Store | null {
   }
 }
 
-export function saveResume(stash: ResumeStash, store: Store | null = defaultStore()): void {
+function saveTo(key: string, stash: ResumeStash, store: Store | null): void {
   try {
-    store?.setItem(KEY, JSON.stringify(stash));
+    store?.setItem(key, JSON.stringify(stash));
   } catch {
     /* 保存先が使えない環境では、一時保存しないだけ */
   }
 }
-
-export function clearResume(store: Store | null = defaultStore()): void {
+function clearFrom(key: string, store: Store | null): void {
   try {
-    store?.removeItem(KEY);
+    store?.removeItem(key);
   } catch {
     /* noop */
   }
+}
+
+export function saveResume(stash: ResumeStash, store: Store | null = defaultStore()): void {
+  saveTo(KEY, stash, store);
+}
+
+export function clearResume(store: Store | null = defaultStore()): void {
+  clearFrom(KEY, store);
 }
 
 /**
@@ -57,9 +64,13 @@ export function clearResume(store: Store | null = defaultStore()): void {
  * 別の抽選の一時保存・期限切れ・壊れたものは破棄する（別のプロフィールのものは、そのプロフィールの内容なので触れずに復元しない）。
  */
 export function loadResume(lotteryId: string, profileId: string, now: number, store: Store | null = defaultStore()): ResumeStash | null {
+  return loadFrom(KEY, lotteryId, profileId, now, store);
+}
+
+function loadFrom(key: string, id: string, profileId: string, now: number, store: Store | null): ResumeStash | null {
   let raw: string | null = null;
   try {
-    raw = store?.getItem(KEY) ?? null;
+    raw = store?.getItem(key) ?? null;
   } catch {
     return null;
   }
@@ -68,23 +79,57 @@ export function loadResume(lotteryId: string, profileId: string, now: number, st
   try {
     s = JSON.parse(raw) as ResumeStash;
   } catch {
-    clearResume(store);
+    clearFrom(key, store);
     return null;
   }
   if (!s || typeof s.lotteryId !== "string" || typeof s.at !== "number" || !s.edited || !s.base) {
-    clearResume(store);
+    clearFrom(key, store);
     return null;
   }
-  if (s.lotteryId !== lotteryId) {
-    clearResume(store); // 別の抽選を編集する → 以前の一時保存を破棄
+  if (s.lotteryId !== id) {
+    clearFrom(key, store); // 別の抽選・候補を編集する → 以前の一時保存を破棄（最後に編集した1件だけ）
     return null;
   }
   if (now - s.at > RESUME_TTL_MS || now < s.at - 60_000) {
-    clearResume(store);
+    clearFrom(key, store);
     return null;
   }
   if (s.profileId !== profileId) return null;
   return s;
+}
+
+// ---------------------------------------------------------------- 抽選候補の編集の一時保存（Stage 8U-1）
+// 候補の編集を閉じても破棄の確認は出さず、最後に編集した候補1件だけを、最後の編集から10分間、この端末内に保持する。
+// 画面の遷移・再読み込み・アプリの再起動でも残るよう localStorage に置く（有効期限で自動的に無効になる）。保存先は抽選の編集の一時保存とは別。
+// 正式に登録・除外・削除したら破棄する。別の候補・別のプロフィールの内容は復元しない（stash.lotteryId に候補IDを入れる）。
+const CANDIDATE_KEY = "tcg.candidate-resume.v1";
+function candidateStore(): Store | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+export function saveCandidateResume(stash: ResumeStash, store: Store | null = candidateStore()): void {
+  saveTo(CANDIDATE_KEY, stash, store);
+}
+export function clearCandidateResume(store: Store | null = candidateStore()): void {
+  clearFrom(CANDIDATE_KEY, store);
+}
+/** 指定した候補IDが、保存されている一時保存の候補IDと一致しない場合（別の候補・別の操作）は、保存内容を破棄する */
+export function loadCandidateResume(candidateId: string, profileId: string, now: number, store: Store | null = candidateStore()): ResumeStash | null {
+  return loadFrom(CANDIDATE_KEY, candidateId, profileId, now, store);
+}
+/** 候補の除外・登録のあと、その候補の一時保存だけを破棄する（他の候補の一時保存は残す） */
+export function discardCandidateResumeFor(candidateId: string, store: Store | null = candidateStore()): void {
+  try {
+    const raw = store?.getItem(CANDIDATE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw) as { lotteryId?: string };
+    if (s.lotteryId === candidateId) clearFrom(CANDIDATE_KEY, store);
+  } catch {
+    clearFrom(CANDIDATE_KEY, store);
+  }
 }
 
 const KEY_LABEL: Record<string, string> = {

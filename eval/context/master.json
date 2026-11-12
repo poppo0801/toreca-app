@@ -1,0 +1,34 @@
+{
+  "_note": "評価用に固定した既存データの断面（架空）。開発用シード（scripts/lib/dev-seed-data.mjs）と名称は対応するが、日付は絶対日で固定し、評価は開発DBの状態に依存しない。システムには入力として渡してよい（正解ではない）。",
+  "region": { "allowedPrefectures": ["東京都", "神奈川県", "埼玉県", "千葉県"], "note": "テスト用の対象地域。これ以外の都道府県の店舗は地域外" },
+  "chains": [
+    { "name": "テスト書店", "aliases": [] },
+    { "name": "テスト家電", "aliases": [] },
+    { "name": "テストカード専門店", "aliases": ["テストカードショップ"] },
+    { "name": "テストBOOKS", "aliases": ["テストブックス", "ＴＥＳＴ　ＢＯＯＫＳ"] },
+    { "name": "テストモール", "aliases": [] },
+    { "name": "テスト通販ショップ", "aliases": [] },
+    { "name": "テスト百貨店", "aliases": [] }
+  ],
+  "stores": [
+    { "chain": "テスト書店", "name": "テスト書店 駅前店", "prefecture": "東京都", "address": "登録済み" },
+    { "chain": "テスト書店", "name": "テスト書店 郊外店", "prefecture": "神奈川県", "address": null },
+    { "chain": "テスト書店", "name": "テスト書店 港北店", "prefecture": "神奈川県", "address": "登録済み", "note": "閉店の可能性あり" },
+    { "chain": "テスト書店", "name": "通販", "prefecture": "", "salesKind": "online_only" },
+    { "chain": "テスト家電", "name": "テスト家電 本店", "prefecture": "東京都", "address": "登録済み" },
+    { "chain": "テスト家電", "name": "テスト家電 西口店", "prefecture": "東京都", "address": null },
+    { "chain": "テスト家電", "name": "本店", "prefecture": "神奈川県", "address": null },
+    { "chain": "テストモール", "name": "本店", "prefecture": "東京都", "address": null },
+    { "chain": "テストBOOKS", "name": "テストBOOKS 本店", "prefecture": "千葉県", "address": null },
+    { "chain": "テストBOOKS", "name": "テストBOOKS 沖縄店", "prefecture": "沖縄県", "address": null },
+    { "chain": "テストカード専門店", "name": "テストカード 中央店", "prefecture": "埼玉県", "address": null },
+    { "chain": "テスト通販ショップ", "name": "通販", "prefecture": "", "salesKind": "online_only" },
+    { "chain": "テスト百貨店", "name": "テスト百貨店 中央館", "prefecture": "東京都", "address": "登録済み" }
+  ],
+  "products": ["テストパック 第1弾", "テストパック 第2弾", "テスト拡張セット", "テストスターターデッキ"],
+  "existingLotteries": [
+    { "id": "X01", "chain": "テスト書店", "store": "テスト書店 駅前店", "products": [["テストパック 第1弾", 1, "box"]], "applyDeadline": "2027-01-12", "resultDate": "2027-01-15", "applyMethod": "web", "receiveMethod": "store" },
+    { "id": "X02", "chain": "テスト家電", "store": "テスト家電 西口店", "products": [["テストパック 第1弾", 1, "box"]], "applyDeadline": "2027-01-10", "resultDate": "2027-01-12", "applyMethod": "store", "receiveMethod": "store" },
+    { "id": "X03", "chain": "テスト通販ショップ", "store": "通販", "products": [["テストパック 第2弾", 1, "box"]], "applyDeadline": "2027-01-14", "resultDate": "2027-01-17", "applyMethod": "web", "receiveMethod": "shipping" }
+  ]
+}

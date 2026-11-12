@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { loadFuelContextAction, saveFuelSettingsAction } from "@/app/(app)/finance/fuel-actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
@@ -15,13 +15,17 @@ export function FuelSettingsSection() {
   const [eff, setEff] = useState(String(DEFAULT_FUEL_KM_PER_L));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 保存済みの値の読み込みが終わるまでは保存できない（読み込み前に保存すると初期値で上書きしてしまう）。入力済みの欄は、遅れて届いた保存済みの値で消さない
+  const [loaded, setLoaded] = useState(false);
+  const touched = useRef({ price: false, eff: false });
 
   useEffect(() => {
     let live = true;
     void loadFuelContextAction(null, null).then((r) => {
       if (!live || !r.ok) return;
-      setPrice(String(r.settings.pricePerL));
-      setEff(String(r.settings.kmPerL));
+      if (!touched.current.price) setPrice(String(r.settings.pricePerL));
+      if (!touched.current.eff) setEff(String(r.settings.kmPerL));
+      setLoaded(true);
     });
     return () => {
       live = false;
@@ -44,11 +48,11 @@ export function FuelSettingsSection() {
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-sm">
           燃費（km/L）
-          <input type="number" inputMode="decimal" min={0} step="0.1" aria-label="燃費" value={eff} onChange={(e) => setEff(e.target.value)} className={field} />
+          <input type="number" inputMode="decimal" min={0} step="0.1" aria-label="燃費" value={eff} onChange={(e) => { touched.current.eff = true; setEff(e.target.value); }} className={field} />
         </label>
         <label className="block text-sm">
           ガソリン単価の初期値（円/L）
-          <input type="number" inputMode="decimal" min={0} step="0.1" aria-label="ガソリン単価の初期値" value={price} onChange={(e) => setPrice(e.target.value)} className={field} />
+          <input type="number" inputMode="decimal" min={0} step="0.1" aria-label="ガソリン単価の初期値" value={price} onChange={(e) => { touched.current.price = true; setPrice(e.target.value); }} className={field} />
         </label>
       </div>
       <details className="text-[11px] text-muted-foreground">
@@ -56,7 +60,7 @@ export function FuelSettingsSection() {
         <p className="mt-1">初期値は MAZDA3 セダン 20S（2WD・5BA-BPFP）を基準にした16.7km/L・155円/Lです。年式により公表値は異なります。実燃費に合わせて変更してください。</p>
       </details>
       <div className="flex items-center gap-2">
-        <Button type="button" onClick={() => void save()} disabled={busy} data-testid="fuel-settings-save">
+        <Button type="button" onClick={() => void save()} disabled={busy || !loaded} data-testid="fuel-settings-save">
           {busy ? "保存中…" : "保存"}
         </Button>
         {msg && (

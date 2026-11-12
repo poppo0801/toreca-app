@@ -242,7 +242,8 @@ describe.skipIf(!dbTestsEnabled)("抽選・応募・購入の保存と世帯分�
   });
 
   it("他店舗への複製: 店舗ごとに独立して作られ、同じキャンペーンに属し、応募は複製されない", async () => {
-    const src = ok(await saveLottery(u1, hid1, null, base({ newCampaign: { name: "結合テストCP", storeRule: "one_store" }, applications: [{ accountId: accA, status: "applied" }] }), profA)).id;
+    // 応募締切を他のテストの抽選と変える（同じ店舗に同じ内容・同じ締切の抽選があると、複製は重複として作らない。Stage 8U-1）
+    const src = ok(await saveLottery(u1, hid1, null, base({ newCampaign: { name: "結合テストCP", storeRule: "one_store" }, applyDeadline: { precision: "date_only", date: "2099-03-03", time: "" }, applications: [{ accountId: accA, status: "applied" }] }), profA)).id;
     const { ids } = ok(await duplicateLottery(u1, hid1, src, [storeB], profA));
     expect(ids).toHaveLength(1);
     const d = await loadAppData(u1);

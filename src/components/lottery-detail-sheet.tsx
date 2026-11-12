@@ -24,7 +24,10 @@ import { useViewScope } from "@/components/user-scope";
 import { canOperateOwner, ownerIdOf, scopedApplications } from "@/lib/profile-link";
 import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, hasSkipException, judgeAccount, skipSourceFor } from "@/lib/eligibility";
 import { BAND_CLASS, formatKm } from "@/lib/geo";
-import { APPLY_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL } from "@/lib/lottery-labels";
+import { LotteryExcludeSheet } from "@/components/lottery-exclude-sheet";
+import { LotteryGroupSheet } from "@/components/lottery-group-sheet";
+import { useGroupManage } from "@/components/group-manage-context";
+import { APPLY_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL, SERIAL_STEPS } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
 import { AppliedStoreDialog } from "@/components/applied-store-dialog";
@@ -245,6 +248,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const boxHint = boxHintOf(lottery, data.chains.find((c) => c.id === lottery.chainId));
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [grouping, setGrouping] = useState(false);
+  const manageGroup = useGroupManage();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
   const [confirmChainSkip, setConfirmChainSkip] = useState(false);
@@ -425,6 +430,11 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 <Field label="応募方法" className={cn("py-2", SIDE_CLS.l)}>
                   {lottery.applyMethod === "unknown" ? DASH : APPLY_LABEL[lottery.applyMethod]}
                   <Unconfirmed show={unconfirmed.includes("applyMethod")} />
+                  {lottery.applyMethod === "serial" && (
+                    <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground" data-testid="serial-steps">
+                      {SERIAL_STEPS}
+                    </span>
+                  )}
                 </Field>
                 <Field label="受取方法" className={cn("py-2", SIDE_CLS.r)}>
                   {lottery.receiveMethod === "unknown" ? DASH : RECEIVE_LABEL[lottery.receiveMethod]}
@@ -639,6 +649,17 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                     他店舗に複製
                   </Button>
                 )}
+                {persistent && (
+                  <Button size="sm" variant="outline" onClick={() => {
+                      // 一覧が管理画面を持つ（グループ化でこのカードが親カードの中へ移っても、画面が消えない）。詳細は閉じる
+                      if (manageGroup) {
+                        manageGroup(lottery);
+                        onOpenChange(false);
+                      } else setGrouping(true);
+                    }} data-testid="lottery-group-open">
+                    {lottery.groupId ? "グループを管理" : "グループにまとめる"}
+                  </Button>
+                )}
                 {lottery.eventState !== "postponed" ? (
                   <Button size="sm" variant="outline" onClick={() => actions.setEventState(lottery.id, "postponed")}>
                     発表延期にする
@@ -658,8 +679,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   </Button>
                 )}
                 {persistent && (
-                  <Button size="sm" variant="danger" onClick={() => setConfirmArchive(true)}>
-                    登録を取り下げる
+                  <Button size="sm" variant="danger" onClick={() => setConfirmArchive(true)} data-testid="lottery-exclude-open">
+                    除外…
                   </Button>
                 )}
               </div>
@@ -670,27 +691,18 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
       {editing && <LotteryFormDialog open lottery={lottery} onOpenChange={setEditing} />}
       {duplicating && <DuplicateDialog open lottery={lottery} onOpenChange={setDuplicating} />}
-      <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
-        <DialogContent>
-          <DialogTitle>この抽選の登録を取り下げますか？</DialogTitle>
-          <DialogDescription>誤登録の整理用です。一覧から表示されなくなりますが、応募・当落・購入の記録はデータとして保持され、削除はされません。</DialogDescription>
-          <div className="mt-4 flex justify-end gap-2">
-            <DialogClose asChild>
-              <Button variant="outline">キャンセル</Button>
-            </DialogClose>
-            <Button
-              variant="danger"
-              onClick={() => {
-                actions.archiveLottery(lottery.id);
-                setConfirmArchive(false);
-                onOpenChange(false);
-              }}
-            >
-              取り下げる
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {grouping && <LotteryGroupSheet anchor={lottery} onClose={() => setGrouping(false)} />}
+      {/* 除外（理由つき。Stage 8U-1）: 抽選候補の除外と同じ理由の分類。削除はせず、応募・当落・購入の記録は保持される */}
+      {confirmArchive && (
+        <LotteryExcludeSheet
+          lottery={lottery}
+          onClose={() => setConfirmArchive(false)}
+          onDone={() => {
+            setConfirmArchive(false);
+            onOpenChange(false);
+          }}
+        />
+      )}
       <Dialog open={confirmCancel} onOpenChange={setConfirmCancel}>
         <DialogContent>
           <DialogTitle>この抽選を中止にしますか？</DialogTitle>

@@ -68,6 +68,23 @@ const PREFECTURES = [
 ] as const;
 export const PREFECTURE_LIST: readonly string[] = PREFECTURES;
 
+/** 47都道府県の正式名か */
+export const isPrefecture = (v: string): boolean => PREFECTURES.some((p) => p === v);
+
+/**
+ * 都道府県の入力を正式名へそろえる（Stage 8U-1。店舗マスターの都道府県を選択式にするための正規化）。
+ * 全角半角・空白を除き、「兵庫」「東京」「京都」のように「県・府・都」を省いた表記は正式名にする。
+ * 47都道府県のどれにも当たらない値は、そのまま返す（推測で別の県にしない。検証で「選択してください」になる）。空欄は空欄（未設定）。
+ */
+export function normalizePrefecture(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  const s = v.normalize("NFKC").replace(/[\s　]+/g, "");
+  if (s === "") return "";
+  if (isPrefecture(s)) return s;
+  const hit = PREFECTURES.filter((p) => p.replace(/[都府県]$/, "") === s);
+  return hit.length === 1 ? hit[0] : s;
+}
+
 /** 住所の先頭から都道府県を取り出す（見つからなければ null。推測しない） */
 export function prefectureOf(address: string): string | null {
   const a = address.normalize("NFKC").trim();

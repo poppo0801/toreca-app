@@ -24,6 +24,8 @@ describe("住所ジオコーディングの判定", () => {
     expect(isCompleteAddress("神戸市中央区東川崎町1-7-2")).toBe(false);
     expect(isCompleteAddress("兵庫県神戸市")).toBe(false);
     expect(isCompleteAddress("三宮店")).toBe(false);
+    expect(isCompleteAddress("三重県名張市夏見3303")).toBe(true); // 「三重県」は漢数字の変換で「3重県」になるが、都道府県として判定する
+    expect(isCompleteAddress("三重県津市一身田上津部田字口の坪115-1")).toBe(true);
   });
   it("住所の先頭と一致する最も細かい候補を採用する", () => {
     const r = pickCandidate("兵庫県神戸市中央区東川崎町1-7-2 ハーバーランドumie", [hit("兵庫県神戸市中央区"), hit("兵庫県神戸市中央区東川崎町１丁目", 34.6785, 135.1818)]);

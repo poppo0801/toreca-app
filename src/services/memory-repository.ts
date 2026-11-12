@@ -84,6 +84,24 @@ export class InMemoryRepository implements LotteryRepository {
   async archiveLottery() {
     return UNSUPPORTED;
   }
+  async saveLotteryAndDuplicate() {
+    return UNSUPPORTED;
+  }
+  async lotteryOperationResult() {
+    return { ok: false as const, error: "デモデータでは使えません" };
+  }
+  async excludeLottery() {
+    return UNSUPPORTED;
+  }
+  async groupLotteries() {
+    return UNSUPPORTED;
+  }
+  async ungroupLottery() {
+    return UNSUPPORTED;
+  }
+  async dissolveLotteryGroup() {
+    return UNSUPPORTED;
+  }
   async addManualPurchase() {
     return UNSUPPORTED;
   }

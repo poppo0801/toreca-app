@@ -121,13 +121,17 @@ describe("カードのスワイプ操作", () => {
     expect(actions.setLotterySkip).toHaveBeenLastCalledWith("L4", false);
   });
 
-  it("Undo通知は約3秒で消える", async () => {
+  it("Undo通知は約4.5秒で消える（Stage 8U-1: 従来の3秒から約1.5秒延長）。3秒を過ぎても取り消せる", async () => {
     mount("all");
     drag(120, 0);
     await act(async () => {});
     expect(document.body.querySelector('[data-testid="undo-toast"]')).not.toBeNull();
     await act(async () => {
       vi.advanceTimersByTime(3100);
+    });
+    expect(document.body.querySelector('[data-testid="undo-toast"]')).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
     });
     expect(document.body.querySelector('[data-testid="undo-toast"]')).toBeNull();
   });

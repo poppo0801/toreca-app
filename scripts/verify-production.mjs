@@ -7,11 +7,9 @@
 // 確認内容: 認証ガード・セキュリティヘッダー・PWA・環境変数の設定漏れ・Supabase URL/キーの整合・匿名RLS・クライアントへの秘密の漏えい
 import { spawnSync } from "node:child_process";
 
-try {
-  process.loadEnvFile(".env.local");
-} catch {
-  /* 環境変数が既に設定されている場合 */
-}
+import { loadProductionEnv } from "./lib/prod-env.mjs";
+
+loadProductionEnv("verify-production.mjs"); // 本番の設定（.env.production-ops）。開発用の .env.local は読まない（Stage 8C）
 const args = process.argv.slice(2);
 const urlArg = args.indexOf("--url");
 const base = (urlArg >= 0 ? args[urlArg + 1] : "https://toreca-app.vercel.app").replace(/\/$/, "");

@@ -72,6 +72,7 @@ test("バックグラウンド復帰: 長く離れたあとはデータだけ静
   await expect(dialog).toBeVisible(); // 開いていたダイアログは閉じない
   await expect(memo).toHaveValue("復帰テスト系列"); // 入力も消えない
   await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "破棄して閉じる" }).click(); // 入力済みのフォームは破棄の確認が出る（現行仕様）
   await expect(page.getByRole("tab", { name: /応募済み/ })).toHaveAttribute("aria-selected", "true"); // タブも保つ
 
   // 一時的な通信切断: 復帰しても取得せず、エラー画面にもならない。接続が戻ったら取得する

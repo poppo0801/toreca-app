@@ -59,6 +59,8 @@ test("登録・編集・設定のダイアログ/シートを開いても、入�
     await chain.fill("入力できる");
     await expect(chain).toHaveValue("入力できる");
     await page.keyboard.press("Escape");
+    // 入力済みの登録フォームは、Escapeで閉じる前に破棄の確認が出る（入力内容を守る現行仕様）。確認で破棄して閉じる
+    await page.getByRole("button", { name: "破棄して閉じる" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
     // 絞り込み

@@ -49,8 +49,5 @@ export async function mergeProductsAction(fromId: string, intoId: string, actor:
   if (!db) return NEED;
   const r = await mergeProducts(db, fromId, intoId, actor);
   if (!r.ok) return { ok: false, error: r.error };
-  revalidatePath("/settings/masters");
-  revalidatePath("/collection");
-  revalidatePath("/lotteries");
   return { ok: true, result: r.value };
 }

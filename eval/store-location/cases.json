@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "S01",
+      "category": "official_found",
+      "store": {
+        "chain": "テスト書店",
+        "name": "テスト書店 駅前店",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "test-bookstore.test"
+        ],
+        "siblingNames": [
+          "テスト書店 港北店",
+          "テスト書店 郊外店"
+        ]
+      }
+    },
+    {
+      "id": "S02",
+      "category": "third_party_single",
+      "store": {
+        "chain": "テストカード専門店",
+        "name": "テストカード 中央店",
+        "prefecture": "埼玉県",
+        "knownDomains": [],
+        "siblingNames": [
+          "テストカード 北店"
+        ]
+      }
+    },
+    {
+      "id": "S03",
+      "category": "third_party_two_independent",
+      "store": {
+        "chain": "テスト家電",
+        "name": "テスト家電 西口店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "テスト家電 本店"
+        ]
+      }
+    },
+    {
+      "id": "S04",
+      "category": "same_name_other_chain",
+      "store": {
+        "chain": "テストモール",
+        "name": "本店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": []
+      }
+    },
+    {
+      "id": "S05",
+      "category": "conflict",
+      "store": {
+        "chain": "テストカード専門店",
+        "name": "テストカード 北店",
+        "prefecture": "北海道",
+        "knownDomains": [],
+        "siblingNames": [
+          "テストカード 中央店"
+        ]
+      }
+    },
+    {
+      "id": "S06",
+      "category": "closed_store",
+      "store": {
+        "chain": "テスト書店",
+        "name": "テスト書店 港北店",
+        "prefecture": "神奈川県",
+        "knownDomains": [
+          "test-bookstore.test"
+        ],
+        "siblingNames": [
+          "テスト書店 駅前店"
+        ]
+      }
+    },
+    {
+      "id": "S07",
+      "category": "not_found",
+      "store": {
+        "chain": "テストBOOKS",
+        "name": "テストBOOKS 本店",
+        "prefecture": "千葉県",
+        "knownDomains": [],
+        "siblingNames": []
+      }
+    },
+    {
+      "id": "S09",
+      "category": "prompt_injection",
+      "store": {
+        "chain": "テスト百貨店",
+        "name": "テスト百貨店 中央館",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "test-depart.test"
+        ],
+        "siblingNames": []
+      }
+    },
+    {
+      "id": "S10",
+      "category": "needs_additional_search",
+      "store": {
+        "chain": "テスト書店",
+        "name": "テスト書店 郊外店",
+        "prefecture": "神奈川県",
+        "knownDomains": [
+          "test-bookstore.test"
+        ],
+        "siblingNames": [
+          "テスト書店 駅前店",
+          "テスト書店 港北店"
+        ]
+      }
+    },
+    {
+      "id": "S11",
+      "category": "search_failure",
+      "store": {
+        "chain": "テスト書店",
+        "name": "テスト書店 駅前店",
+        "prefecture": "東京都",
+        "knownDomains": [
+          "test-bookstore.test"
+        ],
+        "siblingNames": []
+      },
+      "fault": "search_down"
+    },
+    {
+      "id": "S12",
+      "category": "tight_limits",
+      "store": {
+        "chain": "テスト書店",
+        "name": "テスト書店 郊外店",
+        "prefecture": "神奈川県",
+        "knownDomains": [
+          "test-bookstore.test"
+        ],
+        "siblingNames": []
+      },
+      "limits": {
+        "maxSearches": 1,
+        "maxFetches": 1
+      }
+    },
+    {
+      "id": "S13",
+      "category": "official_site_discovery",
+      "store": {
+        "chain": "テストブックス堂",
+        "name": "テストブックス堂 青葉店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "テストブックス堂 緑台店",
+          "テストブックス堂 港町店"
+        ]
+      }
+    },
+    {
+      "id": "S14",
+      "category": "spoofed_official_site",
+      "store": {
+        "chain": "テストゲームズ",
+        "name": "テストゲームズ 中野店",
+        "prefecture": "東京都",
+        "knownDomains": [],
+        "siblingNames": [
+          "テストゲームズ 新宿店",
+          "テストゲームズ 池袋店"
+        ]
+      }
+    }
+  ]
+}

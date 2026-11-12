@@ -29,3 +29,9 @@ e2e/ai-live-output
 .e2e-*.log
 .db-*.log
 .c4.*.json
+
+# Stage 8C: 開発用ローカルSupabaseの作業フォルダ（マイグレーションのコピー・ポート設定）
+.dev-supabase/
+
+# Stage 8D-1: 評価基盤のシステム出力（正解とは分離。Git管理外）
+eval/runs/

@@ -34,8 +34,11 @@ export const APPLY_LABEL: Record<ApplyMethod, string> = {
   web: "Web",
   store: "店頭",
   app: "アプリ",
+  serial: "🔑シリアル",
   unknown: "未確認",
 };
+/** シリアルコード応募の手順（詳細画面）。店頭でコードを入手する必要がある */
+export const SERIAL_STEPS = "店頭でシリアルコードを受け取り、Webでコードを入力して応募します（コードの入手には店舗への来店が必要です）。";
 
 export const RESULT_LABEL: Record<ResultStatus, string> = {
   pending: "結果待ち",

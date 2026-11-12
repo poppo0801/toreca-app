@@ -5,14 +5,22 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 /**
- * 画面上部に浮かせる短い通知（Undo付き）。スワイプ操作の結果を知らせ、約3秒のあいだ「元に戻す」を押せる。
+ * 画面上部に浮かせる短い通知（Undo付き）。スワイプ操作の結果を知らせ、約4.5秒のあいだ「元に戻す」を押せる。上へスワイプすると即座に閉じる（閉じても、操作はそのまま確定している。取り消せなくなるだけ）。
  *  ・position: fixed なので、見出しやカードを押し下げない。ノッチ・Dynamic Island・セーフエリアの内側に出す。
  *  ・body 直下に描画する。スクロール領域（main。iOS では -webkit-overflow-scrolling で独立した重なりの階層になる）の中に置くと、固定ヘッダーの裏に隠れて下の端しか見えなくなる。
  *  ・下部の細い進捗バーが、残り時間に合わせて左から右へ伸びる（アニメーションは CSS。動きを減らす設定でもバーは出す）。
  *  ・新しい操作が来たら通知を差し替える。「元に戻す」は常に今表示している操作だけを取り消す（取り違えない）。
  *  ・元に戻すが失敗したら、失敗を知らせる通知に切り替える（成功したように見せない）。
  */
-export const UNDO_WINDOW_MS = 3000;
+export const UNDO_WINDOW_MS = 4500;
+/** 上スワイプで閉じる判定（Stage 8U-1）: 上向きにこの距離（px）以上動かし、縦の動きが横の動きより大きいとき。これ未満の動きはタップ（元に戻す）として扱う */
+export const DISMISS_SWIPE_PX = 28;
+/** 動き始めとみなす距離（px）。これ未満は指の揺れ。超えたら、そのあとのクリックは無効にする */
+const MOVE_SLOP_PX = 8;
+/** 上スワイプで閉じるかの判定（純粋）。始点からの移動量（dx, dy。上が負）で決める */
+export function isDismissSwipe(dx: number, dy: number): boolean {
+  return dy <= -DISMISS_SWIPE_PX && Math.abs(dy) > Math.abs(dx) * 1.2;
+}
 
 export interface UndoToastInput {
   message: string;
@@ -43,6 +51,9 @@ export function useUndoToast(): UndoToastApi {
 export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { children: React.ReactNode; windowMs?: number }) {
   const [toast, setToast] = useState<ToastState | null>(null);
   const seq = useRef(0);
+  const gesture = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  const swallow = useRef(false);
+  const [lift, setLift] = useState(0);
   const timer = useRef<number | null>(null);
   const host = useSyncExternalStore(
     () => () => undefined,
@@ -82,11 +93,42 @@ export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { chi
     } catch {
       res = "元に戻せませんでした。通信状況を確認してください";
     }
+    // 取り消しの間に新しい操作の通知が出ていたら、古い取り消しの結果で上書きしない（新しい操作を隠さない）
+    if (seq.current !== cur.id) return;
     if (res === true) show({ message: "元に戻しました" });
     else show({ message: res, tone: "error" });
   };
 
   const api = useMemo<UndoToastApi>(() => ({ show }), [show]);
+
+  const onDown = (e: React.PointerEvent) => {
+    gesture.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    swallow.current = false;
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    if (!g || g.id !== e.pointerId) return;
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    if (Math.hypot(dx, dy) > MOVE_SLOP_PX) g.moved = true;
+    // 上へ引いている間だけ追従（下・横には動かさない）
+    setLift(dy < 0 && Math.abs(dy) > Math.abs(dx) ? dy : 0);
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    gesture.current = null;
+    setLift(0);
+    if (!g || g.id !== e.pointerId) return;
+    if (g.moved) swallow.current = true; // 動いたあとのクリックは「元に戻す」にしない（タップと取り違えない）
+    if (isDismissSwipe(e.clientX - g.x, e.clientY - g.y) && toast) {
+      clear();
+      dismiss(toast.id);
+    }
+  };
+  const onCancel = () => {
+    gesture.current = null;
+    setLift(0);
+  };
 
   return (
     <Ctx.Provider value={api}>
@@ -104,6 +146,11 @@ export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { chi
             aria-live="polite"
             data-testid="undo-toast"
             data-tone={toast.tone ?? "default"}
+            onPointerDown={onDown}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onCancel}
+            style={{ touchAction: "none", transform: lift ? `translateY(${lift}px)` : undefined, opacity: lift ? Math.max(0.3, 1 + lift / 120) : undefined }}
             className={cn(
               "pointer-events-auto relative w-full max-w-sm overflow-hidden rounded-xl border shadow-lg",
               toast.tone === "error" ? "border-danger bg-card text-danger" : "border-foreground/10 bg-foreground text-background",
@@ -112,7 +159,13 @@ export function UndoToastProvider({ children, windowMs = UNDO_WINDOW_MS }: { chi
             <button
               type="button"
               disabled={!toast.undo || toast.pending}
-              onClick={() => void runUndo()}
+              onClick={() => {
+                if (swallow.current) {
+                  swallow.current = false;
+                  return;
+                }
+                void runUndo();
+              }}
               className="flex min-h-11 w-full items-center gap-3 px-3.5 py-2 text-left text-sm disabled:cursor-default"
               aria-label={toast.undo ? `${toast.message}。元に戻す` : toast.message}
             >

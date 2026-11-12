@@ -23,17 +23,25 @@ export function FuelCalc({ chain, store, onToggle, onCalc }: { chain: MasterRef;
   const [saved, setSaved] = useState<number | null>(null);
   const kmPerL = useRef<number>(DEFAULT_FUEL_KM_PER_L);
   const priceTouched = useRef(false);
+  // 系列＋店舗の組み合わせごとに、距離を入力し始めたか。入力後に遅れて届いた保存済みの距離で、入力中の値を消さない
+  const kmTouched = useRef(false);
+  const kmKey = useRef("");
 
   // ONの間、系列・店舗の組み合わせが変わるたびに、保存済みの片道距離を読み直す（別の店舗の距離は残さない）
   useEffect(() => {
     if (!on) return;
     let live = true;
+    const key = `${chain.id ?? ""}|${store.id ?? ""}`;
+    if (kmKey.current !== key) {
+      kmKey.current = key;
+      kmTouched.current = false;
+    }
     void loadFuelContextAction(chain.id, store.id).then((r) => {
       if (!live || !r.ok) return;
       kmPerL.current = r.settings.kmPerL;
       if (!priceTouched.current) setPrice(String(r.settings.pricePerL));
       setSaved(r.oneWayKm);
-      setKm(r.oneWayKm === null ? "" : String(r.oneWayKm));
+      if (!kmTouched.current) setKm(r.oneWayKm === null ? "" : String(r.oneWayKm));
     });
     return () => {
       live = false;
@@ -86,7 +94,7 @@ export function FuelCalc({ chain, store, onToggle, onCalc }: { chain: MasterRef;
             </label>
             <label className="block text-sm">
               片道距離（km）
-              <input type="number" inputMode="decimal" min={0} step="0.1" aria-label="片道距離" value={km} onChange={(e) => setKm(e.target.value)} className={field} />
+              <input type="number" inputMode="decimal" min={0} step="0.1" aria-label="片道距離" value={km} onChange={(e) => { kmTouched.current = true; setKm(e.target.value); }} className={field} />
             </label>
           </div>
           <div className="flex items-center gap-2">
