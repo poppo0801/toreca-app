@@ -82,3 +82,8 @@
 - 再調査ループ: `core.ts` の `runAgent(review, maxReviews)` が提出後に独立した検証（`run.ts` → `verifyResearch`）を呼び、`followup.ts`（`diagnoseStoreGaps`・`planFollowUp`）の不足の理由を提出への結果として返す。同じ会話・同じ `Budget`（`hasHeadroom` で余力を予測）。`dedupeKey` で重複呼び出しを断る。`ResearchOutcome.rounds`・`submissions`。`followUps` 既定 0。
 - 評価データ: `evidence-store.ts`（実行ごとの台帳・ハッシュ・整合性検査）。再判定は台帳のみ。`eval/real-stores/targets-8d6.json`・`gold-8d6.json`（T01〜T20・W01〜W10）。
 - 保存: 新しいマイグレーションなし（`usage`・`trace` の jsonb に項目を追加）。本番導入: `docs/PRODUCTION_ROLLOUT_8D.md` §8。結果: `docs/stage8d6.md`。
+
+## Stage 8U の追加
+- 複数店舗抽選のグループ: 既存の `lottery_bulk_groups`（+ `lotteries.bulk_group_id`）を表示グループへ一般化。親カードは表示専用（`lottery-group-card.tsx`・`lib/lottery-group.ts`）で、子は独立した抽選。履歴 `lottery_group_events`。DB関数 `group_lotteries_tx`・`ungroup_lottery_tx`・`dissolve_lottery_group_tx`・`duplicate_lottery_tx`（1トランザクション）。
+- 除外: `lottery_exclusions`（追記専用）＋ `exclude_lottery_tx`。入力欄の自動スクロール: `lib/input-reveal.ts`（AppShell の `InputReveal`）。候補の編集の一時保存: `lib/lottery-resume.ts`（localStorage・10分・1件）。
+- 詳細: `docs/stage8u.md`。本番反映: `docs/PRODUCTION_ROLLOUT_8D.md` §9。

@@ -60,7 +60,10 @@ UI を追加・変更する前に読む。出典は、利用者の指示（`CLAU
 | 1行に収める表示 | `fit-line.tsx`、集計 `summary-triple.tsx`、`expense-bar.tsx` |
 | ページ見出し | `page-heading.tsx` |
 | マスター選択 | `master-combobox.tsx`、`chain-store-fields.tsx` |
-| 入力欄を見える位置へ | `lib/use-scroll-input-into-view.ts`（Stage 7S） |
+| 入力欄を見える位置へ | `lib/use-scroll-input-into-view.ts`（Stage 7S）／アプリ全体の共通処理 `lib/input-reveal.ts`（Stage 8U。AppShell の `InputReveal`。テキスト入力にフォーカスしたときだけ、最も近いスクロール領域を動かす） |
+| 同じ系列の複数店舗を選ぶ | `store-multi-picker.tsx`（Stage 8U。新しい店舗の追加を含む。他店舗に複製・保存して複製・グループ化で共通） |
+| 複数店舗抽選の親カード・グループ管理 | `lottery-group-card.tsx`・`lottery-group-sheet.tsx`（Stage 8U。親は表示専用でスワイプなし。子は通常のカード） |
+| 取り消し通知（Undo） | `undo-toast.tsx`（4.5秒・上スワイプで閉じる。閉じても操作は確定） |
 | 色の同期（iOS） | `theme-color-meta.tsx` |
 | エラー・復帰 | `recoverable-error.tsx`、`resilience-watcher.tsx` |
 

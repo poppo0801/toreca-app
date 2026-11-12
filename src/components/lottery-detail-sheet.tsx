@@ -26,6 +26,7 @@ import { accountsForLottery, describeRule, effectiveEventState, effectiveRules, 
 import { BAND_CLASS, formatKm } from "@/lib/geo";
 import { LotteryExcludeSheet } from "@/components/lottery-exclude-sheet";
 import { LotteryGroupSheet } from "@/components/lottery-group-sheet";
+import { useGroupManage } from "@/components/group-manage-context";
 import { APPLY_LABEL, MODE_LABEL, RECEIVE_LABEL, RESULT_LABEL, SERIAL_STEPS } from "@/lib/lottery-labels";
 import { formatItem, formatQuantity, isManaged } from "@/lib/lottery-view";
 import { boxHintLabel, boxHintOf } from "@/lib/product-kind";
@@ -248,6 +249,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [grouping, setGrouping] = useState(false);
+  const manageGroup = useGroupManage();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
   const [confirmChainSkip, setConfirmChainSkip] = useState(false);
@@ -648,7 +650,13 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   </Button>
                 )}
                 {persistent && (
-                  <Button size="sm" variant="outline" onClick={() => setGrouping(true)} data-testid="lottery-group-open">
+                  <Button size="sm" variant="outline" onClick={() => {
+                      // 一覧が管理画面を持つ（グループ化でこのカードが親カードの中へ移っても、画面が消えない）。詳細は閉じる
+                      if (manageGroup) {
+                        manageGroup(lottery);
+                        onOpenChange(false);
+                      } else setGrouping(true);
+                    }} data-testid="lottery-group-open">
                     {lottery.groupId ? "グループを管理" : "グループにまとめる"}
                   </Button>
                 )}

@@ -15,6 +15,7 @@ import { LotteryFormDialog } from "@/components/lottery-form";
 import { LotteryCard } from "@/components/lottery-card";
 import { LotteryGroupCard } from "@/components/lottery-group-card";
 import { LotteryGroupSheet } from "@/components/lottery-group-sheet";
+import { GroupManageContext } from "@/components/group-manage-context";
 import { buildListRows } from "@/lib/lottery-group";
 import { LotteryMatrix } from "@/components/lottery-matrix";
 import { OngoingSection } from "@/components/ongoing-section";
@@ -256,6 +257,7 @@ function LotteryBoardInner() {
 
   return (
     <UserScopeProvider pref={userScope}>
+    <GroupManageContext.Provider value={setGroupManaging}>
     <div>
       {/* 固定領域: 見出し＋タブ。この下の検索・フィルター・カードだけがスクロールする */}
       <div className="sticky top-[var(--header-h)] z-20 -mx-3 space-y-1.5 border-b bg-background px-3 pb-1.5 md:-mx-6 md:px-6">
@@ -462,6 +464,7 @@ function LotteryBoardInner() {
         )}
       </div>
     </div>
+    </GroupManageContext.Provider>
     </UserScopeProvider>
   );
 }

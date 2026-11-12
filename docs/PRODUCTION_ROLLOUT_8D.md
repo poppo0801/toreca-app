@@ -89,3 +89,14 @@
 3. `followUps` = 1 を有効化。再調査した件の「改善・変化なし・悪化」と、追加費用を `usage`・`trace` で確認。**悪化（正しい結果が正しくなくなる）・誤った確認済みが1件でもあれば無効化**。
 4. 問題なければ 2 へ。承認フローの一括承認は別の判断（§4）。
 - **ロールバック**: `followUps` を 0 に戻す（再調査のみ停止。調査・承認は継続）→ `AGENT_REAL_API` を外す（調査停止）→ 有効化フラグを外す（§6）→ DB構造の削除（§6。最後の手段。先に `backup:full`）。再調査は店舗マスターを変更しないため、再調査の停止・削除で、既に反映した住所は変わらない（反映の取消は §6）。
+
+---
+
+## 9. Stage 8U（機能・UI改善、複数店舗抽選のグループ）の本番反映の注意点
+**準備資料で、実行していない。** 本番に未適用のマイグレーションは **094〜097**（§1 の094〜096に加え、`20261215000097_stage8u.sql`）。`docs/stage8u.md`。
+- **097 の内容と既存への影響**: ①`lotteries.apply_method` の制約を差し替え（`serial` を追加。既存の値は有効のまま）②新規表 `lottery_exclusions`・`lottery_group_events` ③`lottery_bulk_groups` に列を追加（既定値つき。既存の行は `origin='bulk_registration'`）し、件数の制約を緩める（1〜30 → 0〜200）、更新ポリシーを追加 ④関数の追加。既存の抽選・応募・当落のデータは書き換えない。マイグレーション内で、既存の一括登録グループの履歴（作成・所属）を `lottery_group_events` へ補完する（既存グループの数だけ行が増える）。
+- **適用の順序・依存**: 094→095→096→097。097 は 094〜096 に依存しない（`save_lottery_tx`・`stores`・`lotteries`・`lottery_bulk_groups`（7L）・`profiles` が必要）。PostgreSQL 15 以上が必要（`on delete set null (列)`。ローカルは17。Supabase の本番は15以上）。
+- **アプリとの前後関係**: 新しいアプリ（8U）は 097 が無い本番DBでは、①シリアルを選ぶ保存、②抽選の除外（理由つき）、③グループ・複製の操作が失敗する（一覧・応募など既存の機能は動く。グループの読み込みは失敗しても他のデータを読み込む）。**デプロイの前に 097 を適用する**のが安全（097 を先に適用しても、現行の本番アプリには影響しない）。
+- **事前の確認（読み取り）**: 店舗の都道府県が47都道府県の正式名か（`npm run prod -- scripts/check-store-prefectures.mjs --yes-production`）。略記（「兵庫」等）は編集時に正式名へそろう。47都道府県にない値は、その店舗を編集して選び直すまで保存できない（表示・検索・距離計算には影響しない）。**開発側の確認では、本番の読み取りが自動の判定で拒否されたため未実施**（利用者が実行する）。
+- **手順**: `npm run backup:full` → 利用者が 094〜097 を順に適用（§2）→ `verify:prod` → アプリを反映。ロールバックは §6 に 097 の分を追加: `drop function public.duplicate_lottery_tx(uuid,uuid[],jsonb,boolean,uuid,text), public.dissolve_lottery_group_tx(uuid,uuid), public.ungroup_lottery_tx(uuid,uuid), public.group_lotteries_tx(uuid,uuid,text,text,jsonb,uuid), public.lottery_group_refresh(uuid,uuid,text), public.exclude_lottery_tx(uuid,text,uuid,text,uuid); drop table public.lottery_group_events, public.lottery_exclusions;`（`lottery_bulk_groups` の追加列と制約・`apply_method` の制約は、データを失うため先に確認）。**除外の記録・グループの履歴は消える**ため先に `backup:full`。
+- **Stage 8D（住所調査AI）・自動収集への影響**: なし（別の表・別の関数。`lotteries` の `auto_dedupe_key`・`import_key` には触れない。複製した抽選はそれらを引き継がない）。

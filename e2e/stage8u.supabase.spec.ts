@@ -128,7 +128,7 @@ test("複数店舗抽選のグループ（親カード・展開・子の応募�
     await c2.getByRole("button", { name: /の詳細を開く/ }).first().click();
     const detail = page.getByTestId("lottery-detail-sheet");
     await detail.getByTestId("more-ops").locator("summary").click();
-    await detail.getByTestId("lottery-group-open").click();
+    await detail.getByTestId("lottery-group-open").click(); // 詳細は閉じ、管理画面は一覧側で開く（グループ化でカードが親カードへ移っても消えない）
     const gs = page.getByTestId("lottery-group-sheet");
     await expect(gs.getByTestId("group-pick").first()).not.toBeChecked();
     await gs.getByTestId("group-pick").nth(0).check();
