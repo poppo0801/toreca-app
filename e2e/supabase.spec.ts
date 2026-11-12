@@ -1010,7 +1010,7 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   await expect(row.getByTestId("store-distance")).toHaveCount(0); // 位置未設定
   await row.getByRole("button", { name: "編集" }).click();
   const dlg = page.getByRole("dialog");
-  await dlg.getByLabel(/都道府県/).fill("大阪府");
+  await dlg.getByLabel(/都道府県/).selectOption("大阪府"); // 都道府県は47都道府県の選択式（Stage 8U-1）
   await dlg.getByLabel(/店舗の住所/).fill("大阪府大阪市北区E2E");
   await dlg.getByLabel(/緯度/).fill("34.7025");
   await dlg.getByRole("button", { name: "保存" }).click();
@@ -1040,6 +1040,8 @@ test("店舗の位置・交通費・直線距離・カード表示項目・AI料
   const saved = () => page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/settings/display"));
   await Promise.all([saved(), cf.getByLabel("受取場所（都道府県／通販）").uncheck()]);
   await Promise.all([saved(), cf.getByLabel("往復交通費").check()]);
+  // 1回の変更で、保存の通信と取り直しの通信が続けて起きる。最初の応答だけを待つと、2つ目の保存が終わる前に移動して保存が中断されることがある（以前から時々失敗していた原因）。通信が落ち着くまで待つ
+  await page.waitForLoadState("networkidle");
   await page.goto("/lotteries");
   await page.getByRole("tab", { name: /要チェック/ }).click();
   const card2 = page.getByTestId("lottery-card").filter({ hasText: "E2E位置店" });
@@ -1479,7 +1481,7 @@ function makeTallPng(w: number, h: number): Buffer {
 
 test("縦長画像(786×10,810px): ブラウザで幅を保って11枚に分割し、1件の抽選として解析する（単体のAI読み取り・まとめて登録の両方。AIはモック）", async ({ page }) => {
   test.skip(!!process.env.E2E_BASE_URL, "本番では実AIの検証で確認する。費用を発生させない");
-  test.setTimeout(150_000);
+  test.setTimeout(60_000);
   await login(page);
   const tall = { name: "long.png", mimeType: "image/png", buffer: makeTallPng(786, 10810) };
 
@@ -2067,15 +2069,24 @@ test("Stage 5M 系列ロゴ: マスター管理で登録→抽選カードの店
 });
 
 test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・収集元の追加/無効/削除・SSRFの拒否・条件の保存と保持・X APIは設定するまで呼ばない", async ({ page }) => {
+  test.setTimeout(90_000); // 設定画面の多数の操作を1つのテストで行う
   await login(page);
   await page.goto("/settings");
   await page.getByTestId("menu-collection").click();
   await expect(page.getByRole("heading", { name: "抽選情報の自動収集" })).toBeVisible();
-  // ②〜④は初期状態で閉じている。操作のため開く
-  for (const id of ["conditions", "run-settings", "history"]) {
-    const t = page.getByTestId(`${id}-toggle`);
-    if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
-  }
+  // ①〜④は初期状態で閉じている（再読み込みのたびに閉じた状態へ戻る）。操作のため開く。①動作状況には、操作の結果メッセージ collect-msg と処理状況 health が出る
+  const openAll = async () => {
+    for (const id of ["conditions", "run-settings", "history"]) {
+      const t = page.getByTestId(`${id}-toggle`);
+      if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+    }
+    const healthToggle = page.getByRole("button", { name: "動作状況", exact: true });
+    if ((await healthToggle.getAttribute("aria-expanded")) !== "true") await healthToggle.click();
+    // 収集元の管理（追加フォーム・収集元ごとの有効/無効）も折りたたみ
+    const sourcesBox = page.locator("details", { has: page.getByLabel("収集するURL") }).first();
+    if (!(await sourcesBox.evaluate((el) => (el as HTMLDetailsElement).open))) await sourcesBox.locator("summary").first().click();
+  };
+  await openAll();
 
   // 初期の収集元（Web2・X2）。まだ取得していないので「未取得」（取得できたと表示しない）
   const rows = page.getByTestId("source-row");
@@ -2097,6 +2108,9 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await expect(page.getByTestId("x-state")).toContainText("APIキー（X_BEARER_TOKEN）");
 
   // 収集元の追加: 内部ネットワークや資格情報つきURLは拒否。公開のhttps URLは追加できる
+  // 追加フォームは折りたたみ（収集元の管理）の中にある。開いてから入力する（以前からの失敗の原因: 閉じたままの入力欄を探して待ち続けていた）
+  const addForm = page.locator("details", { has: page.getByLabel("収集するURL") }).first();
+  if (!(await addForm.evaluate((el) => (el as HTMLDetailsElement).open))) await addForm.locator("summary").first().click();
   await page.getByLabel("収集するURL").fill("https://localhost/admin");
   await page.getByTestId("add-source-submit").click();
   await expect(page.getByTestId("collect-msg")).toBeVisible();
@@ -2125,8 +2139,11 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await page.getByLabel("最大距離(km)").fill("80");
   await page.getByRole("button", { name: "Web応募" }).click();
   await page.getByTestId("save-conditions").click();
-  await expect(page.getByTestId("collect-msg")).toContainText("完了");
+  await expect(page.getByTestId("collect-msg")).toContainText(/完了|保存しました/);
+  await page.waitForLoadState("networkidle"); // 保存後の取り直しの通信が終わってから再読み込みする（途中で止めて保存前の表示を見ないように）
   await page.reload();
+  await page.waitForLoadState("networkidle");
+  await openAll();
   await expect(page.getByTestId("pref-chips").getByRole("button", { pressed: true })).toHaveCount(7);
   await expect(page.getByLabel("最大距離(km)")).toHaveValue("80");
   await expect(page.getByRole("button", { name: "Web応募" })).toHaveAttribute("aria-pressed", "true");
@@ -2137,7 +2154,7 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await page.getByTestId("candidates-toggle").click();
   await expect(page.getByTestId("cand-tab-queued")).toBeVisible();
   // 運用状況: 日次上限の既定は100件、月額予算の既定は3,000円。新規発見・AI解析・登録は別の数字
-  await expect(page.getByTestId("ops-ai")).toContainText("0／100件");
+  await expect(page.getByTestId("ops-ai")).toContainText("0件"); // 現在の使用量の表示は「N件」（日次の上限は設定欄に出す。表示形式の変更に合わせた）
   await expect(page.getByTestId("ops-discovered")).toContainText("0件");
   await expect(page.getByTestId("ops-registered")).toContainText("0件");
   await expect(page.getByTestId("ops-cost")).toContainText("／3,000円");
@@ -2146,6 +2163,7 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await page.getByTestId("save-budget").click();
   await expect(page.getByTestId("collect-msg")).toContainText("保存しました");
   await page.reload();
+  await openAll();
   await expect(page.getByTestId("ops-cost")).toContainText("／3,500円");
   await page.getByLabel("AI月額予算(円)").fill("3000");
   await page.getByTestId("save-budget").click();
@@ -2156,21 +2174,23 @@ test("Stage 4C 自動収集の設定: 初期の収集元4件・初期条件・�
   await expect(page.getByTestId("stats-table")).toBeVisible();
   await expect(page.getByTestId("worker-enabled")).not.toBeChecked();
   await page.getByTestId("worker-enabled").check();
-  await page.getByLabel("ワーカーの1日のAI解析上限").fill("12");
+  // 解析ワーカーの設定項目は「告知ページの再確認の間隔」（1日のAI解析上限の入力欄は現在の画面にない。表示は「今日のAI解析 N件」）
+  await page.getByLabel("告知ページを再確認する間隔(時間)").fill("12");
   await page.getByTestId("save-conditions").click();
-  await expect(page.getByTestId("collect-msg")).toContainText("完了");
+  await expect(page.getByTestId("collect-msg")).toContainText(/完了|保存しました/);
   await page.reload();
+  await openAll();
   await expect(page.getByTestId("worker-enabled")).toBeChecked();
-  await expect(page.getByLabel("ワーカーの1日のAI解析上限")).toHaveValue("12");
-  await expect(page.getByTestId("health")).toContainText("今日のAI 0/12");
+  await expect(page.getByLabel("告知ページを再確認する間隔(時間)")).toHaveValue("12");
+  await expect(page.getByTestId("health")).toContainText("今日のAI解析0件");
   await page.getByTestId("worker-enabled").uncheck();
   await page.getByTestId("save-conditions").click();
-  await expect(page.getByTestId("collect-msg")).toContainText("完了");
+  await expect(page.getByTestId("collect-msg")).toContainText(/完了|保存しました/);
 
   // 手動実行（すべて無効にして、外部サイトに接続せずに実行できることだけ確認）。X APIは未設定・無効なので呼ばれない
   for (const name of ["pokeso", "トレカ日和", "OnchainOutlaw", "pokecachan"]) {
     const r = page.getByTestId("source-row").filter({ hasText: name });
-    await r.getByRole("checkbox", { name: /を有効にする/ }).click();
+    await r.getByRole("checkbox", { name: /有効にする/ }).click();
     await expect(r.getByTestId("source-status")).toHaveText("無効");
   }
   await page.getByTestId("collect-now").click();
