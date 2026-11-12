@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { proposeAction } from "@/app/(app)/settings/store-research/proposal-actions";
+import { StoreProposalsView } from "@/components/store-proposals-view";
 import { loadResearchContextAction, runStoreResearchAction, type ResearchConfig, type ResearchView } from "@/app/(app)/settings/store-research/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
@@ -29,6 +31,8 @@ export function StoreResearchView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ResearchView | null>(null);
+  const [proposeMsg, setProposeMsg] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [history, setHistory] = useState<{ status: string; address: string | null; confidence: number; researchedAt: string }[]>([]);
 
   const apply = (r: Awaited<ReturnType<typeof loadResearchContextAction>>) => {
@@ -88,7 +92,7 @@ export function StoreResearchView() {
         {selected && (
           <p className="text-xs text-muted-foreground">
             登録済みの住所: {selected.address ?? "なし"}
-            {selected.prefecture ? `（${selected.prefecture}）` : ""}。調査結果は店舗マスターには反映されません。
+            {selected.prefecture ? `（${selected.prefecture}）` : ""}。調査結果は、承認するまで店舗マスターには反映されません。
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
@@ -140,6 +144,24 @@ export function StoreResearchView() {
             {result.address ? `${result.address}${result.city ? `（${result.prefecture ?? ""}${result.city}）` : ""}${result.hasLatLng ? "・座標あり" : ""}` : "住所は確定していません"}
           </p>
           {result.status !== "confirmed" && result.address && <p className="text-xs text-warning">確認済みではありません。登録する前に、情報源を確認してください。</p>}
+          {result.id && result.address && (result.status === "confirmed" || result.status === "candidate") && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="research-propose"
+                onClick={async () => {
+                  setProposeMsg(null);
+                  const r = await proposeAction({ researchId: result.id!, profileId: profile.id });
+                  setProposeMsg(r.ok ? (r.duplicate ? "同じ反映候補がすでにあります" : "反映候補にしました（承認するまで店舗マスターは変わりません）") : r.error);
+                  setRefreshKey((k) => k + 1);
+                }}
+              >
+                反映候補にする
+              </Button>
+              {proposeMsg && <span className="text-xs" data-testid="research-propose-msg">{proposeMsg}</span>}
+            </div>
+          )}
           <ul className="list-disc space-y-0.5 pl-5 text-xs">
             {result.reasons.map((r, i) => (
               <li key={i}>{r}</li>
@@ -206,6 +228,7 @@ export function StoreResearchView() {
           </ul>
         </details>
       )}
+      <StoreProposalsView refreshKey={refreshKey} />
     </div>
   );
 }
