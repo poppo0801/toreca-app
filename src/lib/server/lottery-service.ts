@@ -307,7 +307,9 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   }
   try {
     // 抽選グループ（解散していないもの）。未適用の環境では取得できなくても、他のデータは読み込む
-    const g = await scope(from("lottery_bulk_groups").select("id,chain_id,title,origin,basis").is("dissolved_at", null).limit(5000));
+    // 一時的な失敗（接続など）で、グループだけが欠けた状態にならないよう、1回だけ取り直す
+    let g = await scope(from("lottery_bulk_groups").select("id,chain_id,title,origin,basis").is("dissolved_at", null).limit(5000));
+    if (g.error) g = await scope(from("lottery_bulk_groups").select("id,chain_id,title,origin,basis").is("dissolved_at", null).limit(5000));
     if (!g.error) {
       lotteryGroups = (g.data as { id: string; chain_id: string | null; title: string; origin: string; basis: unknown }[]).map((r) => ({
         id: r.id,

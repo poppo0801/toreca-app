@@ -16,7 +16,10 @@ import type { Lottery } from "@/types/domain";
 export function LotteryGroupSheet({ anchor, onClose }: { anchor: Lottery; onClose: () => void }) {
   const { data, actions } = useApp();
   const live = data.lotteries.find((l) => l.id === anchor.id) ?? anchor;
-  const group = live.groupId ? data.lotteryGroups?.find((g) => g.id === live.groupId) : undefined;
+  // 開いた時点のグループ。「外す」で開いた抽選（anchor）自身が外れても、同じグループの管理を続けられる（グループが解散したときだけ、グループなしの表示になる）
+  const [openedGroupId] = useState(anchor.groupId ?? null);
+  const gid = live.groupId ?? openedGroupId;
+  const group = gid ? data.lotteryGroups?.find((g) => g.id === gid) : undefined;
   const members = useMemo(() => (group ? data.lotteries.filter((l) => l.groupId === group.id) : []), [data.lotteries, group]);
   const sameChain = useMemo(() => data.lotteries.filter((l) => l.chainId === live.chainId && l.id !== live.id && (!group || l.groupId !== group.id)), [data.lotteries, live.chainId, live.id, group?.id]);
   const mates = useMemo(() => new Set(suggestGroupMates(live, sameChain).map((l) => l.id)), [live, sameChain]);
