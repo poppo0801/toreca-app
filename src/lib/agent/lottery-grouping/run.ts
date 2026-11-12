@@ -44,6 +44,8 @@ export interface GroupingOutcome {
   engine: string;
   /** 検証を受けた追加調査の記録（回数と理由） */
   followUps: { round: number; feedback: string }[];
+  /** 最初の提出（追加調査の前）。追加調査の効果の比較用（Stage 8F-2）。追加調査をしなければ claim と同じ */
+  firstClaim: AgentProposal | null;
 }
 
 export const GROUPING_LIMITS: AgentLimits = { maxSteps: 10, maxSearches: 0, maxFetches: 0, maxTokens: 120_000, maxCostJpy: 5, maxMs: 60_000, maxRetries: 2, maxDuplicates: 3 };
@@ -69,7 +71,7 @@ export function planGroupingFollowUp(d: VerifiedDecision, claim: AgentProposal |
 export async function evaluateGrouping(world: GWorld, deps: GroupingDeps): Promise<GroupingOutcome> {
   const subject = world.subject;
   const candidates = world.lotteries.filter((l) => isPlausiblePeer(subject, l));
-  const none = (decision: VerifiedDecision, skipped: GroupingOutcome["skipped"]): GroupingOutcome => ({ decision, ranAgent: false, skipped, claim: null, run: null, usage: null, engine: "rule", followUps: [] });
+  const none = (decision: VerifiedDecision, skipped: GroupingOutcome["skipped"]): GroupingOutcome => ({ decision, ranAgent: false, skipped, claim: null, run: null, usage: null, engine: "rule", followUps: [], firstClaim: null });
 
   // ① 事前の絞り込み: 比較する相手がいなければ、AIを呼ばずに単独（費用をかけない）
   if (candidates.length === 0) {
@@ -92,6 +94,7 @@ export async function evaluateGrouping(world: GWorld, deps: GroupingDeps): Promi
   const maxRounds = Math.max(0, Math.floor(deps.followUps ?? 0));
   const followUps: { round: number; feedback: string }[] = [];
   const fingerprints: string[] = [];
+  let firstClaim: AgentProposal | null | undefined;
 
   const run = await runAgent({
     llm: deps.llm, tools, system: GROUPING_SYSTEM_PROMPT, task, limits: { ...GROUPING_LIMITS, ...deps.limits }, now: deps.now,
@@ -99,6 +102,7 @@ export async function evaluateGrouping(world: GWorld, deps: GroupingDeps): Promi
     review: maxRounds > 0
       ? async (info) => {
           const claim = parseGroupingProposal(info.output);
+          if (firstClaim === undefined) firstClaim = claim;
           const d = verifyProposal(world, claim, { allowAuto: deps.allowAuto });
           const plan = planGroupingFollowUp(d, claim, fingerprints);
           if (!plan) return null;
@@ -122,5 +126,5 @@ export async function evaluateGrouping(world: GWorld, deps: GroupingDeps): Promi
   }
   // 情報源に命令らしき文面があった事実を記録（実行はしていない）
   if (run.usage.injectionFlags > 0 && !decision.downgrades.some((x) => x.includes("命令"))) decision.downgrades.push("ツールの結果に命令らしき文面があった（指示としては扱っていない）");
-  return { decision, ranAgent: true, skipped: null, claim, run, usage: run.usage, engine: deps.llm.name, followUps };
+  return { decision, ranAgent: true, skipped: null, claim, run, usage: run.usage, engine: deps.llm.name, followUps, firstClaim: firstClaim === undefined ? claim : firstClaim };
 }

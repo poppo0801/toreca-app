@@ -58,7 +58,7 @@ function build(spec: LotterySpec, n: number): GLottery {
     storeName: store,
     chainId: spec.chain ? `chain:${spec.chain}` : "chain:main",
     storeMode: spec.storeMode ?? "fixed",
-    items: (spec.products ?? ["A"]).map((p) => item(PRODUCTS[p], spec.qty ?? 1)),
+    items: (spec.products ?? ["A"]).map((p) => item(PRODUCTS[p] ?? `product:${p}`, spec.qty ?? 1)),
     campaignId: spec.campaign ?? null,
     applyStart: flex(spec.start, "2026-12-01"),
     applyDeadline: flex(spec.deadline, "2026-12-07"),
@@ -81,6 +81,8 @@ export function worldOf(sc: Scenario): GWorld {
   const others = sc.others.map((o) => build(o, ++n));
   const groups = (sc.groups ?? []).map((g) => ({ ...mkGroup(g.id, g.origin, g.members, "chain:main") }));
   const w = mkWorld(subject, others, { groups, evidence: Object.fromEntries(Object.entries(sc.evidence ?? {}).map(([k, v]) => [k, [v]])), separated: sc.separated });
+  // 実在の商品名（A・B以外）は、名前そのものを商品IDにして、名前を引けるようにする（実データの評価用）
+  for (const l of [subject, ...others]) for (const i of l.items) if (i.productId.startsWith("product:")) w.productNames.set(i.productId, i.productId.slice("product:".length));
   if (sc.knownRejected) w.knownKeys.set(proposalKey("new_group", [subject.id, ...others.map((o) => o.id)], null), "rejected");
   return w;
 }
