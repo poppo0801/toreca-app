@@ -111,7 +111,8 @@ describe("実在店舗の評価データ", () => {
     const cats = tw.map((t) => t.category).join(",");
     for (const c of ["same_name_other_chain", "name_differs", "official_poor", "closure_possible", "relocation_possible"]) expect(cats, c).toContain(c);
     // 凍結: 実行前に固定した内容。変更するなら理由を残して新しい組にする（結果を見て書き換えない）
-    const hash = (f: string) => createHash("sha256").update(readFileSync(f)).digest("hex");
+    // 改行コードだけは正規化する（Windows の git は autocrlf で作業ツリーを CRLF にするため、LF のリポジトリ内容・CIと一致させる）。内容が1文字でも変われば不一致になる
+    const hash = (f: string) => createHash("sha256").update(readFileSync(f, "utf8").replace(/\r\n/g, "\n")).digest("hex");
     expect(hash("eval/real-stores/targets-8d6.json")).toBe("a6f9d5d422d2b4500b3b5091d178034e1476a46af39d536298f16700a7d7433c");
     expect(hash("eval/real-stores/gold-8d6.json")).toBe("ca9bbd9d13ba0fecd2bcd81afb7884475e929e6a34f20a81eb196a8fcac3f0cc");
   });

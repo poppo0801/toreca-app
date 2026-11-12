@@ -11,7 +11,11 @@ import { freePort } from "./lib/port.mjs";
 import { ISOLATED_AGENT_ENV } from "./lib/e2e-env.mjs";
 import { assertLocalTarget } from "./lib/target.mjs";
 
-process.loadEnvFile(".env.local");
+try {
+  process.loadEnvFile(".env.local");
+} catch {
+  /* .env.local が無い環境（CI など）や、環境変数で設定済みの場合。接続先は次の assertLocalTarget が必ず検査し、未設定・本番なら停止する */
+}
 assertLocalTarget("test:e2e:supabase"); // 開発用ローカルDBのみ（Stage 8C。npm run prod 経由でも本番では実行しない）
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
