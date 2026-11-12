@@ -583,10 +583,18 @@ function FieldInput({ field, rows, value, onChange }: { field: Field; rows: Mast
           .filter((r) => !isRetired(ENTITIES[field.ref!], r) || r.id === value)
           .map((r) => ({ value: r.id, label: String(r[ENTITIES[field.ref!].titleField]) }))
       : (field.options ?? []);
+    // 選択肢に「空」（未設定）がある項目（都道府県など）は、その表示名を空の選択肢にする。登録済みの値が選択肢にない場合（旧い表記）は、消さずに「選び直してください」として残す
+    const blank = options.find((o) => o.value === "");
+    const known = value === "" || options.some((o) => o.value === value);
     return (
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={common} required={field.required}>
-        <option value="">{field.optionalRef ? "指定なし" : "選択してください"}</option>
-        {options.map((o) => (
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={common} required={field.required} data-testid={`field-${field.name}`}>
+        <option value="">{blank ? blank.label : field.optionalRef ? "指定なし" : "選択してください"}</option>
+        {!known && (
+          <option value={value}>
+            {value}（選択肢にない値。選び直してください）
+          </option>
+        )}
+        {options.filter((o) => o.value !== "").map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>

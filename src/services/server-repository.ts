@@ -2,6 +2,11 @@ import {
   addManualPurchaseAction,
   archiveLotteryAction,
   duplicateLotteryAction,
+  saveLotteryAndDuplicateAction,
+  excludeLotteryAction,
+  groupLotteriesAction,
+  ungroupLotteryAction,
+  dissolveLotteryGroupAction,
   loadAppDataAction,
   saveLotteryAction,
   setAppliedAction,
@@ -50,7 +55,12 @@ export class ServerActionRepository implements LotteryRepository {
   setLotterySkip = (profileId: string, id: string, v: boolean) => setLotterySkipAction(profileId, id, v, profileId);
   setEventState = (actor: string, id: string, s: Parameters<typeof setEventStateAction>[1]) => setEventStateAction(id, s, actor);
   saveLottery = (actor: string, id: string | null, input: Parameters<typeof saveLotteryAction>[1]) => saveLotteryAction(id, input, actor);
-  duplicateLottery = (actor: string, id: string, storeIds: string[]) => duplicateLotteryAction(id, storeIds, actor);
+  duplicateLottery = (actor: string, id: string, storeIds: string[], opts?: Parameters<typeof duplicateLotteryAction>[3]) => duplicateLotteryAction(id, storeIds, actor, opts);
+  saveLotteryAndDuplicate = (actor: string, input: Parameters<typeof saveLotteryAction>[1], storeIds: string[], newStores: { name: string; prefecture: string }[]) => saveLotteryAndDuplicateAction(input, storeIds, newStores, actor);
   archiveLottery = (actor: string, id: string) => archiveLotteryAction(id, actor);
+  excludeLottery = (actor: string, id: string, ex: Parameters<typeof excludeLotteryAction>[1]) => excludeLotteryAction(id, ex, actor);
+  groupLotteries = (actor: string, ids: string[], opts: Parameters<typeof groupLotteriesAction>[1] = {}) => groupLotteriesAction(ids, opts, actor);
+  ungroupLottery = (actor: string, id: string) => ungroupLotteryAction(id, actor);
+  dissolveLotteryGroup = (actor: string, id: string) => dissolveLotteryGroupAction(id, actor);
   addManualPurchase = (actor: string, input: Parameters<typeof addManualPurchaseAction>[0]) => addManualPurchaseAction(input, actor);
 }

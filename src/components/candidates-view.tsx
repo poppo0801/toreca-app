@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import type { CandidateView } from "@/components/auto-collect-view";
 import { candidateFacts, ExcludeReasonSheet, type ExcludeResult } from "@/components/exclude-reason-sheet";
 import { LotteryFormDialog } from "@/components/lottery-form";
+import { discardCandidateResumeFor } from "@/lib/lottery-resume";
 import { PageHeading } from "@/components/page-heading";
 import { ProductThumb } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
   const [rank, setRank] = useState<"all" | Rank>("all");
   const [stateFilter, setStateFilter] = useState<"all" | CandidateState>("all");
   const [limit, setLimit] = useState(PAGE);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [editing, setEditing] = useState<CandidateView | null>(null);
   const [excluding, setExcluding] = useState<CandidateView | null>(null);
   const [detail, setDetail] = useState<CandidateView | null>(null);
@@ -102,6 +104,8 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
     [sortable, rank, sortKey, byId, stateFilter, states],
   );
   const visible = shown.slice(0, limit);
+  // 既定（全状態・すべて・新着順）から変えている項目の数（ボタンのバッジ）
+  const activeFilters = (stateFilter !== "all" ? 1 : 0) + (rank !== "all" ? 1 : 0) + (sortKey !== "new" ? 1 : 0);
 
   const hide = (id: string) => setHidden((h) => new Set(h).add(id));
   const unhide = (id: string) =>
@@ -112,6 +116,7 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
     });
 
   const onExcluded = (c: CandidateView, r: ExcludeResult) => {
+    discardCandidateResumeFor(c.id); // 除外した候補の編集の一時保存は破棄する
     hide(c.id);
     setExcluding(null);
     setDetail(null);
@@ -154,32 +159,51 @@ function CandidatesInner({ candidates }: { candidates: CandidateView[] }) {
             {rows.length}件
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <select aria-label="絞り込み（状態）" value={stateFilter} onChange={(e) => setStateFilter(e.target.value as "all" | CandidateState)} className="h-9 rounded-md border bg-input px-2 text-xs" data-testid="candidates-state">
+        <Button
+          variant="outline"
+          size="icon"
+          className="relative size-9 shrink-0"
+          aria-label="絞り込み・並び順"
+          aria-expanded={filterOpen}
+          data-testid="candidates-filter-open"
+          onClick={() => setFilterOpen((v) => !v)}
+        >
+          <SlidersHorizontal className="size-4" aria-hidden="true" />
+          {activeFilters > 0 && (
+            <span data-testid="candidates-filter-count" className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+              {activeFilters}
+            </span>
+          )}
+        </Button>
+      </div>
+      {/* 絞り込み・並び順は、ボタンを押したときだけ表示する（見出し・件数・戻る操作と重ならない。選択状態は閉じても保持）。3つは同じ幅で1行（390px幅でも折り返さない） */}
+      {filterOpen && (
+        <div className="grid grid-cols-3 gap-1.5" data-testid="candidates-filters">
+          <select aria-label="絞り込み（状態）" value={stateFilter} onChange={(e) => setStateFilter(e.target.value as "all" | CandidateState)} className="h-10 w-full min-w-0 rounded-md border bg-input px-2 text-xs" data-testid="candidates-state">
             <option value="all">全状態</option>
             {CANDIDATE_STATES.map((k) => (
-              <option key={k} value={k}>
-                {CANDIDATE_STATE_LABEL[k]}（{stateCounts[k]}）
-              </option>
+            <option key={k} value={k}>
+            {CANDIDATE_STATE_LABEL[k]}（{stateCounts[k]}）
+            </option>
             ))}
-          </select>
-          <select aria-label="絞り込み（情報充実度）" value={rank} onChange={(e) => setRank(e.target.value as "all" | Rank)} className="h-9 rounded-md border bg-input px-2 text-xs" data-testid="candidates-rank">
+            </select>
+          <select aria-label="絞り込み（情報充実度）" value={rank} onChange={(e) => setRank(e.target.value as "all" | Rank)} className="h-10 w-full min-w-0 rounded-md border bg-input px-2 text-xs" data-testid="candidates-rank">
             <option value="all">すべて</option>
             {RANKS.map((r) => (
-              <option key={r} value={r}>
-                {r}（{ranks[r]}）
-              </option>
+            <option key={r} value={r}>
+            {r}（{ranks[r]}）
+            </option>
             ))}
-          </select>
-          <select aria-label="並び順" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-9 rounded-md border bg-input px-2 text-xs" data-testid="candidates-sort">
+            </select>
+          <select aria-label="並び順" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-10 w-full min-w-0 rounded-md border bg-input px-2 text-xs" data-testid="candidates-sort">
             {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
-              <option key={k} value={k}>
-                {SORT_LABEL[k]}
-              </option>
+            <option key={k} value={k}>
+            {SORT_LABEL[k]}
+            </option>
             ))}
-          </select>
+            </select>
         </div>
-      </div>
+      )}
 
       {msg && (
         <p role="alert" className="text-xs text-danger">

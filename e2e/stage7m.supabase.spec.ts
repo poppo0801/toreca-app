@@ -121,6 +121,7 @@ test("複数商品の商品別応募・確認事項の折りたたみ・通知�
 
     // 抽選候補: 状態の絞り込み（要確認）。要手動確認の案件は抽選候補で管理する
     await page.goto("/lotteries/candidates");
+    await page.getByTestId("candidates-filter-open").click(); // 絞り込みは1つのボタンで展開する（Stage 8U-1）
     await page.getByTestId("candidates-state").selectOption("check");
     await expect(page.getByTestId("candidate-card").filter({ hasText: "7M要確認の候補" })).toHaveCount(1);
     await page.getByTestId("candidates-state").selectOption("done");

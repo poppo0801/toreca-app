@@ -8,6 +8,7 @@ import { Ellipsis, Settings } from "lucide-react";
 import { AiJobsProvider } from "@/components/ai-jobs-provider";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { ResilienceWatcher } from "@/components/resilience-watcher";
+import { InputReveal } from "@/components/input-reveal";
 import { BrandLogo } from "@/components/brand-logo";
 import { NotificationBell } from "@/components/notification-bell";
 import { iconOf } from "@/components/page-heading";
@@ -155,6 +156,7 @@ export function AppShell({ children, overlay }: { children: React.ReactNode; /**
         <Shell>{children}</Shell>
         {overlay}
         <ResilienceWatcher />
+        <InputReveal />
       </AiJobsProvider>
     </AppProvider>
   );

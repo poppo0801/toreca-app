@@ -220,7 +220,7 @@ async function loadUsage(db: Db, householdId?: string): Promise<Pick<AppData, "b
  * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
  * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
  */
-async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"]; chainConditions: AppData["chainConditions"]; chainConditionStates: AppData["chainConditionStates"] }> {
+async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"]; chainConditions: AppData["chainConditions"]; chainConditionStates: AppData["chainConditionStates"]; lotteryGroups: AppData["lotteryGroups"] }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
   const from = (t: string): any => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -230,6 +230,7 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   const scope = <T extends { eq: (c: string, v: string) => T }>(q: T): T => (householdId ? q.eq("household_id", householdId) : q);
   let battles: AppData["battles"];
   let settings: AppData["settings"];
+  let lotteryGroups: AppData["lotteryGroups"];
   let chainAliases: { chain_id: string; alias: string }[] = [];
   let storeAliases: { store_id: string; alias: string }[] = [];
   try {
@@ -304,7 +305,22 @@ async function loadOptional(db: Db, householdId?: string): Promise<{ battles: Ap
   } catch {
     /* 未適用 */
   }
-  return { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates };
+  try {
+    // 抽選グループ（解散していないもの）。未適用の環境では取得できなくても、他のデータは読み込む
+    const g = await scope(from("lottery_bulk_groups").select("id,chain_id,title,origin,basis").is("dissolved_at", null).limit(5000));
+    if (!g.error) {
+      lotteryGroups = (g.data as { id: string; chain_id: string | null; title: string; origin: string; basis: unknown }[]).map((r) => ({
+        id: r.id,
+        chainId: r.chain_id,
+        title: r.title ?? "",
+        origin: (["bulk_registration", "manual", "save_and_duplicate", "duplicate", "ai"].includes(r.origin) ? r.origin : "manual") as NonNullable<AppData["lotteryGroups"]>[number]["origin"],
+        basis: r.basis && typeof r.basis === "object" ? (r.basis as Record<string, unknown>) : {},
+      }));
+    }
+  } catch {
+    /* 未適用 */
+  }
+  return { battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates, lotteryGroups };
 }
 /**
  * 世帯の全データを読み込む。householdId を指定すると、その世帯だけに絞る
@@ -400,7 +416,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   const imageUrl = (i: { id: string; sha256: string }, size: "full" | "thumb") => `/api/product-image/${i.id}?v=${i.sha256.slice(0, 12)}&s=${size}`;
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates }, usage, defaultImages] = await Promise.all([optionalP, usageP, defaultImagesP]);
+  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates, lotteryGroups }, usage, defaultImages] = await Promise.all([optionalP, usageP, defaultImagesP]);
 
   return {
     profiles: profiles.map((p) => {
@@ -466,8 +482,10 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       active: a.active,
     })),
     campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, chainId: c.chain_id, storeRule: c.store_rule as "one_store" | "multi" })),
+    ...(lotteryGroups ? { lotteryGroups } : {}),
     lotteries: lotteries.map((l) => ({
       id: l.id,
+      groupId: (l as unknown as { bulk_group_id?: string | null }).bulk_group_id ?? undefined,
       campaignId: l.campaign_id ?? undefined,
       chainId: l.chain_id,
       storeId: l.store_id,
@@ -488,7 +506,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       kind: l.lottery_kind as "normal" | "ongoing" | "invite",
       validUntil: l.valid_until_date ?? undefined,
       receiveMethod: l.receive_method as "store" | "shipping" | "either" | "unknown",
-      applyMethod: l.apply_method as "web" | "store" | "app" | "unknown",
+      applyMethod: l.apply_method as "web" | "store" | "app" | "serial" | "unknown",
       conditionsText: l.conditions_text,
       verificationText: l.verification_text,
       announcementMethod: l.announcement_method,
@@ -826,93 +844,144 @@ export async function saveLotteryBulk(
   return ok({ ids: r.ids, groupId: r.group_id, replayed: r.replayed, skipped });
 }
 
-/** 同系列の他店舗へ複製。店舗ごとに独立した抽選を作り、同じキャンペーンに関連づける（応募・当落は複製しない）。 */
+/**
+ * 同系列の他店舗へ複製（Stage 8U）。DB関数 duplicate_lottery_tx が1トランザクションで行う（1店舗でも失敗すれば全体を取り消す）。
+ *  - 複製先: 既存の店舗（同じ系列）と、新しい店舗（同じ系列に同名があればそれを使い、なければ仮登録）。
+ *  - 店舗ごとに独立した抽選を作る（応募・当落・メモ・自動収集のキー・確認履歴は引き継がない）。同じ店舗に同じ内容（商品・締切）がある店舗は作らず skipped に返す。
+ *  - group=true（既定）のとき、元と複製先を1つの抽選グループにまとめる。
+ */
+export interface DuplicateOptions {
+  /** 新しく追加する店舗（同じ系列） */
+  newStores?: { name: string; prefecture: string }[];
+  /** グループにまとめる（既定 true） */
+  group?: boolean;
+  origin?: "duplicate" | "save_and_duplicate";
+}
+export interface DuplicateResult {
+  ids: string[];
+  skipped: { storeName: string; reason: string }[];
+  groupId: string | null;
+}
+const newStoreSchema = z.object({ name: z.string().trim().min(1).max(80), prefecture: z.string().trim().max(10) });
 export async function duplicateLottery(
   db: Db,
-  householdId: string,
+  _householdId: string,
   lotteryId: string,
   storeIds: string[],
   actor: string | null,
-): Promise<ServiceResult<{ ids: string[] }>> {
-  const ids = z.array(uuid).min(1, "複製先の店舗を選択してください").max(30).safeParse(storeIds);
-  if (!ids.success || !uuid.safeParse(lotteryId).success) return fail(ids.success ? "リクエストが不正です" : ids.error.issues[0].message);
+  opts: DuplicateOptions = {},
+): Promise<ServiceResult<DuplicateResult>> {
+  const ids = z.array(z.uuid()).max(30).safeParse(storeIds);
+  const news = z.array(newStoreSchema).max(30).safeParse(opts.newStores ?? []);
+  if (!uuid.safeParse(lotteryId).success || !ids.success || !news.success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (ids.data.length + news.data.length < 1) return fail("複製先の店舗を選択してください");
+  if (ids.data.length + news.data.length > 30) return fail("複製できるのは30店舗までです");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { data, error } = await (db as any).rpc("duplicate_lottery_tx", { p_lottery: lotteryId, p_store_ids: ids.data, p_new_stores: news.data, p_group: opts.group !== false, p_actor: actor, p_origin: opts.origin ?? "duplicate" });
+  if (error) return fail(mapDuplicateError(error));
+  const r = data as { ids?: string[]; skipped?: { name?: string; reason?: string }[]; groupId?: string | null };
+  return ok({ ids: r.ids ?? [], skipped: (r.skipped ?? []).map((x) => ({ storeName: x.name ?? "", reason: x.reason ?? "" })), groupId: r.groupId ?? null });
+}
 
-  const { data: src } = await db.from("lotteries").select("*").eq("id", lotteryId).maybeSingle();
-  if (!src) return fail("複製元の抽選が見つかりません");
-  const { data: items } = await db.from("lottery_items").select("product_id,quantity,unit").eq("lottery_id", lotteryId);
-  const { data: stores } = await db.from("stores").select("id,chain_id").in("id", ids.data);
-  if ((stores ?? []).length !== new Set(ids.data).size || (stores ?? []).some((s) => s.chain_id !== src.chain_id)) {
-    return fail("複製先は同じ系列の店舗のみ選択できます");
-  }
+function mapDuplicateError(e: { message?: string; code?: string }): string {
+  const m = e.message ?? "";
+  if (/no target stores/.test(m)) return "複製先の店舗を選択してください（元の店舗以外）";
+  if (/store does not belong/.test(m)) return "複製先は同じ系列の店舗のみ選択できます";
+  if (/source lottery is archived/.test(m)) return "除外済みの抽選は複製できません";
+  if (/invalid store name/.test(m)) return "店舗名は1〜80文字で入力してください";
+  if (/too many stores/.test(m)) return "複製できるのは30店舗までです";
+  return mapDbError(e as never);
+}
 
-  // 元がキャンペーン未所属なら、元と複製先をまとめる新規キャンペーンを作る
-  let campaignId = src.campaign_id;
-  if (!campaignId) {
-    const { data: chain } = await db.from("chains").select("name").eq("id", src.chain_id).maybeSingle();
-    const { data, error } = await db
-      .from("campaigns")
-      .insert({ household_id: householdId, chain_id: src.chain_id, name: `${chain?.name ?? "系列"} 抽選`, store_rule: "multi", updated_by_profile_id: actor })
-      .select("id")
-      .single();
-    if (error) return fail(mapDbError(error));
-    campaignId = data.id;
-    const { error: e2 } = await db.from("lotteries").update({ campaign_id: campaignId, updated_by_profile_id: actor }).eq("id", lotteryId);
-    if (e2) return fail(mapDbError(e2));
+/**
+ * 新規登録して、そのまま他店舗へ複製（保存して複製。Stage 8U-2）。元の保存（通常の保存と同じ）→ duplicate_lottery_tx（1トランザクション）。
+ * 複製に失敗したら、保存した元の抽選を取り消す（除外として履歴に残し、一覧には出さない）。見える状態は「すべて保存」か「何も保存されない」のどちらか。
+ */
+export async function saveLotteryAndDuplicate(
+  db: Db,
+  householdId: string,
+  raw: LotteryInput,
+  storeIds: string[],
+  newStores: { name: string; prefecture: string }[],
+  actor: string | null,
+): Promise<ServiceResult<DuplicateResult & { lotteryId: string }>> {
+  if (storeIds.length + newStores.length < 1) return fail("複製先の店舗を選択してください");
+  const saved = await saveLottery(db, householdId, null, raw, actor);
+  if (!saved.ok) return fail(saved.error);
+  const dup = await duplicateLottery(db, householdId, saved.value.id, storeIds, actor, { newStores, group: true, origin: "save_and_duplicate" });
+  if (!dup.ok) {
+    // 補償: 保存した元の抽選を取り消す。取り消せなかった場合も、利用者に状態を正しく伝える
+    const undo = await excludeLottery(db, saved.value.id, { reason: "other", note: "保存して複製に失敗したため、自動で取り消しました" }, actor);
+    return fail(undo.ok ? `${dup.error}（保存した抽選は取り消しました。入力内容はそのままです）` : `${dup.error}（元の抽選は保存済みです。一覧で確認してください）`);
   }
+  return ok({ ...dup.value, lotteryId: saved.value.id });
+}
 
-  const created: string[] = [];
-  for (const storeId of new Set(ids.data)) {
-    const { data, error } = await db
-      .from("lotteries")
-      .insert({
-        household_id: householdId,
-        campaign_id: campaignId,
-        chain_id: src.chain_id,
-        store_id: storeId,
-        apply_start_precision: src.apply_start_precision, apply_start_date: src.apply_start_date, apply_start_at: src.apply_start_at,
-        apply_deadline_precision: src.apply_deadline_precision, apply_deadline_date: src.apply_deadline_date, apply_deadline_at: src.apply_deadline_at,
-        result_precision: src.result_precision, result_date: src.result_date, result_at: src.result_at, result_end_date: src.result_end_date,
-        procedure_start_precision: src.procedure_start_precision, procedure_start_date: src.procedure_start_date, procedure_start_at: src.procedure_start_at,
-        procedure_deadline_precision: src.procedure_deadline_precision, procedure_deadline_date: src.procedure_deadline_date, procedure_deadline_at: src.procedure_deadline_at,
-        procedure_split: src.procedure_split,
-        receive_start_precision: src.receive_start_precision, receive_start_date: src.receive_start_date, receive_start_at: src.receive_start_at,
-        receive_deadline_precision: src.receive_deadline_precision, receive_deadline_date: src.receive_deadline_date, receive_deadline_at: src.receive_deadline_at,
-        lottery_kind: src.lottery_kind, valid_until_date: src.valid_until_date,
-        receive_method: src.receive_method,
-        apply_method: src.apply_method,
-        conditions_text: src.conditions_text,
-        verification_text: src.verification_text,
-        announcement_method: src.announcement_method,
-        announcement_methods: src.announcement_methods,
-        announcement_target: src.announcement_target,
-        announcement_inferred: src.announcement_inferred,
-        requirement_tags: src.requirement_tags,
-        requirement_logic: src.requirement_logic,
-        requirement_details: src.requirement_details,
-        announcement_url: src.announcement_url,
-        source_urls: src.source_urls,
-        event_state: ["cancelled", "closed"].includes(src.event_state) ? "open" : src.event_state,
-        limit_basis: src.limit_basis,
-        limit_max_count: src.limit_max_count,
-        multi_mode: src.multi_mode,
-        source_kind: "manual",
-        memo: src.memo,
-        updated_by_profile_id: actor,
-      })
-      .select("id")
-      .single();
-    if (error) return fail(mapDbError(error));
-    created.push(data.id);
-    const { error: iErr } = await db.from("lottery_items").insert(
-      (items ?? []).map((i) => ({ household_id: householdId, lottery_id: data.id, product_id: i.product_id, quantity: i.quantity, unit: i.unit, updated_by_profile_id: actor })),
-    );
-    if (iErr) return fail(mapDbError(iErr));
-    const { error: mErr } = await db.from("lottery_management").insert({
-      lottery_id: data.id, household_id: householdId, is_managed: true, managed_source: "manual", managed_at: nowIso(), updated_by_profile_id: actor,
-    });
-    if (mErr) return fail(mapDbError(mErr));
+// ------------------------------------------------------------------ 除外（理由つき）・抽選グループ（Stage 8U）
+export const EXCLUSION_REASONS = ["region", "untrusted", "area_chain", "duplicate", "other_game", "other", "unspecified"] as const;
+export interface ExclusionInput {
+  reason: (typeof EXCLUSION_REASONS)[number];
+  /** 重複を理由にした場合の参照先の抽選 */
+  duplicateOfId?: string | null;
+  note?: string;
+}
+/**
+ * 登録済みの抽選の除外（理由つき）。DB関数 exclude_lottery_tx が、アーカイブと除外記録（日時・対象・理由・操作ユーザー・除外時点の事実）を1トランザクションで行う。
+ * 物理削除はしない（応募・当落・購入の履歴を保持）。ユーザー別の「スルー」とは別。収集条件は自動では変更しない。
+ */
+export async function excludeLottery(db: Db, lotteryId: string, ex: ExclusionInput, actor: string | null): Promise<ServiceResult> {
+  const p = z
+    .object({ reason: z.enum(EXCLUSION_REASONS), duplicateOfId: z.uuid().nullable().optional(), note: z.string().trim().max(500).optional() })
+    .safeParse(ex);
+  if (!uuid.safeParse(lotteryId).success || !p.success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (p.data.reason === "duplicate" ? false : !!p.data.duplicateOfId) return fail("重複先は、理由が「重複」のときだけ指定できます");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { error } = await (db as any).rpc("exclude_lottery_tx", { p_lottery: lotteryId, p_reason: p.data.reason, p_duplicate_of: p.data.duplicateOfId ?? null, p_note: p.data.note ?? "", p_actor: actor });
+  if (error) {
+    if (/already excluded/.test(error.message ?? "")) return fail("すでに除外されています");
+    if (/lottery not found/.test(error.message ?? "")) return fail("対象のデータが見つかりません");
+    if (/invalid duplicate target/.test(error.message ?? "")) return fail("重複先の抽選が正しくありません");
+    return fail(mapDbError(error));
   }
-  return ok({ ids: created });
+  return ok(undefined);
+}
+
+export interface GroupOptions {
+  /** 既存のグループへ追加する場合 */
+  groupId?: string | null;
+  title?: string;
+  /** グループ化の根拠（共通の項目・メモなど） */
+  basis?: Record<string, unknown>;
+}
+/** 複数の抽選をグループにまとめる（新規または既存グループへ追加）。同じ系列のみ。抽選ID・応募・当選の記録は変えない（DB関数 group_lotteries_tx） */
+export async function groupLotteries(db: Db, lotteryIds: string[], opts: GroupOptions, actor: string | null): Promise<ServiceResult<{ groupId: string }>> {
+  const ids = z.array(z.uuid()).min(1).max(100).safeParse(lotteryIds);
+  const p = z.object({ groupId: z.uuid().nullable().optional(), title: z.string().trim().max(100).optional() }).safeParse({ groupId: opts.groupId ?? null, title: opts.title ?? "" });
+  if (!ids.success || !p.success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (!p.data.groupId && ids.data.length < 2) return fail("グループにするには、2件以上の抽選を選択してください");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { data, error } = await (db as any).rpc("group_lotteries_tx", { p_ids: ids.data, p_group: p.data.groupId ?? null, p_title: p.data.title ?? "", p_origin: "manual", p_basis: { ...(opts.basis ?? {}), by: "manual" }, p_actor: actor });
+  if (error) {
+    const m = error.message ?? "";
+    if (/same chain/.test(m)) return fail("グループにできるのは、同じ系列の抽選だけです");
+    if (/not found or archived/.test(m)) return fail("除外済み・存在しない抽選は、グループにできません");
+    if (/group not found/.test(m)) return fail("グループが見つかりません（解除済みか、系列が異なります）");
+    return fail(mapDbError(error));
+  }
+  return ok({ groupId: data as string });
+}
+export async function ungroupLottery(db: Db, lotteryId: string, actor: string | null): Promise<ServiceResult> {
+  if (!uuid.safeParse(lotteryId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { error } = await (db as any).rpc("ungroup_lottery_tx", { p_lottery: lotteryId, p_actor: actor });
+  return error ? fail(mapDbError(error)) : ok(undefined);
+}
+export async function dissolveLotteryGroup(db: Db, groupId: string, actor: string | null): Promise<ServiceResult> {
+  if (!uuid.safeParse(groupId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { error } = await (db as any).rpc("dissolve_lottery_group_tx", { p_group: groupId, p_actor: actor });
+  if (error) return fail(/group not found/.test(error.message ?? "") ? "グループが見つかりません（解除済みです）" : mapDbError(error));
+  return ok(undefined);
 }
 
 export async function setEventState(db: Db, lotteryId: string, state: EventState, actor: string | null): Promise<ServiceResult> {

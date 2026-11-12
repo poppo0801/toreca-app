@@ -15,7 +15,7 @@ import { MasterCombobox, NewMasterBadge } from "@/components/master-combobox";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { fingerprint, purgeLegacyDrafts, type FieldSource } from "@/lib/lottery-draft";
-import { clearResume, loadResume, mergeResume, resumeKeyLabel, saveResume, type ResumeStash } from "@/lib/lottery-resume";
+import { clearCandidateResume, clearResume, loadCandidateResume, loadResume, mergeResume, resumeKeyLabel, saveCandidateResume, saveResume, type ResumeStash } from "@/lib/lottery-resume";
 import { FlagChip, FlagPanel, type FlagEvidence } from "@/components/review-flag";
 import { findDuplicates, type DraftDuplicate, type LotteryDraft } from "@/lib/lottery-match";
 import { loadCollectionAreaAction, saveLotteryBulkAction } from "@/app/(app)/lotteries/actions";
@@ -131,7 +131,7 @@ function FlexField({ label, value, onChange, chip }: { label: string; value: Fle
 }
 
 /** 同系列の直近の抽選から確かな設定を引き継ぐ。なければ標準の初期値（どちらも未確認として扱う） */
-export function methodDefaults(data: AppData, chainId: string | null): { applyMethod: "web" | "store" | "app"; receiveMethod: "store" | "shipping" | "either" } {
+export function methodDefaults(data: AppData, chainId: string | null): { applyMethod: "web" | "store" | "app" | "serial"; receiveMethod: "store" | "shipping" | "either" } {
   const same = chainId
     ? data.lotteries.filter((l) => l.chainId === chainId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     : [];
@@ -273,6 +273,8 @@ export function LotteryFormDialog({
 }) {
   const { data, actions, reload, profile } = useApp();
   const isEdit = lottery !== null;
+  /** 抽選候補の編集（Stage 8U-1）。閉じても破棄の確認は出さず、最後に編集した候補1件を10分間、端末内に一時保存する（再開は利用者が押したときだけ） */
+  const candMode = !isEdit && !!candidateId;
   // 編集を始めた時点の更新日時。保存の直前に最新と比べ、他の端末で更新されていないか確認する
   const [baseVersion, setBaseVersion] = useState<string | null>(lottery?.updatedAt ?? null);
   const freshRef = useRef<{ data: AppData; lottery: Lottery } | null>(null);
@@ -366,25 +368,26 @@ export function LotteryFormDialog({
   const dirty = fingerprint({ i: v, u: urlsText }) !== initialFp;
 
   // 編集の一時保存・再開（Stage 7L）: 直前に編集した抽選1件だけ、最後の編集から10分間、この端末内に保持する。開いた直後は常に保存済みの内容
-  const [resume, setResume] = useState<ResumeStash | null>(() => (lottery ? loadResume(lottery.id, profile.id, Date.now()) : null));
+  const [resume, setResume] = useState<ResumeStash | null>(() => (lottery ? loadResume(lottery.id, profile.id, Date.now()) : candidateId ? loadCandidateResume(candidateId, profile.id, Date.now()) : null));
   const [resumeNote, setResumeNote] = useState<string | null>(null);
   const stashRef = useRef<() => void>(() => undefined);
   const initialRef = useRef({ input: initial.input, urlsText: initial.urlsText });
   // 最新の入力を保存する関数（描画のたびに更新する。ref への書き込みは描画後に行う）
   useEffect(() => {
     stashRef.current = () => {
-      if (!lottery || !dirty) return;
-      saveResume({ lotteryId: lottery.id, profileId: profile.id, baseUpdatedAt: baseVersion, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
+      if (!dirty) return;
+      if (lottery) saveResume({ lotteryId: lottery.id, profileId: profile.id, baseUpdatedAt: baseVersion, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
+      else if (candMode && candidateId) saveCandidateResume({ lotteryId: candidateId, profileId: profile.id, baseUpdatedAt: null, base: initialRef.current.input, baseUrls: initialRef.current.urlsText, edited: v, editedUrls: urlsText, sources, at: Date.now() });
     };
   });
   // 編集中は少し間を置いて保存する（アプリを閉じる・バックグラウンドへ移っても内容が残る）
   useEffect(() => {
-    if (!lottery || !dirty) return;
+    if ((!lottery && !candMode) || !dirty) return;
     const t = window.setTimeout(() => stashRef.current(), 400);
     return () => window.clearTimeout(t);
-  }, [lottery, dirty, v, urlsText]);
+  }, [lottery, candMode, dirty, v, urlsText]);
   useEffect(() => {
-    if (!lottery) return;
+    if (!lottery && !candMode) return;
     const flush = () => stashRef.current();
     const onHide = () => document.visibilityState === "hidden" && flush();
     document.addEventListener("visibilitychange", onHide);
@@ -393,7 +396,7 @@ export function LotteryFormDialog({
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", flush);
     };
-  }, [lottery]);
+  }, [lottery, candMode]);
 
   // 以前の版が端末に残した長期の下書きは不要になったので、一度だけ消す
   useEffect(() => {
@@ -404,7 +407,7 @@ export function LotteryFormDialog({
   // 閉じる操作（×・背景・Esc・ハンドルのスワイプ）。入力が変更されていれば、破棄の確認を出す。変更が無ければそのまま閉じる
   // 編集中の抽選は、確認なしで閉じて一時保存する（10分以内なら「編集を再開」で戻せる）。新規登録は従来どおり破棄の確認を出す
   const requestClose = () => {
-    if (isEdit) {
+    if (isEdit || candMode) {
       stashRef.current();
       return finish();
     }
@@ -414,7 +417,15 @@ export function LotteryFormDialog({
   /** 「編集を再開」: 一時保存の未保存の内容を、最新の保存済みの内容に重ねて復元する（他で更新された項目は最新を残す）。入力欄へは自動でフォーカスしない */
   const resumeEdit = async () => {
     const s = resume;
-    if (!s || !lottery) return;
+    if (!s) return;
+    if (!lottery) {
+      // 抽選候補: 保存した未保存の内容をそのまま戻す（候補の下書きには「他で更新された内容」との統合が無い）
+      setV(s.edited);
+      setUrlsText(s.editedUrls);
+      setSources((cur) => ({ ...cur, ...s.sources }));
+      setResume(null);
+      return;
+    }
     const fresh = await reload().catch(() => null);
     const curLot = fresh?.lotteries.find((l) => l.id === lottery.id) ?? lottery;
     const curInput = fromLottery(curLot, fresh ?? data);
@@ -470,6 +481,15 @@ export function LotteryFormDialog({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 抽選候補: AIの下書き（prefill）を入力したあとの状態を「変更なし」の基準にする（開いただけで変更ありにならない）
+  const candBaseline = useRef(false);
+  useEffect(() => {
+    if (!candMode || !prefilled.current || candBaseline.current || v === initial.input) return;
+    candBaseline.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 下書き入力後の基準の確定（1回だけ）
+    setInitialFp(fingerprint({ i: v, u: urlsText }));
+    initialRef.current = { input: v, urlsText };
+  }, [candMode, v, urlsText, initial.input]);
 
   const set = <K extends keyof LotteryInput>(k: K, val: LotteryInput[K]) => setV((s) => ({ ...s, [k]: val }));
   /** 初期値を持つ項目を利用者が選んだ: 以降は「利用者が選んだ値」として扱う */
@@ -607,6 +627,7 @@ export function LotteryFormDialog({
     setSaving(false);
     if (res.ok) {
       if (isEdit) clearResume(); // 正式に保存したので、一時保存は不要
+      else if (candMode) clearCandidateResume();
       onSaved?.(res.createdIds?.[0] ?? null);
       finish();
     }
@@ -640,6 +661,7 @@ export function LotteryFormDialog({
       return setError(res.error);
     }
     await reload();
+    if (candMode) clearCandidateResume(); // 店舗別の一括登録も、正式な登録なので一時保存は不要
     const firstId = res.createdIds?.[0] ?? null;
     if ((res.skipped ?? []).length === 0) {
       onSaved?.(firstId);
@@ -706,7 +728,7 @@ export function LotteryFormDialog({
             </button>
           </div>
 
-          {isEdit && resume && !dirty && (
+          {(isEdit || candMode) && resume && !dirty && (
             <div className="px-4 pb-2">
               <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => void resumeEdit()} data-testid="resume-edit">
                 編集を再開
@@ -1130,6 +1152,7 @@ export function LotteryFormDialog({
                       { value: "web", label: "Web" },
                       { value: "store", label: "店頭" },
                       { value: "app", label: "アプリ" },
+                      { value: "serial", label: "シリアル（店頭でコード入手）" },
                     ]}
                   />
                 </div>
@@ -1430,7 +1453,7 @@ export function LotteryFormDialog({
             </SheetBody>
             <div className="flex items-center justify-end gap-2 border-t bg-card px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
               <Button type="button" variant="outline" className="mr-auto" onClick={requestClose} data-testid="form-discard">
-                {isEdit ? "閉じる" : "破棄"}
+                {isEdit || candMode ? "閉じる" : "破棄"}
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? "保存中…" : "保存"}

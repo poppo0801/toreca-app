@@ -61,8 +61,13 @@ interface AppContextValue {
     setLotterySkip: (lotteryId: string, v: boolean) => Promise<Outcome>;
     setEventState: (lotteryId: string, s: EventState) => Promise<Outcome>;
     saveLottery: (id: string | null, input: LotteryInput) => Promise<Outcome>;
-    duplicateLottery: (lotteryId: string, storeIds: string[]) => Promise<Outcome>;
+    duplicateLottery: (lotteryId: string, storeIds: string[], opts?: import("@/lib/server/lottery-service").DuplicateOptions) => Promise<Outcome>;
+    saveLotteryAndDuplicate: (input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[]) => Promise<Outcome>;
     archiveLottery: (lotteryId: string) => Promise<Outcome>;
+    excludeLottery: (lotteryId: string, ex: import("@/lib/server/lottery-service").ExclusionInput) => Promise<Outcome>;
+    groupLotteries: (lotteryIds: string[], opts?: import("@/lib/server/lottery-service").GroupOptions) => Promise<Outcome>;
+    ungroupLottery: (lotteryId: string) => Promise<Outcome>;
+    dissolveLotteryGroup: (groupId: string) => Promise<Outcome>;
     addManualPurchase: (input: ManualPurchaseInput) => Promise<Outcome>;
   };
 }
@@ -398,8 +403,13 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         setLotterySkip: (id, v) => run((a) => repo.setLotterySkip(a, id, v)),
         setEventState: (id, s) => run((a) => repo.setEventState(a, id, s)),
         saveLottery: (id, input) => run((a) => repo.saveLottery(a, id, input)),
-        duplicateLottery: (id, stores) => run((a) => repo.duplicateLottery(a, id, stores)),
+        duplicateLottery: (id, stores, opts) => run((a) => repo.duplicateLottery(a, id, stores, opts)),
+        saveLotteryAndDuplicate: (input, stores, news) => run((a) => repo.saveLotteryAndDuplicate(a, input, stores, news)),
         archiveLottery: (id) => run((a) => repo.archiveLottery(a, id)),
+        excludeLottery: (id, ex) => run((a) => repo.excludeLottery(a, id, ex)),
+        groupLotteries: (ids, opts) => run((a) => repo.groupLotteries(a, ids, opts)),
+        ungroupLottery: (id) => run((a) => repo.ungroupLottery(a, id)),
+        dissolveLotteryGroup: (id) => run((a) => repo.dissolveLotteryGroup(a, id)),
         addManualPurchase: (input) => run((a) => repo.addManualPurchase(a, input)),
       },
     };

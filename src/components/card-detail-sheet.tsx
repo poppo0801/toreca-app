@@ -267,11 +267,11 @@ export function CardDetailSheet({
   );
 }
 
-function Item({ label, value, testId }: { label: string; value: React.ReactNode; testId?: string }) {
+function Item({ label, value, testId, strong }: { label: string; value: React.ReactNode; testId?: string; /** 主要な金額として目立たせる（Stage 8U-1） */ strong?: boolean }) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] text-muted-foreground">{label}</dt>
-      <dd className="break-words" data-testid={testId}>
+      <dd className={strong ? "break-words text-base font-bold leading-snug" : "break-words"} data-testid={testId}>
         {value}
       </dd>
     </div>
@@ -330,10 +330,11 @@ function MarketBlock({ rows: all, card }: { rows: MarketPriceRow[]; card: CardSu
     r ? `${yen(r.medianYen)}（${edge === "low" ? "最安" : "最高"} ${yen(edge === "low" ? r.lowYen : r.highYen)}・${r.sampleCount === 1 ? "参考データ1件" : `${r.sampleCount}店舗`}）` : "未取得";
   return (
     <div className="space-y-1" data-testid="market-block">
+      {/* 主要な金額（販売＝買う価格・買取＝売る価格）を最も目立たせ、更新日時・情報源は下に小さく置く。取得できていない種類は「未取得」と明示する */}
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border p-3 text-sm" aria-label="取得した相場">
-        <Item label="販売相場（取得）" value={line(sale, "low")} testId="market-sale" />
-        <Item label="買取相場（取得）" value={line(buy, "high")} testId="market-buy" />
-        <Item label="最終取得" value={fetched ? new Date(fetched).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"} />
+        <Item label="販売相場（買う価格・取得）" value={line(sale, "low")} testId="market-sale" strong={!!sale} />
+        <Item label="買取相場（売る価格・取得）" value={line(buy, "high")} testId="market-buy" strong={!!buy} />
+        <Item label="更新（最終取得）" value={fetched ? new Date(fetched).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"} />
         <Item label="参照サイト" value={rows[0] ? <a href={rows[0].sourceUrl ?? "https://card.pricebest.jp/data/"} target="_blank" rel="noopener noreferrer" className="underline">{rows[0].source || "ポケカ価格比較"}</a> : "—"} />
       </dl>
       {state.level !== "ok" && (

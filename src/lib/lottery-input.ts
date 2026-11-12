@@ -112,7 +112,7 @@ export const lotteryInputSchema = z.object({
   lotteryKind: z.enum(["normal", "ongoing", "invite"]).default("normal"),
   validUntil: z.union([z.literal(""), dateStr]).default(""),
   receiveMethod: z.enum(["store", "shipping", "either", "unknown"]),
-  applyMethod: z.enum(["web", "store", "app", "unknown"]),
+  applyMethod: z.enum(["web", "store", "app", "serial", "unknown"]),
   conditionsText: z.string().trim().max(2000),
   verificationText: z.string().trim().max(1000),
   /** 当落発表方法の補足・原文（標準分類は announcementMethods） */
