@@ -77,3 +77,8 @@
 - 承認フローの一括操作: `bulkBlockReason`（`proposal-types.ts`。UI とサーバーで同じ判定）・`bulkProcess`（1件ずつ DB 関数で検証）・`bulkAction`。
 - 評価: `eval/real-stores/targets-8d5.json`・`gold-8d5.json`（未知30件）。自律性の集計 `autonomyOf`。誤確認で即停止。E2E は `AGENT_*` を空文字で分離（`scripts/lib/e2e-env.mjs`）。
 - 本番導入の準備: `docs/PRODUCTION_ROLLOUT_8D.md`（未実行）。
+
+## Stage 8D-6 の追加
+- 再調査ループ: `core.ts` の `runAgent(review, maxReviews)` が提出後に独立した検証（`run.ts` → `verifyResearch`）を呼び、`followup.ts`（`diagnoseStoreGaps`・`planFollowUp`）の不足の理由を提出への結果として返す。同じ会話・同じ `Budget`（`hasHeadroom` で余力を予測）。`dedupeKey` で重複呼び出しを断る。`ResearchOutcome.rounds`・`submissions`。`followUps` 既定 0。
+- 評価データ: `evidence-store.ts`（実行ごとの台帳・ハッシュ・整合性検査）。再判定は台帳のみ。`eval/real-stores/targets-8d6.json`・`gold-8d6.json`（T01〜T20・W01〜W10）。
+- 保存: 新しいマイグレーションなし（`usage`・`trace` の jsonb に項目を追加）。本番導入: `docs/PRODUCTION_ROLLOUT_8D.md` §8。結果: `docs/stage8d6.md`。

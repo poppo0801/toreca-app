@@ -135,6 +135,7 @@ export function addressCore(a: string): string {
   return pref + (m ? m[1] : rest);
 }
 
+const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 const CLOSURE_WORDS = /(閉店|移転|営業終了|閉館|リニューアル休業|閉鎖)/;
 /** 閉店・移転の記載か。営業時間の表示（「営業中 / 営業終了 22:00」）とオンラインストアの閉店は、店舗の閉店ではないので除く */
 const CLOSURE = {
@@ -154,8 +155,9 @@ export interface VerifyInput {
 function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[], sites: OfficialSiteAssessment[]): EvaluatedCandidate {
   const problems: string[] = [];
   const page = pages.find((p) => p.url === c.sourceUrl || p.finalUrl === c.sourceUrl);
-  const text = page ? page.text.normalize("NFKC") : "";
-  let q = c.quote.normalize("NFKC").trim();
+  // ゼロ幅文字（ZWSP など。公式ページの住所と建物名の間に入っていることがある）は、見えない文字なので比較から除く（Stage 8D-6）
+  const text = page ? page.text.normalize("NFKC").replace(ZERO_WIDTH, "") : "";
+  let q = c.quote.normalize("NFKC").replace(ZERO_WIDTH, "").trim();
   const collapsed = (s: string) => s.replace(/[\s　]+/g, "");
   let quotePos = page && q.length >= 8 ? collapsed(text).indexOf(collapsed(q)) : -1;
   // 引用が「見出し … 住所」のように「…」「|」でつながれている場合: 住所を含む部分だけが本文に実在すれば、その部分だけを根拠とする（他の部分は根拠にしない）
@@ -174,7 +176,13 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
   const addrNorm = normalizeForMatch(c.address);
   // 住所は引用の中にあるのが基本。引用が住所の一部だけ（改行で分かれた後半など）でも、その直前直後の本文に住所全体が実在すれば、住所は本文に実在するとみなす
   const nearQuote = quoteVerified ? collapsed(text).slice(Math.max(0, quotePos - 80), quotePos + collapsed(q).length + 80) : "";
-  const addressInQuote = quoteVerified && (normalizeForMatch(q).includes(addrNorm) || normalizeForMatch(nearQuote).includes(addrNorm));
+  let addressInQuote = quoteVerified && (normalizeForMatch(q).includes(addrNorm) || normalizeForMatch(nearQuote).includes(addrNorm));
+  // 公式ページの住所に都道府県が書かれていない場合（「京都市下京区…」「大阪市北区…」）: 店舗マスターに登録された都道府県と、AIの住所の都道府県が同じなら、都道府県を除いた部分（市区町村から番地・建物名まで）が引用の中にあればよい。
+  // 市区町村・番地は引用に実在する必要がある（都道府県だけを補う。登録済みの都道府県と異なる住所には使えない）
+  if (quoteVerified && !addressInQuote && !PREF_RE.test(q) && store.prefecture && prefectureOf(c.address) === store.prefecture) {
+    const noPref = normalizeForMatch(c.address).replace(normalizeForMatch(store.prefecture), "");
+    addressInQuote = noPref.length >= 6 && (normalizeForMatch(q).includes(noPref) || normalizeForMatch(nearQuote).includes(noPref));
+  }
   if (quoteVerified && !addressInQuote) problems.push("住所が引用の中に無い");
 
   const complete = isCompleteAddress(c.address) && /\d/.test(addrNorm.replace(/^.+?[都道府県]/, ""));

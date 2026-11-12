@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { AgentLLM, AgentMessage, LlmStep } from "@/lib/agent/core";
 import { ledgerEntriesFromTrace, ledgerPath, pagesForStore, readLedger, RunLedgerWriter, sha256, verifyLedger, type PageLedgerEntry } from "@/lib/agent/store-location/evidence-store";
@@ -148,5 +148,21 @@ describe("評価実行（runRealEval）: 台帳・実行記録・再調査の記
     const before = readFileSync(`${DIR}/real-${runId}.json`, "utf8");
     expect(JSON.parse(before).runId).toBe(runId);
     writeFileSync(`${DIR}/.keep`, ""); // 後始末の対象
+  });
+});
+
+describe("保存済みの実行（eval/runs/real/）の台帳の整合性（実行があれば検査。無ければ何もしない）", () => {
+  it("すべての台帳が整合し、実行記録のページ取得と対応している", () => {
+    const dir = "eval/runs/real";
+    if (!existsSync(dir)) return;
+    for (const f of readdirSync(dir).filter((x) => /^pages-.*\.jsonl$/.test(x))) {
+      const led = readLedger(`${dir}/${f}`);
+      const repPath = `${dir}/real-${led.runId}.json`;
+      expect(existsSync(repPath), `${f} に対応する実行記録`).toBe(true);
+      const rep = JSON.parse(readFileSync(repPath, "utf8")) as { runId: string; ledgerFile: string; records: { target: { id: string }; actions: { name: string; ok: boolean; arg: string }[] }[] };
+      expect(rep.runId).toBe(led.runId);
+      expect(rep.ledgerFile).toBe(f);
+      expect(verifyLedger(led, Object.fromEntries(rep.records.map((r) => [r.target.id, r.actions]))), f).toEqual([]);
+    }
   });
 });

@@ -59,3 +59,6 @@
 
 ## 未知30件の評価（Stage 8D-5）
 `eval/real-stores/targets-8d5.json`・`gold-8d5.json`（正解あり P01〜P20＋正解不明 Q01〜Q10。実行前にコミットして固定）。`npm run eval:real-report`（組・初回/再実行ごとに集計。自律性の指標つき）・`eval:real-replay`。結果は `docs/stage8d5.md`。
+
+## 未知30件の評価（Stage 8D-6）
+`eval/real-stores/targets-8d6.json`・`gold-8d6.json`（正解あり T01〜T20＋正解不明 W01〜W10。実行前にコミットし、内容のハッシュをテストで固定）。実行: `npm run eval:real -- … --followups=2`（有料・承認制）。実行ごとに `real-<ID>.json`（結果）・`pages-<ID>.jsonl`（取得ページの台帳。ハッシュつき）・`cache-<ID>.json`（その実行専用）が作られ、既存のファイルは上書きされない。`npm run eval:real-report` は再調査の効果（最初の提出 vs 最終）も `summary-8d6-initial-followup.json` に出す。`npm run eval:real-replay` は台帳から再判定する（有料なし）。
