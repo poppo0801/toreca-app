@@ -221,7 +221,7 @@ describe.skipIf(process.env.REAL_EVAL !== "1")("実API評価（承認済みの�
     writeFileSync(counterPath, JSON.stringify({ date: today, n: runsToday + rep.records.length }));
     console.log(`[real] 実行 ${rep.records.length} 件 / 推定費用 ${rep.spentJpy.toFixed(2)}円 / ${rep.stoppedReason ?? "完了"}`);
     expect(rep.records.length).toBeGreaterThan(0);
-  }, 600_000);
+  }, 3_600_000);
 });
 
 // ---------------------------------------------------------------- 実行前の確認の表示（REAL_PREFLIGHT=1。API・ネットワークには接続しない）
