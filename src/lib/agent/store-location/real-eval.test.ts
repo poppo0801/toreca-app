@@ -1,12 +1,13 @@
 // @vitest-environment node
 import Anthropic from "@anthropic-ai/sdk";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AnthropicAgentLLM, AnthropicWebSearch } from "@/lib/agent/anthropic";
 import { SYSTEM_PROMPT } from "@/lib/agent/store-location/run";
 import { checkRealApi } from "@/lib/agent/real-gate";
 import { REAL_GOLD, REAL_TARGETS, estimateRealCost, FileCache, collectRecords, isFatalProblem, isProblem, summarizeRecords, type RealRecord, preflight, runRealEval, validatePlan, type RealEvalPlan } from "@/lib/agent/store-location/real-eval";
-import { scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
+import { matchesGoldV1, scoreEval, type EvalResult } from "@/lib/agent/store-location/eval";
+import { verifyResearch } from "@/lib/agent/store-location/verify";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
 import { EVAL_WORLD } from "@/lib/agent/store-location/world";
 import { CachedFetcher, CachedSearch } from "@/lib/agent/store-location/tools";
@@ -204,7 +205,7 @@ describe.skipIf(process.env.REAL_EVAL !== "1")("実API評価（承認済みの�
     const gate = checkRealApi({ env, confirm: true, runsToday });
     if (!gate.ok) throw new Error(`実APIの関門: ${gate.reason}`);
     const ids = (env.REAL_EVAL_IDS ?? "R1").split(",").map((x) => x.trim()).filter(Boolean);
-    const plan: RealEvalPlan = { ids, approvedMaxJpy: Number(env.REAL_EVAL_APPROVED_MAX_JPY) || 0, approvedStores: Number(env.REAL_EVAL_APPROVED_STORES) || 0, firstOnly: env.REAL_EVAL_FIRST_ONLY === "1", phase: env.REAL_EVAL_PHASE === "rerun" ? "rerun" : "initial", continueOnProblem: env.REAL_EVAL_CONTINUE === "1" };
+    const plan: RealEvalPlan = { ids, approvedMaxJpy: Number(env.REAL_EVAL_APPROVED_MAX_JPY) || 0, approvedStores: Number(env.REAL_EVAL_APPROVED_STORES) || 0, firstOnly: env.REAL_EVAL_FIRST_ONLY === "1", phase: env.REAL_EVAL_PHASE === "rerun" ? "rerun" : "initial", continueOnProblem: env.REAL_EVAL_CONTINUE === "1", maxProblems: Number(env.REAL_EVAL_MAX_PROBLEMS) || undefined };
     const maxRuns = Number(env.AGENT_MAX_RUNS_PER_DAY) || 0;
     const client = new Anthropic({ apiKey: gate.apiKey }); // キーは出力・保存しない
     const cache = new FileCache("eval/runs/real/cache.json");
@@ -286,6 +287,41 @@ describe.skipIf(process.env.REAL_REPORT !== "1")("集計の出力（表示のみ
     for (const phase of ["initial", "rerun"] as const) {
       const recs = collectRecords("eval/runs/real", phase, (id) => /^[NU][0-9]+$/.test(id));
       writeFileSync(`eval/runs/real/summary-8d4-${phase}.json`, JSON.stringify(summarizeRecords(recs), null, 2));
+      writeFileSync(`eval/runs/real/summary-8d4-${phase}-original-scorer.json`, JSON.stringify(summarizeRecords(recs, matchesGoldV1), null, 2)); // 初回の採点（旧版）を再現
     }
   });
+});
+
+// ---------------------------------------------------------------- 保存済みデータでの再検証（REAL_REPLAY=1。有料APIは使わない）
+// 実行記録（eval/runs/real/real-*.json）に残した「AIの提出（住所・情報源・引用）」と、取得済みのページ（cache.json）を使い、
+// 検証層（verifyResearch）だけを現在のコードでやり直す。AIの出力・取得したページは変えない（検索・AI呼び出しは行わない）。
+describe.skipIf(process.env.REAL_REPLAY !== "1")("保存済みデータでの再検証（有料API・検索なし）", () => {
+  it("初回の記録を、現在の検証層で再判定して eval/runs/real/replay-8d4.json に書く", async () => {
+    const cache = JSON.parse(readFileSync("eval/runs/real/cache.json", "utf8")) as Record<string, { v: { ok?: boolean; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[] } }>;
+    const pageFor = (arg: string) => {
+      const key = Object.keys(cache).find((k) => k.startsWith(`page:${arg}`));
+      const v = key ? cache[key].v : null;
+      return v && v.ok !== false ? { url: v.url, finalUrl: v.finalUrl, title: v.title, text: v.text, links: v.links, injection: false } : null;
+    };
+    // 各店舗の最初の記録（N・U は初回の実行、R は最後の実行）
+    const first = new Map<string, RealRecord>();
+    for (const f of readdirSync("eval/runs/real").filter((x) => /^real-.*json$/.test(x)).sort()) {
+      const rep = JSON.parse(readFileSync(`eval/runs/real/${f}`, "utf8")) as { phase?: string; records: RealRecord[] };
+      for (const r of rep.records) {
+        if (/^[NU]/.test(r.target.id)) { if ((rep.phase ?? "initial") === "initial" && !first.has(r.target.id)) first.set(r.target.id, r); }
+        else first.set(r.target.id, r); // R1〜R5: 最後の記録（修正後の再実行）
+      }
+    }
+    const rows: Record<string, unknown>[] = [];
+    const replayed: RealRecord[] = [];
+    for (const r of first.values()) {
+      const pages = r.actions.filter((a) => a.name === "fetch_page" && a.ok).map((a) => pageFor(a.arg)).filter((p): p is NonNullable<typeof p> => !!p);
+      const proposal = { candidates: (r.outcome.candidates ?? []).map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, closureHint: c.closureHint ?? null })) };
+      const res = await verifyResearch({ store: r.target.store, proposal, pages, geocode: realGeocode, limitReached: false });
+      rows.push({ id: r.target.id, before: { status: r.outcome.status, address: r.outcome.address, confidence: r.outcome.confidence }, after: { status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => `${o.domain}:${o.status}`) }, pages: pages.length, candidates: proposal.candidates.length });
+      replayed.push({ ...r, outcome: { ...r.outcome, status: res.status, address: res.address, confidence: res.confidence, reasons: res.reasons, officialSites: res.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })) } });
+    }
+    writeFileSync("eval/runs/real/replay-8d4.json", JSON.stringify({ rows, summaryNU: summarizeRecords(replayed.filter((r) => /^[NU]/.test(r.target.id))), summaryR: replayed.filter((r) => /^R/.test(r.target.id)).map((r) => ({ id: r.target.id, status: r.outcome.status, address: r.outcome.address })) }, null, 2));
+    expect(rows.length).toBeGreaterThan(0);
+  }, 600_000);
 });

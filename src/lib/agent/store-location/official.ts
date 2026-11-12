@@ -70,11 +70,23 @@ export function assessOfficialSites({ store, pages }: OfficialInput): OfficialSi
     for (const l of p.links ?? []) linkedFromTrusted.add(domainOf(l.href));
   }
 
+  // 信頼済みの公式サイトのURLが、別のドメインへ転送された場合（例: 登録済みの旧ドメイン → 現在の公式ドメイン）。転送は公式サイト自身が行うもので、第三者には作れない
+  const redirectedFromTrusted = new Set<string>();
+  for (const p of pages) {
+    const from = domainOf(p.url);
+    const to = domainOf(p.finalUrl ?? p.url);
+    if (from && to && from !== to && trusted.has(from) && !trusted.has(to)) redirectedFromTrusted.add(to);
+  }
+
   const out: OfficialSiteAssessment[] = [];
   for (const [domain, ps] of byDomain) {
     const urls = ps.map((p) => p.finalUrl ?? p.url);
     if (trusted.has(domain)) {
       out.push({ domain, status: "trusted", signals: ["店舗マスターに登録済みの公式サイト"], problems: [], urls });
+      continue;
+    }
+    if (redirectedFromTrusted.has(domain) && !THIRD_PARTY.some((x) => domain === x || domain.endsWith(`.${x}`))) {
+      out.push({ domain, status: "verified", signals: ["登録済みの公式サイトから転送されている（公式サイト自身による転送）"], problems: [], urls });
       continue;
     }
     if (THIRD_PARTY.some((t) => domain === t || domain.endsWith(`.${t}`))) {

@@ -66,3 +66,8 @@
 - 自動収集の現行仕様は `docs/auto-collection-audit.md`（2026-11-05 時点）。以後の変更との照合は未実施。
 - Supabase のプラン・バックアップ機能（日次/PITR）の有無は未確認（ドキュメント上は無料プランで日次なし）。
 - 負荷・性能: Stage 7O の計測は Chromium（CPU 4倍）と PC→実 DB の相対値。実機の絶対値は未計測。
+
+## 店舗所在地の反映候補と承認フロー（Stage 8D-4。開発環境のみ）
+- 3層: `store_location_research`（調査結果＝ログ。追記専用）→ `store_location_proposals`（反映候補。承認待ち・保留・却下・反映済み・取消済み）→ `stores`（確定データ）。履歴は `store_location_proposal_events`（追記専用）。マイグレーション `20261214000096`（開発DBのみ）。
+- `stores` を更新するのは DB 関数 `apply_/revert_store_location_proposal`（security definer）だけ。アプリ側は `src/lib/server/agent/store-location-proposals.ts`（関数を呼ぶ薄い層）と `settings/store-research/proposal-actions.ts`（`canApplyToStoreMaster` = `TOREMANE_ENV=local` のときだけ動く）。
+- 評価: `eval/real-stores/targets-8d4.json`・`gold-8d4.json`（30件。正解は実行前に固定）。`npm run eval:real-report`（初回/再実行を別集計）・`eval:real-replay`（保存済みデータで検証層だけ再判定。有料APIなし）。詳細は `docs/stage8d4.md`。

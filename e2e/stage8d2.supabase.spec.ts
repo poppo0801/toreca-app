@@ -63,8 +63,10 @@ test("所在地の調査: 店舗を選んで調査（モック）。結果・情
 
   // 店舗一覧に最新の状態が付く
   await expect(page.getByTestId("research-store").locator("option", { hasText: "テスト書店 駅前店" })).toContainText("確認済み");
-  // 実APIは無効（開発専用キー・上限が未設定）
-  await expect(page.getByText("実APIは無効です")).toBeVisible();
+  // 既定はモック。実APIは、開発専用キー・上限が設定されていても、利用者が選んで費用を確認するまで使われない（未設定なら「無効です」）
+  await expect(page.getByTestId("research-mode")).toContainText("モック");
+  await expect(page.getByText(/実APIは無効です|実APIで調査する/).first()).toBeVisible();
+  if (await page.getByTestId("research-real").count()) await expect(page.getByTestId("research-real")).not.toBeChecked();
 });
 
 test("所在地の調査: 確認済みにならない場合は注意を出し、追加調査ができる", async ({ page }) => {

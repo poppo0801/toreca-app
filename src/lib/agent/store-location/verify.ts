@@ -116,6 +116,16 @@ export function parseCity(address: string): string | null {
   return /^(.+?郡.+?[町村]|.{1,6}?[市区町村])/.exec(rest)?.[1] ?? null;
 }
 
+const PREF_RE = /(北海道|東京都|京都府|大阪府|(?:青森|岩手|宮城|秋田|山形|福島|茨城|栃木|群馬|埼玉|千葉|神奈川|新潟|富山|石川|福井|山梨|長野|岐阜|静岡|愛知|三重|滋賀|兵庫|奈良|和歌山|鳥取|島根|岡山|広島|山口|徳島|香川|愛媛|高知|福岡|佐賀|長崎|熊本|大分|宮崎|鹿児島|沖縄)県)/;
+/** 住所から郵便番号（先頭の「〒561-0821」・末尾の「（〒518-0441）」）を取り除く。住所の本体だけを検証・保存する（郵便番号つきだと「都道府県から始まらない」と誤判定され、地図の照合も外れる） */
+export function cleanAddress(a: string): string {
+  const n = a.normalize("NFKC");
+  const hasMark = n.includes("〒");
+  let out = hasMark ? n.replace(/[(]? *〒 *[0-9]{3} *[-‐‑–—−ー－]? *[0-9]{4} *[)]?/g, " ") : n;
+  if (!hasMark) out = out.replace(/^ *[0-9]{3}[-‐‑–—−ー－][0-9]{4} +/, ""); // 「〒」なしの先頭の郵便番号（ハイフンつき＋空白）
+  return out.replace(/ {2,}/g, " ").trim();
+}
+
 const CLOSURE_WORDS = /(閉店|移転|営業終了|閉館|リニューアル休業|閉鎖)/;
 /** 閉店・移転の記載か。営業時間の表示（「営業中 / 営業終了 22:00」）とオンラインストアの閉店は、店舗の閉店ではないので除く */
 const CLOSURE = {
@@ -170,7 +180,9 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
     const tok = distinctiveToken(store.chain, store.name);
     // 系列を示す語: 系列名、および店舗名の先頭の語（系列名と店舗名の表記が違う場合: 例「テストカード専門店」と「テストカード 中央店」）
     const chainKeys = [norm(store.chain), ...(store.chainAliases ?? []).map(norm), norm(store.name.split(/[\s　]+/)[0] ?? "")].filter((k) => k.length >= 2 && k !== norm(tok));
-    const ownInWindow = window.includes(norm(tok));
+    // 店舗を見分ける語が、そのまま、または文字の種類（漢字・カタカナ・英数字）ごとの部分がすべて近くにある（語順の違う表記: 「マルイ海老名」と「海老名マルイ」）
+    const tokParts = (norm(tok).match(/[\p{Script=Han}]+|[\p{Script=Katakana}ー]+|[\p{Script=Hiragana}]+|[a-z0-9]+/gu) ?? []).filter((p) => p.length >= 2);
+    const ownInWindow = window.includes(norm(tok)) || (tokParts.length >= 2 && tokParts.every((p) => window.includes(p)));
     const chainOnPage = chainKeys.length === 0 || chainKeys.some((k) => flat.toLowerCase().includes(k));
     const otherNearer = store.siblingNames
       .map((n) => distinctiveToken(store.chain, n))
@@ -210,7 +222,25 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
     for (let i = flat.indexOf(tokN); i >= 0; i = flat.indexOf(tokN, i + tokN.length)) if (CLOSURE.test(flat.slice(Math.max(0, i - 40), i + tokN.length + 60))) return true;
     return false;
   });
-  const closure = !!c.closureHint || (quoteVerified && CLOSURE.test(collapsed(text).slice(Math.max(0, quotePos - 300), quotePos + collapsed(q).length + 300))) || closureElsewhere;
+  // 店舗一覧のページでは、隣の店舗の「移転」「閉店」の記載を、この店舗のものと取り違えない: 範囲は、この店舗の名前（直前120字以内）から、次の店舗・次の住所の手前まで
+  let ownEntryClosure = false;
+  if (quoteVerified) {
+    const flatAll = collapsed(text);
+    const endQ = quotePos + collapsed(q).length;
+    const beforeRaw = flatAll.slice(Math.max(0, quotePos - 120), quotePos);
+    const nameAt = beforeRaw.toLowerCase().lastIndexOf(tokN);
+    const before = nameAt >= 0 ? beforeRaw.slice(nameAt) : beforeRaw.slice(-30);
+    let after = flatAll.slice(endQ, endQ + 300);
+    const cuts = [after.search(PREF_RE), after.search(/〒/)].filter((i) => i >= 0);
+    for (const sib of store.siblingNames) {
+      const t = norm(distinctiveToken(store.chain, sib));
+      const i = t.length >= 2 ? after.toLowerCase().indexOf(t) : -1;
+      if (i >= 0) cuts.push(i);
+    }
+    if (cuts.length) after = after.slice(0, Math.min(...cuts));
+    ownEntryClosure = CLOSURE.test(before + flatAll.slice(quotePos, endQ) + after);
+  }
+  const closure = !!c.closureHint || ownEntryClosure || closureElsewhere;
   if (closure) problems.push("閉店・移転の記載がある（現在の住所とは限らない）");
 
   return { address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, quoteVerified, addressInQuote, complete, nameMatch, prefectureMismatch, official, officialStatus, closure, closureHint: c.closureHint ?? null, injection, geoMatch: false, lat: null, lng: null, domain, score: 0, problems };
@@ -219,7 +249,7 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
 export async function verifyResearch(input: VerifyInput): Promise<ResearchResult> {
   const { store, proposal, pages } = input;
   const officialSites = assessOfficialSites({ store, pages });
-  const evaluated = (proposal?.candidates ?? []).slice(0, 5).map((c) => evaluate(c, store, pages, officialSites));
+  const evaluated = (proposal?.candidates ?? []).slice(0, 5).map((c) => evaluate({ ...c, address: cleanAddress(c.address) }, store, pages, officialSites));
 
   // 地図の照合（引用が実在する候補だけ。無駄な通信を避ける）
   for (const e of evaluated.filter((x) => x.quoteVerified && x.addressInQuote)) {

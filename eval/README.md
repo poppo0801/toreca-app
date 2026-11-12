@@ -53,3 +53,6 @@
 
 ## 実在店舗の評価（Stage 8D-3。実API評価は実施済み、結果は docs/stage8d3.md §7）
 `eval/real-stores/targets.json`（入力）と `gold.json`（正解。採点専用）。住所未登録の実在店舗5件（公式が明記・名称と住所の地名が違う・同名の別地域・公式が見つけにくい・特定できない）。正解は公式ページで確認した範囲で、確認できない項目は unknown。モック（`eval/store-location/`）と実API（`eval/runs/real/`）の結果は別に集計し、混ぜない。手順・費用: `docs/stage8d3.md` §5。
+
+## 実在店舗30件の評価（Stage 8D-4）
+`eval/real-stores/targets-8d4.json`（入力。本番の店舗マスターから読み取り専用で凍結）と `gold-8d4.json`（正解あり20件 N01〜N20＋正解不明10件 U01〜U10。実行前にコミットして固定）。正解不明は正解率の分母に含めず別に報告。初回の結果（`real-*.json` の phase=initial）が主要評価値で、再実行は別集計。`npm run eval:real-report`・`eval:real-replay`。結果と分析は `docs/stage8d4.md`。

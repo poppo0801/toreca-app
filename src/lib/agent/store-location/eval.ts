@@ -13,7 +13,7 @@ import type { AgentLimits } from "@/lib/agent/core";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode, type MockWorldData } from "@/lib/agent/store-location/mock";
 import { researchStoreLocation } from "@/lib/agent/store-location/run";
 import type { SearchHit, SearchProvider } from "@/lib/agent/store-location/tools";
-import type { ResearchStatus, StoreTarget } from "@/lib/agent/store-location/verify";
+import { cleanAddress, type ResearchStatus, type StoreTarget } from "@/lib/agent/store-location/verify";
 import { normalizeForMatch } from "@/lib/geocode";
 import casesJson from "../../../../eval/store-location/cases.json";
 import goldJson from "../../../../eval/store-location/gold.json";
@@ -112,8 +112,30 @@ const extendsExpected = (addr: string | null, expected: string | null | undefine
   const e = normalizeForMatch(expected);
   return a.startsWith(e) && !/^[0-9０-９\-ー－丁目番号]/.test(a.slice(e.length));
 };
-export const matchesGold = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) =>
+/** 採点の旧版（Stage 8D-3〜8D-4 の初回採点で使用。郵便番号つき・建物名が数字で始まる住所・「二子玉川」のような漢数字の建物名を誤りとしていた）。初回の採点結果を再現するために残す */
+export const matchesGoldV1 = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) =>
   same(addr, g.expectedAddress) || extendsExpected(addr, g.expectedAddress) || (!!addr && !!g.expectedAddressPrefix && normalizeForMatch(addr).startsWith(normalizeForMatch(g.expectedAddressPrefix)));
+
+/** 採点の改訂版（Stage 8D-4 の分析で修正）: 郵便番号を除き、正解の直後が「空白・文字の終わり・数字以外」なら正解（建物名・階数つき）。番地の続き（1-11-50）・町名だけは誤り。正解データは変えない */
+export function extendsExpectedV2(addr: string | null, expected: string | null | undefined): boolean {
+  if (!addr || !expected) return false;
+  const a = cleanAddress(addr);
+  const e = normalizeForMatch(expected);
+  for (let i = 1; i <= a.length; i++) {
+    if (normalizeForMatch(a.slice(0, i)) !== e) continue;
+    const rest = a.slice(i);
+    if (rest === "") return true;
+    if (/^[ 　]/.test(rest)) return true; // 空白のあとの建物名・階数
+    if (/^[-0-9丁目番号]/.test(normalizeForMatch(rest.slice(0, 1)))) return false; // 番地の続き
+    return true;
+  }
+  return false;
+}
+export const matchesGold = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) => {
+  if (!addr) return false;
+  const a = cleanAddress(addr);
+  return same(a, g.expectedAddress) || extendsExpectedV2(a, g.expectedAddress) || (!!g.expectedAddressPrefix && normalizeForMatch(a).startsWith(normalizeForMatch(g.expectedAddressPrefix)));
+};
 /** 採用してはならない住所に当たるか（前後どちらかが前方一致） */
 const isForbidden = (addr: string | null, list: string[] = []) => !!addr && list.some((a) => { const x = normalizeForMatch(addr); const y = normalizeForMatch(a); return x.startsWith(y) || y.startsWith(x); });
 

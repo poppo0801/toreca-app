@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { DEFAULT_LIMITS, type AgentLimits } from "@/lib/agent/core";
 import { checkRealApi } from "@/lib/agent/real-gate";
-import { type EvalGold, type EvalResult, matchesGold, scoreEval, type EvalScore } from "@/lib/agent/store-location/eval";
+import { type EvalGold, type EvalResult, matchesGold, matchesGoldV1, scoreEval, type EvalScore } from "@/lib/agent/store-location/eval";
 import { researchStoreLocation, type ResearchDeps, type ResearchOutcome } from "@/lib/agent/store-location/run";
 import type { ResultCache } from "@/lib/agent/store-location/tools";
 import type { StoreTarget } from "@/lib/agent/store-location/verify";
@@ -299,12 +299,12 @@ export interface RunSummary {
 const rate = (a: number, b: number) => (b === 0 ? null : a / b);
 const pct = (xs: number[], q: number) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))] : 0);
 
-export function summarizeRecords(records: RealRecord[]): RunSummary {
+export function summarizeRecords(records: RealRecord[], scorer: typeof matchesGold = matchesGold): RunSummary {
   const perStore: StoreMetric[] = records.map((r) => {
     const g = REAL_GOLD.find((x) => x.id === r.target.id);
     const known = !!g && !g.unknownGold;
     const adopted = (r.outcome.status === "confirmed" || r.outcome.status === "candidate") && !!r.outcome.address;
-    const correct = known && g ? adopted && matchesGold(r.outcome.address, g) : null;
+    const correct = known && g ? adopted && scorer(r.outcome.address, g) : null;
     const isOff = (d: string) => r.outcome.officialSites.some((o) => o.domain === d && (o.status === "verified" || o.status === "trusted"));
     const offDomains = known && g ? g.officialDomains ?? [] : [];
     const a = r.actions;
