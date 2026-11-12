@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MockFetcher, MockSearch, MockStoreBrain, mockGeocode } from "@/lib/agent/store-location/mock";
 import { assessOfficialSites } from "@/lib/agent/store-location/official";
-import { researchStoreLocation } from "@/lib/agent/store-location/run";
+import { parseProposal, researchStoreLocation } from "@/lib/agent/store-location/run";
 import { EVAL_CASES } from "@/lib/agent/store-location/eval";
 import { EVAL_WORLD } from "@/lib/agent/store-location/world";
 import { verifyResearch, type PageEvidence, type StoreTarget } from "@/lib/agent/store-location/verify";
@@ -88,5 +89,96 @@ describe("公式サイトの自律的な発見（モックのWeb）", () => {
     const out = await run("S14");
     expect(out.result.status).toBe("candidate");
     expect(out.result.officialSites.find((s) => s.domain === "tg-official-store.test")?.status).toBe("candidate");
+  });
+});
+
+describe("実サイトの回帰（Stage 8D-3 R1: 住所の地名が店舗名の語と同じ）", () => {
+  const kStore: StoreTarget = { chain: "キデイランド", name: "吉祥寺店", prefecture: "東京都", knownDomains: [], siblingNames: ["二子玉川店", "三宮店", "神戸店"], chainAliases: ["KIDDY LAND"] };
+  const kPage = page("https://www.kiddyland.co.jp/shoplist/kichijyouji/", "キデイランド吉祥寺店 | キデイランドへようこそ！", "キデイランドへようこそ！ > ショップリスト > キデイランド吉祥寺店\n\nキデイランド吉祥寺店\n\n郵便番号\n〒 180-0004\n\n住所\n東京都武蔵野市吉祥寺本町1-11-5 コピス吉祥寺 6階/A館\n\nTEL\n0422-29-2150");
+  const geo = async () => [{ title: "東京都武蔵野市吉祥寺本町1丁目11-5", lat: 35.7, lng: 139.58 }] as never;
+  for (const quote of ["住所\n東京都武蔵野市吉祥寺本町1-11-5 コピス吉祥寺 6階/A館", "東京都武蔵野市吉祥寺本町1-11-5", "キデイランド吉祥寺店\n\n郵便番号\n〒 180-0004\n\n住所\n東京都武蔵野市吉祥寺本町1-11-5 コピス吉祥寺 6階/A館"]) {
+    it(`引用が住所から始まっても別系列と誤判定しない: ${quote.slice(0, 12)}…`, async () => {
+      const r = await verifyResearch({ store: kStore, proposal: { candidates: [{ address: "東京都武蔵野市吉祥寺本町1-11-5", sourceUrl: kPage.url, quote }] }, pages: [kPage], geocode: geo, limitReached: false });
+      expect(r.candidates[0].problems).toEqual([]);
+      expect(r.candidates[0].nameMatch).toBe(true);
+    });
+  }
+});
+
+describe("実サイトの回帰（Stage 8D-3 R2: ふるいち 竹の塚店。公式の実ページ）", () => {
+  const raw = JSON.parse(readFileSync("src/lib/agent/store-location/fixtures/furu1-takenotsuka.json", "utf8")) as Record<string, PageEvidence>;
+  const pages: PageEvidence[] = Object.values(raw).map((p) => ({ ...p, injection: false }));
+  const fStore: StoreTarget = { chain: "ふるいち", name: "竹の塚店", prefecture: "東京都", knownDomains: [], siblingNames: ["鶴見店","泉大津店","魚住店","深井店","イオンモール神戸北店","西神戸店","イオンモールりんくう泉南店","三宮店","三田店","宝塚店","富田林店","川西店","庄内店","灘店","イオンモール伊丹店","名谷店","野口店","香里園店","門真店","小平店","高野店","原山台店","中百舌鳥店","南茨木店","東住吉店","猪名寺店","緑橋店","西淀川店","西宮店","千里丘店"], chainAliases: ["古本市場"] };
+  const url = "https://www.furu1.net/shop/_1106/shop12.html";
+  const geo = async () => [{ title: "東京都足立区東伊興1丁目16-9", lat: 35.8, lng: 139.78 }] as never;
+  const run = (quote: string) => verifyResearch({ store: fStore, proposal: { candidates: [{ address: "東京都足立区東伊興1-16-9", sourceUrl: url, quote }] }, pages, geocode: geo, limitReached: false });
+
+  it("営業時間の「営業中 / 営業終了 22:00」とオンラインストアの閉店は、店舗の閉店ではない", async () => {
+    const r = await run("住所 東京都足立区東伊興１-１６-９");
+    expect(r.candidates[0].problems.join()).not.toMatch(/閉店/);
+  });
+  it("運営法人の名前が系列名と違っても、フッターの会社概要＋法人名で公式サイトを検証できる", async () => {
+    const r = await run("住所 東京都足立区東伊興１-１６-９");
+    expect(r.officialSites.find((s) => s.domain === "furu1.net")?.status).toBe("verified");
+    expect(r.status).toBe("confirmed");
+    expect(r.address).toBe("東京都足立区東伊興1-16-9");
+  });
+  it("引用が「見出し … 住所」のようにつながれていても、住所を含む部分が本文に実在すれば、その部分だけを根拠にする", async () => {
+    const r = await run("古本市場竹の塚店|古本市場 ふるいち店舗情報サイト … 東京都足立区東伊興１-１６-９");
+    expect(r.candidates[0].quoteVerified).toBe(true);
+    expect(r.status).toBe("confirmed");
+  });
+  it("つながれた引用でも、住所を含む部分が本文に無ければ（作り話）採用しない", async () => {
+    const r = await run("古本市場竹の塚店 … 東京都足立区東伊興9-9-9");
+    expect(r.candidates[0].quoteVerified).toBe(false);
+    expect(r.status).not.toBe("confirmed");
+  });
+  it("同じ公式の一覧にある別店舗の住所（滑川店）や、本文に無い誤住所は、竹の塚店の住所として採用しない", async () => {
+    const other = await verifyResearch({ store: fStore, proposal: { candidates: [{ address: "富山県滑川市上小泉2829番地", sourceUrl: "https://www.furu1.net/shop.html", quote: "住所 富山県滑川市上小泉2829番地明文堂書店滑川店・店内" }] }, pages, geocode: geo, limitReached: false });
+    expect(other.status).not.toBe("confirmed");
+    expect(other.address).not.toBe("富山県滑川市上小泉2829番地");
+    const fake = await run("住所 東京都足立区東伊興1-16-90");
+    expect(fake.status).not.toBe("confirmed");
+  });
+});
+
+describe("実サイトの回帰（Stage 8D-3 R5: 改行で分かれた住所・提出形式）", () => {
+  const raw = JSON.parse(readFileSync("src/lib/agent/store-location/fixtures/alto-kobe.json", "utf8")) as PageEvidence;
+  const aPage: PageEvidence = { ...raw, injection: false };
+  const aStore: StoreTarget = { chain: "買取アルト", name: "ライフ神戸店", prefecture: "兵庫県", knownDomains: [], siblingNames: [] };
+  const geo = async () => [{ title: "兵庫県神戸市兵庫区吉田町2丁目38-10", lat: 34.65, lng: 135.17 }] as never;
+  const run = (address: string, quote: string) => verifyResearch({ store: aStore, proposal: { candidates: [{ address, sourceUrl: aPage.url, quote }] }, pages: [aPage], geocode: geo, limitReached: false });
+
+  it("引用が住所の後半だけ（改行で分かれた行）でも、直前直後の本文に住所全体が実在すれば採用できる。ただし公式を検証できないので確認済みにはしない", async () => {
+    const r = await run("兵庫県神戸市兵庫区吉田町2丁目38-10", "2丁目38-10");
+    expect(r.candidates[0].addressInQuote).toBe(true);
+    expect(r.status).toBe("candidate");
+    expect(r.address).toBe("兵庫県神戸市兵庫区吉田町2丁目38-10");
+  });
+  it("同じ引用でも、本文の近くに無い住所（同じ系列の別店舗や誤住所）は採用しない", async () => {
+    const other = await run("兵庫県尼崎市立花町1丁目26-12", "2丁目38-10");
+    expect(other.candidates[0].addressInQuote).toBe(false);
+    expect(other.status).not.toBe("confirmed");
+    expect(other.address).not.toBe("兵庫県尼崎市立花町1丁目26-12");
+    const fake = await run("兵庫県神戸市兵庫区吉田町2丁目99-99", "2丁目38-10");
+    expect(fake.address).toBeNull();
+  });
+});
+
+describe("AIの提出の解釈（parseProposal）", () => {
+  const ok = { address: "東京都架空区1-2-3", sourceUrl: "https://x.test/a", quote: "東京都架空区1-2-3" };
+  it("長すぎる要約・ヒント・引用は切り詰めて受け入れる（提出全体を捨てない）", () => {
+    const r = parseProposal({ candidates: [{ ...ok, quote: "あ".repeat(600), closureHint: "い".repeat(500) }], summary: "う".repeat(900) });
+    expect(r.proposal?.candidates).toHaveLength(1);
+    expect(r.proposal?.candidates[0].quote.length).toBe(400);
+    expect(r.proposal?.summary?.length).toBe(500);
+  });
+  it("不正な候補だけを捨て、有効な候補は残す。全て不正なら提案なし", () => {
+    const r = parseProposal({ candidates: [ok, { address: "", sourceUrl: "x", quote: "y" }, 5] });
+    expect(r.proposal?.candidates).toHaveLength(1);
+    expect(r.invalid).toBe(2);
+    expect(parseProposal({ candidates: [{ foo: 1 }] }).proposal).toBeNull();
+    expect(parseProposal("text").proposal).toBeNull();
+    expect(parseProposal({ candidates: [] }).proposal?.candidates).toEqual([]);
   });
 });

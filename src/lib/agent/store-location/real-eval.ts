@@ -113,7 +113,7 @@ export function isProblem(r: { status: string; wrong: boolean; rejectedCalls: nu
 export interface RealRecord {
   target: RealTarget;
   result: EvalResult;
-  outcome: { status: string; address: string | null; confidence: number; reasons: string[]; officialSites: { domain: string; status: string; signals: string[]; problems: string[] }[]; sources: { url: string; official: boolean }[] };
+  outcome: { status: string; address: string | null; confidence: number; reasons: string[]; officialSites: { domain: string; status: string; signals: string[]; problems: string[] }[]; sources: { url: string; official: boolean }[]; candidates?: { address: string; sourceUrl: string; quote: string; closureHint?: string | null; problems: string[] }[] };
   usage: ResearchOutcome["usage"];
   /** ツール呼び出しの経過（名前・成否・入力の検索語/URL。本文は保存しない） */
   actions: { name: string; ok: boolean; arg: string }[];
@@ -160,6 +160,8 @@ export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) 
         status: out.result.status, address: out.result.address, confidence: out.result.confidence, reasons: out.result.reasons,
         officialSites: out.result.officialSites.map((o) => ({ domain: o.domain, status: o.status, signals: o.signals, problems: o.problems })),
         sources: out.result.sources.map((s) => ({ url: s.url, official: s.official })),
+        // 採用されなかった候補も記録する（原因調査用。AIが提案した住所・引用・検証で見つかった問題）
+        candidates: out.result.candidates.map((c) => ({ address: c.address, sourceUrl: c.sourceUrl, quote: c.quote.slice(0, 200), closureHint: c.closureHint ?? null, problems: c.problems })),
       },
       usage: out.usage,
       actions: out.run.trace.flatMap((e) => (e.t === "tool" ? [{ name: e.name, ok: e.ok, arg: String(e.input.query ?? e.input.url ?? "").slice(0, 120) }] : [])),

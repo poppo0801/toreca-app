@@ -105,8 +105,15 @@ export async function runAll(engine: EngineName): Promise<EvalResult[]> {
 
 const same = (a: string | null, b: string | null) => !!a && !!b && normalizeForMatch(a) === normalizeForMatch(b);
 /** 住所が、正解（完全一致または前半一致）に合うか */
+/** 正解の後ろに建物名・階数などが付いた住所も正解とする（ただし番地の続き「1-11-50」などは別の住所） */
+const extendsExpected = (addr: string | null, expected: string | null | undefined) => {
+  if (!addr || !expected) return false;
+  const a = normalizeForMatch(addr);
+  const e = normalizeForMatch(expected);
+  return a.startsWith(e) && !/^[0-9０-９\-ー－丁目番号]/.test(a.slice(e.length));
+};
 const matchesGold = (addr: string | null, g: Pick<EvalGold, "expectedAddress" | "expectedAddressPrefix">) =>
-  same(addr, g.expectedAddress) || (!!addr && !!g.expectedAddressPrefix && normalizeForMatch(addr).startsWith(normalizeForMatch(g.expectedAddressPrefix)));
+  same(addr, g.expectedAddress) || extendsExpected(addr, g.expectedAddress) || (!!addr && !!g.expectedAddressPrefix && normalizeForMatch(addr).startsWith(normalizeForMatch(g.expectedAddressPrefix)));
 /** 採用してはならない住所に当たるか（前後どちらかが前方一致） */
 const isForbidden = (addr: string | null, list: string[] = []) => !!addr && list.some((a) => { const x = normalizeForMatch(addr); const y = normalizeForMatch(a); return x.startsWith(y) || y.startsWith(x); });
 
@@ -152,7 +159,8 @@ export function scoreEval(engine: string, results: EvalResult[], gold: EvalGold[
     const adoptedHere = (r.status === "confirmed" || r.status === "candidate") && !!r.address;
     const hasExpected = !!(g.expectedAddress || g.expectedAddressPrefix);
     const correct = matchesGold(r.address, g);
-    const wrong = adoptedHere && (!correct || isForbidden(r.address, g.mustNotAdopt));
+    // 正解に合う住所は、禁止リスト（町名だけ等の不完全な住所）の前方一致があっても誤りとしない
+    const wrong = adoptedHere && (!correct || isForbidden(r.address, g.mustNotAdopt) && !hasExpected);
     if (hasExpected && adoptedHere && correct) found++;
     if (hasExpected && r.status === "confirmed" && correct) confirmedOk++;
     if (adoptedHere) adopted++;

@@ -76,6 +76,8 @@ export interface EvaluatedCandidate {
   /** 情報源ドメインの公式性（trusted=登録済み / verified=根拠で検証 / candidate / rejected / null=未評価） */
   officialStatus: OfficialStatus | null;
   closure: boolean;
+  /** AIが付けた閉店・移転のヒント（記録用。判定にはAIの主張として使うのみ） */
+  closureHint?: string | null;
   injection: boolean;
   geoMatch: boolean;
   lat: number | null;
@@ -114,7 +116,11 @@ export function parseCity(address: string): string | null {
   return /^(.+?郡.+?[町村]|.{1,6}?[市区町村])/.exec(rest)?.[1] ?? null;
 }
 
-const CLOSURE = /(閉店|移転|営業終了|閉館|リニューアル休業|閉鎖)/;
+const CLOSURE_WORDS = /(閉店|移転|営業終了|閉館|リニューアル休業|閉鎖)/;
+/** 閉店・移転の記載か。営業時間の表示（「営業中 / 営業終了 22:00」）とオンラインストアの閉店は、店舗の閉店ではないので除く */
+const CLOSURE = {
+  test: (s: string) => CLOSURE_WORDS.test(s.replace(/営業中\s*営業終了/g, "").replace(/営業終了\s*\d/g, "").replace(/オンライン(?:ストア|ショップ)?閉店/g, "")),
+};
 
 export interface VerifyInput {
   store: StoreTarget;
@@ -130,15 +136,26 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
   const problems: string[] = [];
   const page = pages.find((p) => p.url === c.sourceUrl || p.finalUrl === c.sourceUrl);
   const text = page ? page.text.normalize("NFKC") : "";
-  const q = c.quote.normalize("NFKC").trim();
+  let q = c.quote.normalize("NFKC").trim();
   const collapsed = (s: string) => s.replace(/[\s　]+/g, "");
-  const quotePos = page && q.length >= 8 ? collapsed(text).indexOf(collapsed(q)) : -1;
+  let quotePos = page && q.length >= 8 ? collapsed(text).indexOf(collapsed(q)) : -1;
+  // 引用が「見出し … 住所」のように「…」「|」でつながれている場合: 住所を含む部分だけが本文に実在すれば、その部分だけを根拠とする（他の部分は根拠にしない）
+  if (page && quotePos < 0 && /…|\.{3}|\|/.test(q)) {
+    const addrC = collapsed(c.address.normalize("NFKC"));
+    const seg = q.split(/\s*(?:…+|\.{3,}|\|)\s*/).find((s) => collapsed(s).includes(addrC));
+    if (seg && seg.length >= 8) {
+      const pos = collapsed(text).indexOf(collapsed(seg));
+      if (pos >= 0) { q = seg.trim(); quotePos = pos; }
+    }
+  }
   const quoteVerified = quotePos >= 0;
   if (!page) problems.push("提案の情報源は、実際に取得したページではない");
   else if (!quoteVerified) problems.push("引用が取得したページの本文に存在しない（AIの作り話の可能性）");
 
   const addrNorm = normalizeForMatch(c.address);
-  const addressInQuote = quoteVerified && normalizeForMatch(q).includes(addrNorm);
+  // 住所は引用の中にあるのが基本。引用が住所の一部だけ（改行で分かれた後半など）でも、その直前直後の本文に住所全体が実在すれば、住所は本文に実在するとみなす
+  const nearQuote = quoteVerified ? collapsed(text).slice(Math.max(0, quotePos - 80), quotePos + collapsed(q).length + 80) : "";
+  const addressInQuote = quoteVerified && (normalizeForMatch(q).includes(addrNorm) || normalizeForMatch(nearQuote).includes(addrNorm));
   if (quoteVerified && !addressInQuote) problems.push("住所が引用の中に無い");
 
   const complete = isCompleteAddress(c.address) && /\d/.test(addrNorm.replace(/^.+?[都道府県]/, ""));
@@ -160,8 +177,12 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
       .filter((t) => t && t !== tok && !tok.includes(t) && !t.includes(tok))
       .some((t) => flatQ.toLowerCase().includes(norm(t)) && !flatQ.toLowerCase().includes(norm(tok)));
     // 同名店舗（別系列の「本店」など）: 引用の中で店舗を見分ける語の直前が別の系列名なら、別系列の店舗とみなす
-    const flatQLower = flatQ.toLowerCase();
-    const at = flatQLower.indexOf(norm(tok));
+    // 住所の部分は除く（「吉祥寺本町」のように住所の地名が店舗名の語と同じ場合、住所の途中を店舗名と取り違えないため）
+    const addrFlat = collapsed(c.address.normalize("NFKC")).toLowerCase();
+    const flatQLower = addrFlat.length >= 6 ? flatQ.toLowerCase().split(addrFlat).join("") : flatQ.toLowerCase();
+    // 店舗名として現れる形（「吉祥寺店」）だけを見る。建物名（「コピス吉祥寺」）や地名の一部は店舗名ではない
+    const needle = norm(store.name).endsWith("店") ? (norm(tok).endsWith("店") ? norm(tok) : `${norm(tok)}店`) : norm(tok);
+    const at = flatQLower.indexOf(needle);
     const pre = at > 0 ? flatQLower.slice(0, at).replace(/[【】\[\]()（）「」『』・:：|｜\-－ 0-9.]/g, "") : "";
     const otherChain = pre.length >= 3 && !chainKeys.some((k) => pre.endsWith(k));
     if (otherChain) problems.push("引用の店舗が別の系列の可能性（同名の店舗）");
@@ -192,7 +213,7 @@ function evaluate(c: AddressProposal, store: StoreTarget, pages: PageEvidence[],
   const closure = !!c.closureHint || (quoteVerified && CLOSURE.test(collapsed(text).slice(Math.max(0, quotePos - 300), quotePos + collapsed(q).length + 300))) || closureElsewhere;
   if (closure) problems.push("閉店・移転の記載がある（現在の住所とは限らない）");
 
-  return { address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, quoteVerified, addressInQuote, complete, nameMatch, prefectureMismatch, official, officialStatus, closure, injection, geoMatch: false, lat: null, lng: null, domain, score: 0, problems };
+  return { address: c.address, sourceUrl: c.sourceUrl, quote: c.quote, quoteVerified, addressInQuote, complete, nameMatch, prefectureMismatch, official, officialStatus, closure, closureHint: c.closureHint ?? null, injection, geoMatch: false, lat: null, lng: null, domain, score: 0, problems };
 }
 
 export async function verifyResearch(input: VerifyInput): Promise<ResearchResult> {

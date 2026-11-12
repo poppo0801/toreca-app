@@ -1,3 +1,4 @@
+// @vitest-environment node
 import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -95,12 +96,23 @@ describe("実行基盤（モック部品で、実APIなしに動作確認）", (
     expect(failing.stoppedReason).toMatch(/停止/);
     expect(failing.records[0].outcome.status).toBe("failed");
   });
-  it("採点: 前半一致の正解（R4）は前半が合えば正しい、住所を作れない店舗（R5）で別店舗の住所を採用すると誤り", () => {
+  it("採点: 前半一致の正解（R4）は前半が合えば正しい、R5 は同じ系列の別店舗（尼崎本店）の住所を採用すると誤り", () => {
     const r = (caseId: string, address: string | null, status = "candidate"): EvalResult => ({ caseId, status: status as never, address, confidence: 40, searches: 1, fetches: 1, steps: 3, costJpy: 5, ms: 1000, injectionFlags: 0 });
-    const s = scoreEval("t", [r("R4", "京都府京都市伏見区横大路芝生1-1"), r("R5", "兵庫県神戸市兵庫区吉田町2-38-10"), r("R3", "神奈川県横浜市鶴見区鶴見1-1-1")], REAL_GOLD.filter((g) => ["R3", "R4", "R5"].includes(g.id)));
+    const s = scoreEval("t", [r("R4", "京都府京都市伏見区横大路芝生1-1"), r("R5", "兵庫県尼崎市立花町1丁目26-12"), r("R3", "神奈川県横浜市鶴見区鶴見1-1-1")], REAL_GOLD.filter((g) => ["R3", "R4", "R5"].includes(g.id)));
     expect(s.perCase.find((p) => p.caseId === "R4")!.wrong).toBe(false);
     expect(s.perCase.find((p) => p.caseId === "R5")!.wrong).toBe(true);
     expect(s.perCase.find((p) => p.caseId === "R3")!.wrong).toBe(true);
+    const ok = scoreEval("t", [r("R5", "兵庫県神戸市兵庫区吉田町2丁目38-10")], REAL_GOLD.filter((x) => x.id === "R5"));
+    expect(ok.perCase[0].wrong).toBe(false);
+  });
+  it("採点: 正解の後ろに建物名・階数が付いた住所（R1）は正しい。番地の続きや町名だけは誤り", () => {
+    const r = (address: string): EvalResult => ({ caseId: "R1", status: "confirmed", address, confidence: 75, searches: 1, fetches: 1, steps: 3, costJpy: 1, ms: 1000, injectionFlags: 0 });
+    const g = REAL_GOLD.filter((x) => x.id === "R1");
+    const wrongOf = (a: string) => scoreEval("t", [r(a)], g).perCase[0].wrong;
+    expect(wrongOf("東京都武蔵野市吉祥寺本町1-11-5 コピス吉祥寺 6階/A館")).toBe(false);
+    expect(wrongOf("東京都武蔵野市吉祥寺本町1-11-5")).toBe(false);
+    expect(wrongOf("東京都武蔵野市吉祥寺本町1-11-50")).toBe(true);
+    expect(wrongOf("東京都武蔵野市吉祥寺")).toBe(true);
   });
   it("FileCache: 保存・再読み込み・期限切れ", () => {
     const path = "eval/runs/real-test/cache.json";

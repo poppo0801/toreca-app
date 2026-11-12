@@ -151,40 +151,48 @@
     },
     {
       "id": "R5",
-      "expectedAddress": null,
+      "expectedAddress": "兵庫県神戸市兵庫区吉田町2-38-10",
       "acceptableStatuses": [
         "candidate",
+        "confirmed",
         "insufficient",
         "not_found",
         "limit_reached"
       ],
-      "mustNotConfirm": true,
-      "officialDomains": [],
+      "officialDomains": [
+        "kaitori-alto.com"
+      ],
       "notOfficialDomains": [
         "oikura.jp",
         "hikakaku.com"
       ],
       "mustNotAdopt": [
-        "兵庫県神戸市兵庫区吉田町2-38-10"
+        "兵庫県尼崎市立花町1-26-12"
       ],
-      "mustNotAdoptNote": "『買取アルト』の別の店舗（兵庫区吉田町）とみられる住所。ライフ神戸店と同じかは確認できない",
+      "mustNotAdoptNote": "同じ系列の別店舗（尼崎本店）の住所。ライフ神戸店の住所ではない",
       "conditions": [
-        "『ライフ神戸店』という店舗の住所を、人手では特定できなかった（unknown）。系列名だけが一致する別店舗の住所を採用してはならない。確認済みにしてはならない"
+        "『買取アルト ライフ神戸店』の住所は、運営会社（株式会社アルトホープ）の会社概要ページ、系列の店舗一覧ページ（kaitori-alto.com）、ポケモンカード公式の店舗検索の3つで一致する（兵庫県神戸市兵庫区吉田町2丁目38-10）。系列の別店舗（尼崎本店 など）の住所を採用してはならない",
+        "公式サイトの検証（システムの規則）は、店舗マスターに同じ系列の他店舗が無い場合は成立しにくく、候補止まりになりうる。独立した2つ目の情報源で一致すれば確認済みにできる"
       ],
       "evidence": [
         {
-          "url": "https://oikura.jp/shop/16428403/",
-          "quote": "買取アルト 兵庫県神戸市兵庫区吉田町2-38-10（第三者。ライフ神戸店と同一かは未確認）",
+          "url": "https://altohope.co.jp/company/",
+          "quote": "【買取アルト ライフ神戸店】〒652-0872 兵庫県神戸市兵庫区吉田町2丁目38-10（運営会社の会社概要）",
           "verifiedOn": "2026-11-12",
-          "verifiedBy": "Claude（公式ページを取得して照合）。利用者による再確認は未実施"
+          "verifiedBy": "Claude（HTTPで取得して照合）。利用者による再確認は未実施"
+        },
+        {
+          "url": "https://map.pokemon-card.com/map/22682",
+          "quote": "買取アルト ライフ神戸店 兵庫県神戸市兵庫区吉田町2丁目38-10",
+          "verifiedOn": "2026-11-12",
+          "verifiedBy": "Claude（HTTPで取得して照合）。利用者による再確認は未実施"
         }
       ],
-      "closure": "不明",
+      "closure": "不明（営業中の表示はあるが、最新の状況は未確認）",
       "unknown": [
-        "住所",
-        "公式サイト",
         "営業状況"
-      ]
+      ],
+      "revision": "2026-11-12 修正: 当初は「住所不明・別店舗の住所とみられる」としていたが、AIの初回の実行結果（系列の店舗一覧ページ）を受けて公式の会社概要ページ等を取得し直したところ、当初の想定が誤りだった。正解を変えた理由と根拠は上記"
     }
   ]
 }

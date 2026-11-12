@@ -94,7 +94,7 @@ export function assessOfficialSites({ store, pages }: OfficialInput): OfficialSi
     if (listMatch) signals.push(`店舗マスターの同じ系列の他店舗${sibHits}件が一覧に載っている`);
     else problems.push("店舗マスターの同じ系列の店舗の一覧との一致が確認できない");
 
-    const operator = ps.some((p) => {
+    const operatorNear = ps.some((p) => {
       const t = p.text.normalize("NFKC");
       for (const m of t.matchAll(new RegExp(OPERATOR.source, "gi"))) {
         const near = norm(t.slice(Math.max(0, (m.index ?? 0) - 80), (m.index ?? 0) + 120));
@@ -102,7 +102,14 @@ export function assessOfficialSites({ store, pages }: OfficialInput): OfficialSi
       }
       return false;
     });
-    if (operator) signals.push("会社概要・運営会社・著作権表記が系列名の近くにある");
+    // 系列名と運営会社の名前が違う場合（例: 「ふるいち」を運営する「株式会社テイツー」）: ページ末尾（フッター）に「会社概要」と法人名・著作権表記が揃う
+    const operatorFooter = ps.some((p) => {
+      const tail = p.text.normalize("NFKC").slice(-700);
+      return /会社概要|企業情報|会社情報/.test(tail) && /(株式会社|有限会社|合同会社|(?:©|copyright)[^\n]{0,60}(?:co\.?,?\s*ltd|inc|corp|株式会社))/i.test(tail);
+    });
+    const operator = operatorNear || operatorFooter;
+    if (operatorNear) signals.push("会社概要・運営会社・著作権表記が系列名の近くにある");
+    else if (operatorFooter) signals.push("フッターに会社概要と運営法人の記載がある（法人名は系列名と別）");
     const linked = linkedFromTrusted.has(domain);
     if (linked) signals.push("信頼済みの公式サイトからリンクされている");
     if (!operator && !linked) problems.push("運営会社の情報も、信頼済みの公式サイトからのリンクも確認できない");
