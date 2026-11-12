@@ -5,7 +5,12 @@ import type { ManualPurchaseInput } from "@/lib/purchase-input";
 import type { AppData, EventState, FulfillmentStatus, ResultStatus } from "@/types/domain";
 
 /** 更新系の結果。成功時は最新スナップショット、失敗時は利用者向けメッセージ。 */
-export type Outcome = { ok: true; data: AppData; createdIds?: string[]; /** 複製で、同じ内容がすでにあるため作らなかった店舗 */ skipped?: { storeName: string; reason: string }[]; groupId?: string | null } | { ok: false; error: string };
+export type Outcome =
+  | { ok: true; data: AppData; createdIds?: string[]; /** 複製で、同じ内容がすでにあるため作らなかった店舗 */ skipped?: { storeName: string; reason: string }[]; groupId?: string | null }
+  /** uncertain: 通信の失敗などで、サーバーで処理されたか分からない（失敗と断定しない。操作IDのある操作は結果を確認できる） */
+  | { ok: false; error: string; uncertain?: boolean };
+/** 操作IDの結果の確認 */
+export type OperationCheck = { ok: true; found: boolean; result?: { ids: string[]; lotteryId?: string } } | { ok: false; error: string };
 
 /**
  * データ層の境界。mock は InMemory（CI/デモ）、supabase は Server Action 経由で DB に保存する。
@@ -37,7 +42,9 @@ export interface LotteryRepository {
   saveLottery(actorId: string, id: string | null, input: LotteryInput): Promise<Outcome>;
   duplicateLottery(actorId: string, lotteryId: string, storeIds: string[], opts?: import("@/lib/server/lottery-service").DuplicateOptions): Promise<Outcome>;
   /** 新規登録して他店舗へ複製（保存して複製）。失敗時は保存した元も取り消す */
-  saveLotteryAndDuplicate(actorId: string, input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[]): Promise<Outcome>;
+  saveLotteryAndDuplicate(actorId: string, input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[], opId: string): Promise<Outcome>;
+  /** 保存して複製・他店舗に複製の結果を、操作IDで確認する（通信が途切れたあと） */
+  lotteryOperationResult(opId: string): Promise<OperationCheck>;
   archiveLottery(actorId: string, lotteryId: string): Promise<Outcome>;
   /** 登録済み抽選の除外（理由つき）。物理削除はしない */
   excludeLottery(actorId: string, lotteryId: string, ex: import("@/lib/server/lottery-service").ExclusionInput): Promise<Outcome>;

@@ -858,11 +858,15 @@ export interface DuplicateOptions {
   /** グループにまとめる（既定 true） */
   group?: boolean;
   origin?: "duplicate" | "save_and_duplicate";
+  /** 操作ID（画面の1回の操作ごとに発行）。同じ操作IDの再送は、作成済みの結果を返す（二重に作らない。Stage 8U-3） */
+  opId?: string;
 }
 export interface DuplicateResult {
   ids: string[];
   skipped: { storeName: string; reason: string }[];
   groupId: string | null;
+  /** 同じ操作IDの再送で、作成済みの結果を返したか */
+  replayed?: boolean;
 }
 const newStoreSchema = z.object({ name: z.string().trim().min(1).max(80), prefecture: z.string().trim().max(10) });
 export async function duplicateLottery(
@@ -879,10 +883,27 @@ export async function duplicateLottery(
   if (ids.data.length + news.data.length < 1) return fail("複製先の店舗を選択してください");
   if (ids.data.length + news.data.length > 30) return fail("複製できるのは30店舗までです");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
-  const { data, error } = await (db as any).rpc("duplicate_lottery_tx", { p_lottery: lotteryId, p_store_ids: ids.data, p_new_stores: news.data, p_group: opts.group !== false, p_actor: actor, p_origin: opts.origin ?? "duplicate" });
+  const args = { p_lottery: lotteryId, p_store_ids: ids.data, p_new_stores: news.data, p_group: opts.group !== false, p_actor: actor, p_origin: opts.origin ?? "duplicate" };
+  if (opts.opId !== undefined && !uuid.safeParse(opts.opId).success) return fail("リクエストが不正です");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { data, error } = opts.opId ? await (db as any).rpc("duplicate_lottery_op_tx", { ...args, p_op: opts.opId }) : await (db as any).rpc("duplicate_lottery_tx", args);
   if (error) return fail(mapDuplicateError(error));
-  const r = data as { ids?: string[]; skipped?: { name?: string; reason?: string }[]; groupId?: string | null };
-  return ok({ ids: r.ids ?? [], skipped: (r.skipped ?? []).map((x) => ({ storeName: x.name ?? "", reason: x.reason ?? "" })), groupId: r.groupId ?? null });
+  return ok(toDuplicateResult(data));
+}
+
+function toDuplicateResult(data: unknown): DuplicateResult {
+  const r = (data ?? {}) as { ids?: string[]; skipped?: { name?: string; reason?: string }[]; groupId?: string | null; replayed?: boolean };
+  return { ids: r.ids ?? [], skipped: (r.skipped ?? []).map((x) => ({ storeName: x.name ?? "", reason: x.reason ?? "" })), groupId: r.groupId ?? null, replayed: r.replayed === true };
+}
+
+/** 操作ID（保存して複製・他店舗に複製）の結果の確認。通信が途切れて結果が分からないときに使う。見つからなければ null（実行されていない、または失敗してロールバックされた） */
+export async function lotteryOperationResult(db: Db, opId: string): Promise<ServiceResult<(DuplicateResult & { lotteryId?: string }) | null>> {
+  if (!uuid.safeParse(opId).success) return fail("リクエストが不正です");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { data, error } = await (db as any).rpc("lottery_op_result", { p_op: opId });
+  if (error) return fail(mapDbError(error));
+  if (!data) return ok(null);
+  return ok({ ...toDuplicateResult(data), lotteryId: (data as { lotteryId?: string }).lotteryId });
 }
 
 function mapDuplicateError(e: { message?: string; code?: string }): string {
@@ -891,13 +912,16 @@ function mapDuplicateError(e: { message?: string; code?: string }): string {
   if (/store does not belong/.test(m)) return "複製先は同じ系列の店舗のみ選択できます";
   if (/source lottery is archived/.test(m)) return "除外済みの抽選は複製できません";
   if (/invalid store name/.test(m)) return "店舗名は1〜80文字で入力してください";
+  if (/op reused with different params/.test(m)) return "同じ操作の内容が変わっています。画面を開き直してやり直してください";
   if (/too many stores/.test(m)) return "複製できるのは30店舗までです";
   return mapDbError(e as never);
 }
 
 /**
- * 新規登録して、そのまま他店舗へ複製（保存して複製。Stage 8U-2）。元の保存（通常の保存と同じ）→ duplicate_lottery_tx（1トランザクション）。
- * 複製に失敗したら、保存した元の抽選を取り消す（除外として履歴に残し、一覧には出さない）。見える状態は「すべて保存」か「何も保存されない」のどちらか。
+ * 新規登録して、そのまま他店舗へ複製（保存して複製。Stage 8U-3 で単一のトランザクションに変更）。
+ * DB関数 save_lottery_and_duplicate_tx が、元の抽選の保存・分類などの追記・新しい店舗の追加・複製先の作成・グループ化・操作の記録までを1トランザクションで行う。
+ * どこで失敗しても全体をロールバックする（以前の「複製に失敗したら元の抽選を除外する」補償処理は廃止。不要な除外履歴は残らない）。
+ * opId（画面の1回の操作ごとに発行）が同じ再送は、作成済みの結果を返す（二重に作らない）。通信が途切れた場合は lotteryOperationResult で結果を確認できる。
  */
 export async function saveLotteryAndDuplicate(
   db: Db,
@@ -906,17 +930,66 @@ export async function saveLotteryAndDuplicate(
   storeIds: string[],
   newStores: { name: string; prefecture: string }[],
   actor: string | null,
+  opId: string,
 ): Promise<ServiceResult<DuplicateResult & { lotteryId: string }>> {
-  if (storeIds.length + newStores.length < 1) return fail("複製先の店舗を選択してください");
-  const saved = await saveLottery(db, householdId, null, raw, actor);
-  if (!saved.ok) return fail(saved.error);
-  const dup = await duplicateLottery(db, householdId, saved.value.id, storeIds, actor, { newStores, group: true, origin: "save_and_duplicate" });
-  if (!dup.ok) {
-    // 補償: 保存した元の抽選を取り消す。取り消せなかった場合も、利用者に状態を正しく伝える
-    const undo = await excludeLottery(db, saved.value.id, { reason: "other", note: "保存して複製に失敗したため、自動で取り消しました" }, actor);
-    return fail(undo.ok ? `${dup.error}（保存した抽選は取り消しました。入力内容はそのままです）` : `${dup.error}（元の抽選は保存済みです。一覧で確認してください）`);
+  const ids = z.array(z.uuid()).max(30).safeParse(storeIds);
+  const news = z.array(newStoreSchema).max(30).safeParse(newStores);
+  if (!uuid.safeParse(opId).success || !ids.success || !news.success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (ids.data.length + news.data.length < 1) return fail("複製先の店舗を選択してください");
+  if (ids.data.length + news.data.length > 30) return fail("複製できるのは30店舗までです");
+  const parsed = lotteryInputSchema.safeParse(raw);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "入力内容を確認してください");
+  const input = parsed.data;
+  const modeError = validateMultiMode(input.multiMode, input.items.length);
+  if (modeError) return fail(modeError);
+  if (input.multiMode === "choose_one" && input.applications.length > 0) return fail("希望商品を1つ選んで応募する方式では、登録後に応募するユーザーごとに希望商品を選択してください");
+  if (input.storeMode !== "fixed") return fail("店舗が決まっている抽選だけ、保存して複製できます");
+
+  // 「オンライン」「通販」などの店舗名の寄せ（通常の保存と同じ）。新しい店舗かどうかも、通常の保存と同じ判定
+  const onlineInput = !input.store.id && isOnlineStoreName(input.store.name);
+  if (onlineInput && input.chain.id) {
+    const [{ data: ch }, { data: ss }] = await Promise.all([db.from("chains").select("name").eq("id", input.chain.id).maybeSingle(), db.from("stores").select("id,name,sales_kind").eq("chain_id", input.chain.id)]);
+    const online = (ss ?? []).filter((r) => isOnlineStore({ name: r.name, salesKind: r.sales_kind }, ch?.name));
+    if (online.length === 1) input.store = { id: online[0].id, name: online[0].name, prefecture: "" };
+    else if (online.length === 0) input.store = { id: null, name: ONLINE_STORE_NAME, prefecture: "" };
   }
-  return ok({ ...dup.value, lotteryId: saved.value.id });
+  const newStoreName = !input.store.id && !isDummyStoreName(input.store.name) && input.store.name !== SELECT_STORE_PLACEHOLDER ? input.store.name.trim() : "";
+  let storeExisted = true;
+  if (newStoreName) {
+    if (!input.chain.id) storeExisted = false;
+    else {
+      const [{ data: chain }, { data: ss }] = await Promise.all([db.from("chains").select("name").eq("id", input.chain.id).maybeSingle(), db.from("stores").select("name").eq("chain_id", input.chain.id)]);
+      storeExisted = (ss ?? []).some((r) => storeKey(r.name, chain?.name) === storeKey(newStoreName, chain?.name));
+    }
+  }
+  const payload = buildLotteryPayload(input, null, actor);
+  const post = {
+    unconfirmed: input.unconfirmedFields,
+    announcement_methods: normalizeAnnounceMethods(input.announcementMethods),
+    announcement_target: input.announcementTarget,
+    announcement_inferred: input.announcementInferred,
+    requirement_tags: normalizeRequirementTags(input.requirementTags),
+    requirement_logic: input.requirementLogic,
+    store_mode: input.storeMode,
+    selectable_stores: null,
+    requirement_details: sanitizeRequirementDetails(input.requirementDetails),
+    registration_path: input.aiFeedback ? "manual_ai" : "manual",
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
+  const { data, error } = await (db as any).rpc("save_lottery_and_duplicate_tx", { p: payload, p_post: post, p_confirm_store: !!newStoreName && !storeExisted, p_store_ids: ids.data, p_new_stores: news.data, p_actor: actor, p_op: opId });
+  if (error) return fail(mapDuplicateError(error));
+  const res = toDuplicateResult(data);
+  const lotteryId = (data as { lotteryId?: string }).lotteryId as string;
+  // AI読み取りから登録した場合の修正の記録は、通常の保存と同じく、登録後の別の記録（失敗しても登録自体は成功のまま。再送では二重に記録しない）
+  if (input.aiFeedback && !res.replayed) {
+    try {
+      await recordAiFeedback(db, lotteryId, input, actor);
+    } catch {
+      /* 記録できなくても抽選の保存には影響しない */
+    }
+  }
+  void householdId;
+  return ok({ ...res, lotteryId });
 }
 
 // ------------------------------------------------------------------ 除外（理由つき）・抽選グループ（Stage 8U）

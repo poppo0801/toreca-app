@@ -261,3 +261,34 @@ describe("Stage 8U-2: 抽選グループの表示ロジック", () => {
     expect(basis.lotteryCount).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------- 操作ID・通信障害の復旧（Stage 8U-3）
+import { newOpId, opKeeper, recoverUncertain } from "@/lib/operation-id";
+import type { OperationCheck } from "@/services/types";
+
+describe("Stage 8U-3: 操作IDと通信障害後の結果確認", () => {
+  const noSleep = async () => undefined;
+  it("操作ID: 同じ内容の再送は同じID。内容が変わる・成功して次の操作になるときは新しいID", () => {
+    const k = opKeeper();
+    const a = k.idFor("内容1");
+    expect(k.idFor("内容1")).toBe(a);
+    const b = k.idFor("内容2");
+    expect(b).not.toBe(a);
+    k.reset();
+    expect(k.idFor("内容2")).not.toBe(b);
+    expect(newOpId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+  it("保存済み（応答だけ失われた）は done、実行されていない（ロールバック）は not_done。失敗と断定しない", async () => {
+    expect(await recoverUncertain(async () => ({ ok: true, found: true, result: { ids: ["a"], lotteryId: "l" } }), "op", { sleep: noSleep })).toEqual({ state: "done", result: { ids: ["a"], lotteryId: "l" } });
+    expect(await recoverUncertain(async () => ({ ok: true, found: false }), "op", { sleep: noSleep })).toEqual({ state: "not_done" });
+  });
+  it("確認の通信も失敗したら少し待って再試行し、回復すれば結果を返す。回復しなければ unknown（同じ操作IDで再送すれば二重にならない）", async () => {
+    let n = 0;
+    const flaky = async (): Promise<OperationCheck> => (++n < 3 ? { ok: false, error: "通信に失敗しました" } : { ok: true, found: true, result: { ids: [] } });
+    expect((await recoverUncertain(flaky, "op", { sleep: noSleep })).state).toBe("done");
+    expect(n).toBe(3);
+    let m = 0;
+    expect((await recoverUncertain(async () => (m++, { ok: false, error: "x" }), "op", { tries: 2, sleep: noSleep })).state).toBe("unknown");
+    expect(m).toBe(2);
+  });
+});

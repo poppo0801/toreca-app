@@ -17,7 +17,7 @@ import { EMPTY_FLEX, flexFromParts, flexToInput, lotteryInputSchema, type FlexIn
 import { fingerprint, purgeLegacyDrafts, type FieldSource } from "@/lib/lottery-draft";
 import { clearCandidateResume, clearResume, loadCandidateResume, loadResume, mergeResume, resumeKeyLabel, saveCandidateResume, saveResume, type ResumeStash } from "@/lib/lottery-resume";
 import { FlagChip, FlagPanel, type FlagEvidence } from "@/components/review-flag";
-import { findDuplicates, type DraftDuplicate, type LotteryDraft } from "@/lib/lottery-match";
+import { findDuplicates, matchChain, type DraftDuplicate, type LotteryDraft } from "@/lib/lottery-match";
 import { loadCollectionAreaAction, saveLotteryBulkAction } from "@/app/(app)/lotteries/actions";
 import type { FieldKey } from "@/lib/ai/extraction";
 import { flexToJstDate } from "@/lib/finance";
@@ -27,6 +27,7 @@ import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker"
 import { classifyAnnouncement, classifyRequirements, foldAnnounceNote, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
 import { InfoTip } from "@/components/ui/info-tip";
 import { StoreMultiPicker, type NewStoreDraft } from "@/components/store-multi-picker";
+import { opKeeper, recoverUncertain } from "@/lib/operation-id";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
 
@@ -325,6 +326,14 @@ export function LotteryFormDialog({
   const [dupStep, setDupStep] = useState<null | "pick" | "result">(null);
   const [dupPicked, setDupPicked] = useState<string[]>([]);
   const [dupNew, setDupNew] = useState<NewStoreDraft[]>([]);
+  // 保存して複製の対象の系列: 選んだ系列、または入力した系列名が登録済みの系列（名称・別名）と一致するもの。未登録の系列は、新しい店舗だけを追加できる
+  const dupChain = useMemo(() => {
+    if (v.chain.id) return data.chains.find((c) => c.id === v.chain.id) ?? null;
+    if (!v.chain.name.trim()) return null;
+    const m = matchChain(v.chain.name, data.chains, { stores: data.stores, storeName: v.store.name });
+    return (m.kind === "exact" || m.kind === "alias") && m.item ? m.item : null;
+  }, [v.chain.id, v.chain.name, v.store.name, data.chains, data.stores]);
+  const dupOps = useRef(opKeeper()); // 同じ内容の再送には同じ操作ID（二重に作らない）
   const [dupResult, setDupResult] = useState<{ created: number; skipped: { storeName: string; reason: string }[]; firstId: string | null } | null>(null);
   const [bulkSel, setBulkSel] = useState<Record<string, boolean>>({});
   const [bulkExtra, setBulkExtra] = useState<string[]>([]);
@@ -610,11 +619,30 @@ export function LotteryFormDialog({
     savingRef.current = true;
     setSaving(true);
     setError(null);
-    // 元の保存と複製は1つの操作。複製に失敗したら元の保存も取り消される（失敗しても入力内容はこの画面に残る）
-    const res = await actions.saveLotteryAndDuplicate(input, dupPicked, dupNew);
+    // 元の保存・店舗の追加・複製・グループ化は、サーバー側の1つのトランザクション（途中で失敗すれば全体が取り消され、何も保存されない。失敗しても入力内容はこの画面に残る）。
+    // 操作IDで、再送・連続タップ・通信の途中切断でも二重に作らない
+    const opId = dupOps.current.idFor(fingerprint({ i: input, p: dupPicked, n: dupNew }));
+    let res = await actions.saveLotteryAndDuplicate(input, dupPicked, dupNew, opId);
+    if (!res.ok && res.uncertain) {
+      // 通信が途切れた: 保存されたか分からない。失敗と断定せず、操作IDで結果を確認する
+      const rec = await recoverUncertain((id) => actions.lotteryOperationResult(id), opId);
+      if (rec.state === "done") {
+        const fresh = await reload().catch(() => null);
+        res = { ok: true, data: fresh ?? data, createdIds: [rec.result.lotteryId ?? "", ...rec.result.ids].filter(Boolean) };
+      } else {
+        savingRef.current = false;
+        setSaving(false);
+        return setError(
+          rec.state === "not_done"
+            ? "通信が途切れました。確認したところ、保存されていませんでした。もう一度「保存して複製」を押してください（二重には登録されません）。"
+            : "通信が途切れ、保存されたか確認できませんでした。通信が回復してから、もう一度「保存して複製」を押してください（保存済みなら二重には登録されず、結果を受け取れます）。",
+        );
+      }
+    }
     savingRef.current = false;
     setSaving(false);
     if (!res.ok) return setError(res.error);
+    dupOps.current.reset();
     const skipped = res.skipped ?? [];
     const firstId = res.createdIds?.[0] ?? null;
     if (skipped.length === 0) {
@@ -783,8 +811,8 @@ export function LotteryFormDialog({
               <p className="font-bold">保存して複製</p>
               <p className="text-xs text-muted-foreground">この内容を保存し、選んだ店舗にも同じ内容の抽選を作ります（店舗ごとに独立。1つのグループにまとめます）。応募・メモは複製しません。</p>
               <StoreMultiPicker
-                chainName={data.chains.find((c) => c.id === v.chain.id)?.name ?? v.chain.name}
-                candidates={data.stores.filter((s) => s.chainId === v.chain.id && !s.archived && s.id !== v.store.id)}
+                chainName={dupChain?.name ?? v.chain.name}
+                candidates={data.stores.filter((s) => dupChain && s.chainId === dupChain.id && !s.archived && s.id !== v.store.id && s.name !== v.store.name.trim())}
                 picked={dupPicked}
                 onPick={setDupPicked}
                 newStores={dupNew}
@@ -1541,7 +1569,7 @@ export function LotteryFormDialog({
                 {isEdit || candMode ? "閉じる" : "破棄"}
               </Button>
               {/* 保存して複製: 新規登録で、店舗が決まっている（店舗固定）ときだけ。候補・編集・まとめて登録では出さない */}
-              {!isEdit && !candMode && !bulk && v.storeMode === "fixed" && v.chain.id && (v.store.id || v.store.name.trim()) && dupStep === null && (
+              {!isEdit && !candMode && !bulk && (v.storeMode ?? "fixed") === "fixed" && (v.chain.id || v.chain.name.trim()) && (v.store.id || v.store.name.trim()) && dupStep === null && (
                 <Button type="button" variant="outline" disabled={saving} onClick={startDup} data-testid="save-and-duplicate">
                   保存して複製
                 </Button>

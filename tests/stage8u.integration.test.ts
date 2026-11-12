@@ -6,9 +6,10 @@
  *  - 他店舗への複製（1トランザクション。新しい店舗の追加・重複の防止・店舗固有情報の非複製・グループ化）と、保存して複製（失敗時は元も取り消す）
  *   npm run test:db   ※ マイグレーション 20261215000097 の適用後に実行する
  */
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lotteryInputSchema } from "@/lib/lottery-input";
-import { duplicateLottery, dissolveLotteryGroup, excludeLottery, groupLotteries, loadAppData, saveLottery, saveLotteryAndDuplicate, ungroupLottery, type Db } from "@/lib/server/lottery-service";
+import { duplicateLottery, dissolveLotteryGroup, excludeLottery, groupLotteries, loadAppData, saveLottery, lotteryOperationResult, saveLotteryAndDuplicate, ungroupLottery, type Db } from "@/lib/server/lottery-service";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
 describe.skipIf(!dbTestsEnabled)("Stage 8U", () => {
@@ -300,29 +301,167 @@ describe.skipIf(!dbTestsEnabled)("Stage 8U", () => {
       expect(((await u1.from("stores").select("id").eq("chain_id", chain)).data ?? []).length).toBe(2); // 増えていない
       if (r.ok) expect(r.value.ids).toHaveLength(1);
     });
-    it("保存して複製: 元と複製先が1グループで作られる。複製に失敗したら、保存した元の抽選も取り消される（一覧に残らない）", async () => {
+    it("保存して複製（単一トランザクション）: 元・新しい店舗・複製先が1グループで作られ、操作の記録が残る。分類・登録経路も通常の保存と同じ", async () => {
       const chain = await mkChain("8U保存複製電機");
       const product = await mkProduct("8U保存複製商品");
       const s0 = await mkStore(chain, "8U保存元");
       const s1 = await mkStore(chain, "8U保存先1");
-      const ok = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s0, name: "8U保存元" }), [s1], [{ name: "8U保存新規店", prefecture: "兵庫県" }], actor);
+      const op = randomUUID();
+      const ok = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s0, name: "8U保存元" }, { announcementMethods: ["result_mail"], requirementTags: ["member_registration"] }), [s1], [{ name: "8U保存新規店", prefecture: "兵庫県" }], actor, op);
       expect(ok.ok, JSON.stringify(ok)).toBe(true);
       if (!ok.ok) return;
       const all = [ok.value.lotteryId, ...ok.value.ids];
       expect(all).toHaveLength(3);
-      const rows = (await x(u1).from("lotteries").select("bulk_group_id,archived_at").in("id", all)).data as { bulk_group_id: string; archived_at: string | null }[];
+      const rows = (await x(u1).from("lotteries").select("bulk_group_id,archived_at,registration_path,announcement_methods,requirement_tags,store_mode").in("id", all)).data as Record<string, unknown>[];
       expect(new Set(rows.map((r) => r.bulk_group_id)).size).toBe(1);
       expect(rows.every((r) => r.archived_at === null)).toBe(true);
-      // 失敗（店舗名が長すぎる）: 元の抽選は保存されない（除外として履歴に残り、一覧には出ない）
-      const s2 = await mkStore(chain, "8U保存元2");
-      const bad = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s2, name: "8U保存元2" }, { applyDeadline: { precision: "date_only", date: "2099-02-10", time: "" } }), [s1], [{ name: "y".repeat(81), prefecture: "" }], actor);
+      // 元の抽選は、通常の保存と同じ追記（分類・登録経路・店舗方式）が済んでいる。複製先は元の内容を引き継ぐ
+      expect(rows.every((r) => r.registration_path === "manual" && r.store_mode === "fixed")).toBe(true);
+      expect(rows.every((r) => (r.announcement_methods as string[]).length > 0 && (r.requirement_tags as string[]).length > 0)).toBe(true);
+      // 操作の記録（再送・確認用）
+      expect((await x(u1).from("lottery_operations").select("kind,op_id").eq("op_id", op).single()).data).toMatchObject({ kind: "save_and_duplicate" });
+      const check = await lotteryOperationResult(u1, op);
+      expect(check.ok && check.value?.lotteryId).toBe(ok.value.lotteryId);
+    });
+    it("【原子性】複製の途中（店舗名が不正）で失敗すると、元の抽選・店舗・グループ・操作の記録のすべてがロールバックされる。除外の履歴も作られない", async () => {
+      const chain = await mkChain("8U原子保存電機");
+      const product = await mkProduct("8U原子保存商品");
+      const s0 = await mkStore(chain, "8U原子保存元");
+      const s1 = await mkStore(chain, "8U原子保存先");
+      const before = {
+        lots: ((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length,
+        stores: ((await u1.from("stores").select("id").eq("chain_id", chain)).data ?? []).length,
+        groups: ((await x(u1).from("lottery_bulk_groups").select("id").eq("chain_id", chain)).data ?? []).length,
+        excl: ((await x(u1).from("lottery_exclusions").select("id").eq("household_id", h1)).data ?? []).length,
+        ops: ((await x(u1).from("lottery_operations").select("id").eq("household_id", h1)).data ?? []).length,
+      };
+      const op = randomUUID();
+      // 2件目の新店舗名が長すぎる → 元の保存・1件目の新店舗の追加・複製の作成の後で失敗する
+      const bad = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s0, name: "8U原子保存元" }), [s1], [{ name: "8U追加OK", prefecture: "" }, { name: "z".repeat(81), prefecture: "" }], actor, op);
       expect(bad.ok).toBe(false);
-      const left = (await u1.from("lotteries").select("id,archived_at").eq("store_id", s2)).data!;
-      expect(left.every((l) => l.archived_at !== null)).toBe(true);
-      expect((await loadAppData(u1)).lotteries.some((l) => l.storeId === s2)).toBe(false);
-      const ex = (await x(u1).from("lottery_exclusions").select("reason,note").in("lottery_id", left.map((l) => l.id))).data as { reason: string; note: string }[];
-      expect(ex[0]).toMatchObject({ reason: "other" });
-      expect(ex[0].note).toMatch(/自動で取り消し/);
+      expect(((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length).toBe(before.lots);
+      expect(((await u1.from("stores").select("id").eq("chain_id", chain)).data ?? []).length).toBe(before.stores); // 新しい店舗（追加OK）も作られない
+      expect(((await x(u1).from("lottery_bulk_groups").select("id").eq("chain_id", chain)).data ?? []).length).toBe(before.groups);
+      expect(((await x(u1).from("lottery_exclusions").select("id").eq("household_id", h1)).data ?? []).length).toBe(before.excl); // 不要な除外履歴を作らない
+      expect(((await x(u1).from("lottery_operations").select("id").eq("household_id", h1)).data ?? []).length).toBe(before.ops);
+      const check = await lotteryOperationResult(u1, op);
+      expect(check.ok && check.value).toBeNull(); // 実行されていない（ロールバック）と確認できる
+      // 失敗した操作は記録されていないので、同じ操作IDのまま、内容を直して送り直せる（失敗の再送で二重にならず、何も残っていないことも確認済み）
+      const fixed = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s0, name: "8U原子保存元" }), [s1], [{ name: "8U追加OK", prefecture: "" }], actor, op);
+      expect(fixed.ok, JSON.stringify(fixed)).toBe(true);
+      expect(((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length).toBe(before.lots + 3); // 元＋既存の店舗＋新しい店舗
+    });
+    it("【原子性】店舗の追加の途中で失敗（別系列の店舗ID）しても、保存・店舗追加・複製が残らない", async () => {
+      const chain = await mkChain("8U店舗失敗電機");
+      const other = await mkChain("8U店舗失敗別系列");
+      const product = await mkProduct("8U店舗失敗商品");
+      const s0 = await mkStore(chain, "8U店舗失敗元");
+      const sx = await mkStore(other, "8U店舗失敗別系列店");
+      const lots = ((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length;
+      const stores = ((await u1.from("stores").select("id").eq("chain_id", chain)).data ?? []).length;
+      const bad = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s0, name: "8U店舗失敗元" }), [sx], [{ name: "8U店舗失敗新規", prefecture: "" }], actor, randomUUID());
+      expect(bad.ok).toBe(false);
+      expect(((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length).toBe(lots);
+      expect(((await u1.from("stores").select("id").eq("chain_id", chain)).data ?? []).length).toBe(stores);
+    });
+    it("【冪等性】同じ操作IDの再送（応答が失われた場合）は、二重に作らず、作成済みの結果を返す。内容の違う再利用は拒否", async () => {
+      const chain = await mkChain("8U冪等電機");
+      const product = await mkProduct("8U冪等商品");
+      const s0 = await mkStore(chain, "8U冪等元");
+      const s1 = await mkStore(chain, "8U冪等先");
+      const op = randomUUID();
+      const inp = input(chain, product, { id: s0, name: "8U冪等元" });
+      const first = await saveLotteryAndDuplicate(u1, h1, inp, [s1], [{ name: "8U冪等新規", prefecture: "" }], actor, op);
+      expect(first.ok, JSON.stringify(first)).toBe(true);
+      if (!first.ok) return;
+      const count = () => u1.from("lotteries").select("id").eq("chain_id", chain).then((r) => (r.data ?? []).length);
+      expect(await count()).toBe(3);
+      const again = await saveLotteryAndDuplicate(u1, h1, inp, [s1], [{ name: "8U冪等新規", prefecture: "" }], actor, op);
+      expect(again.ok, JSON.stringify(again)).toBe(true);
+      if (again.ok) {
+        expect(again.value.replayed).toBe(true);
+        expect(again.value.lotteryId).toBe(first.value.lotteryId);
+        expect([...again.value.ids].sort()).toEqual([...first.value.ids].sort());
+      }
+      expect(await count()).toBe(3); // 増えていない
+      expect(((await u1.from("stores").select("id").eq("chain_id", chain).eq("name", "8U冪等新規")).data ?? []).length).toBe(1);
+      // 同じ操作IDで内容が違う → 拒否
+      const other = await saveLotteryAndDuplicate(u1, h1, inp, [s1], [{ name: "8U冪等別の店", prefecture: "" }], actor, op);
+      expect(other.ok).toBe(false);
+      expect(await count()).toBe(3);
+    });
+    it("【冪等性】他店舗に複製も、同じ操作IDの再送は二重に作らない（結果が同じ）", async () => {
+      const chain = await mkChain("8U複製冪等電機");
+      const product = await mkProduct("8U複製冪等商品");
+      const s0 = await mkStore(chain, "8U複製冪等元");
+      const s1 = await mkStore(chain, "8U複製冪等先");
+      const src = await mkLottery(chain, product, s0, "8U複製冪等元");
+      const op = randomUUID();
+      const r1 = await duplicateLottery(u1, h1, src, [s1], actor, { opId: op });
+      const r2 = await duplicateLottery(u1, h1, src, [s1], actor, { opId: op });
+      expect(r1.ok && r2.ok).toBe(true);
+      if (r1.ok && r2.ok) {
+        expect(r2.value.replayed).toBe(true);
+        expect(r2.value.ids).toEqual(r1.value.ids);
+      }
+      expect(((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length).toBe(2);
+    });
+    it("【同時実行】同じ操作IDを同時に2回送っても、1回分だけ作られる。別の操作IDの同時実行でも、同じ店舗への重複や店舗の二重登録が起きない", async () => {
+      const chain = await mkChain("8U同時電機");
+      const product = await mkProduct("8U同時商品");
+      const s0 = await mkStore(chain, "8U同時元");
+      const inp = input(chain, product, { id: s0, name: "8U同時元" });
+      const op = randomUUID();
+      const [a, b] = await Promise.all([
+        saveLotteryAndDuplicate(u1, h1, inp, [], [{ name: "8U同時新規", prefecture: "" }], actor, op),
+        saveLotteryAndDuplicate(u1, h1, inp, [], [{ name: "8U同時新規", prefecture: "" }], actor, op),
+      ]);
+      expect(a.ok && b.ok, JSON.stringify([a, b])).toBe(true);
+      if (a.ok && b.ok) {
+        expect(a.value.lotteryId).toBe(b.value.lotteryId);
+        expect([a.value.replayed, b.value.replayed].filter(Boolean)).toHaveLength(1); // 片方は再送として結果を受け取る
+      }
+      expect(((await u1.from("lotteries").select("id").eq("chain_id", chain)).data ?? []).length).toBe(2);
+      // 別の操作IDで、同じ複製元から同じ新しい店舗へ同時に複製: 店舗は1件、複製先の抽選も1件
+      const src = await mkLottery(chain, product, s0, "8U同時元2", { applyDeadline: { precision: "date_only", date: "2099-05-05", time: "" } });
+      const [c, d] = await Promise.all([
+        duplicateLottery(u1, h1, src, [], actor, { newStores: [{ name: "8U同時新規2", prefecture: "" }], opId: randomUUID() }),
+        duplicateLottery(u1, h1, src, [], actor, { newStores: [{ name: "8U同時新規2", prefecture: "" }], opId: randomUUID() }),
+      ]);
+      expect(c.ok && d.ok, JSON.stringify([c, d])).toBe(true);
+      if (c.ok && d.ok) expect(c.value.ids.length + d.value.ids.length).toBe(1); // 一方は「すでに同じ内容がある」として作らない
+      expect(((await u1.from("stores").select("id").eq("chain_id", chain).eq("name", "8U同時新規2")).data ?? []).length).toBe(1);
+    });
+    it("【権限分離】他の世帯の操作ID・抽選・店舗は使えず、操作の記録も見えない（RLS）", async () => {
+      const chain = await mkChain("8U権限電機");
+      const product = await mkProduct("8U権限商品");
+      const s0 = await mkStore(chain, "8U権限元");
+      const s1 = await mkStore(chain, "8U権限先");
+      const op = randomUUID();
+      const first = await saveLotteryAndDuplicate(u1, h1, input(chain, product, { id: s0, name: "8U権限元" }), [s1], [], actor, op);
+      expect(first.ok, JSON.stringify(first)).toBe(true);
+      // 他の世帯は、操作の結果を見られない（存在しない扱い）
+      const peek = await lotteryOperationResult(u2, op);
+      expect(peek.ok && peek.value).toBeNull();
+      expect(((await x(u2).from("lottery_operations").select("id").eq("op_id", op)).data ?? []).length).toBe(0);
+      // 他の世帯の抽選を複製元にできない
+      if (first.ok) expect((await duplicateLottery(u2, "x", first.value.lotteryId, [s1], null, { opId: randomUUID() })).ok).toBe(false);
+    });
+    it("既存データの互換性: 既存のグループ・応募履歴は、保存して複製・他店舗に複製のあとも変わらない", async () => {
+      const chain = await mkChain("8U互換電機");
+      const product = await mkProduct("8U互換商品");
+      const [a, b, c] = [await mkStore(chain, "8U互換A"), await mkStore(chain, "8U互換B"), await mkStore(chain, "8U互換C")];
+      const [la, lb] = [await mkLottery(chain, product, a, "8U互換A"), await mkLottery(chain, product, b, "8U互換B")];
+      await apply(chain, la);
+      const g = await groupLotteries(u1, [la, lb], {}, actor);
+      expect(g.ok).toBe(true);
+      const apps = (await u1.from("applications").select("id,lottery_id,state").eq("lottery_id", la)).data;
+      const r = await duplicateLottery(u1, h1, la, [c], actor, { opId: randomUUID() });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect((await u1.from("applications").select("id,lottery_id,state").eq("lottery_id", la)).data).toEqual(apps);
+      const gid = g.ok ? g.value.groupId : "";
+      if (r.ok) expect(r.value.groupId).toBe(gid); // 既存グループへ追加される
+      expect(((await x(u1).from("lotteries").select("id").eq("bulk_group_id", gid)).data ?? []).length).toBe(3);
     });
   });
 });

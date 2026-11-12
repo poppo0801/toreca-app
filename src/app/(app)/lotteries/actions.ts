@@ -12,6 +12,7 @@ import {
   ungroupLottery,
   dissolveLotteryGroup,
   saveLotteryAndDuplicate,
+  lotteryOperationResult,
   type DuplicateOptions,
   type ExclusionInput,
   type GroupOptions,
@@ -127,16 +128,25 @@ export async function duplicateLotteryAction(lotteryId: string, storeIds: string
 }
 
 /** 新規登録して他店舗へ複製（保存して複製）。複製に失敗したら、保存した元の抽選も取り消す */
-export async function saveLotteryAndDuplicateAction(input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[], actor: string | null): Promise<MutationResult> {
+export async function saveLotteryAndDuplicateAction(input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[], actor: string | null, opId: string): Promise<MutationResult> {
   const c = await context();
   if (!c) return { ok: false, error: "ログインが必要です" };
-  const res = await saveLotteryAndDuplicate(c.db, c.householdId, input, storeIds, newStores, actor);
+  const res = await saveLotteryAndDuplicate(c.db, c.householdId, input, storeIds, newStores, actor, opId);
   if (!res.ok) return { ok: false, error: res.error };
   try {
     return { ok: true, data: await loadAppData(c.db), createdIds: [res.value.lotteryId, ...res.value.ids], skipped: res.value.skipped, groupId: res.value.groupId };
   } catch {
     return { ok: false, error: "保存しましたが、最新データの取得に失敗しました。再読み込みしてください" };
   }
+}
+
+/** 保存して複製・他店舗に複製の結果の確認（操作ID）。通信が途切れて結果が分からないときに使う。found=false は、実行されていない（または失敗してロールバックされた） */
+export async function lotteryOperationResultAction(opId: string): Promise<{ ok: true; found: boolean; result?: { ids: string[]; lotteryId?: string } } | { ok: false; error: string }> {
+  const c = await readContext();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const r = await lotteryOperationResult(c.db, opId);
+  if (!r.ok) return { ok: false, error: r.error };
+  return r.value ? { ok: true, found: true, result: { ids: r.value.ids, lotteryId: r.value.lotteryId } } : { ok: true, found: false };
 }
 
 /** 登録済み抽選の除外（理由つき。物理削除はしない） */

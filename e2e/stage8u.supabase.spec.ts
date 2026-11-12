@@ -285,3 +285,53 @@ test("抽選候補: 絞り込みは1つのボタンで展開（見出し・件�
     if (wasAdmin !== true) await a.from("profiles").update({ is_admin: wasAdmin }).eq("id", me.id);
   }
 });
+
+test("保存して複製（単一トランザクション）: 新規登録のフォームから、複製先（既存・新規の店舗）を選んで保存。1グループに作られ、新しい店舗も同時に追加される", async ({ page }) => {
+  test.setTimeout(180_000);
+  page.setDefaultTimeout(20_000);
+  await login(page);
+  const hid = await household();
+  const a = admin();
+  const ins = async (table: string, row: Record<string, unknown>) => {
+    const { data, error } = await a.from(table).insert(row as never).select("id").single();
+    expect(error?.message, table).toBeUndefined();
+    return (data as { id: string }).id;
+  };
+  const chain = await ins("chains", { household_id: hid, name: "8U保存複製電機" });
+  await ins("products", { household_id: hid, official_name: "8U保存複製商品", packs_per_box: 20 });
+  await ins("stores", { household_id: hid, chain_id: chain, name: "8U保存元店", prefecture: "兵庫県" });
+  await ins("stores", { household_id: hid, chain_id: chain, name: "8U保存先店", prefecture: "兵庫県" });
+  try {
+    await page.goto("/lotteries");
+    await page.getByTestId("register").click();
+    const form = page.getByTestId("lottery-form");
+    await form.getByRole("combobox", { name: "系列", exact: true }).fill("8U保存複製電機");
+    await form.getByRole("option", { name: /8U保存複製電機/ }).first().click();
+    await form.getByRole("combobox", { name: "店舗", exact: true }).fill("8U保存元店");
+    await form.getByRole("option", { name: /8U保存元店/ }).first().click();
+    await form.getByRole("combobox", { name: "商品1", exact: true }).fill("8U保存複製商品");
+    await form.getByRole("option", { name: /8U保存複製商品/ }).first().click();
+    await form.getByTestId("save-and-duplicate").click();
+    const panel = form.getByTestId("dup-panel");
+    await expect(panel).toBeVisible();
+    await expect(form.getByTestId("dup-run")).toBeDisabled(); // 複製先を選ぶまで押せない
+    await panel.getByRole("checkbox").first().check(); // 8U保存先店
+    await panel.getByTestId("store-picker-new-name").fill("8U保存新規店");
+    await panel.getByTestId("store-picker-new-add").click();
+    await expect(form.getByTestId("dup-run")).toContainText("2店舗");
+    await form.getByTestId("dup-run").click();
+    await expect(form).toHaveCount(0);
+    const lots = (await a.from("lotteries").select("id,store_id,bulk_group_id,registration_path").eq("chain_id", chain)).data ?? [];
+    expect(lots).toHaveLength(3);
+    expect(new Set(lots.map((l) => l.bulk_group_id)).size).toBe(1);
+    expect(lots[0].bulk_group_id).toBeTruthy();
+    expect(((await a.from("stores").select("id,is_provisional").eq("chain_id", chain).eq("name", "8U保存新規店")).data ?? [])[0]).toMatchObject({ is_provisional: true });
+    expect(((await a.from("lottery_operations").select("kind").eq("household_id", hid)).data ?? []).map((o) => o.kind)).toContain("save_and_duplicate");
+    expect(((await a.from("lottery_exclusions").select("id").eq("household_id", hid)).data ?? []).length).toBe(0); // 不要な除外履歴は作られない
+  } finally {
+    await a.from("lottery_operations").delete().eq("household_id", hid);
+    await a.from("lottery_group_events").delete().eq("household_id", hid);
+    await a.from("lotteries").update({ bulk_group_id: null }).eq("household_id", hid);
+    await a.from("lottery_bulk_groups").delete().eq("household_id", hid);
+  }
+});

@@ -100,3 +100,15 @@
 - **事前の確認（読み取り）**: 店舗の都道府県が47都道府県の正式名か（`npm run prod -- scripts/check-store-prefectures.mjs --yes-production`）。略記（「兵庫」等）は編集時に正式名へそろう。47都道府県にない値は、その店舗を編集して選び直すまで保存できない（表示・検索・距離計算には影響しない）。**開発側の確認では、本番の読み取りが自動の判定で拒否されたため未実施**（利用者が実行する）。
 - **手順**: `npm run backup:full` → 利用者が 094〜097 を順に適用（§2）→ `verify:prod` → アプリを反映。ロールバックは §6 に 097 の分を追加: `drop function public.duplicate_lottery_tx(uuid,uuid[],jsonb,boolean,uuid,text), public.dissolve_lottery_group_tx(uuid,uuid), public.ungroup_lottery_tx(uuid,uuid), public.group_lotteries_tx(uuid,uuid,text,text,jsonb,uuid), public.lottery_group_refresh(uuid,uuid,text), public.exclude_lottery_tx(uuid,text,uuid,text,uuid); drop table public.lottery_group_events, public.lottery_exclusions;`（`lottery_bulk_groups` の追加列と制約・`apply_method` の制約は、データを失うため先に確認）。**除外の記録・グループの履歴は消える**ため先に `backup:full`。
 - **Stage 8D（住所調査AI）・自動収集への影響**: なし（別の表・別の関数。`lotteries` の `auto_dedupe_key`・`import_key` には触れない。複製した抽選はそれらを引き継がない）。
+
+---
+
+## 10. Stage 8U-3（保存して複製の完全なトランザクション化）の本番導入準備
+**準備資料で、実行していない。** 本番に未適用のマイグレーションは **094〜098**。`20261216000098_stage8u3.sql`（097 の後。097 は変更しない）。`docs/stage8u.md`。
+- **適用順序**: 094 → 095 → 096 → 097 → 098（番号順。途中で止めない）。**098 は 097 の関数・表に依存する**（`duplicate_lottery_tx`・`lottery_bulk_groups` の追加列）ため、097 より先には適用できない。
+- **事前バックアップ**: `npm run backup:full`（§3）。適用後に `verify:prod`。
+- **DB関数の切り替え**: 098 は ①`lottery_operations` 表を新規作成 ②新関数 3 つ（`lottery_op_result`・`duplicate_lottery_op_tx`・`save_lottery_and_duplicate_tx`）を追加 ③`duplicate_lottery_tx` を**同じ署名で置き換え**（排他ロックの追加のみ。動作は同じ）。既存の関数・データの書き換えはない。
+- **アプリとの前後関係**: 新しいアプリ（8U-3）は「保存して複製」で `save_lottery_and_duplicate_tx` を呼ぶ。**098 が無い本番では「保存して複製」と、他店舗に複製の再送保護が失敗する**（通常の保存・一覧・応募は動く）。デプロイの前に 098 を適用する。098 を先に適用しても、8U-2 のアプリは `duplicate_lottery_tx` を直接呼ぶので動作に影響しない。
+- **既存の抽選データへの影響**: なし（新しい表と関数のみ。既存の抽選ID・グループ・応募・当選・除外の履歴は変更しない）。
+- **失敗時の復旧**: 適用の失敗は1ファイル内で完結（途中で止まったら、そのファイルの内容は反映されていない）。適用後の問題は、アプリを 8U-2 の版へ戻せば、098 を残したまま動く（098 の追加物は参照されない）。DBの構造を戻す場合（最後の手段。先に `backup:full`）: `drop function public.save_lottery_and_duplicate_tx(jsonb,jsonb,boolean,uuid[],jsonb,uuid,uuid), public.duplicate_lottery_op_tx(uuid,uuid[],jsonb,boolean,uuid,text,uuid), public.lottery_op_result(uuid); drop table public.lottery_operations;`（`duplicate_lottery_tx` は 097 の定義に戻す必要がある場合、097 の該当関数を再作成する。ロックの追加のみの差なので、残しても害はない）。保存・複製で作られた抽選は、操作の記録（`lottery_operations`）が消えても残る。
+- **Stage 8E で必要となる確認事項**: ①本番の適用済みバージョンが 098 であること（`verify:prod`）②`lottery_operations` が増え続けるため、保持期間（例: 90日で削除）の運用方針（今回は未実装。件数は操作数のみで小さい）③AIが抽選を作成・複製・グループ化する処理（Stage 8F 以降）は、同じ操作IDの規約（再送で二重作成しない）と、1操作＝1トランザクションの規約に従うこと ④自動収集の登録（`auto_dedupe_key`）との重複判定が、複製・グループ化と干渉しないこと（今回は干渉なしを確認済み）⑤8U の画面確認（iPhone実機）と、本番の店舗の都道府県の確認（`scripts/check-store-prefectures.mjs`）。

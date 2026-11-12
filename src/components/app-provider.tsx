@@ -62,7 +62,9 @@ interface AppContextValue {
     setEventState: (lotteryId: string, s: EventState) => Promise<Outcome>;
     saveLottery: (id: string | null, input: LotteryInput) => Promise<Outcome>;
     duplicateLottery: (lotteryId: string, storeIds: string[], opts?: import("@/lib/server/lottery-service").DuplicateOptions) => Promise<Outcome>;
-    saveLotteryAndDuplicate: (input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[]) => Promise<Outcome>;
+    saveLotteryAndDuplicate: (input: LotteryInput, storeIds: string[], newStores: { name: string; prefecture: string }[], opId: string) => Promise<Outcome>;
+    /** 保存して複製・他店舗に複製の結果を操作IDで確認する（通信が途切れたあと。データの更新はしない） */
+    lotteryOperationResult: (opId: string) => Promise<import("@/services/types").OperationCheck>;
     archiveLottery: (lotteryId: string) => Promise<Outcome>;
     excludeLottery: (lotteryId: string, ex: import("@/lib/server/lottery-service").ExclusionInput) => Promise<Outcome>;
     groupLotteries: (lotteryIds: string[], opts?: import("@/lib/server/lottery-service").GroupOptions) => Promise<Outcome>;
@@ -242,7 +244,7 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
       try {
         res = await fn(actor);
       } catch {
-        res = { ok: false, error: "通信に失敗しました。接続を確認して再度お試しください" };
+        res = { ok: false, error: "通信に失敗しました。接続を確認して再度お試しください", uncertain: true };
       } finally {
         release();
         pendingOps.current -= 1;
@@ -404,7 +406,14 @@ export function AppProvider({ children, repository }: { children: React.ReactNod
         setEventState: (id, s) => run((a) => repo.setEventState(a, id, s)),
         saveLottery: (id, input) => run((a) => repo.saveLottery(a, id, input)),
         duplicateLottery: (id, stores, opts) => run((a) => repo.duplicateLottery(a, id, stores, opts)),
-        saveLotteryAndDuplicate: (input, stores, news) => run((a) => repo.saveLotteryAndDuplicate(a, input, stores, news)),
+        saveLotteryAndDuplicate: (input, stores, news, opId) => run((a) => repo.saveLotteryAndDuplicate(a, input, stores, news, opId)),
+        lotteryOperationResult: async (opId) => {
+          try {
+            return await repo.lotteryOperationResult(opId);
+          } catch {
+            return { ok: false as const, error: "通信に失敗しました" };
+          }
+        },
         archiveLottery: (id) => run((a) => repo.archiveLottery(a, id)),
         excludeLottery: (id, ex) => run((a) => repo.excludeLottery(a, id, ex)),
         groupLotteries: (ids, opts) => run((a) => repo.groupLotteries(a, ids, opts)),

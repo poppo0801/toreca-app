@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { opKeeper, recoverUncertain } from "@/lib/operation-id";
 import { useApp } from "@/components/app-provider";
 import { StoreMultiPicker, type NewStoreDraft } from "@/components/store-multi-picker";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,8 @@ import type { Lottery } from "@/types/domain";
  * 実際にその店舗で開催されるかは、利用者が確認してから登録する（過去の開催店舗は候補にすぎない）。
  */
 export function DuplicateDialog({ lottery, open, onOpenChange }: { lottery: Lottery; open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { data, actions } = useApp();
+  const { data, actions, reload } = useApp();
+  const ops = useRef(opKeeper()); // 同じ内容の再送には同じ操作ID（二重に作らない）
   const chain = data.chains.find((c) => c.id === lottery.chainId);
   const taken = new Set(data.lotteries.filter((l) => lottery.campaignId && l.campaignId === lottery.campaignId).map((l) => l.storeId));
   taken.add(lottery.storeId);
@@ -30,9 +32,22 @@ export function DuplicateDialog({ lottery, open, onOpenChange }: { lottery: Lott
     if (busy || total === 0) return;
     setBusy(true);
     setError(null);
-    const res = await actions.duplicateLottery(lottery.id, picked, { newStores, group: true });
+    const opId = ops.current.idFor(JSON.stringify([lottery.id, picked, newStores]));
+    let res = await actions.duplicateLottery(lottery.id, picked, { newStores, group: true, opId });
+    if (!res.ok && res.uncertain) {
+      // 通信が途切れた: 複製されたか分からない。失敗と断定せず、操作IDで結果を確認する
+      const rec = await recoverUncertain((id) => actions.lotteryOperationResult(id), opId);
+      if (rec.state === "done") {
+        const fresh = await reload().catch(() => null);
+        res = { ok: true, data: fresh ?? data, createdIds: rec.result.ids };
+      } else {
+        setBusy(false);
+        return setError(rec.state === "not_done" ? "通信が途切れました。確認したところ、複製されていませんでした。もう一度押してください（二重には登録されません）。" : "通信が途切れ、複製されたか確認できませんでした。通信が回復してから、もう一度押してください（複製済みなら二重には登録されません）。");
+      }
+    }
     setBusy(false);
     if (!res.ok) return setError(res.error);
+    ops.current.reset();
     const skipped = res.skipped ?? [];
     if (skipped.length === 0) return onOpenChange(false);
     setDone({ created: res.createdIds?.length ?? 0, skipped });
