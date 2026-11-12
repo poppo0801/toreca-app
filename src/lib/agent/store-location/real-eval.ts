@@ -12,14 +12,18 @@ import type { ResultCache } from "@/lib/agent/store-location/tools";
 import type { StoreTarget } from "@/lib/agent/store-location/verify";
 import goldJson from "../../../../eval/real-stores/gold.json";
 import targetsJson from "../../../../eval/real-stores/targets.json";
+import gold8d4 from "../../../../eval/real-stores/gold-8d4.json";
+import targets8d4 from "../../../../eval/real-stores/targets-8d4.json";
 
 export interface RealTarget {
   id: string;
   category: string;
   store: StoreTarget;
 }
-export const REAL_TARGETS = targetsJson.targets as unknown as RealTarget[];
-export const REAL_GOLD = goldJson.gold as unknown as (EvalGold & { evidence?: unknown[]; unknown?: string[] })[];
+export type RealGold = EvalGold & { evidence?: unknown[]; unknown?: string[]; /** 正解不明。正解率の分母に含めず、調査結果と確認状況を別に報告する */ unknownGold?: boolean };
+/** Stage 8D-3（R1〜R5）と Stage 8D-4（N01〜N20・U01〜U10）。ID で区別する */
+export const REAL_TARGETS = [...(targetsJson.targets as unknown as RealTarget[]), ...(targets8d4.targets as unknown as RealTarget[])];
+export const REAL_GOLD = [...(goldJson.gold as unknown as RealGold[]), ...(gold8d4.gold as unknown as RealGold[])];
 
 // ---------------------------------------------------------------- 費用の見積もり（実行前の報告用）
 export interface CostEstimate {
@@ -88,6 +92,11 @@ export interface RealEvalPlan {
   approvedStores: number;
   /** 最初の1店舗だけで止める */
   firstOnly: boolean;
+  /** 初回の実行か、修正後の再実行か（集計を分けるための記録。初回の結果が主要評価値） */
+  phase?: "initial" | "rerun";
+  /** 誤住所などの問題があっても続ける（API障害・ツールの不正使用・費用超過では必ず止まる）。問題が maxProblems 件に達したら止まる */
+  continueOnProblem?: boolean;
+  maxProblems?: number;
 }
 
 export function validatePlan(plan: RealEvalPlan, limits: AgentLimits = DEFAULT_LIMITS): string | null {
@@ -102,6 +111,13 @@ export function validatePlan(plan: RealEvalPlan, limits: AgentLimits = DEFAULT_L
 }
 
 /** 最初の店舗で問題があれば、残りを止める（誤住所の採用・確認済みの誤り・ツールの不正使用・費用超過・実行失敗） */
+/** 続行できない問題（API障害・ツールの不正使用・費用超過）。これが起きたら常に止める */
+export function isFatalProblem(r: { status: string; rejectedCalls: number; costJpy: number }, capJpy: number): string | null {
+  if (r.status === "failed") return "調査が失敗した（API障害・実行エラー）";
+  if (r.rejectedCalls > 0) return "登録されていないツールを呼び出そうとした";
+  if (r.costJpy > capJpy * 1.2) return "推定費用が上限を大きく超えた";
+  return null;
+}
 export function isProblem(r: { status: string; wrong: boolean; rejectedCalls: number; costJpy: number }, capJpy: number): string | null {
   if (r.status === "failed") return "調査が失敗した（API障害・実行エラー）";
   if (r.wrong) return "誤った住所を採用した";
@@ -120,10 +136,24 @@ export interface RealRecord {
   engine: string;
   problem: string | null;
 }
+export interface UnknownGoldRow {
+  id: string;
+  store: string;
+  status: string;
+  address: string | null;
+  confidence: number;
+  /** 公式（trusted/verified）と判定したドメイン */
+  officialDomains: string[];
+  sources: string[];
+  reasons: string[];
+}
 export interface RealRunReport {
   runId: string;
   startedAt: string;
+  phase: "initial" | "rerun";
   plan: RealEvalPlan;
+  /** 正解不明の店舗: 正解率の分母に含めず、調査結果と確認状況だけを記録する */
+  unknown: UnknownGoldRow[];
   records: RealRecord[];
   stoppedReason: string | null;
   spentJpy: number;
@@ -131,14 +161,15 @@ export interface RealRunReport {
 }
 
 /** 実在店舗を1件ずつ実行する。1件ごとに結果を保存（途中で失敗しても履歴が残る）。承認範囲を超えない */
-export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) => ResearchDeps, opts: { limits?: AgentLimits; outDir?: string; onRecord?: (r: RealRecord) => void } = {}): Promise<RealRunReport> {
+export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) => ResearchDeps, opts: { limits?: AgentLimits; outDir?: string; onRecord?: (r: RealRecord) => void; /** 本日あと何回まで実行できるか（1日の上限）。超える実行はしない */ remainingRuns?: number } = {}): Promise<RealRunReport> {
   const limits = opts.limits ?? DEFAULT_LIMITS;
   const bad = validatePlan(plan, limits);
   if (bad) throw new Error(bad);
   const outDir = opts.outDir ?? "eval/runs/real";
   mkdirSync(outDir, { recursive: true });
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
-  const report: RealRunReport = { runId, startedAt: new Date().toISOString(), plan, records: [], stoppedReason: null, spentJpy: 0, score: null };
+  const report: RealRunReport = { runId, startedAt: new Date().toISOString(), phase: plan.phase ?? "initial", plan, unknown: [], records: [], stoppedReason: null, spentJpy: 0, score: null };
+  let problems = 0;
   const save = () => writeFileSync(`${outDir}/real-${runId}.json`, JSON.stringify(report, null, 2));
   const ids = plan.firstOnly ? plan.ids.slice(0, 1) : plan.ids;
 
@@ -148,11 +179,17 @@ export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) 
       report.stoppedReason = `承認された総費用（${plan.approvedMaxJpy}円）を超える可能性があるため、${id} 以降は実行しない`;
       break;
     }
+    if (opts.remainingRuns !== undefined && report.records.length >= opts.remainingRuns) {
+      report.stoppedReason = `本日の実行回数の上限に達したため、${id} 以降は実行しない`;
+      break;
+    }
     const t0 = Date.now();
     const out = await researchStoreLocation(target.store, null, { ...makeDeps(target), limits });
     const gold = REAL_GOLD.find((g) => g.id === id)!;
     const one = scoreEval("real", [toEvalResult(id, out, Date.now() - t0)], [gold]);
-    const problem = isProblem({ status: out.result.status, wrong: one.perCase[0].wrong, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy);
+    const unknownGold = !!gold.unknownGold;
+    const fatal = isFatalProblem({ status: out.result.status, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy);
+    const problem = fatal ?? (unknownGold ? null : isProblem({ status: out.result.status, wrong: one.perCase[0].wrong, rejectedCalls: out.usage.rejectedCalls, costJpy: out.usage.costJpy }, limits.maxCostJpy));
     const rec: RealRecord = {
       target,
       result: toEvalResult(id, out, Date.now() - t0),
@@ -173,12 +210,18 @@ export async function runRealEval(plan: RealEvalPlan, makeDeps: (t: RealTarget) 
     opts.onRecord?.(rec);
     save(); // 1件ごとに保存
     if (problem) {
-      report.stoppedReason = `${id} で問題があったため、残りの実行を停止した: ${problem}`;
-      break;
+      problems++;
+      if (fatal || !plan.continueOnProblem || problems >= (plan.maxProblems ?? 3)) {
+        report.stoppedReason = `${id} で問題があったため、残りの実行を停止した: ${problem}`;
+        break;
+      }
     }
   }
-  const gold = REAL_GOLD.filter((g) => report.records.some((r) => r.target.id === g.id));
-  report.score = report.records.length ? scoreEval("real-agent", report.records.map((r) => r.result), gold) : null;
+  const knownGold = REAL_GOLD.filter((g) => !g.unknownGold && report.records.some((r) => r.target.id === g.id));
+  report.score = knownGold.length ? scoreEval("real-agent", report.records.map((r) => r.result), knownGold) : null;
+  report.unknown = report.records
+    .filter((r) => REAL_GOLD.find((g) => g.id === r.target.id)?.unknownGold)
+    .map((r) => ({ id: r.target.id, store: `${r.target.store.chain} ${r.target.store.name}`, status: r.outcome.status, address: r.outcome.address, confidence: r.outcome.confidence, officialDomains: r.outcome.officialSites.filter((o) => o.status === "verified" || o.status === "trusted").map((o) => o.domain), sources: r.outcome.sources.map((x) => x.url), reasons: r.outcome.reasons }));
   save();
   return report;
 }

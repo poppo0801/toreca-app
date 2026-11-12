@@ -1,6 +1,7 @@
 // 実在店舗の評価（Stage 8D-3）。実APIは費用が発生するため、承認された件数・費用の範囲だけ実行する。
 //   node scripts/eval-real.mjs preflight [--ids=R1,R2]                         実行前の確認（API・ネットワークに接続しない。キーは表示しない）
 //   node scripts/eval-real.mjs run --approved-max-jpy=<円> --approved-stores=<件> [--ids=R1,...] [--first-only]
+//   run には --phase=initial|rerun（初回/再実行。集計を分ける）・--continue（誤住所があっても続ける。API障害などでは必ず止まる）が使える。
 // 事前に .env.local へ開発専用の設定が必要（AGENT_REAL_API=allow・AGENT_ANTHROPIC_API_KEY・AGENT_MAX_COST_JPY_PER_RUN・AGENT_MAX_RUNS_PER_DAY。docs/stage8d3.md §5）。
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -31,7 +32,7 @@ if (cmd === "preflight") {
   const r = spawnSync("npx", ["vitest", "run", "src/lib/agent/store-location/real-eval.test.ts", "-t", "実API評価"], {
     stdio: "inherit",
     shell: true,
-    env: { ...env, REAL_EVAL: "1", REAL_EVAL_APPROVED_MAX_JPY: String(max), REAL_EVAL_APPROVED_STORES: String(stores), ...(rest.includes("--first-only") ? { REAL_EVAL_FIRST_ONLY: "1" } : {}) },
+    env: { ...env, REAL_EVAL: "1", REAL_EVAL_APPROVED_MAX_JPY: String(max), REAL_EVAL_APPROVED_STORES: String(stores), ...(rest.includes("--first-only") ? { REAL_EVAL_FIRST_ONLY: "1" } : {}), REAL_EVAL_PHASE: arg("phase") === "rerun" ? "rerun" : "initial", ...(rest.includes("--continue") ? { REAL_EVAL_CONTINUE: "1" } : {}) },
   });
   process.exit(r.status ?? 1);
 } else {
