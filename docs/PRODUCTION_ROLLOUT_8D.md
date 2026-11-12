@@ -184,3 +184,81 @@
 | iPhone実機・Safari実機の確認 | 未確認 | 実機が必要（E2Eは390px幅のブラウザ） |
 | 実データ規模（大量の応募）での適用時間・性能 | 未確認 | 本番の件数は小さく、既存表の書き換えは履歴補完のみで影響は小さい見込み |
 | `lottery_operations` の自動削除 | 未実装（意図的） | 本番での自動削除は開始しない。§11.2 |
+
+---
+
+## 12. 本番反映の実行手順書（利用者が行う操作。Stage 8E-1 の最終確認。**準備のみ・未実行**）
+Claude Code は本番バックアップ・`db push`・`main` への push を行わない（権限と方針による）。次の A〜F を**上から順に**、各段階の確認が合格したときだけ次へ進む。PowerShell の例。
+
+### 12.1 今回のリリースで本番に反映される変更（d8a8d68 → dev）
+- 本番のデプロイ済みコミットは **d8a8d68**（Stage 8A）。`main` は b845cfe（8B。文書のみで d8a8d68 の子孫）。`dev` は `main` の子孫（26コミット先。**fast-forward でマージできる**）。反映範囲 = d8a8d68 → dev（211ファイル・+21,487/-447行）。
+- 内容: ①**Stage 8U**（8U-1 UI改善・8U-2 抽選グループ・8U-3 保存して複製の安全化。通常機能の変更）②**8C/8D-1 の開発基盤・不具合修正**（`env.ts` の接続先判定は本番では従来どおり／`revalidatePath` の廃止＝操作中のダイアログが消える不具合の修正／三重県の住所判定の修正／都道府県の正規化）③**Stage 8D の住所調査AI**（コードは入るが**本番では無効**）④評価データ・文書・開発用スクリプト（実行時には使われない）。
+- **変わらないもの**: `src/app/api/`（自動収集・cron・通知・X連携）、`vercel.json`、`next.config`、middleware、**依存ライブラリ（`package.json` は scripts のみの変更・lockファイルなし）**、環境変数（追加・変更不要）。
+
+### 12.2 8U 以外の機能が有効にならないことの確認結果
+- 住所調査（8D）: 画面 `/settings/store-research` はどこからもリンクされず、本番では `notFound`。サーバーアクションは冒頭で `isStoreResearchEnabled()`／`canApplyToStoreMaster()` が拒否（DB・外部にも触れない）。実APIは `TOREMANE_ENV=local` ＋ `AGENT_REAL_API=allow` ＋開発専用キーが無いと不可。→ `src/lib/agent/production-disabled.test.ts`（6件）で固定。
+- 094〜096 が作る表（`store_location_*`）は**空のまま**。旧アプリ・新アプリのどちらも本番では書き込まない。DB関数は世帯メンバーのみ実行可（匿名は不可）。**残るリスク（低）**: 認証済みの家族が、APIを直接叩いて自分の世帯の調査行を作り反映関数を呼べば店舗の住所を更新できる。ただし店舗マスターは元々その家族が編集できるデータで、権限の拡大ではない。
+- 再調査ループ（8D-6）の `followUps` の既定は 0。本番の有効化は未実装。
+- 自動削除（`lottery_operations`）は未実装。
+
+### 12.3 マイグレーション094〜098の最終確認（§11.1 のとおり）
+- 順序: 094→095→096→097→098（番号順。097 は 087（7L）と `save_lottery_tx`、098 は 097 に依存）。`supabase db push` は未適用分を番号順に1ファイルずつ（各ファイル＝1トランザクション）適用する。
+- 既存アプリとの互換: 適用後〜デプロイ前の旧アプリ（d8a8d68）は、新しい構造で正常に動く（旧アプリのテスト 436/438。失敗2件は旧い期待値）。097 の変更は、`apply_method` の許可値の追加・`store_count` 制約の緩和・列の追加（既定値あり）・履歴表の追加のみ。
+- 失敗時の停止条件: 途中のファイルでエラー → **そこで止める**（残りは適用しない）。失敗したファイルの内容は残らない。アプリは未デプロイなので利用者への影響なし。エラー文と `npx supabase migration list --linked` の結果を Claude に共有。
+- 本番の既存データとの衝突: なし（`preflight-8u.mjs`。グループ0件・不正な都道府県0件）。
+
+### 12.4 手順
+
+**A. 事前確認（読み取り）** — 承認前でもよい
+```powershell
+npm run verify:prod
+npm run prod -- scripts/preflight-8u.mjs --yes-production
+```
+合格: すべて ✅・「新しいDB構造に抵触する既存データは見つかりませんでした」・適用済みの最新が 093。
+
+**B. 本番バックアップ（本番を読むだけ。【利用者が実行】）**
+前提: `.env.production-ops` に `BACKUP_PASSPHRASE`（16文字以上）がある／パスフレーズを別の場所（パスワードマネージャー）にも控えてある／Docker Desktop が起動／保存先の空き（約160MB×世代。C: と D:）。
+```powershell
+npm run backup:full
+```
+合格の表示: 「完全バックアップ: 成功」・保存先が**2か所**（C: と D:）・DB のテーブル数と行数・認証ユーザー数・Storage のファイル数・「取得中に変動したテーブル」が無いか軽微。**不合格**: 「失敗」・保存先1か所のみの注意（BACKUP_DIR2 未設定。続行しない）。
+検証（パスフレーズはその場で環境変数に入れる。`.env.local` には置かない）:
+```powershell
+$env:BACKUP_PASSPHRASE = Read-Host "パスフレーズ"
+Get-Content "$env:USERPROFILE\TorecaBackups\full\INDEX.jsonl" -Tail 1          # 日時・サイズ・SHA-256・Gitコミット・表数・行数
+npm run backup:inspect -- "$env:USERPROFILE\TorecaBackups\full\<今取った tcg-full-….tcgbak2>"   # 復号できる・db/ storage/ source/ が揃う
+npm run restore:full-drill -- --file "$env:USERPROFILE\TorecaBackups\full\<同上>"               # 使い捨てDockerへ復元し全項目を照合（本番には接続しない）
+Remove-Item Env:BACKUP_PASSPHRASE
+```
+合格: 復元演習が全項目合格（行数・RLS・関数・孤児行・Storage）。**C: と D: の2つの SHA-256 が一致**（取得時に自動確認済み）。パスフレーズの控えが開けることを確認。**不合格なら移行しない**。
+併せて、Vercel の直前のデプロイ（d8a8d68）が「ロールバック可能」な状態であること（Vercel のDeployments画面）を確認。
+
+**C. マイグレーション適用（【DB変更】承認必須。利用者の端末）**
+```powershell
+npx supabase migration list --linked      # 本番の適用済みが 093 まで・ローカルに 094〜098 があること
+npx supabase db push --linked --dry-run   # 適用される予定が 094〜098 の5本だけであること（他が混じる・順序違いなら中止）
+npx supabase db push --linked             # 確認のプロンプトで 094〜098 を確認して Y
+```
+合格: 5本が順に適用・エラーなし。停止: エラー → §12.3。
+
+**D. 適用後のDB確認（読み取り）**
+```powershell
+npx supabase migration list --linked      # 最新が 098
+npm run verify:prod
+npm run prod -- scripts/preflight-8u.mjs --yes-production
+```
+合格: 094〜098 の5つの表が「存在する（適用済み）」・既存の件数（lotteries／applications／stores など）が A から**変わっていない**・新しい表は 0 件。（RLS・関数12個・anon権限なしの確認SQLは `scripts/rehearse-migration.mjs` の⑤。SQL Editor で実行してもよい）
+**この時点で本番アプリ（旧）が普通に使えること**を、利用者が一覧・登録・応募で軽く確認（DBだけ先に進んだ状態。旧アプリは互換）。問題があれば §11.4。
+
+**E. アプリのデプロイ（【本番反映】承認必須）**
+- Claude Code は実行しない。利用者が反映を決めたとき、自分の端末で `dev` を `main` にマージして push（`.githooks/pre-push` の確認が出る。fast-forward）。Vercel が自動でデプロイ。**C・D が済んでいない場合は行わない**。
+- 確認: Vercel のデプロイが成功／`npm run verify:prod` のデプロイ済みコミットが新しいもの。環境変数の追加・変更は不要。
+
+**F. 反映後の確認**
+- スモークテスト（利用者）: 一覧・詳細・登録・編集・応募・当選・購入・マイページ・設定、一括登録、グループ化／解除／追加、除外、他店舗に複製、保存して複製（**本番データを書き換える操作は、テスト用の抽選を作って後で整理する**）。
+- iPhone 実機: 一覧のグループ表示、グループ管理、複製ダイアログ、下部メニューとSafe Area、ホーム画面（PWA）からの起動（**未確認の項目。実機でのみ確認できる**）。
+- 問題が出たら §11.4（アプリだけ戻す → DB追加物を戻す → 復元）。
+
+### 12.5 既知の注意
+- バックアップの `backup:inspect`・`restore:full-drill`・`backup:decrypt` は `.env.local`（開発用）からパスフレーズを読むが、8C 以降 `.env.local` には置かない。上記のとおり**その場の環境変数**で渡す（`inspect-backup.mjs` は未設定時に説明を表示するよう改めた）。
+- 直近の完全バックアップ（2026-11-11）は移行前の状態を含まないものとして扱い、**必ず当日に取り直す**。

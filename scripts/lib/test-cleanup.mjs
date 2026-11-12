@@ -22,9 +22,16 @@ export function adminClient() {
 }
 
 export async function listTestUsers(admin) {
-  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-  return data.users.filter((u) => TEST_EMAIL.test(u.email ?? ""));
+  // 長いE2E（数分）の後に、使い回された古い接続が切れていて一度だけ「fetch failed」になることがあった（Stage 8E-1）。数回だけ再試行する
+  let last;
+  for (let i = 0; i < 4; i++) {
+    const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    if (!error) return data.users.filter((u) => TEST_EMAIL.test(u.email ?? ""));
+    last = error;
+    console.warn(`  ユーザー一覧の取得に失敗（${i + 1}/4回目）: ${error.message}${error.cause ? ` / ${error.cause.code ?? error.cause.message}` : ""}`);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw last;
 }
 
 /** purge したテスト世帯の商品画像（Storage）を削除する。対象はテスト世帯のフォルダのみ */
