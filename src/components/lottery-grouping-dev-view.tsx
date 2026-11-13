@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { listGroupingLogAction, scanGroupingAction, type LogRow } from "@/app/(app)/settings/lottery-grouping/actions";
+import { SelectCleanupPanel } from "@/components/select-cleanup-panel";
 import { Button } from "@/components/ui/button";
 
 /** 抽選グループ判定の検証画面（Stage 8F。開発用）。既存の抽選を判定し、記録（自動・候補・単独・保留）を確認する。既定はモック（実APIは使わない） */
@@ -33,6 +34,7 @@ export function LotteryGroupingDevView() {
   };
   return (
     <div className="space-y-3 text-sm" data-testid="grouping-dev">
+      <SelectCleanupPanel />
       <p className="text-xs text-muted-foreground">開発環境のみ。グループに入っていない抽選を判定し、同一系列・同一商品・同一応募期間・同一応募条件の別店舗の抽選を、条件がそろっていると確認できたときだけ自動でまとめます（不確かなものは「グループ候補」として承認待ち）。</p>
       <Button size="sm" disabled={busy} onClick={() => void scan()} data-testid="grouping-scan">
         {busy ? "判定中…" : "既存の抽選を判定する"}

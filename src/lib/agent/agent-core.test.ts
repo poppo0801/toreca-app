@@ -220,3 +220,16 @@ describe("Anthropic 接続部（偽のクライアントで検証。実APIには
     await expect(down.search("q")).rejects.toThrow(/一時的/);
   });
 });
+
+describe("再調査のあと再提出が無いとき（8F-7）", () => {
+  it("AIが再提出せず説明だけで終了（no_tool_call）しても、直前の有効な提出を失わない。再調査の前に空の提出なら、そのまま（保留相当）", async () => {
+    const good = { action: "new_group", memberIds: ["o1"] };
+    const empty = { action: "hold", rationale: "出力が途切れたため" };
+    const llm = scripted([done(good), { kind: "final", output: empty, usage, stopReason: "end_turn:no_tool_call" }]);
+    const out = await runAgent({ llm, tools: new ToolRegistry(), system: "s", task: "t", maxReviews: 1, review: async (i) => (i.round === 0 ? { feedback: "追加調査してください" } : null) });
+    expect(out.status).toBe("completed");
+    expect(out.output).toEqual(good);
+    const first = await runAgent({ llm: scripted([{ kind: "final", output: empty, usage, stopReason: "end_turn:no_tool_call" }]), tools: new ToolRegistry(), system: "s", task: "t", maxReviews: 1, review: async () => null });
+    expect(first.output).toEqual(empty);
+  });
+});

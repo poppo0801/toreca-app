@@ -58,7 +58,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F", () => {
       procedureDeadline: { precision: "unknown", date: "", time: "" },
       receiveMethod: "store",
       applyMethod: "web",
-      conditionsText: "共通の条件",
+      conditionsText: "共通の条件。各店舗で受付・抽選を行います。",
       verificationText: "",
       announcementMethod: "",
       announcementUrl: "",

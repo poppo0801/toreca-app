@@ -1,0 +1,300 @@
+{
+ "version": 1,
+ "kind": "synthetic",
+ "note": "架空データ（実データではない）。scenarios-8f6.json から変換",
+ "cases": [
+  {
+   "id": "H01",
+   "title": "店舗別独立抽選（店舗ごとに受付する旨の記載）・3店舗",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。"
+    },
+    {
+     "id": "o2",
+     "store": "ウ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。"
+    }
+   ],
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H01",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H02",
+   "title": "店舗選択式を店舗ごとの別カードで登録（応募時に店舗を選ぶ旨の記載）",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "応募フォームで受取店舗を選択してください。会員登録が必要です。"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "応募フォームで受取店舗を選択してください。会員登録が必要です。"
+    }
+   ],
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H02",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H03",
+   "title": "店舗選択式（取得した情報源の文章に店舗選択欄の記載。条件の登録は空）",
+   "subject": {
+    "id": "s",
+    "store": "ア店"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店"
+    }
+   ],
+   "evidence": {
+    "s": "応募時に店舗を選んでください。受付期間は12/1〜12/7。",
+    "o1": "受付期間は12/1〜12/7。"
+   },
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H03",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H04",
+   "title": "制限の記載だけ（対象店舗の中から1店舗のみ応募）。構造は不明",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "お一人様につき対象店舗の中から1店舗のみ応募できます。会員登録が必要です。"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "お一人様につき対象店舗の中から1店舗のみ応募できます。会員登録が必要です。"
+    }
+   ],
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H04",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H05",
+   "title": "店舗ごとに受付する構造の記載があり、複数店舗への応募は無効（制限）",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。複数店舗への応募は無効です。"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。複数店舗への応募は無効です。"
+    }
+   ],
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H05",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H06",
+   "title": "店舗別独立だが、応募条件が異なる（購入履歴が必要な店舗）",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。購入履歴が必要です。",
+     "tags": [
+      "member",
+      "purchase_history"
+     ]
+    }
+   ],
+   "category": "conditions_differ",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H06",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H07",
+   "title": "店舗別独立だが、応募期間が異なる",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。"
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+     "start": "2026-12-03",
+     "deadline": "2026-12-09"
+    }
+   ],
+   "category": "period_differs",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H07",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H08",
+   "title": "商品名の略称（登録が別。名称が一方に他方を含む）",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+    "products": [
+     "30th CELEBRATION カードセット"
+    ]
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+     "products": [
+      "30th CELEBRATION"
+     ]
+    }
+   ],
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H08",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H09",
+   "title": "別の商品（名称の末尾1文字だけ違う）",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+    "products": [
+     "架空商品A"
+    ]
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+     "products": [
+      "架空商品B"
+     ]
+    }
+   ],
+   "category": "multi_store_same",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H09",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H10",
+   "title": "情報不足: 応募条件が両方とも未登録で、情報源の文章も無い",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "tags": [],
+    "conditions": ""
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "tags": [],
+     "conditions": ""
+    }
+   ],
+   "category": "insufficient",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H10",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "H11",
+   "title": "情報不足: 応募開始が不明（核心の不明）で、裏づけも無い",
+   "subject": {
+    "id": "s",
+    "store": "ア店",
+    "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+    "start": null
+   },
+   "others": [
+    {
+     "id": "o1",
+     "store": "イ店",
+     "conditions": "各店舗で受付・抽選を行います。会員登録が必要です。",
+     "start": null
+    }
+   ],
+   "category": "insufficient",
+   "capturedAt": "2026-11-13T00:00:00Z",
+   "sources": [
+    {
+     "url": "https://example.invalid/synthetic/H11",
+     "fetchedAt": "2026-11-13T00:00:00Z"
+    }
+   ]
+  }
+ ]
+}

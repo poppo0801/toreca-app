@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MockGroupingBrain } from "@/lib/agent/lottery-grouping/mock";
 import { lotteryInputSchema } from "@/lib/lottery-input";
+import { listSelectCleanup, resolveSelectCleanup, restoreArchived } from "@/lib/server/agent/select-cleanup-service";
 import { saveLottery, setLotteryForm, type Db } from "@/lib/server/lottery-service";
 import { auditSelectFormDuplicates, runLotteryGrouping } from "@/lib/server/agent/lottery-grouping-service";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
@@ -141,5 +142,63 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F-6", () => {
     expect(after.map((a) => [a.apply_deadline_date, a.conditions_text, a.source_urls, a.store_mode])).toEqual(before.map((a) => [a.apply_deadline_date, a.conditions_text, a.source_urls, a.store_mode]));
     expect(after[0].bulk_group_id).toBeTruthy();
     expect(after[0].bulk_group_id).toBe(after[1].bulk_group_id);
+  });
+
+  it("【8F-7 整理】店舗選択式のカードと同じ情報源の店舗別カードを整理候補に出す。『整理する』は応募の記録が無いカードだけを退避（物理削除しない）、記録のあるカードは触らない。元に戻せる", async () => {
+    const chain = await mkChain("8F7整理チェーン");
+    const product = await mkProduct("8F7整理商品");
+    const url = "https://example.invalid/8f7/cleanup-1";
+    const sel = await saveLottery(u1, h1, null, input(chain, product, { id: null, name: "応募時に店舗選択" }, { storeMode: "select_on_apply", selectableStores: [{ name: "A店", prefecture: "" }, { name: "B店", prefecture: "" }], sourceUrls: [url] }), actor);
+    expect(sel.ok, JSON.stringify(sel)).toBe(true);
+    const per: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const st = await mkStore(chain, `8F7整理店${i + 1}`);
+      const r = await saveLottery(u1, h1, null, input(chain, product, { id: st, name: "" }, { sourceUrls: [url] }), actor);
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      per.push(r.ok ? r.value.id : "");
+    }
+    const accountId = (await x(u1).from("accounts").select("id").eq("household_id", h1).limit(1)).data?.[0]?.id as string | undefined;
+    if (accountId) expect((await x(u1).from("applications").insert({ household_id: h1, lottery_id: per[0], account_id: accountId, state: "applied", applied_at: new Date().toISOString() })).error).toBeNull();
+    const view = (await listSelectCleanup(u1, h1)).find((c) => per.every((id) => c.cards.some((k) => k.id === id)));
+    expect(view, "整理候補に出る").toBeTruthy();
+    expect(view!.selectCardId).toBe(sel.ok ? sel.value.id : "");
+    expect(view!.cards.filter((k) => k.protectedCard).map((k) => k.id)).toEqual(accountId ? [per[0]] : []);
+    // 画面から渡された別のkeyでは実行できない
+    expect((await resolveSelectCleanup(u1, h1, { key: "unknown", decision: "consolidate" }, actor)).ok).toBe(false);
+    const r = await resolveSelectCleanup(u1, h1, { key: view!.key, decision: "consolidate" }, actor);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const archivedRows = (await x(u1).from("lotteries").select("id,archived_at").in("id", per)).data as { id: string; archived_at: string | null }[];
+    expect(archivedRows).toHaveLength(2); // 物理削除しない
+    if (accountId) {
+      expect(archivedRows.find((a) => a.id === per[0])!.archived_at).toBeNull(); // 応募の記録があるカードは退避しない
+      expect(archivedRows.find((a) => a.id === per[1])!.archived_at).not.toBeNull();
+      expect((await x(u1).from("applications").select("id").eq("lottery_id", per[0])).data).toHaveLength(1);
+    }
+    // 元に戻す
+    const gone = per.filter((id) => archivedRows.find((a) => a.id === id)!.archived_at);
+    for (const id of gone) expect((await restoreArchived(u1, h1, id, actor)).ok).toBe(true);
+    expect(((await x(u1).from("lotteries").select("archived_at").in("id", per)).data as { archived_at: string | null }[]).every((a) => a.archived_at === null)).toBe(true);
+    expect((await restoreArchived(u1, h1, per[0], actor)).ok).toBe(false); // 退避していないものは対象外
+  });
+
+  it("【8F-7 整理】『別の抽選として残す』は手動の分類（店舗別独立）を記録し、候補から外れる。分類を解除すると候補に戻る（誤操作からの復旧）。店舗選択式のカードが無い組では整理（退避）できない", async () => {
+    const chain = await mkChain("8F7残すチェーン");
+    const product = await mkProduct("8F7残す商品");
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const st = await mkStore(chain, `8F7残す店${i + 1}`);
+      const r = await saveLottery(u1, h1, null, input(chain, product, { id: st, name: "" }, { conditionsText: "応募フォームで受取店舗を選択してください。", sourceUrls: [`https://example.invalid/8f7/keep-${i}`] }), actor);
+      ids.push(r.ok ? r.value.id : "");
+    }
+    const find = async () => (await listSelectCleanup(u1, h1)).find((c) => ids.every((id) => c.cards.some((k) => k.id === id)));
+    const v = await find();
+    expect(v, "店舗選択欄の構造があるため候補").toBeTruthy();
+    expect(v!.selectCardId).toBeNull();
+    expect((await resolveSelectCleanup(u1, h1, { key: v!.key, decision: "consolidate" }, actor)).ok).toBe(false);
+    expect((await resolveSelectCleanup(u1, h1, { key: v!.key, decision: "keep_separate" }, actor)).ok).toBe(true);
+    for (const id of ids) expect([(await row(id)).lottery_form, (await row(id)).lottery_form_source]).toEqual(["store_independent", "manual"]);
+    expect(await find()).toBeUndefined();
+    for (const id of ids) expect((await setLotteryForm(u1, id, null, actor)).ok).toBe(true);
+    expect(await find()).toBeTruthy();
   });
 });

@@ -48,8 +48,11 @@ export function findSelectFormCleanup(lotteries: GLottery[], evidence: Map<strin
       });
       // 手動で「店舗別独立」「その他」と設定されたものは対象にしない（利用者の判断を尊重）
       if (j.form === "store_select" && j.basisKind !== "manual") flagged.push({ l, why: j.basis.join("・") });
-      else if (j.form === "store_select" && j.basisKind === "manual") flagged.push({ l, why: "利用者が店舗選択式に設定している" });
-      else if (selectCards.some((s) => s.sourceUrls.some((u) => l.sourceUrls.includes(u)))) flagged.push({ l, why: "店舗選択式の抽選と同じ情報源URLで、店舗別に登録されている" });
+      // 利用者が店舗選択式と設定済みでも、同じ抽選を店舗別に二重登録している疑い（同じ組に複数ある）があるときだけ。単独のカードは整理済み
+      else if (j.form === "store_select" && j.basisKind === "manual") {
+        if (members.length > 1) flagged.push({ l, why: "利用者が店舗選択式に設定している" });
+      }
+      else if (l.formDecl?.source !== "manual" && selectCards.some((s) => s.sourceUrls.some((u) => l.sourceUrls.includes(u)))) flagged.push({ l, why: "店舗選択式の抽選と同じ情報源URLで、店舗別に登録されている" });
     }
     if (flagged.length === 0) continue;
     const perStoreIds = flagged.map((f) => f.l.id);

@@ -1,0 +1,127 @@
+{
+ "version": 1,
+ "kind": "synthetic",
+ "labels": {
+  "H01": {
+   "label": "auto",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "店舗ごとに独立して受付する構造の記載があり、商品・期間・条件・方式が同じ。定義どおり対象"
+  },
+  "H02": {
+   "label": "none",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "応募時に店舗を選ぶ構造＝店舗選択式。1つの抽選を店舗別カードで二重に登録している。グループ化ではなく重複整理の対象"
+  },
+  "H03": {
+   "label": "none",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "情報源に店舗選択欄の記載＝店舗選択式。グループ化の対象外"
+  },
+  "H04": {
+   "label": "review",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "1店舗のみ応募は制限であり構造の証拠ではない。店舗選択式とも店舗別独立とも断定できないため、利用者の確認"
+  },
+  "H05": {
+   "label": "auto",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "構造として店舗ごとの受付が明示され、制限は店舗別独立抽選にも付くため、拒否しない"
+  },
+  "H06": {
+   "label": "none",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "応募条件が異なる"
+  },
+  "H07": {
+   "label": "none",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "応募期間が異なる"
+  },
+  "H08": {
+   "label": "review",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "略称・表記揺れの可能性。確定せず利用者の確認"
+  },
+  "H09": {
+   "label": "none",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "別の商品"
+  },
+  "H10": {
+   "label": "review",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "条件が両方とも未登録で、同じとは確認できない。確認候補"
+  },
+  "H11": {
+   "label": "none",
+   "basis": [
+    {
+     "kind": "human_review",
+     "ref": "synthetic:definition-8f6(gold-8f6.json)",
+     "checkedAt": "2026-11-13"
+    }
+   ],
+   "note": "応募開始が不明（核心）。同じ期間とは確認できず、裏づけもないためまとめない"
+  }
+ }
+}

@@ -101,7 +101,20 @@ describe("新定義の核心（8F-5）: 条件がそろっていれば、イベ�
     expect(v.tier).toBe("auto");
     expect(v.basis.join()).toContain("店舗別独立抽選");
   });
-  it("利用者の手動の分類が最優先: 手動で店舗別独立→制限があっても対象／手動で店舗選択式・その他→対象外。収集・AIの記録（rule/ai）は手動を上書きできない", () => {
+  it("8F-7: 複数店舗が同じ応募ページを共有し、店舗ごとの独立した受付を構造で確認できないものは、他がそろっていても auto にしない（suggest）。店舗ごとにページが別・構造の記載・手動の確認があれば auto", () => {
+    resetSeq();
+    const url = ["https://example.invalid/shared"];
+    const a = mkLottery({ sourceUrls: url });
+    const b = mkLottery({ sourceUrls: url });
+    expect(verifyProposal(mkWorld(a, [b]), claim({ memberIds: [b.id] }), { allowAuto: true }).tier).toBe("suggest");
+    const c = mkLottery({ sourceUrls: url, formDecl: { form: "store_independent", source: "manual" } });
+    const d = mkLottery({ sourceUrls: url, formDecl: { form: "store_independent", source: "manual" } });
+    expect(verifyProposal(mkWorld(c, [d]), claim({ memberIds: [d.id] }), { allowAuto: true }).tier).toBe("auto");
+    const e = mkLottery({ sourceUrls: ["https://example.invalid/e1"] });
+    const f = mkLottery({ sourceUrls: ["https://example.invalid/e2"] });
+    expect(verifyProposal(mkWorld(e, [f]), claim({ memberIds: [f.id] }), { allowAuto: true }).tier).toBe("auto");
+  });
+  it("利用者の手動の分類が最優先:手動で店舗別独立→制限があっても対象／手動で店舗選択式・その他→対象外。収集・AIの記録（rule/ai）は手動を上書きできない", () => {
     resetSeq();
     const text = "対象店舗の中から1店舗のみ応募できます。";
     const manual = { form: "store_independent" as const, source: "manual" as const };

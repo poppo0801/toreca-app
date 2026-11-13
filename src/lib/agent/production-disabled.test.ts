@@ -55,10 +55,12 @@ describe("住所調査AIは本番で有効にならない", () => {
     const users = src.filter((f) => !f.startsWith("src/lib/agent/") && !f.startsWith("src/lib/server/agent/") && /from "@\/lib\/(server\/)?agent\//.test(readFileSync(f, "utf8")));
     expect(users.map((f) => f.replaceAll("\\", "/")).sort()).toEqual([
       "src/app/(app)/settings/lottery-grouping/actions.ts",
+      "src/app/(app)/settings/lottery-grouping/cleanup-actions.ts",
       "src/app/(app)/settings/lottery-grouping/page.tsx",
       "src/app/(app)/settings/store-research/actions.ts",
       "src/app/(app)/settings/store-research/page.tsx",
       "src/app/(app)/settings/store-research/proposal-actions.ts",
+      "src/components/select-cleanup-panel.tsx",
       "src/components/store-proposals-view.tsx",
       "src/components/store-research-view.tsx",
     ]);
@@ -90,6 +92,10 @@ describe("住所調査AIは本番で有効にならない", () => {
     expect(exportedLg).toBeGreaterThan(0);
     expect((lg.match(/if \(!isLotteryGroupingEnabled\(\)\) return/g) ?? []).length).toBeGreaterThanOrEqual(exportedLg);
     expect(readFileSync("src/app/(app)/settings/lottery-grouping/page.tsx", "utf8")).toMatch(/isLotteryGroupingEnabled\(\)[\s\S]*notFound\(\)/);
+    // Stage 8F-7: 整理候補の操作も同じ
+    const cl = readFileSync("src/app/(app)/settings/lottery-grouping/cleanup-actions.ts", "utf8");
+    expect((cl.match(/export async function \w+/g) ?? []).length).toBeGreaterThan(0);
+    expect((cl.match(/if \(!isLotteryGroupingEnabled\(\)\) return/g) ?? []).length).toBe((cl.match(/export async function \w+/g) ?? []).length);
   });
   it("Stage 8F: 画面からの承認・却下（lottery-service）はAIを使わず、通常の読み込み経路はエージェントの部品を読み込まない", () => {
     for (const f of ["src/lib/server/lottery-service.ts", "src/app/(app)/lotteries/actions.ts", "src/services/server-repository.ts", "src/components/lottery-board.tsx", "src/components/group-proposals-sheet.tsx", "src/components/lottery-group-sheet.tsx"]) {

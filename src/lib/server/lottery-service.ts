@@ -1159,6 +1159,14 @@ export async function archiveLottery(db: Db, lotteryId: string, actor: string | 
   return data ? ok(undefined) : fail("対象のデータが見つかりません");
 }
 
+/** 退避した抽選を元に戻す（整理の取り消し）。応募・購入履歴は退避中も保持されている */
+export async function restoreLottery(db: Db, lotteryId: string, actor: string | null): Promise<ServiceResult> {
+  if (!uuid.safeParse(lotteryId).success) return fail("リクエストが不正です");
+  const { data, error } = await db.from("lotteries").update({ archived_at: null, updated_by_profile_id: actor }).eq("id", lotteryId).not("archived_at", "is", null).select("id").maybeSingle();
+  if (error) return fail(mapDbError(error));
+  return data ? ok(undefined) : fail("元に戻せる抽選が見つかりません");
+}
+
 // ------------------------------------------------------------------ ★・応募・当落・購入・スルー
 export async function setManaged(db: Db, householdId: string, lotteryId: string, isManaged: boolean, actor: string | null): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success) return fail("リクエストが不正です");

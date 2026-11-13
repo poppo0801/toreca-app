@@ -473,6 +473,9 @@ function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: V
     dec.mismatches.push({ field: "group", detail: `対象と内容が一致する別のグループが${rivals.length}件ある（どれに入れるか決められない）`, severity: "soft" });
     cap("同じ内容の既存グループが他にもあるため、自動にしない");
   }
+  // 8F-7: 複数店舗が同じ1つの情報源ページ（同一の応募ページ）を共有していて、店舗ごとの独立した受付を構造で確認できないものは、1つの抽選企画（店舗選択式など）の可能性が残る。
+  // 他の項目がそろっていても自動にしない（情報不足を一致とみなさない）。店舗ごとに情報源が別なら、別々の受付である裏づけになるためこの上限は掛けない
+  if (pairs.some((p) => p.c.sharedSourceUrl) && forms.some((f) => f.j.form !== "store_independent")) cap("複数店舗が同じ応募ページを共有していて、店舗ごとに独立した受付かを構造で確認できないため、自動にしない（利用者が確認）");
   if (kind === "add_to_group" && group && group.origin === "manual") cap("手動で作ったグループには、承認なしで追加しない");
   if (!opts.allowAuto) cap("自動グループ化が無効の設定のため、候補として提示する");
   if (dec.skipReason) tier = tier === "auto" ? "suggest" : tier;
