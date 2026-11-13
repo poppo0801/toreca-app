@@ -1,7 +1,7 @@
 // 抽選グループ判定の実データ評価（Stage 8F-2）。実APIは費用が発生するため、承認された費用・実行回数の範囲だけ実行する。
 //   node scripts/eval-grouping-real.mjs preflight [--repeats=N]           実行前の確認（API・ネットワークに接続しない。キーは表示しない）
 //   node scripts/eval-grouping-real.mjs freeze                            評価データ（入力・正解）のハッシュを固定する（正解の確定後・実行前）
-//   node scripts/eval-grouping-real.mjs run --approved-max-jpy=<円> --approved-runs=<回> [--repeats=N] [--followups=N]
+//   node scripts/eval-grouping-real.mjs run --approved-max-jpy=<円> --approved-runs=<回> [--repeats=N] [--followups=N] [--set=8f3] [--strict]
 //   node scripts/eval-grouping-real.mjs replay                            保存済みの提出を現在の検証層でやり直す（有料なし。新規の精度評価ではない）
 // 事前に .env.local へ開発専用の設定が必要（AGENT_REAL_API=allow・AGENT_ANTHROPIC_API_KEY・AGENT_MAX_COST_JPY_PER_RUN・AGENT_MAX_RUNS_PER_DAY）。
 import { spawnSync } from "node:child_process";
@@ -15,7 +15,7 @@ try {
 }
 const [cmd, ...rest] = process.argv.slice(2);
 const arg = (name) => rest.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
-const base = { ...process.env, ...(arg("repeats") ? { REAL_GROUPING_REPEATS: arg("repeats") } : {}) };
+const base = { ...process.env, ...(arg("repeats") ? { REAL_GROUPING_REPEATS: arg("repeats") } : {}), ...(arg("set") ? { REAL_GROUPING_SET: arg("set") } : {}), ...(rest.includes("--strict") ? { REAL_GROUPING_STRICT: "1" } : {}) };
 const vitest = (name, extra) => spawnSync("npx", ["vitest", "run", "src/lib/agent/lottery-grouping/real-eval.test.ts", "-t", name], { stdio: "inherit", shell: true, env: { ...base, ...extra } });
 
 if (cmd === "preflight") {

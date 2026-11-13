@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { describe, expect, it } from "vitest";
 import { AnthropicAgentLLM } from "@/lib/agent/anthropic";
 import { checkRealApi } from "@/lib/agent/real-gate";
-import { GROUPING_SUBMIT } from "@/lib/agent/lottery-grouping/proposal";
+import { GROUPING_SUBMIT, GROUPING_SUBMIT_STRICT_SCHEMA } from "@/lib/agent/lottery-grouping/proposal";
 import { MockGroupingBrain } from "@/lib/agent/lottery-grouping/mock";
 import { BudgetGuard, datasetHashes, planRun, replayRecords, runCases, summarizeRuns, validateDataset, REAL_EVAL_LIMITS, type RealCase, type RealGold, type RunRecord } from "@/lib/agent/lottery-grouping/real-eval";
 import { DEFAULT_AI_MODEL } from "@/lib/ai-cost";
@@ -18,8 +18,10 @@ import { DEFAULT_AI_MODEL } from "@/lib/ai-cost";
  */
 const DIR = "eval/lottery-grouping-real";
 const OUT = "eval/runs/lottery-grouping-real";
-const read = (f: string): string => readFileSync(`${DIR}/${f}`, "utf8");
-const have = existsSync(`${DIR}/cases.json`) && existsSync(`${DIR}/gold.json`);
+/** 評価データの組（空=8F-2の17ケース。REAL_GROUPING_SET=8f3 で 8F-3 の新しい組）。組ごとに入力・正解・凍結が別ファイル。既存の組は変更しない */
+const SET = process.env.REAL_GROUPING_SET ? `-${process.env.REAL_GROUPING_SET}` : "";
+const read = (f: string): string => readFileSync(`${DIR}/${f.replace(".json", `${SET}.json`)}`, "utf8");
+const have = existsSync(`${DIR}/cases${SET}.json`) && existsSync(`${DIR}/gold${SET}.json`);
 const load = (): { cases: RealCase[]; gold: Record<string, RealGold>; casesText: string; goldText: string } => {
   const casesText = read("cases.json");
   const goldText = read("gold.json");
@@ -136,7 +138,7 @@ describe.skipIf(!have)("実データセットの検査（eval/lottery-grouping-r
   it("入力と正解が整合し、正解に独立した根拠がある。凍結済みならハッシュが一致する", () => {
     const d = load();
     expect(validateDataset(d.cases, d.gold)).toEqual([]);
-    if (existsSync(`${DIR}/frozen.json`)) {
+    if (existsSync(`${DIR}/frozen${SET}.json`)) {
       const f = JSON.parse(read("frozen.json")) as { cases: string; gold: string };
       const h = datasetHashes(d.casesText, d.goldText);
       expect(h.cases).toBe(f.cases);
@@ -164,7 +166,7 @@ describe.skipIf(env.REAL_GROUPING_PREFLIGHT !== "1")("実行前の確認（接�
     if (have) {
       const d = load();
       const errs = validateDataset(d.cases, d.gold);
-      const frozen = existsSync(`${DIR}/frozen.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
+      const frozen = existsSync(`${DIR}/frozen${SET}.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
       const h = datasetHashes(d.casesText, d.goldText);
       const byCat: Record<string, number> = {};
       for (const c of d.cases) byCat[c.category] = (byCat[c.category] ?? 0) + 1;
@@ -183,14 +185,14 @@ describe.skipIf(env.REAL_GROUPING_FREEZE !== "1")("評価データの凍結（�
   it("入力・正解のハッシュを frozen.json に保存する（以後の変更は実行時に検出される）", () => {
     const d = requireData();
     const h = datasetHashes(d.casesText, d.goldText);
-    writeFileSync(`${DIR}/frozen.json`, JSON.stringify({ ...h, frozenOn: new Date().toISOString().slice(0, 10), cases: h.cases, gold: h.gold, count: d.cases.length }, null, 2) + "\n");
+    writeFileSync(`${DIR}/frozen${SET}.json`, JSON.stringify({ ...h, frozenOn: new Date().toISOString().slice(0, 10), cases: h.cases, gold: h.gold, count: d.cases.length }, null, 2) + "\n");
   });
 });
 
 describe.skipIf(env.REAL_GROUPING_EVAL !== "1")("実API評価（承認された費用・実行回数の範囲のみ）", () => {
   it("予算ガードの範囲で実行し、結果を保存する", async () => {
     const d = requireData();
-    const f = existsSync(`${DIR}/frozen.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
+    const f = existsSync(`${DIR}/frozen${SET}.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
     const h = datasetHashes(d.casesText, d.goldText);
     if (!f || f.cases !== h.cases || f.gold !== h.gold) throw new Error("評価データが凍結されていない、または凍結後に変更されています（freeze をやり直す場合は、結果を新規の評価として扱う）");
     const approvedJpy = Number(env.REAL_GROUPING_APPROVED_MAX_JPY) || 0;
@@ -202,14 +204,15 @@ describe.skipIf(env.REAL_GROUPING_EVAL !== "1")("実API評価（承認された�
     if (plan.maxRuns > approvedRuns) throw new Error(`実行回数（${plan.maxRuns}）が承認された回数（${approvedRuns}）を超えます`);
     const gate = checkRealApi({ env, confirm: true, runsToday: 0 });
     if (!gate.ok) throw new Error(gate.reason);
+    const strict = env.REAL_GROUPING_STRICT === "1";
     const client = new Anthropic({ apiKey: gate.apiKey });
-    const makeLlm = () => new AnthropicAgentLLM(client, gate.model, { submit: { description: GROUPING_SUBMIT.description, schema: GROUPING_SUBMIT.schema, emptyOutput: GROUPING_SUBMIT.emptyOutput } });
+    const makeLlm = () => new AnthropicAgentLLM(client, gate.model, { submit: { description: GROUPING_SUBMIT.description, schema: strict ? (GROUPING_SUBMIT_STRICT_SCHEMA as unknown as Record<string, unknown>) : GROUPING_SUBMIT.schema, emptyOutput: GROUPING_SUBMIT.emptyOutput, strict } });
     const guard = new BudgetGuard(approvedJpy, REAL_EVAL_LIMITS.perCaseJpy);
     const runId = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
     mkdirSync(OUT, { recursive: true });
     const res = await runCases(d.cases, d.gold, 1 + repeats, { makeLlm, guard, followUps: Number(env.REAL_GROUPING_FOLLOWUPS) || 1, kind: "real", maxConsecutiveErrors: 2, onRecord: (r) => console.log(`[grouping-real] ${r.caseId}#${r.pass} ${r.status} tier=${r.tier ?? "-"} cost=${(r.usage?.costJpy ?? 0).toFixed(2)}円 spent=${guard.spent.toFixed(2)}/${approvedJpy}円${r.error ? ` 問題: ${r.error}` : ""}`) });
     const summary = summarizeRuns(d.cases, d.gold, res.records);
-    writeFileSync(`${OUT}/real-${runId}.json`, JSON.stringify({ runId, kind: "real", model: gate.model, frozen: f, approvedJpy, approvedRuns, repeats, stoppedBy: res.stoppedBy, stopReason: res.stopReason, spentJpy: guard.spent, records: res.records, summary }, null, 2));
+    writeFileSync(`${OUT}/real-${runId}.json`, JSON.stringify({ runId, kind: "real", set: SET || "8f2", strict, model: gate.model, frozen: f, approvedJpy, approvedRuns, repeats, stoppedBy: res.stoppedBy, stopReason: res.stopReason, spentJpy: guard.spent, records: res.records, summary }, null, 2));
     expect(guard.spent).toBeLessThanOrEqual(approvedJpy);
   }, 1_800_000);
 });
@@ -223,4 +226,32 @@ describe.skipIf(env.REAL_GROUPING_REPLAY !== "1")("保存済みの提出の再�
     const re = replayRecords(d.cases, d.gold, saved.records);
     writeFileSync(`${OUT}/replay-${saved.runId}.json`, JSON.stringify({ kind: "replay", from: saved.runId, records: re, summary: summarizeRuns(d.cases, d.gold, re) }, null, 2));
   });
+});
+
+// ---------------------------------------------------------------- 実データの組（8F-2 の17ケース・8F-3 の7ケース）× モックAI: 誤った自動グループ化が出ないこと（API・ネットワークなし）
+describe("実データの組 × モックAI（全方針で、誤った自動グループ化が 0）", () => {
+  const sets = [["", "8F-2"], ["-8f3", "8F-3"]] as const;
+  for (const [suffix, name] of sets) {
+    const ok = existsSync(`${DIR}/cases${suffix}.json`) && existsSync(`${DIR}/gold${suffix}.json`);
+    it.skipIf(!ok)(`${name}: 入力に正解が混ざっていない・凍結済みで一致・全方針で誤った自動が0`, async () => {
+      const casesText = readFileSync(`${DIR}/cases${suffix}.json`, "utf8");
+      const goldText = readFileSync(`${DIR}/gold${suffix}.json`, "utf8");
+      const cases = JSON.parse(casesText).cases as RealCase[];
+      const gold = JSON.parse(goldText).labels as Record<string, RealGold>;
+      expect(validateDataset(cases, gold)).toEqual([]);
+      if (existsSync(`${DIR}/frozen${suffix}.json`)) {
+        const f = JSON.parse(readFileSync(`${DIR}/frozen${suffix}.json`, "utf8")) as { cases: string; gold: string };
+        const h = datasetHashes(casesText, goldText);
+        expect(h).toEqual({ cases: f.cases, gold: f.gold });
+      }
+      // 正解の根拠（URL・ラベル）の文字列が、入力に現れない（正解の混入がない）。入力の情報源URLと、正解の根拠URLが一致するのは、同じ公式ページを指すためで許容（ラベル・説明文は不可）
+      const inputText = JSON.stringify(cases);
+      for (const g of Object.values(gold)) if (g.note) expect(inputText).not.toContain(g.note.slice(0, 30));
+      for (const policy of ["careful", "eager", "liar", "lazy", "timid"] as const) {
+        const recs = (await runCases(cases, gold, 1, { makeLlm: () => new MockGroupingBrain(policy), guard: new BudgetGuard(), followUps: 1, kind: "mock" })).records;
+        const s = summarizeRuns(cases, gold, recs);
+        expect(s.gated.autoHarm, `${name}/${policy}: 誤った自動 ${recs.filter((r) => r.score?.autoHarm).map((r) => r.caseId).join(",")}`).toBe(0);
+      }
+    });
+  }
 });

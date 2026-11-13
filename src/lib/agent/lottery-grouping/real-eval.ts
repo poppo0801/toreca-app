@@ -16,6 +16,7 @@ import { isPlausiblePeer } from "@/lib/agent/lottery-grouping/compare";
 import { evaluateGrouping, type GroupingOutcome } from "@/lib/agent/lottery-grouping/run";
 import { verifyProposal } from "@/lib/agent/lottery-grouping/verify";
 import type { AgentProposal } from "@/lib/agent/lottery-grouping/types";
+import { RecordingLlm, redact, type StepLog } from "@/lib/agent/lottery-grouping/recorder";
 
 export const REAL_EVAL_LIMITS = { totalJpy: 500, perCaseJpy: 15 } as const;
 
@@ -176,6 +177,12 @@ export interface RunRecord {
   claim?: AgentProposal | null;
   firstClaim?: AgentProposal | null;
   followUps: number;
+  /** 追加調査の内訳（format=形式の指摘による再提出／evidence=根拠不足の追加調査） */
+  followUpKinds?: string[];
+  /** 最終の提出の形式のずれ（補正した項目・却下の理由） */
+  parseIssues?: { path: string; code: string; detail: string }[];
+  /** 各ステップの記録（停止理由・呼んだツール・提出の生の内容。伏せ字済み） */
+  trace?: StepLog[];
   usage?: Pick<AgentUsage, "steps" | "inputTokens" | "outputTokens" | "costJpy" | "ms" | "retries" | "rejectedCalls" | "injectionFlags">;
   score?: Score;
 }
@@ -196,7 +203,7 @@ const toRecord = (c: RealCase, g: RealGold, pass: number, kind: RunRecord["kind"
     tier: o.decision.skipReason ? "single" : o.decision.tier, confidence: o.decision.confidence, action: o.claim?.action ?? "none",
     firstAction: o.firstClaim?.action ?? "none", firstTier: verifiedFirst?.tier,
     memberIds: o.decision.lotteryIds, mismatches: o.decision.mismatches.map((m) => `${m.field}:${m.severity}`), downgrades: o.decision.downgrades, rationale: o.decision.rationale.slice(0, 400),
-    claim: o.claim, firstClaim: o.firstClaim, followUps: o.followUps.length,
+    claim: o.claim, firstClaim: o.firstClaim, followUps: o.followUps.length, followUpKinds: o.followUps.map((f) => f.kind ?? "evidence"), parseIssues: o.parseIssues,
     usage: o.usage ? { steps: o.usage.steps, inputTokens: o.usage.inputTokens, outputTokens: o.usage.outputTokens, costJpy: o.usage.costJpy, ms: o.usage.ms, retries: o.usage.retries, rejectedCalls: o.usage.rejectedCalls, injectionFlags: o.usage.injectionFlags } : undefined,
     score: g.label === "unknown" ? undefined : score(g.label, o),
   };
@@ -214,15 +221,19 @@ export async function runCases(cases: RealCase[], gold: Record<string, RealGold>
       deps.guard.begin();
       const world = worldOf(c);
       let rec: RunRecord;
+      let recorder: RecordingLlm | null = null;
       try {
-        const o = await evaluateGrouping(world, { llm: deps.makeLlm(), allowAuto: true, followUps: deps.followUps, limits: { maxCostJpy: deps.guard.caseLimit() } });
+        const rl = new RecordingLlm(deps.makeLlm());
+        recorder = rl;
+        const o = await evaluateGrouping(world, { llm: rl, allowAuto: true, followUps: deps.followUps, limits: { maxCostJpy: deps.guard.caseLimit() } });
         deps.guard.record(o.usage?.costJpy ?? 0);
         rec = toRecord(c, gold[c.id], pass, deps.kind, o);
+        rec.trace = rl.steps;
         // 実行が完了しなかった（API障害・上限）ものは、問題として数える
         consecutive = o.run && o.run.status !== "completed" && o.run.output === undefined ? consecutive + 1 : 0;
         if (consecutive > 0) rec.error = o.run?.stopReason;
       } catch (e) {
-        rec = { caseId: c.id, pass, kind: deps.kind, status: "error", error: String((e as Error).message ?? e).replace(/sk-[A-Za-z0-9_-]+/g, "[key]").slice(0, 200), followUps: 0 };
+        rec = { caseId: c.id, pass, kind: deps.kind, status: "error", error: redact(String((e as Error).message ?? e)).slice(0, 200), followUps: 0, trace: recorder?.steps };
         consecutive += 1;
       }
       records.push(rec);
@@ -242,7 +253,7 @@ export function replayRecords(cases: RealCase[], gold: Record<string, RealGold>,
     if (!c || r.status !== "ok") continue;
     if (!r.claim && !r.usage) { out.push({ ...r, kind: "replay" }); continue; } // AIを呼ばなかった（比較する相手がいない）ものは、そのまま
     const d = verifyProposal(worldOf(c), r.claim ?? null, { allowAuto: true });
-    const o = { decision: d, ranAgent: true, skipped: null, claim: r.claim ?? null, run: null, usage: null, engine: "replay", followUps: [], firstClaim: r.firstClaim ?? null } as GroupingOutcome;
+    const o = { decision: d, ranAgent: true, skipped: null, claim: r.claim ?? null, run: null, usage: null, engine: "replay", followUps: [], parseIssues: [], firstClaim: r.firstClaim ?? null } as GroupingOutcome;
     out.push({ ...toRecord(c, gold[c.id], r.pass, "replay", o), usage: r.usage, followUps: r.followUps });
   }
   return out;

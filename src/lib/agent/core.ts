@@ -208,9 +208,9 @@ export type AgentMessage =
   | { role: "tool"; callId: string; name: string; content: string; isError?: boolean };
 
 export type LlmStep =
-  | { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage }
+  | { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage; /** APIの停止理由（記録用。Stage 8F-3） */ stopReason?: string }
   /** 提出。calls・raw は、提出のあとに検証結果を返して会話を続けるとき（再調査）に使う（提出を含む同じ応答の呼び出しと、応答の原本）。無ければ会話側で補う */
-  | { kind: "final"; output: unknown; usage: LlmUsage; calls?: ToolCall[]; raw?: unknown[] };
+  | { kind: "final"; output: unknown; usage: LlmUsage; calls?: ToolCall[]; raw?: unknown[]; stopReason?: string };
 
 export class TransientLlmError extends Error {}
 

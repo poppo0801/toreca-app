@@ -98,7 +98,8 @@ export interface PairCompare {
   receiveMethod: Cmp;
   kind: Cmp;
   storeMode: Cmp;
-  requirements: "same" | "similar" | "differs";
+  /** unstated: 一方にだけ記載のある条件がある（記載なし）。differs（食い違い）とは区別する */
+  requirements: "same" | "similar" | "differs" | "unstated";
   campaign: "same" | "differs" | "none";
   sharedSourceUrl: boolean;
 }

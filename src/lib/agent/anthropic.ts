@@ -50,7 +50,7 @@ export function isTransientApiError(e: unknown): boolean {
 
 export interface AnthropicLlmOptions {
   /** 提出ツールの定義（既定は店舗所在地の調査用。Stage 8F の抽選グループ判定などは、ここで差し替える） */
-  submit?: { description: string; schema: Record<string, unknown>; emptyOutput: unknown };
+  submit?: { description: string; schema: Record<string, unknown>; emptyOutput: unknown; /** 提出ツールを構造化（strict）にする。入力が必ずスキーマに合う（Stage 8F-3。既定は無効。実APIで効果を測ってから有効にする） */ strict?: boolean };
   maxOutputTokens?: number;
   /** 思考の深さ。Haiku 5.5 の既定は medium。ここでは明示する（既定 medium） */
   effort?: "low" | "medium" | "high";
@@ -72,7 +72,7 @@ export class AnthropicAgentLLM implements AgentLLM {
         system,
         messages: apiMessages,
         output_config: { effort: this.opts.effort ?? "medium" },
-        tools: [...tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool["input_schema"] })), this.opts.submit ? { name: SUBMIT_TOOL, description: this.opts.submit.description, input_schema: this.opts.submit.schema as Anthropic.Tool["input_schema"] } : submitTool(SUBMIT_SCHEMA)],
+        tools: [...tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool["input_schema"] })), this.opts.submit ? { name: SUBMIT_TOOL, description: this.opts.submit.description, input_schema: this.opts.submit.schema as Anthropic.Tool["input_schema"], ...(this.opts.submit.strict ? { strict: true } : {}) } : submitTool(SUBMIT_SCHEMA)],
       });
     } catch (e) {
       if (isTransientApiError(e)) throw new TransientLlmError((e as Error).message ?? "一時的なAPIエラー");
@@ -82,17 +82,17 @@ export class AnthropicAgentLLM implements AgentLLM {
     const uses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
     const submit = uses.find((u) => u.name === SUBMIT_TOOL);
     // 提出のあとに検証結果を返して会話を続ける（再調査）ときのため、同じ応答の呼び出しと原本（思考ブロックを含む）も渡す
-    if (submit) return { kind: "final", output: submit.input, usage, calls: uses.map((u) => ({ id: u.id, name: u.name, input: (u.input ?? {}) as Record<string, unknown> })), raw: res.content as unknown[] };
+    if (submit) return { kind: "final", stopReason: res.stop_reason ?? undefined, output: submit.input, usage, calls: uses.map((u) => ({ id: u.id, name: u.name, input: (u.input ?? {}) as Record<string, unknown> })), raw: res.content as unknown[] };
     if (res.stop_reason === "max_tokens") {
       // 出力が上限で途切れた（ツール呼び出しが不完全な可能性）。実行せずに終了させる
-      return { kind: "final", output: this.opts.submit?.emptyOutput ?? { candidates: [], summary: "出力が上限に達したため中断" }, usage };
+      return { kind: "final", stopReason: "max_tokens", output: this.opts.submit?.emptyOutput ?? { candidates: [], summary: "出力が上限に達したため中断" }, usage };
     }
     if (uses.length === 0) {
       // ツールも提出も無く終わった（説明だけ返した）
-      return { kind: "final", output: this.opts.submit?.emptyOutput ?? { candidates: [], summary: res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("").slice(0, 300) }, usage };
+      return { kind: "final", stopReason: `${res.stop_reason ?? "none"}:no_tool_call`, output: this.opts.submit?.emptyOutput ?? { candidates: [], summary: res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("").slice(0, 300) }, usage };
     }
     const text = res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
-    return { kind: "tool_calls", calls: uses.map((u) => ({ id: u.id, name: u.name, input: (u.input ?? {}) as Record<string, unknown> })), text: text || undefined, raw: res.content as unknown[], usage };
+    return { kind: "tool_calls", stopReason: res.stop_reason ?? undefined, calls: uses.map((u) => ({ id: u.id, name: u.name, input: (u.input ?? {}) as Record<string, unknown> })), text: text || undefined, raw: res.content as unknown[], usage };
   }
 }
 

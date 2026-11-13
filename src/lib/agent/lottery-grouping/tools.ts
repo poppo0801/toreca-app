@@ -10,6 +10,9 @@ import type { GLottery, GWorld, PairCompare } from "@/lib/agent/lottery-grouping
 const MAX_LIST = 30;
 const MAX_TEXT = 1500;
 
+/** relations の読み方。「異なる」「記載なし」「確認できない」を区別して判断する（Stage 8F-3） */
+export const RELATION_LEGEND = "same=一致／differs=両方に記載があり内容が異なる（食い違い）／unknown=一方または両方に記載がない・不明（異なるとは限らない）／unstated=応募条件の一方にだけ記載のある項目がある（記載なし。異なるとは限らない）／similar=文面が一部異なる。sourceTextStored=false の抽選は、情報源の文章を確認できない（異なるのではなく、確認できない）";
+
 const flexText = (f: GLottery["applyStart"]): string => (f.precision === "unknown" ? "不明" : f.precision === "date_only" ? f.date : f.at);
 
 export function describeLottery(l: GLottery, world: GWorld): Record<string, unknown> {
@@ -30,6 +33,8 @@ export function describeLottery(l: GLottery, world: GWorld): Record<string, unkn
     sourceUrls: l.sourceUrls.slice(0, 3),
     groupId: l.groupId,
     hasApplication: l.hasApplication,
+    /** 情報源の文章が保存されているか（false なら、文言による確認ができない＝「確認できない」であって「異なる」ではない） */
+    sourceTextStored: (world.evidence.get(l.id) ?? []).some((x) => x.trim().length > 0),
   };
 }
 const relationSummary = (c: PairCompare): Record<string, string> => ({
@@ -72,6 +77,7 @@ export function buildGroupingTools(world: GWorld): ToolRegistry {
       const groups = world.groups.map((g) => ({ groupId: g.id, origin: g.origin, title: g.title, members: g.memberIds.length }));
       const data = {
         total: rows.length,
+        legend: RELATION_LEGEND,
         lotteries: rows.map(({ l, c }) => ({ ...describeLottery(l, world), groupOrigin: world.groups.find((g) => g.id === l.groupId)?.origin ?? null, relations: relationSummary(c) })),
         groups,
       };

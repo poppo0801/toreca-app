@@ -79,10 +79,20 @@ function quantityRelation(a: GLottery, b: GLottery): Cmp {
 }
 const cmpStr = (a: string | null, b: string | null, unknown = "unknown"): Cmp => (!a || !b || a === unknown || b === unknown ? "unknown" : a === b ? "same" : "differs");
 
+/**
+ * 応募条件の関係（Stage 8F-3）。「異なる」と「一方にだけ記載がある（記載なし）」を区別する:
+ *  - 条件タグが、一方がもう一方を含むだけ（片方にだけ追加の項目がある）→ unstated（記載なし。条件が異なるとは限らない。一方が書き漏らした可能性がある）
+ *  - 互いに相手に無い項目がある（食い違い）・条件の論理（すべて/いずれか）が異なる → differs
+ *  - 同じなら、条件の文面の類似度で same / similar / differs
+ */
 function requirementRelation(a: GLottery, b: GLottery): PairCompare["requirements"] {
-  const ta = [...a.requirementTags].sort().join(",");
-  const tb = [...b.requirementTags].sort().join(",");
-  if (ta !== tb || (a.requirementLogic ?? "") !== (b.requirementLogic ?? "")) return "differs";
+  const sa = new Set(a.requirementTags);
+  const sb = new Set(b.requirementTags);
+  const onlyA = [...sa].filter((x) => !sb.has(x));
+  const onlyB = [...sb].filter((x) => !sa.has(x));
+  if ((a.requirementLogic ?? "") !== (b.requirementLogic ?? "")) return "differs";
+  if (onlyA.length > 0 && onlyB.length > 0) return "differs";
+  if (onlyA.length > 0 || onlyB.length > 0) return "unstated";
   const ca = norm(a.conditionsText);
   const cb = norm(b.conditionsText);
   if (ca === "" && cb === "") return "same";

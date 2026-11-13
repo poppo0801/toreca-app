@@ -91,6 +91,7 @@ export function mismatchesOf(c: PairCompare, lotteryId: string): Mismatch[] {
   if (c.kind === "differs") add("kind", "抽選方式が異なる", "hard");
   if (c.storeMode === "differs") add("storeMode", "店舗の指定方式が異なる（店舗固定と店舗選択式）", "hard");
   if (c.requirements === "differs") add("requirements", "応募条件が異なる", "hard");
+  else if (c.requirements === "unstated") add("requirements", "応募条件の一方にだけ記載がある項目がある（記載なし。条件が異なるとは限らない）", "soft");
   else if (c.requirements === "similar") add("requirements", "応募条件の文面が一部異なる", "soft");
   return out;
 }
@@ -315,11 +316,12 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
       ? `同じ企画の裏づけはあるが、店舗ごとに異なる点がある（${[...new Set(hard.map((m) => fieldLabel(m.field)))].join("・")}）。利用者の確認が必要`
       : `同じ系列でも、${[...new Set(hard.map((m) => fieldLabel(m.field)))].join("・")}が異なり、同じ企画の裏づけも無いため、まとめない`;
   } else if (gaps.length > 0) {
+    // 不明（記載なし・確認できない）がある: 同じ企画の裏づけがあれば候補、無ければ保留（「記載なし」だけを根拠にまとめない）
     tier = strong ? "suggest" : "hold";
     why = `${[...new Set(gaps.map((m) => m.detail))].join("・")}のため、確定できない`;
   } else if (soft.length > 0) {
     tier = "suggest";
-    why = "応募条件の文面に違いがあるため、利用者の確認が必要";
+    why = soft.some((m) => m.detail.includes("記載なし")) ? "応募条件の一方にだけ記載がある項目があり（記載なし）、同じ条件かを利用者が確認する必要がある" : "応募条件の文面に違いがあるため、利用者の確認が必要";
   } else if (strong) {
     tier = "auto";
     why = "系列・商品・応募期間・発表日・応募方法・受取方法・応募条件がすべて一致し、同じ企画の裏づけもある";

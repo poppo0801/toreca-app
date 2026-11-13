@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "checkedAt": "2026-11-13",
+  "note": "Stage 8F-3 の新しい評価データの素材。公式の販売ページ（LivePocket 上の販売元の公式イベントページ）が『1ページに複数店舗が並び、同一の商品・期間・発表日・条件で行う共通の抽選』であると、ページ自身の構造と文言で示しているイベント。各店舗の抽選は、そのページの内容から再構成した登録内容（provenance=reconstructed）。本番の登録（pool.json）に実在するものは provenance=real として使う。条件の文面は、取得時の要約を介した記述で、原文の一字一句ではない（原文の引用と明記したもののみ引用）。",
+  "events": {
+    "E1": {
+      "title": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売",
+      "chain": "ホビーステーション",
+      "url": "https://livepocket.jp/e/m3_6v",
+      "product": "30th CELEBRATION",
+      "start": "2026-08-04T12:00",
+      "deadline": "2026-08-06T23:59",
+      "result": "2026-08-13",
+      "tags": ["member_registration", "id_check"],
+      "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+      "text": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。",
+      "stores": ["池袋本店", "秋葉原ラジオ会館店", "町田店", "津田沼店", "大宮店", "所沢店"]
+    },
+    "E2": {
+      "title": "【当選者代金前払い必要】ホビーステーション「ポケモンカードゲーム 拡張パック ハドウシーカー」抽選販売",
+      "chain": "ホビーステーション",
+      "url": "https://livepocket.jp/e/075sp",
+      "product": "ハドウシーカー",
+      "start": "2026-10-26T12:00",
+      "deadline": "2026-10-28T23:59",
+      "result": "2026-11-05",
+      "tags": ["member_registration", "id_check"],
+      "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。支払い時にマイナンバーカードで本人確認し、カード氏名とLivePocketアカウント氏名が一致すること。1人2BOXまで。当選者は応募店舗で代金前払い（現金のみ）。店頭購入のみ。譲渡・代理購入は不可。",
+      "text": "【当選者代金前払い必要】ホビーステーション「ポケモンカードゲーム 拡張パック ハドウシーカー」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。",
+      "stores": ["名古屋大須本店", "金沢店", "新潟店", "広島店"]
+    },
+    "E3": {
+      "title": "ホビーステーション「ポケモンカードゲームMEGA 30th CELEBRATION カードセット ９種セット（再販）」抽選販売",
+      "chain": "ホビーステーション",
+      "url": "https://livepocket.jp/e/tjphs",
+      "product": "30th CELEBRATION カードセット 9種セット",
+      "start": "2026-11-10T12:00",
+      "deadline": "2026-11-12T23:59",
+      "result": "2026-11-25",
+      "tags": ["member_registration", "id_check"],
+      "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。マイナンバーカードで本人確認し、氏名がアカウントと一致すること。9種セットは1セットまで。店頭購入のみ。複数応募・複数アカウント・譲渡・代理購入は無効またはキャンセル。",
+      "text": "ホビーステーション「ポケモンカードゲームMEGA 30th CELEBRATION カードセット ９種セット（再販）」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。",
+      "stores": ["大宮店", "所沢店", "本厚木店", "池袋本店"]
+    },
+    "E4": {
+      "title": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売",
+      "chain": "イトーヨーカドー",
+      "urls": { "page1": "https://livepocket.jp/e/luo8lp88-d", "page2": "https://livepocket.jp/e/s2dtfw7rvo" },
+      "product": "ハドウシーカー",
+      "start": "2026-11-06T10:00",
+      "deadline": "2026-11-08T23:59",
+      "result": null,
+      "tags": ["member_registration", "id_check", "photo_id", "livepocket_account"],
+      "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+      "text": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売 販売元 イトーヨーカドー TOYLO 結果発表予定日 11月中旬",
+      "storesPage1": ["大船店", "船橋店", "若葉台店", "伊勢原店"],
+      "storesPage2": ["大和鶴間店", "アリオ蘇我店", "アリオ亀有店"]
+    }
+  },
+  "cases": [
+    { "id": "A1", "category": "multi_store_same", "label": "auto", "event": "E1", "subject": "池袋本店", "others": ["秋葉原ラジオ会館店", "町田店", "津田沼店"], "refs": ["https://livepocket.jp/e/m3_6v"], "note": "ホビーステーション30thの共通抽選（28店舗・1ページ）。ページ: 『お一人様につき対象店舗の中から１店舗のみご応募が可能です』『複数店舗にご応募された場合は無効』＝店舗横断の1つの企画。同じ公式URLで4店舗を登録した想定（再構成）" },
+    { "id": "A2", "category": "multi_store_same", "label": "auto", "event": "E2", "realSubject": "L046", "others": ["名古屋大須本店", "金沢店", "新潟店"], "refs": ["https://livepocket.jp/e/075sp"], "note": "ハドウシーカーの共通抽選。対象のL046（神戸三宮）は本番に実在の登録（同じ公式URL）。他は再構成。実在の登録の条件文と再構成の差があり、検証層が候補止まりにする可能性がある" },
+    { "id": "A3", "category": "multi_store_same", "label": "auto", "event": "E3", "subject": "大宮店", "others": ["所沢店", "本厚木店", "池袋本店"], "refs": ["https://livepocket.jp/e/tjphs"], "note": "9種セット再販の共通抽選（同一ページ・全店同一日程）。再構成" },
+    { "id": "A4", "category": "source_mixed", "label": "auto", "event": "E4", "subject": "大船店", "others": ["船橋店", "若葉台店"], "realOthers": ["L077"], "refs": ["https://livepocket.jp/e/luo8lp88-d", "https://livepocket.jp/e/s2dtfw7rvo"], "note": "イトーヨーカドー（TOYLO）の1イベント（event_id 1135507）に22店舗が列挙。甲子園店（L077）は本番に実在の登録。発表日は『11月中旬』で日付なし（不明）のため、検証層は候補止まりにする可能性がある（正解は『まとめるのが正しい』）" },
+    { "id": "A5", "category": "add_to_group", "label": "auto", "event": "E1", "subject": "大宮店", "groupMembers": ["池袋本店", "町田店", "津田沼店"], "others": ["所沢店"], "refs": ["https://livepocket.jp/e/m3_6v"], "note": "既存グループ（池袋本店・町田店・津田沼店）にE1の大宮店を追加する。再構成" },
+    { "id": "A6", "category": "insufficient", "label": "auto", "event": "E4", "subject": "大船店", "subjectUrl": "page1", "others": ["大和鶴間店", "アリオ蘇我店"], "othersUrl": "page2", "noText": true, "refs": ["https://livepocket.jp/e/luo8lp88-d", "https://livepocket.jp/e/s2dtfw7rvo"], "note": "同じイベント（event_id 1135507）だが、登録の情報源URLが別（2つのページ）で、情報源の文章も保存されていない状態。正解は『まとめるのが正しい』（根拠は公式ページ）。検証層は、同じ企画の裏づけを確認できず、候補止まり／保留になる想定（保守的）" },
+    { "id": "A7", "category": "conditions_differ", "label": "none", "event": "E4", "subjectReal": "L126", "others": ["大船店", "船橋店"], "refs": ["https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx", "https://livepocket.jp/e/luo8lp88-d"], "note": "イトーヨーカドーネット通販（7iD・配送・11/12〜11/13・販売元はネット通販）は、TOYLOの店頭受取の抽選（11/6〜11/8）とは別。同じ商品でも期間・方式・販売元が異なる（8F-2のK10と同じ事実で、相手を再構成の店舗にした別の入力）" }
+  ]
+}
