@@ -77,7 +77,16 @@ export interface RegistrationContext {
   /** 店舗が特定できているか（マスター照合済み、または明確な仮登録、オンライン、選択式） */
   storeResolved: boolean;
   now: string;
+  /** 告知に抽選・応募の文言があるか（Stage 9A）。false のときだけ、日時が不明な告知を登録しない（未指定は「ある」として扱う） */
+  wording?: boolean;
+  /** 告知（投稿）からの経過日数。不明は null/未指定（古さを理由に止めない） */
+  sourceAgeDays?: number | null;
+  /** 憶測・未確定の表現の告知か（Stage 9A）。日時が不明な告知を登録するときだけ参照する */
+  speculative?: boolean;
 }
+
+/** 応募締切が不明のまま、告知からこの日数を超えたものは、終了済みの可能性が高いため登録しない（確認待ち） */
+export const STALE_UNKNOWN_DEADLINE_DAYS = 21;
 
 const md = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
@@ -140,9 +149,13 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   if (/情報源URLがありません/.test(miss)) blockers.push("情報源（確認できるURL）がありません");
   if (c.verdictReasons.some((r) => /指定商品か判断できません/.test(r))) blockers.push("商品を判別できず、収集対象の商品か判断できません");
   if (c.duplicateCount > 0) blockers.push("同じ抽選か別の抽選か判断できません（重複の疑い）");
-  if (c.stage === "teaser" || c.stage === "partial") blockers.push("応募の日時が未発表です（抽選予告として追跡します）");
-  else if (c.verdict === "upcoming") blockers.push("受付前です（受付が始まるまで追跡します）");
-  else if (input.applyDeadline.precision === "unknown") blockers.push("応募締切が不明です");
+  // Stage 9A: 応募の日時が未発表・不明・受付前でも、抽選の告知と認識できれば登録する（不明な日時は「未確認」として保持し、あとから補完する）。
+  // 確認待ちに残すのは、抽選・応募に関する文言が確認できない場合と、締切が不明のまま告知から長く経過している（終了済みの可能性が高い）場合だけ
+  const deadlineUnknown = input.applyDeadline.precision === "unknown" || !input.applyDeadline.date;
+  const noticeLike = deadlineUnknown || c.stage === "teaser" || c.stage === "partial" || c.verdict === "upcoming";
+  if (noticeLike && c.wording === false) blockers.push("抽選・応募に関する文言が確認できません（抽選の告知か判断できません）");
+  if (deadlineUnknown && c.speculative) blockers.push("憶測・未確定の表現の告知です（確定した抽選か判断できません）");
+  if (deadlineUnknown && c.sourceAgeDays != null && c.sourceAgeDays > STALE_UNKNOWN_DEADLINE_DAYS) blockers.push(`告知から${Math.floor(c.sourceAgeDays)}日が経過し、応募締切を確認できません（終了済みの可能性があります）`);
   if (c.textConflict && SERIOUS_TEXT_CONFLICT.test(c.textConflict)) blockers.push(`抽選の内容に重大な矛盾があります: ${c.textConflict.slice(0, 60)}`);
   const cf = conflictCautions(c.fields, c.now);
   blockers.push(...cf.blockers);
@@ -151,6 +164,7 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   // ---- B: 注意付きで登録する
   cautions.push(...cf.cautions);
   if (c.textConflict && !cf.cautions.some((x) => x.field === "applyDeadline")) cautions.push({ code: "text_conflict", field: "other", message: `情報に矛盾の疑いがあります: ${c.textConflict.slice(0, 80)}`, at: c.now });
+  if (deadlineUnknown) cautions.push({ code: "deadline_unknown", field: "applyDeadline", message: c.stage === "teaser" || c.stage === "partial" ? "応募の日時が未発表または確認できていません（告知の続報で自動的に補います）" : "応募締切が確認できていません", at: c.now });
   if (!flexDate(input.resultDate)) cautions.push({ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: c.now });
   const hasReceive = !!flexDate(input.receiveStart) || !!flexDate(input.receiveDeadline) || !!flexDate(input.procedureStart) || !!flexDate(input.procedureDeadline);
   if (!hasReceive) cautions.push({ code: "receive_period_unknown", field: "receivePeriod", message: "購入・受取期間が確認できていません", at: c.now });

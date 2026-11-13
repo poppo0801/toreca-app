@@ -1,0 +1,24 @@
+{
+ "version": 1,
+ "kind": "synthetic",
+ "note": "Stage 9A の登録方針の適合確認用シナリオ（架空。実データではない）。expected は方針（docs/stage9a.md §3）の文言だけから決めた。old は 7A 時点の仕様（docs/stage7a.md §2・attention.ts の旧条件）で、当時の判定を表す。件数は精度ではなく、方針の適合と、旧方式からの変化を示すだけ。",
+ "scenarios": [
+  { "id": "R01", "title": "締切・開始とも明記された通常の抽選", "ctx": { "deadline": "known", "stage": "open" }, "expected": "register", "old": "register" },
+  { "id": "R02", "title": "締切が不明（開始は明記）", "ctx": { "deadline": "unknown", "stage": "partial" }, "expected": "register", "old": "hold" },
+  { "id": "R03", "title": "抽選予告（開始・締切とも未発表）", "ctx": { "deadline": "unknown", "stage": "teaser" }, "expected": "register", "old": "hold" },
+  { "id": "R04", "title": "受付前（開始は未来・締切明記）", "ctx": { "deadline": "known", "stage": "upcoming", "verdict": "upcoming" }, "expected": "register", "old": "hold" },
+  { "id": "R05", "title": "締切不明・告知から3日", "ctx": { "deadline": "unknown", "stage": "partial", "sourceAgeDays": 3 }, "expected": "register", "old": "hold" },
+  { "id": "R06", "title": "締切不明・告知から40日（終了済みの可能性）", "ctx": { "deadline": "unknown", "stage": "partial", "sourceAgeDays": 40 }, "expected": "hold", "old": "hold" },
+  { "id": "R07", "title": "憶測の表現（〜の模様）で日時なし", "ctx": { "deadline": "unknown", "stage": "teaser", "speculative": true }, "expected": "hold", "old": "hold" },
+  { "id": "R08", "title": "抽選・応募の文言が無い告知（発売予定のみ）", "ctx": { "deadline": "unknown", "stage": "teaser", "wording": false }, "expected": "hold", "old": "hold" },
+  { "id": "R09", "title": "応募条件・受取方法が不明（締切は明記）", "ctx": { "deadline": "known", "stage": "open", "receiveUnknown": true, "conditionsUnknown": true }, "expected": "register", "old": "register" },
+  { "id": "R10", "title": "店舗が特定できない（締切は明記）", "ctx": { "deadline": "known", "stage": "open", "storeResolved": false }, "expected": "register", "old": "register" },
+  { "id": "R11", "title": "系列を特定できない", "ctx": { "deadline": "known", "stage": "open", "missing": ["系列を確実に特定できません"] }, "expected": "hold", "old": "hold" },
+  { "id": "R12", "title": "商品がマスター未登録", "ctx": { "deadline": "known", "stage": "open", "missing": ["商品マスターに未登録の商品です（商品確認待ち）: 「X」"] }, "expected": "hold", "old": "hold" },
+  { "id": "R13", "title": "情報源URLが無い", "ctx": { "deadline": "known", "stage": "open", "missing": ["情報源URLがありません"] }, "expected": "hold", "old": "hold" },
+  { "id": "R14", "title": "同じ抽選か別の抽選か判断できない重複の疑い", "ctx": { "deadline": "known", "stage": "open", "duplicateCount": 1 }, "expected": "hold", "old": "hold" },
+  { "id": "R15", "title": "収集条件の対象外（地域外など）", "ctx": { "deadline": "known", "stage": "open", "verdict": "exclude" }, "expected": "hold", "old": "hold" },
+  { "id": "R16", "title": "抽選ではない・別の抽選という重大な矛盾", "ctx": { "deadline": "known", "stage": "open", "textConflict": "別の抽選の情報が混ざっています" }, "expected": "hold", "old": "hold" },
+  { "id": "R17", "title": "締切不明・店舗不明・受取方法不明（情報が最小）", "ctx": { "deadline": "unknown", "stage": "teaser", "storeResolved": false, "receiveUnknown": true, "conditionsUnknown": true }, "expected": "register", "old": "hold" }
+ ]
+}

@@ -90,30 +90,28 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     await addWeb("list1", "統合系列6D 本店 6D商品 抽選販売 当選発表あり 会員登録が必要 店頭受取");
     await run();
     const a = await candBy(U("list1"));
-    expect(a.status).toBe("pending"); // 応募締切が無く、登録できない
-    expect(dr(a).assessment?.rank).toBe("D"); // 系列・店舗・商品は分かるが、応募期間・応募先がどちらも不明
+    expect(a.status).toBe("auto_registered"); // Stage 9A: 応募締切が無くても、抽選と分かれば注意付きで登録する（締切は未確認として保持）
     expect(dr(a).fields?.resultDate?.source.kind).toBe("list_site");
     expect(dr(a).fields?.resultDate?.state).toBe("unverified");
+    const first = await lots();
+    expect(first).toHaveLength(1);
     // 店舗公式Xの投稿（公式アカウント）: 応募締切・応募方法・応募URLがある
     plan = { store: "本店", deadline: jst(5, 23, 59), apply: "web", applyUrl: "https://shop6d.example.invalid/apply" };
     await addX("911000001", "q6d_official", "統合系列6D 本店で6D商品の抽選受付中。応募期間は11月末まで。応募はこちら https://shop6d.example.invalid/apply");
     await run();
     const b = await candBy("x:911000001");
-    expect(b.status).toBe("auto_registered"); // 補完の結果、登録条件を満たした
-    expect(dr(b).mergeLog?.[0]).toMatchObject({ kind: "same_lottery" });
-    expect(dr(b).mergeLog?.[0].filled.sort()).toEqual(["conditions", "receiveMethod", "resultDate"].sort());
-    expect(dr(b).fields?.applyDeadline).toMatchObject({ state: "confirmed" });
-    expect(dr(b).fields?.applyDeadline?.source).toMatchObject({ kind: "official_x" });
-    expect(dr(b).fields?.resultDate?.source).toMatchObject({ kind: "list_site", url: U("list1") }); // 補った項目の出典は元の情報源
+    expect(b.status, JSON.stringify(b.reasons)).toBe("duplicate"); // 公式Xの続報は、同じ抽選として既存の抽選を補完する（二重に登録しない）
+    expect(b.lottery_id).toBe(first[0].id);
     const old = await candBy(U("list1"));
-    expect(old.status).toBe("duplicate"); // 統合済みの候補は、同じ抽選として整理（削除せず残す）
-    expect(old.lottery_id).toBe(b.lottery_id);
-    expect(old.reasons[0]).toContain("続報");
+    expect(old.status).toBe("auto_registered");
     const l = await lots();
     expect(l).toHaveLength(1);
     expect(l[0].apply_method).toBe("web");
     expect(l[0].result_date ?? l[0].result_at).toBeTruthy(); // 他の情報源から補った項目が抽選に入っている
     expect(l[0].conditions_text).toContain("会員登録");
+    const done = (await sys.from("lotteries").select("apply_deadline_precision,cautions").eq("id", l[0].id).single()).data as unknown as { apply_deadline_precision: string; cautions: { code: string }[] };
+    expect(done.apply_deadline_precision).not.toBe("unknown"); // 続報で締切が補われた
+    expect(done.cautions.map((c) => c.code)).not.toContain("deadline_unknown");
   });
 
   it("2) 情報源間で食い違う項目（受取方法）は、どちらにも決めず矛盾として記録し、注意付きで自動登録する（Stage 7A）。情報充実度は下げない", async () => {
@@ -127,16 +125,13 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     await addX("911000002", "q6d_official", "統合系列6D 本店で6D商品2の抽選受付中（配送でお届け）");
     await run();
     const b = await candBy("x:911000002");
-    // 受取方法の食い違いは応募機会の把握に致命的ではないため、確認待ちにせず注意付きで登録する（どちらの値かは決めず、矛盾として記録して注意に残す）
-    expect(b.status).toBe("auto_registered");
-    expect(dr(b).fields?.receiveMethod?.state).toBe("conflict");
-    expect(dr(b).assessment?.conflict).toContain("受取方法");
-    expect(["A", "B"]).toContain(dr(b).assessment?.rank); // 情報は揃っている（ランクは下げず、矛盾を別に示す）
-    expect(b.reasons.join()).toContain("注意付き");
-    const cautions = ((await sys.from("lotteries").select("cautions,confidence").eq("id", b.lottery_id!).single()).data as unknown as { cautions: { code: string }[]; confidence: string });
+    // Stage 9A: 締切の無い先の候補も登録済みなので、続報は同じ抽選として補完する。受取方法の食い違いは、どちらの値かは決めず（上書きせず）相違の注意として残す
+    expect(b.status, JSON.stringify(b.reasons)).toBe("duplicate");
+    const cautions = ((await sys.from("lotteries").select("cautions,confidence,receive_method").eq("id", b.lottery_id!).single()).data as unknown as { cautions: { code: string }[]; confidence: string; receive_method: string });
+    expect(cautions.receive_method).toBe("store"); // 採用中の値を上書きしない
     expect(cautions.cautions.map((c) => c.code)).toContain("conflict_receiveMethod");
     expect(cautions.confidence).toBe("conflict");
-    expect((await lots()).length).toBe(2); // 1件目と、注意付きで登録された2件目
+    expect((await lots()).length).toBe(2); // 1件目と、2件目（二重登録しない）
   });
 
   it("3) 補足投稿（応募条件だけを説明する投稿）は、引用元の投稿で対象が一意に特定できれば、商品・締切が無くても既存候補へ補完する", async () => {
@@ -145,7 +140,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     await addX("911000010", "q6d_official", "統合系列6D 本店で6D商品3の抽選を開始。当選発表は後日");
     await run();
     const target = await candBy("x:911000010");
-    expect(target.status).toBe("pending");
+    expect(target.status).toBe("auto_registered"); // Stage 9A: 締切が未発表でも登録する
     expect(dr(target).xpost?.id).toBe("911000010");
     // 補足投稿: 購入履歴の条件だけ。商品・締切・店舗は書かれていない。元の投稿を引用している
     plan = { chain: "", store: "", product: null, conditions: "過去に購入履歴のある方のみ応募可能です" };
@@ -155,14 +150,13 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     expect(sup.status).toBe("excluded");
     expect(sup.reasons[0]).toContain("補足投稿");
     expect(dr(sup).mergedInto).toBe(target.id);
-    const after = await candBy("x:911000010");
-    expect(dr(after).input?.conditionsText).toContain("購入履歴");
-    expect(dr(after).mergeLog?.[0]).toMatchObject({ kind: "supplement" });
-    expect(dr(after).fields?.conditions?.source.url).toContain("911000011");
+    // 補足の内容は、登録済みの抽選の応募条件として補われる（未登録のときだけ。手動編集された抽選には触れない）
+    const lot = (await sys.from("lotteries").select("conditions_text").eq("id", target.lottery_id!).single()).data as unknown as { conditions_text: string };
+    expect(lot.conditions_text).toContain("購入履歴");
   });
 
   it("4) 補足投稿の対象が複数あって一意に決まらない場合は、自動補完せず関連候補として記録する（同じアカウントというだけでは統合しない）", async () => {
-    // 同じ公式アカウント・同じ系列で、追跡中（確認待ち）の候補が複数ある状態にする（別の商品の予告を1件追加。Stage 7A で情報不足の候補は注意付きで登録されるようになったため）
+    // 同じ公式アカウント・同じ系列で、登録済み（または確認待ち）の候補が複数ある状態にする（別の商品の予告を1件追加）
     await sys.from("products").insert({ household_id: hid, official_name: "6D商品4", packs_per_box: 20 });
     plan = { chain: "統合系列6D", store: "本店", product: "6D商品4", start: jst(2, 10), result: jst(9, 0) };
     await addX("911000019", "q6d_official", "統合系列6D 本店で6D商品4の抽選を予告（詳細は後日）");
@@ -175,12 +169,12 @@ describe.skipIf(!dbTestsEnabled)("Stage 6D", () => {
     await run();
     const sup = await candBy("x:911000021");
     // 同じ公式アカウント・同じ系列の候補が複数あるため、一意に特定できない
-    expect(sup.status).toBe("pending");
+    expect(sup.status, JSON.stringify(sup.reasons)).toBe("pending");
     expect((dr(sup).related ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
   it("5) 情報充実度 D・E の候補は、要手動確認へ送らず、低優先度の自動追跡・再調査にとどめる", async () => {
-    plan = { chain: "低情報系列6D", store: "", product: "6D商品" };
+    plan = { chain: "低情報系列6D", store: "", product: "6D商品" }; // 憶測の表現（模様）・日時なし: 確定した抽選か判断できないため、登録せず追跡する
     await addWeb("low1", "低情報系列6D 6D商品 抽選を予定している模様（詳細不明の情報です。続報をお待ちください）");
     await run();
     const c = await candBy(U("low1"));

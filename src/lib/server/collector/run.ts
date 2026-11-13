@@ -48,14 +48,14 @@ import { judgeForm } from "@/lib/lottery-form";
 import { judgeRegion, isRegionReason, regionExclusionOf } from "@/lib/collector/region";
 import { decideRegistration, isUnmanagedConflict } from "@/lib/collector/attention";
 import { classifyReviewReasons } from "@/lib/collector/review-reasons";
-import { autoCompleteLottery } from "@/lib/server/collector/complete";
-import { classifyStage, hasLotteryWording, STAGE_LABEL } from "@/lib/collector/stage";
+import { autoCompleteConditions, autoCompleteLottery } from "@/lib/server/collector/complete";
+import { ageDaysOf, classifyStage, hasLotteryWording, isSpeculative, STAGE_LABEL } from "@/lib/collector/stage";
 import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
 import { assessCompleteness } from "@/lib/collector/completeness";
 import { classifySource, conflictLabels, FIELD_LABEL, mergeSides, provenanceFor, type FieldSource, type SourceContext } from "@/lib/collector/fields";
 import { isSupplement, matchOpen, matchSupplement, type OpenLite } from "@/lib/collector/supplement";
-import { loadOpen, loadSourceCtx } from "@/lib/server/collector/open";
+import { loadOpen, loadRecentRegistered, loadSourceCtx } from "@/lib/server/collector/open";
 import type { RequirementTag } from "@/lib/lottery-taxonomy";
 import { lotteryRow } from "@/lib/lottery-payload";
 import type { Json } from "@/types/database";
@@ -357,14 +357,19 @@ export async function reserveBudget(deps: CollectDeps, snap: BudgetSnapshot | nu
 
 export { isReady };
 
+/** 手動編集の判定の許容時間（自動処理の更新から、最終更新までの差。これを超えたら手動編集とみなす） */
+const MANUAL_EDIT_TOLERANCE_MS = 120_000;
+
 export async function appendSourceUrl(db: Db, lotteryId: string, url: string): Promise<boolean> {
-  const { data } = await db.from("lotteries").select("source_urls").eq("id", lotteryId).maybeSingle();
+  const { data } = await db.from("lotteries").select("source_urls,updated_at,cautions_updated_at,created_at").eq("id", lotteryId).maybeSingle();
   if (!data) return false;
   const cur = data.source_urls ?? [];
   if (cur.includes(url) || cur.length >= 10) return false;
   // 抽選の確定情報には触れず、情報源URLの追加だけを行う
-  // 自動処理による更新の印（cautions_updated_at）も更新する。利用者の手動編集と区別して、注意付きの抽選の自動補完（Stage 7A）を止めないため
-  const { error } = await db.from("lotteries").update({ source_urls: [...cur, url], cautions_updated_at: new Date().toISOString() }).eq("id", lotteryId);
+  // 自動処理による更新の印（cautions_updated_at）も更新する。利用者の手動編集と区別して、注意付きの抽選の自動補完（Stage 7A）を止めないため。
+  // ただし、すでに手動で編集された抽選（最終更新が印より十分後）では印を更新しない（更新すると、手動編集の記録が消え、自動補完が手動の値を上書きしてしまう。Stage 9A）
+  const edited = new Date(data.updated_at).getTime() - new Date(data.cautions_updated_at ?? data.created_at).getTime() > MANUAL_EDIT_TOLERANCE_MS;
+  const { error } = await db.from("lotteries").update({ source_urls: [...cur, url], ...(edited ? {} : { cautions_updated_at: new Date().toISOString() }) }).eq("id", lotteryId);
   return !error;
 }
 
@@ -683,9 +688,19 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   let mergeLog: Record<string, unknown> | null = null;
   if (isSupplement(input)) {
     // 補足投稿（応募条件・発表方法だけの投稿）: 引用元・共通URL・同じ公式アカウント×系列×時刻で対象が一意に特定できるときだけ補完する
-    const sm = matchSupplement(openAll, { input, postId, quotedId, replyToId: q.post?.replyToId, account: (q.post?.username ?? sc.account ?? "").toLowerCase() || undefined, postedAt: q.post?.createdAt || nowIso, urls: [q.url, ...(input.sourceUrls ?? [])] }, c.id);
+    // Stage 9A: 補完先は、確認待ちの候補と、最近自動登録した抽選の元の候補の両方から探す（一意に決まらなければ補完しない）
+    const registered = await loadRecentRegistered(db, deps.householdId, sctx).catch(() => []);
+    const sm = matchSupplement([...openAll, ...registered], { input, postId, quotedId, replyToId: q.post?.replyToId, account: (q.post?.username ?? sc.account ?? "").toLowerCase() || undefined, postedAt: q.post?.createdAt || nowIso, urls: [q.url, ...(input.sourceUrls ?? [])] }, c.id);
     relatedIds = sm.related;
-    if (sm.target) {
+    const rt = sm.target ? registered.find((r) => r.id === sm.target!.id) : undefined;
+    if (rt && input.conditionsText?.trim()) {
+      // 補完先が、すでに自動登録された抽選のとき（日時が不明でも先に登録するため）は、その抽選の応募条件を補う（未登録のときだけ。手動編集された抽選には触れない）
+      const done = await autoCompleteConditions(db, rt.lotteryId, input.conditionsText).catch(() => null);
+      await recordMergedSource(db, rt.lotteryId, { url: q.url, collectedAt: c.fetched_at ?? nowIso, chainName: input.chain.name, mergedAt: nowIso, reason: "補足投稿（応募条件）", candidateId: c.id, snapshot: snapshotOfInput(input) }).catch(() => false);
+      await finish("skipped", { status: "excluded", triage: "auto_exclude", triage_reason: "補足投稿を登録済みの抽選へ統合", reasons: [`補足投稿を、登録済みの抽選（${rt.lotteryId.slice(0, 6)}）の応募条件として${done?.updated ? "補いました" : "確認しました（すでに登録がある、または手動で編集された抽選のため変更していません）"}`], draft: { input, summary: draft.summary, fields: myFields, mergedInto: rt.id, supplement: true } }, { excluded: 1 });
+      return { usedAi: true, registered: false, aiFailed: false };
+    }
+    if (sm.target && !rt) {
       const tgt = sm.target;
       const m = mergeSides({ input: tgt.input, summary: tgt.summary, fields: tgt.fields, source: tgt.source }, { input, summary: draft.summary, fields: myFields, source: mySource });
       const tRow = (await db.from("collection_candidates").select("draft,triage").eq("id", tgt.id).maybeSingle()).data;
@@ -821,8 +836,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const reasons = [...(conflict ? [conflict] : []), ...stageGap, ...ev.reasons, ...missing, ...dups.map((d) => d.reason)];
   // 登録の判定（Stage 7A）: A=十分 → 通常登録 / B=情報不足・軽微な矛盾 → 注意付きで登録 / C=抽選として成立するか判断できない → 確認待ち
   const chainRow = data.chains.find((x) => x.id === input.chain.id);
-  const decision = decideRegistration({ input, verdict: ev.verdict, verdictReasons: ev.reasons, missing, fields: myFields, duplicateCount: dups.length, stage, modePending: draft.modePending, textConflict: typeof conflictText === "string" ? conflictText : null, chainStoreSelectDefault: !!chainRow?.storeSelectDefault, storeResolved: !missing.some((m) => /店舗を確実に特定できません/.test(m)), now: nowIso });
-  const canRegisterNow = (ev.verdict === "match" || ev.verdict === "review") && decision.grade !== "C";
+  const decision = decideRegistration({ input, verdict: ev.verdict, verdictReasons: ev.reasons, missing, fields: myFields, duplicateCount: dups.length, stage, modePending: draft.modePending, textConflict: typeof conflictText === "string" ? conflictText : null, chainStoreSelectDefault: !!chainRow?.storeSelectDefault, storeResolved: !missing.some((m) => /店舗を確実に特定できません/.test(m)), now: nowIso, wording, sourceAgeDays: ageDaysOf(q.post?.createdAt, deps.now), speculative: isSpeculative([q.post?.text, q.post?.quoted?.text, q.card, q.context, q.title, result.extraction.notes]) });
+  // Stage 9A: 受付前（upcoming）・日時が未発表の告知も、抽選と認識できれば登録する（日時は未確認として保持し、続報で補う）
+  const canRegisterNow = (ev.verdict === "match" || ev.verdict === "review" || ev.verdict === "upcoming") && decision.grade !== "C";
   // 追跡する予告（受付前・詳細未発表）: 要手動確認へ送らず、続報を待って保持する。受付開始が近いほど短い間隔で再確認する
   if (wantTrack && !canRegisterNow) {
     const dueAtT = due ? new Date(due.due_at) : null;
@@ -1369,17 +1385,24 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
 export async function recheckPages(deps: CollectDeps, opts: { max: number; recheckHours: number; timeLeft: () => number }): Promise<{ checked: number; changed: number }> {
   const { db, householdId, now } = deps;
   const before = new Date(now.getTime() - opts.recheckHours * 3600_000).toISOString();
-  const { data } = await db
-    .from("collection_candidates")
-    .select("id,dedupe_key,source_url,draft,status,lottery_id,page_hash,due_at,job_state,last_checked_at")
-    .eq("household_id", householdId)
-    .in("job_state", ["completed", "review"])
-    .in("status", ["auto_registered", "pending", "duplicate"])
-    .or(`last_checked_at.is.null,last_checked_at.lt.${before}`)
-    .or(`due_at.is.null,due_at.gt.${now.toISOString()}`)
-    .not("source_url", "is", null)
-    .order("last_checked_at", { ascending: true, nullsFirst: true })
-    .limit(opts.max * 3);
+  const cols = "id,dedupe_key,source_url,draft,status,lottery_id,page_hash,due_at,job_state,last_checked_at";
+  const dueQuery = () =>
+    db
+      .from("collection_candidates")
+      .select(cols)
+      .eq("household_id", householdId)
+      .in("job_state", ["completed", "review"])
+      .in("status", ["auto_registered", "pending", "duplicate"])
+      .or(`last_checked_at.is.null,last_checked_at.lt.${before}`)
+      .or(`due_at.is.null,due_at.gt.${now.toISOString()}`)
+      .not("source_url", "is", null);
+  // Stage 9A: 応募締切が未確認のまま登録した抽選（deadline_unknown）の情報源は、続報で日時が分かる可能性が高いため、先に再確認する（優先順位: 重要情報が不足している抽選）
+  const unknownDl = await db.from("lotteries").select("id").eq("household_id", householdId).eq("source_kind", "auto").is("archived_at", null).contains("cautions", [{ code: "deadline_unknown" }]).limit(40);
+  const unknownIds = (unknownDl.data ?? []).map((r) => r.id as string);
+  const prio = unknownIds.length > 0 ? ((await dueQuery().in("lottery_id", unknownIds).order("last_checked_at", { ascending: true, nullsFirst: true }).limit(opts.max)).data ?? []) : [];
+  const rest = (await dueQuery().order("last_checked_at", { ascending: true, nullsFirst: true }).limit(opts.max * 3)).data ?? [];
+  const seen = new Set(prio.map((r) => r.id));
+  const data = [...prio, ...rest.filter((r) => !seen.has(r.id))];
   let checked = 0;
   let changed = 0;
   for (const c of data ?? []) {

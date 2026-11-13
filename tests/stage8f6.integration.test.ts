@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MockGroupingBrain } from "@/lib/agent/lottery-grouping/mock";
 import { lotteryInputSchema } from "@/lib/lottery-input";
+import { mkApplication } from "./helpers/application";
 import { listSelectCleanup, resolveSelectCleanup, restoreArchived } from "@/lib/server/agent/select-cleanup-service";
 import { saveLottery, setLotteryForm, type Db } from "@/lib/server/lottery-service";
 import { auditSelectFormDuplicates, runLotteryGrouping } from "@/lib/server/agent/lottery-grouping-service";
@@ -79,8 +80,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F-6", () => {
   it("手動の分類は、収集・AI（自動）の保存で上書きされない。解除すると構造からの判別に戻る。応募の記録・店舗の指定方式・期限は変わらない", async () => {
     const { chain, product, lots } = await mkSet("手動", 1, "会員登録が必要です。");
     const id = lots[0];
-    const accountId = (await x(u1).from("accounts").select("id").eq("household_id", h1).limit(1)).data?.[0]?.id as string | undefined;
-    if (accountId) expect((await x(u1).from("applications").insert({ household_id: h1, lottery_id: id, account_id: accountId, state: "applied", applied_at: new Date().toISOString() })).error).toBeNull();
+    await mkApplication(x(u1), h1, chain, id); // 応募の記録（実際のスキーマで作成）
     const appsBefore = (await x(u1).from("applications").select("id,state,result").eq("lottery_id", id).order("id")).data;
     expect((await setLotteryForm(u1, id, "store_independent", actor)).ok).toBe(true);
     let a = await row(id);
@@ -104,18 +104,17 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F-6", () => {
   });
 
   it("店舗選択式の構造（応募時に店舗を選ぶ記載）を持つ抽選を店舗別に登録していても、グループ化しない。重複登録の整理の対象であり、自動で削除・変更しない", async () => {
-    const { lots } = await mkSet("選択", 3, "応募フォームで受取店舗を選択してください。会員登録が必要です。");
+    const { chain: chain0, lots } = await mkSet("選択", 3, "応募フォームで受取店舗を選択してください。会員登録が必要です。");
     const before = await Promise.all(lots.map(row));
     const r = await run(lots[2]);
     expect(r.tier === "auto" || r.status === "applied", `${r.status}/${r.tier}`).toBe(false);
     for (const id of lots) expect((await row(id)).bulk_group_id).toBeNull();
     expect(await Promise.all(lots.map(row))).toEqual(before);
     // 整理候補として洗い出す（読み取りのみ。応募の記録があるカードは protectedIds。削除・統合・変更はしない）
-    const accountId = (await x(u1).from("accounts").select("id").eq("household_id", h1).limit(1)).data?.[0]?.id as string | undefined;
-    if (accountId) expect((await x(u1).from("applications").insert({ household_id: h1, lottery_id: lots[0], account_id: accountId, state: "applied", applied_at: new Date().toISOString() })).error).toBeNull();
+    await mkApplication(x(u1), h1, chain0, lots[0]); // 応募の記録（実際のスキーマで作成）
     const cleanup = (await auditSelectFormDuplicates(u1, h1)).find((c) => lots.every((id) => c.perStoreIds.includes(id)));
     expect(cleanup, "整理候補に含まれる").toBeTruthy();
-    if (accountId) expect(cleanup!.protectedIds).toEqual([lots[0]]);
+    expect(cleanup!.protectedIds).toEqual([lots[0]]);
     expect(await Promise.all(lots.map(row))).toEqual(before);
     expect((await u1.from("lotteries").select("id").in("id", lots)).data).toHaveLength(3);
   });
@@ -157,23 +156,21 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F-6", () => {
       expect(r.ok, JSON.stringify(r)).toBe(true);
       per.push(r.ok ? r.value.id : "");
     }
-    const accountId = (await x(u1).from("accounts").select("id").eq("household_id", h1).limit(1)).data?.[0]?.id as string | undefined;
-    if (accountId) expect((await x(u1).from("applications").insert({ household_id: h1, lottery_id: per[0], account_id: accountId, state: "applied", applied_at: new Date().toISOString() })).error).toBeNull();
+    await mkApplication(x(u1), h1, chain, per[0]); // 応募の記録（実際のスキーマで作成）
     const view = (await listSelectCleanup(u1, h1)).find((c) => per.every((id) => c.cards.some((k) => k.id === id)));
     expect(view, "整理候補に出る").toBeTruthy();
     expect(view!.selectCardId).toBe(sel.ok ? sel.value.id : "");
-    expect(view!.cards.filter((k) => k.protectedCard).map((k) => k.id)).toEqual(accountId ? [per[0]] : []);
+    expect(view!.cards.filter((k) => k.protectedCard).map((k) => k.id)).toEqual([per[0]]);
     // 画面から渡された別のkeyでは実行できない
     expect((await resolveSelectCleanup(u1, h1, { key: "unknown", decision: "consolidate" }, actor)).ok).toBe(false);
     const r = await resolveSelectCleanup(u1, h1, { key: view!.key, decision: "consolidate" }, actor);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const archivedRows = (await x(u1).from("lotteries").select("id,archived_at").in("id", per)).data as { id: string; archived_at: string | null }[];
     expect(archivedRows).toHaveLength(2); // 物理削除しない
-    if (accountId) {
-      expect(archivedRows.find((a) => a.id === per[0])!.archived_at).toBeNull(); // 応募の記録があるカードは退避しない
-      expect(archivedRows.find((a) => a.id === per[1])!.archived_at).not.toBeNull();
-      expect((await x(u1).from("applications").select("id").eq("lottery_id", per[0])).data).toHaveLength(1);
-    }
+     expect(archivedRows.find((a) => a.id === per[0])!.archived_at).toBeNull(); // 応募の記録があるカードは退避しない
+     expect(archivedRows.find((a) => a.id === per[1])!.archived_at).not.toBeNull();
+     expect((await x(u1).from("applications").select("id").eq("lottery_id", per[0])).data).toHaveLength(1);
+    
     // 元に戻す
     const gone = per.filter((id) => archivedRows.find((a) => a.id === id)!.archived_at);
     for (const id of gone) expect((await restoreArchived(u1, h1, id, actor)).ok).toBe(true);

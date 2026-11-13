@@ -199,9 +199,13 @@ describe("Stage 7A: 自動登録の判定（A=通常 / B=注意付き / C=確認
     expect(c({ missing: ["商品マスターに未登録の商品です（商品確認待ち）: 「X」"] }).grade).toBe("C");
     expect(c({ missing: ["情報源URLがありません"] }).grade).toBe("C");
     expect(c({ duplicateCount: 1 }).grade).toBe("C");
-    expect(c({ stage: "teaser" }).grade).toBe("C");
-    expect(c({ verdict: "upcoming" }).grade).toBe("C");
-    expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial" }).grade).toBe("C");
+    // Stage 9A: 日時が未発表・不明・受付前でも、抽選の告知と認識できれば登録する（B）。抽選の文言が無いもの・古くて締切不明のものだけ確認待ち
+    expect(c({ stage: "teaser" }).grade).not.toBe("C");
+    expect(c({ verdict: "upcoming" }).grade).not.toBe("C"); // 受付前でも、詳細が確定していれば通常の登録
+    expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial" }).grade).toBe("B");
+    expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "teaser", wording: false }).grade).toBe("C");
+    expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial", sourceAgeDays: 30 }).grade).toBe("C");
+    expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial", sourceAgeDays: 3 }).grade).toBe("B");
     expect(c({ textConflict: "別の抽選の情報が混ざっています" }).grade).toBe("C");
     expect(c({ verdict: "exclude" }).grade).toBe("C");
     // 日付が大きく離れた締切の食い違いは、別の抽選の可能性があるため確認待ち
@@ -210,6 +214,14 @@ describe("Stage 7A: 自動登録の判定（A=通常 / B=注意付き / C=確認
     // 系列・店舗・商品の食い違いも確認待ち
     const fields2: FieldMap = { items: { value: "A", source: { url: "a", kind: "list_site", origin: "a", at: "" }, state: "conflict", origins: [], alt: { value: "B", source: { url: "b", kind: "list_site", origin: "b", at: "" } } } };
     expect(c({ fields: fields2 }).grade).toBe("C");
+  });
+  it("Stage 9A: 応募締切が不明でも登録し、『未確認』の注意を残す（推測で日時を入れない）。公式な日時が分かれば自動補完で注意が消える", () => {
+    const d = decideRegistration(ctx({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial" }));
+    expect(d.grade).toBe("B");
+    expect(d.cautions.map((x) => x.code)).toContain("deadline_unknown");
+    expect(d.cautions.find((x) => x.code === "deadline_unknown")!.field).toBe("applyDeadline");
+    // 締切が分かる通常の告知には、この注意は付かない
+    expect(decideRegistration(ctx({})).cautions.map((x) => x.code)).not.toContain("deadline_unknown");
   });
   it("軽微な矛盾（本文の日付の食い違いなど）は注意付きで登録する", () => {
     const d = decideRegistration(ctx({ textConflict: "当選発表日が本文内で食い違っています" }));
@@ -253,6 +265,17 @@ describe("Stage 7A: 情報の自動補完・注意の解除", () => {
     expect(p.patch.receiveMethod).toBe("store");
     expect(p.cautions.map((c) => c.code)).toEqual(["store_unconfirmed"]);
     expect(p.cautionsChanged).toBe(true);
+  });
+  it("Stage 9A: 締切が未確認で登録した抽選に、続報で締切・応募開始が分かれば補い、『未確認』の注意を解除する。手動で入れた値は上書きしない", () => {
+    const unk = f({ applyDeadline: EMPTY_FLEX });
+    const p = planCompletion(unk, f({ applyStart: date("2026-11-18"), applyDeadline: date("2026-11-25") }), cs("deadline_unknown"), { official: false, now: "2026-11-09T00:00:00Z" });
+    expect(p.patch.applyDeadline?.date).toBe("2026-11-25");
+    expect(p.patch.applyStart?.date).toBe("2026-11-18");
+    expect(p.filled).toEqual(expect.arrayContaining(["応募締切", "応募開始"]));
+    expect(p.cautions.map((c) => c.code)).not.toContain("deadline_unknown");
+    // すでに応募開始がある場合は上書きしない
+    const q = planCompletion(f({ applyStart: date("2026-11-01"), applyDeadline: EMPTY_FLEX }), f({ applyStart: date("2026-11-18"), applyDeadline: date("2026-11-25") }), cs("deadline_unknown"), { official: false, now: "2026-11-09T00:00:00Z" });
+    expect(q.patch.applyStart).toBeUndefined();
   });
   it("すでに値がある項目は上書きしない。当選発表日の相違は新しい注意として追加する", () => {
     const p = planCompletion(f({ resultDate: date("2026-11-25") }), f({ resultDate: date("2026-11-27") }), [], { official: false, now: "2026-11-09T00:00:00Z" });

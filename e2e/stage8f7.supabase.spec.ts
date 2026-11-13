@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
+import { mkApplication } from "../tests/helpers/application";
 
 /**
  * Stage 8F-7 の画面確認: 店舗選択式の二重登録の整理候補（実Supabaseのテスト世帯・架空データ・モバイル幅）。
@@ -64,12 +65,8 @@ test("店舗選択式の整理候補: 退避は記録の無いカードだけ・
   const sel = await mk(phantom, { store_mode: "select_on_apply" });
   const l1 = await mk(s1);
   const l2 = await mk(s2);
-  const { data: accs } = await a.from("accounts").select("id").eq("household_id", hid).limit(1);
-  const accountId = accs?.[0]?.id as string | undefined;
-  if (accountId) {
-    const { error } = await a.from("applications").insert({ household_id: hid, lottery_id: l1, account_id: accountId, state: "applied", applied_at: new Date().toISOString() } as never);
-    expect(error?.message).toBeUndefined();
-  }
+  await mkApplication(a, hid, chain, l1); // 応募の記録（実際のスキーマで作成）
+  const accountId = true;
 
   await page.goto("/settings/lottery-grouping");
   const panel = page.getByTestId("select-cleanup");

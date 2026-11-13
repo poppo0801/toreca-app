@@ -15,6 +15,7 @@ const MANUAL_EDIT_TOLERANCE_MS = 120_000;
 type FlexCols = { precision: string; date: string | null; at: string | null };
 
 const COLS = {
+  applyStart: ["apply_start_precision", "apply_start_date", "apply_start_at"],
   resultDate: ["result_precision", "result_date", "result_at"],
   applyDeadline: ["apply_deadline_precision", "apply_deadline_date", "apply_deadline_at"],
   procedureStart: ["procedure_start_precision", "procedure_start_date", "procedure_start_at"],
@@ -42,6 +43,7 @@ export async function autoCompleteLottery(db: Db, lotteryId: string, incoming: C
   const r = row as unknown as Record<string, string | null>;
   const flex = (k: FlexKey) => flexToInput(dbToFlex(r[COLS[k][0]] ?? "unknown", r[COLS[k][1]] ?? null, r[COLS[k][2]] ?? null));
   const cur: CompletionFields = {
+    applyStart: flex("applyStart"),
     resultDate: flex("resultDate"),
     applyDeadline: flex("applyDeadline"),
     procedureStart: flex("procedureStart"),
@@ -72,4 +74,23 @@ export async function autoCompleteLottery(db: Db, lotteryId: string, incoming: C
   update.cautions_updated_at = new Date().toISOString();
   const { error } = await db.from("lotteries").update(update as never).eq("id", lotteryId);
   return error ? { updated: false, filled: [] } : { updated: true, filled: plan.filled };
+}
+
+/**
+ * 補足投稿（応募条件だけを説明する投稿）で、登録済みの注意付き抽選の応募条件を補う（Stage 9A）。
+ * 応募条件が未登録のときだけ補う（値のある項目は上書きしない）。手動編集された抽選・自動収集でない抽選には触れない。補ったら「応募条件が未確認」の注意を解除する。
+ */
+export async function autoCompleteConditions(db: Db, lotteryId: string, conditionsText: string): Promise<CompleteResult> {
+  const text = conditionsText.trim().slice(0, 2000);
+  if (!text) return { updated: false, filled: [] };
+  const { data: row } = await db.from("lotteries").select("*").eq("id", lotteryId).maybeSingle();
+  if (!row) return { updated: false, filled: [], skipped: "not_found" };
+  if (row.source_kind !== "auto" || row.archived_at) return { updated: false, filled: [], skipped: "not_auto" };
+  const base = new Date(row.cautions_updated_at ?? row.created_at).getTime();
+  if (new Date(row.updated_at).getTime() - base > MANUAL_EDIT_TOLERANCE_MS) return { updated: false, filled: [], skipped: "manual_edit" };
+  if ((row.conditions_text ?? "").trim()) return { updated: false, filled: [] };
+  const cautions = ((Array.isArray(row.cautions) ? row.cautions : []) as unknown as Caution[]).filter((c) => c.code !== "conditions_unknown");
+  const hasConflict = cautions.some((c) => c.code.startsWith("conflict_") || c.code === "deadline_conflict" || c.code === "text_conflict");
+  const { error } = await db.from("lotteries").update({ conditions_text: text, cautions: cautions as unknown as Json, confidence: confidenceOf({}, cautions.length > 0, hasConflict), cautions_updated_at: new Date().toISOString() } as never).eq("id", lotteryId);
+  return error ? { updated: false, filled: [] } : { updated: true, filled: ["応募条件"] };
 }

@@ -66,3 +66,13 @@ export async function loadOpen(db: Db, householdId: string, ctx: SourceContext, 
   const { data } = await q;
   return (data ?? []).map((r) => toOpenLite(r as OpenRow, ctx)).filter((x): x is OpenLite => !!x);
 }
+
+/** 最近、自動登録した抽選の元の候補（Stage 9A）。補足投稿（応募条件だけの投稿）の補完先の探索に使う。抽選IDも返す */
+export async function loadRecentRegistered(db: Db, householdId: string, ctx: SourceContext, days = 14): Promise<(OpenLite & { lotteryId: string })[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data } = await db.from("collection_candidates").select("id,source_url,created_at,draft,lottery_id").eq("household_id", householdId).eq("status", "auto_registered").not("lottery_id", "is", null).gte("created_at", since).limit(200);
+  return (data ?? []).flatMap((r) => {
+    const o = toOpenLite(r as OpenRow, ctx);
+    return o && r.lottery_id ? [{ ...o, lotteryId: r.lottery_id as string }] : [];
+  });
+}

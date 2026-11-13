@@ -10,7 +10,7 @@
 import type { Caution } from "@/lib/collector/attention";
 import type { LotteryInput } from "@/lib/lottery-input";
 
-export type CompletionFields = Pick<LotteryInput, "resultDate" | "applyDeadline" | "procedureStart" | "procedureDeadline" | "receiveStart" | "receiveDeadline" | "receiveMethod" | "applyMethod">;
+export type CompletionFields = Pick<LotteryInput, "resultDate" | "applyDeadline" | "procedureStart" | "procedureDeadline" | "receiveStart" | "receiveDeadline" | "receiveMethod" | "applyMethod"> & Partial<Pick<LotteryInput, "applyStart">>;
 export type CompletionKey = keyof CompletionFields;
 
 type Flex = { precision: string; date?: string | null; time?: string | null } | undefined;
@@ -29,7 +29,7 @@ export interface CompletionPlan {
   cautionsChanged: boolean;
 }
 
-const LABEL: Record<CompletionKey, string> = { resultDate: "当選発表日", applyDeadline: "応募締切", procedureStart: "購入開始", procedureDeadline: "購入期限", receiveStart: "受取開始", receiveDeadline: "受取期限", receiveMethod: "受取方法", applyMethod: "応募方法" };
+const LABEL: Record<CompletionKey, string> = { applyStart: "応募開始", resultDate: "当選発表日", applyDeadline: "応募締切", procedureStart: "購入開始", procedureDeadline: "購入期限", receiveStart: "受取開始", receiveDeadline: "受取期限", receiveMethod: "受取方法", applyMethod: "応募方法" };
 
 export function planCompletion(cur: CompletionFields, inc: CompletionFields, cautions: Caution[], opts: { official: boolean; now: string }): CompletionPlan {
   const patch: Partial<CompletionFields> = {};
@@ -46,7 +46,7 @@ export function planCompletion(cur: CompletionFields, inc: CompletionFields, cau
   };
 
   // ---- 日付: 不足は補う。食い違いは上書きせず、注意を追加する
-  for (const k of ["resultDate", "procedureStart", "procedureDeadline", "receiveStart", "receiveDeadline"] as const) {
+  for (const k of ["applyStart", "resultDate", "procedureStart", "procedureDeadline", "receiveStart", "receiveDeadline"] as const) {
     if (!known(inc[k])) continue;
     if (!known(cur[k])) {
       (patch as Record<string, unknown>)[k] = inc[k];
@@ -70,12 +70,18 @@ export function planCompletion(cur: CompletionFields, inc: CompletionFields, cau
     drop("apply_method_unclear");
   }
 
+  // 受取方法・応募方法が、双方に分かっていて食い違うときは、上書きせず相違の注意を追加する（Stage 9A）
+  for (const k of ["receiveMethod", "applyMethod"] as const) {
+    if (cur[k] !== "unknown" && inc[k] !== "unknown" && cur[k] !== inc[k]) add({ code: `conflict_${k}`, field: k, message: `${LABEL[k]}に相違があります（${cur[k]} / ${inc[k]}）。確認できるまで採用中の値は暫定です`, values: [String(cur[k]), String(inc[k])], at: opts.now });
+  }
+
   // ---- 応募締切
   const cd = dateOf(cur.applyDeadline);
   const id = dateOf(inc.applyDeadline);
   if (id && !cd) {
     patch.applyDeadline = inc.applyDeadline;
     filled.push(LABEL.applyDeadline);
+    drop("deadline_unknown");
   } else if (id && cd && id !== cd) {
     const gap = Math.abs(Date.parse(cd) - Date.parse(id)) / 86_400_000;
     const hasProvisional = next.some((c) => c.code === "deadline_conflict");

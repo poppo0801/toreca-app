@@ -621,7 +621,13 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     }
     if (isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: theirStart, deadline: theirDeadline }, today)) continue;
     const unconf = mine.cls === "unconfirmed" && bucket === "same";
-    if (bucket === "same" && sameSet && !unknownEither) {
+    // Stage 9A: 応募締切が未確認のまま自動登録した抽選（未確認の注意あり・登録から30日以内）に、同じ店舗・同じ商品の続報で日時が分かったときは、同じ抽選の続報として扱う（自動補完の対象）。
+    // 既存の側に確定した締切がある場合・店舗が違う場合・登録から長く経つ場合は、従来どおり判断を保留する（別の開催回・別の店舗の誤統合を防ぐ）
+    const pendingAge = (Date.parse(`${today}T00:00:00Z`) - Date.parse(l.createdAt)) / 86_400_000;
+    const awaitingDeadline = theirDeadline === null && l.sourceKind === "auto" && (l.cautions ?? []).some((c) => c.code === "deadline_unknown" && !c.ackAt) && Number.isFinite(pendingAge) && pendingAge <= 30;
+    if (bucket === "same" && sameSet && awaitingDeadline && myDeadline !== null && mine.cls === "fixed") {
+      out.push({ lotteryId: l.id, level: "high", reason: "締切が未確認で登録済みの同じ店舗・同じ商品の抽選の続報です（日時が判明したため、同じ抽選として補完します）" });
+    } else if (bucket === "same" && sameSet && !unknownEither) {
       out.push({
         lotteryId: l.id,
         level: "high",

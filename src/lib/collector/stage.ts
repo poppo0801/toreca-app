@@ -27,6 +27,13 @@ export function classifyStage(i: { applyStart?: FlexLike; applyDeadline: FlexLik
   return "open";
 }
 
+/** 告知（投稿）からの経過日数。投稿日時が無い・読み取れないときは null（古さを理由に止めない） */
+export function ageDaysOf(postedAt: string | null | undefined, now: Date): number | null {
+  if (!postedAt) return null;
+  const t = Date.parse(postedAt);
+  return Number.isFinite(t) ? Math.max(0, (now.getTime() - t) / 86_400_000) : null;
+}
+
 /** 追跡する予告の段階（受付前、または詳細未発表） */
 export const isTrackableStage = (s: LotteryStage) => s === "teaser" || s === "partial" || s === "upcoming";
 
@@ -36,3 +43,10 @@ export const isTrackableStage = (s: LotteryStage) => s === "teaser" || s === "pa
  */
 const LOTTERY_WORDING = /抽選|当選|応募|エントリー|申込|申し込み/;
 export const hasLotteryWording = (texts: (string | null | undefined)[]) => texts.some((t) => !!t && LOTTERY_WORDING.test(t.normalize("NFKC")));
+
+/**
+ * 憶測・未確定の表現（Stage 9A）。日時が未発表の告知を登録するとき、確定した抽選の告知か判断するために使う。
+ * 「〜の模様」「〜かもしれません」「噂」「詳細不明」など、告知元が確定していない情報を示す表現。
+ */
+const SPECULATIVE = /模様|かもしれ|かも？|噂|うわさ|予想|予測|未確定|詳細不明|ではないか|と思われ|らしい|可能性があ/;
+export const isSpeculative = (texts: (string | null | undefined)[]) => texts.some((t) => !!t && SPECULATIVE.test(t.normalize("NFKC")));
