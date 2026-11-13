@@ -238,6 +238,8 @@ export interface Lottery {
   storeMode?: "fixed" | "select_on_apply" | "none";
   /** 応募時に選べる店舗（取得できたときだけ） */
   selectableStores?: { name: string; prefecture: string }[];
+  /** 抽選形態の記録（8F-6）。source=manual は利用者の設定で、AI・収集は上書きしない。未設定は構造から判別 */
+  formDecl?: { form: "store_select" | "store_independent" | "other"; source: "manual" | "rule" | "ai" } | null;
   campaignId?: string;
   chainId: string;
   storeId: string | null;

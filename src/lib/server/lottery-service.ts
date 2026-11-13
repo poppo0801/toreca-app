@@ -20,6 +20,7 @@ import type { Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
 import { validateLink } from "@/lib/profile-link";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
+import { nextFormColumns, type FormDecl, type FormSource } from "@/lib/lottery-form";
 import type { Database, Json } from "@/types/database";
 import type {
   AppData,
@@ -593,6 +594,10 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       memo: l.memo,
       boxShrinkHint: (l.box_shrink_hint ?? null) as BoxShrinkHint | null,
       storeMode: (l.store_mode ?? "fixed") as "fixed" | "select_on_apply" | "none",
+      formDecl: ((): import("@/types/domain").Lottery["formDecl"] => {
+        const r = l as unknown as { lottery_form?: string | null; lottery_form_source?: string | null };
+        return r.lottery_form && r.lottery_form_source ? ({ form: r.lottery_form, source: r.lottery_form_source } as import("@/types/domain").Lottery["formDecl"]) : null;
+      })(),
       selectableStores: Array.isArray(l.selectable_stores) ? (l.selectable_stores as { name?: unknown; prefecture?: unknown }[]).flatMap((x) => (typeof x?.name === "string" && x.name ? [{ name: x.name, prefecture: typeof x.prefecture === "string" ? x.prefecture : "" }] : [])) : [],
       createdAt: l.created_at,
       updatedAt: l.updated_at,
@@ -780,6 +785,9 @@ export async function saveLottery(
       return (ss ?? []).some((r) => storeKey(r.name, chain?.name) === storeKey(newStoreName, chain?.name));
     })(),
   ]);
+  // 抽選形態の記録（8F-6）: 手動の分類を、収集・AIが上書きしないために、保存前の状態を読む
+  const prevForm = id !== null ? ((await (db as any).from("lotteries").select("store_mode,lottery_form_source").eq("id", id).maybeSingle()).data as { store_mode: string | null; lottery_form_source: string | null } | null) : null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const formCols = nextFormColumns({ isNew: id === null, byUser: !opts.autoCollected && !opts.asService, prevMode: prevForm?.store_mode ?? null, prevSource: (prevForm?.lottery_form_source ?? null) as FormSource | null, nextMode: input.storeMode });
   const payload = buildLotteryPayload(input, id, actor);
   const { data, error } = opts.asService && id === null
     ? await db.rpc("save_lottery_tx_as", { p: payload as never, p_actor: actor as string, p_household: householdId })
@@ -801,7 +809,8 @@ export async function saveLottery(
       store_mode: input.storeMode,
       selectable_stores: input.storeMode === "select_on_apply" && input.selectableStores.length > 0 ? input.selectableStores : null,
       requirement_details: sanitizeRequirementDetails(input.requirementDetails) as unknown as Database["public"]["Tables"]["lotteries"]["Update"]["requirement_details"],
-    })
+      ...(formCols ?? {}),
+    } as never)
     .eq("id", data as string);
   if (tax.error) return fail("抽選は保存しましたが、発表方法・応募条件の分類を保存できませんでした。もう一度保存してください");
   if (newStoreName && !storeExisted && !opts.autoCollected && !opts.asService) {
@@ -1667,4 +1676,26 @@ export async function updateProfileSettings(db: Db, profileId: string, raw: Prof
     .maybeSingle();
   if (error) return fail(error.code === "23505" ? "同じ表示名のユーザーが既にいます" : mapDbError(error));
   return data ? ok(undefined) : fail("対象のデータが見つかりません");
+}
+
+/**
+ * 抽選形態を手動で設定・解除する（Stage 8F-6）。手動の設定は、AI・収集・再解析が上書きしない。form=null で設定を解除する（構造からの判別に戻る）。
+ * 店舗の指定方式（store_mode）・応募・当選・購入・通知・期限は変更しない。分類の記録だけを変える。
+ */
+export async function setLotteryForm(db: Db, lotteryId: string, form: FormDecl["form"] | null, actor: string | null): Promise<ServiceResult<void>> {
+  if (!uuid.safeParse(lotteryId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (form !== null && !["store_select", "store_independent", "other"].includes(form)) return fail("抽選形態が不正です");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい列は生成型に含まれない場合がある
+  const { error, data } = await (db as any).from("lotteries").update(form === null ? { lottery_form: null, lottery_form_source: null } : { lottery_form: form, lottery_form_source: "manual" }).eq("id", lotteryId).select("id");
+  if (error) return fail(mapDbError(error));
+  if (!data || data.length === 0) return fail("対象のデータが見つかりません");
+  // 分類が変わったので、この抽選に関する承認待ちのグループ候補は無効にする（次の判定で、新しい分類にもとづいて出し直す）。応募・当選・購入の記録には触れない
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表は生成型に含まれない場合がある
+  const pend = await (db as any).from("lottery_group_proposals").select("id,proposal_key").eq("status", "pending").or(`subject_lottery_id.eq.${lotteryId},lottery_ids.cs.{${lotteryId}}`);
+  // 同じ組の候補を新しい分類で出し直せるよう、無効にした候補のキーを退避する（一意キーの衝突を避ける）
+  for (const p of (pend.data ?? []) as { id: string; proposal_key: string }[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db as any).from("lottery_group_proposals").update({ status: "superseded", decision_note: "form_changed", proposal_key: `${p.proposal_key}~fc${Date.now()}` }).eq("id", p.id).eq("status", "pending");
+  }
+  return ok(undefined);
 }

@@ -16,6 +16,7 @@
  */
 import { detectInjection } from "@/lib/agent/core";
 import { comparePair, pairKey } from "@/lib/agent/lottery-grouping/compare";
+import { judgeForm } from "@/lib/lottery-form";
 import { compareIdentifiers, identifiersFromUrl, type EventIdentifier } from "@/lib/agent/lottery-grouping/identifiers";
 import type { AgentProposal, GGroup, GLottery, GWorld, Mismatch, PairCompare, Tier, VerifiedDecision } from "@/lib/agent/lottery-grouping/types";
 
@@ -175,7 +176,9 @@ export function evidenceSignature(world: GWorld): string {
 }
 /** 判定の定義の版。変えると、過去の「単独」「保留」の記録キーが変わり、新しい定義で再評価される（8F-5。却下・手動で分けた組は別の記録なので、再びまとめない） */
 export const GROUPING_DEFINITION = "def8f5";
-export const peerHashOf = (world: GWorld): string => hash53(`${GROUPING_DEFINITION}#` + world.lotteries.map((l) => l.id).sort().join(",") + "#" + evidenceSignature(world));
+// 8F-6: 抽選形態の記録（手動の設定など）が変わったら、過去の単独・保留の記録を再評価する（キーに含める）
+const formSignature = (world: GWorld): string => [world.subject, ...world.lotteries].flatMap((l) => (l.formDecl ? [`${l.id}:${l.formDecl.form}:${l.formDecl.source}`] : [])).sort().join(",");
+export const peerHashOf = (world: GWorld): string => hash53(`${GROUPING_DEFINITION}#` + world.lotteries.map((l) => l.id).sort().join(",") + "#" + evidenceSignature(world) + "#" + formSignature(world));
 /** 保存済みの文章と、取得したページの本文を合わせた、抽選ごとの文章 */
 export function allEvidence(world: GWorld): Map<string, string[]> {
   const m = new Map<string, string[]>();
@@ -376,9 +379,35 @@ function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: V
   const basisNotes: string[] = [];
   // 店舗選択式の疑い: 応募時に店舗を1つ選ぶ（対象店舗の中から1店舗のみ応募できる）旨の記載・タグがある。店舗ごとに独立した抽選ではなく、1つの抽選で店舗を選ぶ形の可能性が高い（原則グループ化の対象外）。
   // 登録が店舗固定でも、自動にはせず、利用者の確認（候補）に回す
-  const choiceRe = /店舗(の)?(中|うち)から.{0,8}[1一]店舗|店舗を(お)?選(択|び|んで)|応募(する)?店舗を選|[1一]店舗のみ(応募|ご応募)/;
-  const storeChoice = compareSet.some((l) => l.requirementTags.includes("one_store_only") || choiceRe.test(norm(l.conditionsText)) || (evidenceAll.get(l.id) ?? []).some((t) => choiceRe.test(norm(t))));
-  if (storeChoice) dec.mismatches.push({ field: "storeMode", detail: "応募時に店舗を1つ選ぶ（1店舗のみ応募できる）記載があり、店舗選択式の抽選の可能性がある（原則グループ化の対象外。利用者が確認）", severity: "soft" });
+  // 8F-6: 抽選形態は「応募受付の構造」で判別する（lottery-form.ts）。「1店舗のみ応募」「複数店舗への応募は無効」は制限であり、店舗選択式の証拠ではない。
+  //  ・構造が店舗選択式（店舗選択欄・選べる店舗の一覧）→ グループ化ではなく重複登録の整理の対象（single）
+  //  ・利用者が手動で「店舗別独立」に設定 → 制限の記載があっても対象
+  //  ・構造を確認できず、制限の記載がある → 候補（利用者の確認）
+  const forms = compareSet.map((l) => ({
+    l,
+    j: judgeForm({
+      storeMode: l.storeMode,
+      requirementTags: l.requirementTags,
+      texts: [l.conditionsText, ...(evidenceAll.get(l.id) ?? [])],
+      sourceUrls: l.sourceUrls,
+      siblings: compareSet.filter((o) => o.id !== l.id).map((o) => ({ sourceUrls: o.sourceUrls, storeKey: o.storeId })),
+      storeKey: l.storeId,
+      decl: l.formDecl ?? null,
+    }),
+  }));
+  const selectForm = forms.filter((f) => f.j.form === "store_select");
+  const otherForm = forms.filter((f) => f.j.form === "other");
+  if (selectForm.length > 0) {
+    const bySignal = selectForm.some((f) => f.l.storeMode !== "select_on_apply");
+    dec.mismatches.push({ field: "storeMode", detail: bySignal ? "応募時に店舗を選ぶ構造（店舗選択式）の抽選。1つの抽選を店舗ごとに別カードで登録している可能性があり、グループ化ではなく重複登録の整理の対象" : "店舗選択式の抽選（グループ化の対象外）", severity: "hard" });
+  } else if (otherForm.length > 0 && otherForm.some((f) => f.j.basisKind === "manual")) {
+    dec.mismatches.push({ field: "storeMode", detail: "利用者が「その他の抽選」に設定している（店舗別の抽選ではない）", severity: "hard" });
+  }
+  const unresolvedRestriction = forms.some((f) => f.j.restrictionOnly && f.j.form !== "store_independent");
+  if (selectForm.length === 0 && unresolvedRestriction) {
+    dec.mismatches.push({ field: "storeMode", detail: "「1店舗のみ応募」などの制限の記載がある。応募時に店舗を選ぶ構造か、店舗ごとに独立した受付かは確認できない（制限だけでは店舗選択式と断定しない。利用者が確認）", severity: "soft" });
+  }
+  if (forms.length > 0 && forms.every((f) => f.j.form === "store_independent")) basisNotes.push(`抽選形態: 店舗別独立抽選（${forms[0].j.basis.join("・")}）`);
   const involved = compareSet;
   const textsAll = involved.every((l) => (evidenceAll.get(l.id) ?? []).some((t) => t.trim().length > 0));
   if (allPairs.some((c) => c.requirements === "same" && c.requirementsBlank) && !textsAll) {

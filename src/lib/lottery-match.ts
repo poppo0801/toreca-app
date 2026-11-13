@@ -590,8 +590,11 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     const brandChain = master?.chains.find((c) => c.id === l.chainId)?.brandGroup || master?.chains.find((c) => c.id === input.chain.id)?.brandGroup;
     const sameChain = brandChain ? !!input.chain.id && l.chainId === input.chain.id : l.chainId === input.chain.id || (!!lChainName && !!chainName.trim() && chainKey(lChainName) === chainKey(chainName));
     if (!sameChain) continue;
-    const bucket = storeRelation(mine, classify(l.storeId, "", l.storeMode));
-    if (!bucket) continue;
+    const theirs = classify(l.storeId, "", l.storeMode);
+    const bucket = storeRelation(mine, theirs);
+    // 8F-6: 店舗選択式（1件の抽選で応募時に店舗を選ぶ）と、店舗別に登録された同じ告知（同じ情報源URL）。店舗選択式の抽選を店舗ごとの別カードで二重登録しない
+    const selectVsFixed = !bucket && ((mine.cls === "select" && theirs.cls === "fixed") || (mine.cls === "fixed" && theirs.cls === "select"));
+    if (!bucket && !selectVsFixed) continue;
     const theirIds = l.items.map((i) => i.productId);
     const overlap = theirIds.some((id) => productIds.has(id));
     if (!overlap) continue;
@@ -601,6 +604,16 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     const theirStart = l.applyStart ? flexToJstDate(l.applyStart) : null;
     const sameDay = myDeadline !== null && theirDeadline === myDeadline;
     const unknownEither = myDeadline === null || theirDeadline === null;
+    if (selectVsFixed) {
+      if (sameUrl && !isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: theirStart, deadline: theirDeadline }, today)) {
+        out.push(
+          mine.cls === "fixed"
+            ? { lotteryId: l.id, level: "high", reason: "同じ情報源の店舗選択式の抽選が登録済みです（応募時に店舗を選ぶ1件の抽選のため、店舗別のカードは作りません）" }
+            : { lotteryId: l.id, level: "medium", reason: "同じ情報源の抽選が店舗別に登録済みです（店舗選択式の1件の抽選を店舗ごとに登録した可能性があります。応募の記録があるカードは自動で統合しません）" },
+        );
+      }
+      continue;
+    }
     // 同じ情報源URLは、店舗が違わなければ（同じ区分なら）同じ告知。店舗固定式と店舗未確定の組は、店舗が確定していない側の告知なので同一
     if (sameUrl) {
       out.push({ lotteryId: l.id, level: "high", reason: "同じ情報源URLで登録済みです" });

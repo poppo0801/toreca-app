@@ -1,6 +1,7 @@
 import "server-only";
 import type { AgentLLM, AgentUsage } from "@/lib/agent/core";
 import { isPlausiblePeer, pairKey } from "@/lib/agent/lottery-grouping/compare";
+import { findSelectFormCleanup, type SelectFormCleanup } from "@/lib/agent/lottery-grouping/form-cleanup";
 import { auditGroup, type GroupAudit, type ProposalAudit } from "@/lib/agent/lottery-grouping/audit";
 import { parseGroupingProposal } from "@/lib/agent/lottery-grouping/proposal";
 import { evaluateGrouping, type GroupingOutcome } from "@/lib/agent/lottery-grouping/run";
@@ -22,7 +23,7 @@ import { loadSourceSnapshotTexts, saveSourceSnapshots, snapshotsOfFetched } from
 const any = (db: Db) => db as any;
 
 const LOTTERY_COLS =
-  "id,chain_id,store_id,store_mode,campaign_id,apply_start_precision,apply_start_date,apply_start_at,apply_deadline_precision,apply_deadline_date,apply_deadline_at,result_precision,result_date,result_at,apply_method,receive_method,lottery_kind,requirement_tags,requirement_logic,conditions_text,source_urls,bulk_group_id,archived_at,created_at";
+  "id,chain_id,store_id,store_mode,campaign_id,apply_start_precision,apply_start_date,apply_start_at,apply_deadline_precision,apply_deadline_date,apply_deadline_at,result_precision,result_date,result_at,apply_method,receive_method,lottery_kind,requirement_tags,requirement_logic,conditions_text,source_urls,bulk_group_id,archived_at,created_at,lottery_form,lottery_form_source";
 const MAX_PEERS = 400;
 const MAX_EVIDENCE_LOTTERIES = 60;
 
@@ -33,6 +34,7 @@ interface Row {
   result_precision: string; result_date: string | null; result_at: string | null;
   apply_method: string; receive_method: string; lottery_kind: string | null; requirement_tags: string[] | null; requirement_logic: string | null;
   conditions_text: string | null; source_urls: string[] | null; bulk_group_id: string | null; archived_at: string | null; created_at: string;
+  lottery_form?: string | null; lottery_form_source?: string | null;
 }
 
 /** `.in()` の長い一覧を分割して問い合わせる（URLが長くなりすぎないように） */
@@ -85,6 +87,7 @@ export async function loadGroupingWorld(db: Db, householdId: string, lotteryId: 
     applyMethod: r.apply_method, receiveMethod: r.receive_method, kind: r.lottery_kind && r.lottery_kind !== "normal" ? r.lottery_kind : null,
     requirementTags: r.requirement_tags ?? [], requirementLogic: r.requirement_logic, conditionsText: r.conditions_text ?? "", sourceUrls: r.source_urls ?? [],
     groupId: r.bulk_group_id, archived: !!r.archived_at, hasApplication: applied.has(r.id), createdAt: r.created_at,
+    formDecl: r.lottery_form && r.lottery_form_source ? ({ form: r.lottery_form, source: r.lottery_form_source } as GLottery["formDecl"]) : null,
   });
   const subject = toG(subjectRow);
   const lotteries = rows.slice(1).map(toG);
@@ -97,7 +100,7 @@ export async function loadGroupingWorld(db: Db, householdId: string, lotteryId: 
     inChunks(productIds, async (c) => (await a.from("products").select("id,official_name").in("id", c)).data ?? []),
     a.from("lottery_bulk_groups").select("id,chain_id,title,origin").eq("household_id", householdId).is("dissolved_at", null).eq("chain_id", subject.chainId).limit(2000),
     inChunks(evidenceIds, async (c) => (await a.from("lottery_group_events").select("lottery_id,detail").eq("action", "removed").eq("origin", "manual").in("lottery_id", c)).data ?? []),
-    a.from("lottery_group_proposals").select("proposal_key,status,subject_lottery_id,lottery_ids").eq("household_id", householdId).or(`subject_lottery_id.eq.${lotteryId},lottery_ids.cs.{${lotteryId}}`).limit(500),
+    a.from("lottery_group_proposals").select("proposal_key,status,decision_note,subject_lottery_id,lottery_ids").eq("household_id", householdId).or(`subject_lottery_id.eq.${lotteryId},lottery_ids.cs.{${lotteryId}}`).limit(500),
   ]);
   const evidence = new Map<string, string[]>();
   for (const c of cands as { lottery_id: string; draft: unknown }[]) evidence.set(c.lottery_id, [...(evidence.get(c.lottery_id) ?? []), ...textsOfDraft(c.draft)].slice(0, 6));
@@ -126,7 +129,8 @@ export async function loadGroupingWorld(db: Db, householdId: string, lotteryId: 
     const all = [...new Set([...p.lottery_ids, p.subject_lottery_id])].filter((x) => candidateIds.has(x));
     for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) separated.add(pairKey(all[i], all[j]));
   }
-  const knownKeys = new Map<string, string>(((proposals.data ?? []) as { proposal_key: string; status: string }[]).map((p) => [p.proposal_key, p.status]));
+  // 抽選形態の変更で無効にした候補（form_changed）は、記録として数えない（新しい分類にもとづいて出し直す）
+  const knownKeys = new Map<string, string>(((proposals.data ?? []) as { proposal_key: string; status: string; decision_note?: string | null }[]).filter((p) => !(p.status === "superseded" && p.decision_note === "form_changed")).map((p) => [p.proposal_key, p.status]));
   return { subject, lotteries, groups, evidence, separated, knownKeys, productNames };
 }
 
@@ -262,4 +266,23 @@ export async function auditGroupingState(db: Db, householdId: string, opts: { ma
     proposals.push({ proposalId: p.id, oldTier: p.tier, newTier: d.tier, changed: d.tier !== p.tier, reason: d.rationale.slice(0, 200) });
   }
   return { groups, proposals };
+}
+
+// ---------------------------------------------------------------- 店舗選択式の二重登録の整理候補（8F-6。読み取りのみ）
+/**
+ * 1つの抽選を店舗ごとの別カードで登録してしまった可能性のある組（店舗選択式の構造がある店舗別カード）を洗い出す。固定ロジック・AIなし・費用なし。
+ * **何も変更しない**（削除・統合・アーカイブ・店舗の指定方式の変更はしない）。応募の記録があるカードは protectedIds として示し、整理は利用者が判断する。
+ */
+export async function auditSelectFormDuplicates(db: Db, householdId: string, opts: { maxChains?: number } = {}): Promise<SelectFormCleanup[]> {
+  const a = any(db);
+  const { data } = await a.from("lotteries").select("id,chain_id").eq("household_id", householdId).is("archived_at", null).order("created_at", { ascending: false }).limit(2000);
+  const firstOfChain = new Map<string, string>();
+  for (const r of (data ?? []) as { id: string; chain_id: string }[]) if (!firstOfChain.has(r.chain_id)) firstOfChain.set(r.chain_id, r.id);
+  const out: SelectFormCleanup[] = [];
+  for (const id of [...firstOfChain.values()].slice(0, opts.maxChains ?? 200)) {
+    const world = await loadGroupingWorld(db, householdId, id);
+    if (!world) continue;
+    out.push(...findSelectFormCleanup([world.subject, ...world.lotteries], world.evidence));
+  }
+  return out;
 }

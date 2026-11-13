@@ -34,6 +34,8 @@ export interface GLottery {
   conditionsText: string;
   sourceUrls: string[];
   groupId: string | null;
+  /** 利用者・収集が記録した抽選形態（8F-6）。手動（manual）は、構造の判別より優先する。無ければ未設定 */
+  formDecl?: { form: "store_select" | "store_independent" | "other"; source: "manual" | "rule" | "ai" } | null;
   /** 除外・取り下げ済み（グループ化の対象にならない） */
   archived: boolean;
   /** 応募・当選などの記録があるか（表示用。グループ化しても記録は変わらない） */

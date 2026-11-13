@@ -4,6 +4,7 @@
  * 情報源の文章は外部由来のため、実行基盤が「データ」として囲む（その中の指示には従わない）。
  */
 import { ToolRegistry, type AgentTool } from "@/lib/agent/core";
+import { formLabel, judgeForm } from "@/lib/lottery-form";
 import { compareIdentifiers, extractIdentifiers, longestCommonPhrase, relevantExcerpt, type EventIdentifier, type FetchedSource, type IdKind } from "@/lib/agent/lottery-grouping/identifiers";
 import type { PageFetcher } from "@/lib/agent/store-location/tools";
 import { allEvidence, hash53, idsOf } from "@/lib/agent/lottery-grouping/verify";
@@ -52,6 +53,11 @@ export function describeLottery(l: GLottery, world: GWorld): Record<string, unkn
     hasApplication: l.hasApplication,
     /** 情報源の文章が保存されているか（false なら、文言による確認ができない＝「確認できない」であって「異なる」ではない） */
     sourceTextStored: (world.evidence.get(l.id) ?? []).some((x) => x.trim().length > 0),
+    /** 抽選形態（固定ロジックによる判別。参考情報で、AIの判断を縛らない。最終判定は検証層）: 店舗選択式／店舗別独立／その他／未確認。制限（1店舗のみ）の記載だけでは店舗選択式としない */
+    form: ((): { form: string; confidence: string; reasons: string[]; restrictionOnly: boolean } => {
+      const j = judgeForm({ storeMode: l.storeMode, requirementTags: l.requirementTags, texts: [l.conditionsText, ...(world.evidence.get(l.id) ?? [])], sourceUrls: l.sourceUrls, storeKey: l.storeId, decl: l.formDecl ?? null });
+      return { form: formLabel(j.form), confidence: j.confidence, reasons: j.basis, restrictionOnly: j.restrictionOnly };
+    })(),
   };
 }
 const relationSummary = (c: PairCompare): Record<string, string> => ({

@@ -44,6 +44,7 @@ import { applyAccountHint, normUsername, usernameFromPostUrl, type XLink } from 
 import { dropUsernameChain, resolveXChain } from "@/lib/collector/x-chain";
 import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { detectStoreSelect } from "@/lib/collector/store-select";
+import { judgeForm } from "@/lib/lottery-form";
 import { judgeRegion, isRegionReason, regionExclusionOf } from "@/lib/collector/region";
 import { decideRegistration, isUnmanagedConflict } from "@/lib/collector/attention";
 import { classifyReviewReasons } from "@/lib/collector/review-reasons";
@@ -613,6 +614,19 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
     draft.summary.store = ph ? "exact" : "none";
     secondary.push("応募時に店舗選択（店舗は応募者が応募時に選びます）");
+  } else if (input.storeMode !== "select_on_apply" && input.store.id) {
+    // 8F-6: 店舗を1つ特定できても、告知に「応募時に店舗を選ぶ」構造（店舗選択欄）の記載があり、店舗ごとの受付の記載が無ければ、店舗別のカードにせず店舗選択式の1件として登録する
+    // （1つの抽選を店舗ごとの別カードで二重に登録しない）。「1店舗のみ応募」などの制限だけでは店舗選択式としない。特定できた店舗は選べる店舗の1つとして残す
+    const j = judgeForm({ storeMode: input.storeMode ?? "fixed", requirementTags: input.requirementTags, texts: [q.title, q.context, q.card, q.post?.text, input.conditionsText].filter((x): x is string => typeof x === "string"), sourceUrls: input.sourceUrls });
+    if (j.form === "store_select" && j.selectSignals.some((s) => s.code === "select_field")) {
+      const ph = data.stores.find((s) => s.chainId === input.chain.id && s.name === SELECT_STORE_PLACEHOLDER);
+      const known = { name: input.store.name, prefecture: input.store.prefecture ?? "" };
+      input.storeMode = "select_on_apply";
+      input.selectableStores = [...(input.selectableStores ?? []), ...(known.name ? [known] : [])];
+      input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
+      draft.summary.store = ph ? "exact" : "none";
+      secondary.push(`応募時に店舗を選ぶ構造の記載があるため、店舗選択式の1件として登録します（${known.name || "特定できた店舗"}は選べる店舗の1つ）`);
+    }
   }
   // 複数のTCGを案内する投稿では、ポケモンカード以外の明細を外す（ポケモンカードの明細が残るときだけ）
   const dropIdx = new Set(otherTcgItemIndexes(input.items));

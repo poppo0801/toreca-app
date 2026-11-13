@@ -68,22 +68,60 @@ describe("新定義の核心（8F-5）: 条件がそろっていれば、イベ�
     const o3 = mkLottery(blank);
     expect(verifyProposal(mkWorld(s3, [o3]), claim({ memberIds: [o3.id] }), { allowAuto: true }).tier).toBe("suggest");
   });
-  it("店舗選択式の疑い: 『対象店舗の中から1店舗のみ応募』『1店舗のみ』のタグがあれば、条件が一致していても自動にしない（候補。原則対象外のため利用者が確認）", () => {
+  it("制限だけでは店舗選択式と断定しない（8F-6）: 『対象店舗の中から1店舗のみ応募』『1店舗のみ』のタグは、自動にせず候補（構造が不明のため利用者が確認）", () => {
     resetSeq();
     const choiceText = "お一人様につき対象店舗の中から１店舗のみご応募が可能です。";
     const s = mkLottery({ conditionsText: choiceText });
     const o = mkLottery({ conditionsText: choiceText });
     const v = verifyProposal(mkWorld(s, [o]), claim({ memberIds: [o.id] }), { allowAuto: true });
     expect(v.tier).toBe("suggest");
-    expect(v.mismatches.some((m) => m.field === "storeMode" && m.detail.includes("店舗選択式"))).toBe(true);
+    expect(v.mismatches.some((m) => m.field === "storeMode" && m.severity === "soft" && m.detail.includes("断定しない"))).toBe(true);
     const t1 = mkLottery({ requirementTags: ["member", "one_store_only"] });
     const t2 = mkLottery({ requirementTags: ["member", "one_store_only"] });
     expect(verifyProposal(mkWorld(t1, [t2]), claim({ memberIds: [t2.id] }), { allowAuto: true }).tier).toBe("suggest");
-    // 情報源の文章（取得したページ）にあっても同じ
+  });
+  it("構造（店舗選択欄）の記載があれば店舗選択式: 条件の文面でも、取得した情報源の文章でも、グループ化の対象外（single。重複登録の整理の対象）", () => {
+    resetSeq();
+    const f1 = mkLottery({ conditionsText: "応募フォームで受取店舗を選択してください。" });
+    const f2 = mkLottery({ conditionsText: "応募フォームで受取店舗を選択してください。" });
+    const vf = verifyProposal(mkWorld(f1, [f2]), claim({ memberIds: [f2.id] }), { allowAuto: true });
+    expect(vf.tier).toBe("single");
+    expect(vf.mismatches.some((m) => m.field === "storeMode" && m.severity === "hard" && m.detail.includes("店舗選択式"))).toBe(true);
     const e1 = mkLottery();
     const e2 = mkLottery();
     const ev = { [e1.id]: [postText("冬の企画", "A", " 応募時に応募店舗を選んでください。")], [e2.id]: [postText("冬の企画", "B")] };
-    expect(verifyProposal(mkWorld(e1, [e2], { evidence: ev }), claim({ memberIds: [e2.id] }), { allowAuto: true }).tier).toBe("suggest");
+    expect(verifyProposal(mkWorld(e1, [e2], { evidence: ev }), claim({ memberIds: [e2.id] }), { allowAuto: true }).tier).toBe("single");
+  });
+  it("店舗ごとに独立して受付する構造の記載があれば、制限（1店舗のみ）があっても店舗別独立抽選として対象（auto）", () => {
+    resetSeq();
+    const text = "各店舗で受付・抽選を行います。複数店舗への応募は無効です。";
+    const s = mkLottery({ conditionsText: text });
+    const o = mkLottery({ conditionsText: text });
+    const v = verifyProposal(mkWorld(s, [o]), claim({ memberIds: [o.id] }), { allowAuto: true });
+    expect(v.tier).toBe("auto");
+    expect(v.basis.join()).toContain("店舗別独立抽選");
+  });
+  it("利用者の手動の分類が最優先: 手動で店舗別独立→制限があっても対象／手動で店舗選択式・その他→対象外。収集・AIの記録（rule/ai）は手動を上書きできない", () => {
+    resetSeq();
+    const text = "対象店舗の中から1店舗のみ応募できます。";
+    const manual = { form: "store_independent" as const, source: "manual" as const };
+    const a = mkLottery({ conditionsText: text, formDecl: manual });
+    const b = mkLottery({ conditionsText: text, formDecl: manual });
+    expect(verifyProposal(mkWorld(a, [b]), claim({ memberIds: [b.id] }), { allowAuto: true }).tier).toBe("auto");
+    const c = mkLottery({ formDecl: { form: "store_select", source: "manual" } });
+    const d2 = mkLottery();
+    expect(verifyProposal(mkWorld(d2, [c]), claim({ memberIds: [c.id] }), { allowAuto: true }).tier).toBe("single");
+    const o = mkLottery({ formDecl: { form: "other", source: "manual" } });
+    expect(verifyProposal(mkWorld(d2, [o]), claim({ memberIds: [o.id] }), { allowAuto: true }).tier).toBe("single");
+    // 手動の「店舗別独立」に対し、構造の記載が店舗選択式に読めても、手動を優先する（食い違いは記録のみ）
+    const sel = "応募フォームで受取店舗を選択してください。";
+    const m1 = mkLottery({ conditionsText: sel, formDecl: manual });
+    const m2 = mkLottery({ conditionsText: sel, formDecl: manual });
+    expect(verifyProposal(mkWorld(m1, [m2]), claim({ memberIds: [m2.id] }), { allowAuto: true }).tier).toBe("auto");
+    // rule/ai の記録は、構造の判別に優先しない
+    const r1 = mkLottery({ conditionsText: sel, formDecl: { form: "store_independent", source: "ai" } });
+    const r2 = mkLottery({ conditionsText: sel, formDecl: { form: "store_independent", source: "rule" } });
+    expect(verifyProposal(mkWorld(r1, [r2]), claim({ memberIds: [r2.id] }), { allowAuto: true }).tier).toBe("single");
   });
   it("同じ内容の既存グループが複数ある（どれに入れるか決められない）: 自動にしない", () => {
     resetSeq();
