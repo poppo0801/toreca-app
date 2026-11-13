@@ -79,7 +79,9 @@ export function worldOf(sc: Scenario): GWorld {
   let n = 0;
   const subject = build(sc.subject, ++n);
   const others = sc.others.map((o) => build(o, ++n));
-  const groups = (sc.groups ?? []).map((g) => ({ ...mkGroup(g.id, g.origin, g.members, "chain:main") }));
+  // グループの系列は、所属する抽選の系列に合わせる（8F-3: 固定値だと、系列を指定したシナリオで「追加先が別の系列」と誤判定する評価ハーネスの不具合だった）
+  const chainOfMember = (id: string): string => { const spec = [sc.subject, ...sc.others].find((x) => x.id === id); return spec?.chain ? `chain:${spec.chain}` : "chain:main"; };
+  const groups = (sc.groups ?? []).map((g) => ({ ...mkGroup(g.id, g.origin, g.members, chainOfMember(g.members[0])) }));
   const w = mkWorld(subject, others, { groups, evidence: Object.fromEntries(Object.entries(sc.evidence ?? {}).map(([k, v]) => [k, [v]])), separated: sc.separated });
   // 実在の商品名（A・B以外）は、名前そのものを商品IDにして、名前を引けるようにする（実データの評価用）
   for (const l of [subject, ...others]) for (const i of l.items) if (i.productId.startsWith("product:")) w.productNames.set(i.productId, i.productId.slice("product:".length));

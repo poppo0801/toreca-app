@@ -210,7 +210,7 @@ describe.skipIf(env.REAL_GROUPING_EVAL !== "1")("実API評価（承認された�
     const guard = new BudgetGuard(approvedJpy, REAL_EVAL_LIMITS.perCaseJpy);
     const runId = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
     mkdirSync(OUT, { recursive: true });
-    const res = await runCases(d.cases, d.gold, 1 + repeats, { makeLlm, guard, followUps: Number(env.REAL_GROUPING_FOLLOWUPS) || 1, kind: "real", maxConsecutiveErrors: 2, onRecord: (r) => console.log(`[grouping-real] ${r.caseId}#${r.pass} ${r.status} tier=${r.tier ?? "-"} cost=${(r.usage?.costJpy ?? 0).toFixed(2)}円 spent=${guard.spent.toFixed(2)}/${approvedJpy}円${r.error ? ` 問題: ${r.error}` : ""}`) });
+    const res = await runCases(d.cases, d.gold, 1 + repeats, { makeLlm, guard, followUps: Number(env.REAL_GROUPING_FOLLOWUPS) || 1, kind: "real", maxConsecutiveErrors: strict ? 1 : 2, onRecord: (r) => console.log(`[grouping-real] ${r.caseId}#${r.pass} ${r.status} tier=${r.tier ?? "-"} cost=${(r.usage?.costJpy ?? 0).toFixed(2)}円 spent=${guard.spent.toFixed(2)}/${approvedJpy}円${r.error ? ` 問題: ${r.error}` : ""}`) });
     const summary = summarizeRuns(d.cases, d.gold, res.records);
     writeFileSync(`${OUT}/real-${runId}.json`, JSON.stringify({ runId, kind: "real", set: SET || "8f2", strict, model: gate.model, frozen: f, approvedJpy, approvedRuns, repeats, stoppedBy: res.stoppedBy, stopReason: res.stopReason, spentJpy: guard.spent, records: res.records, summary }, null, 2));
     expect(guard.spent).toBeLessThanOrEqual(approvedJpy);
@@ -254,4 +254,17 @@ describe("実データの組 × モックAI（全方針で、誤った自動グ�
       }
     });
   }
+});
+
+describe("評価ハーネス: 既存グループの系列は所属する抽選の系列と一致する（8F-3 の M05 の不具合の回帰テスト）", () => {
+  const ok = existsSync(`${DIR}/cases-8f3.json`);
+  it.skipIf(!ok)("8f3 の add_to_group ケースで、追加先が別の系列と判定されない", async () => {
+    const cases = JSON.parse(readFileSync(`${DIR}/cases-8f3.json`, "utf8")).cases as RealCase[];
+    const c = cases.find((x) => x.category === "add_to_group")!;
+    const w = (await import("@/lib/agent/lottery-grouping/eval-world")).worldOf(c);
+    expect(w.groups[0].chainId).toBe(w.subject.chainId);
+    const gold = { [c.id]: { label: "auto", basis: [{ kind: "official_announcement", ref: "https://example.invalid", checkedAt: "2026-11-13" }] } } as Record<string, RealGold>;
+    const recs = (await runCases([c], gold, 1, { makeLlm: () => new MockGroupingBrain("careful"), guard: new BudgetGuard(), followUps: 0, kind: "mock" })).records;
+    expect(recs[0].downgrades?.join() ?? "").not.toContain("追加先が別の系列");
+  });
 });
