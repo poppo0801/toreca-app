@@ -8,7 +8,7 @@ import type { Lottery, Store } from "@/types/domain";
  * 利用者が「確認済みにする」で解除した注意（ackAt あり）は表示しない（Stage 7N）。
  * 金額の表示差など、抽選管理の対象外の矛盾（text_conflict）は表示しない。
  */
-export function liveCautions(lottery: Pick<Lottery, "cautions" | "resultDate" | "procedureStart" | "procedureDeadline" | "receiveMethod" | "applyMethod" | "conditionsText" | "requirementTags" | "storeMode" | "storeId" | "multiMode" | "items">, store: Pick<Store, "prefecture"> | undefined): Caution[] {
+export function liveCautions(lottery: Pick<Lottery, "cautions" | "applyDeadline" | "resultDate" | "procedureStart" | "procedureDeadline" | "receiveMethod" | "applyMethod" | "conditionsText" | "requirementTags" | "storeMode" | "storeId" | "multiMode" | "items">, store: Pick<Store, "prefecture"> | undefined): Caution[] {
   const list = lottery.cautions ?? [];
   const unknownDate = (d: { precision: string } | undefined) => !d || d.precision === "unknown";
   return list.filter((c) => {
@@ -16,6 +16,9 @@ export function liveCautions(lottery: Pick<Lottery, "cautions" | "resultDate" | 
     switch (c.code) {
       case "text_conflict":
         return !isUnmanagedConflict(c.message);
+      case "end_candidate":
+      case "deadline_unknown":
+        return unknownDate(lottery.applyDeadline); // Stage 9B: 締切が入ったら（手動・自動とも）表示しない
       case "result_date_unknown":
         return unknownDate(lottery.resultDate);
       case "receive_period_unknown":

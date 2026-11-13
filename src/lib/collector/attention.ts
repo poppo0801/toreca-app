@@ -85,8 +85,11 @@ export interface RegistrationContext {
   speculative?: boolean;
 }
 
-/** 応募締切が不明のまま、告知からこの日数を超えたものは、終了済みの可能性が高いため登録しない（確認待ち） */
+/** 応募締切が不明のまま、告知（確認）からこの日数を超えたものは、「終了候補」の注意を付ける（非表示・削除・終了日時の推測はしない） */
 export const STALE_UNKNOWN_DEADLINE_DAYS = 21;
+
+/** 終了候補の注意（日時が長く確認できていない。表示は続け、情報源の再確認を続ける） */
+export const endCandidateCaution = (now: string, days?: number): Caution => ({ code: "end_candidate", field: "applyDeadline", message: `${days != null ? `告知から${Math.floor(days)}日が経過し、` : "長期間、"}応募の日時を確認できていません。すでに終了している可能性があります（情報源の再確認を続けています）`, at: now });
 
 const md = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
@@ -155,7 +158,6 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   const noticeLike = deadlineUnknown || c.stage === "teaser" || c.stage === "partial" || c.verdict === "upcoming";
   if (noticeLike && c.wording === false) blockers.push("抽選・応募に関する文言が確認できません（抽選の告知か判断できません）");
   if (deadlineUnknown && c.speculative) blockers.push("憶測・未確定の表現の告知です（確定した抽選か判断できません）");
-  if (deadlineUnknown && c.sourceAgeDays != null && c.sourceAgeDays > STALE_UNKNOWN_DEADLINE_DAYS) blockers.push(`告知から${Math.floor(c.sourceAgeDays)}日が経過し、応募締切を確認できません（終了済みの可能性があります）`);
   if (c.textConflict && SERIOUS_TEXT_CONFLICT.test(c.textConflict)) blockers.push(`抽選の内容に重大な矛盾があります: ${c.textConflict.slice(0, 60)}`);
   const cf = conflictCautions(c.fields, c.now);
   blockers.push(...cf.blockers);
@@ -164,6 +166,8 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   // ---- B: 注意付きで登録する
   cautions.push(...cf.cautions);
   if (c.textConflict && !cf.cautions.some((x) => x.field === "applyDeadline")) cautions.push({ code: "text_conflict", field: "other", message: `情報に矛盾の疑いがあります: ${c.textConflict.slice(0, 80)}`, at: c.now });
+  // 告知から長く経過して日時が不明: 登録は止めず（有効な抽選を見えなくしない）、終了している可能性を注意として示す。終了日時は推測しない（Stage 9B）
+  if (deadlineUnknown && c.sourceAgeDays != null && c.sourceAgeDays > STALE_UNKNOWN_DEADLINE_DAYS) cautions.push(endCandidateCaution(c.now, c.sourceAgeDays));
   if (deadlineUnknown) cautions.push({ code: "deadline_unknown", field: "applyDeadline", message: c.stage === "teaser" || c.stage === "partial" ? "応募の日時が未発表または確認できていません（告知の続報で自動的に補います）" : "応募締切が確認できていません", at: c.now });
   if (!flexDate(input.resultDate)) cautions.push({ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: c.now });
   const hasReceive = !!flexDate(input.receiveStart) || !!flexDate(input.receiveDeadline) || !!flexDate(input.procedureStart) || !!flexDate(input.procedureDeadline);

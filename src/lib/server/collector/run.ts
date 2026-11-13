@@ -28,7 +28,7 @@ import { reconcileAutoRegistered, recordMergedSource } from "@/lib/server/collec
 import { afterCollectedRegistration } from "@/lib/server/collector/grouping-hook";
 import { snapshotOfInput } from "@/lib/merged-sources";
 import { deepClean, safeSlice, safeSliceEnd } from "@/lib/text-safe";
-import { emptyFunnel, funnelLine, judgeXPost, type XFunnel } from "@/lib/collector/x-relevance";
+import { emptyFunnel, funnelLine, judgeXPost, productTerms, type XFunnel } from "@/lib/collector/x-relevance";
 import type { ImageStats } from "@/lib/server/collector/x-rich";
 import { listInfoFromQueued, rebuildQueued, type AiReason } from "@/lib/collector/queued";
 import { dueSources, runResultOf, type AttemptStatus } from "@/lib/collector/schedule";
@@ -48,7 +48,8 @@ import { judgeForm } from "@/lib/lottery-form";
 import { judgeRegion, isRegionReason, regionExclusionOf } from "@/lib/collector/region";
 import { decideRegistration, isUnmanagedConflict } from "@/lib/collector/attention";
 import { classifyReviewReasons } from "@/lib/collector/review-reasons";
-import { autoCompleteConditions, autoCompleteLottery } from "@/lib/server/collector/complete";
+import { autoCompleteConditions, autoCompleteLottery, markEndCandidates } from "@/lib/server/collector/complete";
+import { tryAutoUpdate } from "@/lib/server/collector/auto-update";
 import { ageDaysOf, classifyStage, hasLotteryWording, isSpeculative, STAGE_LABEL } from "@/lib/collector/stage";
 import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
@@ -58,6 +59,7 @@ import { isSupplement, matchOpen, matchSupplement, type OpenLite } from "@/lib/c
 import { loadOpen, loadRecentRegistered, loadSourceCtx } from "@/lib/server/collector/open";
 import type { RequirementTag } from "@/lib/lottery-taxonomy";
 import { lotteryRow } from "@/lib/lottery-payload";
+import { UPDATE_COLUMNS as UPDATE_KEYS } from "@/lib/collector/auto-update";
 import type { Json } from "@/types/database";
 import type { AppData } from "@/types/domain";
 
@@ -81,6 +83,8 @@ const MAX_ATTEMPTS = QUEUE_MAX_ATTEMPTS;
 const AI_CONCURRENCY = 4;
 
 export interface CollectDeps {
+  /** 商品マスター由来の関連語（Stage 9B。X投稿の関連判定用。未設定なら初回に読み込む） */
+  knownTerms?: string[];
   db: Db;
   householdId: string;
   trigger: "manual" | "cron";
@@ -797,12 +801,26 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       await finish("completed", { reasons: ["再確認: 変更はありません"], draft: c.draft, kind: "new" });
       return { usedAi: true, registered: false, aiFailed: false };
     }
+    // Stage 9B: 十分な根拠のある変更（公式または同じ情報源の更新・不明な日時を埋める・期限の延長など）は、人の承認を待たずに反映する。更新前後・情報源は履歴に残り、元に戻せる。
+    // 期限の短縮・受取方法の変更などは、従来どおり更新の提案（人の確認）。失敗したときも提案に回す
+    const au = await tryAutoUpdate(db, lot, input, changes, { sourceUrl: q.url, sourceKind: mySource.kind, official: mySource.kind === "official_site" || mySource.kind === "official_x", now: deps.now }).catch(() => null);
+    const toPropose = au ? au.plan.propose : changes;
+    if (au && au.applied.length > 0) {
+      await bumpStats(db, deps.householdId, deps.now, { updated_existing: 1 });
+      if (toPropose.length === 0) {
+        await finish("completed", { reasons: ["自動更新: " + au.applied.map((x) => `${x.label}: ${x.before} → ${x.after}`).join("・")], draft: c.draft, kind: "new" });
+        return { usedAi: true, registered: false, aiFailed: false };
+      }
+    } else if (au && toPropose.length === 0) {
+      await finish("completed", { reasons: ["再確認: 現在の値を保持しました（新しい情報に値が無い、または元に戻された内容と同じ）"], draft: c.draft, kind: "new" });
+      return { usedAi: true, registered: false, aiFailed: false };
+    }
     const base = (await db.from("lotteries").select("updated_at").eq("id", lot.id).maybeSingle()).data?.updated_at ?? null;
     await finish("review", {
       status: "pending",
       kind: "update",
-      reasons: changes.map((x) => `${x.label}: ${x.before} → ${x.after}`),
-      draft: { ...(c.draft as object), update: { changes, baseUpdatedAt: base, input } } as unknown as Json,
+      reasons: toPropose.map((x) => `${x.label}: ${x.before} → ${x.after}${au?.plan.reasons[x.key] ? `（${au.plan.reasons[x.key]}）` : ""}`),
+      draft: { ...(c.draft as object), update: { changes: toPropose, baseUpdatedAt: base, input } } as unknown as Json,
     }, { review_added: 1 });
     return { usedAi: true, registered: false, aiFailed: false };
   }
@@ -1125,12 +1143,17 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
         const funnel = emptyFunnel();
         funnel.fetched = r.posts.length;
         const rows: Record<string, unknown>[] = [];
+        // 商品マスターの名称・略称・別名（「ポケカ」と書かれていない告知も、登録済みの商品名があれば関連ありとして扱う）
+        const knownTerms = (deps.knownTerms ??= await (async () => {
+          const [pr, al] = await Promise.all([db.from("products").select("id,official_name").eq("household_id", householdId).is("archived_at", null).limit(2000), db.from("product_aliases").select("product_id,alias").eq("household_id", householdId).limit(5000)]);
+          return productTerms((pr.data ?? []).map((x) => ({ officialName: x.official_name, aliases: (al.data ?? []).filter((a) => a.product_id === x.id).map((a) => a.alias) })));
+        })().catch(() => []));
         for (const p of r.posts as XPost[]) {
           if (p.images.length > 0 || (p.quoted?.images.length ?? 0) > 0) funnel.withImages++;
           if (p.quoted) funnel.withQuote++;
           if (p.links.length > 0) funnel.withLinks++;
           // 本文のキーワードだけで画像・引用つきの投稿を落とさない（Stage 6B）。他のTCG・無関係な長文・古い投稿だけ解析しない
-          const j = judgeXPost({ text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, quoted: p.quoted ?? null }, now);
+          const j = judgeXPost({ text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, quoted: p.quoted ?? null }, now, { knownTerms });
           if (!j.pass) {
             funnel.skipped[j.skip]++;
             continue;
@@ -1397,7 +1420,7 @@ export async function recheckPages(deps: CollectDeps, opts: { max: number; reche
       .or(`due_at.is.null,due_at.gt.${now.toISOString()}`)
       .not("source_url", "is", null);
   // Stage 9A: 応募締切が未確認のまま登録した抽選（deadline_unknown）の情報源は、続報で日時が分かる可能性が高いため、先に再確認する（優先順位: 重要情報が不足している抽選）
-  const unknownDl = await db.from("lotteries").select("id").eq("household_id", householdId).eq("source_kind", "auto").is("archived_at", null).contains("cautions", [{ code: "deadline_unknown" }]).limit(40);
+  const unknownDl = await db.from("lotteries").select("id").eq("household_id", householdId).eq("source_kind", "auto").is("archived_at", null).contains("cautions", JSON.stringify([{ code: "deadline_unknown" }])).limit(40);
   const unknownIds = (unknownDl.data ?? []).map((r) => r.id as string);
   const prio = unknownIds.length > 0 ? ((await dueQuery().in("lottery_id", unknownIds).order("last_checked_at", { ascending: true, nullsFirst: true }).limit(opts.max)).data ?? []) : [];
   const rest = (await dueQuery().order("last_checked_at", { ascending: true, nullsFirst: true }).limit(opts.max * 3)).data ?? [];
@@ -1439,6 +1462,8 @@ export async function recheckPages(deps: CollectDeps, opts: { max: number; reche
     }
     await db.from("collection_candidates").update(patch as never).eq("id", c.id);
   }
+  // Stage 9B: 日時が長く確認できていない抽選に「終了候補」の注意を付ける（非表示・削除はしない）
+  await markEndCandidates(db, householdId, now).catch(() => 0);
   return { checked, changed };
 }
 
@@ -1498,15 +1523,6 @@ export async function runWorker(deps: CollectDeps): Promise<WorkerOutcome> {
   }
 }
 
-const UPDATE_KEYS: Record<string, string[]> = {
-  applyStart: ["apply_start_precision", "apply_start_date", "apply_start_at"],
-  applyDeadline: ["apply_deadline_precision", "apply_deadline_date", "apply_deadline_at"],
-  resultDate: ["result_precision", "result_date", "result_at"],
-  procedureStart: ["procedure_start_precision", "procedure_start_date", "procedure_start_at"],
-  procedureDeadline: ["procedure_deadline_precision", "procedure_deadline_date", "procedure_deadline_at"],
-  receiveMethod: ["receive_method"],
-  eventState: ["event_state"],
-};
 
 /**
  * 既存の抽選への更新提案を反映する(利用者のログインで実行)。反映するのは日時・受取方法・状態だけ。

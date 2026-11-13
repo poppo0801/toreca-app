@@ -2,6 +2,7 @@
 
 // 更新系は最新のデータをそのまま返し、画面は自分の状態を更新する。revalidatePath はページ全体の再描画（認証・世帯準備のRPCを含む）と、全リンクの先読みの取り直しを起こすため使わない（Stage 7O）
 import { createClient } from "@/lib/supabase/server";
+import { revertAutoUpdate } from "@/lib/server/collector/auto-update";
 import {
   addManualPurchase,
   archiveLottery,
@@ -216,6 +217,14 @@ export async function setAppliedItemsAction(applicationId: string, itemIds: stri
 /** 要確認を確認済みにする（表示中の注意のコードをまとめて解除。状態はDBに保存） */
 export async function acknowledgeCautionsAction(lotteryId: string, codes: string[]): Promise<MutationResult> {
   return mutate((c) => acknowledgeCautions(c.db, lotteryId, codes));
+}
+
+/** 自動更新（収集が根拠のある変更を自動で反映したもの）を元に戻す（Stage 9B）。その後に内容が変更されている場合は戻さない */
+export async function revertAutoUpdateAction(lotteryId: string, entryId: string): Promise<MutationResult> {
+  return mutate(async (c) => {
+    const r = await revertAutoUpdate(c.db, lotteryId, entryId, null);
+    return r.ok ? { ok: true as const, value: undefined } : { ok: false as const, error: r.error };
+  });
 }
 
 export async function setItemResultsAction(

@@ -81,7 +81,7 @@ export function planCompletion(cur: CompletionFields, inc: CompletionFields, cau
   if (id && !cd) {
     patch.applyDeadline = inc.applyDeadline;
     filled.push(LABEL.applyDeadline);
-    drop("deadline_unknown");
+    drop("deadline_unknown", "end_candidate");
   } else if (id && cd && id !== cd) {
     const gap = Math.abs(Date.parse(cd) - Date.parse(id)) / 86_400_000;
     const hasProvisional = next.some((c) => c.code === "deadline_conflict");

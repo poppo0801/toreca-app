@@ -1,5 +1,5 @@
 import "server-only";
-import { confidenceOf, type Caution } from "@/lib/collector/attention";
+import { confidenceOf, endCandidateCaution, STALE_UNKNOWN_DEADLINE_DAYS, type Caution } from "@/lib/collector/attention";
 import { planCompletion, type CompletionFields } from "@/lib/collector/complete";
 import { dbToFlex, flexInputToDb, flexToInput, type LotteryInput } from "@/lib/lottery-input";
 import type { Db } from "@/lib/server/lottery-service";
@@ -93,4 +93,34 @@ export async function autoCompleteConditions(db: Db, lotteryId: string, conditio
   const hasConflict = cautions.some((c) => c.code.startsWith("conflict_") || c.code === "deadline_conflict" || c.code === "text_conflict");
   const { error } = await db.from("lotteries").update({ conditions_text: text, cautions: cautions as unknown as Json, confidence: confidenceOf({}, cautions.length > 0, hasConflict), cautions_updated_at: new Date().toISOString() } as never).eq("id", lotteryId);
   return error ? { updated: false, filled: [] } : { updated: true, filled: ["応募条件"] };
+}
+
+/**
+ * 日時が長く確認できていない自動登録の抽選に、「終了候補」の注意を付ける（Stage 9B）。
+ * 非表示・削除・アーカイブ・終了日時の推測はしない。一覧には表示され続け、情報源の再確認も続く。日時が分かれば注意は自動で外れる。
+ * 対象: 自動収集で登録され、手動編集されておらず、「応募締切が未確認」の注意が付いたまま、登録から days 日を超えたもの。
+ */
+export async function markEndCandidates(db: Db, householdId: string, now: Date, o: { days?: number; limit?: number } = {}): Promise<number> {
+  const days = o.days ?? STALE_UNKNOWN_DEADLINE_DAYS;
+  const before = new Date(now.getTime() - days * 86_400_000).toISOString();
+  const { data } = await db
+    .from("lotteries")
+    .select("id,cautions,created_at,updated_at,cautions_updated_at")
+    .eq("household_id", householdId)
+    .eq("source_kind", "auto")
+    .is("archived_at", null)
+    .contains("cautions", JSON.stringify([{ code: "deadline_unknown" }]))
+    .lt("created_at", before)
+    .limit(o.limit ?? 30);
+  let marked = 0;
+  for (const r of data ?? []) {
+    const cs = (Array.isArray(r.cautions) ? r.cautions : []) as unknown as Caution[];
+    if (cs.some((c) => c.code === "end_candidate")) continue;
+    const base = new Date(r.cautions_updated_at ?? r.created_at).getTime();
+    if (new Date(r.updated_at).getTime() - base > MANUAL_EDIT_TOLERANCE_MS) continue; // 手動で編集された抽選には触れない
+    const next = [...cs, endCandidateCaution(now.toISOString(), (now.getTime() - new Date(r.created_at).getTime()) / 86_400_000)];
+    const { error } = await db.from("lotteries").update({ cautions: next as unknown as Json, cautions_updated_at: now.toISOString() } as never).eq("id", r.id).eq("updated_at", r.updated_at);
+    if (!error) marked++;
+  }
+  return marked;
 }

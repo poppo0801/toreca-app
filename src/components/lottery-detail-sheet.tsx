@@ -37,7 +37,7 @@ import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
 import { RegistrationOrigin } from "@/components/registration-origin";
 import { EligibilitySection } from "@/components/eligibility-mark";
-import { acknowledgeCautionsAction } from "@/app/(app)/lotteries/actions";
+import { acknowledgeCautionsAction, revertAutoUpdateAction } from "@/app/(app)/lotteries/actions";
 import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
 import { cn } from "@/lib/utils";
 import { liveCautions } from "@/lib/live-cautions";
@@ -98,6 +98,67 @@ function LongText({ text }: { text: string }) {
         {open ? "閉じる" : "詳細を見る"}
       </button>
     </span>
+  );
+}
+
+/** 自動更新の履歴（Stage 9B）。収集が根拠のある変更を自動で反映したときの内容・情報源・時刻。「元に戻す」で更新前に戻せる（その後に内容が変わっていれば戻さない） */
+function UpdateHistory({ lottery }: { lottery: Lottery }) {
+  const { reload } = useApp();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const items = [...(lottery.updateHistory ?? [])].reverse();
+  if (items.length === 0) return null;
+  const host = (u: string) => {
+    try {
+      return new URL(u).hostname;
+    } catch {
+      return "";
+    }
+  };
+  return (
+    <details aria-label="自動更新の履歴" data-testid="update-history" className="rounded-lg border px-3 py-2 text-xs">
+      <summary className="cursor-pointer list-none font-semibold">自動更新の履歴（{items.length}件）</summary>
+      <ul className="mt-1.5 space-y-1.5">
+        {items.map((h) => (
+          <li key={h.id} className="space-y-0.5" data-testid="update-history-item">
+            <p className="text-muted-foreground">
+              {new Date(h.at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+              {h.official ? " ・公式の情報" : ""}
+              {host(h.sourceUrl) ? ` ・${host(h.sourceUrl)}` : ""}
+            </p>
+            {h.summary.map((x) => (
+              <p key={x} className="break-words">{x}</p>
+            ))}
+            {h.revertedAt ? (
+              <p className="text-muted-foreground">元に戻しました</p>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3 text-xs"
+                disabled={busy !== null}
+                data-testid="update-revert"
+                onClick={async () => {
+                  setBusy(h.id);
+                  const r = await revertAutoUpdateAction(lottery.id, h.id);
+                  setBusy(null);
+                  if (!r.ok) return setError(r.error);
+                  setError(null);
+                  await reload();
+                }}
+              >
+                元に戻す
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p role="alert" className="mt-1 text-danger">
+          {error}
+        </p>
+      )}
+    </details>
   );
 }
 
@@ -386,6 +447,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                 {persistent && <AckButton lotteryId={lottery.id} codes={cautions.map((c) => c.code)} />}
               </details>
             )}
+
+            {persistent && <UpdateHistory lottery={lottery} />}
 
             {/* 2. 日付・期間: 外枠なしの区切り線形式（2列）。奇数のときは最後を横いっぱいに */}
             {(() => {

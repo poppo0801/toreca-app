@@ -8,7 +8,7 @@
   { "id": "R03", "title": "抽選予告（開始・締切とも未発表）", "ctx": { "deadline": "unknown", "stage": "teaser" }, "expected": "register", "old": "hold" },
   { "id": "R04", "title": "受付前（開始は未来・締切明記）", "ctx": { "deadline": "known", "stage": "upcoming", "verdict": "upcoming" }, "expected": "register", "old": "hold" },
   { "id": "R05", "title": "締切不明・告知から3日", "ctx": { "deadline": "unknown", "stage": "partial", "sourceAgeDays": 3 }, "expected": "register", "old": "hold" },
-  { "id": "R06", "title": "締切不明・告知から40日（終了済みの可能性）", "ctx": { "deadline": "unknown", "stage": "partial", "sourceAgeDays": 40 }, "expected": "hold", "old": "hold" },
+  { "id": "R06", "title": "締切不明・告知から40日（終了している可能性。Stage 9B: 登録して終了候補の注意を付ける。非表示にしない）", "ctx": { "deadline": "unknown", "stage": "partial", "sourceAgeDays": 40 }, "expected": "register", "old": "hold" },
   { "id": "R07", "title": "憶測の表現（〜の模様）で日時なし", "ctx": { "deadline": "unknown", "stage": "teaser", "speculative": true }, "expected": "hold", "old": "hold" },
   { "id": "R08", "title": "抽選・応募の文言が無い告知（発売予定のみ）", "ctx": { "deadline": "unknown", "stage": "teaser", "wording": false }, "expected": "hold", "old": "hold" },
   { "id": "R09", "title": "応募条件・受取方法が不明（締切は明記）", "ctx": { "deadline": "known", "stage": "open", "receiveUnknown": true, "conditionsUnknown": true }, "expected": "register", "old": "register" },

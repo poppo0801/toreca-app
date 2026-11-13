@@ -295,6 +295,8 @@ export interface Lottery {
   unconfirmedFields?: string[];
   /** 注意付き自動登録の注意情報（Stage 7A）。項目別・理由別。注意が無ければ空 */
   cautions?: import("@/lib/collector/attention").Caution[];
+  /** 自動更新の履歴（Stage 9B）。収集が根拠のある変更を自動で反映したときの、更新内容・情報源・時刻。元に戻せる */
+  updateHistory?: { id: string; at: string; summary: string[]; sourceUrl: string; official: boolean; revertedAt?: string }[];
   /** 信頼度（内部管理） */
   confidence?: import("@/lib/collector/attention").Confidence | null;
   /** 最終更新（他端末での更新を検出するため）。モックでは未設定 */

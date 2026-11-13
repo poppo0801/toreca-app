@@ -604,6 +604,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       unconfirmedFields: l.unconfirmed_fields ?? [],
       cautions: Array.isArray(l.cautions) ? (l.cautions as unknown as NonNullable<import("@/types/domain").Lottery["cautions"]>) : [],
       confidence: (l.confidence ?? null) as import("@/types/domain").Lottery["confidence"],
+      updateHistory: (Array.isArray((l as unknown as { update_history?: unknown }).update_history) ? ((l as unknown as { update_history: Record<string, unknown>[] }).update_history) : []).flatMap((h) => (typeof h?.id === "string" && typeof h?.at === "string" ? [{ id: h.id, at: h.at, summary: Array.isArray(h.summary) ? (h.summary as unknown[]).filter((x): x is string => typeof x === "string") : [], sourceUrl: typeof h.sourceUrl === "string" ? h.sourceUrl : "", official: h.official === true, ...(typeof h.revertedAt === "string" ? { revertedAt: h.revertedAt } : {}) }] : [])),
     })),
     management: mgmt
       .filter((m) => liveLotteryIds.has(m.lottery_id))

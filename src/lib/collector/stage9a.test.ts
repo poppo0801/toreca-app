@@ -37,13 +37,19 @@ describe("Stage 9A: 登録方針の適合確認（架空シナリオ）", () => 
   });
   it("旧方式（7A）との違い: 日時が未発表・不明・受付前だけの理由で確認待ちだったものが登録に変わる。それ以外の判定は変わらない（保留すべきものは保留のまま）", () => {
     const changed = results.filter((r) => (r.s.old === "register") !== registers(r.grade));
-    expect(changed.map((r) => r.s.id).sort()).toEqual(["R02", "R03", "R04", "R05", "R17"]);
+    expect(changed.map((r) => r.s.id).sort()).toEqual(["R02", "R03", "R04", "R05", "R06", "R17"]);
     // 登録→保留に変わったものは無い（誤登録を増やす方向の変更は、ここでは起きていない）
     expect(results.filter((r) => r.s.old === "register" && !registers(r.grade))).toEqual([]);
     // 集計（報告用）: 旧 → 新
     const oldReg = results.filter((r) => r.s.old === "register").length;
     const newReg = results.filter((r) => registers(r.grade)).length;
-    expect({ total: results.length, oldRegistered: oldReg, newRegistered: newReg }).toEqual({ total: 17, oldRegistered: 3, newRegistered: 8 });
+    expect({ total: results.length, oldRegistered: oldReg, newRegistered: newReg }).toEqual({ total: 17, oldRegistered: 3, newRegistered: 9 });
+  });
+  it("告知から長く経過して日時が不明な登録（R06）には、終了している可能性を示す注意が付く（登録は止めない。終了日時は推測しない）", () => {
+    const r06 = scenarios.find((x) => x.id === "R06")!;
+    const d = decideRegistration(build(r06));
+    expect(d.grade).toBe("B");
+    expect(d.cautions.map((c) => c.code)).toEqual(expect.arrayContaining(["deadline_unknown", "end_candidate"]));
   });
   it("日時が不明な登録には『未確認』の注意が付き、不明な日時を推測で補っていない", () => {
     for (const r of results.filter((x) => x.s.ctx.deadline === "unknown" && registers(x.grade))) {
@@ -78,5 +84,59 @@ describe("Stage 9A: 一覧での表示（締切が未確認の抽選も通常の
     const data = { ...d, lotteries: [...d.lotteries, unk] };
     expect(tabOf(data, unk)).toBe("all");
     expect(selectLotteries(data, "all", DEFAULT_FILTERS, now).some((l) => l.id === "UNK1")).toBe(true);
+  });
+});
+
+describe("Stage 9B: 商品名・略称による関連判定（「ポケカ」と書かれていない告知）", () => {
+  it("商品マスターの名称・本体名・別名から関連語を作る。短い語・単独では意味を持たない語（拡張パック等）は含めない", async () => {
+    const { productTerms } = await import("@/lib/collector/x-relevance");
+    const terms = productTerms([{ officialName: "ポケモンカードゲーム MEGA 拡張パック「ハドウシーカー」", aliases: ["ハドウ", "ハドシカ弾"] }, { officialName: "拡張パック", aliases: [] }]);
+    expect(terms).toContain("ハドウシーカー".toLowerCase());
+    expect(terms).toContain("ハドシカ弾");
+    expect(terms).not.toContain("ハドウ"); // 3文字以下は誤判定が増えるため含めない
+    expect(terms).not.toContain("拡張パック");
+  });
+  it("商品名だけの抽選告知（ポケカ・ポケモンカードの語が無い）も、登録済みの商品名があれば関連ありとして解析に回す。無ければ従来どおり（解析しない）", async () => {
+    const { judgeXPost, productTerms } = await import("@/lib/collector/x-relevance");
+    const now = new Date("2026-11-13T00:00:00Z");
+    const terms = productTerms([{ officialName: "拡張パック「ハドウシーカー」" }]);
+    const post = { text: "ハドウシーカー 抽選販売のお知らせ。応募はこちら", images: [] as string[], links: [] as string[], createdAt: "2026-11-12T00:00:00Z", quoted: null };
+    expect(judgeXPost(post, now).pass).toBe(false);
+    expect(judgeXPost(post, now, { knownTerms: terms }).pass).toBe(true);
+    // 他のTCGが主題の告知は、商品名が偶然一致しても対象外のまま
+    expect(judgeXPost({ ...post, text: "遊戯王 ハドウシーカー 抽選" }, now, { knownTerms: terms }).pass).toBe(false);
+  });
+});
+
+describe("Stage 9B: 情報源の網羅性の分析（次に調べる情報源の順位づけ）", () => {
+  it("実績のある未監視の系列・日時未確認の抽選を優先し、取得制限のある情報源は回避せず再試行をやめる。提案は上限件数まで", async () => {
+    const { analyzeCoverage, MAX_RECOMMENDATIONS } = await import("@/lib/collector/coverage");
+    const now = new Date("2026-11-13T00:00:00Z");
+    const recs = analyzeCoverage({
+      now,
+      monitoredChainIds: new Set(["c-mon"]),
+      chains: [
+        { id: "c-mon", name: "監視済み", storeCount: 10, lotteries30d: 5, unknownDeadline: 0 },
+        { id: "c-hot", name: "実績あり・未監視", storeCount: 8, lotteries30d: 4, unknownDeadline: 0 },
+        { id: "c-cold", name: "実績なし・店舗少", storeCount: 1, lotteries30d: 0, unknownDeadline: 0 },
+        { id: "c-unk", name: "日時未確認あり", storeCount: 0, lotteries30d: 2, unknownDeadline: 3 },
+      ],
+      sources: [
+        { id: "s-robots", name: "取得制限のサイト", kind: "web", status: "error", lastSuccessAt: null, lastItemCount: null, lastNewCount: null, failKind: "robots" },
+        { id: "s-quiet", name: "新着なしのX", kind: "x", status: "ok", lastSuccessAt: "2026-11-12T00:00:00Z", lastItemCount: 30, lastNewCount: 0 },
+        { id: "s-live", name: "新着ありのサイト", kind: "web", status: "ok", lastSuccessAt: "2026-11-12T00:00:00Z", lastItemCount: 30, lastNewCount: 4 },
+      ],
+    });
+    const by = (k: string, id: string) => recs.find((r) => r.kind === k && r.targetId === id);
+    expect(by("add_monitor", "c-hot")).toBeTruthy();
+    expect(by("add_monitor", "c-mon")).toBeUndefined(); // 監視済みは提案しない
+    expect(by("add_monitor", "c-cold")).toBeUndefined(); // 実績も店舗も少ない系列は提案しない（無制限に増やさない）
+    expect(by("recheck_unknown", "c-unk")).toBeTruthy();
+    expect(by("stop_retry", "s-robots")).toMatchObject({ cost: "none" });
+    expect(by("reduce_frequency", "s-quiet")).toBeTruthy();
+    expect(by("reduce_frequency", "s-live")).toBeUndefined();
+    expect(recs[0].score).toBeGreaterThanOrEqual(recs[recs.length - 1].score);
+    const many = analyzeCoverage({ now, monitoredChainIds: new Set(), sources: [], chains: Array.from({ length: 40 }, (_, n) => ({ id: `c${n}`, name: `系列${n}`, storeCount: 5, lotteries30d: 2, unknownDeadline: 0 })) });
+    expect(many.length).toBe(MAX_RECOMMENDATIONS);
   });
 });

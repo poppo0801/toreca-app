@@ -204,7 +204,10 @@ describe("Stage 7A: 自動登録の判定（A=通常 / B=注意付き / C=確認
     expect(c({ verdict: "upcoming" }).grade).not.toBe("C"); // 受付前でも、詳細が確定していれば通常の登録
     expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial" }).grade).toBe("B");
     expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "teaser", wording: false }).grade).toBe("C");
-    expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial", sourceAgeDays: 30 }).grade).toBe("C");
+    // 告知から長く経過して日時が不明でも、登録は止めず「終了候補」の注意を付ける（Stage 9B。非表示にしない）
+    const stale = c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial", sourceAgeDays: 30 });
+    expect(stale.grade).toBe("B");
+    expect(stale.cautions.map((x) => x.code)).toContain("end_candidate");
     expect(c({ input: input({ applyDeadline: EMPTY_FLEX }), stage: "partial", sourceAgeDays: 3 }).grade).toBe("B");
     expect(c({ textConflict: "別の抽選の情報が混ざっています" }).grade).toBe("C");
     expect(c({ verdict: "exclude" }).grade).toBe("C");
