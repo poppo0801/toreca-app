@@ -1,0 +1,308 @@
+{
+  "version": 2,
+  "definition": "8F-5",
+  "note": "新定義（同一系列・同一商品・同一応募期間・同一応募条件・同一抽選方式の別店舗の抽選。同一イベントID・URLは必須でない。店舗選択式は原則対象外）での正解。旧定義の正解は gold.json に保持（oldLabel で対応）。AIに渡さない",
+  "labels": {
+    "K01": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/624225",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623986",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: カードラボ津田沼店の30th CELEBRATION抽選。各店のブログは『下記の期間、○○店にて抽選を行います』等の店舗別告知で、チェーン共通の記述なし。なんば店・NAMBA・オタロード本店は別日程。比較相手のうち秋葉原ラジオ会館本店は告知（X）を確認できていないが、締切が異なり、確認できた4店舗がすべて店舗別であることから、共通企画とは考えにくい",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K02": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623986",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: カードラボなんば店の30th（再販）。販売買取センターNAMBAとは別々の告知・別日程",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K03": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/624225",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: カードラボオタロード本店の30th『再抽選』。『カードラボオタロード本店Xにて抽選を行います』で店舗別",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K04": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/u6fu3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/fz4f0",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: ふるいち泉大津店。読めた7店舗のLivePocketページは、販売元（promoter）が店舗ごとに別で、期間が店舗ごとに異なり、他店舗への言及・共通企画の記述なし",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K05": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/fz4f0",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/u6fu3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: ふるいち鶴見店（応募 11/3 の1日のみ）。店舗別の別ページ・別日程",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K06": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: ふるいち（古本市場）野口店。店舗別の別ページ・別日程",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K07": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/1j91f",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/u6fu3",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場宝塚店の30th拡張パック（別商品のエーフィ・ブラッキーセットは別の抽選）。他店舗とは別ページ・別日程",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K08": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://shoplottery.e-starbox.com/lottery/entry?code=mP3lHYSNT5",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://shoplottery.e-starbox.com/lottery/entry?code=vWjDlyL9hp",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: カードボックス オーサカ店と日本橋店の30th。店舗・応募期間・発表日・購入期間がすべて異なる別々の抽選として掲載（ページに『1抽選につき1口』）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K09": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://card.luruna.jp/items/164670243",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://card.luruna.jp/items/163162690",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: Luruna Cardの30th。①10/17〜11/15（購入履歴2000円以上）と②11/1〜11/30（1000円以上）で、期間・条件・発表日が異なる別の受付（ページ上に番号①②）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K10": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/luo8lp88-d",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: イトーヨーカドーネット通販（7iD・配送・11/12〜11/13）は、LivePocketの店頭受取の抽選（TOYLO・11/6〜11/8）とは、販売元・方式・期間が異なり、相互の言及もない",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "K11": {
+      "label": "review",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/wjv4a",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/mkpvg",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル review を維持。条件は概ね一致するが、登録の条件の記載差・店舗未特定・店舗選択式の記載があり、利用者の確認が必要（候補提示のみ）／旧: キデイランド吉祥寺店と二子玉川店のスペシャルデッキセットMEGA。同じ販売元・同じ商品・同じ期間・同じ条件の文面で、『同販売期間にキデイランド複数店舗より同商品の案内があった場合、重複応募は無効』と店舗横断の規定がある（同一企画とみなせる強い根拠）。ただし『同一企画』と明記する記述はなく、各店は別イベントページ",
+      "oldLabel": "review",
+      "definition": "8F-5"
+    },
+    "K12": {
+      "label": "review",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/s2dtfw7rvo",
+          "checkedAt": "2026-11-13"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/luo8lp88-d",
+          "checkedAt": "2026-11-13"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル review を維持。条件は概ね一致するが、登録の条件の記載差・店舗未特定・店舗選択式の記載があり、利用者の確認が必要（候補提示のみ）／旧: イトーヨーカドーのハドウシーカー（TOYLO）。2つのURLは同じイベント（event_id 1135507・同名・同期間・同条件）で、店舗一覧だけが異なる（甲子園店は片方のみ）。同一企画の根拠は強いが、L023は店舗が未特定のため、利用者の確認が必要",
+      "oldLabel": "review",
+      "definition": "8F-5"
+    },
+    "K13": {
+      "label": "unknown",
+      "basis": [],
+      "note": "新定義（8F-5）でも旧ラベル unknown を維持。一次情報で確認できず、unknown のまま（推測で確定しない）／旧: ドラゴンスターのハドウシーカー（10店舗・同じ応募期間・条件・共通の情報源URL）。公式の抽選ページ（403）とX投稿（402）を取得できず、一次情報で同一企画かを確認できなかった。共通の情報源URLは登録時の記録で、独立した根拠ではない",
+      "oldLabel": "unknown",
+      "definition": "8F-5"
+    },
+    "K14": {
+      "label": "unknown",
+      "basis": [],
+      "note": "新定義（8F-5）でも旧ラベル unknown を維持。一次情報で確認できず、unknown のまま（推測で確定しない）／旧: BOOKOFF蒲田駅東口店の30th。BOOKOFFの各店は店舗ごとのXアカウントで告知する形式だが、X投稿（402）を取得できず、豊中三国店等との関係を確認できなかった",
+      "oldLabel": "unknown",
+      "definition": "8F-5"
+    },
+    "K15": {
+      "label": "unknown",
+      "basis": [],
+      "note": "新定義（8F-5）でも旧ラベル unknown を維持。一次情報で確認できず、unknown のまま（推測で確定しない）／旧: GEOの30th（news/790）。ハドウシーカー（news/789）・両方（L122）と期間が同じだが、公式ページ（403）を取得できず、1つの企画か別企画かを確認できなかった",
+      "oldLabel": "unknown",
+      "definition": "8F-5"
+    },
+    "K16": {
+      "label": "unknown",
+      "basis": [],
+      "note": "新定義（8F-5）でも旧ラベル unknown を維持。一次情報で確認できず、unknown のまま（推測で確定しない）／旧: DMMマイカの30th（店舗未特定・集約アカウント経由）と通販（公式Xの投稿）。X投稿（402）を取得できず、同じ抽選の別経路の収集（重複）かを確認できなかった",
+      "oldLabel": "unknown",
+      "definition": "8F-5"
+    },
+    "K17": {
+      "label": "unknown",
+      "basis": [],
+      "note": "新定義（8F-5）でも旧ラベル unknown を維持。一次情報で確認できず、unknown のまま（推測で確定しない）／旧: トレカショップフロントの9種セット。公式Xと集約アカウントの別投稿由来の可能性があるが、X投稿（402）を取得できず確認できなかった",
+      "oldLabel": "unknown",
+      "definition": "8F-5"
+    }
+  }
+}

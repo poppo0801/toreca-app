@@ -142,7 +142,7 @@ describe("Stage 8F: グループ候補の確認（承認・却下）", () => {
     expect(q("group-proposal-mismatch")!.textContent).toContain("異なる点: 応募締切が異なる"); // 不明（gap）は強調せず詳細へ
     const det = c.querySelector("details") as HTMLDetailsElement;
     expect(det.open).toBe(false);
-    expect(det.textContent).toContain("同じ企画の裏づけ: 同じキャンペーン");
+    expect(det.textContent).toContain("補足の裏づけ: 同じキャンペーン");
     expect(det.textContent).toContain("不足している情報: 発表日が不明");
   });
   it("判断の根拠（区分・裏づけ・相違）と、確認した情報源（ホスト名）は、折りたたんだ詳細の中に出る（既定では表示面積を増やさない）。根拠が無い従来の候補も表示できる", () => {

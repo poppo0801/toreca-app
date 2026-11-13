@@ -158,13 +158,13 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F-4", () => {
     expect(f.fetched).toHaveLength(3);
   });
 
-  it("根拠が確認できない（別のイベントID）→ 自動にしない（候補）。ページは保存される", async () => {
+  it("【8F-5】別のイベントID（店舗ごとに別ページ）でも、内容が一致していれば自動。イベントIDは判定を左右しない。ページは保存される", async () => {
     const { lots } = await mkSet("別ID", 2);
     const f = new Pages((u) => (u.endsWith("page-1") ? "1111111" : "2222222"));
     const r = await runLotteryGrouping(u1, h1, lots[1], { llm: investigator(lots[1], [lots[0]]), allowAuto: true, asService: false, actor, followUps: 0, fetcher: f });
-    expect(r.tier).toBe("suggest");
-    expect(r.status).toBe("pending");
-    expect(await groupOf(lots[1])).toBeNull();
+    expect(r.tier).toBe("auto");
+    expect(r.status).toBe("applied");
+    expect(await groupOf(lots[1])).toBe(await groupOf(lots[0]));
     expect((await snaps(lots[1])).length).toBe(1);
   });
 
@@ -223,7 +223,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F-4", () => {
     const r = await runLotteryGrouping(u1, h1, lots[1], { llm: investigator(lots[1], [lots[0]]), allowAuto: true, asService: false, actor, followUps: 0 });
     expect(r.outcome?.usage?.fetches).toBe(0);
     expect(f.fetched).toHaveLength(0);
-    expect(r.tier).not.toBe("auto");
+    expect(r.tier).toBe("auto"); // 取得できなくても、登録内容が一致していれば判定は変わらない（新定義）
     expect(await snaps(lots[1])).toHaveLength(0);
   });
 });

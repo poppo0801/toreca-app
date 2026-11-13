@@ -33,7 +33,7 @@ export function LotteryGroupingDevView() {
   };
   return (
     <div className="space-y-3 text-sm" data-testid="grouping-dev">
-      <p className="text-xs text-muted-foreground">開発環境のみ。グループに入っていない抽選を判定し、同じ企画の別店舗を、根拠が十分なときだけ自動でまとめます（不確かなものは「グループ候補」として承認待ち）。</p>
+      <p className="text-xs text-muted-foreground">開発環境のみ。グループに入っていない抽選を判定し、同一系列・同一商品・同一応募期間・同一応募条件の別店舗の抽選を、条件がそろっていると確認できたときだけ自動でまとめます（不確かなものは「グループ候補」として承認待ち）。</p>
       <Button size="sm" disabled={busy} onClick={() => void scan()} data-testid="grouping-scan">
         {busy ? "判定中…" : "既存の抽選を判定する"}
       </Button>

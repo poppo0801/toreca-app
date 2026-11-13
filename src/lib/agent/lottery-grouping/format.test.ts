@@ -105,10 +105,13 @@ describe("異なる／記載なし／確認できない の区別", () => {
     const a = mkLottery({ applyDeadline: { precision: "date_only", date: "2026-12-20" } });
     expect(verifyProposal(mkWorld(s, [a]), claimOf({ memberIds: [a.id], selfConfidence: 99 }), { allowAuto: true }).tier).toBe("single");
   });
-  it("『確認できない』: 不明（日付なし）で裏づけが無ければ保留のまま（記載がないだけを根拠にまとめない）", () => {
+  it("『確認できない』（8F-5）: 発表日など周辺の不明は候補止まり（自動にしない）。応募締切など核心の不明は、補足の裏づけが無ければ保留のまま（記載がないだけを根拠にまとめない）", () => {
     const s = mkLottery({ resultDate: { precision: "unknown" } });
     const a = mkLottery({ resultDate: { precision: "unknown" } });
-    expect(verifyProposal(mkWorld(s, [a]), claimOf({ memberIds: [a.id], selfConfidence: 99 }), { allowAuto: true }).tier).toBe("hold");
+    expect(verifyProposal(mkWorld(s, [a]), claimOf({ memberIds: [a.id], selfConfidence: 99 }), { allowAuto: true }).tier).toBe("suggest");
+    const s2 = mkLottery({ applyDeadline: { precision: "unknown" } });
+    const a2 = mkLottery({ applyDeadline: { precision: "unknown" } });
+    expect(verifyProposal(mkWorld(s2, [a2]), claimOf({ memberIds: [a2.id], selfConfidence: 99 }), { allowAuto: true }).tier).toBe("hold");
   });
   it("AIに渡す情報: 情報源の文章が保存されているか（sourceTextStored）と、関係の読み方（legend）が含まれる", async () => {
     const { buildGroupingTools } = await import("@/lib/agent/lottery-grouping/tools");

@@ -1,0 +1,590 @@
+{
+  "version": 2,
+  "definition": "8F-5",
+  "note": "新定義（同一系列・同一商品・同一応募期間・同一応募条件・同一抽選方式の別店舗の抽選。同一イベントID・URLは必須でない。店舗選択式は原則対象外）での正解。旧定義の正解は gold-8f4.json に保持（oldLabel で対応）。AIに渡さない",
+  "labels": {
+    "P01": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: ふるいちイオンモール伊丹店の30th。店舗別のLivePocketイベント（イベントID 1134754）。他店舗とはイベントID・期間が異なる（確認したページのイベントID: 1134754, 1140532, 1136198, 1134915, 1135028, 1137523, 1139415, 1138866）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P02": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場深井店の30th（イベントID 1134915）。店舗別・期間が異なる（確認したページのイベントID: 1134915, 1140532, 1136198, 1134754, 1135028, 1137523, 1139415, 1138866）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P03": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: ふるいちイオンモール神戸北店の30th（イベントID 1137523）。店舗別・期間が異なる（確認したページのイベントID: 1137523, 1140532, 1136198, 1134754, 1134915, 1135028, 1139415, 1138866）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P04": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場小平店の30th（20BOX・イベントID 1139415）。数量・期間が他店舗と異なる店舗別のイベント（確認したページのイベントID: 1139415, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1138866）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P05": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/ugp5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場竹の塚店の30th（イベントID 1138194）。店舗別・期間が異なる（確認したページのイベントID: 1138194, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P06": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/pr4q5",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場魚住店の30th（アプリ会員限定・イベントID 1138864）。店舗別・期間が異なる（確認したページのイベントID: 1138864, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P07": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/4m2ak",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場東住吉店の30th（イベントID 1140258）。店舗別・期間が異なる（確認したページのイベントID: 1140258, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P08": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/ccavo",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場三田店の30th（イベントID 1140619）。店舗別・期間が異なる（確認したページのイベントID: 1140619, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P09": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: ふるいち高野店のストームエメラルダ（イベントID 1140532）。店舗別・期間が異なる（確認したページのイベントID: 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415, 1138866）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P10": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/0aq7y",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: 古本市場千里丘店のストームエメラルダ（イベントID 1140481）。店舗別・期間が異なる（確認したページのイベントID: 1140481, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P11": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623986",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba2nd/blog/623986",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba2nd/blog/623973",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623703",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623703",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: カードラボ販売買取センターNAMBAの30th（再販）。店舗ブログの告知は店舗別（カードラボなんば店・津田沼店・オタロード本店とは別日程・別告知）",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P12": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623703",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623703",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba2nd/blog/623973",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623603/",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/himeji/blog/623603",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "新定義（8F-5）でも旧ラベル none を維持。各店舗の応募期間・応募条件・方式・販売元が異なる（または商品が別）ことが公式ページ・登録内容から確認でき、イベントIDの異同に依らず対象外／旧: カードラボ津田沼店のハドウシーカー。津田沼店のブログの告知は店舗別。マルイ海老名店は別日程（11/3〜11/19）の別告知",
+      "oldLabel": "none",
+      "definition": "8F-5"
+    },
+    "P13": {
+      "label": "unknown",
+      "basis": [],
+      "note": "新定義（8F-5）でも旧ラベル unknown を維持。一次情報で確認できず、unknown のまま（推測で確定しない）／旧: GEOのハドウシーカー＋30th（集約アカウントのX投稿由来）。GEOの公式告知は商品ごとに2件（news/789・790）で同じ日程・条件。X投稿由来の登録が、公式告知の登録と同じ抽選の別経路か（重複）、別の抽選かは、確認できなかった（Xは取得できない）",
+      "oldLabel": "unknown",
+      "definition": "8F-5"
+    }
+  }
+}

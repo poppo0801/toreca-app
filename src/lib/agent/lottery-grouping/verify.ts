@@ -2,14 +2,17 @@
  * 検証層（Stage 8F）: AIの提案を、登録済みの事実と突き合わせて、区分（auto / suggest / hold / single）と信頼度を決める。
  * AIの外側にある固定ロジック。AIの自己申告（selfConfidence・「共通」の主張）は信用せず、事実と食い違えば降格する。
  *
- * 原則（誤ってまとめるより、まとめない方を選ぶ）:
- *  - 自動（auto）にできるのは、①系列・商品（数量まで）・応募期間・発表日・応募方法・受取方法・店舗の指定方式・応募条件がすべて一致し、
- *    ②同じ企画だという独立した裏づけ（同じキャンペーン／同じ情報源のURL／すべての情報源に実在する同一の企画文言）があり、
- *    ③店舗が重複せず、④手動で分けた組ではなく、⑤AIの主張と事実が食い違わず、⑥情報源に命令らしき文面が無く、
- *    ⑦手動で作ったグループへの追加ではない、場合だけ。
- *  - 相違がある（応募期間・条件・方式・商品など）が、同じ企画の裏づけがある → 利用者の承認が必要な候補（suggest）。相違と理由を示す。
- *  - 相違があり、裏づけも無い → まとめない（single）。不足があり判断できない → 保留（hold）。
- *  - 店舗が同じ・別のキャンペーン・商品がまったく別・手動で分けた組 → まとめない（single）。
+ * グループ化の定義（8F-5。正式仕様）: 同一系列の複数店舗で、同一商品・同一応募期間・同一応募条件・同一抽選方式の抽選が独立に実施されているとき、
+ * 一覧表示上で1つにまとめる（各店舗の抽選・応募・当選・履歴は独立のまま）。同一イベントID・同一の応募URLは必須ではなく、
+ * イベントIDやURLが店舗ごとに異なることを理由に拒否しない（8F-4 までの「同じイベント・同じ応募枠」の定義は廃止）。
+ *
+ * 原則（誤ってまとめるより、まとめない方を選ぶ。情報不足を「一致」とみなさない）:
+ *  - 自動（auto）にできるのは、①系列・商品（数量まで）・応募開始/締切・発表日・応募方法・受取方法・抽選方式・応募条件が、すべて「確認できたうえで一致」し、
+ *    ②店舗が互いに別で特定され（重複なし）、どれも店舗固定（店舗選択式ではない）で、③応募条件の一致を確認できる根拠（条件の記載が両方にあって一致、
+ *    または両方とも未登録でも、情報源の文章が全件ある）があり、④手動で分けた組ではなく、⑤AIの主張と事実が食い違わず、⑥情報源に命令らしき文面が無く、
+ *    ⑦手動で作ったグループへの追加ではない、場合だけ。同じキャンペーン・同じ情報源・同じイベントID・共通の企画文言は、信頼度を上げる補足であって、必須ではない。
+ *  - 一部が不足・軽微な違い（記載なし・文面の一部の違い・別のキャンペーンIDなど）→ 利用者の承認が必要な候補（suggest）／判断の核心（商品・期間・店舗）が不明なら保留（hold）。
+ *  - 商品・期間・条件・方式・数量・抽選方式のいずれかが異なる、店舗選択式、同じ店舗、系列が別、手動で分けた組 → まとめない（single）。
  */
 import { detectInjection } from "@/lib/agent/core";
 import { comparePair, pairKey } from "@/lib/agent/lottery-grouping/compare";
@@ -73,9 +76,11 @@ export const fieldLabel = (f: string): string => FIELD_LABEL[f] ?? f;
 export function mismatchesOf(c: PairCompare, lotteryId: string): Mismatch[] {
   const out: Mismatch[] = [];
   const add = (field: string, detail: string, severity: Mismatch["severity"]) => out.push({ field, detail, severity, lotteryId });
-  if (c.store === "same") add("store", "同じ店舗の抽選（別のグループではなく重複の可能性）", "hard");
+  if (c.store === "same") add("store", "同じ店舗の抽選（グループ化ではなく重複管理の対象）", "hard");
   if (c.store === "unknown") add("store", "店舗が特定できていない", "gap");
-  if (c.campaign === "differs") add("campaign", "別のキャンペーンとして登録されている", "hard");
+  if (c.storeSelect) add("storeMode", "店舗選択式の抽選はグループ化の対象外", "hard");
+  // 別のキャンペーンIDは、それだけでは「別企画」と断定できない（店舗ごとに別登録でも同じ内容がある）ため、拒否ではなく利用者の確認
+  if (c.campaign === "differs") add("campaign", "別のキャンペーンとして登録されている（同じ内容かを利用者が確認）", "soft");
   if (c.products === "disjoint") add("products", "対象商品が重ならない", "hard");
   else if (c.products === "subset" || c.products === "overlap") add("products", "対象商品の一部だけが共通", "hard");
   else if (c.products === "unknown") add("products", "対象商品が未登録", "gap");
@@ -90,7 +95,7 @@ export function mismatchesOf(c: PairCompare, lotteryId: string): Mismatch[] {
     else if (c[f] === "unknown") add(f, `${fieldLabel(f)}が不明`, "gap");
   }
   if (c.kind === "differs") add("kind", "抽選方式が異なる", "hard");
-  if (c.storeMode === "differs") add("storeMode", "店舗の指定方式が異なる（店舗固定と店舗選択式）", "hard");
+  if (c.storeMode === "differs" && !c.storeSelect) add("storeMode", "店舗の指定方式が異なる", "hard");
   if (c.requirements === "differs") add("requirements", "応募条件が異なる", "hard");
   else if (c.requirements === "unstated") add("requirements", "応募条件の一方にだけ記載がある項目がある（記載なし。条件が異なるとは限らない）", "soft");
   else if (c.requirements === "similar") add("requirements", "応募条件の文面が一部異なる", "soft");
@@ -99,17 +104,18 @@ export function mismatchesOf(c: PairCompare, lotteryId: string): Mismatch[] {
 
 /** 1組の信頼度への寄与（事実が一致している項目だけ加点） */
 function pairScore(c: PairCompare): number {
+  // 合計100（8F-5: 同じ企画の裏づけが無くても、すべて一致すれば満点。裏づけは補足の加点）。応募条件が両方未登録なら「一致」ではなく半分だけ
   let s = 0;
   if (c.chain === "same") s += 10;
   if (c.store === "distinct") s += 5;
-  if (c.products === "same") s += 20;
+  if (c.products === "same") s += 25;
   if (c.quantity === "same") s += 5;
-  if (c.applyStart === "same") s += 8;
-  if (c.applyDeadline === "same") s += 7;
-  if (c.resultDate === "same") s += 8;
-  if (c.applyMethod === "same") s += 5;
-  if (c.receiveMethod === "same") s += 5;
-  if (c.requirements === "same") s += 7;
+  if (c.applyStart === "same") s += 10;
+  if (c.applyDeadline === "same") s += 10;
+  if (c.resultDate === "same") s += 10;
+  if (c.applyMethod === "same") s += 6;
+  if (c.receiveMethod === "same") s += 6;
+  if (c.requirements === "same") s += c.requirementsBlank ? 4 : 8;
   if (c.kind === "same" && c.storeMode === "same") s += 5;
   return s;
 }
@@ -144,8 +150,8 @@ const TIER_LABEL: Record<Tier, string> = { auto: "自動確定", suggest: "承�
 const SIGNAL_LABEL: Record<string, string> = { campaign: "同じキャンペーンとして登録", source_url: "同じ情報源URL", phrase: "すべての情報源に実在する共通の企画文言", event_id: "取得したページ・URLで同じイベントID" };
 function basisOf(tier: Tier, signals: string[], dec: VerifiedDecision, why: string): string[] {
   const out = [`区分: ${TIER_LABEL[tier]}`, why];
-  for (const s of signals) out.push(`同じ企画の裏づけ: ${SIGNAL_LABEL[s] ?? s}`);
-  if (signals.length === 0) out.push("同じ企画の独立した裏づけ: なし");
+  for (const s of signals) out.push(`補足の裏づけ: ${SIGNAL_LABEL[s] ?? s}`);
+  if (signals.length === 0) out.push("補足の裏づけ（同じキャンペーン・情報源・イベントID・企画文言）: なし（グループ化の必須条件ではない）");
   for (const m of dec.mismatches.slice(0, 8)) out.push(`${m.severity === "hard" ? "相違" : m.severity === "gap" ? "不明・確認できない" : "軽微な違い"}: ${m.detail}`);
   for (const d of dec.downgrades.slice(0, 5)) out.push(`降格・却下: ${d}`);
   return [...new Set(out.filter(Boolean))];
@@ -167,7 +173,9 @@ export function evidenceSignature(world: GWorld): string {
   const ids = [world.subject.id, ...world.lotteries.map((l) => l.id)].sort();
   return hash53(ids.map((id) => `${id}:${hash53([...new Set(ev.get(id) ?? [])].sort().join("\u0001"))}`).join("|"));
 }
-export const peerHashOf = (world: GWorld): string => hash53(world.lotteries.map((l) => l.id).sort().join(",") + "#" + evidenceSignature(world));
+/** 判定の定義の版。変えると、過去の「単独」「保留」の記録キーが変わり、新しい定義で再評価される（8F-5。却下・手動で分けた組は別の記録なので、再びまとめない） */
+export const GROUPING_DEFINITION = "def8f5";
+export const peerHashOf = (world: GWorld): string => hash53(`${GROUPING_DEFINITION}#` + world.lotteries.map((l) => l.id).sort().join(",") + "#" + evidenceSignature(world));
 /** 保存済みの文章と、取得したページの本文を合わせた、抽選ごとの文章 */
 export function allEvidence(world: GWorld): Map<string, string[]> {
   const m = new Map<string, string[]>();
@@ -309,12 +317,31 @@ function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: V
   }
 
   // ---- 事実の突き合わせ（subject × 相手、新規グループは相手どうしも）
-  const pairs: { c: PairCompare; other: GLottery }[] = peers.map((p) => ({ c: comparePair(subject, p), other: p }));
+  // 商品の表記揺れ・略称: 登録が別でも名称が同じ（正規化後）なら同じ商品。名称が近く、AIが「商品は共通」と主張するときは、一致とはせず利用者の確認に回す
+  const nameOf = (l: GLottery): string[] => [...new Set(l.items.map((i) => norm(world.productNames.get(i.productId) ?? "")))].filter(Boolean).sort();
+  const sameNames = (x: string[], y: string[]): boolean => x.length > 0 && x.length === y.length && x.every((n, i) => n === y[i]);
+  // 商品の数が同じで、1つずつの名称が一方に他方が含まれる（略称・表記揺れの可能性。4文字以上）。構成が違う（一部だけ共通）・末尾の1文字だけが違う別商品は近いとしない
+  const nearNames = (x: string[], y: string[]): boolean => x.length > 0 && x.length === y.length && x.every((n, i) => Math.min(n.length, y[i].length) >= 4 && (n.includes(y[i]) || y[i].includes(n)));
+  const claimsProducts = claim.claimedCommon.some((x) => CLAIM_FIELDS[norm(x)]?.includes("products") || CLAIM_FIELDS[x]?.includes("products"));
+  const productNotes: Mismatch[] = [];
+  const cmp = (a: GLottery, b: GLottery): PairCompare => {
+    const c = comparePair(a, b);
+    if (c.products === "same" || c.products === "unknown") return c;
+    const na = nameOf(a);
+    const nb = nameOf(b);
+    if (sameNames(na, nb)) return { ...c, products: "same" };
+    if (claimsProducts && nearNames(na, nb)) {
+      productNotes.push({ field: "products", detail: "商品の登録は別だが名称が近く、AIは同じ商品と判断した（表記揺れ・略称の可能性。確認が必要）", severity: "soft" });
+      return { ...c, products: "same" };
+    }
+    return c;
+  };
+  const pairs: { c: PairCompare; other: GLottery }[] = peers.map((p) => ({ c: cmp(subject, p), other: p }));
   const peerPairs: PairCompare[] = [];
-  if (kind === "new_group") for (let i = 0; i < peers.length; i++) for (let j = i + 1; j < peers.length; j++) peerPairs.push(comparePair(peers[i], peers[j]));
+  if (kind === "new_group") for (let i = 0; i < peers.length; i++) for (let j = i + 1; j < peers.length; j++) peerPairs.push(cmp(peers[i], peers[j]));
   const allPairs = [...pairs.map((p) => p.c), ...peerPairs];
 
-  const mismatches: Mismatch[] = [];
+  const mismatches: Mismatch[] = [...productNotes];
   for (const { c, other } of pairs) mismatches.push(...mismatchesOf(c, other.id));
   for (const c of peerPairs) mismatches.push(...mismatchesOf(c, c.b).map((m) => ({ ...m, detail: `${m.detail}（相手の抽選どうし）` })));
   // 同じ内容の相違は1つにまとめる（相手が多いときの重複表示を避ける）
@@ -335,58 +362,60 @@ function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: V
   let injection = false;
   for (const l of compareSet) if ((evidenceAll.get(l.id) ?? []).some((t) => detectInjection(t).length > 0)) injection = true;
   const phrase = verifyPhrase(claim.commonPhrase, subject, peers, evidenceAll);
-  // 同じイベントの識別子（取得したページ・URLから。AIの主張ではなく事実）: すべての相手と共有→強い裏づけ／一部だけ共有・別の値が混在→矛盾（自動・候補にしない）
+  // 同じイベントの識別子（取得したページ・URLから。AIの主張ではなく事実）。8F-5: 補足の裏づけ（信頼度の加点）であり、一致も不一致も区分を決めない
+  // （店舗ごとにイベントID・応募URLが別でも、内容が同じならグループ化の対象。イベントIDが異なることを理由に拒否しない）
   const subjIds = idsOf(world, subject);
   const idRel = peers.map((p) => ({ p, r: compareIdentifiers(subjIds, idsOf(world, p)) }));
   const sharedAll = idRel.length > 0 && idRel.every((x) => x.r.shared.length > 0);
-  const contradictory = idRel.some((x) => x.r.shared.length > 0) && idRel.some((x) => x.r.differs);
-  const allDiffer = idRel.length > 0 && idRel.every((x) => x.r.differs);
+  const idsDiffer = idRel.some((x) => x.r.differs);
   if (sharedAll) signals.push("event_id");
   if (phrase.ok) signals.push("phrase");
-  else if (claim.commonPhrase) dec.downgrades.push(`共通の文言を確認できない: ${phrase.reason}`);
   dec.strongSignals = signals;
+
+  // ---- 応募条件の一致を確認できる根拠（両方とも未登録の「同じ」は、情報源の文章が全件あるときだけ確認できたとみなす）
+  const basisNotes: string[] = [];
+  // 店舗選択式の疑い: 応募時に店舗を1つ選ぶ（対象店舗の中から1店舗のみ応募できる）旨の記載・タグがある。店舗ごとに独立した抽選ではなく、1つの抽選で店舗を選ぶ形の可能性が高い（原則グループ化の対象外）。
+  // 登録が店舗固定でも、自動にはせず、利用者の確認（候補）に回す
+  const choiceRe = /店舗(の)?(中|うち)から.{0,8}[1一]店舗|店舗を(お)?選(択|び|んで)|応募(する)?店舗を選|[1一]店舗のみ(応募|ご応募)/;
+  const storeChoice = compareSet.some((l) => l.requirementTags.includes("one_store_only") || choiceRe.test(norm(l.conditionsText)) || (evidenceAll.get(l.id) ?? []).some((t) => choiceRe.test(norm(t))));
+  if (storeChoice) dec.mismatches.push({ field: "storeMode", detail: "応募時に店舗を1つ選ぶ（1店舗のみ応募できる）記載があり、店舗選択式の抽選の可能性がある（原則グループ化の対象外。利用者が確認）", severity: "soft" });
+  const involved = compareSet;
+  const textsAll = involved.every((l) => (evidenceAll.get(l.id) ?? []).some((t) => t.trim().length > 0));
+  if (allPairs.some((c) => c.requirements === "same" && c.requirementsBlank) && !textsAll) {
+    dec.mismatches.push({ field: "requirementsBlank", detail: "応募条件が両方とも未登録で、情報源の文章も揃っておらず、条件が同じか確認できない", severity: "gap" });
+  }
+  if (idsDiffer && !sharedAll) basisNotes.push("イベントID・応募URLは店舗ごとに異なる（店舗別の抽選のため。判定には使わない）");
 
   // ---- 区分の決定
   const hard = dec.mismatches.filter((m) => m.severity === "hard");
   const gaps = dec.mismatches.filter((m) => m.severity === "gap");
   const soft = dec.mismatches.filter((m) => m.severity === "soft");
-  const blocking = dec.mismatches.filter((m) => m.severity === "hard" && ["store", "campaign"].includes(m.field) || (m.field === "products" && m.detail.startsWith("対象商品が重ならない")));
+  const blocking = hard.filter((m) => m.field === "store" || m.field === "storeMode" || (m.field === "products" && m.detail.startsWith("対象商品が重ならない")));
   const strong = signals.length > 0;
+  // 判断の核心（商品・応募期間・店舗・応募条件）が不明なら、同じ内容かどうか判断できない（保留）。受取・発表日など周辺の不明は候補（利用者の確認）
+  const critical = gaps.filter((m) => ["products", "applyStart", "applyDeadline", "store", "requirements"].includes(m.field));
   let tier: Tier;
   let why: string;
   if (blocking.length > 0) {
     tier = "single";
     why = `まとめない: ${[...new Set(blocking.map((m) => m.detail))].join("・")}`;
+  } else if (hard.length > 0 && kind === "add_to_group" && pairs.some((p) => !mismatchesOf(p.c, p.other.id).some((m) => m.severity === "hard"))) {
+    // 既存グループの所属の一部とは一致し、一部とは相違する: グループの中で内容が一致していない（旧定義で作られた組など）。勝手に追加せず、確認に回す
+    tier = "hold";
+    why = `追加先のグループの所属の間で内容が一致していない（${[...new Set(hard.map((m) => fieldLabel(m.field)))].join("・")}が異なる所属がある）ため、確認が必要`;
   } else if (hard.length > 0) {
-    tier = strong ? "suggest" : "single";
-    why = strong
-      ? `同じ企画の裏づけはあるが、店舗ごとに異なる点がある（${[...new Set(hard.map((m) => fieldLabel(m.field)))].join("・")}）。利用者の確認が必要`
-      : `同じ系列でも、${[...new Set(hard.map((m) => fieldLabel(m.field)))].join("・")}が異なり、同じ企画の裏づけも無いため、まとめない`;
+    tier = "single";
+    why = `同じ系列でも、${[...new Set(hard.map((m) => fieldLabel(m.field)))].join("・")}が異なるため、まとめない（別の抽選）`;
   } else if (gaps.length > 0) {
-    // 不明（記載なし・確認できない）がある: 同じ企画の裏づけがあれば候補、無ければ保留（「記載なし」だけを根拠にまとめない）
-    tier = strong ? "suggest" : "hold";
+    // 不明（記載なし・確認できない）を「一致」とみなさない: 核心が不明なら、同じ企画の裏づけがあるときだけ候補、無ければ保留。周辺の不明は候補
+    tier = critical.length === 0 || strong ? "suggest" : "hold";
     why = `${[...new Set(gaps.map((m) => m.detail))].join("・")}のため、確定できない`;
   } else if (soft.length > 0) {
     tier = "suggest";
-    why = soft.some((m) => m.detail.includes("記載なし")) ? "応募条件の一方にだけ記載がある項目があり（記載なし）、同じ条件かを利用者が確認する必要がある" : "応募条件の文面に違いがあるため、利用者の確認が必要";
-  } else if (strong) {
-    tier = "auto";
-    why = "系列・商品・応募期間・発表日・応募方法・受取方法・応募条件がすべて一致し、同じ企画の裏づけもある";
+    why = soft.some((m) => m.detail.includes("記載なし")) ? "応募条件の一方にだけ記載がある項目があり（記載なし）、同じ条件かを利用者が確認する必要がある" : soft.some((m) => m.field === "campaign") ? "別のキャンペーンとして登録されているため、同じ内容かを利用者が確認する必要がある" : "表記や条件の文面に違いがあるため、利用者の確認が必要";
   } else {
-    tier = "suggest";
-    why = "項目はすべて一致しているが、同じ企画であることの裏づけ（同じキャンペーン・同じ情報源・共通の企画名）が確認できていない";
-  }
-
-  // ---- 根拠の矛盾・別のイベント（8F-4）
-  if (contradictory) {
-    dec.mismatches.push({ field: "campaign", detail: "同じイベントIDの抽選と、別のイベントIDの抽選が混在している（根拠が矛盾）", severity: "gap" });
-    if (tier === "auto" || tier === "suggest") {
-      tier = "hold";
-      why = "同じイベントIDと別のイベントIDが混在し、根拠が矛盾するため、確定できない";
-      dec.downgrades.push("根拠が矛盾するため、自動・候補にしない（保留）");
-    }
-  } else if (allDiffer) {
-    dec.mismatches.push({ field: "campaign", detail: "別のイベントID（別のイベントページ）として登録されている", severity: "soft" });
+    tier = "auto";
+    why = "系列・商品・応募期間・発表日・応募方法・受取方法・抽選方式・応募条件がすべて確認できたうえで一致し、店舗はそれぞれ別の独立した抽選";
   }
 
   // ---- 降格（自動にしてはいけない事情）
@@ -406,8 +435,16 @@ function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: V
     dec.mismatches.push({ field: "claim", detail: "情報源の文章に命令らしき文面があった（指示としては扱っていない）", severity: "gap" });
     cap("情報源に命令らしき文面があるため、自動にしない");
   }
+  // 対象と内容が完全に一致する別の既存グループがある（どのグループへ入れるべきか決められない）: 自動にしない
+  const rivals = world.groups.filter((g) => g.id !== group?.id && (!g.chainId || g.chainId === subject.chainId) && g.memberIds.length > 0 && g.memberIds.every((id) => {
+    const m = byId.get(id);
+    return !!m && !m.archived && m.id !== subject.id && mismatchesOf(cmp(subject, m), m.id).length === 0;
+  }));
+  if (rivals.length > 0) {
+    dec.mismatches.push({ field: "group", detail: `対象と内容が一致する別のグループが${rivals.length}件ある（どれに入れるか決められない）`, severity: "soft" });
+    cap("同じ内容の既存グループが他にもあるため、自動にしない");
+  }
   if (kind === "add_to_group" && group && group.origin === "manual") cap("手動で作ったグループには、承認なしで追加しない");
-  if (allDiffer && !contradictory) cap("別のイベントIDとして登録されているため、自動にしない");
   if (!opts.allowAuto) cap("自動グループ化が無効の設定のため、候補として提示する");
   if (dec.skipReason) tier = tier === "auto" ? "suggest" : tier;
 
@@ -443,7 +480,7 @@ function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: V
   dec.confidence = confidence;
   dec.missing = [...new Set([...claim.missing, ...gaps.map((g) => g.detail)])].slice(0, 6);
   dec.rationale = [rationale, why].filter(Boolean).join(" / ").slice(0, 1400);
-  dec.basis = basisOf(tier, signals, dec, why);
+  dec.basis = [...basisOf(tier, signals, dec, why), ...basisNotes];
   if (tier === "single") {
     dec.kind = "single";
     dec.key = singleKey;

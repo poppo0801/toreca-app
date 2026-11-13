@@ -66,12 +66,54 @@ describe("検証層: 自動にしてよい条件（すべて満たすときだ�
     expect(verifyProposal(mkWorld(s, [b]), claim({ memberIds: [b.id], commonPhrase: null }), { allowAuto: true }).strongSignals).toEqual(["source_url"]);
     expect(verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("auto");
   });
-  it("項目がすべて一致していても、同じ企画の裏づけが無ければ auto にしない（suggest）", () => {
+  it("【8F-5 新定義】項目がすべて一致していれば、同じキャンペーン・同じ情報源・企画名の裏づけが無くても auto（同一イベントID・同一URLは必須ではない）", () => {
     const s = mkLottery();
     const a = mkLottery();
     const d = verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true });
-    expect(d.tier).toBe("suggest");
-    expect(d.rationale).toContain("裏づけ");
+    expect(d.tier).toBe("auto");
+    expect(d.strongSignals).toEqual([]);
+    expect(d.confidence).toBeGreaterThanOrEqual(90);
+    expect(d.basis.join()).toContain("必須条件ではない");
+  });
+  it("【8F-5】店舗ごとにイベントID・応募URLが別でも、内容が同じなら拒否しない（イベントIDの違いは判定に使わない）", () => {
+    const s = mkLottery({ sourceUrls: ["https://livepocket.example.invalid/e/11111?event_id=1111111"] });
+    const a = mkLottery({ sourceUrls: ["https://livepocket.example.invalid/e/22222?event_id=2222222"] });
+    const d = verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true });
+    expect(d.tier).toBe("auto");
+    expect(d.mismatches).toEqual([]);
+    expect(d.basis.join()).toContain("店舗ごとに異なる");
+  });
+  it("【8F-5】応募条件が両方とも未登録: 情報源の文章が全件そろうときだけ確認できた（auto）。そろわなければ「同じ」とみなさず候補（suggest）", () => {
+    const blank = { requirementTags: [], conditionsText: "" };
+    const s = mkLottery(blank);
+    const a = mkLottery(blank);
+    const noText = verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true });
+    expect(noText.tier).toBe("suggest");
+    expect(noText.mismatches.some((m) => m.field === "requirementsBlank")).toBe(true);
+    const withText = verifyProposal(mkWorld(s, [a], { evidence: evidenceOf(s, a) }), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true });
+    expect(withText.tier).toBe("auto");
+  });
+  it("【8F-5】店舗選択式（1つの抽選で応募店舗を選ぶ）は、同じイベントでも対象外（single）。事前の絞り込みでAIも呼ばない", () => {
+    const s = mkLottery();
+    const sel = mkLottery({ storeMode: "select_on_apply", storeId: null, storeName: "" });
+    expect(isPlausiblePeer(s, sel)).toBe(false);
+    const d = verifyProposal(mkWorld(s, [sel], { evidence: evidenceOf(s, sel) }), claim({ memberIds: [sel.id] }), { allowAuto: true });
+    expect(d.tier).toBe("single");
+    expect(d.rationale).toContain("店舗選択式");
+  });
+  it("【8F-5】商品の表記揺れ: 登録が別でも名称が同じ（正規化後）なら同じ商品。名称が近くAIが共通と判断した場合は一致とせず確認（suggest）。無関係な商品は single", () => {
+    const s = mkLottery({ items: [item("prod-1")] });
+    const same = mkLottery({ items: [item("prod-2")] });
+    const near = mkLottery({ items: [item("prod-3")] });
+    const far = mkLottery({ items: [item("prod-4")] });
+    const names = { "prod-1": "30th CELEBRATION カードセット", "prod-2": "30th　celebration　カードセット", "prod-3": "30th CELEBRATION カードセット（フシギダネ）", "prod-4": "別の拡張パック" };
+    const w = (o: ReturnType<typeof mkLottery>) => { const x = mkWorld(s, [o]); for (const [k, v] of Object.entries(names)) x.productNames.set(k, v); return x; };
+    expect(verifyProposal(w(same), claim({ memberIds: [same.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("auto");
+    const nearD = verifyProposal(w(near), claim({ memberIds: [near.id], commonPhrase: null, claimedCommon: ["対象商品"] }), { allowAuto: true });
+    expect(nearD.tier).toBe("suggest");
+    expect(nearD.mismatches.some((m) => m.detail.includes("表記揺れ"))).toBe(true);
+    expect(verifyProposal(w(near), claim({ memberIds: [near.id], commonPhrase: null, claimedCommon: [] }), { allowAuto: true }).tier).toBe("single"); // AIが共通と判断しなければ、別の商品
+    expect(verifyProposal(w(far), claim({ memberIds: [far.id], commonPhrase: null, claimedCommon: ["対象商品"] }), { allowAuto: true }).tier).toBe("single");
   });
   it("自動グループ化が無効の設定なら、auto になる提案も suggest（候補）にする", () => {
     const s = mkLottery();
@@ -82,7 +124,7 @@ describe("検証層: 自動にしてよい条件（すべて満たすときだ�
 });
 
 describe("検証層: 誤ってまとめない（相違・不足・過去の判断）", () => {
-  it("同一系列だが応募期間が異なる: 裏づけが無ければ single。同じキャンペーンなら suggest（店舗ごとの期間の違いを示す）。自動にはしない", () => {
+  it("【8F-5】同一系列でも応募期間が異なれば対象外（single）。同じキャンペーン・同じ企画名があっても、期間が異なる別の抽選としてまとめない", () => {
     const s = mkLottery();
     const a = mkLottery({ applyDeadline: { precision: "date_only", date: "2026-12-14" } });
     const d1 = verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true });
@@ -90,39 +132,37 @@ describe("検証層: 誤ってまとめない（相違・不足・過去の判�
     expect(d1.kind).toBe("single");
     const s2 = mkLottery({ campaignId: "camp-1" });
     const a2 = mkLottery({ campaignId: "camp-1", applyDeadline: { precision: "date_only", date: "2026-12-14" } });
-    const d2 = verifyProposal(mkWorld(s2, [a2]), claim({ memberIds: [a2.id], commonPhrase: null }), { allowAuto: true });
-    expect(d2.tier).toBe("suggest");
+    const d2 = verifyProposal(mkWorld(s2, [a2], { evidence: evidenceOf(s2, a2) }), claim({ memberIds: [a2.id] }), { allowAuto: true });
+    expect(d2.tier).toBe("single");
     expect(d2.mismatches.some((m) => m.field === "applyDeadline" && m.severity === "hard")).toBe(true);
   });
-  it("AIが全部『共通』と主張しても（過剰なAI）、事実と食い違えば降格し、信頼度の自己申告は使わない", () => {
+  it("AIが全部『共通』と主張しても（過剰なAI）、事実と食い違えば まとめない。信頼度の自己申告は使わない", () => {
     const s = mkLottery({ campaignId: "camp-1" });
     const a = mkLottery({ campaignId: "camp-1", applyDeadline: { precision: "date_only", date: "2026-12-14" } });
     const d = verifyProposal(mkWorld(s, [a], { evidence: evidenceOf(s, a) }), claim({ memberIds: [a.id], claimedCommon: ["応募期間", "対象商品"], selfConfidence: 99 }), { allowAuto: true });
-    expect(d.tier).toBe("suggest");
-    expect(d.downgrades.join()).toContain("AIは「応募期間が共通」と判断したが、登録内容では異なる");
-    expect(d.confidence).toBeLessThan(90);
+    expect(d.tier).toBe("single");
+    expect(d.downgrades.join()).not.toContain("自動");
   });
-  it("複数商品の抽選: 対象商品が異なれば single（同じキャンペーンなら suggest）。まったく別の商品は常に single", () => {
+  it("複数商品の抽選: 対象商品が異なれば single（同じキャンペーンでも）。まったく別の商品も single", () => {
     const s = mkLottery({ items: [item(PRODUCT_A), item(PRODUCT_B)] });
     const partial = mkLottery({ items: [item(PRODUCT_A)] });
     expect(verifyProposal(mkWorld(s, [partial]), claim({ memberIds: [partial.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("single");
     const sc = mkLottery({ items: [item(PRODUCT_A), item(PRODUCT_B)], campaignId: "c1" });
     const pc = mkLottery({ items: [item(PRODUCT_A)], campaignId: "c1" });
-    expect(verifyProposal(mkWorld(sc, [pc]), claim({ memberIds: [pc.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("suggest");
+    expect(verifyProposal(mkWorld(sc, [pc]), claim({ memberIds: [pc.id], commonPhrase: null, claimedCommon: ["対象商品"] }), { allowAuto: true }).tier).toBe("single"); // AIが共通と主張しても、一部だけの共通は別の商品構成
     const other = mkLottery({ items: [item(PRODUCT_B)], campaignId: "c1" });
     const sa = mkLottery({ items: [item(PRODUCT_A)], campaignId: "c1" });
     expect(verifyProposal(mkWorld(sa, [other]), claim({ memberIds: [other.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("single");
   });
-  it("店舗ごとに応募条件が異なる／通販と店頭が混在する: 裏づけが無ければ single、あっても auto にしない", () => {
+  it("店舗ごとに応募条件・応募方法が異なる／通販と店頭が混在する: 同じ企画名があっても対象外（single）", () => {
     const s = mkLottery();
     const cond = mkLottery({ requirementTags: ["purchase_history"], conditionsText: "過去の購入履歴が必要です。" });
     const mix = mkLottery({ receiveMethod: "shipping", applyMethod: "store" });
     for (const other of [cond, mix]) {
       const w = mkWorld(s, [other], { evidence: evidenceOf(s, other) });
       const d = verifyProposal(w, claim({ memberIds: [other.id] }), { allowAuto: true });
-      expect(d.tier).toBe("suggest"); // 企画名の裏づけはあるが、相違があるため利用者の承認が必要
+      expect(d.tier).toBe("single");
       expect(d.mismatches.some((m) => m.severity === "hard")).toBe(true);
-      expect(verifyProposal(mkWorld(s, [other]), claim({ memberIds: [other.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("single");
     }
   });
   it("応募条件の文面が一部だけ異なる（類似）: 自動にしない", () => {
@@ -131,19 +171,29 @@ describe("検証層: 誤ってまとめない（相違・不足・過去の判�
     const d = verifyProposal(mkWorld(s, [a], { evidence: evidenceOf(s, a) }), claim({ memberIds: [a.id] }), { allowAuto: true });
     expect(d.tier).toBe("suggest");
   });
-  it("日付・方式が不明（情報不足）: 裏づけが無ければ hold、あれば suggest。自動にしない", () => {
+  it("【8F-5】情報不足を「一致」とみなさない: 発表日など周辺の不明は候補（suggest）、応募期間など核心の不明は保留（hold）。自動にしない", () => {
     const s = mkLottery({ resultDate: { precision: "unknown" } });
     const a = mkLottery({ resultDate: { precision: "unknown" } });
-    expect(verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("hold");
-    expect(verifyProposal(mkWorld(s, [a], { evidence: evidenceOf(s, a) }), claim({ memberIds: [a.id] }), { allowAuto: true }).tier).toBe("suggest");
+    expect(verifyProposal(mkWorld(s, [a]), claim({ memberIds: [a.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("suggest");
+    const s2 = mkLottery({ applyDeadline: { precision: "unknown" } });
+    const a2 = mkLottery({ applyDeadline: { precision: "unknown" } });
+    expect(verifyProposal(mkWorld(s2, [a2]), claim({ memberIds: [a2.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("hold");
+    // 同じ企画の補足の裏づけ（同じキャンペーンなど）があれば、核心の不明でも候補にできる（自動にはしない）
+    const s3 = mkLottery({ applyDeadline: { precision: "unknown" }, campaignId: "c" });
+    const a3 = mkLottery({ applyDeadline: { precision: "unknown" }, campaignId: "c" });
+    expect(verifyProposal(mkWorld(s3, [a3]), claim({ memberIds: [a3.id], commonPhrase: null }), { allowAuto: true }).tier).toBe("suggest");
   });
-  it("同じ店舗の抽選・別のキャンペーン: まとめない（重複はグループではなく重複判定の対象）", () => {
+  it("【8F-5】同じ店舗の抽選は対象外（重複管理の対象）。別のキャンペーンIDだけでは拒否せず、利用者の確認（suggest。自動にしない）", () => {
     const s = mkLottery();
     const dup = mkLottery({ storeId: s.storeId });
-    expect(verifyProposal(mkWorld(s, [dup], { evidence: evidenceOf(s, dup) }), claim({ memberIds: [dup.id] }), { allowAuto: true }).tier).toBe("single");
+    const dd = verifyProposal(mkWorld(s, [dup], { evidence: evidenceOf(s, dup) }), claim({ memberIds: [dup.id] }), { allowAuto: true });
+    expect(dd.tier).toBe("single");
+    expect(dd.rationale).toContain("重複管理");
     const s2 = mkLottery({ campaignId: "c1" });
     const o = mkLottery({ campaignId: "c2" });
-    expect(verifyProposal(mkWorld(s2, [o], { evidence: evidenceOf(s2, o) }), claim({ memberIds: [o.id] }), { allowAuto: true }).tier).toBe("single");
+    const d = verifyProposal(mkWorld(s2, [o], { evidence: evidenceOf(s2, o) }), claim({ memberIds: [o.id] }), { allowAuto: true });
+    expect(d.tier).toBe("suggest");
+    expect(d.mismatches.some((m) => m.field === "campaign")).toBe(true);
   });
   it("手動で分けた組（解除・却下）は、まとめない。記憶は組ごと", () => {
     const s = mkLottery();
@@ -196,12 +246,14 @@ describe("検証層: 共通の企画名の検証（強い裏づけ）", () => {
     // 相手の文章にその文言が無い（別の企画）
     expect(verifyPhrase(TITLE, s, [a], new Map([[s.id, [postText(TITLE, "A")]], [a.id, ["別の企画の告知です。応募はこちら。"]]])).ok).toBe(false);
   });
-  it("AIが嘘の企画名を出す（liar）: 裏づけにならず、auto にならない", () => {
+  it("AIが嘘の企画名を出す（liar）: 補足の裏づけにならない（信頼度に加点しない）。8F-5: 企画名は必須ではないため、項目が一致していれば区分には影響しない", () => {
     const s = mkLottery();
     const a = mkLottery();
     const d = verifyProposal(mkWorld(s, [a], { evidence: evidenceOf(s, a) }), claim({ memberIds: [a.id], commonPhrase: "実在しない大抽選会ですよ全国" }), { allowAuto: true });
-    expect(d.tier).toBe("suggest");
     expect(d.strongSignals).toEqual([]);
+    const ok = verifyProposal(mkWorld(s, [a], { evidence: evidenceOf(s, a) }), claim({ memberIds: [a.id] }), { allowAuto: true });
+    expect(ok.strongSignals).toEqual(["phrase"]);
+    expect(ok.confidence).toBeGreaterThanOrEqual(d.confidence);
   });
   it("情報源に命令らしき文面がある: 指示としては扱わず、auto にしない", () => {
     const s = mkLottery();
@@ -227,12 +279,17 @@ describe("検証層: 既存グループへの追加", () => {
     const wm = mkWorld(s, [m1, m2], { groups: [mkGroup("g1", "manual", [m1.id, m2.id])], evidence: evidenceOf(s, m1, m2) });
     expect(verifyProposal(wm, claim({ action: "add_to_group", groupId: "g1" }), { allowAuto: true }).tier).toBe("suggest");
   });
-  it("追加先の既存の所属と1件でも相違があれば auto にしない。存在しない・別の系列のグループへは追加しない", () => {
+  it("追加先の既存の所属と1件でも相違があれば auto にしない（所属の間で内容が一致しないグループは、勝手に追加せず保留）。存在しない・別の系列のグループへは追加しない", () => {
     const s = mkLottery();
     const m1 = mkLottery({ groupId: "g1" });
     const m2 = mkLottery({ groupId: "g1", applyDeadline: { precision: "date_only", date: "2026-12-20" } });
     const w = mkWorld(s, [m1, m2], { groups: [mkGroup("g1", "ai", [m1.id, m2.id])], evidence: evidenceOf(s, m1, m2) });
-    expect(verifyProposal(w, claim({ action: "add_to_group", groupId: "g1" }), { allowAuto: true }).tier).toBe("suggest");
+    const mixed = verifyProposal(w, claim({ action: "add_to_group", groupId: "g1" }), { allowAuto: true });
+    expect(mixed.tier).toBe("hold");
+    expect(mixed.rationale).toContain("内容が一致していない");
+    // すべての所属と相違するなら、対象外
+    const m3 = mkLottery({ groupId: "g2", applyDeadline: { precision: "date_only", date: "2026-12-20" } });
+    expect(verifyProposal(mkWorld(s, [m3], { groups: [mkGroup("g2", "ai", [m3.id])] }), claim({ action: "add_to_group", groupId: "g2" }), { allowAuto: true }).tier).toBe("single");
     expect(verifyProposal(w, claim({ action: "add_to_group", groupId: "nope" }), { allowAuto: true }).tier).toBe("single");
     const wc = mkWorld(s, [m1], { groups: [mkGroup("g1", "ai", [m1.id], "other-chain")], evidence: evidenceOf(s, m1) });
     expect(verifyProposal(wc, claim({ action: "add_to_group", groupId: "g1" }), { allowAuto: true }).tier).toBe("single");
@@ -304,29 +361,37 @@ describe("エージェントの実行（モックAI → 検証層）", () => {
     expect(r.decision.tier).not.toBe("auto"); // しかし検証層が自動にしない
     expect(["suggest", "single"]).toContain(r.decision.tier);
   });
-  it("liar（嘘の企画名）: auto にならない。timid（常に単独）: 単独", async () => {
+  it("liar（嘘の企画名）: 企画名は必須でないため区分は変わらない（信頼度の加点だけ無い）。timid（常に単独）: 単独", async () => {
     const { w } = set();
-    expect((await evaluateGrouping(w, { llm: new MockGroupingBrain("liar"), allowAuto: true })).decision.tier).toBe("suggest");
+    const liar = await evaluateGrouping(w, { llm: new MockGroupingBrain("liar"), allowAuto: true });
+    expect(liar.decision.strongSignals).not.toContain("phrase");
     expect((await evaluateGrouping(w, { llm: new MockGroupingBrain("timid"), allowAuto: true })).decision.tier).toBe("single");
   });
-  it("lazy: 最初は文章を読まずに提出 → 検証が不足を返し、追加調査で企画名を確認して auto になる（追加調査は予算の中・回数に上限）", async () => {
+  it("lazy: 調べる余地（情報が足りない点）があるときだけ追加調査する。条件が確認できていれば追加調査は起きない（追加調査は予算の中・回数に上限）", async () => {
     const { w } = set();
-    const none = await evaluateGrouping(w, { llm: new MockGroupingBrain("lazy"), allowAuto: true, followUps: 0 });
-    expect(none.decision.tier).toBe("suggest");
-    expect(none.followUps).toEqual([]);
-    const withFollow = await evaluateGrouping(w, { llm: new MockGroupingBrain("lazy"), allowAuto: true, followUps: 1 });
-    expect(withFollow.followUps).toHaveLength(1);
-    expect(withFollow.decision.tier).toBe("auto");
-    expect(withFollow.usage!.steps).toBeLessThanOrEqual(10);
+    const done = await evaluateGrouping(w, { llm: new MockGroupingBrain("lazy"), allowAuto: true, followUps: 1 });
+    expect(done.followUps).toEqual([]); // 一致が確認できているので、調べ直す必要がない
+    expect(done.decision.tier).toBe("auto");
+    expect(done.usage!.steps).toBeLessThanOrEqual(10);
   });
-  it("追加調査の判断: 同じ不足が続くなら打ち切る（無制限に再調査しない）。まとめない提出は再調査しない", () => {
-    const { w, a } = set();
+  it("追加調査の判断: 調べれば解決しうる不足（不明・記載なし）だけ。同じ不足が続くなら打ち切る。相違・まとめない提出は再調査しない", () => {
+    const s = mkLottery({ resultDate: { precision: "unknown" } });
+    const a = mkLottery({ resultDate: { precision: "unknown" } });
+    const w = mkWorld(s, [a], { evidence: evidenceOf(s, a) });
     const c = claim({ memberIds: [a.id], commonPhrase: null });
     const d = verifyProposal(w, c, { allowAuto: true });
     const plan = planGroupingFollowUp(d, c, []);
     expect(plan).not.toBeNull();
+    expect(plan!.feedback).toContain("イベントIDや応募URLが店舗ごとに違っていることは、まとめない理由になりません");
     expect(planGroupingFollowUp(d, c, [plan!.fingerprint])).toBeNull();
     expect(planGroupingFollowUp(verifyProposal(w, claim({ action: "single" }), { allowAuto: true }), claim({ action: "single" }), [])).toBeNull();
+    // 期間が異なる（相違）は、調べ直しても変わらない
+    const x = mkLottery({ applyDeadline: { precision: "date_only", date: "2026-12-14" } });
+    const dx = verifyProposal(mkWorld(mkLottery(), [x]), claim({ memberIds: [x.id] }), { allowAuto: true });
+    expect(planGroupingFollowUp(dx, claim({ memberIds: [x.id] }), [])).toBeNull();
+    // すべて一致（auto）も再調査しない
+    const { w: w3, a: a3 } = set();
+    expect(planGroupingFollowUp(verifyProposal(w3, claim({ memberIds: [a3.id] }), { allowAuto: true }), claim({ memberIds: [a3.id] }), [])).toBeNull();
   });
   it("比較する相手がいなければ、AIを呼ばずに単独（費用なし）。同じ状況で判断済みなら繰り返さない", async () => {
     const s = mkLottery();
@@ -364,12 +429,9 @@ describe("エージェントの実行（モックAI → 検証層）", () => {
     expect(r.run!.status).toBe("limit_reached");
     expect(r.decision.tier).toBe("hold"); // 提出に至らなかった
     expect(r.decision.rationale).toContain("完了しなかった");
-    // 追加調査の余力（ステップ）が無ければ、追加調査はせず候補止まり。余力があれば追加調査で裏づけを確認できて auto になる
-    const noRoom = await evaluateGrouping(w, { llm: new MockGroupingBrain("lazy"), allowAuto: true, followUps: 1, limits: { maxSteps: 3 } });
-    expect(noRoom.followUps).toEqual([]);
-    expect(noRoom.decision.tier).toBe("suggest");
+    // 提出まで届けば（上限内）、すべて一致なら auto。追加調査は不要（一致が確認できているため）
     const room = await evaluateGrouping(w, { llm: new MockGroupingBrain("lazy"), allowAuto: true, followUps: 1, limits: { maxSteps: 4 } });
-    expect(room.followUps).toHaveLength(1);
+    expect(room.followUps).toEqual([]);
     expect(room.decision.tier).toBe("auto");
   });
   it("ペアのキー・ID捏造の安全性（pairKey は順序に依存しない）", () => {

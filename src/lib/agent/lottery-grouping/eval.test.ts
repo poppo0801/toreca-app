@@ -12,7 +12,8 @@ import { evaluateGrouping } from "@/lib/agent/lottery-grouping/run";
  *   npm run eval:grouping   → eval/runs/lottery-grouping-report.md
  */
 const scenarios = JSON.parse(readFileSync("eval/lottery-grouping/scenarios.json", "utf8")).scenarios as Scenario[];
-const gold = JSON.parse(readFileSync("eval/lottery-grouping/gold.json", "utf8")).labels as Record<string, { label: Label; why: string }>;
+// 8F-5: 正解は新しい定義のもの（gold-8f5.json）。旧定義の正解（gold.json）は保持している（oldLabel で対応）
+const gold = JSON.parse(readFileSync("eval/lottery-grouping/gold-8f5.json", "utf8")).labels as Record<string, { label: Label; why: string }>;
 
 interface Row { id: string; title: string; label: Label; s: Score; tier: string; confidence: number; reason: string }
 async function run(policy: BrainPolicy, followUps = 0): Promise<{ rows: Row[]; sum: Summary }> {
@@ -55,10 +56,10 @@ describe("抽選グループ判定の評価（モックAI × 検証層）", () =
     expect(eager.sum.ungatedWrong).toBeGreaterThan(3); // 検証層が無ければ、誤ってまとめていた件数
     expect(eager.sum.autoHarm).toBe(0);
     expect(runs.find((r) => r.name === "timid")!.res.sum.autoPredicted).toBe(0);
-    // 追加調査で、読み忘れた情報源の確認ができ、自動になる件数が増える（同じ予算の中）
+    // 8F-5: 企画名の確認は自動の条件ではないため、追加調査で自動の件数は減らず、誤りも増えない（同じ予算の中）
     const lazy0 = runs.find((r) => r.name === "lazy")!.res.sum;
     const lazy1 = runs.find((r) => r.name === "lazy（追加調査1回）")!.res.sum;
-    expect(lazy1.autoHits).toBeGreaterThan(lazy0.autoHits);
+    expect(lazy1.autoHits).toBeGreaterThanOrEqual(lazy0.autoHits);
     expect(lazy1.autoHarm).toBe(0);
   });
 

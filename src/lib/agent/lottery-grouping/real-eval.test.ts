@@ -20,8 +20,10 @@ const DIR = "eval/lottery-grouping-real";
 const OUT = "eval/runs/lottery-grouping-real";
 /** 評価データの組（空=8F-2の17ケース。REAL_GROUPING_SET=8f3 で 8F-3 の新しい組）。組ごとに入力・正解・凍結が別ファイル。既存の組は変更しない */
 const SET = process.env.REAL_GROUPING_SET ? `-${process.env.REAL_GROUPING_SET}` : "";
-const read = (f: string): string => readFileSync(`${DIR}/${f.replace(".json", `${SET}.json`)}`, "utf8");
-const have = existsSync(`${DIR}/cases${SET}.json`) && existsSync(`${DIR}/gold${SET}.json`);
+/** 正解の定義の版（空=旧定義の正解 gold*.json。REAL_GROUPING_DEF=8f5 で、新定義（8F-5）の正解 gold*-d8f5.json と凍結 frozen*-d8f5.json）。入力 cases・台帳 pages は共通 */
+const DEF = process.env.REAL_GROUPING_DEF === "8f5" ? "-d8f5" : "";
+const read = (f: string): string => readFileSync(`${DIR}/${f.startsWith("cases") || f.startsWith("pages") ? f.replace(".json", `${SET}.json`) : f.replace(".json", `${SET}${DEF}.json`)}`, "utf8");
+const have = existsSync(`${DIR}/cases${SET}.json`) && existsSync(`${DIR}/gold${SET}${DEF}.json`);
 const load = (): { cases: RealCase[]; gold: Record<string, RealGold>; casesText: string; goldText: string } => {
   const casesText = read("cases.json");
   const goldText = read("gold.json");
@@ -142,7 +144,7 @@ describe.skipIf(!have)("実データセットの検査（eval/lottery-grouping-r
   it("入力と正解が整合し、正解に独立した根拠がある。凍結済みならハッシュが一致する", () => {
     const d = load();
     expect(validateDataset(d.cases, d.gold)).toEqual([]);
-    if (existsSync(`${DIR}/frozen${SET}.json`)) {
+    if (existsSync(`${DIR}/frozen${SET}${DEF}.json`)) {
       const f = JSON.parse(read("frozen.json")) as { cases: string; gold: string };
       const h = datasetHashes(d.casesText, d.goldText);
       expect(h.cases).toBe(f.cases);
@@ -170,7 +172,7 @@ describe.skipIf(env.REAL_GROUPING_PREFLIGHT !== "1")("実行前の確認（接�
     if (have) {
       const d = load();
       const errs = validateDataset(d.cases, d.gold);
-      const frozen = existsSync(`${DIR}/frozen${SET}.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
+      const frozen = existsSync(`${DIR}/frozen${SET}${DEF}.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
       const h = datasetHashes(d.casesText, d.goldText);
       const byCat: Record<string, number> = {};
       for (const c of d.cases) byCat[c.category] = (byCat[c.category] ?? 0) + 1;
@@ -196,14 +198,14 @@ describe.skipIf(env.REAL_GROUPING_FREEZE !== "1")("評価データの凍結（�
       cur[SET_KEY] = datasetHashes(readFileSync(`${DIR}/pages${SET}.json`, "utf8"), "").cases;
       writeFileSync(hp, JSON.stringify(cur, null, 2) + "\n");
     }
-    writeFileSync(`${DIR}/frozen${SET}.json`, JSON.stringify({ ...h, frozenOn: new Date().toISOString().slice(0, 10), cases: h.cases, gold: h.gold, count: d.cases.length }, null, 2) + "\n");
+    writeFileSync(`${DIR}/frozen${SET}${DEF}.json`, JSON.stringify({ ...h, frozenOn: new Date().toISOString().slice(0, 10), cases: h.cases, gold: h.gold, count: d.cases.length }, null, 2) + "\n");
   });
 });
 
 describe.skipIf(env.REAL_GROUPING_EVAL !== "1")("実API評価（承認された費用・実行回数の範囲のみ）", () => {
   it("予算ガードの範囲で実行し、結果を保存する", async () => {
     const d = requireData();
-    const f = existsSync(`${DIR}/frozen${SET}.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
+    const f = existsSync(`${DIR}/frozen${SET}${DEF}.json`) ? (JSON.parse(read("frozen.json")) as { cases: string; gold: string }) : null;
     const h = datasetHashes(d.casesText, d.goldText);
     if (!f || f.cases !== h.cases || f.gold !== h.gold) throw new Error("評価データが凍結されていない、または凍結後に変更されています（freeze をやり直す場合は、結果を新規の評価として扱う）");
     const approvedJpy = Number(env.REAL_GROUPING_APPROVED_MAX_JPY) || 0;
@@ -247,11 +249,13 @@ describe.skipIf(env.REAL_GROUPING_REPLAY !== "1")("保存済みの提出の再�
 
 // ---------------------------------------------------------------- 実データの組（8F-2 の17ケース・8F-3 の7ケース）× モックAI: 誤った自動グループ化が出ないこと（API・ネットワークなし）
 describe("実データの組 × モックAI（全方針で、誤った自動グループ化が 0）", () => {
-  const sets = [["", "8F-2"], ["-8f3", "8F-3"], ["-8f4", "8F-4"]] as const;
-  for (const [suffix, name] of sets) {
-    const ok = existsSync(`${DIR}/cases${suffix}.json`) && existsSync(`${DIR}/gold${suffix}.json`);
+  // 旧定義の正解（gold*.json）と、新定義（8F-5）の正解（gold*-d8f5.json）の両方で確認する（どちらの正解でも、誤った自動グループ化は0）
+  const sets = [["", "", "8F-2"], ["-8f3", "", "8F-3"], ["-8f4", "", "8F-4"], ["", "-d8f5", "8F-2（新定義）"], ["-8f3", "-d8f5", "8F-3（新定義）"], ["-8f4", "-d8f5", "8F-4（新定義）"]] as const;
+  for (const [setSuffix, def, name] of sets) {
+    const suffix = setSuffix + def; // 正解・凍結のファイル名の末尾
+    const ok = existsSync(`${DIR}/cases${setSuffix}.json`) && existsSync(`${DIR}/gold${suffix}.json`);
     it.skipIf(!ok)(`${name}: 入力に正解が混ざっていない・凍結済みで一致・全方針で誤った自動が0`, async () => {
-      const casesText = readFileSync(`${DIR}/cases${suffix}.json`, "utf8");
+      const casesText = readFileSync(`${DIR}/cases${setSuffix}.json`, "utf8");
       const goldText = readFileSync(`${DIR}/gold${suffix}.json`, "utf8");
       const cases = JSON.parse(casesText).cases as RealCase[];
       const gold = JSON.parse(goldText).labels as Record<string, RealGold>;
@@ -262,9 +266,9 @@ describe("実データの組 × モックAI（全方針で、誤った自動グ�
         expect(h).toEqual({ cases: f.cases, gold: f.gold });
       }
       // ページの台帳（AIの入力の一部）も凍結されている。台帳に正解（ラベル・説明）が混ざっていない
-      if (existsSync(`${DIR}/pages${suffix}.json`)) {
-        const pagesText = readFileSync(`${DIR}/pages${suffix}.json`, "utf8");
-        const want = (JSON.parse(readFileSync(`${DIR}/pages-hashes.json`, "utf8")) as Record<string, string>)[suffix ? suffix.slice(1) : "8f2"];
+      if (existsSync(`${DIR}/pages${setSuffix}.json`)) {
+        const pagesText = readFileSync(`${DIR}/pages${setSuffix}.json`, "utf8");
+        const want = (JSON.parse(readFileSync(`${DIR}/pages-hashes.json`, "utf8")) as Record<string, string>)[setSuffix ? setSuffix.slice(1) : "8f2"];
         expect(datasetHashes(pagesText, "").cases).toBe(want);
         for (const g of Object.values(gold)) if (g.note) expect(pagesText).not.toContain(g.note.slice(0, 30));
       }

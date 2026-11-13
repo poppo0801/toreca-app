@@ -1,0 +1,207 @@
+{
+  "version": 2,
+  "definition": "8F-5",
+  "note": "Stage 8F-5: 新しい定義（同一系列の複数店舗で、同一商品・同一応募期間・同一応募条件・同一抽選方式の抽選をグループ化。同一イベントID・同一URLは必須ではない。店舗選択式・同一店舗・条件/期間/商品が異なるものは対象外）での正解。旧定義の正解は gold.json に保持（oldLabel に対応づけ）。ラベルは定義の事実だけから決め、AIの出力・検証層の結果に合わせて書き換えない。",
+  "labels": {
+    "G01": {
+      "label": "auto",
+      "why": "全項目一致の別店舗",
+      "oldLabel": "auto"
+    },
+    "G02": {
+      "label": "auto",
+      "why": "5店舗とも一致。応募済みでもグループ化は表示だけ",
+      "oldLabel": "auto"
+    },
+    "G03": {
+      "label": "auto",
+      "why": "12店舗が一致",
+      "oldLabel": "auto"
+    },
+    "G04": {
+      "label": "auto",
+      "why": "旧定義ではreview（同じ企画の裏づけなし）。新定義では系列・商品・期間・条件・方式が一致していれば裏づけは不要",
+      "oldLabel": "review"
+    },
+    "G05": {
+      "label": "auto",
+      "why": "全項目一致（同じURLは補足）",
+      "oldLabel": "auto"
+    },
+    "G06": {
+      "label": "auto",
+      "why": "全項目一致（同じキャンペーンは補足）",
+      "oldLabel": "auto"
+    },
+    "G07": {
+      "label": "auto",
+      "why": "暦日と時刻つきで同じ日",
+      "oldLabel": "auto"
+    },
+    "G08": {
+      "label": "none",
+      "why": "応募締切が異なる",
+      "oldLabel": "none"
+    },
+    "G09": {
+      "label": "none",
+      "why": "旧定義ではreview。新定義では、同じキャンペーンでも応募期間が異なれば対象外",
+      "oldLabel": "review"
+    },
+    "G10": {
+      "label": "none",
+      "why": "応募開始が異なる",
+      "oldLabel": "none"
+    },
+    "G11": {
+      "label": "none",
+      "why": "旧定義ではreview。発表日が異なる＝応募期間の一部が異なる",
+      "oldLabel": "review"
+    },
+    "G12": {
+      "label": "none",
+      "why": "締切の時刻が異なる",
+      "oldLabel": "none"
+    },
+    "G13": {
+      "label": "none",
+      "why": "商品が一部だけ共通",
+      "oldLabel": "none"
+    },
+    "G14": {
+      "label": "none",
+      "why": "旧定義ではreview。商品の構成が異なれば対象外",
+      "oldLabel": "review"
+    },
+    "G15": {
+      "label": "auto",
+      "why": "商品の順序が違うだけ",
+      "oldLabel": "auto"
+    },
+    "G16": {
+      "label": "none",
+      "why": "商品が別",
+      "oldLabel": "none"
+    },
+    "G17": {
+      "label": "none",
+      "why": "旧定義ではreview。数量が異なれば別の商品構成",
+      "oldLabel": "review"
+    },
+    "G18": {
+      "label": "none",
+      "why": "旧定義ではreview。応募条件が異なれば対象外",
+      "oldLabel": "review"
+    },
+    "G19": {
+      "label": "review",
+      "why": "応募条件の文面が一部だけ異なる。条件が同じかを利用者が確認",
+      "oldLabel": "review"
+    },
+    "G20": {
+      "label": "none",
+      "why": "応募条件が異なる",
+      "oldLabel": "none"
+    },
+    "G21": {
+      "label": "none",
+      "why": "旧定義ではreview。通販と店頭受取＝方式が異なる",
+      "oldLabel": "review"
+    },
+    "G22": {
+      "label": "none",
+      "why": "応募方法が異なる",
+      "oldLabel": "none"
+    },
+    "G23": {
+      "label": "none",
+      "why": "旧定義ではreview。店舗選択式は対象外",
+      "oldLabel": "review"
+    },
+    "G24": {
+      "label": "none",
+      "why": "同じ店舗＝重複管理の対象",
+      "oldLabel": "none"
+    },
+    "G25": {
+      "label": "review",
+      "why": "旧定義ではnone。新定義では、別のキャンペーンIDだけでは拒否しない。内容は一致するため、同じ内容かを利用者が確認（候補）",
+      "oldLabel": "none"
+    },
+    "G26": {
+      "label": "auto",
+      "why": "一括登録グループへ、同じ内容の新店舗を追加",
+      "oldLabel": "auto"
+    },
+    "G27": {
+      "label": "review",
+      "why": "手動で作ったグループには、承認なしに追加しない",
+      "oldLabel": "review"
+    },
+    "G28": {
+      "label": "none",
+      "why": "追加先のグループの所属の間で内容が一致していない（旧定義で作られた組など）。勝手に追加しない（保留・単独が正）",
+      "oldLabel": "review"
+    },
+    "G29": {
+      "label": "none",
+      "why": "手動で分けた組は再びまとめない",
+      "oldLabel": "none"
+    },
+    "G30": {
+      "label": "none",
+      "why": "却下済みの組",
+      "oldLabel": "none"
+    },
+    "G31": {
+      "label": "none",
+      "why": "除外済みの抽選のみ一致",
+      "oldLabel": "none"
+    },
+    "G32": {
+      "label": "review",
+      "why": "情報源に命令らしき文面。同じ内容でも自動にしない",
+      "oldLabel": "review"
+    },
+    "G33": {
+      "label": "auto",
+      "why": "旧定義ではnone（共通の企画名なし）。新定義では、項目が一致していれば別々の告知でもグループ化の対象",
+      "oldLabel": "none"
+    },
+    "G34": {
+      "label": "review",
+      "why": "発表日が不明（周辺の不明）。候補として利用者が確認",
+      "oldLabel": "review"
+    },
+    "G35": {
+      "label": "none",
+      "why": "応募締切が不明（核心の不明）。保留が正で、候補は余計",
+      "oldLabel": "none"
+    },
+    "G36": {
+      "label": "none",
+      "why": "比較できる相手がいない",
+      "oldLabel": "none"
+    },
+    "G37": {
+      "label": "review",
+      "why": "2つの既存グループのどちらにも合う。どちらへ追加するか利用者が決める",
+      "oldLabel": "review"
+    },
+    "G38": {
+      "label": "auto",
+      "why": "旧定義と同じ。一致する相手だけをまとめる",
+      "oldLabel": "auto"
+    },
+    "G39": {
+      "label": "auto",
+      "why": "旧定義ではreview（企画名が一般的）。新定義では企画名は不要",
+      "oldLabel": "review"
+    },
+    "G40": {
+      "label": "auto",
+      "why": "応募方法が同じ（シリアルコード）",
+      "oldLabel": "auto"
+    }
+  }
+}

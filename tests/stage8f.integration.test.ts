@@ -138,11 +138,25 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F", () => {
     expect((await x(u1).from("lottery_bulk_groups").select("id").eq("id", (await groupOf(lots[0]))!)).data).toHaveLength(1);
   });
 
-  it("応募期間が異なる: eager（無理にまとめたがる）でも自動にならない。同じ情報源の裏づけがあれば承認待ちの候補、承認でグループ化・却下で記録", async () => {
+  it("【8F-5】応募期間が異なる: eager（無理にまとめたがる）でも対象外（まとめない・候補にもしない）", async () => {
     const chain = await mkChain("8F期間電機");
     const product = await mkProduct("8F期間商品");
     const s1 = await mkLottery(chain, product, await mkStore(chain, "8F期間店1"), "8F期間店1");
     const s2 = await mkLottery(chain, product, await mkStore(chain, "8F期間店2"), "8F期間店2", { applyDeadline: { precision: "date_only", date: "2099-01-20", time: "" } });
+    const r = await runLotteryGrouping(u1, h1, s2, eager());
+    expect(r.status, r.message).toBe("dismissed");
+    expect(r.tier).toBe("single");
+    expect(await groupOf(s1)).toBeNull();
+    expect(await groupOf(s2)).toBeNull();
+    expect((await loadPendingGroupProposals(u1, h1)).find((p) => p.subjectId === s2)).toBeUndefined();
+  });
+
+  it("応募条件の文面が一部だけ異なる: eager でも自動にならず、承認待ちの候補。承認でグループ化・却下で記録（応募・当選・期限は変わらない）", async () => {
+    const chain = await mkChain("8F条件電機");
+    const product = await mkProduct("8F条件商品");
+    const base = "会員登録が必要です。1人1口まで。店頭受取のみ。";
+    const s1 = await mkLottery(chain, product, await mkStore(chain, "8F条件店1"), "8F条件店1", { conditionsText: base });
+    const s2 = await mkLottery(chain, product, await mkStore(chain, "8F条件店2"), "8F条件店2", { conditionsText: base + "ただし本人確認書類をお持ちください。" });
     const r = await runLotteryGrouping(u1, h1, s2, eager());
     expect(r.status, r.message).toBe("pending");
     expect(r.tier).toBe("suggest");
@@ -150,8 +164,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F", () => {
     expect(await groupOf(s2)).toBeNull(); // 候補だけ。まだグループ化されていない
     const pending = await loadPendingGroupProposals(u1, h1);
     const mine = pending.find((p) => p.subjectId === s2)!;
-    expect(mine.mismatches.some((m) => m.field === "applyDeadline" && m.severity === "hard")).toBe(true);
-    expect(mine.confidence).toBeLessThan(90);
+    expect(mine.mismatches.some((m) => m.field === "requirements" && m.severity === "soft")).toBe(true);
     // 承認 → グループ化（利用者が承認した記録）。応募・当選・期限は変わらない
     const before = await snapshot([s1, s2]);
     const ok = await decideGroupProposal(u1, mine.id, "approve", "店舗ごとの期間差で同じ企画", actor);
@@ -169,8 +182,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 8F", () => {
   it("却下: 同じ組は再提案されない（記録が残り、今後の判断に使われる）。別の組は対象", async () => {
     const chain = await mkChain("8F却下電機");
     const product = await mkProduct("8F却下商品");
-    const a = await mkLottery(chain, product, await mkStore(chain, "8F却下店1"), "8F却下店1");
-    const b = await mkLottery(chain, product, await mkStore(chain, "8F却下店2"), "8F却下店2", { applyStart: { precision: "date_only", date: "2099-01-03", time: "" } });
+    const base = "会員登録が必要です。1人1口まで。店頭受取のみ。";
+    const a = await mkLottery(chain, product, await mkStore(chain, "8F却下店1"), "8F却下店1", { conditionsText: base });
+    const b = await mkLottery(chain, product, await mkStore(chain, "8F却下店2"), "8F却下店2", { conditionsText: base + "ただし本人確認書類をお持ちください。" });
     const r = await runLotteryGrouping(u1, h1, b, eager());
     expect(r.status).toBe("pending");
     const rej = await decideGroupProposal(u1, r.proposalId!, "reject", "別の企画だった", actor);

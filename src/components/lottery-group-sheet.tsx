@@ -152,7 +152,7 @@ export function LotteryGroupSheet({ anchor, onClose }: { anchor: Lottery; onClos
                     <label className="flex min-h-11 items-center gap-2 text-xs">
                       <input type="checkbox" className="size-4" checked={picked.includes(l.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, l.id] : p.filter((x) => x !== l.id)))} data-testid="group-pick" />
                       <span className="min-w-0 flex-1 truncate">{label(l)}</span>
-                      {mates.has(l.id) && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">同じ企画の可能性</span>}
+                      {mates.has(l.id) && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">条件が同じ</span>}
                       {l.groupId && l.groupId !== group?.id && <span className="shrink-0 text-[10px] text-warn">別グループから移す</span>}
                     </label>
                   </li>

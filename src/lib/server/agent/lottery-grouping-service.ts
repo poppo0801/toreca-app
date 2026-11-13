@@ -1,8 +1,11 @@
 import "server-only";
 import type { AgentLLM, AgentUsage } from "@/lib/agent/core";
 import { isPlausiblePeer, pairKey } from "@/lib/agent/lottery-grouping/compare";
+import { auditGroup, type GroupAudit, type ProposalAudit } from "@/lib/agent/lottery-grouping/audit";
+import { parseGroupingProposal } from "@/lib/agent/lottery-grouping/proposal";
 import { evaluateGrouping, type GroupingOutcome } from "@/lib/agent/lottery-grouping/run";
 import type { GGroup, GLottery, GroupOrigin, GWorld, Tier } from "@/lib/agent/lottery-grouping/types";
+import { verifyProposal } from "@/lib/agent/lottery-grouping/verify";
 import { dbToFlex } from "@/lib/lottery-input";
 import type { PageFetcher } from "@/lib/agent/store-location/tools";
 import { mapDbError, resolveProposal, type Db } from "@/lib/server/lottery-service";
@@ -229,4 +232,34 @@ export async function scanLotteryGrouping(db: Db, householdId: string, opts: Gro
     else sum.skipped++;
   }
   return sum;
+}
+
+// ---------------------------------------------------------------- 既存グループ・候補の再評価（8F-5。読み取りのみ）
+/**
+ * 旧定義で作られた既存グループと承認待ちの候補を、新しい定義で再評価する（固定ロジック・AIなし・費用なし）。
+ * **何も変更しない**（グループの解除・候補の却下・店舗の抽選・応募・当選の更新はしない）。結果を利用者が確認して操作する。
+ */
+export async function auditGroupingState(db: Db, householdId: string, opts: { maxGroups?: number; maxProposals?: number } = {}): Promise<{ groups: GroupAudit[]; proposals: ProposalAudit[] }> {
+  const a = any(db);
+  const groups: GroupAudit[] = [];
+  const { data: gRows } = await a.from("lottery_bulk_groups").select("id").eq("household_id", householdId).is("dissolved_at", null).order("created_at", { ascending: false }).limit(opts.maxGroups ?? 100);
+  for (const g of (gRows ?? []) as { id: string }[]) {
+    const { data: m } = await a.from("lotteries").select("id").eq("household_id", householdId).eq("bulk_group_id", g.id).is("archived_at", null).limit(1).maybeSingle();
+    if (!m) continue;
+    const world = await loadGroupingWorld(db, householdId, (m as { id: string }).id);
+    const group = world?.groups.find((x) => x.id === g.id);
+    if (!world || !group) continue;
+    groups.push(auditGroup(group, new Map([world.subject, ...world.lotteries].map((l) => [l.id, l]))));
+  }
+  const proposals: ProposalAudit[] = [];
+  const { data: pRows } = await a.from("lottery_group_proposals").select("id,tier,subject_lottery_id,agent_claim").eq("household_id", householdId).eq("status", "pending").in("kind", ["new_group", "add_to_group"]).order("created_at", { ascending: false }).limit(opts.maxProposals ?? 100);
+  for (const p of (pRows ?? []) as { id: string; tier: string; subject_lottery_id: string; agent_claim: unknown }[]) {
+    const claim = parseGroupingProposal(p.agent_claim);
+    if (!claim) continue;
+    const world = await loadGroupingWorld(db, householdId, p.subject_lottery_id);
+    if (!world) continue;
+    const d = verifyProposal(world, claim, { allowAuto: false });
+    proposals.push({ proposalId: p.id, oldTier: p.tier, newTier: d.tier, changed: d.tier !== p.tier, reason: d.rationale.slice(0, 200) });
+  }
+  return { groups, proposals };
 }

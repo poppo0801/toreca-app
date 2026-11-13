@@ -52,7 +52,8 @@ export class MockGroupingBrain implements AgentLLM {
 
     // 候補
     const rel = data.lotteries;
-    const same = rel.filter((r) => ALL_SAME.every((k) => r.relations[k] === "same") || (r.relations.campaign === "same" && r.relations.products === "same"));
+    // 8F-5: まとめる対象は、系列・商品・期間・方法・条件・方式がすべて一致する別店舗の抽選（キャンペーン・イベントIDは問わない）
+    const same = rel.filter((r) => ALL_SAME.every((k) => r.relations[k] === "same"));
     const picked = this.policy === "eager" ? rel : same;
     const groups = [...new Set(picked.map((r) => r.groupId).filter((g): g is string => !!g))];
     const ungrouped = picked.filter((r) => !r.groupId);

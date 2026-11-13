@@ -56,7 +56,7 @@ export function describeLottery(l: GLottery, world: GWorld): Record<string, unkn
 }
 const relationSummary = (c: PairCompare): Record<string, string> => ({
   products: c.products, quantity: c.quantity, applyStart: c.applyStart, applyDeadline: c.applyDeadline, resultDate: c.resultDate,
-  applyMethod: c.applyMethod, receiveMethod: c.receiveMethod, requirements: c.requirements, storeMode: c.storeMode, campaign: c.campaign, sharedSourceUrl: String(c.sharedSourceUrl),
+  applyMethod: c.applyMethod, receiveMethod: c.receiveMethod, requirements: c.requirements, storeMode: c.storeMode, campaign: c.campaign, sharedSourceUrl: String(c.sharedSourceUrl), storeSelect: String(c.storeSelect),
 });
 
 /** 参照できる抽選（subject と、同じ系列の有効な抽選） */

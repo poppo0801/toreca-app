@@ -49,7 +49,7 @@ function ProposalCard({ p, busy, onDecide }: { p: LotteryGroupProposal; busy: bo
         <summary className="min-h-8 cursor-pointer py-1">根拠の詳細</summary>
         <div className="space-y-1 pb-1">
           <p>{p.rationale}</p>
-          <p>同じ企画の裏づけ: {p.strongSignals.length > 0 ? p.strongSignals.map((s) => SIGNAL_LABEL[s] ?? s).join("・") : "確認できていません"}</p>
+          <p>補足の裏づけ: {p.strongSignals.length > 0 ? p.strongSignals.map((s) => SIGNAL_LABEL[s] ?? s).join("・") : "なし（グループ化の必須条件ではありません）"}</p>
           {p.missing.length > 0 && <p>不足している情報: {p.missing.join("・")}</p>}
           {p.mismatches.length > 0 && <p>相違・不足: {p.mismatches.map((m) => m.detail).join("・")}</p>}
           {p.basis && p.basis.length > 0 && (

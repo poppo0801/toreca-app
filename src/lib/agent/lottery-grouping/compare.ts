@@ -118,6 +118,8 @@ export function comparePair(a: GLottery, b: GLottery): PairCompare {
     requirements: requirementRelation(a, b),
     campaign: a.campaignId && b.campaignId ? (a.campaignId === b.campaignId ? "same" : "differs") : "none",
     sharedSourceUrl: sharedUrl(a.sourceUrls, b.sourceUrls),
+    storeSelect: a.storeMode === "select_on_apply" || b.storeMode === "select_on_apply",
+    requirementsBlank: a.requirementTags.length === 0 && b.requirementTags.length === 0 && norm(a.conditionsText) === "" && norm(b.conditionsText) === "",
   };
 }
 
@@ -125,6 +127,8 @@ export function comparePair(a: GLottery, b: GLottery): PairCompare {
 export function isPlausiblePeer(subject: GLottery, other: GLottery): boolean {
   if (other.archived || other.id === subject.id || other.chainId !== subject.chainId) return false;
   if (subject.storeId && other.storeId && subject.storeId === other.storeId) return false;
+  // 店舗選択式（1つの抽選で応募店舗を選ぶ）は、グループ化の対象外（8F-5）
+  if (subject.storeMode === "select_on_apply" || other.storeMode === "select_on_apply") return false;
   const p = productRelation(subject, other);
   return p === "same" || p === "subset" || p === "overlap" || p === "unknown" || comparePair(subject, other).campaign === "same";
 }
