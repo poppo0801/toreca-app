@@ -333,6 +333,10 @@ export interface LotteryGroupProposal {
   mismatches: { field: string; detail: string; severity: "hard" | "gap" | "soft" }[];
   missing: string[];
   strongSignals: string[];
+  /** 判断の根拠（区分と理由の箇条書き。検証層が事実から作る。無い場合あり） */
+  basis?: string[];
+  /** 判断に使った、AIが取得した情報源（URLと取得日時。無い場合あり） */
+  sources?: { url: string; fetchedAt: string }[];
   engine: string;
   createdAt: string;
 }

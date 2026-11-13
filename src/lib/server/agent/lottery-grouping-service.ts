@@ -4,7 +4,9 @@ import { isPlausiblePeer, pairKey } from "@/lib/agent/lottery-grouping/compare";
 import { evaluateGrouping, type GroupingOutcome } from "@/lib/agent/lottery-grouping/run";
 import type { GGroup, GLottery, GroupOrigin, GWorld, Tier } from "@/lib/agent/lottery-grouping/types";
 import { dbToFlex } from "@/lib/lottery-input";
+import type { PageFetcher } from "@/lib/agent/store-location/tools";
 import { mapDbError, resolveProposal, type Db } from "@/lib/server/lottery-service";
+import { loadSourceSnapshotTexts, saveSourceSnapshots, snapshotsOfFetched } from "@/lib/server/agent/source-snapshots";
 
 /**
  * 抽選グループのAI判定の読み書き（Stage 8F）。認証済み(RLS適用)のクライアント、または自動収集の service_role のクライアントを受け取る。
@@ -96,6 +98,9 @@ export async function loadGroupingWorld(db: Db, householdId: string, lotteryId: 
   ]);
   const evidence = new Map<string, string[]>();
   for (const c of cands as { lottery_id: string; draft: unknown }[]) evidence.set(c.lottery_id, [...(evidence.get(c.lottery_id) ?? []), ...textsOfDraft(c.draft)].slice(0, 6));
+  // 保存済みの情報源（手動登録・AIが取得したページなど。マイグレーション100。表が無ければ空）。収集時の下書きと合わせる（同じ文章は1つ）
+  const snaps = await loadSourceSnapshotTexts(db, evidenceIds);
+  for (const [id, texts] of snaps) evidence.set(id, [...new Set([...(evidence.get(id) ?? []), ...texts])].slice(0, 8));
   const productNames = new Map((prods as { id: string; official_name: string }[]).map((p) => [p.id, p.official_name]));
   const live = [subject, ...lotteries].filter((l) => !l.archived);
   const members = new Map<string, string[]>();
@@ -131,6 +136,8 @@ export interface GroupingRunOptions {
   asService: boolean;
   actor: string | null;
   followUps?: number;
+  /** 登録された情報源URLの本文を取得する部品（開発環境の調査用）。渡すとAIが fetch_source_page で根拠を集められる。取得したページは情報源として保存される */
+  fetcher?: PageFetcher;
 }
 export type GroupingStatus = "applied" | "pending" | "dismissed" | "skipped" | "superseded" | "error";
 export interface GroupingResult {
@@ -154,7 +161,10 @@ export async function runLotteryGrouping(db: Db, householdId: string, lotteryId:
     const world = await loadGroupingWorld(db, householdId, lotteryId);
     if (!world) return empty("skipped", "抽選が見つかりません");
     if (world.subject.archived) return empty("skipped", "除外・取り下げ済みの抽選は判定しない");
-    const outcome = await evaluateGrouping(world, { llm: opts.llm, allowAuto: opts.allowAuto, followUps: opts.followUps });
+    const outcome = await evaluateGrouping(world, { llm: opts.llm, allowAuto: opts.allowAuto, followUps: opts.followUps, fetcher: opts.fetcher });
+    // AIが取得したページは、情報源として保存する（追跡できるように。次回の判定の入力にもなる。重複・表が無い場合は何もしない）
+    const fetchedAll = [...(world.fetched?.values() ?? [])].flat();
+    if (fetchedAll.length > 0) await saveSourceSnapshots(db, householdId, snapshotsOfFetched(fetchedAll));
     const d = outcome.decision;
     if (!outcome.ranAgent && outcome.skipped === "no_candidates") return empty("skipped", "比較する抽選が無い（単独）", { tier: d.tier, kind: d.kind, outcome });
     if (d.skipReason) return empty("skipped", d.skipReason, { tier: d.tier, kind: d.kind, ranAgent: outcome.ranAgent, skipReason: d.skipReason, usage: outcome.usage, outcome });
@@ -165,7 +175,7 @@ export async function runLotteryGrouping(db: Db, householdId: string, lotteryId:
     const row = {
       household_id: householdId, proposal_key: d.key, kind: d.kind, status, tier: d.tier, subject_lottery_id: lotteryId, lottery_ids: d.lotteryIds, target_group_id: d.targetGroupId,
       confidence: d.confidence, rationale: d.rationale, common: d.common, mismatches: d.mismatches, missing: d.missing,
-      evidence: { strongSignals: d.strongSignals, downgrades: d.downgrades, followUps: outcome.followUps, ai: outcome.ranAgent },
+      evidence: { strongSignals: d.strongSignals, downgrades: d.downgrades, basis: d.basis, followUps: outcome.followUps, ai: outcome.ranAgent, sources: fetchedAll.map((f) => ({ lotteryId: f.lotteryId, url: f.url, fetchedAt: f.fetchedAt, hash: f.hash, identifiers: f.identifiers.map((i) => `${i.kind}:${i.value}`) })), startHash: outcome.startHash },
       agent_claim: outcome.claim ?? {}, engine: outcome.engine, usage: outcome.usage ?? {},
     };
     const ins = await a.from("lottery_group_proposals").insert(row).select("id").maybeSingle();
@@ -174,6 +184,10 @@ export async function runLotteryGrouping(db: Db, householdId: string, lotteryId:
       return empty("error", mapDbError(ins.error), { outcome });
     }
     const proposalId = (ins.data as { id: string }).id;
+    // 単独・保留の判断が、取得したページで根拠の状態が変わった後のキーで記録されるため、取得前の状態のキーでも記録する（取得を保存できない環境で、毎回再調査しないように）
+    if ((d.tier === "single" || d.tier === "hold") && outcome.startHash && outcome.startHash !== d.key.split(":").at(-1)) {
+      await a.from("lottery_group_proposals").insert({ ...row, proposal_key: `${d.tier}:${lotteryId}:${outcome.startHash}` });
+    }
     const base = { proposalId, tier: d.tier, kind: d.kind, ranAgent: outcome.ranAgent, usage: outcome.usage, outcome };
     if (d.tier === "single" || d.tier === "hold") return empty("dismissed", d.rationale, base);
     if (d.tier === "suggest" || !opts.allowAuto) return empty("pending", "利用者の承認待ちの候補として保存した", base);

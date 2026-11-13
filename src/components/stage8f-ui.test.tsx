@@ -145,6 +145,19 @@ describe("Stage 8F: グループ候補の確認（承認・却下）", () => {
     expect(det.textContent).toContain("同じ企画の裏づけ: 同じキャンペーン");
     expect(det.textContent).toContain("不足している情報: 発表日が不明");
   });
+  it("判断の根拠（区分・裏づけ・相違）と、確認した情報源（ホスト名）は、折りたたんだ詳細の中に出る（既定では表示面積を増やさない）。根拠が無い従来の候補も表示できる", () => {
+    data.groupProposals = [proposal({ strongSignals: ["event_id"], basis: ["区分: 承認候補", "同じ企画の裏づけ: 取得したページ・URLで同じイベントID", "軽微な違い: 応募条件の一方にだけ記載がある項目がある（記載なし。条件が異なるとは限らない）"], sources: [{ url: "https://livepocket.jp/e/abc", fetchedAt: "2026-11-14T00:00:00Z" }, { url: "https://livepocket.jp/e/def", fetchedAt: "2026-11-14T00:00:00Z" }] })];
+    act(() => root.render(createElement(GroupProposalsSheet, { onClose: () => {} })));
+    const det = q("group-proposal")!.querySelector("details") as HTMLDetailsElement;
+    expect(det.open).toBe(false);
+    expect(det.textContent).toContain("同じイベントID（取得したページで確認）");
+    expect(q("group-proposal-basis")!.textContent).toContain("区分: 承認候補");
+    expect(det.contains(q("group-proposal-basis"))).toBe(true);
+    expect(det.textContent).toContain("確認した情報源: livepocket.jp（2件）");
+    data.groupProposals = [proposal()]; // basis・sources なし（従来のデータ）
+    act(() => root.render(createElement(GroupProposalsSheet, { onClose: () => {} })));
+    expect(q("group-proposal-basis")).toBeNull();
+  });
   it("既存グループへの追加の表示", () => {
     const m = withGroup("duplicate");
     data.groupProposals = [proposal({ kind: "add_to_group", subjectId: data.lotteries[5].id, lotteryIds: [data.lotteries[5].id], targetGroupId: "g1", mismatches: [] })];

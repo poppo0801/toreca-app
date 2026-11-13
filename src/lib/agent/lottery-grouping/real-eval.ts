@@ -17,6 +17,7 @@ import { evaluateGrouping, type GroupingOutcome } from "@/lib/agent/lottery-grou
 import { verifyProposal } from "@/lib/agent/lottery-grouping/verify";
 import type { AgentProposal } from "@/lib/agent/lottery-grouping/types";
 import { RecordingLlm, redact, type StepLog } from "@/lib/agent/lottery-grouping/recorder";
+import type { FetchedPage, PageFetcher } from "@/lib/agent/store-location/tools";
 
 export const REAL_EVAL_LIMITS = { totalJpy: 500, perCaseJpy: 15 } as const;
 
@@ -183,7 +184,7 @@ export interface RunRecord {
   parseIssues?: { path: string; code: string; detail: string }[];
   /** 各ステップの記録（停止理由・呼んだツール・提出の生の内容。伏せ字済み） */
   trace?: StepLog[];
-  usage?: Pick<AgentUsage, "steps" | "inputTokens" | "outputTokens" | "costJpy" | "ms" | "retries" | "rejectedCalls" | "injectionFlags">;
+  usage?: Pick<AgentUsage, "steps" | "fetches" | "inputTokens" | "outputTokens" | "costJpy" | "ms" | "retries" | "rejectedCalls" | "injectionFlags">;
   score?: Score;
 }
 export interface RunDeps {
@@ -194,6 +195,8 @@ export interface RunDeps {
   /** 連続して失敗したら止める回数（認証・通信障害での浪費を防ぐ） */
   maxConsecutiveErrors?: number;
   onRecord?: (r: RunRecord) => void;
+  /** 情報源の取得部品（保存済みのページの台帳 LedgerFetcher など）。渡すとAIが fetch_source_page で根拠を集められる */
+  fetcher?: PageFetcher;
 }
 
 const toRecord = (c: RealCase, g: RealGold, pass: number, kind: RunRecord["kind"], o: GroupingOutcome): RunRecord => {
@@ -204,7 +207,7 @@ const toRecord = (c: RealCase, g: RealGold, pass: number, kind: RunRecord["kind"
     firstAction: o.firstClaim?.action ?? "none", firstTier: verifiedFirst?.tier,
     memberIds: o.decision.lotteryIds, mismatches: o.decision.mismatches.map((m) => `${m.field}:${m.severity}`), downgrades: o.decision.downgrades, rationale: o.decision.rationale.slice(0, 400),
     claim: o.claim, firstClaim: o.firstClaim, followUps: o.followUps.length, followUpKinds: o.followUps.map((f) => f.kind ?? "evidence"), parseIssues: o.parseIssues,
-    usage: o.usage ? { steps: o.usage.steps, inputTokens: o.usage.inputTokens, outputTokens: o.usage.outputTokens, costJpy: o.usage.costJpy, ms: o.usage.ms, retries: o.usage.retries, rejectedCalls: o.usage.rejectedCalls, injectionFlags: o.usage.injectionFlags } : undefined,
+    usage: o.usage ? { steps: o.usage.steps, fetches: o.usage.fetches, inputTokens: o.usage.inputTokens, outputTokens: o.usage.outputTokens, costJpy: o.usage.costJpy, ms: o.usage.ms, retries: o.usage.retries, rejectedCalls: o.usage.rejectedCalls, injectionFlags: o.usage.injectionFlags } : undefined,
     score: g.label === "unknown" ? undefined : score(g.label, o),
   };
 };
@@ -225,7 +228,7 @@ export async function runCases(cases: RealCase[], gold: Record<string, RealGold>
       try {
         const rl = new RecordingLlm(deps.makeLlm());
         recorder = rl;
-        const o = await evaluateGrouping(world, { llm: rl, allowAuto: true, followUps: deps.followUps, limits: { maxCostJpy: deps.guard.caseLimit() } });
+        const o = await evaluateGrouping(world, { llm: rl, allowAuto: true, followUps: deps.followUps, fetcher: deps.fetcher, limits: { maxCostJpy: deps.guard.caseLimit() } });
         deps.guard.record(o.usage?.costJpy ?? 0);
         rec = toRecord(c, gold[c.id], pass, deps.kind, o);
         rec.trace = rl.steps;
@@ -253,7 +256,7 @@ export function replayRecords(cases: RealCase[], gold: Record<string, RealGold>,
     if (!c || r.status !== "ok") continue;
     if (!r.claim && !r.usage) { out.push({ ...r, kind: "replay" }); continue; } // AIを呼ばなかった（比較する相手がいない）ものは、そのまま
     const d = verifyProposal(worldOf(c), r.claim ?? null, { allowAuto: true });
-    const o = { decision: d, ranAgent: true, skipped: null, claim: r.claim ?? null, run: null, usage: null, engine: "replay", followUps: [], parseIssues: [], firstClaim: r.firstClaim ?? null } as GroupingOutcome;
+    const o = { decision: d, ranAgent: true, skipped: null, claim: r.claim ?? null, run: null, usage: null, engine: "replay", followUps: [], parseIssues: [], startHash: "", firstClaim: r.firstClaim ?? null } as GroupingOutcome;
     out.push({ ...toRecord(c, gold[c.id], r.pass, "replay", o), usage: r.usage, followUps: r.followUps });
   }
   return out;
@@ -276,9 +279,74 @@ export interface RealSummary {
   cost: { totalJpy: number; perRunJpy: number | null; maxRunJpy: number; perRunMs: number | null; inputTokens: number; outputTokens: number; steps: number };
   stability: { casesRepeated: number; stable: number; rate: number | null; unstableIds: string[] };
   unknownResults: { auto: number; suggest: number; other: number };
+  /** 評価から除いたケース（評価側の不具合・データの誤り。AIの誤判定とは別） */
+  excluded: Exclusion[];
+  /** ケース単位の集計（反復は独立した件数として数えない） */
+  caseLevel: { cases: CaseLevel[]; counts: Record<string, Record<string, number>>; independentCases: number };
 }
+/** 保存済みのページの台帳（実際に取得したページを、取得日時・ハッシュつきで保存したもの）から返す取得部品。評価でネットワークに出ず、同じ入力で再現できる */
+export interface LedgerPage {
+  url: string;
+  finalUrl: string;
+  title: string;
+  text: string;
+  links: string[];
+  /** HTML全体から取り出した、同じイベントを示す識別子（取得時に抽出） */
+  identifiers?: { kind: string; value: string }[];
+  fetchedAt: string;
+  hash: string;
+}
+const normalizeUrl = (u: string): string => u.replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase();
+export class LedgerFetcher implements PageFetcher {
+  private readonly by = new Map<string, LedgerPage>();
+  constructor(pages: LedgerPage[]) {
+    for (const p of pages) this.by.set(normalizeUrl(p.url), p);
+  }
+  async fetchPage(url: string): Promise<FetchedPage> {
+    const p = this.by.get(normalizeUrl(url));
+    if (!p) return { ok: false, message: "保存済みのページがありません（取得できなかったページ）" };
+    return { ok: true, url, finalUrl: p.finalUrl, title: p.title, text: p.text, links: p.links.map((href) => ({ text: "", href })), identifiers: p.identifiers, fetchedAt: p.fetchedAt };
+  }
+}
+
+/** 評価から除く記録（評価側の不具合・評価データの誤り）。AIの誤判定と区別して報告する。データ・正解は変更しない（別ファイルで管理） */
+export interface Exclusion {
+  set: string;
+  caseId: string;
+  kind: "harness_defect" | "data_error";
+  reason: string;
+}
+
+export interface CaseLevel {
+  caseId: string;
+  gold: GoldLabel;
+  passes: number;
+  /** 各回の区分 */
+  tiers: string[];
+  /** 全回で同じ区分なら、その区分。違えば unstable */
+  stable: string;
+}
+/** ケース単位の集計: 同じケースの反復は独立した成功件数として数えない（ケースを1件として数える） */
+export function caseLevelSummary(gold: Record<string, RealGold>, recs: RunRecord[], excluded: Set<string> = new Set()): { cases: CaseLevel[]; counts: Record<string, Record<string, number>> } {
+  const by = new Map<string, RunRecord[]>();
+  for (const r of recs) if (r.status === "ok" && !excluded.has(r.caseId)) by.set(r.caseId, [...(by.get(r.caseId) ?? []), r]);
+  const cases: CaseLevel[] = [...by.entries()].map(([caseId, rs]) => {
+    const tiers = rs.sort((a, b) => a.pass - b.pass).map((x) => x.tier ?? "none");
+    return { caseId, gold: gold[caseId]?.label ?? "unknown", passes: rs.length, tiers, stable: new Set(tiers).size === 1 ? tiers[0] : "unstable" };
+  });
+  const counts: Record<string, Record<string, number>> = {};
+  for (const c of cases) {
+    counts[c.gold] ??= { cases: 0 };
+    counts[c.gold].cases += 1;
+    counts[c.gold][c.stable] = (counts[c.gold][c.stable] ?? 0) + 1;
+  }
+  return { cases, counts };
+}
+
 const rank: Record<string, number> = { single: 0, hold: 0, suggest: 1, auto: 2 };
-export function summarizeRuns(cases: RealCase[], gold: Record<string, RealGold>, recs: RunRecord[]): RealSummary {
+export function summarizeRuns(cases: RealCase[], gold: Record<string, RealGold>, allRecs: RunRecord[], exclusions: Exclusion[] = []): RealSummary {
+  const excludedIds = new Set(exclusions.map((e) => e.caseId));
+  const recs = allRecs.filter((r) => !excludedIds.has(r.caseId));
   const ok = recs.filter((r) => r.status === "ok");
   const known = ok.filter((r) => gold[r.caseId]?.label && gold[r.caseId].label !== "unknown");
   const lab = (r: RunRecord): Label => gold[r.caseId].label as Label;
@@ -325,6 +393,8 @@ export function summarizeRuns(cases: RealCase[], gold: Record<string, RealGold>,
     cost: { totalJpy: Math.round(costs.reduce((a, b) => a + b, 0) * 100) / 100, perRunJpy: ok.length ? Math.round((costs.reduce((a, b) => a + b, 0) / ok.length) * 1000) / 1000 : null, maxRunJpy: Math.max(0, ...costs), perRunMs: ok.length ? Math.round(ok.reduce((a, r) => a + (r.usage?.ms ?? 0), 0) / ok.length) : null, inputTokens: ok.reduce((a, r) => a + (r.usage?.inputTokens ?? 0), 0), outputTokens: ok.reduce((a, r) => a + (r.usage?.outputTokens ?? 0), 0), steps: ok.reduce((a, r) => a + (r.usage?.steps ?? 0), 0) },
     stability: { casesRepeated: repeated.length, stable: repeated.length - unstable.length, rate: rate(repeated.length - unstable.length, repeated.length), unstableIds: unstable },
     unknownResults: { auto: unk.filter((r) => r.tier === "auto").length, suggest: unk.filter((r) => r.tier === "suggest").length, other: unk.filter((r) => r.tier !== "auto" && r.tier !== "suggest").length },
+    excluded: exclusions,
+    caseLevel: (() => { const cl = caseLevelSummary(gold, recs, excludedIds); return { ...cl, independentCases: cl.cases.length }; })(),
   };
 }
 

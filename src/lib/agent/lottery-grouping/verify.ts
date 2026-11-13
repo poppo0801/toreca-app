@@ -13,6 +13,7 @@
  */
 import { detectInjection } from "@/lib/agent/core";
 import { comparePair, pairKey } from "@/lib/agent/lottery-grouping/compare";
+import { compareIdentifiers, identifiersFromUrl, type EventIdentifier } from "@/lib/agent/lottery-grouping/identifiers";
 import type { AgentProposal, GGroup, GLottery, GWorld, Mismatch, PairCompare, Tier, VerifiedDecision } from "@/lib/agent/lottery-grouping/types";
 
 export const AUTO_MIN_CONFIDENCE = 90;
@@ -138,6 +139,18 @@ function claimMismatches(claim: AgentProposal, pairs: PairCompare[]): string[] {
   return [...new Set(out)];
 }
 
+/** 判断の根拠の箇条書き（検証層が事実から作る）。区分: 自動確定／承認候補／保留／別企画（まとめない） */
+const TIER_LABEL: Record<Tier, string> = { auto: "自動確定", suggest: "承認候補", hold: "保留", single: "別企画（まとめない）" };
+const SIGNAL_LABEL: Record<string, string> = { campaign: "同じキャンペーンとして登録", source_url: "同じ情報源URL", phrase: "すべての情報源に実在する共通の企画文言", event_id: "取得したページ・URLで同じイベントID" };
+function basisOf(tier: Tier, signals: string[], dec: VerifiedDecision, why: string): string[] {
+  const out = [`区分: ${TIER_LABEL[tier]}`, why];
+  for (const s of signals) out.push(`同じ企画の裏づけ: ${SIGNAL_LABEL[s] ?? s}`);
+  if (signals.length === 0) out.push("同じ企画の独立した裏づけ: なし");
+  for (const m of dec.mismatches.slice(0, 8)) out.push(`${m.severity === "hard" ? "相違" : m.severity === "gap" ? "不明・確認できない" : "軽微な違い"}: ${m.detail}`);
+  for (const d of dec.downgrades.slice(0, 5)) out.push(`降格・却下: ${d}`);
+  return [...new Set(out.filter(Boolean))];
+}
+
 // ---------------------------------------------------------------- 本体
 export interface VerifyOptions {
   /** 自動グループ化を許可するか（開発環境の設定）。false なら、auto になる提案も suggest にする */
@@ -145,13 +158,39 @@ export interface VerifyOptions {
 }
 
 function base(world: GWorld, kind: VerifiedDecision["kind"], tier: Tier, key: string): VerifiedDecision {
-  return { kind, tier, confidence: 0, lotteryIds: [world.subject.id], targetGroupId: null, rationale: "", common: [], mismatches: [], missing: [], strongSignals: [], downgrades: [], title: "", key, skipReason: null };
+  return { kind, tier, confidence: 0, lotteryIds: [world.subject.id], targetGroupId: null, rationale: "", common: [], mismatches: [], missing: [], strongSignals: [], downgrades: [], basis: [], title: "", key, skipReason: null };
 }
-const peerHashOf = (world: GWorld): string => hash53(world.lotteries.map((l) => l.id).sort().join(","));
+/** 判断に使える情報源の状態（保存済みの文章の量・取得したページ）の署名。新しい情報源が増えたら変わる＝過去の「単独」「保留」を、根拠が増えたときに再評価できる（8F-4） */
+export function evidenceSignature(world: GWorld): string {
+  // 保存済みの文章と取得したページの本文を、重複を除いて合わせた内容で署名する（取得したページを保存して次回の入力になっても、署名は変わらない）
+  const ev = allEvidence(world);
+  const ids = [world.subject.id, ...world.lotteries.map((l) => l.id)].sort();
+  return hash53(ids.map((id) => `${id}:${hash53([...new Set(ev.get(id) ?? [])].sort().join("\u0001"))}`).join("|"));
+}
+export const peerHashOf = (world: GWorld): string => hash53(world.lotteries.map((l) => l.id).sort().join(",") + "#" + evidenceSignature(world));
+/** 保存済みの文章と、取得したページの本文を合わせた、抽選ごとの文章 */
+export function allEvidence(world: GWorld): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  for (const [id, ts] of world.evidence) m.set(id, [...ts]);
+  for (const [id, fs] of world.fetched ?? []) m.set(id, [...(m.get(id) ?? []), ...fs.map((f) => `${f.title} ${f.text}`)]);
+  return m;
+}
+/** 抽選ごとの識別子（登録された情報源URLと、取得したページから） */
+export function idsOf(world: GWorld, l: GLottery): EventIdentifier[] {
+  const out = [...l.sourceUrls.flatMap((u) => identifiersFromUrl(u)), ...(world.fetched?.get(l.id) ?? []).flatMap((f) => f.identifiers)];
+  const seen = new Set<string>();
+  return out.filter((x) => (seen.has(x.kind + x.value) ? false : (seen.add(x.kind + x.value), true)));
+}
 const short = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** 提案を検証し、確定した判断を返す。保存・実行はしない */
 export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts: VerifyOptions): VerifiedDecision {
+  const d = verifyProposalInner(world, claim, opts);
+  // 早期に決まった区分（AIが単独・保留を選んだ、別の系列・手動で分けた組など）にも、根拠を付ける
+  if (d.basis.length === 0) d.basis = [`区分: ${TIER_LABEL[d.tier]}`, d.rationale, ...d.downgrades.slice(0, 5).map((x) => `降格・却下: ${x}`)].filter(Boolean);
+  return d;
+}
+function verifyProposalInner(world: GWorld, claim: AgentProposal | null, opts: VerifyOptions): VerifiedDecision {
   const subject = world.subject;
   const singleKey = `single:${subject.id}:${peerHashOf(world)}`;
   if (!claim) {
@@ -292,9 +331,17 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
   const signals: VerifiedDecision["strongSignals"] = [];
   if (pairs.some((p) => p.c.campaign === "same") && !allPairs.some((c) => c.campaign === "differs")) signals.push("campaign");
   if (pairs.some((p) => p.c.sharedSourceUrl)) signals.push("source_url");
+  const evidenceAll = allEvidence(world);
   let injection = false;
-  for (const l of compareSet) if ((world.evidence.get(l.id) ?? []).some((t) => detectInjection(t).length > 0)) injection = true;
-  const phrase = verifyPhrase(claim.commonPhrase, subject, peers, world.evidence);
+  for (const l of compareSet) if ((evidenceAll.get(l.id) ?? []).some((t) => detectInjection(t).length > 0)) injection = true;
+  const phrase = verifyPhrase(claim.commonPhrase, subject, peers, evidenceAll);
+  // 同じイベントの識別子（取得したページ・URLから。AIの主張ではなく事実）: すべての相手と共有→強い裏づけ／一部だけ共有・別の値が混在→矛盾（自動・候補にしない）
+  const subjIds = idsOf(world, subject);
+  const idRel = peers.map((p) => ({ p, r: compareIdentifiers(subjIds, idsOf(world, p)) }));
+  const sharedAll = idRel.length > 0 && idRel.every((x) => x.r.shared.length > 0);
+  const contradictory = idRel.some((x) => x.r.shared.length > 0) && idRel.some((x) => x.r.differs);
+  const allDiffer = idRel.length > 0 && idRel.every((x) => x.r.differs);
+  if (sharedAll) signals.push("event_id");
   if (phrase.ok) signals.push("phrase");
   else if (claim.commonPhrase) dec.downgrades.push(`共通の文言を確認できない: ${phrase.reason}`);
   dec.strongSignals = signals;
@@ -330,6 +377,18 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
     why = "項目はすべて一致しているが、同じ企画であることの裏づけ（同じキャンペーン・同じ情報源・共通の企画名）が確認できていない";
   }
 
+  // ---- 根拠の矛盾・別のイベント（8F-4）
+  if (contradictory) {
+    dec.mismatches.push({ field: "campaign", detail: "同じイベントIDの抽選と、別のイベントIDの抽選が混在している（根拠が矛盾）", severity: "gap" });
+    if (tier === "auto" || tier === "suggest") {
+      tier = "hold";
+      why = "同じイベントIDと別のイベントIDが混在し、根拠が矛盾するため、確定できない";
+      dec.downgrades.push("根拠が矛盾するため、自動・候補にしない（保留）");
+    }
+  } else if (allDiffer) {
+    dec.mismatches.push({ field: "campaign", detail: "別のイベントID（別のイベントページ）として登録されている", severity: "soft" });
+  }
+
   // ---- 降格（自動にしてはいけない事情）
   const cap = (reason: string) => {
     if (tier === "auto") {
@@ -348,6 +407,7 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
     cap("情報源に命令らしき文面があるため、自動にしない");
   }
   if (kind === "add_to_group" && group && group.origin === "manual") cap("手動で作ったグループには、承認なしで追加しない");
+  if (allDiffer && !contradictory) cap("別のイベントIDとして登録されているため、自動にしない");
   if (!opts.allowAuto) cap("自動グループ化が無効の設定のため、候補として提示する");
   if (dec.skipReason) tier = tier === "auto" ? "suggest" : tier;
 
@@ -355,7 +415,7 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
   const scores = pairs.map((p) => pairScore(p.c));
   let confidence = scores.length > 0 ? Math.min(...scores) : 0;
   if (peerPairs.length > 0) confidence = Math.min(confidence, ...peerPairs.map(pairScore));
-  confidence += Math.min(15, (signals.includes("campaign") ? 10 : 0) + (signals.includes("source_url") ? 7 : 0) + (signals.includes("phrase") ? 7 : 0));
+  confidence += Math.min(15, (signals.includes("campaign") ? 10 : 0) + (signals.includes("event_id") ? 10 : 0) + (signals.includes("source_url") ? 7 : 0) + (signals.includes("phrase") ? 7 : 0));
   if (claimBad.length > 0) confidence -= 15;
   if (injection) confidence -= 20;
   confidence = Math.max(0, Math.min(100, confidence));
@@ -375,6 +435,7 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
   if (allSame("requirements")) common.push("応募条件");
   if (signals.includes("campaign")) common.push("同じキャンペーン");
   if (signals.includes("source_url")) common.push("同じ情報源");
+  if (signals.includes("event_id")) common.push("同じイベントID");
   if (signals.includes("phrase")) common.push(`共通の企画文言「${short(claim.commonPhrase ?? "", 30)}」`);
   dec.common = common;
 
@@ -382,6 +443,7 @@ export function verifyProposal(world: GWorld, claim: AgentProposal | null, opts:
   dec.confidence = confidence;
   dec.missing = [...new Set([...claim.missing, ...gaps.map((g) => g.detail)])].slice(0, 6);
   dec.rationale = [rationale, why].filter(Boolean).join(" / ").slice(0, 1400);
+  dec.basis = basisOf(tier, signals, dec, why);
   if (tier === "single") {
     dec.kind = "single";
     dec.key = singleKey;

@@ -25,7 +25,7 @@ export interface SearchProvider {
   readonly name: string;
   search(query: string): Promise<SearchHit[] | SearchOutcome>;
 }
-export type FetchedPage = { ok: true; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[]; cached?: boolean; /** 本文を実際に取得した日時（ISO）。キャッシュから返したときは、最初に取得した日時 */ fetchedAt?: string } | { ok: false; message: string };
+export type FetchedPage = { ok: true; url: string; finalUrl: string; title: string; text: string; links?: { text: string; href: string }[]; /** HTML全体から抽出した、同じイベントを示す識別子（本文・リンクの切り詰め前。抽選グループの判定用。Stage 8F-4） */ identifiers?: { kind: string; value: string }[]; cached?: boolean; /** 本文を実際に取得した日時（ISO）。キャッシュから返したときは、最初に取得した日時 */ fetchedAt?: string } | { ok: false; message: string };
 /** ページ本文の取得。実装は SSRF 対策つきの安全な取得（本番側）か、モック */
 export interface PageFetcher {
   fetchPage(url: string): Promise<FetchedPage>;

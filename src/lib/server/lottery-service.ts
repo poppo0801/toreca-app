@@ -269,11 +269,12 @@ export async function loadPendingGroupProposals(db: Db, householdId?: string): P
     if (householdId) q = q.eq("household_id", householdId);
     const { data, error } = await q;
     if (error || !data) return [];
-    return (data as { id: string; kind: string; subject_lottery_id: string; lottery_ids: string[]; target_group_id: string | null; confidence: number; rationale: string; common: string[]; mismatches: { field: string; detail: string; severity: string }[]; missing: string[]; evidence: { strongSignals?: string[] } | null; engine: string; created_at: string }[]).map((p) => ({
+    return (data as { id: string; kind: string; subject_lottery_id: string; lottery_ids: string[]; target_group_id: string | null; confidence: number; rationale: string; common: string[]; mismatches: { field: string; detail: string; severity: string }[]; missing: string[]; evidence: { strongSignals?: string[]; basis?: string[]; sources?: { url?: string; fetchedAt?: string }[] } | null; engine: string; created_at: string }[]).map((p) => ({
       id: p.id, kind: p.kind as "new_group" | "add_to_group", subjectId: p.subject_lottery_id, lotteryIds: p.lottery_ids, targetGroupId: p.target_group_id, confidence: p.confidence, rationale: p.rationale,
       common: Array.isArray(p.common) ? p.common : [],
       mismatches: Array.isArray(p.mismatches) ? p.mismatches.map((m) => ({ field: m.field, detail: m.detail, severity: m.severity as "hard" | "gap" | "soft" })) : [],
-      missing: Array.isArray(p.missing) ? p.missing : [], strongSignals: p.evidence?.strongSignals ?? [], engine: p.engine, createdAt: p.created_at,
+      missing: Array.isArray(p.missing) ? p.missing : [], strongSignals: p.evidence?.strongSignals ?? [], basis: Array.isArray(p.evidence?.basis) ? p.evidence!.basis!.slice(0, 12) : undefined,
+      sources: Array.isArray(p.evidence?.sources) ? p.evidence!.sources!.filter((x) => x.url).slice(0, 6).map((x) => ({ url: String(x.url), fetchedAt: String(x.fetchedAt ?? "") })) : undefined, engine: p.engine, createdAt: p.created_at,
     }));
   } catch {
     return [];

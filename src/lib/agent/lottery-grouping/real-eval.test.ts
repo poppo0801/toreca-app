@@ -6,7 +6,7 @@ import { AnthropicAgentLLM } from "@/lib/agent/anthropic";
 import { checkRealApi } from "@/lib/agent/real-gate";
 import { GROUPING_SUBMIT, GROUPING_SUBMIT_STRICT_SCHEMA } from "@/lib/agent/lottery-grouping/proposal";
 import { MockGroupingBrain } from "@/lib/agent/lottery-grouping/mock";
-import { BudgetGuard, datasetHashes, planRun, replayRecords, runCases, summarizeRuns, validateDataset, REAL_EVAL_LIMITS, type RealCase, type RealGold, type RunRecord } from "@/lib/agent/lottery-grouping/real-eval";
+import { BudgetGuard, LedgerFetcher, datasetHashes, planRun, replayRecords, runCases, summarizeRuns, validateDataset, REAL_EVAL_LIMITS, type Exclusion, type LedgerPage, type RealCase, type RealGold, type RunRecord } from "@/lib/agent/lottery-grouping/real-eval";
 import { DEFAULT_AI_MODEL } from "@/lib/ai-cost";
 
 /**
@@ -28,6 +28,10 @@ const load = (): { cases: RealCase[]; gold: Record<string, RealGold>; casesText:
   return { cases: JSON.parse(casesText).cases as RealCase[], gold: JSON.parse(goldText).labels as Record<string, RealGold>, casesText, goldText };
 };
 const env = process.env;
+const SET_KEY = env.REAL_GROUPING_SET || "8f2";
+const exclusionsOf = (): Exclusion[] => (existsSync(`${DIR}/exclusions.json`) ? (JSON.parse(readFileSync(`${DIR}/exclusions.json`, "utf8")).exclusions as Exclusion[]).filter((e) => e.set === SET_KEY) : []);
+/** 保存済みのページの台帳（実際に取得したページ。取得日時・ハッシュつき）。あれば、AIが fetch_source_page でここから根拠を集められる。評価でネットワークに出ない */
+const ledgerOf = (): LedgerFetcher | undefined => (existsSync(`${DIR}/pages${SET}.json`) && env.REAL_GROUPING_FETCH !== "0" ? new LedgerFetcher((JSON.parse(readFileSync(`${DIR}/pages${SET}.json`, "utf8")).pages as LedgerPage[])) : undefined);
 const model = env.AGENT_MODEL?.trim() || DEFAULT_AI_MODEL;
 
 // ---------------------------------------------------------------- 合成データ（ロジックの検証用。実在の評価データではない）
@@ -185,6 +189,13 @@ describe.skipIf(env.REAL_GROUPING_FREEZE !== "1")("評価データの凍結（�
   it("入力・正解のハッシュを frozen.json に保存する（以後の変更は実行時に検出される）", () => {
     const d = requireData();
     const h = datasetHashes(d.casesText, d.goldText);
+    // ページの台帳（AIが fetch_source_page で参照する入力）も、組ごとにハッシュを固定する（実行時に照合）
+    if (existsSync(`${DIR}/pages${SET}.json`)) {
+      const hp = `${DIR}/pages-hashes.json`;
+      const cur = existsSync(hp) ? (JSON.parse(readFileSync(hp, "utf8")) as Record<string, string>) : {};
+      cur[SET_KEY] = datasetHashes(readFileSync(`${DIR}/pages${SET}.json`, "utf8"), "").cases;
+      writeFileSync(hp, JSON.stringify(cur, null, 2) + "\n");
+    }
     writeFileSync(`${DIR}/frozen${SET}.json`, JSON.stringify({ ...h, frozenOn: new Date().toISOString().slice(0, 10), cases: h.cases, gold: h.gold, count: d.cases.length }, null, 2) + "\n");
   });
 });
@@ -210,9 +221,15 @@ describe.skipIf(env.REAL_GROUPING_EVAL !== "1")("実API評価（承認された�
     const guard = new BudgetGuard(approvedJpy, REAL_EVAL_LIMITS.perCaseJpy);
     const runId = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
     mkdirSync(OUT, { recursive: true });
-    const res = await runCases(d.cases, d.gold, 1 + repeats, { makeLlm, guard, followUps: Number(env.REAL_GROUPING_FOLLOWUPS) || 1, kind: "real", maxConsecutiveErrors: strict ? 1 : 2, onRecord: (r) => console.log(`[grouping-real] ${r.caseId}#${r.pass} ${r.status} tier=${r.tier ?? "-"} cost=${(r.usage?.costJpy ?? 0).toFixed(2)}円 spent=${guard.spent.toFixed(2)}/${approvedJpy}円${r.error ? ` 問題: ${r.error}` : ""}`) });
-    const summary = summarizeRuns(d.cases, d.gold, res.records);
-    writeFileSync(`${OUT}/real-${runId}.json`, JSON.stringify({ runId, kind: "real", set: SET || "8f2", strict, model: gate.model, frozen: f, approvedJpy, approvedRuns, repeats, stoppedBy: res.stoppedBy, stopReason: res.stopReason, spentJpy: guard.spent, records: res.records, summary }, null, 2));
+    const ledger = ledgerOf();
+    if (ledger && existsSync(`${DIR}/pages-hashes.json`)) {
+      const want = (JSON.parse(readFileSync(`${DIR}/pages-hashes.json`, "utf8")) as Record<string, string>)[SET_KEY];
+      if (want && want !== datasetHashes(readFileSync(`${DIR}/pages${SET}.json`, "utf8"), "").cases) throw new Error("ページの台帳が凍結後に変更されています");
+      if (!want) throw new Error("ページの台帳が凍結されていません（freeze をやり直してください）");
+    }
+    const res = await runCases(d.cases, d.gold, 1 + repeats, { makeLlm, guard, fetcher: ledger, followUps: Number(env.REAL_GROUPING_FOLLOWUPS) || 1, kind: "real", maxConsecutiveErrors: strict ? 1 : 2, onRecord: (r) => console.log(`[grouping-real] ${r.caseId}#${r.pass} ${r.status} tier=${r.tier ?? "-"} cost=${(r.usage?.costJpy ?? 0).toFixed(2)}円 spent=${guard.spent.toFixed(2)}/${approvedJpy}円${r.error ? ` 問題: ${r.error}` : ""}`) });
+    const summary = summarizeRuns(d.cases, d.gold, res.records, exclusionsOf());
+    writeFileSync(`${OUT}/real-${runId}.json`, JSON.stringify({ runId, kind: "real", set: SET || "8f2", strict, ledger: !!ledger, model: gate.model, frozen: f, approvedJpy, approvedRuns, repeats, stoppedBy: res.stoppedBy, stopReason: res.stopReason, spentJpy: guard.spent, records: res.records, summary }, null, 2));
     expect(guard.spent).toBeLessThanOrEqual(approvedJpy);
   }, 1_800_000);
 });
@@ -224,13 +241,13 @@ describe.skipIf(env.REAL_GROUPING_REPLAY !== "1")("保存済みの提出の再�
     if (!files.length) throw new Error("保存済みの実行結果がありません");
     const saved = JSON.parse(readFileSync(`${OUT}/${files.at(-1)}`, "utf8")) as { records: RunRecord[]; runId: string };
     const re = replayRecords(d.cases, d.gold, saved.records);
-    writeFileSync(`${OUT}/replay-${saved.runId}.json`, JSON.stringify({ kind: "replay", from: saved.runId, records: re, summary: summarizeRuns(d.cases, d.gold, re) }, null, 2));
+    writeFileSync(`${OUT}/replay-${saved.runId}.json`, JSON.stringify({ kind: "replay", from: saved.runId, records: re, summary: summarizeRuns(d.cases, d.gold, re, exclusionsOf()) }, null, 2));
   });
 });
 
 // ---------------------------------------------------------------- 実データの組（8F-2 の17ケース・8F-3 の7ケース）× モックAI: 誤った自動グループ化が出ないこと（API・ネットワークなし）
 describe("実データの組 × モックAI（全方針で、誤った自動グループ化が 0）", () => {
-  const sets = [["", "8F-2"], ["-8f3", "8F-3"]] as const;
+  const sets = [["", "8F-2"], ["-8f3", "8F-3"], ["-8f4", "8F-4"]] as const;
   for (const [suffix, name] of sets) {
     const ok = existsSync(`${DIR}/cases${suffix}.json`) && existsSync(`${DIR}/gold${suffix}.json`);
     it.skipIf(!ok)(`${name}: 入力に正解が混ざっていない・凍結済みで一致・全方針で誤った自動が0`, async () => {
@@ -243,6 +260,13 @@ describe("実データの組 × モックAI（全方針で、誤った自動グ�
         const f = JSON.parse(readFileSync(`${DIR}/frozen${suffix}.json`, "utf8")) as { cases: string; gold: string };
         const h = datasetHashes(casesText, goldText);
         expect(h).toEqual({ cases: f.cases, gold: f.gold });
+      }
+      // ページの台帳（AIの入力の一部）も凍結されている。台帳に正解（ラベル・説明）が混ざっていない
+      if (existsSync(`${DIR}/pages${suffix}.json`)) {
+        const pagesText = readFileSync(`${DIR}/pages${suffix}.json`, "utf8");
+        const want = (JSON.parse(readFileSync(`${DIR}/pages-hashes.json`, "utf8")) as Record<string, string>)[suffix ? suffix.slice(1) : "8f2"];
+        expect(datasetHashes(pagesText, "").cases).toBe(want);
+        for (const g of Object.values(gold)) if (g.note) expect(pagesText).not.toContain(g.note.slice(0, 30));
       }
       // 正解の根拠（URL・ラベル）の文字列が、入力に現れない（正解の混入がない）。入力の情報源URLと、正解の根拠URLが一致するのは、同じ公式ページを指すためで許容（ラベル・説明文は不可）
       const inputText = JSON.stringify(cases);
@@ -266,5 +290,60 @@ describe("評価ハーネス: 既存グループの系列は所属する抽選�
     const gold = { [c.id]: { label: "auto", basis: [{ kind: "official_announcement", ref: "https://example.invalid", checkedAt: "2026-11-13" }] } } as Record<string, RealGold>;
     const recs = (await runCases([c], gold, 1, { makeLlm: () => new MockGroupingBrain("careful"), guard: new BudgetGuard(), followUps: 0, kind: "mock" })).records;
     expect(recs[0].downgrades?.join() ?? "").not.toContain("追加先が別の系列");
+  });
+});
+
+// ---------------------------------------------------------------- ページの台帳の作成（実際の取得。無料。有料APIなし。REAL_GROUPING_CAPTURE=1）
+describe.skipIf(env.REAL_GROUPING_CAPTURE !== "1")("ページの台帳の作成（登録された情報源URLの実際の取得。公開ページのみ・読み取りのみ）", () => {
+  it("ケースの情報源URL（https・Xなど取得できないサイトを除く）を、既存の安全な取得で取得し、取得日時・ハッシュつきで pages<組>.json に保存する", async () => {
+    const d = requireData();
+    const { SafePageFetcher } = await import("@/lib/server/agent/real-providers");
+    const { relevantExcerpt } = await import("@/lib/agent/lottery-grouping/identifiers");
+    const { hash53 } = await import("@/lib/agent/lottery-grouping/verify");
+    const f = new SafePageFetcher();
+    const urls = [...new Set(d.cases.flatMap((c) => [c.subject, ...c.others].flatMap((l) => l.urls ?? [])))].filter((u) => /^https:\/\//.test(u) && !/(^|\.)(x\.com|twitter\.com|t\.co)$/i.test(new URL(u).hostname));
+    const pages: LedgerPage[] = [];
+    const failed: { url: string; message: string }[] = [];
+    for (const url of urls) {
+      const r = await f.fetchPage(url);
+      if (!r.ok) {
+        failed.push({ url, message: r.message });
+        continue;
+      }
+      const text = relevantExcerpt(r.text);
+      pages.push({ url, finalUrl: r.finalUrl, title: r.title.slice(0, 200), text, links: (r.links ?? []).map((l) => l.href).slice(0, 60), identifiers: r.identifiers ?? [], fetchedAt: new Date().toISOString(), hash: hash53(text) });
+    }
+    writeFileSync(`${DIR}/pages${SET}.json`, JSON.stringify({ version: 1, note: "実際に取得した公開ページの台帳（要点・最大4000文字。取得日時・ハッシュつき）。評価でAIが fetch_source_page で参照する。取得できなかったページは failed に記録", capturedAt: new Date().toISOString(), failed, pages }, null, 2) + "\n");
+    expect(pages.length + failed.length).toBe(urls.length);
+  }, 600_000);
+});
+
+// ---------------------------------------------------------------- 実際に取得したページの台帳での、情報源の調査（AIは台本どおり。ネットワーク・APIなし）
+describe("実際に取得したページの台帳 × 調査（8f3 の M06 型: 同じイベントだが登録URLが別・情報源の文章なし）", () => {
+  const ok = existsSync(`${DIR}/cases-8f3.json`) && existsSync(`${DIR}/pages-8f3.json`);
+  it.skipIf(!ok)("取得したページから同じイベントIDを確認でき、強い裏づけ（event_id）になる。項目が一致しても、発表日が日付でない（11月中旬）ため自動ではなく候補", async () => {
+    const cases = JSON.parse(readFileSync(`${DIR}/cases-8f3.json`, "utf8")).cases as RealCase[];
+    const c = cases.find((x) => x.category === "insufficient")!;
+    const ledger = new LedgerFetcher((JSON.parse(readFileSync(`${DIR}/pages-8f3.json`, "utf8")).pages as LedgerPage[]));
+    const { worldOf } = await import("@/lib/agent/lottery-grouping/eval-world");
+    const { evaluateGrouping } = await import("@/lib/agent/lottery-grouping/run");
+    const w = worldOf(c);
+    const peers = w.lotteries.filter((l) => l.sourceUrls[0] !== w.subject.sourceUrls[0]).map((l) => l.id);
+    expect(peers.length).toBeGreaterThan(0);
+    let n = 0;
+    const usage = { inputTokens: 1, outputTokens: 1, costJpy: 0 };
+    const llm = {
+      name: "scripted",
+      async step() {
+        const i = n++;
+        if (i === 0) return { kind: "tool_calls" as const, usage, calls: [w.subject.id, ...peers.slice(0, 1)].map((id, k) => ({ id: `f${k}`, name: "fetch_source_page", input: { lotteryId: id } })) };
+        return { kind: "final" as const, usage, output: { action: "new_group", memberIds: peers.slice(0, 1), rationale: "同じイベントの店舗違い", claimedCommon: ["商品"] } };
+      },
+    };
+    const o = await evaluateGrouping(w, { llm, allowAuto: true, fetcher: ledger, followUps: 0, formatRepairs: 0 });
+    expect(o.usage?.fetches).toBe(2);
+    expect(o.decision.strongSignals).toContain("event_id");
+    expect(o.decision.tier).toBe("suggest");
+    expect(o.decision.basis.join("\n")).toContain("同じイベントID");
   });
 });

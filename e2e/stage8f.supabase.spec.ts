@@ -69,7 +69,7 @@ test("AIのグループ候補の承認・却下／AIがまとめたグループ�
   const bIds = [await mkLot(stores[3]), await mkLot(stores[4], { apply_deadline_date: day(13) })];
   const prop = (key: string, ids: string[], over: Record<string, unknown>) =>
     ins("lottery_group_proposals", { household_id: hid, proposal_key: key, kind: "new_group", status: "pending", tier: "suggest", subject_lottery_id: ids[0], lottery_ids: ids, engine: "mock-grouping:careful", ...over });
-  const pA = await prop(`new_group:e2e-a:3`, aIds, { confidence: 85, rationale: "商品・応募期間・発表日が同じ別店舗の抽選 / 項目はすべて一致しているが、同じ企画であることの裏づけが確認できていない", common: ["系列", "対象商品", "応募期間", "発表日"], mismatches: [], missing: [], evidence: { strongSignals: [] } });
+  const pA = await prop(`new_group:e2e-a:3`, aIds, { confidence: 85, rationale: "商品・応募期間・発表日が同じ別店舗の抽選 / 項目はすべて一致しているが、同じ企画であることの裏づけが確認できていない", common: ["系列", "対象商品", "応募期間", "発表日"], mismatches: [], missing: [], evidence: { strongSignals: [], basis: ["区分: 承認候補", "同じ企画の独立した裏づけ: なし", "軽微な違い: 応募条件の一方にだけ記載がある項目がある（記載なし。条件が異なるとは限らない）"], sources: [{ url: "https://example.invalid/8f/event-page-1", fetchedAt: "2026-11-14T00:00:00Z" }] } });
   const pB = await prop(`new_group:e2e-b:2`, bIds, { confidence: 70, rationale: "同じキャンペーンだが、店舗ごとに応募締切が異なる", common: ["系列", "対象商品"], mismatches: [{ field: "applyDeadline", detail: "応募締切が異なる", severity: "hard" }], missing: [], evidence: { strongSignals: ["campaign"] } });
 
   try {
@@ -89,6 +89,11 @@ test("AIのグループ候補の承認・却下／AIがまとめたグループ�
     await expect(cardB.getByTestId("group-proposal-confidence")).toContainText("信頼度 70");
     const cardA = sheet.getByTestId("group-proposal").filter({ hasText: "3店舗をグループにまとめる" });
     await expect(cardA.getByTestId("group-proposal-mismatch")).toHaveCount(0);
+    await noHorizontalOverflow(page);
+    // 8F-4: 判断の根拠・確認した情報源は、折りたたんだ詳細の中（開いても横にはみ出さない）
+    await cardA.locator("details summary").click();
+    await expect(cardA.getByTestId("group-proposal-basis")).toContainText("区分: 承認候補");
+    await expect(cardA).toContainText("確認した情報源: example.invalid（1件）");
     await noHorizontalOverflow(page);
     await page.screenshot({ path: "docs/screenshots/stage8f-proposals.png" });
 

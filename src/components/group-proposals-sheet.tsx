@@ -11,7 +11,14 @@ import type { LotteryGroupProposal } from "@/types/domain";
  * AIが提示したグループ候補の確認（Stage 8F）。承認すると、手動のグループと同じ親子カードになる（出所: ai）。却下は記録され、同じ組は再提案されない。
  * 店舗ごとの抽選・応募・当選・購入・通知・期限は変わらない。理由・共通点・異なる点・信頼度は、AIの文章ではなく検証層が事実と照合して決めたもの。
  */
-const SIGNAL_LABEL: Record<string, string> = { campaign: "同じキャンペーン", source_url: "同じ情報源のURL", phrase: "共通の企画名を確認" };
+const SIGNAL_LABEL: Record<string, string> = { campaign: "同じキャンペーン", source_url: "同じ情報源のURL", phrase: "共通の企画名を確認", event_id: "同じイベントID（取得したページで確認）" };
+const hostOf = (u: string): string => {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return u.slice(0, 30);
+  }
+};
 
 function ProposalCard({ p, busy, onDecide }: { p: LotteryGroupProposal; busy: boolean; onDecide: (id: string, d: "approve" | "reject") => void }) {
   const { data } = useApp();
@@ -45,6 +52,14 @@ function ProposalCard({ p, busy, onDecide }: { p: LotteryGroupProposal; busy: bo
           <p>同じ企画の裏づけ: {p.strongSignals.length > 0 ? p.strongSignals.map((s) => SIGNAL_LABEL[s] ?? s).join("・") : "確認できていません"}</p>
           {p.missing.length > 0 && <p>不足している情報: {p.missing.join("・")}</p>}
           {p.mismatches.length > 0 && <p>相違・不足: {p.mismatches.map((m) => m.detail).join("・")}</p>}
+          {p.basis && p.basis.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-4" data-testid="group-proposal-basis">
+              {p.basis.slice(0, 8).map((b, i) => (
+                <li key={i}>{b}</li>
+              ))}
+            </ul>
+          )}
+          {p.sources && p.sources.length > 0 && <p>確認した情報源: {[...new Set(p.sources.map((x) => hostOf(x.url)))].join("・")}（{p.sources.length}件）</p>}
         </div>
       </details>
       <div className="flex justify-end gap-2">

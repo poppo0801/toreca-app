@@ -264,8 +264,11 @@ describe("ツール（読み取り専用）", () => {
     const a = mkLottery();
     const w = mkWorld(s, [a], { evidence: evidenceOf(s, a) });
     const reg = buildGroupingTools(w);
-    expect(reg.names().sort()).toEqual(["get_group_detail", "get_lottery_detail", "get_manual_decisions", "get_source_text", "get_subject", "list_related_lotteries"]);
+    // 取得の部品を渡さなければ（本番の既定）、外部に触れるツールは登録されない（8F-4: compare_evidence は固定ロジックの比較で read_internal）
+    expect(reg.names().sort()).toEqual(["compare_evidence", "get_group_detail", "get_lottery_detail", "get_manual_decisions", "get_source_text", "get_subject", "list_related_lotteries"]);
     for (const n of reg.names()) expect(reg.get(n)!.access).toBe("read_internal");
+    const withFetch = buildGroupingTools(w, { fetcher: { fetchPage: async () => ({ ok: false, message: "x" }) } });
+    expect(withFetch.get("fetch_source_page")).toMatchObject({ access: "read_external", consumes: "fetch" });
     const out = await reg.get("get_source_text")!.run({ id: a.id }, { budget: undefined as never });
     expect(out.untrusted).toBe(true);
     await expect(reg.get("get_lottery_detail")!.run({ id: "other" }, { budget: undefined as never })).rejects.toThrow();
@@ -333,10 +336,13 @@ describe("エージェントの実行（モックAI → 検証層）", () => {
     expect(lone.usage).toBeNull();
     const { w } = set();
     const first = await evaluateGrouping(w, { llm: new MockGroupingBrain("timid"), allowAuto: true });
-    const w2 = mkWorld(w.subject, w.lotteries, { knownKeys: { [first.decision.key]: "dismissed" } });
-    const again = await evaluateGrouping(w2, { llm: new MockGroupingBrain("timid"), allowAuto: true });
+    const same = { evidence: Object.fromEntries(w.evidence), knownKeys: { [first.decision.key]: "dismissed" } };
+    const again = await evaluateGrouping(mkWorld(w.subject, w.lotteries, same), { llm: new MockGroupingBrain("timid"), allowAuto: true });
     expect(again.ranAgent).toBe(false);
     expect(again.skipped).toBe("already_evaluated");
+    // 8F-4: 情報源が増えたら（根拠が変わったら）、過去の単独・保留を維持せず、再評価する
+    const more = await evaluateGrouping(mkWorld(w.subject, w.lotteries, { ...same, evidence: { ...same.evidence, [w.subject.id]: ["新しく保存された情報源の文章"] } }), { llm: new MockGroupingBrain("timid"), allowAuto: true });
+    expect(more.ranAgent).toBe(true);
   });
   it("通信失敗・上限: 一時的なエラーは再試行し、続けば保留。API障害でも例外を投げず、自動にしない", async () => {
     const { w } = set();

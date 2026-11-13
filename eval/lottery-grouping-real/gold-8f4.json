@@ -1,0 +1,563 @@
+{
+  "version": 1,
+  "note": "正解。AIに渡さない（採点だけが読む）。根拠は取得した公式の販売ページ（取得日時つき）。確認できないものは unknown",
+  "labels": {
+    "P01": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "ふるいちイオンモール伊丹店の30th。店舗別のLivePocketイベント（イベントID 1134754）。他店舗とはイベントID・期間が異なる（確認したページのイベントID: 1134754, 1140532, 1136198, 1134915, 1135028, 1137523, 1139415, 1138866）"
+    },
+    "P02": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場深井店の30th（イベントID 1134915）。店舗別・期間が異なる（確認したページのイベントID: 1134915, 1140532, 1136198, 1134754, 1135028, 1137523, 1139415, 1138866）"
+    },
+    "P03": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "ふるいちイオンモール神戸北店の30th（イベントID 1137523）。店舗別・期間が異なる（確認したページのイベントID: 1137523, 1140532, 1136198, 1134754, 1134915, 1135028, 1139415, 1138866）"
+    },
+    "P04": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場小平店の30th（20BOX・イベントID 1139415）。数量・期間が他店舗と異なる店舗別のイベント（確認したページのイベントID: 1139415, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1138866）"
+    },
+    "P05": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/ugp5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場竹の塚店の30th（イベントID 1138194）。店舗別・期間が異なる（確認したページのイベントID: 1138194, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）"
+    },
+    "P06": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/pr4q5",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場魚住店の30th（アプリ会員限定・イベントID 1138864）。店舗別・期間が異なる（確認したページのイベントID: 1138864, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）"
+    },
+    "P07": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/4m2ak",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場東住吉店の30th（イベントID 1140258）。店舗別・期間が異なる（確認したページのイベントID: 1140258, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）"
+    },
+    "P08": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/ccavo",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場三田店の30th（イベントID 1140619）。店舗別・期間が異なる（確認したページのイベントID: 1140619, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）"
+    },
+    "P09": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/j2fs9",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "ふるいち高野店のストームエメラルダ（イベントID 1140532）。店舗別・期間が異なる（確認したページのイベントID: 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415, 1138866）"
+    },
+    "P10": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/0aq7y",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z-8_2",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/05tt3",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/11t5c",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/8xaaf",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/6mbex",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/z4uwb",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://livepocket.jp/e/t7ka0",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "古本市場千里丘店のストームエメラルダ（イベントID 1140481）。店舗別・期間が異なる（確認したページのイベントID: 1140481, 1140532, 1136198, 1134754, 1134915, 1135028, 1137523, 1139415）"
+    },
+    "P11": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623986",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba2nd/blog/623986",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba2nd/blog/623973",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623703",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623703",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "カードラボ販売買取センターNAMBAの30th（再販）。店舗ブログの告知は店舗別（カードラボなんば店・津田沼店・オタロード本店とは別日程・別告知）"
+    },
+    "P12": {
+      "label": "none",
+      "basis": [
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623703",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623703",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/tsudanuma/blog/623681",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba2nd/blog/623973",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/namba/blog/623524/",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/blog/623603/",
+          "checkedAt": "2026-11-14"
+        },
+        {
+          "kind": "official_announcement",
+          "ref": "https://www.c-labo.jp/shop/himeji/blog/623603",
+          "checkedAt": "2026-11-14"
+        }
+      ],
+      "note": "カードラボ津田沼店のハドウシーカー。津田沼店のブログの告知は店舗別。マルイ海老名店は別日程（11/3〜11/19）の別告知"
+    },
+    "P13": {
+      "label": "unknown",
+      "basis": [],
+      "note": "GEOのハドウシーカー＋30th（集約アカウントのX投稿由来）。GEOの公式告知は商品ごとに2件（news/789・790）で同じ日程・条件。X投稿由来の登録が、公式告知の登録と同じ抽選の別経路か（重複）、別の抽選かは、確認できなかった（Xは取得できない）"
+    }
+  }
+}

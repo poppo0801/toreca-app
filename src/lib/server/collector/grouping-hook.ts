@@ -10,11 +10,11 @@ import type { Db } from "@/lib/server/lottery-service";
 export async function afterCollectedRegistration(db: Db, householdId: string, lotteryId: string, opts: { asService: boolean; actor: string | null }): Promise<void> {
   if (process.env.TOREMANE_ENV !== "local") return;
   try {
-    const { createGroupingLlm } = await import("@/lib/server/agent/lottery-grouping-engine");
+    const { createGroupingFetcher, createGroupingLlm } = await import("@/lib/server/agent/lottery-grouping-engine");
     const { runLotteryGrouping } = await import("@/lib/server/agent/lottery-grouping-service");
     const { canAutoGroup } = await import("@/lib/agent/lottery-grouping/flags");
     const engine = createGroupingLlm(process.env);
-    await runLotteryGrouping(db, householdId, lotteryId, { llm: engine.llm, allowAuto: canAutoGroup(), asService: opts.asService, actor: opts.actor, followUps: 1 });
+    await runLotteryGrouping(db, householdId, lotteryId, { llm: engine.llm, allowAuto: canAutoGroup(), asService: opts.asService, actor: opts.actor, followUps: 1, fetcher: await createGroupingFetcher(process.env) });
   } catch {
     /* グループ判定の失敗で収集を止めない */
   }

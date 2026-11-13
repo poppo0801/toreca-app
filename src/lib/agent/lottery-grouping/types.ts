@@ -7,6 +7,7 @@
  *    突き合わせて、区分（auto=自動で実行してよい／suggest=利用者の承認が必要／hold／single）と信頼度を決める。AIの自己申告は信用しない。
  *  - グループ化の実行: Stage 8U の group_lotteries_tx（origin = 'ai'）。店舗ごとの抽選・応募・当選・購入・通知・期限は変更しない。
  */
+import type { FetchedSource } from "@/lib/agent/lottery-grouping/identifiers";
 import type { FlexibleDate } from "@/types/domain";
 
 /** 判定に使う抽選の見え方（必要な項目だけ） */
@@ -54,6 +55,8 @@ export interface GWorld {
   groups: GGroup[];
   /** 抽選ID → 取得時の情報源の文章（X投稿本文・AI読み取りの根拠など。外部由来＝データとして扱う）。無ければ空 */
   evidence: Map<string, string[]>;
+  /** 実行中に取得した情報源の台帳（抽選ID → 取得したページ）。AIの主張ではなく、取得した事実。無ければ未取得 */
+  fetched?: Map<string, FetchedSource[]>;
   /** 手動で分けた組（解除・却下・実行後の解除）。キーは pairKey(a, b) */
   separated: Set<string>;
   /** すでに記録のある提案キー（却下済みなど。同じ組を繰り返さない） */
@@ -129,9 +132,11 @@ export interface VerifiedDecision {
   mismatches: Mismatch[];
   missing: string[];
   /** 強い裏づけ（同じキャンペーン・同じ情報源・検証できた同一の文言）の種類 */
-  strongSignals: ("campaign" | "source_url" | "phrase")[];
+  strongSignals: ("campaign" | "source_url" | "phrase" | "event_id")[];
   /** 検証で却下・降格した理由（AIの主張と事実の食い違いなど） */
   downgrades: string[];
+  /** 判断の根拠（自動確定／承認候補／保留／別企画の区分と、その理由を箇条書き。検証層が事実から作る。AIの文章ではない） */
+  basis: string[];
   /** 画面に出すグループの見出し候補 */
   title: string;
   /** 提案の一意キー（同じ組を繰り返さないため） */

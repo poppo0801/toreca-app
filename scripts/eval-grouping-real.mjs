@@ -1,7 +1,8 @@
 // 抽選グループ判定の実データ評価（Stage 8F-2）。実APIは費用が発生するため、承認された費用・実行回数の範囲だけ実行する。
 //   node scripts/eval-grouping-real.mjs preflight [--repeats=N]           実行前の確認（API・ネットワークに接続しない。キーは表示しない）
 //   node scripts/eval-grouping-real.mjs freeze                            評価データ（入力・正解）のハッシュを固定する（正解の確定後・実行前）
-//   node scripts/eval-grouping-real.mjs run --approved-max-jpy=<円> --approved-runs=<回> [--repeats=N] [--followups=N] [--set=8f3] [--strict]
+//   node scripts/eval-grouping-real.mjs run --approved-max-jpy=<円> --approved-runs=<回> [--repeats=N] [--followups=N] [--set=8f3|8f4] [--strict]
+//   node scripts/eval-grouping-real.mjs capture [--set=...]               情報源URLを実際に取得してページの台帳を作る（無料・公開ページのみ）
 //   node scripts/eval-grouping-real.mjs replay                            保存済みの提出を現在の検証層でやり直す（有料なし。新規の精度評価ではない）
 // 事前に .env.local へ開発専用の設定が必要（AGENT_REAL_API=allow・AGENT_ANTHROPIC_API_KEY・AGENT_MAX_COST_JPY_PER_RUN・AGENT_MAX_RUNS_PER_DAY）。
 import { spawnSync } from "node:child_process";
@@ -24,6 +25,9 @@ if (cmd === "preflight") {
   process.exit(r.status ?? 1);
 } else if (cmd === "freeze") {
   process.exit(vitest("評価データの凍結", { REAL_GROUPING_FREEZE: "1" }).status ?? 1);
+} else if (cmd === "capture") {
+  // 評価データの情報源URLを実際に取得して、ページの台帳（pages<組>.json）を作る（無料・公開ページのみ・読み取りのみ。有料APIは使わない）
+  process.exit(vitest("ページの台帳の作成", { REAL_GROUPING_CAPTURE: "1" }).status ?? 1);
 } else if (cmd === "replay") {
   process.exit(vitest("保存済みの提出の再判定", { REAL_GROUPING_REPLAY: "1" }).status ?? 1);
 } else if (cmd === "run") {

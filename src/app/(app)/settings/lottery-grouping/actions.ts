@@ -1,7 +1,7 @@
 "use server";
 
 import { canAutoGroup, isLotteryGroupingEnabled } from "@/lib/agent/lottery-grouping/flags";
-import { createGroupingLlm } from "@/lib/server/agent/lottery-grouping-engine";
+import { createGroupingFetcher, createGroupingLlm } from "@/lib/server/agent/lottery-grouping-engine";
 import { scanLotteryGrouping, type ScanSummary } from "@/lib/server/agent/lottery-grouping-service";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
 import { createClient } from "@/lib/supabase/server";
@@ -47,6 +47,6 @@ export async function scanGroupingAction(): Promise<R<{ summary: ScanSummary; en
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
   const eng = createGroupingLlm(process.env);
-  const summary = await scanLotteryGrouping(c.db, c.householdId, { llm: eng.llm, allowAuto: canAutoGroup(), asService: false, actor: c.actor, followUps: 1, maxAiRuns: 30, maxEvaluations: 100 });
+  const summary = await scanLotteryGrouping(c.db, c.householdId, { llm: eng.llm, allowAuto: canAutoGroup(), asService: false, actor: c.actor, followUps: 1, fetcher: await createGroupingFetcher(process.env), maxAiRuns: 30, maxEvaluations: 100 });
   return { ok: true, summary, engine: eng.llm.name, real: eng.real, note: eng.note };
 }
