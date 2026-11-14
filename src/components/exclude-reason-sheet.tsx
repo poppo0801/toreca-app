@@ -86,7 +86,7 @@ export function ExcludeReasonSheet({ candidate, others, onClose, onDone }: { can
     const chainName = new Map(data.chains.map((c) => [c.id, c.name]));
     const storeName = new Map(data.stores.map((s) => [s.id, s.name]));
     const aliasOf = new Map(data.chains.map((c) => [c.id, c.aliases ?? []]));
-    const lots: DupTarget[] = data.lotteries.map((l) => ({ kind: "lottery", id: l.id, label: [chainName.get(l.chainId), l.storeId ? storeName.get(l.storeId) : "", l.items.map((t) => names.get(t.productId) ?? "").filter(Boolean).join("・")].filter(Boolean).join(" "), chainId: l.chainId, chainName: chainName.get(l.chainId) ?? "", chainAliases: aliasOf.get(l.chainId) ?? [], storeId: l.storeId ?? null, storeName: l.storeId ? (storeName.get(l.storeId) ?? "") : "", urls: l.sourceUrls ?? [], productIds: l.items.map((t) => t.productId), productNames: l.items.map((t) => names.get(t.productId) ?? ""), deadline: l.applyDeadline.precision === "date_time" ? l.applyDeadline.at : l.applyDeadline.precision === "date_only" ? `${l.applyDeadline.date}T23:59:00+09:00` : null }));
+    const lots: DupTarget[] = data.lotteries.map((l) => ({ kind: "lottery", id: l.id, label: [chainName.get(l.chainId), l.storeId ? storeName.get(l.storeId) : "", l.items.map((t) => names.get(t.productId) ?? "").filter(Boolean).join("・")].filter(Boolean).join(" "), chainId: l.chainId, chainName: chainName.get(l.chainId) ?? "", chainAliases: aliasOf.get(l.chainId) ?? [], storeId: l.storeId ?? null, storeName: l.storeId ? (storeName.get(l.storeId) ?? "") : "", select: l.storeMode === "select_on_apply", urls: l.sourceUrls ?? [], productIds: l.items.map((t) => t.productId), productNames: l.items.map((t) => names.get(t.productId) ?? ""), deadline: l.applyDeadline.precision === "date_time" ? l.applyDeadline.at : l.applyDeadline.precision === "date_only" ? `${l.applyDeadline.date}T23:59:00+09:00` : null }));
     const cands: DupTarget[] = others
       .filter((o) => o.id !== candidate.id)
       .map((o) => {
@@ -264,7 +264,7 @@ export function ExcludeReasonSheet({ candidate, others, onClose, onDone }: { can
 
           {reason === "duplicate" && (
             <div className="space-y-2" data-testid="reason-dup-form">
-              <p className="text-xs text-muted-foreground">同じ抽選として扱う登録済みの抽選・候補を選びます。この候補の情報源URLは、統合先に参照として残ります。店舗が異なる抽選は別の抽選のため統合できません。</p>
+              <p className="text-xs text-muted-foreground">同じ抽選として扱う登録済みの抽選・候補を選びます。この候補の情報源URLは、統合先に参照として残ります。店舗が異なる抽選は別の抽選のため統合できません（店舗選択式の抽選を除く）。</p>
               {dups.length === 0 && <p className="text-sm text-warn" data-testid="dup-none">自動では統合先の候補が見つかりませんでした。下の検索から、登録済みの抽選・確認待ちの候補を探せます。</p>}
               <DupList items={dups} pick={dupPick} onPick={setDupPick} />
               <label className="block text-sm">

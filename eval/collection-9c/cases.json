@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "note": "Stage 9C の評価ケース。provenance=user_reported は、利用者が実運用で確認した事象に出てきた実際の表記（正解は利用者の説明による）。synthetic は、同じ型の表記違い・紛らわしい別物を架空に作ったもの。実際の収集データ（本番）はこの環境にないため、実データ全体での精度・発見率は未測定。件数は精度ではなく、型ごとの適合を示す。old=変更前のコードの結果（同じケースを変更前のコミットで実行して記録）。",
+  "chain": [
+    { "id": "C01", "p": "user_reported", "input": "BOOK・OFF", "master": ["BOOKOFF", "ブックオフ"], "expect": "BOOKOFF", "item": 1 },
+    { "id": "C02", "p": "user_reported", "input": "GEO（ゲオ）", "master": ["GEO"], "expect": "GEO", "item": 1 },
+    { "id": "C03", "p": "user_reported", "input": "イトーヨーカドーネット通販", "master": ["イトーヨーカドー"], "expect": "イトーヨーカドー", "item": 1 },
+    { "id": "C04", "p": "synthetic", "input": "ＢＯＯＫ ＯＦＦ", "master": ["BOOKOFF"], "expect": "BOOKOFF" },
+    { "id": "C05", "p": "synthetic", "input": "ブックオフ", "master": ["BOOKOFF"], "expect": "BOOKOFF" },
+    { "id": "C06", "p": "synthetic", "input": "ゲオ", "master": ["GEO"], "expect": "GEO" },
+    { "id": "C07", "p": "synthetic", "input": "イトーヨーカドー", "master": ["イトーヨーカドー"], "expect": "イトーヨーカドー" },
+    { "id": "C08", "p": "synthetic", "input": "イトーヨーカドーオンラインストア", "master": ["イトーヨーカドー"], "expect": "イトーヨーカドー" },
+    { "id": "C09", "p": "synthetic", "input": "ブックマーケット", "master": ["BOOKOFF"], "expect": null },
+    { "id": "C10", "p": "synthetic", "input": "イオン九州", "master": ["イオン"], "expect": null },
+    { "id": "C11", "p": "synthetic", "input": "TSUTAYA", "master": ["GEO", "BOOKOFF"], "expect": null }
+  ],
+  "product": [
+    { "id": "P01", "p": "user_reported", "input": "MEGA 拡張パック ハドウシーカー（シュリンクなし）", "master": ["ハドウシーカー"], "expect": "ハドウシーカー", "item": 7 },
+    { "id": "P02", "p": "synthetic", "input": "MEGA 拡張パック ハドウシーカー（シュリンク付き）", "master": ["ハドウシーカー"], "expect": "ハドウシーカー" },
+    { "id": "P03", "p": "synthetic", "input": "ハドウシーカー（1人2個まで）", "master": ["ハドウシーカー"], "expect": "ハドウシーカー" },
+    { "id": "P04", "p": "synthetic", "input": "拡張パック ハドウシーカー 1BOX", "master": ["ハドウシーカー"], "expect": "ハドウシーカー" },
+    { "id": "P05", "p": "synthetic", "input": "ハドウシーカー（特別版）", "master": ["ハドウシーカー"], "expect": null },
+    { "id": "P06", "p": "synthetic", "input": "MEGA 拡張パック ニンジャスピナー（シュリンクなし）", "master": ["ハドウシーカー"], "expect": null },
+    { "id": "P07", "p": "synthetic", "input": "ハドウシーカー", "master": ["ハドウシーカー"], "expect": "ハドウシーカー" }
+  ],
+  "form": [
+    { "id": "F01", "p": "user_reported", "item": 8, "chain": "キデイランド", "texts": ["※応募できる店舗はいずれか1店舗のみです。複数店舗への応募は無効となります。"], "perStorePages": true, "expect": "store_select" },
+    { "id": "F02", "p": "synthetic", "chain": "キデイランド", "texts": ["※応募できる店舗はいずれか1店舗のみです。複数店舗への応募は無効となります。"], "perStorePages": false, "expect": "store_select" },
+    { "id": "F03", "p": "synthetic", "chain": "テスト玩具", "texts": ["※応募できる店舗はいずれか1店舗のみです。複数店舗への応募は無効となります。"], "perStorePages": false, "expect": "unknown" },
+    { "id": "F04", "p": "synthetic", "chain": "キデイランド", "texts": ["予約受付のお知らせ"], "perStorePages": true, "expect": "unknown" },
+    { "id": "F05", "p": "synthetic", "chain": "テスト玩具", "texts": ["応募時に受取店舗を選択してください"], "perStorePages": false, "expect": "store_select" },
+    { "id": "F06", "p": "synthetic", "chain": "テスト玩具", "texts": ["各店舗での受付となります。店舗ごとに応募してください"], "perStorePages": true, "expect": "store_independent" }
+  ],
+  "dup": [
+    { "id": "D01", "p": "user_reported", "item": 4, "desc": "店舗選択式の抽選がある。選べる店舗に含まれる個別店舗の告知（情報源URLは別）", "existing": { "mode": "select", "selectable": ["原宿店", "梅田店"], "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "input": { "store": "原宿店", "url": "https://x.example.invalid/2", "products": ["p1"], "deadline": "2026-11-14" }, "expect": "duplicate" },
+    { "id": "D02", "p": "synthetic", "desc": "同系列・同商品・同締切だが、選べる店舗に無く情報源も違う（店舗別の独立した抽選かもしれない）", "existing": { "mode": "select", "selectable": ["原宿店"], "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "input": { "store": "新宿店", "url": "https://x.example.invalid/2", "products": ["p1"], "deadline": "2026-11-14" }, "expect": "new" },
+    { "id": "D03", "p": "synthetic", "desc": "同じ情報源の個別店舗の告知（店舗選択式が既にある）", "existing": { "mode": "select", "selectable": [], "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "input": { "store": "新宿店", "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "expect": "duplicate" },
+    { "id": "D04", "p": "user_reported", "item": 6, "desc": "登録済み抽選の一部の情報（商品が読み取れない）で、同じ情報源URL", "existing": { "mode": "fixed", "store": "原宿店", "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "input": { "store": "原宿店", "url": "https://x.example.invalid/1", "products": [], "deadline": "2026-11-14" }, "expect": "duplicate" },
+    { "id": "D05", "p": "synthetic", "desc": "商品が読み取れず、別の店舗・別の開催回", "existing": { "mode": "fixed", "store": "原宿店", "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "input": { "store": "新宿店", "url": "https://x.example.invalid/9", "products": [], "deadline": "2026-11-14" }, "expect": "new" },
+    { "id": "D06", "p": "synthetic", "desc": "同じ店舗・別の商品（店舗固定どうし）", "existing": { "mode": "fixed", "store": "原宿店", "url": "https://x.example.invalid/1", "products": ["p1"], "deadline": "2026-11-14" }, "input": { "store": "原宿店", "url": "https://x.example.invalid/2", "products": ["p2"], "deadline": "2026-11-14" }, "expect": "new" }
+  ],
+  "multi": [
+    { "id": "M01", "p": "user_reported", "item": 9, "desc": "楽天ブックス: 同期間・同条件・同じ店舗（オンライン）で別商品", "chain": "楽天ブックス", "existing": { "products": ["p1"], "deadline": "2026-11-20", "tags": [] }, "input": { "products": ["p2"], "deadline": "2026-11-20", "tags": [] }, "texts": [], "expect": "merge" },
+    { "id": "M02", "p": "synthetic", "chain": "楽天ブックス", "existing": { "products": ["p1"], "deadline": "2026-11-20", "tags": [] }, "input": { "products": ["p2"], "deadline": "2026-11-27", "tags": [] }, "texts": [], "expect": "separate" },
+    { "id": "M03", "p": "synthetic", "chain": "楽天ブックス", "existing": { "products": ["p1"], "deadline": "2026-11-20", "tags": [] }, "input": { "products": ["p2"], "deadline": "2026-11-20", "tags": ["member_only"] }, "texts": [], "expect": "separate" },
+    { "id": "M04", "p": "synthetic", "chain": "楽天ブックス", "existing": { "products": ["p1"], "deadline": "2026-11-20", "tags": [] }, "input": { "products": ["p2"], "deadline": "2026-11-20", "tags": [] }, "texts": ["商品ごとに応募してください"], "expect": "separate" },
+    { "id": "M05", "p": "synthetic", "chain": "テスト玩具", "existing": { "products": ["p1"], "deadline": "2026-11-20", "tags": [] }, "input": { "products": ["p2"], "deadline": "2026-11-20", "tags": [] }, "texts": [], "expect": "separate" }
+  ],
+  "account": [
+    { "id": "A01", "p": "synthetic", "desc": "表示名に系列、投稿本文に店舗", "username": "tc_info", "displayName": "トレカキャピタル公式", "bio": "", "postText": "【渋谷店】抽選のお知らせ", "expectChain": "トレカキャピタル", "expectStore": "渋谷店" },
+    { "id": "A02", "p": "synthetic", "desc": "ユーザーIDとプロフィールの2根拠", "username": "kiddyland_harajuku", "displayName": "原宿店 公式", "bio": "キデイランド 原宿店の公式アカウントです", "postText": "", "expectChain": "キデイランド", "expectStore": "原宿店" },
+    { "id": "A03", "p": "synthetic", "desc": "店舗の根拠なし（系列のみ）", "username": "tc_info", "displayName": "トレカキャピタル公式", "bio": "", "postText": "", "expectChain": "トレカキャピタル", "expectStore": null },
+    { "id": "A04", "p": "synthetic", "desc": "根拠が1つで他の系列とも読める", "username": "x1", "displayName": "トレカキャピタルとキデイランドの抽選情報", "bio": "", "postText": "", "expectChain": null, "expectStore": null }
+  ]
+}

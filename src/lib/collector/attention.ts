@@ -181,7 +181,7 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   }
   if (c.modePending) cautions.push({ code: "mode_unconfirmed", field: "mode", message: "複数商品の応募方式が確認できていません（全商品を対象として登録しています）", at: c.now });
   // 店舗: 特定できないときは、系列の設定（店舗選択式を基本とする）に従って店舗選択式として登録する。設定がなければ仮の店舗名で登録する（店舗を推測しない）
-  if (!c.storeResolved) {
+  if (!c.storeResolved && input.storeMode !== "select_on_apply") {
     if (c.chainStoreSelectDefault) {
       patch = { storeMode: "select_on_apply", noteStoreSelect: true };
       cautions.push({ code: "store_select_assumed", field: "store", message: "受取店舗が確定していません。この系列は応募時に店舗を選ぶ抽選が多いため、店舗選択式として登録しています（告知で確認してください）", at: c.now });

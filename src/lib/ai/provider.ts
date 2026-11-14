@@ -152,6 +152,8 @@ export const RECORD_LOTTERY_TOOL = {
       receive_start: { ...dateSchema, description: "購入手続きと別に、店舗受取の期間が書かれているときだけ: 受取の開始日時。無ければ null" },
       receive_deadline: { ...dateSchema, description: "購入手続きと別に、店舗受取の期間が書かれているときだけ: 受取の期限。無ければ null" },
       lottery_kind: { type: "string", enum: ["normal", "ongoing", "invite", "unknown"], description: "抽選方式。通常=normal / 継続抽選=ongoing / 招待制販売=invite / 不明=unknown" },
+      apply_unit: { type: "string", enum: ["store_select", "store_independent", "per_product", "single", "unknown"], description: "応募の単位。応募時に応募者が受取店舗を選ぶ=store_select／店舗ごとに別の受付=store_independent／商品ごとに別の応募=per_product／1件の応募=single／読み取れない=unknown。「1店舗のみ応募可」の記載だけで店舗選択式と断定しない（応募フォームの店舗選択欄・応募ページの構造で判断する）" },
+      selectable_stores: { type: "array", items: { type: "string" }, description: "店舗選択式のとき、告知に挙げられている選べる店舗名。無ければ空配列" },
       valid_until: { ...dateSchema, description: "継続抽選・招待の有効期限（書かれているときだけ）。無ければ null" },
       announcement_method: { type: "string", description: "当選発表の方法（メール、マイページ等）" },
       announcement_url: { type: "string" },

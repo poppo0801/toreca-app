@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "note": "系列ごとの傾向（判定の参考情報）。絶対的なルールではなく、実際の応募条件・公式告知を最優先する。追加・修正はこのファイルだけで行い、判定コードには例外を書かない。traits の code は chain-knowledge.ts の KNOWN_TRAITS を参照。",
+  "entries": [
+    {
+      "id": "kiddyland",
+      "names": ["キデイランド", "Kiddy Land", "KIDDY LAND", "キディランド"],
+      "traits": [
+        { "code": "restriction_implies_select", "note": "LivePocketの応募ページが店舗別でも、応募できる店舗がいずれか1つに制限される場合がある。その場合は店舗別独立ではなく店舗選択式（応募ページの注意事項で確認する）" },
+        { "code": "per_store_pages", "note": "応募ページ（URL）が店舗ごとに分かれていることがある。URLが店舗別であることだけでは独立抽選と判断しない" }
+      ],
+      "source": "利用者の運用確認（2026-11）"
+    },
+    {
+      "id": "rakuten-books",
+      "names": ["楽天ブックス", "Rakuten Books"],
+      "traits": [
+        { "code": "multi_product_events", "note": "同じ期間・同じ条件で複数商品を対象にした抽選が行われることがある。同一企画なら1つの抽選カードに複数商品として登録する。応募単位が商品別・条件や期間が異なる場合は統合しない" }
+      ],
+      "source": "利用者の運用確認（2026-11）"
+    },
+    {
+      "id": "bookoff",
+      "names": ["BOOKOFF", "ブックオフ", "BOOK・OFF"],
+      "traits": [
+        { "code": "name_variants", "note": "系列名の表記が複数ある（BOOK・OFF / BOOKOFF / ブックオフ）。系列名の正規化で同じ系列として扱う" }
+      ],
+      "source": "利用者の運用確認（2026-11）"
+    },
+    {
+      "id": "geo",
+      "names": ["GEO", "ゲオ"],
+      "traits": [{ "code": "name_variants", "note": "「GEO（ゲオ）」のように読みが括弧書きで付く" }],
+      "source": "利用者の運用確認（2026-11）"
+    },
+    {
+      "id": "ito-yokado",
+      "names": ["イトーヨーカドー"],
+      "traits": [{ "code": "online_channel_name", "note": "「イトーヨーカドーネット通販」は系列「イトーヨーカドー」の通販チャネル。系列は同じ（店舗・チャネルは別）" }],
+      "source": "利用者の運用確認（2026-11）"
+    }
+  ]
+}

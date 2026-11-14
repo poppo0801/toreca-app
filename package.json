@@ -22,6 +22,7 @@
     "eval:real-report": "node scripts/eval-real.mjs report",
     "eval:real-preflight": "node scripts/eval-real.mjs preflight",
     "eval:real": "node scripts/eval-real.mjs run",
+    "eval:9c": "vitest run src/lib/collector/eval9c.test.ts",
     "eval:grouping": "vitest run src/lib/agent/lottery-grouping/eval.test.ts",
     "eval:grouping-real-preflight": "node scripts/eval-grouping-real.mjs preflight",
     "eval:grouping-real-freeze": "node scripts/eval-grouping-real.mjs freeze",

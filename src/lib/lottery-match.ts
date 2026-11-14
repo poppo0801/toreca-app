@@ -2,6 +2,7 @@ import type { ExtractedFlex, ExtractedLottery, FieldKey } from "@/lib/ai/extract
 import { isOnlineStoreName } from "@/lib/store-online";
 import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { normName } from "@/lib/norm";
+import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { productNameCandidates, tidyProductName } from "@/lib/product-name";
 import { flexToJstDate } from "@/lib/finance";
 import { jstDateString } from "@/lib/datetime";
@@ -44,6 +45,9 @@ const cleanName = (s: string) => {
   return n;
 };
 
+/** 系列の照合用の名称（Stage 9C: 記号・括弧書きの読み・チャネル語の違いを除く共通の正規化。chain-normalize.ts）。空になるときは従来の整形 */
+const chainClean = (s: string) => chainCanonicalKey(s) || cleanName(s);
+
 /** 商品名の整形（表示・保存用）: ブランド名の接頭辞（ポケモンカードゲーム等）と、数量・入数の表記（1BOX・30パック入り）を除く */
 export function cleanProductName(s: string): string {
   return normName(s)
@@ -63,7 +67,7 @@ export function productKey(s: string): string {
     .replace(/[#＃「」『』【】\[\]()（）・,、。:：!！?？~〜-]/g, "")
     .replace(/(強化拡張パック|ハイクラスパック|拡張パック)/g, "")
     .replace(/セレブレーション|cerebration/g, "celebration")
-    .replace(/(未開封|シュリンク付き?|新品|未使用|予約|定価)/g, "");
+    .replace(/(未開封|シュリンク(付き?|なし|無し|あり|有り)|新品|未使用|予約|定価)/g, "");
 }
 
 /** さらに緩い照合キー（商品名の途中のシリーズ名 mega を除く）。一意に決まるときだけ使う */
@@ -186,7 +190,7 @@ export function matchChain(name: string, chains: Chain[], hint: { stores?: Store
 
 function matchChainBase(name: string, chains: Chain[], hint: { stores?: Store[]; storeName?: string } = {}): MatchResult<Chain> {
   const active = chains.filter((c) => !c.archived);
-  const ranked = rankByName(name, active, (c) => [c.name, ...(c.aliases ?? [])], cleanName);
+  const ranked = rankByName(name, active, (c) => [c.name, ...(c.aliases ?? [])], chainClean);
   // 同じ系列の別名として複数の系列が登録されている（古本市場／ふるいち等）とき: その店舗が登録されている系列、なければ店舗数の多い系列
   const sure = ranked.filter((r) => r.kind === "exact" || r.kind === "alias");
   if (sure.length > 1) {
@@ -493,10 +497,10 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
 }
 
 /** 系列名の比較用キー。「通販」「オンライン」などの販売形態の語、法人格を除く（「駿河屋」と「駿河屋通販」を同じ系列として扱う） */
+const storeNameKey = (s: string): string => normName(s).replace(/店$/, "");
+
 export function chainKey(name: string): string {
-  return normName(name)
-    .replace(/株式会社|有限会社|\(株\)|（株）/g, "")
-    .replace(/(オンラインショップ|オンラインストア|オンライン|通販部|通販|公式|ショップ|ストア)$/g, "");
+  return chainCanonicalKey(name) || normName(name);
 }
 
 /** 店舗名が、店舗ではなく販売・受取の形態を表すか（「オンライン」「通販」など）。これらの語だけで店舗を確定させない */
@@ -577,7 +581,8 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
   const mine = classify(input.store.id, input.store.name, input.storeMode);
   const resolved = input.items.map((i) => i.product.id).filter((x): x is string => !!x);
   const productIds = new Set(resolved);
-  if (productIds.size === 0) return [];
+  // Stage 9C: 商品を特定できない（登録済み抽選の一部の情報しか取得できない）告知も、情報源URL・店舗・締切で既存の抽選との関連を調べる（情報不足だけを理由に新規扱いにしない）
+  const noProduct = productIds.size === 0;
   // 未登録の商品（ID なし）を含むときは、商品構成が同じとは言い切れない
   const mySetComplete = resolved.length === input.items.length;
   const myDeadline = input.applyDeadline.precision === "unknown" ? null : input.applyDeadline.date || null;
@@ -595,6 +600,15 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     // 8F-6: 店舗選択式（1件の抽選で応募時に店舗を選ぶ）と、店舗別に登録された同じ告知（同じ情報源URL）。店舗選択式の抽選を店舗ごとの別カードで二重登録しない
     const selectVsFixed = !bucket && ((mine.cls === "select" && theirs.cls === "fixed") || (mine.cls === "fixed" && theirs.cls === "select"));
     if (!bucket && !selectVsFixed) continue;
+    if (noProduct) {
+      const sameUrlP = l.sourceUrls.some((u) => myKeys.has(u) || (urlIdentity(u) !== null && myKeys.has(urlIdentity(u) as string)));
+      const tDeadline = l.applyDeadline ? flexToJstDate(l.applyDeadline) : null;
+      const tStart = l.applyStart ? flexToJstDate(l.applyStart) : null;
+      if (isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: tStart, deadline: tDeadline }, today)) continue;
+      if (sameUrlP) out.push({ lotteryId: l.id, level: "high", reason: "同じ情報源URLで登録済みの抽選の一部の情報です（商品は読み取れていないため、既存の抽選の補完として扱います）" });
+      else if (bucket === "same" && mine.cls === "fixed" && myDeadline !== null && tDeadline === myDeadline) out.push({ lotteryId: l.id, level: "medium", reason: "同じ店舗・同じ応募締切の抽選が登録済みです（商品が読み取れていないため、同じ抽選の一部の情報か判断できません）" });
+      continue;
+    }
     const theirIds = l.items.map((i) => i.productId);
     const overlap = theirIds.some((id) => productIds.has(id));
     if (!overlap) continue;
@@ -605,11 +619,17 @@ export function findDuplicates(input: LotteryInput, lotteries: Lottery[], source
     const sameDay = myDeadline !== null && theirDeadline === myDeadline;
     const unknownEither = myDeadline === null || theirDeadline === null;
     if (selectVsFixed) {
-      if (sameUrl && !isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: theirStart, deadline: theirDeadline }, today)) {
+      const notOther = !isClearlyOtherRound({ start: myStart, deadline: myDeadline }, { start: theirStart, deadline: theirDeadline }, today);
+      // Stage 9C: 同じ企画と言える根拠は、同じ情報源URL、または「店舗選択式の選べる店舗に、その店舗が含まれる」こと。
+      // 同じ系列・同じ商品というだけでは重複としない（店舗ごとに独立した別の抽選もあるため）。期間が一致するだけでも重複としない（確認待ちを増やさない）
+      const fixedName = mine.cls === "fixed" ? input.store.name || storeOf(input.store.id)?.name || "" : (storeOf(l.storeId)?.name ?? "");
+      const selectable = mine.cls === "select" ? (input.selectableStores ?? []).map((x) => x.name) : (l.selectableStores ?? []).map((x) => x.name);
+      const listed = !!fixedName && selectable.some((n) => storeNameKey(n) !== "" && (storeNameKey(n) === storeNameKey(fixedName) || storeNameKey(fixedName).includes(storeNameKey(n)) || storeNameKey(n).includes(storeNameKey(fixedName))));
+      if (notOther && (sameUrl || listed)) {
         out.push(
           mine.cls === "fixed"
-            ? { lotteryId: l.id, level: "high", reason: "同じ情報源の店舗選択式の抽選が登録済みです（応募時に店舗を選ぶ1件の抽選のため、店舗別のカードは作りません）" }
-            : { lotteryId: l.id, level: "medium", reason: "同じ情報源の抽選が店舗別に登録済みです（店舗選択式の1件の抽選を店舗ごとに登録した可能性があります。応募の記録があるカードは自動で統合しません）" },
+            ? { lotteryId: l.id, level: "high", reason: sameUrl ? "同じ情報源の店舗選択式の抽選が登録済みです（応募時に店舗を選ぶ1件の抽選のため、店舗別のカードは作りません）" : "この店舗を選べる店舗選択式の抽選が登録済みです（応募時に店舗を選ぶ1件の抽選のため、店舗別のカードは作りません）" }
+            : { lotteryId: l.id, level: "medium", reason: sameUrl ? "同じ情報源の抽選が店舗別に登録済みです（店舗選択式の1件の抽選を店舗ごとに登録した可能性があります。応募の記録があるカードは自動で統合しません）" : "選べる店舗に含まれる店舗の抽選が、店舗別に登録済みです（店舗選択式の1件の抽選を店舗ごとに登録した可能性があります。応募の記録があるカードは自動で統合しません）" },
         );
       }
       continue;

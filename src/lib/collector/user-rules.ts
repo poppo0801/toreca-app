@@ -7,6 +7,8 @@
  *  - other_game:   対象外の商品名のキーワード。「解析した商品名」がすべて該当するときだけ除外する（本文にあるだけでは除外しない。ポケモンカードの商品も含む投稿は維持）。
  * 信頼性なし（系列・情報源）は、既存の収集元の除外ルール（collection_exclusions）に作る。
  */
+import { chainCanonicalKey } from "@/lib/chain-normalize";
+import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { placeInfo, type StoreKind } from "@/lib/lottery-taxonomy";
 import { looksMultiStore } from "@/lib/collector/region";
 
@@ -142,6 +144,8 @@ export interface DupTarget {
   chainAliases?: string[];
   storeId?: string | null;
   storeName?: string;
+  /** 店舗選択式（応募時に店舗を選ぶ1件の抽選）。店舗が違う別の抽選とは言えない（Stage 9C） */
+  select?: boolean;
   productIds?: string[];
   productNames?: string[];
   deadline?: string | null;
@@ -161,18 +165,24 @@ export interface DupMe {
   chainAliases?: string[];
   storeId?: string | null;
   storeName?: string;
+  select?: boolean;
   productIds: string[];
   productNames: string[];
   deadline: string | null;
   urls?: string[];
 }
 
-const chainKeys = (name: string | undefined, aliases: string[] | undefined) => [name ?? "", ...(aliases ?? [])].map(ruleNameKey).filter((k) => k !== "");
+const chainKeys = (name: string | undefined, aliases: string[] | undefined) => [...new Set([name ?? "", ...(aliases ?? [])].flatMap((n) => [ruleNameKey(n), chainCanonicalKey(n)]).filter((k) => k !== ""))];
 /** URLの照合キー（クエリ・ハッシュ・末尾のスラッシュを除く） */
 const urlKey = (u: string) => u.trim().toLowerCase().replace(/[#?].*$/, "").replace(/\/+$/, "");
 
 /** 店舗が違うか: 店舗IDが両方あり異なる、または（IDが無く）店舗名が両方あり異なる。片方でも不明なら違うと断定しない */
-export function storeDiffers(a: { storeId?: string | null; storeName?: string }, b: { storeId?: string | null; storeName?: string }): boolean {
+const SELECT_NAME = ruleNameKey(SELECT_STORE_PLACEHOLDER);
+const isSelectSide = (x: { storeName?: string; select?: boolean }): boolean => !!x.select || (!!x.storeName && ruleNameKey(x.storeName) === SELECT_NAME);
+
+export function storeDiffers(a: { storeId?: string | null; storeName?: string; select?: boolean }, b: { storeId?: string | null; storeName?: string; select?: boolean }): boolean {
+  // Stage 9C: 店舗選択式の抽選は、応募時に店舗を選ぶ1件の抽選。「店舗が異なる」とは言えず、重複先として選べる（既存の応募・当選・購入の記録は統合先の更新では変えない）
+  if (isSelectSide(a) || isSelectSide(b)) return false;
   if (a.storeId && b.storeId) return a.storeId !== b.storeId;
   const an = ruleNameKey(a.storeName ?? "");
   const bn = ruleNameKey(b.storeName ?? "");
@@ -219,6 +229,10 @@ export function suggestDuplicates(me: DupMe, targets: DupTarget[], limit = 8): D
     if (sameUrl) {
       score += 5;
       why.push("同じ情報源URL");
+    }
+    if (isSelectSide(me) || isSelectSide(t)) {
+      score += 1;
+      why.push("店舗選択式の抽選");
     }
     if (me.storeId && t.storeId && me.storeId === t.storeId) {
       score += 1;

@@ -85,6 +85,9 @@ export interface ExtractedLottery {
   receiveDeadline?: ExtractedFlex;
   /** 抽選方式（unknown は通常として扱うが、確定とはしない） */
   lotteryKind?: "normal" | "ongoing" | "invite" | "unknown";
+  /** Stage 9C: AIが読み取った応募の単位（固定ロジックは根拠なく上書きしない。変更は trace に残す） */
+  applyUnit?: "store_select" | "store_independent" | "per_product" | "single" | "unknown";
+  selectableStoreNames?: string[];
   /** 継続・招待の有効期限（YYYY-MM-DD）。不明は空 */
   validUntil?: string;
   announcementMethod: string;
@@ -146,6 +149,10 @@ export const rawExtractionSchema = z.object({
   receive_start: rawDate,
   receive_deadline: rawDate,
   lottery_kind: z.enum(["normal", "ongoing", "invite", "unknown"]).catch("unknown").default("unknown"),
+  /** Stage 9C: 応募の単位（応募時に店舗を選ぶ=store_select／店舗ごとに独立=store_independent／商品ごと=per_product／1件=single）。読み取れなければ unknown */
+  apply_unit: z.enum(["store_select", "store_independent", "per_product", "single", "unknown"]).catch("unknown").default("unknown"),
+  /** 応募時に選べる店舗（店舗選択式のとき告知に挙げられている店舗名） */
+  selectable_stores: z.array(z.string().trim().max(60)).max(60).catch([]).default([]),
   valid_until: rawDate,
   announcement_method: str(200),
   announcement_url: str(2000),
@@ -365,6 +372,8 @@ export function normalizeExtraction(raw: unknown, now: Date, opts: { postedOn?: 
     receiveStart: recvStart,
     receiveDeadline: recvDeadline,
     lotteryKind: r.lottery_kind,
+    applyUnit: r.apply_unit,
+    selectableStoreNames: r.selectable_stores,
     validUntil: validFlex.precision === "unknown" ? "" : validFlex.date,
     announcementMethod: r.announcement_method,
     announcementUrl: httpUrl(r.announcement_url),

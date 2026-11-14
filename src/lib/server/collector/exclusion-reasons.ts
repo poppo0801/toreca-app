@@ -66,6 +66,7 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
   let dupLottery: string | null = null;
   let dupCandidate: string | null = null;
   const candStoreId = ((cand.draft as { input?: { store?: { id?: string | null } } } | null)?.input?.store?.id ?? null) as string | null;
+  const candSelect = (cand.draft as { input?: { storeMode?: string } } | null)?.input?.storeMode === "select_on_apply";
   // 系列名の別名登録（重複の原因が表記揺れのとき。利用者が確定したものだけ。他の系列の名称・別名と衝突する場合は登録しない）
   let aliasToAdd: { chainId: string; alias: string } | null = null;
   if (input.reason === "duplicate" && input.registerChainAlias) {
@@ -114,17 +115,19 @@ export async function excludeWithReason(db: Db, householdId: string, candidateId
     plan = { kind: "source", createChain, row: { household_id: householdId, scope: input.target, key, label: (input.label || input.chainName || "").slice(0, 120), chain_id: input.target === "chain" && !createChain ? key : null, reason_code: "untrusted_shop", reason_note: input.note, created_by_profile_id: actor } };
   } else if (input.reason === "duplicate") {
     if (input.target.kind === "lottery") {
-      const { data: l } = await db.from("lotteries").select("id,store_id").eq("id", input.target.id).maybeSingle();
+      const { data: l } = await db.from("lotteries").select("id,store_id,store_mode").eq("id", input.target.id).maybeSingle();
       if (!l) return fail("重複先の抽選が見つかりません");
       // 店舗が異なる抽選は、店舗ごとに独立した応募が必要な別の抽選として扱う（誤統合しない）
-      if (candStoreId && l.store_id && candStoreId !== l.store_id) return fail(STORE_DIFFERS);
+      // Stage 9C: 店舗選択式（応募時に店舗を選ぶ1件の抽選）は、店舗が異なる別の抽選ではない。統合先として選べる（応募・当選・購入の記録は変更しない）
+      if (candStoreId && l.store_id && candStoreId !== l.store_id && l.store_mode !== "select_on_apply" && !candSelect) return fail(STORE_DIFFERS);
       dupLottery = l.id;
     } else {
       if (input.target.id === candidateId) return fail("同じ候補は重複先にできません");
       const { data: t } = await db.from("collection_candidates").select("id,draft").eq("id", input.target.id).maybeSingle();
       if (!t) return fail("重複先の候補が見つかりません");
-      const tStore = ((t.draft as { input?: { store?: { id?: string | null } } } | null)?.input?.store?.id ?? null) as string | null;
-      if (candStoreId && tStore && candStoreId !== tStore) return fail(STORE_DIFFERS);
+      const tInput = (t.draft as { input?: { store?: { id?: string | null }; storeMode?: string } } | null)?.input;
+      const tStore = (tInput?.store?.id ?? null) as string | null;
+      if (candStoreId && tStore && candStoreId !== tStore && tInput?.storeMode !== "select_on_apply" && !candSelect) return fail(STORE_DIFFERS);
       dupCandidate = t.id;
     }
   }

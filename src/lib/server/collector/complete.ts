@@ -124,3 +124,36 @@ export async function markEndCandidates(db: Db, householdId: string, now: Date, 
   }
   return marked;
 }
+
+/**
+ * 同一企画の複数商品を、既存の1枚の抽選カードに追加する（Stage 9C・⑨）。判断は src/lib/collector/multi-product.ts（純関数）。
+ * 守ること: 自動収集で登録され手動編集されていない抽選だけ／応募の記録が1件でもある抽選には商品を足さない（応募した内容の意味が変わるため）／
+ * 追加するだけで、既存の商品・応募・当選・購入の記録は変更しない。応募方式（全商品・どれか1つ）は告知から確定できないため「未確認」の注意を付ける。
+ * 追加できなかったとき（条件に合わない・競合）は何も変更せず null を返し、呼び出し側は通常の流れ（新規・重複判定）に戻る。
+ */
+export async function addProductsToLottery(
+  db: Db,
+  lotteryId: string,
+  items: { productId: string; quantity: number; unit: string }[],
+  o: { actor: string | null; now: Date; sourceUrl: string },
+): Promise<{ added: number } | null> {
+  if (items.length === 0 || items.some((i) => !["box", "pack", "set"].includes(i.unit))) return null;
+  const { data: row } = await db.from("lotteries").select("id,household_id,source_kind,archived_at,cautions,cautions_updated_at,created_at,updated_at,multi_mode").eq("id", lotteryId).maybeSingle();
+  if (!row || row.source_kind !== "auto" || row.archived_at) return null;
+  const base = new Date(row.cautions_updated_at ?? row.created_at).getTime();
+  if (new Date(row.updated_at).getTime() - base > MANUAL_EDIT_TOLERANCE_MS) return null;
+  const { count: apps } = await db.from("applications").select("id", { count: "exact", head: true }).eq("lottery_id", lotteryId);
+  if ((apps ?? 0) > 0) return null;
+  const { data: cur } = await db.from("lottery_items").select("product_id").eq("lottery_id", lotteryId);
+  const have = new Set((cur ?? []).map((x) => x.product_id));
+  const fresh = items.filter((i) => !have.has(i.productId));
+  if (fresh.length === 0) return { added: 0 };
+  const ins = await db.from("lottery_items").insert(fresh.map((i) => ({ household_id: row.household_id, lottery_id: lotteryId, product_id: i.productId, quantity: i.quantity, unit: i.unit, updated_by_profile_id: o.actor })) as never);
+  if (ins.error) return null;
+  const cautions = (Array.isArray(row.cautions) ? row.cautions : []) as unknown as Caution[];
+  const nowIso = o.now.toISOString();
+  const next = cautions.some((c) => c.code === "mode_unconfirmed") ? cautions : [...cautions, { code: "mode_unconfirmed", field: "mode", message: "複数商品の応募方式（全商品を対象／どれか1つ）が確認できていません。同一企画の商品として追加しました", at: nowIso } as Caution];
+  // 商品が複数になるため、応募方式は未確定のまま「全商品を対象」として扱う（確認の注意を付ける）。自動処理の更新時刻を更新し、手動編集とは区別する
+  await db.from("lotteries").update({ multi_mode: row.multi_mode === "single" ? "all" : row.multi_mode, cautions: next as unknown as Json, cautions_updated_at: nowIso }).eq("id", lotteryId).eq("updated_at", row.updated_at);
+  return { added: fresh.length };
+}

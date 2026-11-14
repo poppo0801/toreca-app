@@ -7,10 +7,13 @@
  *   C. other             通販・単独店舗など、上のどちらでもないもの（既存の方式を維持）。
  *   unknown              構造を確認できない。無理に決めず、既存の登録を尊重し、確認候補として扱う。
  *
- * 重要: 「複数店舗への応募が禁止／1店舗のみ応募できる」は応募の“制限”であり、店舗選択式の証拠ではない（`restrictionOnly`）。
+ * 重要: 「複数店舗への応募が禁止／1店舗のみ応募できる」は応募の“制限”であり、それだけでは店舗選択式の証拠ではない（`restrictionOnly`）。
+ * ただし Stage 9C: 店舗をまたぐ制限（応募できる店舗が1つに絞られる）の記載があり、応募ページが店舗別、または系列の傾向（キデイランド等・参考情報）と一致するときは、「店舗を選んで1回応募する」構造として店舗選択式にする（cross_store_limit）。
  * 店舗別に独立した受付でも、同じ制限は付く。決め手は、応募時の店舗選択欄・選べる店舗の一覧・店舗ごとの受付/応募先などの“構造”の記載。
  * 判別の優先順位: 利用者の手動の分類（source=manual）> 構造の根拠 > 登録済みの方式。AIや再解析が、手動の分類を根拠なく上書きしない。
  */
+import { hasTrait, type ChainKnowledge } from "@/lib/collector/knowledge/chain-knowledge";
+
 export type LotteryForm = "store_select" | "store_independent" | "other" | "unknown";
 export type FormSource = "manual" | "rule" | "ai";
 
@@ -21,6 +24,10 @@ export interface FormDecl {
 }
 
 export interface FormInput {
+  /** Stage 9C: 系列の傾向（参考情報。告知の記載がないまま、これだけで形態を決めない） */
+  knowledge?: ChainKnowledge | null;
+  /** Stage 9C: 同じ企画の応募ページ（URL）が店舗ごとに分かれているか（応募ページを調べた結果） */
+  perStorePages?: boolean;
   storeMode: "fixed" | "select_on_apply" | "none";
   /** 通販・オンライン専用（店舗を持たない）か */
   online?: boolean;
@@ -85,6 +92,20 @@ const RESTRICTION: RegExp[] = [
   /店舗.{0,6}(重複|複数)(して)?応募.{0,6}(無効|不可|禁止)/,
 ];
 
+/**
+ * 店舗をまたぐ制限（Stage 9C）。「応募できる店舗はいずれか1つ」「複数店舗への応募は無効」など、同じ企画で応募先の店舗を1つに絞る記載。
+ * 店舗ごとの応募ページがあっても、応募できる店舗が1つに制限されるなら、応募の単位は「店舗を選んで1回」＝店舗選択式（キデイランドなど）。
+ * 「1店舗のみ受取」のように受取だけの制限は含めない。
+ */
+const CROSS_STORE_LIMIT: RegExp[] = [
+  /(複数店舗|店舗(を)?また(い|が)(で|った)?|他店舗|別店舗).{0,12}(応募|エントリー).{0,8}(不可|禁止|無効|できません|できない|ご遠慮)/,
+  /(応募|エントリー).{0,10}(できる|可能な?)店舗は.{0,6}(いずれか|どれか)?.{0,2}[1一]店舗/,
+  /(いずれか|どれか|どちらか)[1一]店舗(のみ|だけ|にのみ).{0,6}(応募|エントリー)/,
+  /[1一]店舗(のみ|だけ|にのみ|限り).{0,6}(応募|エントリー)(可|できます|が可能)/,
+  /店舗の?(中|うち)から.{0,8}[1一]店舗.{0,6}(応募|選択|選び)/,
+  /(重複|同時|複数)(して)?応募.{0,8}(店舗|店).{0,6}(無効|不可|禁止)/,
+];
+
 const hit = (res: RegExp[], t: string): boolean => res.some((re) => re.test(t));
 
 export function judgeForm(input: FormInput): FormJudgement {
@@ -105,6 +126,17 @@ export function judgeForm(input: FormInput): FormJudgement {
     if (ind.length > 0) ind.push({ code: "per_store_url", label: "店舗ごとに別の情報源（応募ページ）がある" });
   }
   const restriction = hit(RESTRICTION, text) || tags.includes("one_store_only");
+  // Stage 9C: 店舗をまたぐ応募の制限（応募できる店舗が1つに絞られる）。応募ページが店舗別に分かれていること、または系列の傾向（参考情報）があるときだけ、
+  // 「店舗を選んで1回応募する」構造＝店舗選択式の根拠にする。制限の記載が無いまま、URLが店舗別というだけ・系列の傾向だけでは決めない
+  const crossLimit = hit(CROSS_STORE_LIMIT, text);
+  const knowsRestrictionSelect = hasTrait(input.knowledge, "restriction_implies_select");
+  const crossSupport = !!input.perStorePages || knowsRestrictionSelect;
+  const crossSelect = crossLimit && crossSupport && sel.length === 0;
+  if (crossSelect) {
+    sel.push({ code: "cross_store_limit", label: `応募できる店舗が1つに制限されている（店舗を選んで1回応募する構造。${input.perStorePages ? "応募ページは店舗別" : "系列の傾向と一致"}）` });
+    // 店舗ごとの応募ページがあっても、応募先が1つに制限される抽選は独立した受付ではない（店舗別の記載は構造の根拠から外す）
+    if (!hit(PER_STORE, text)) ind.length = 0;
+  }
 
   const base = { selectSignals: sel, independentSignals: ind, restrictionOnly: restriction, conflict: false, manualDisagrees: false };
   const structure = ((): { form: LotteryForm; conf: FormJudgement["confidence"]; conflict: boolean } => {

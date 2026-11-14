@@ -17,7 +17,20 @@ const RELEASE_RE = /(?:\d{1,2}\s*[/月]\s*\d{1,2}\s*日?\s*(?:\(.\))?\s*発売(?
 /** ブランド名の接頭辞 */
 const BRAND_RE = /^(?:ポケモンカードゲーム|ポケモンカード|ポケカ|pokemoncardgame)\s*/i;
 
+/**
+ * 販売条件・数量の語（Stage 9C）。商品そのものではない付帯情報（「シュリンクなし」「1人2個まで」「特典付き」など）。
+ * 括弧書きの中身がすべてこれらの語だけのときに、商品名から分離する（商品を区別する語「特別版」「ex」などは含めない）。
+ */
+const CONDITION_TOKEN = /^(?:シュリンク(?:なし|無し|あり|有り|付き?|未開封)?|未開封|新品|未使用|開封済み?|特典(?:付き?|なし|無し|あり|有り)?|封入特典|限定|予約(?:受付)?|定価(?:販売)?|通常(?:版)?販売|送料(?:無料|込み?)|在庫(?:限り|あり)|先着|抽選(?:販売)?|\d+(?:box|ボックス|個|点|パック|セット|枚|カートン)(?:まで|限り|限定|入り?|セット)?|(?:お?1?人|1人|おひとり様|お一人様|1会員)\d*(?:box|ボックス|個|点|セット)?(?:まで|限り|限定)?|\d+(?:box|ボックス|個|点)?(?:まで))$/i;
+const BRACKET_RE = /[（(［\[【]([^）)］\]】]{1,40})[）)］\]】]/g;
+const isConditionText = (t: string): boolean => {
+  const toks = t.split(/[・、,，\s/／+＋]+/).map((x) => x.trim()).filter(Boolean);
+  return toks.length > 0 && toks.every((x) => CONDITION_TOKEN.test(x));
+};
+
 export interface ProductNameParts {
+  /** 販売条件・数量の語（シュリンクなし・1人2個まで など）。商品名には含めない */
+  conditions: string[];
   /** 装飾語を除いた商品名（元が整理不要ならそのまま） */
   cleaned: string;
   /** 括弧『』「」で囲まれた名称（商品名の本体）。なければ空 */
@@ -37,8 +50,24 @@ export function splitProductName(raw: string): ProductNameParts {
     removed.push(brand[0].trim());
     s = s.slice(brand[0].length).trim();
   }
-  const q = s.match(/[『「]([^』」]{2,60})[』」]/);
-  return { cleaned: s, quoted: q ? q[1].trim() : "", removed };
+  const conditions: string[] = [];
+  s = s.replace(BRACKET_RE, (m, inner: string) => {
+    if (!isConditionText(inner)) return m;
+    conditions.push(inner.trim());
+    removed.push(m);
+    return " ";
+  });
+  // 括弧のない末尾の販売条件（「ハドウシーカー シュリンクなし」）
+  for (;;) {
+    const t = s.match(/\s+(\S{2,16})$/);
+    if (!t || !CONDITION_TOKEN.test(t[1])) break;
+    conditions.push(t[1]);
+    removed.push(t[1]);
+    s = s.slice(0, s.length - t[0].length).trim();
+  }
+  s = s.replace(/\s+/g, " ").trim();
+  const q =s.match(/[『「]([^』」]{2,60})[』」]/);
+  return { cleaned: s, quoted: q ? q[1].trim() : "", removed, conditions };
 }
 
 /**
@@ -51,6 +80,9 @@ export function productNameCandidates(raw: string): string[] {
   const parts = splitProductName(raw);
   const out: string[] = [raw.trim()];
   if (parts.cleaned && parts.cleaned !== raw.trim()) out.push(parts.cleaned);
+  // 商品区分・シリーズ名（MEGA・拡張パックなど）だけが前に付くときは、本体名だけの候補も加える（「MEGA 拡張パック ハドウシーカー」→「ハドウシーカー」）
+  const body = parts.cleaned.replace(/^(?:(?:mega|メガ|スカーレット&バイオレット|スカーレットバイオレット|sv)\s*)?(?:(?:強化|ハイクラス|スペシャル)?拡張パック|ハイクラスパック|スペシャルパック)\s*/i, "").trim();
+  if (body && body !== parts.cleaned && body.length >= 2) out.push(body);
   if (parts.quoted) {
     const outside = parts.cleaned.replace(/[『「][^』」]*[』」]/, "");
     if (GENERIC_OUTSIDE.test(normName(outside).replace(/[()（）]/g, ""))) out.push(parts.quoted);
