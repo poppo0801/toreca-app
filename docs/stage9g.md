@@ -53,5 +53,5 @@
 - 実AIでの指示文変更の効果、本番での 9C 系修正の効果（本番未反映）。
 - `basis` を付ける取得側の接続（LivePocket本文の取得）。
 
-## 7. Stage 9H の計画
+## 7. Stage 9H の計画（9H-1の実装は `docs/stage9h1.md`）
 `docs/stage9h-plan.md` を参照。

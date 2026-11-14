@@ -137,7 +137,7 @@ export interface AnalysisPreview {
 export interface PlannerWorld {
   signals(): Promise<InvestigationSignals>;
   /** 公開ページの取得。許可されない（robots・ログイン・頻度制限）ときは ok=false と理由 */
-  fetchPage(url: string): Promise<{ ok: boolean; title?: string; text?: string; links?: { url: string; text: string }[]; reason?: string }>;
+  fetchPage(url: string): Promise<{ ok: boolean; title?: string; text?: string; links?: { url: string; text: string }[]; reason?: string; /** 告知日時・更新日時（取得できたとき。Stage 9H） */ publishedAt?: string }>;
   /** 公開検索（有料API・未承認のときは未設定にする）。未設定なら検索ツールは登録されない */
   search?(query: string): Promise<{ title: string; url: string; snippet: string }[]>;
   /** 投稿画像の読み取り（画像の文字起こし。外部AIを使う場合は費用が発生するため承認制） */

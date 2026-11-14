@@ -1,5 +1,6 @@
 import "server-only";
 import { classifySource, provenanceFor, type FieldMap, type FieldSource, type SourceContext } from "@/lib/collector/fields";
+import { sourceBasis } from "@/lib/collector/source-basis";
 import type { Summary } from "@/lib/collector/completeness";
 import type { OpenLite } from "@/lib/collector/supplement";
 import type { Tracking } from "@/lib/collector/tracking";
@@ -41,7 +42,8 @@ export function toOpenLite(row: OpenRow, ctx: SourceContext): OpenLite | null {
   const quotedId = post?.quoted?.id;
   const at = d.confirmedAt ?? row.created_at;
   const origin = quotedId ? `x:${quotedId}` : postId ? `x:${postId}` : d.viaList ? `list:${url}` : `u:${urlIdentity(url) ?? url}`;
-  const source: FieldSource = { url, kind, origin, at, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
+  const basis = sourceBasis(url, { viaList: !!d.viaList });
+  const source: FieldSource = { ...(basis ? { basis } : {}), url, kind, origin, at, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
   const fields = d.fields && Object.keys(d.fields).length > 0 ? d.fields : provenanceFor(d.input, source);
   return {
     id: row.id,

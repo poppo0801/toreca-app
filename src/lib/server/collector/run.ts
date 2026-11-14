@@ -60,6 +60,7 @@ import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tr
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
 import { assessCompleteness } from "@/lib/collector/completeness";
 import { classifySource, conflictLabels, FIELD_LABEL, mergeSides, provenanceFor, type FieldSource, type SourceContext } from "@/lib/collector/fields";
+import { sourceBasis } from "@/lib/collector/source-basis";
 import { isSupplement, matchOpen, matchSupplement, type OpenLite } from "@/lib/collector/supplement";
 import { loadOpen, loadRecentRegistered, loadSourceCtx } from "@/lib/server/collector/open";
 import type { RequirementTag } from "@/lib/lottery-taxonomy";
@@ -744,7 +745,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const sc = classifySource(q.url, sctx);
   const postId = q.post?.id ?? sc.postId;
   const quotedId = q.post?.quoted?.id;
-  const mySource: FieldSource = { url: q.url, kind: q.viaList ? "list_site" : sc.kind, origin: quotedId ? `x:${quotedId}` : postId ? `x:${postId}` : q.viaList ? `list:${q.url}` : `u:${urlIdentity(q.url) ?? q.url}`, at: nowIso, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
+  const basis = sourceBasis(q.url, { viaList: !!q.viaList });
+  const mySource: FieldSource = { ...(basis ? { basis } : {}), url: q.url, kind: q.viaList ? "list_site" : sc.kind, origin: quotedId ? `x:${quotedId}` : postId ? `x:${postId}` : q.viaList ? `list:${q.url}` : `u:${urlIdentity(q.url) ?? q.url}`, at: nowIso, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
   let myFields = provenanceFor(input, mySource);
   const openAll = await loadOpen(db, deps.householdId, sctx).catch((): OpenLite[] => []);
   let relatedIds: string[] = [];
