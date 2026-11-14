@@ -26,6 +26,10 @@ export interface StepLog {
   resultSummary: string;
   found: { kind: "lottery_candidate" | "monitor_candidate"; title: string; url?: string; detail?: string }[];
   nextInfo: string;
+  /** この行動を決めたのは誰か（Stage 9E）。ai=AIモデルが自分で選んだ／fixed_policy=固定の方針（実AIなし）／review_feedback=検証層の指摘を受けてAIが選んだ追加調査 */
+  decidedBy?: "ai" | "fixed_policy" | "review_feedback";
+  /** AIがこの行動の前に述べた理由（短く。記録用） */
+  rationale?: string;
 }
 
 export interface SourceOutcome {

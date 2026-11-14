@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "note": "9E の自律調査の評価シナリオ（入力のみ。正解は gold-scenarios.json に別ファイルで持つ。AIには正解を渡さない）。マスター（系列・店舗・商品）は評価用に固定した既存データの断面。取得は凍結した実在ページ（eval/investigation-9e/pages-live*.json と eval/lottery-grouping-real/pages*.json）の再生で、凍結にないURLは取得失敗になる。",
+  "master": {
+    "chains": [
+      {
+        "name": "カードラボ",
+        "aliases": [
+          "C-labo"
+        ],
+        "storeUrl": "https://www.c-labo.jp/",
+        "stores": [
+          "津田沼店",
+          "大阪日本橋店",
+          "名古屋駅前店",
+          "小倉店",
+          "高崎店",
+          "鹿児島店",
+          "オタロード本店",
+          "岡山西口店",
+          "新潟店"
+        ]
+      },
+      {
+        "name": "GEO",
+        "aliases": [
+          "ゲオ"
+        ],
+        "storeUrl": "https://geo-online.co.jp/",
+        "stores": [
+          "ゲオオンライン"
+        ]
+      },
+      {
+        "name": "イトーヨーカドー",
+        "aliases": [],
+        "storeUrl": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx",
+        "stores": [
+          "イトーヨーカドーネット通販"
+        ]
+      },
+      {
+        "name": "キデイランド",
+        "aliases": [],
+        "storeUrl": "https://www.kiddyland.co.jp/",
+        "stores": [
+          "キデイランド吉祥寺店"
+        ]
+      },
+      {
+        "name": "トレーナーズウェブサイト",
+        "aliases": [],
+        "storeUrl": "https://www.pokemon-card.com/",
+        "stores": [
+          "公式サイト"
+        ]
+      }
+    ],
+    "products": [
+      "ハドウシーカー",
+      "30th CELEBRATION",
+      "ストームエメラルダ",
+      "スペシャルデッキセットMEGA",
+      "ONE PIECE Heroines Edition vol.2"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "S01",
+      "title": "未監視のカードラボ（公式トップは告知の一覧）。一覧から個別の告知をたどれるか",
+      "chains": [
+        "カードラボ"
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "未監視のGEO（トップのお知らせ一覧から抽選の告知をたどる）",
+      "chains": [
+        "GEO"
+      ]
+    },
+    {
+      "id": "S03",
+      "title": "公式情報サイトのトップ（ナビ・新着に『抽選』の語があるだけ）。抽選として登録しないこと",
+      "chains": [
+        "トレーナーズウェブサイト"
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "未監視のキデイランド（抽選の記載なし）。無駄な調査をせず適切に終えられるか",
+      "chains": [
+        "キデイランド"
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "日時が不明な登録済みの抽選（情報源に応募期間がある）。補完できるか",
+      "chains": [
+        "カードラボ"
+      ],
+      "registered": [
+        {
+          "chain": "カードラボ",
+          "store": "津田沼店",
+          "product": "ハドウシーカー",
+          "deadline": null,
+          "sourceUrls": [
+            "https://www.c-labo.jp/shop/tsudanuma/blog/623703"
+          ],
+          "auto": true
+        }
+      ]
+    },
+    {
+      "id": "S06",
+      "title": "同じ抽選が別の情報源で既に登録済み。重複と新規を見分けられるか",
+      "chains": [
+        "カードラボ"
+      ],
+      "registered": [
+        {
+          "chain": "カードラボ",
+          "store": "高崎店",
+          "product": "ハドウシーカー",
+          "deadline": "2026-11-15",
+          "sourceUrls": [
+            "https://x.com/c_labo_takasaki/status/1"
+          ],
+          "auto": false
+        }
+      ]
+    },
+    {
+      "id": "S07",
+      "title": "取得に失敗している情報源（ページが存在しない）。回避せず、無駄な再試行をせず終えられるか",
+      "chains": [],
+      "failedSources": [
+        {
+          "name": "失敗している情報源",
+          "url": "https://shop-9e-missing.example.invalid/news"
+        }
+      ]
+    },
+    {
+      "id": "S08",
+      "title": "取得に失敗していた情報源（ネット通販の応募ページ。タイトルは店名だけ）。再確認して抽選として認識できるか",
+      "chains": [
+        "イトーヨーカドー"
+      ],
+      "failedSources": [
+        {
+          "name": "イトーヨーカドー 抽選ページ",
+          "url": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx"
+        }
+      ]
+    },
+    {
+      "id": "M1",
+      "title": "複数の手がかりが同時にある実運用に近い状況。AIが優先順位を選ぶ（上限内で）",
+      "chains": [
+        "カードラボ",
+        "GEO",
+        "イトーヨーカドー",
+        "キデイランド",
+        "トレーナーズウェブサイト"
+      ],
+      "registered": [
+        {
+          "chain": "カードラボ",
+          "store": "津田沼店",
+          "product": "ハドウシーカー",
+          "deadline": null,
+          "sourceUrls": [
+            "https://www.c-labo.jp/shop/tsudanuma/blog/623703"
+          ],
+          "auto": true
+        },
+        {
+          "chain": "カードラボ",
+          "store": "高崎店",
+          "product": "ハドウシーカー",
+          "deadline": "2026-11-15",
+          "sourceUrls": [
+            "https://x.com/c_labo_takasaki/status/1"
+          ],
+          "auto": false
+        }
+      ],
+      "failedSources": [
+        {
+          "name": "失敗している情報源",
+          "url": "https://shop-9e-missing.example.invalid/news"
+        },
+        {
+          "name": "イトーヨーカドー 抽選ページ",
+          "url": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx"
+        }
+      ]
+    }
+  ]
+}

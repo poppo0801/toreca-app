@@ -39,9 +39,10 @@ export function buildPlannerTools(world: PlannerWorld, throttle: HostThrottle = 
   const depth = new Map<string, number>();
   const maxDepth = opts.maxFollowDepth ?? 2;
   let cachedSignals: InvestigationSignals | null = null;
-  const untrusted = (text: string, source: string): ToolOutput => {
+  /** 外部の文面を「データ」として囲む。本文は maxChars まで（リンク一覧など、本文のあとに付ける部分は切らない） */
+  const untrusted = (text: string, source: string, maxChars = 3000, tail = ""): ToolOutput => {
     const inj = detectInjection(text);
-    return { content: wrapUntrusted(text.slice(0, 3000), source), untrusted: true, data: inj.length ? { injection: inj } : undefined };
+    return { content: wrapUntrusted(text.slice(0, maxChars) + tail, source), untrusted: true, data: inj.length ? { injection: inj } : undefined };
   };
   const refuse = (reason: string): ToolOutput => ({ content: `取得できません: ${reason}`, data: { failed: true, reason } });
 
@@ -83,8 +84,12 @@ export function buildPlannerTools(world: PlannerWorld, throttle: HostThrottle = 
       if (!r.ok) return refuse(r.reason ?? "ページを取得できませんでした");
       depth.set(norm(url), myDepth);
       pages.set(norm(url), { url: norm(url), title: r.title ?? "", text: r.text ?? "", links: r.links ?? [] });
-      const links = (r.links ?? []).slice(0, 15).map((l) => `- ${l.text.slice(0, 40)} ${l.url}`).join("\n");
-      const out = untrusted(`${r.title ?? ""}\n${r.text ?? ""}${links ? `\n\n[リンク]\n${links}` : ""}`, url);
+      // リンクは、告知・応募に関係しそうなもの（抽選・お知らせ・応募など）を先に見せる。ナビゲーションのリンクで枠を使い切らない
+      const hint = (t: string) => (/抽選|応募|エントリー|受付|お知らせ|ご案内|予約/.test(t) ? 1 : 0);
+      const ranked = [...(r.links ?? [])].sort((a, b) => hint(b.text) - hint(a.text));
+      const links = ranked.slice(0, 15).map((l) => `- ${l.text.slice(0, 60)} ${l.url}`).join("\n") + ((r.links ?? []).length > 15 ? `\n（ほかに${(r.links ?? []).length - 15}件のリンク）` : "");
+      // 本文は先頭4000文字まで。リンク一覧は本文のあとに付け、本文の長さで切り落とさない（一覧ページの告知へのリンクが見えなくならないように）
+      const out = untrusted(`${r.title ?? ""}\n${r.text ?? ""}`, url, 4000, links ? `\n\n[リンク]\n${links}` : "");
       return { ...out, data: { ...(out.data as object | undefined), url, title: r.title, links: r.links } };
     },
   });
@@ -132,13 +137,15 @@ export function buildPlannerTools(world: PlannerWorld, throttle: HostThrottle = 
       inputSchema: { type: "object", properties: { url: { type: "string", description: "取得済みのページのURL" }, ...purposeProp }, required: ["url"], additionalProperties: false },
       access: "read_internal",
       dedupeKey: (i) => norm(String(i.url ?? "")),
-      async run(input) {
+      async run(input, ctx) {
         const page = pages.get(norm(String(input.url ?? "")));
         if (!page) return { content: "エラー: このURLはまだ取得していません。先にページを取得してください", data: { failed: true, reason: "未取得のURL" } };
         if (analyses >= maxAnalyses) return { content: `エラー: 1回の調査で解析できるのは${maxAnalyses}件までです`, data: { failed: true, reason: "解析の上限" } };
         analyses += 1;
         const p = await analyze(page);
-        return { content: JSON.stringify({ recognized: p.recognized, chain: p.chainName, store: p.storeName, products: p.products, applyDeadline: p.applyDeadline, missing: p.missing, disposition: p.disposition, registrable: p.registrable, blockers: p.blockers }), data: { preview: p } };
+        // 解析の費用（実AIのとき）も、この調査の費用の上限に数える
+        if (p.costJpy > 0) ctx.budget.addCost(p.costJpy);
+        return { content: JSON.stringify({ recognized: p.recognized, pageKind: p.pageKind, pageKindReason: p.pageKindReason, chain: p.chainName, store: p.storeName, products: p.products, applyDeadline: p.applyDeadline, missing: p.missing, disposition: p.disposition, registrable: p.registrable, blockers: p.blockers }), data: { preview: p } };
       },
     });
   }

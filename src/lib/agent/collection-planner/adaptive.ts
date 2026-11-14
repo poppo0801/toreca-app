@@ -49,6 +49,7 @@ function linksOf(content: string): { url: string; text: string }[] {
 }
 interface PreviewJson {
   recognized: boolean;
+  pageKind?: string;
   chain: string;
   products: string[];
   missing: string[];
@@ -112,13 +113,20 @@ export class AdaptiveScoutBrain implements AgentLLM {
       const links = linksOf(root.content);
       if (has("analyze_page_for_lottery") && !find("analyze_page_for_lottery", t.url)) return calls([{ name: "analyze_page_for_lottery", input: { url: t.url, purpose: "取得したページを抽選情報として解析する" } }]);
       const p = preview(t.url);
-      // 追加調査: 不足がある・抽選と認識できないときは、関連リンクを1回だけ追跡して再解析する
+      // 追加調査: 不足がある・抽選と認識できないときは、関連リンクを追跡して再解析する。リンクは「抽選」を含むものを優先する。告知の一覧ページなら最大2件、それ以外は1件
+      const followed: { url: string }[] = [];
       if (p && (p.missing.length > 0 || !p.recognized)) {
-        const link = links.find((l) => LINK_HINT.test(l.text) && !SOCIAL.test(hostOf(l.url)) && /^https:\/\//.test(l.url) && l.url.replace(/#.*$/, "") !== t.url);
-        if (link) {
+        const score = (l: { text: string }) => (/抽選/.test(l.text) ? 3 : /応募|受付|エントリー/.test(l.text) ? 2 : 1);
+        const cands = links
+          .filter((l) => LINK_HINT.test(l.text) && !SOCIAL.test(hostOf(l.url)) && /^https:\/\//.test(l.url) && l.url.replace(/#.*$/, "") !== t.url)
+          .map((l, i) => ({ l, i }))
+          .sort((a, b) => score(b.l) - score(a.l) || a.i - b.i)
+          .map((x) => x.l);
+        for (const link of cands.slice(0, p.pageKind === "announcement_index" ? 2 : 1)) {
           const f = find("follow_external_link", link.url);
           if (!f) return calls([{ name: "follow_external_link", input: { url: link.url, purpose: `不足している項目（${p.missing.slice(0, 3).join("・") || "抽選の記載"}）を、関連ページで確認する` } }]);
           if (!f.failed && has("analyze_page_for_lottery") && !find("analyze_page_for_lottery", link.url)) return calls([{ name: "analyze_page_for_lottery", input: { url: link.url, purpose: "追跡したページを抽選情報として解析する" } }]);
+          if (!f.failed) followed.push(link);
         }
       }
       // 重複・追加調査の疑い: 登録済みの抽選と照合
@@ -130,7 +138,11 @@ export class AdaptiveScoutBrain implements AgentLLM {
         const x = links.find((l) => SOCIAL.test(hostOf(l.url)));
         if (x && has("assess_source_candidate") && !h.some((y) => y.call.name === "assess_source_candidate" && y.call.input.url === x.url)) return calls([{ name: "assess_source_candidate", input: { url: x.url, chainId: t.chainId, linkedFromUrl: t.url, purpose: "公式サイトからリンクされたアカウントを評価する" } }]);
       }
-      // 提出に載せる発見（取得した根拠だけ）
+      // 提出に載せる発見（取得した根拠だけ）。追跡したページで抽選と認識できたものも載せる
+      for (const f of followed) {
+        const fp = preview(f.url);
+        if (fp?.recognized) findings.push({ kind: "lottery_info", targetId: t.id, title: `${fp.chain} ${fp.products.join("・")}`.trim() || "抽選の告知", url: f.url, evidence: `解析: ${fp.disposition.kind}${fp.missing.length ? `／不足: ${fp.missing.join("・")}（不明のまま保持）` : ""}`, official: true });
+      }
       if (p?.recognized) findings.push({ kind: "lottery_info", targetId: t.id, title: `${p.chain} ${p.products.join("・")}`.trim() || "抽選の告知", url: t.url, evidence: `解析: ${p.disposition.kind}${p.missing.length ? `／不足: ${p.missing.join("・")}（不明のまま保持）` : ""}`, official: true });
     }
     for (const x of h.filter((y) => y.call.name === "assess_source_candidate" && !y.failed)) {

@@ -1,7 +1,9 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
 import { normalizeExtraction } from "@/lib/ai/extraction";
+import { estimateCostJpy } from "@/lib/ai-cost";
 import { RuleExtractor } from "@/lib/ai/rule-extractor";
+import { classifyPage } from "@/lib/ai/page-kind";
 import type { LotteryExtractor } from "@/lib/ai/provider";
 import { decideDisposition } from "@/lib/collector/disposition";
 import { chainCanonicalKey, sameChainName } from "@/lib/chain-normalize";
@@ -26,6 +28,7 @@ export interface InvestigationWorld {
   drafts: Map<string, LotteryInput>;
 }
 
+const KIND_LABEL = { lottery_announcement: "抽選の告知", announcement_index: "告知の一覧", lottery_explainer: "抽選の説明", past_lottery: "終了した抽選", general: "抽選の告知ではないページ" } as const;
 const flexDate = (f: { precision?: string; date?: string | null } | undefined): string | null => (f && f.precision !== "unknown" && f.date ? f.date : null);
 
 export function createInvestigationWorld(o: {
@@ -49,7 +52,7 @@ export function createInvestigationWorld(o: {
       if (!o.live) return { ok: false, reason: "外部アクセスは設定されていません（この調査は保存済みの情報だけを使います）" };
       const r = await fetchRespectingRobots(url, { timeoutMs: 10_000, maxBytes: 1_000_000, accept: ["text/html", "application/xhtml+xml"] });
       if (!r.ok) return { ok: false, reason: r.code === "robots" ? "robots.txt で取得が許可されていません（回避しません）" : `取得できませんでした（${r.code}）` };
-      const page = extractPageText(r.body, r.finalUrl, 20_000);
+      const page = extractPageText(r.body, r.finalUrl, 20_000, 200);
       return { ok: true, title: page.title, text: page.text, links: page.links.map((l) => ({ url: l.href, text: l.text })) };
     });
 
@@ -78,7 +81,10 @@ export function createInvestigationWorld(o: {
     if (input.applyMethod === "unknown") missing.push("応募方法");
     if (input.receiveMethod === "unknown") missing.push("受取方法");
 
-    const recognized = ex.isLotteryAnnouncement && (!!chainName || products.length > 0);
+    // ページの主題の確認（固定ロジック）: 解析エンジンが抽選と判断しても、ページの主題・応募の記載が抽選の告知と確認できなければ、登録の対象にしない（Stage 9E）
+    const kind = classifyPage({ title: page.title, text: `${page.title}
+${page.text}` });
+    const recognized = ex.isLotteryAnnouncement && kind.actionable && (!!chainName || products.length > 0);
     const dup = draft.duplicates.filter((x) => x.level === "high" || x.level === "medium");
     const target = dup[0] ? d.lotteries.find((l) => l.id === dup[0].lotteryId) : undefined;
     const targetDeadline = target ? flexDate(target.applyDeadline) : null;
@@ -91,6 +97,7 @@ export function createInvestigationWorld(o: {
 
     // 開発環境の自動登録の安全条件（満たさない理由は blockers に残す。情報が不足しているだけでは止めない＝日時が不明でも登録できる）
     const blockers: string[] = [];
+    if (!kind.actionable) blockers.push(`ページの主題が抽選の告知と確認できません（${KIND_LABEL[kind.kind]}: ${kind.reasons[0] ?? ""}）`);
     if (!recognized) blockers.push("抽選として認識できません");
     if (draft.summary.chain !== "exact" && draft.summary.chain !== "alias") blockers.push("系列を確実に特定できません");
     if (!isSelect && draft.summary.store !== "exact" && draft.summary.store !== "alias") blockers.push("店舗を確実に特定できません（応募時に店舗を選ぶ抽選ではありません）");
@@ -99,7 +106,7 @@ export function createInvestigationWorld(o: {
     if (dup.length > 0) blockers.push("登録済みの抽選と同じものの可能性があります");
     if (draft.modePending) blockers.push("複数商品の応募方式が確定できません");
     drafts.set(page.url, input);
-    return { url: page.url, recognized, chainName, storeName: isSelect ? "応募時に店舗を選択" : input.store.name, products, applyDeadline: deadline, missing, disposition, registrable: blockers.length === 0, blockers, costJpy: 0 };
+    return { url: page.url, pageKind: kind.kind, pageKindReason: kind.reasons[0] ?? "", aiJudgedLottery: ex.isLotteryAnnouncement, recognized, chainName, storeName: isSelect ? "応募時に店舗を選択" : input.store.name, products, applyDeadline: deadline, missing, disposition, registrable: blockers.length === 0, blockers, costJpy: out.usage ? (estimateCostJpy(out.model, out.usage.input, out.usage.output) ?? 0) : 0 };
   };
 
   const world: PlannerWorld = {

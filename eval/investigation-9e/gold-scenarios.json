@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "note": "9E シナリオの正解（実在ページの本文・見出しを読んで作成。AIの出力に合わせて変更しない）。urls は、そのURLをAIが解析したときの正しい判定（chain・store・product。disposition は各シナリオの既存データとの関係で scenarios に定義）。notLottery は、抽選の告知ではなく、登録の対象になってはいけないURL。deadline が null のものは締切を採点しない（本文で確認していない）。",
+  "urls": {
+    "https://www.c-labo.jp/shop/nagoyaekimae/blog/624574/": { "chain": "カードラボ", "store": "名古屋駅前店", "product": "ONE PIECE Heroines Edition vol.2", "deadline": null },
+    "https://www.c-labo.jp/shop/kokura/blog/624560/": { "chain": "カードラボ", "store": "小倉店", "product": "ONE PIECE Heroines Edition vol.2", "deadline": null },
+    "https://www.c-labo.jp/shop/nipponbashi/blog/624555/": { "chain": "カードラボ", "store": "大阪日本橋店", "product": "ハドウシーカー", "deadline": null },
+    "https://www.c-labo.jp/shop/nipponbashi/blog/624550/": { "chain": "カードラボ", "store": "大阪日本橋店", "product": "ONE PIECE Heroines Edition vol.2", "deadline": null },
+    "https://www.c-labo.jp/shop/takasaki/blog/624548/": { "chain": "カードラボ", "store": "高崎店", "product": "ハドウシーカー", "deadline": "2026-11-15" },
+    "https://www.c-labo.jp/shop/kagoshima/blog/624542/": { "chain": "カードラボ", "store": "鹿児島店", "product": "ONE PIECE Heroines Edition vol.2", "deadline": null },
+    "https://www.c-labo.jp/shop/otaro/blog/624536/": { "chain": "カードラボ", "store": "オタロード本店", "product": "ONE PIECE Heroines Edition vol.2", "deadline": null },
+    "https://www.c-labo.jp/shop/okayamanishi/blog/624532/": { "chain": "カードラボ", "store": "岡山西口店", "product": "ONE PIECE Heroines Edition vol.2", "deadline": "2026-11-15" },
+    "https://www.c-labo.jp/shop/niigata/blog/624529/": { "chain": "カードラボ", "store": "新潟店", "product": "ハドウシーカー", "deadline": null },
+    "https://www.c-labo.jp/shop/tsudanuma/blog/623703": { "chain": "カードラボ", "store": "津田沼店", "product": "ハドウシーカー", "deadline": "2026-11-05" },
+    "https://geo-online.co.jp/news/789": { "chain": "GEO", "store": null, "product": "ハドウシーカー", "deadline": null },
+    "https://geo-online.co.jp/news/790": { "chain": "GEO", "store": null, "product": "30th CELEBRATION", "deadline": null },
+    "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx": { "chain": "イトーヨーカドー", "store": null, "product": "ハドウシーカー", "deadline": "2026-11-13" }
+  },
+  "notLottery": [
+    "https://www.c-labo.jp/",
+    "https://www.c-labo.jp/shop/tsudanuma/",
+    "https://www.c-labo.jp/blog/",
+    "https://www.c-labo.jp/information/",
+    "https://www.c-labo.jp/information/612840/",
+    "https://www.c-labo.jp/information/620246/",
+    "https://geo-online.co.jp/",
+    "https://geo-online.co.jp/news/",
+    "https://geo-online.co.jp/news/791",
+    "https://www.pokemon-card.com/",
+    "https://www.pokemon-card.com/info/",
+    "https://www.pokemon-card.com/products/",
+    "https://www.kiddyland.co.jp/",
+    "https://www.kiddyland.co.jp/news/"
+  ],
+  "scenarios": {
+    "S01": { "reachable": ["https://www.c-labo.jp/shop/nagoyaekimae/blog/624574/", "https://www.c-labo.jp/shop/kokura/blog/624560/", "https://www.c-labo.jp/shop/nipponbashi/blog/624555/", "https://www.c-labo.jp/shop/nipponbashi/blog/624550/", "https://www.c-labo.jp/shop/takasaki/blog/624548/", "https://www.c-labo.jp/shop/kagoshima/blog/624542/", "https://www.c-labo.jp/shop/otaro/blog/624536/", "https://www.c-labo.jp/shop/okayamanishi/blog/624532/", "https://www.c-labo.jp/shop/niigata/blog/624529/"], "disposition": { "default": "new" }, "shouldFindLottery": true },
+    "S02": { "reachable": ["https://geo-online.co.jp/news/789", "https://geo-online.co.jp/news/790", "https://geo-online.co.jp/news/788"], "disposition": { "default": "new" }, "shouldFindLottery": true },
+    "S03": { "reachable": [], "disposition": {}, "shouldFindLottery": false, "maxFetches": 4 },
+    "S04": { "reachable": [], "disposition": {}, "shouldFindLottery": false, "maxFetches": 3 },
+    "S05": { "reachable": ["https://www.c-labo.jp/shop/tsudanuma/blog/623703"], "disposition": { "https://www.c-labo.jp/shop/tsudanuma/blog/623703": "complete" }, "shouldFindLottery": true },
+    "S06": { "reachable": ["https://www.c-labo.jp/shop/takasaki/blog/624548/", "https://www.c-labo.jp/shop/niigata/blog/624529/"], "disposition": { "https://www.c-labo.jp/shop/takasaki/blog/624548/": "duplicate", "default": "new" }, "shouldFindLottery": true },
+    "S07": { "reachable": [], "disposition": {}, "shouldFindLottery": false, "maxFetches": 2 },
+    "S08": { "reachable": ["https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx"], "disposition": { "default": "new" }, "shouldFindLottery": true },
+    "M1": { "reachable": ["https://www.c-labo.jp/shop/tsudanuma/blog/623703", "https://www.c-labo.jp/shop/takasaki/blog/624548/", "https://geo-online.co.jp/news/789", "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx"], "disposition": { "https://www.c-labo.jp/shop/tsudanuma/blog/623703": "complete", "https://www.c-labo.jp/shop/takasaki/blog/624548/": "duplicate", "default": "new" }, "shouldFindLottery": true }
+  }
+}

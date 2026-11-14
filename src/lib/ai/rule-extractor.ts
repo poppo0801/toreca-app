@@ -5,6 +5,7 @@
  */
 import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { productKey } from "@/lib/lottery-match";
+import { classifyPage } from "@/lib/ai/page-kind";
 import type { ExtractOutput, ExtractRequest, LotteryExtractor } from "@/lib/ai/provider";
 
 export interface RuleMaster {
@@ -21,7 +22,7 @@ const WD = String.raw`(?:\s*[(（][月火水木金土日祝][)）])?`;
 const TIME = String.raw`(?:\s*\d{1,2}[:：時]\d{0,2}分?)?`;
 /** 終了側は月を省略できる（「11/16〜20」）。グループ: 1-3=開始(年・月・日)、4-6=終了(年・月・日) */
 const MD2 = String.raw`(?:(\d{4})\s*[年/.]\s*)?(?:(\d{1,2})\s*[/月.]\s*)?(\d{1,2})\s*日?`;
-const RANGE = new RegExp(`(?:応募|受付|エントリー)(?:期間|期限)?\\s*[:：]?\\s*${MD}${WD}${TIME}\\s*[〜~～\\-－ー]\\s*${MD2}`);
+const RANGE = new RegExp(`(?:応募|受付|エントリー|お?申し?込み|申込|抽選)(?:期間|期限)?\\s*[:：]?\\s*${MD}${WD}${TIME}\\s*(?:[〜~～\\-－ー]|から)\\s*${MD2}`);
 const DEADLINE = new RegExp(`(?:応募|受付|エントリー)?(?:締切|締め切り|期限|まで)\\s*[:：]?\\s*${MD}`);
 const RESULT = new RegExp(`当選(?:者)?(?:発表|連絡|通知)(?:日)?\\s*[:：]?\\s*${MD}`);
 
@@ -36,7 +37,9 @@ export class RuleExtractor implements LotteryExtractor {
 
   async extract(req: ExtractRequest): Promise<ExtractOutput> {
     const text = (req.text ?? "").normalize("NFKC");
-    const lottery = /抽選|エントリー受付|応募受付/.test(text);
+    // 「抽選」の語が出るだけでは抽選の告知としない（ナビゲーション・新着一覧・説明・商品紹介を除く。Stage 9E）。先頭の行をページの題とみなす
+    const kind = classifyPage({ text });
+    const lottery = kind.actionable;
     // 系列: 本文・タイトルに名称（別名を含む）が書かれているもの。複数あれば名称が長い方（誤一致を避ける）
     const chainHits = this.master.chains
       .flatMap((c) => [c.name, ...(c.aliases ?? [])].map((n) => ({ canon: c.name, n })))
@@ -80,7 +83,7 @@ export class RuleExtractor implements LotteryExtractor {
         announcement_url: "",
         apply_url: "",
         conditions_text: "",
-        notes: "",
+        notes: `ページの種類: ${kind.kind}（${kind.reasons[0] ?? ""}）`,
         confidence: { chain: conf(!!chainName), store: conf(stores.length === 1), products: conf(products.length > 0), multi_mode: low, apply_start: conf(!!start), apply_deadline: conf(!!deadline), result_date: conf(!!result), procedure_start: low, procedure_deadline: low, announcement: low, apply_method: low, receive_method: low, limit: low, conditions: low },
         warnings: [],
       },

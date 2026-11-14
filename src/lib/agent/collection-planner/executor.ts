@@ -10,6 +10,7 @@ import { runAgent, ToolRegistry, type AgentLLM, type AgentRun, type AgentTool } 
 import { HostThrottle } from "@/lib/agent/collection-planner/throttle";
 import { buildPlannerTools } from "@/lib/agent/collection-planner/tools";
 import { PLANNER_SYSTEM, reviewPlan, type PlanReview } from "@/lib/agent/collection-planner/plan";
+import { buildReviewFeedback, previewsFromTrace } from "@/lib/agent/collection-planner/review";
 import { evaluateRun, type RunEvaluation, type StepLog } from "@/lib/agent/collection-planner/evaluate";
 import type { SourceEvaluation } from "@/lib/agent/collection-planner/discovery";
 import type { ResolvedControls } from "@/lib/agent/collection-planner/controls";
@@ -33,6 +34,19 @@ export interface InvestigationRecord {
   evaluation: RunEvaluation;
   summary: string;
   totalMs: number;
+  /** 検証層の指摘を受けた追加調査の回数（Stage 9E） */
+  followUps: number;
+  /** AIが提出した各発見の判断と、固定ロジック（ページの主題・解析・照合）の判定の照合（食い違いは登録しない） */
+  agreement: AgreementRecord[];
+}
+
+export interface AgreementRecord {
+  url: string;
+  aiPageKind: string | null;
+  aiAction: string | null;
+  fixedPageKind: string | null;
+  fixedDisposition: string | null;
+  agrees: boolean | null;
 }
 
 const short = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -93,6 +107,11 @@ export interface ExecuteInput {
   controls: ResolvedControls;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** システムプロンプト・依頼文の差し替え（実AI用。既定は9Dのもの） */
+  system?: string;
+  task?: string;
+  /** 検証層の指摘を受けた追加調査の最大回数（既定0。同じ予算・同じ上限の中だけ。上限は増えない） */
+  maxReviews?: number;
 }
 
 /** 調査を1回実行する。例外を投げず、上限（回数・取得・解析・深さ・費用・時間・アクセス頻度）で必ず終了する */
@@ -104,7 +123,39 @@ export async function executeInvestigation(i: ExecuteInput): Promise<Investigati
   const throttle = new HostThrottle(i.controls.throttle, now);
   const signals = await i.world.signals();
   const tools = instrument(buildPlannerTools(i.world, throttle, { pages, maxAnalyses: i.controls.maxAnalyses, maxFollowDepth: i.controls.maxFollowDepth, sleep: i.sleep, monitoredUrls: signals.monitors.map((m) => m.url ?? "").filter(Boolean) }), steps, now);
-  const run = await runAgent({ llm: i.llm, tools, system: PLANNER_SYSTEM, task: "今日の抽選情報の収集で、調べるべきことを選んで調査し、結果を提出してください。情報が不足しているときは、公式ページなどを追加で調べてください。調べても分からない項目は、不明のまま提出してください。", limits: i.controls.limits, now });
+  const run = await runAgent({
+    llm: i.llm,
+    tools,
+    system: i.system ?? PLANNER_SYSTEM,
+    task: i.task ?? "今日の抽選情報の収集で、調べるべきことを選んで調査し、結果を提出してください。情報が不足しているときは、公式ページなどを追加で調べてください。調べても分からない項目は、不明のまま提出してください。",
+    limits: i.controls.limits,
+    now,
+    maxReviews: i.maxReviews ?? 0,
+    // 提出を、AIの外側の検証（固定ロジック）にかける。不足・食い違い・未確認の関連リンクがあれば、具体的な理由を返して追加調査の機会を与える（AIは検証結果を書き換えられない）
+    review: i.maxReviews
+      ? async (info) => {
+          const analysed = steps.filter((s) => s.tool === "analyze_page_for_lottery" && s.ok).length;
+          const f = buildReviewFeedback({ output: info.output as PlanOutput, pages, previews: previewsFromTrace(info.trace), remaining: info.remaining, analysesLeft: Math.max(0, i.controls.maxAnalyses - analysed) });
+          return f ? { feedback: f.text, meta: f.meta } : null;
+        }
+      : undefined,
+  });
+  // 行動の決定者と理由を記録に付ける（実行順に、トレースのツール呼び出しと記録の行は1対1に対応する）
+  const aiBrain = /^anthropic/.test(i.llm.name);
+  {
+    let text = "";
+    let afterReview = false;
+    let idx = 0;
+    for (const e of run.trace) {
+      if (e.t === "step") text = e.text ?? "";
+      else if (e.t === "review") afterReview = true;
+      else if (e.t === "tool" && steps[idx]) {
+        steps[idx].decidedBy = aiBrain ? (afterReview ? "review_feedback" : "ai") : "fixed_policy";
+        if (text) steps[idx].rationale = short(text, 240);
+        idx += 1;
+      }
+    }
+  }
   const fetched = new Set<string>(steps.filter((s) => s.ok && (s.tool === "check_official_site" || s.tool === "follow_external_link")).map((s) => s.target.replace(/#.*$/, "")));
   const out = run.output as PlanOutput | undefined;
   const valid = !!out && Array.isArray(out.tasks) && Array.isArray(out.findings);
@@ -138,7 +189,18 @@ export async function executeInvestigation(i: ExecuteInput): Promise<Investigati
     if (root) followPairs.push({ rootMissing: root.missing, followMissing: p.missing });
   }
   const totalMs = Math.max(0, now() - t0);
-  const evaluation = evaluateRun({ steps, previews, monitorEvals, followPairs, totalMs, totalCostJpy: run.usage.costJpy + previews.reduce((a, p) => a + p.costJpy, 0) });
+  // 費用は、AIのステップと解析（実AIのとき）の合計。解析の費用は調査の上限（budget）に数えているため、二重に足さない
+  const evaluation = evaluateRun({ steps, previews, monitorEvals, followPairs, totalMs, totalCostJpy: run.usage.costJpy });
+  // AIの判断と固定ロジックの判定の照合（AIが抽選の告知と言ったページを、検証がどう判定したか）
+  const agreement: AgreementRecord[] = [];
+  if (valid) {
+    for (const f of review?.accepted.findings ?? []) {
+      if (f.kind !== "lottery_info" || !f.url) continue;
+      const pv = previews.find((p) => p.url === f.url?.replace(/#.*$/, ""));
+      const fixedKind = pv?.pageKind ?? null;
+      agreement.push({ url: f.url, aiPageKind: f.pageKind ?? null, aiAction: f.action ?? null, fixedPageKind: fixedKind, fixedDisposition: pv ? (pv.recognized ? pv.disposition.kind : "not_lottery") : null, agrees: pv && f.pageKind ? f.pageKind === fixedKind : null });
+    }
+  }
   const status: InvestigationRecord["status"] = run.status === "error" ? "failed" : run.status === "limit_reached" ? "limit_reached" : "completed";
   return {
     status,
@@ -154,5 +216,7 @@ export async function executeInvestigation(i: ExecuteInput): Promise<Investigati
     evaluation,
     summary: valid ? short(String(out.summary ?? ""), 300) : "調査結果は提出されませんでした",
     totalMs,
+    followUps: run.usage.followUps,
+    agreement,
   };
 }

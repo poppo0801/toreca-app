@@ -89,6 +89,10 @@ export interface Finding {
   /** 根拠（取得した文面の抜粋・一致した名称など）。AIの自己評価は含めない */
   evidence: string;
   official: boolean;
+  /** AIが読み取ったページの種類（Stage 9E。検証層は固定ロジックの判定と照合する。食い違いは記録する） */
+  pageKind?: "lottery_announcement" | "announcement_index" | "lottery_explainer" | "past_lottery" | "general";
+  /** AIの判断: 新規・補完・更新・重複・追加調査・抽選ではない（AIの自己申告。登録の可否は検証層が決める） */
+  action?: "new" | "complete" | "update" | "duplicate" | "investigate" | "not_lottery";
 }
 
 export interface PlanOutput {
@@ -108,6 +112,11 @@ export interface PageData {
 /** 取得したページの解析のプレビュー（登録しない読み取りだけの判定）。新規・補完・更新・重複・追加調査のどれになるかを示す */
 export interface AnalysisPreview {
   url: string;
+  /** ページの主題の判定（固定ロジック。Stage 9E）。抽選の告知でなければ登録の対象にならない */
+  pageKind?: "lottery_announcement" | "announcement_index" | "lottery_explainer" | "past_lottery" | "general";
+  pageKindReason?: string;
+  /** 解析エンジン（AI）が抽選の告知と判断したか。pageKind と食い違う場合は、登録せず追加調査にする */
+  aiJudgedLottery?: boolean;
   recognized: boolean;
   chainName: string;
   storeName: string;

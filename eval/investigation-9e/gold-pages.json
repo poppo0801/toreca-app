@@ -1,0 +1,619 @@
+{
+ "version": 1,
+ "note": "ページの種類の正解。AI・分類器の出力に合わせて変更しない。set: real=実在の抽選の情報源／live1・live2=取得して本文を読んで決めたもの",
+ "pages": [
+  {
+   "url": "https://www.c-labo.jp/blog/623681",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tsudanuma/blog/623681",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/namba2nd/blog/623973",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/namba/blog/623524/",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/blog/623703",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tsudanuma/blog/623703",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/blog/623603/",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/himeji/blog/623603",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/blog/623793",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/nipponbashi/blog/623793",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/blog/623986",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/namba2nd/blog/623986",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/blog/624225",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/otaro/blog/624225",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/ebina/blog/623647",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/u6fu3",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/z-8_2",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/05tt3",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/11t5c",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/8xaaf",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/6mbex",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/z4uwb",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/t7ka0",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/j2fs9",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/fz4f0",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/ugp5c",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/pr4q5",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/4m2ak",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/1j91f",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/0aq7y",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/p6v9t",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/3lkk8",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/6c764",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/ccavo",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://card.luruna.jp/items/164670243",
+   "set": "real",
+   "kind": null,
+   "actionable": null,
+   "ambiguous": true,
+   "basis": "フリマ形式の出品。店舗の抽選告知か個人の出品かの判断が分かれるため採点しない"
+  },
+  {
+   "url": "https://card.luruna.jp/items/163993835",
+   "set": "real",
+   "kind": null,
+   "actionable": null,
+   "ambiguous": true,
+   "basis": "フリマ形式の出品。店舗の抽選告知か個人の出品かの判断が分かれるため採点しない"
+  },
+  {
+   "url": "https://card.luruna.jp/items/163162690",
+   "set": "real",
+   "kind": null,
+   "actionable": null,
+   "ambiguous": true,
+   "basis": "フリマ形式の出品。店舗の抽選告知か個人の出品かの判断が分かれるため採点しない"
+  },
+  {
+   "url": "https://card.luruna.jp/items/165349187",
+   "set": "real",
+   "kind": null,
+   "actionable": null,
+   "ambiguous": true,
+   "basis": "フリマ形式の出品。店舗の抽選告知か個人の出品かの判断が分かれるため採点しない"
+  },
+  {
+   "url": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/s2dtfw7rvo",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/luo8lp88-d",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/wjv4a",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/9m8au",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/mkpvg",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/790",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/789",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/ff373",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/qmwq3",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/m3_6v",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/075sp",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://livepocket.jp/e/tjphs",
+   "set": "real",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "本番で有効な抽選の情報源として管理されていたページ（8F評価データ）"
+  },
+  {
+   "url": "https://www.pokemon-card.com/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ。新着欄に抽選結果発表の延期（イベント参加の抽選）が1件あるだけ"
+  },
+  {
+   "url": "https://www.pokemon-card.com/products/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "商品情報の一覧"
+  },
+  {
+   "url": "https://www.pokemon-card.com/info/",
+   "set": "live1",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "ニュース一覧（抽選関連の見出しを含むが、ページ自体は一覧）"
+  },
+  {
+   "url": "https://www.kiddyland.co.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://www.kiddyland.co.jp/news/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "ニュース（抽選の記載なし）"
+  },
+  {
+   "url": "https://www.c-labo.jp/",
+   "set": "live1",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "店舗ブログの新着一覧（抽選販売の告知の見出しが多数）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tsudanuma/",
+   "set": "live1",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "店舗ページの新着一覧"
+  },
+  {
+   "url": "https://www.bookoff.co.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://geo-online.co.jp/",
+   "set": "live1",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "トップのお知らせ一覧（抽選販売受付のお知らせの見出しを含む）"
+  },
+  {
+   "url": "https://books.rakuten.co.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://www.toysrus.co.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://www.yamada-denki.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://www.suruga-ya.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://www.hmv.co.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ。商品名に『抽選特典』の語が1回あるだけ"
+  },
+  {
+   "url": "https://www.pokemon.co.jp/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "公式トップ"
+  },
+  {
+   "url": "https://www.pokemon-card.com/rules/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "ルール説明"
+  },
+  {
+   "url": "https://www.pokemon-card.com/card-search/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "カード検索"
+  },
+  {
+   "url": "https://www.pokemon-card.com/howtoplay/",
+   "set": "live1",
+   "kind": "general",
+   "actionable": false,
+   "basis": "遊び方の説明"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/nagoyaekimae/blog/624574/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選販売のお知らせ（ONE PIECE Heroines Edition vol.2）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/kokura/blog/624560/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/nipponbashi/blog/624555/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選予約のお知らせ（ハドウシーカー）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/nipponbashi/blog/624550/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再抽選販売のお知らせ"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/takasaki/blog/624548/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選予約のお知らせ（ハドウシーカー）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/kagoshima/blog/624542/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/otaro/blog/624536/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/okayamanishi/blog/624532/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ（応募期間つき）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/niigata/blog/624529/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選予約のお知らせ（ハドウシーカー）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tsudanuma/blog/623696/",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選予約販売のお知らせ（スペシャルデッキセット）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tsudanuma/blog/581202/",
+   "set": "live2",
+   "kind": "general",
+   "actionable": false,
+   "basis": "買取情報の記事（抽選の告知ではない。サイドバーに他の記事の見出しがある）"
+  },
+  {
+   "url": "https://www.c-labo.jp/information/620246/",
+   "set": "live2",
+   "kind": "general",
+   "actionable": false,
+   "basis": "臨時休業のお知らせ"
+  },
+  {
+   "url": "https://www.c-labo.jp/information/612840/",
+   "set": "live2",
+   "kind": "past_lottery",
+   "actionable": false,
+   "basis": "抽選作業は完了済み。当選者への手続き・問い合わせの案内（新たに応募できる抽選ではない）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/788",
+   "set": "live2",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選販売受付のお知らせ（ONE PIECE 神の支配）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/791",
+   "set": "live2",
+   "kind": "general",
+   "actionable": false,
+   "basis": "メンテナンス終了のお知らせ（抽選の告知ではない。サイドバーに他の見出しがある）"
+  },
+  {
+   "url": "https://www.c-labo.jp/blog/",
+   "set": "live2",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "店舗ブログの一覧"
+  },
+  {
+   "url": "https://www.c-labo.jp/information/",
+   "set": "live2",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "お知らせの一覧"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/",
+   "set": "live2",
+   "kind": "announcement_index",
+   "actionable": false,
+   "basis": "お知らせの一覧"
+  }
+ ]
+}
