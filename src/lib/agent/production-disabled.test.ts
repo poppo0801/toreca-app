@@ -54,6 +54,8 @@ describe("住所調査AIは本番で有効にならない", () => {
   it("住所調査AIの部品（lib/agent・lib/server/agent）を読み込むのは、開発専用の画面・アクションだけ。通常の画面・API・自動収集（cron）は読み込まない", () => {
     const users = src.filter((f) => !f.startsWith("src/lib/agent/") && !f.startsWith("src/lib/server/agent/") && /from "@\/lib\/(server\/)?agent\//.test(readFileSync(f, "utf8")));
     expect(users.map((f) => f.replaceAll("\\", "/")).sort()).toEqual([
+      "src/app/(app)/settings/investigation/actions.ts",
+      "src/app/(app)/settings/investigation/page.tsx",
       "src/app/(app)/settings/lottery-grouping/actions.ts",
       "src/app/(app)/settings/lottery-grouping/cleanup-actions.ts",
       "src/app/(app)/settings/lottery-grouping/page.tsx",

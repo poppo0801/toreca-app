@@ -20,7 +20,7 @@ export interface PlanReview {
 const MAX_TASKS = 10;
 const MAX_FINDINGS = 10;
 
-export function reviewPlan(out: PlanOutput, signals: InvestigationSignals, fetchedUrls: Set<string>): PlanReview {
+export function reviewPlan(out: PlanOutput, signals: InvestigationSignals, fetchedUrls: Set<string>, linkedUrls: Set<string> = new Set()): PlanReview {
   const rejected: PlanReview["rejected"] = [];
   const chainIds = new Set(signals.chains.map((c) => c.id));
   const lotteryIds = new Set(signals.missing.map((m) => m.lotteryId));
@@ -51,7 +51,7 @@ export function reviewPlan(out: PlanOutput, signals: InvestigationSignals, fetch
     // 根拠: 取得した（取得を許可された）URLに紐づくこと。取得していないURLを根拠にした発見は採用しない
     if (!f.evidence.trim()) rejected.push({ item: f.title, reason: "根拠がありません" });
     else if (f.kind !== "stop_retry" && !f.url) rejected.push({ item: f.title, reason: "情報源のURLがありません" });
-    else if (f.url && f.kind !== "stop_retry" && !fetchedUrls.has(f.url.replace(/#.*$/, ""))) rejected.push({ item: f.title, reason: "取得していないURLを根拠にしています" });
+    else if (f.url && f.kind !== "stop_retry" && !fetchedUrls.has(f.url.replace(/#.*$/, "")) && !(f.kind === "monitor_candidate" && linkedUrls.has(f.url.replace(/#.*$/, "")))) rejected.push({ item: f.title, reason: "取得していない（取得したページにも載っていない）URLを根拠にしています" });
     else if (findings.length >= MAX_FINDINGS) rejected.push({ item: f.title, reason: `発見は${MAX_FINDINGS}件までです` });
     else findings.push(f);
   }

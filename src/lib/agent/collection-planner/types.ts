@@ -44,6 +44,18 @@ export interface MonitorSignal {
   kind: "x" | "web";
   lastNewCount: number | null;
   lastSuccessAt: string | null;
+  /** 監視しているURL（Webのみ。Xはアカウントページ） */
+  url?: string;
+}
+/** 前回までの調査の成果（情報源ごと）。次回の調査対象・方法の調整に使う（情報であり、制限は変えられない） */
+export interface PreviousRunSignal {
+  host: string;
+  attempts: number;
+  failures: number;
+  /** 直近の失敗の種類（robots など。回避せず、しばらく避ける判断に使う） */
+  lastFailKind?: string;
+  /** その情報源から見つかった抽選候補の累計 */
+  yielded: number;
 }
 export interface InvestigationSignals {
   today: string;
@@ -52,6 +64,8 @@ export interface InvestigationSignals {
   missing: MissingInfoSignal[];
   failed: FailedSourceSignal[];
   monitors: MonitorSignal[];
+  /** 前回までの調査の成果（情報源のホストごと） */
+  previous?: PreviousRunSignal[];
   /** 直近の抽選の発見状況（件数） */
   discovery: { found7d: number; registered7d: number; held7d: number };
 }
@@ -83,6 +97,33 @@ export interface PlanOutput {
   summary: string;
 }
 
+/** 取得したページ（調査の根拠・解析の入力。全文は保存せず、要点だけを記録に残す） */
+export interface PageData {
+  url: string;
+  title: string;
+  text: string;
+  links: { url: string; text: string }[];
+}
+
+/** 取得したページの解析のプレビュー（登録しない読み取りだけの判定）。新規・補完・更新・重複・追加調査のどれになるかを示す */
+export interface AnalysisPreview {
+  url: string;
+  recognized: boolean;
+  chainName: string;
+  storeName: string;
+  products: string[];
+  /** 応募締切（YYYY-MM-DD。不明なら null。推測しない） */
+  applyDeadline: string | null;
+  /** 不足している項目（調べても分からなければ、不明のまま保持する） */
+  missing: string[];
+  disposition: { kind: "new" | "complete" | "update" | "duplicate" | "investigate"; targetLotteryId: string | null; reason: string };
+  /** 登録の安全条件を満たすか（開発環境の自動登録の可否）。満たさない理由は blockers */
+  registrable: boolean;
+  blockers: string[];
+  /** 解析の費用（円。モックは0） */
+  costJpy: number;
+}
+
 /** 調査の外部アクセスを担う部品（読み取りのみ）。テストでは架空の世界、本番相当では制限つきの実装を差し込む */
 export interface PlannerWorld {
   signals(): Promise<InvestigationSignals>;
@@ -92,6 +133,8 @@ export interface PlannerWorld {
   search?(query: string): Promise<{ title: string; url: string; snippet: string }[]>;
   /** 投稿画像の読み取り（画像の文字起こし。外部AIを使う場合は費用が発生するため承認制） */
   readImage?(url: string): Promise<{ text: string }>;
+  /** 取得したページの解析プレビュー（読み取りのみ。解析エンジンが設定されているときだけ登録される） */
+  analyze?(page: PageData): Promise<AnalysisPreview>;
   /** 登録済みの抽選との照合（読み取りのみ） */
   matchExisting(q: { chainName?: string; productName?: string; url?: string }): Promise<{ lotteryId: string; chainName: string; storeName: string; products: string[]; sourceUrls: string[] }[]>;
 }

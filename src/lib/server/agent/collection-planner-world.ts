@@ -7,13 +7,13 @@ import { sameChainName } from "@/lib/chain-normalize";
  * 調査計画の「手がかり」を、データベースから読み取る（Stage 9C・読み取り専用）。書き込みは一切しない。
  * 外部への取得（fetchPage 等）は呼び出し側が、取得制限・robots・費用の制限つきの部品を渡す（既定では外部アクセスなし）。
  */
-export async function loadPlannerSignals(db: Db, householdId: string, now: Date): Promise<InvestigationSignals> {
+export async function loadPlannerSignals(db: Db, householdId: string, now: Date, previous: InvestigationSignals["previous"] = []): Promise<InvestigationSignals> {
   const today = new Date(now.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
   const since7 = new Date(now.getTime() - 7 * 86_400_000).toISOString();
   const since30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
   const [chains, stores, sources, lots, products, cands] = await Promise.all([
     db.from("chains").select("id,name").eq("household_id", householdId).is("archived_at", null),
-    db.from("stores").select("id,chain_id,name").eq("household_id", householdId).is("archived_at", null),
+    db.from("stores").select("id,chain_id,name,store_url").eq("household_id", householdId).is("archived_at", null),
     db.from("collection_sources").select("id,kind,name,url,x_username,status,last_success_at,last_new_count,error_message").eq("household_id", householdId),
     db.from("lotteries").select("id,chain_id,store_id,created_at,cautions,source_urls,source_kind").eq("household_id", householdId).is("archived_at", null).order("created_at", { ascending: false }).limit(500),
     db.from("products").select("id,official_name,release_date").eq("household_id", householdId).not("release_date", "is", null).gte("release_date", new Date(now.getTime() - 14 * 86_400_000).toISOString().slice(0, 10)).order("release_date").limit(20),
@@ -22,6 +22,22 @@ export async function loadPlannerSignals(db: Db, householdId: string, now: Date)
   const storeName = new Map((stores.data ?? []).map((s) => [s.id, s.name]));
   const chainName = new Map((chains.data ?? []).map((c) => [c.id, c.name]));
   const monitoredNames = (sources.data ?? []).map((s) => s.name);
+  // 系列の公式サイト: 店舗に登録されたURLのうち、最も多いサイトの入口（利用者が登録した情報。無ければ未設定）
+  const hostVotes = new Map<string, Map<string, number>>();
+  for (const st of stores.data ?? []) {
+    const u = (st as { store_url?: string | null }).store_url;
+    if (!u || !/^https:\/\//.test(u)) continue;
+    try {
+      const o = new URL(u).origin;
+      const m = hostVotes.get(st.chain_id) ?? new Map<string, number>();
+      m.set(o, (m.get(o) ?? 0) + 1);
+      hostVotes.set(st.chain_id, m);
+    } catch {
+      // 不正なURLは無視
+    }
+  }
+  const officialOf = (chainId: string): string | undefined => [...(hostVotes.get(chainId)?.entries() ?? [])].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const officialUrlOf = (chainId: string): string | undefined => (officialOf(chainId) ? `${officialOf(chainId)}/` : undefined);
   const storeCount = new Map<string, number>();
   for (const s of stores.data ?? []) storeCount.set(s.chain_id, (storeCount.get(s.chain_id) ?? 0) + 1);
   const recentByChain = new Map<string, number>();
@@ -37,10 +53,11 @@ export async function loadPlannerSignals(db: Db, householdId: string, now: Date)
   return {
     today,
     releases: (products.data ?? []).map((p) => ({ productId: p.id, name: p.official_name, releaseDate: p.release_date as string, chainsWithLottery: 0 })),
-    chains: (chains.data ?? []).map((c) => ({ id: c.id, name: c.name, storeCount: storeCount.get(c.id) ?? 0, lotteries30d: recentByChain.get(c.id) ?? 0, monitored: monitoredNames.some((n) => sameChainName(n, c.name) || n.includes(c.name)) })),
+    chains: (chains.data ?? []).map((c) => ({ id: c.id, name: c.name, storeCount: storeCount.get(c.id) ?? 0, lotteries30d: recentByChain.get(c.id) ?? 0, monitored: monitoredNames.some((n) => sameChainName(n, c.name) || n.includes(c.name)), officialUrl: officialUrlOf(c.id) })),
     missing,
     failed,
-    monitors: (sources.data ?? []).map((s) => ({ sourceId: s.id, name: s.name, kind: s.kind as "x" | "web", lastNewCount: s.last_new_count, lastSuccessAt: s.last_success_at })),
+    monitors: (sources.data ?? []).map((s) => ({ sourceId: s.id, name: s.name, kind: s.kind as "x" | "web", lastNewCount: s.last_new_count, lastSuccessAt: s.last_success_at, url: s.url ?? undefined })),
+    previous,
     discovery: { found7d: c7.length, registered7d: c7.filter((c) => c.status === "registered").length, held7d: c7.filter((c) => c.status === "pending").length },
   };
 }

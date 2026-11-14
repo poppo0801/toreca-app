@@ -80,7 +80,7 @@ describe("9C-3 自律型の情報収集計画", () => {
   });
   it("検索・画像解析は、世界（承認・設定）に無ければツールとして登録されない（有料APIを勝手に使わない）", () => {
     const names = buildPlannerTools(world()).names();
-    expect(names).toEqual(["get_signals", "check_official_site", "follow_external_link", "match_existing_lotteries"]);
+    expect(names).toEqual(["get_signals", "check_official_site", "follow_external_link", "assess_source_candidate", "match_existing_lotteries"]);
     const withSearch = buildPlannerTools(world({ search: async () => [] })).names();
     expect(withSearch).toContain("search_public_web");
   });
