@@ -50,6 +50,8 @@ test("調査状況: プレビュー調査を実行すると、履歴・経過・
   await expect(detail).toContainText("get_signals");
   await expect(detail).toContainText("check_official_site");
   await expect(detail).toContainText("目的:");
+  // 行動を決めたのは誰か（9E）: 実AIなしの調査は「固定の方針」
+  await expect(detail).toContainText("決めたのは: 固定の方針");
   await expect(detail).toContainText("調査先: https://e2e9d.example.invalid/");
   // 外部アクセスはオフ: 取得できない理由が「止めたもの」に出る（アクセス制限・ログインの回避はしない）
   await expect(detail).toContainText("止めたもの・エラー");

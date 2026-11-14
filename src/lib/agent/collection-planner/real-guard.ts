@@ -106,19 +106,18 @@ export class RealRunGuard {
 
   /** Messages API のクライアントを包む。呼び出しの前に費用の見込みを確認し、後で実際の使用量を台帳へ記録する */
   wrapClient(client: Client, kind: LedgerEntry["kind"] = "agent"): Client {
-    const guard = this;
     return {
       messages: {
         create: async (params: Anthropic.MessageCreateParamsNonStreaming, options?: Anthropic.RequestOptions) => {
-          const worst = estimateCostJpy(guard.o.model, estimateInputTokens(params), params.max_tokens) ?? 0;
-          guard.precheck(worst);
+          const worst = estimateCostJpy(this.o.model, estimateInputTokens(params), params.max_tokens) ?? 0;
+          this.precheck(worst);
           try {
             const res = (await client.messages.create(params, options)) as Anthropic.Message;
-            guard.charge(kind, res.usage.input_tokens, res.usage.output_tokens);
+            this.charge(kind, res.usage.input_tokens, res.usage.output_tokens);
             return res;
           } catch (e) {
             if (e instanceof GuardStop) throw e;
-            guard.apiError();
+            this.apiError();
             throw e;
           }
         },
@@ -128,20 +127,19 @@ export class RealRunGuard {
 
   /** 解析エンジン（抽選情報の読み取り）を包む。同じ関門を通し、使用量を台帳へ記録する */
   wrapExtractor(ex: LotteryExtractor): LotteryExtractor {
-    const guard = this;
     return {
       engine: ex.engine,
-      async extract(req: ExtractRequest): Promise<ExtractOutput> {
+      extract: async (req: ExtractRequest): Promise<ExtractOutput> => {
         // 読み取りは出力の上限が8192トークン。最大費用で確認する
-        const worst = estimateCostJpy(guard.o.model, estimateInputTokens(req.text ?? "") + 3000, 8192) ?? 0;
-        guard.precheck(worst);
+        const worst = estimateCostJpy(this.o.model, estimateInputTokens(req.text ?? "") + 3000, 8192) ?? 0;
+        this.precheck(worst);
         try {
           const out = await ex.extract(req);
-          if (out.usage) guard.charge("extract", out.usage.input, out.usage.output);
+          if (out.usage) this.charge("extract", out.usage.input, out.usage.output);
           return out;
         } catch (e) {
           if (e instanceof GuardStop) throw e;
-          guard.apiError();
+          this.apiError();
           throw e;
         }
       },

@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
  * 情報収集エージェントの調査状況（開発用の管理画面。Stage 9D）。調査の状態・調べた情報源・見つけた候補・登録/補完/更新/重複の判定・費用・停止理由を確認する。
  * 既定は「プレビュー」（登録しない）。自動適用は開発環境のみ。実APIは使わない（費用0）。
  */
+const DECIDED: Record<string, string> = { ai: "AIが選択", fixed_policy: "固定の方針", review_feedback: "検証の指摘を受けてAIが選択" };
+const PAGE_KIND: Record<string, string> = { lottery_announcement: "抽選の告知", announcement_index: "告知の一覧", lottery_explainer: "抽選の説明", past_lottery: "終了した抽選", general: "抽選の告知ではないページ" };
 const STATUS: Record<RunRow["status"], { label: string; cls: string }> = {
   running: { label: "調査中", cls: "bg-warning/15 text-warning" },
   completed: { label: "完了", cls: "bg-success/15 text-success" },
@@ -143,6 +145,7 @@ function RunDetailView({ detail, summary }: { detail: RunDetail | null; summary:
               <p>
                 <span className={s.ok ? "text-success" : "text-danger"}>{s.ok ? "成功" : "失敗"}</span> {s.tool} ・ {s.ms}ms ・ {s.costJpy}円
               </p>
+              {s.decidedBy ? <p className="text-muted-foreground">決めたのは: {DECIDED[s.decidedBy] ?? s.decidedBy}{s.rationale ? `（${s.rationale}）` : ""}</p> : null}
               {s.purpose ? <p className="text-muted-foreground">目的: {s.purpose}</p> : null}
               {s.target ? <p className="break-all text-muted-foreground">調査先: {s.target}</p> : null}
               <p className="break-words">{s.resultSummary}</p>
@@ -162,6 +165,7 @@ function RunDetailView({ detail, summary }: { detail: RunDetail | null; summary:
               <p>
                 <strong>{DISPOSITION[p.disposition.kind] ?? p.disposition.kind}</strong> ・ {p.recognized ? [p.chainName, p.storeName, p.products.join("・")].filter(Boolean).join(" / ") : "抽選と認識できず"}
               </p>
+              {p.pageKind ? <p className="text-muted-foreground">ページの種類: {PAGE_KIND[p.pageKind] ?? p.pageKind}</p> : null}
               <p className="text-muted-foreground">{p.disposition.reason}</p>
               {p.missing.length ? <p className="text-muted-foreground">不明のまま保持: {p.missing.join("・")}</p> : null}
               {p.blockers.length ? <p className="text-muted-foreground">登録しない理由: {p.blockers.join("・")}</p> : null}

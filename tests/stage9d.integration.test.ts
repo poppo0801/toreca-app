@@ -39,7 +39,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 9D", () => {
   };
   const BASE = "テスト玩具9D 本店 ハドウシーカー9D 抽選販売 応募受付";
   const noDeadline = () => ({
-    [ROOT]: { title: "テスト玩具9D 公式", text: `抽選販売のご案内 応募 ${BASE}`, links: [{ url: NEWS, text: "抽選販売のお知らせ" }, { url: "https://x.com/toy9d_official", text: "公式X" }] },
+    [ROOT]: { title: "テスト玩具9D 公式", text: `抽選販売のご案内 応募方法 応募フォームから 当選者のみ購入できます ${BASE}`, links: [{ url: NEWS, text: "抽選販売のお知らせ" }, { url: "https://x.com/toy9d_official", text: "公式X" }] },
     [NEWS]: { title: "抽選販売のお知らせ", text: BASE },
   });
   const withDeadline = () => ({
@@ -115,7 +115,7 @@ const tbl = (t: string) => (sys as any).from(t);
     const r = await go("execute");
     if (!r.ok) throw new Error(r.error);
     // 日時が不足している登録済みの抽選を手がかりに、AIが情報源を再確認した
-    expect(r.record.steps.some((s) => s.tool === "check_official_site" && s.target === NEWS)).toBe(true);
+    expect(r.record.steps.some((s) => ["check_official_site", "follow_external_link"].includes(s.tool) && s.target === NEWS)).toBe(true);
     expect((await lots()).length).toBe(before);
     expect(r.applied?.registered).toHaveLength(0);
     expect(r.applied?.completed).toHaveLength(1);

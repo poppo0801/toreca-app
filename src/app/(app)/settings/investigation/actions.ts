@@ -56,6 +56,9 @@ export interface StepRow {
   resultSummary: string;
   found: { kind: string; title: string; url?: string; detail?: string }[];
   nextInfo: string;
+  /** この行動を決めたのは誰か（ai=AIが自分で選んだ／fixed_policy=固定の方針／review_feedback=検証の指摘を受けてAIが選んだ）と、AIが述べた理由（Stage 9E） */
+  decidedBy?: string | null;
+  rationale?: string | null;
 }
 export interface CandidateRow {
   id: string;
@@ -70,7 +73,7 @@ export interface CandidateRow {
 }
 export interface RunDetail {
   steps: StepRow[];
-  previews: { url: string; recognized: boolean; chainName: string; storeName: string; products: string[]; applyDeadline: string | null; missing: string[]; disposition: { kind: string; reason: string }; registrable: boolean; blockers: string[] }[];
+  previews: { url: string; recognized: boolean; chainName: string; storeName: string; products: string[]; applyDeadline: string | null; missing: string[]; disposition: { kind: string; reason: string }; registrable: boolean; blockers: string[]; pageKind?: string; pageKindReason?: string }[];
   findings: { kind: string; title: string; url?: string; evidence: string }[];
   rejected: { item: string; reason: string }[];
   stops: string[];
@@ -117,12 +120,13 @@ export async function loadRunDetailAction(runId: string): Promise<R<{ detail: Ru
     anyDb(c.db).from("agent_investigation_steps").select("seq,tool,purpose,target,ok,ms,cost_jpy,result_summary,found,next_info").eq("run_id", runId).eq("household_id", c.householdId).order("seq"),
   ]);
   if (!run.data) return { ok: false, error: "調査の記録が見つかりません" };
-  const res = (run.data.result ?? {}) as Partial<RunDetail> & { applied?: AppliedSummary | null };
+  const res = (run.data.result ?? {}) as Partial<RunDetail> & { applied?: AppliedSummary | null; decisions?: { seq: number; by: string | null; why: string | null }[] };
+  const decisions = new Map((res.decisions ?? []).map((d) => [d.seq, d]));
   const ev = (run.data.evaluation ?? {}) as { metrics?: RunDetail["metrics"]; adjustments?: string[] };
   return {
     ok: true,
     detail: {
-      steps: ((steps.data ?? []) as { seq: number; tool: string; purpose: string; target: string; ok: boolean; ms: number; cost_jpy: number | string; result_summary: string; found: StepRow["found"]; next_info: string }[]).map((s) => ({ seq: s.seq, tool: s.tool, purpose: s.purpose, target: s.target, ok: s.ok, ms: s.ms, costJpy: Number(s.cost_jpy), resultSummary: s.result_summary, found: Array.isArray(s.found) ? s.found : [], nextInfo: s.next_info })),
+      steps: ((steps.data ?? []) as { seq: number; tool: string; purpose: string; target: string; ok: boolean; ms: number; cost_jpy: number | string; result_summary: string; found: StepRow["found"]; next_info: string }[]).map((s) => ({ seq: s.seq, tool: s.tool, purpose: s.purpose, target: s.target, ok: s.ok, ms: s.ms, costJpy: Number(s.cost_jpy), resultSummary: s.result_summary, found: Array.isArray(s.found) ? s.found : [], nextInfo: s.next_info, decidedBy: decisions.get(s.seq)?.by ?? null, rationale: decisions.get(s.seq)?.why ?? null })),
       previews: res.previews ?? [],
       findings: res.findings ?? [],
       rejected: res.rejected ?? [],

@@ -62,6 +62,10 @@ const compact = (r: InvestigationRecord) => ({
   pages: r.pages,
   stops: r.stops,
   injectionFlags: r.injectionFlags,
+  // 行動を決めたのは誰か・理由（Stage 9E）／AIの判断と固定ロジックの照合／検証の指摘による追加調査の回数
+  decisions: r.steps.map((s) => ({ seq: s.seq, by: s.decidedBy ?? null, why: s.rationale ?? null })),
+  agreement: r.agreement,
+  followUps: r.followUps,
 });
 
 /** 調査の記録を保存する（実行中の記録を作る → 完了時に更新）。ページ全文・個人情報・認証情報は保存しない */
@@ -78,7 +82,7 @@ export async function finishRun(db: Db, householdId: string, runId: string, r: I
       status: r.status === "failed" ? "failed" : r.status === "limit_reached" ? "limit_reached" : "completed",
       stop_reason: r.stopReason.slice(0, 300),
       finished_at: new Date().toISOString(),
-      usage: { ...r.usage, analyses, totalMs: r.totalMs, costJpy: r.usage.costJpy + r.previews.reduce((a, p) => a + p.costJpy, 0) } as unknown as Json,
+      usage: { ...r.usage, analyses, totalMs: r.totalMs, costJpy: r.usage.costJpy } as unknown as Json,
       result: { ...compact(r), applied: extra.applied ?? null } as unknown as Json,
       evaluation: r.evaluation as unknown as Json,
       summary: r.summary.slice(0, 600),
