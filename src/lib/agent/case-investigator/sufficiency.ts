@@ -67,8 +67,8 @@ export function assess(ledger: CaseLedger, ceilings: Ceilings): Sufficiency {
   const conflicts = records.filter((r) => r.state === "conflict").map((r) => r.field);
   const weak = required.filter((f) => present(rec(f)) && ["unverified"].includes(rec(f).state));
   const primaryOk = ledger.hasPrimaryFetched();
-  // 登録済みの情報源（公式ページ）が取得できなかった = 公式情報が取得不能
-  const primaryFailed = ledger.failedPrimary().length > 0;
+  // 登録済みの情報源（公式ページ・告知のURL）が取得できず、一次情報も得られていない = 公式情報が取得不能（9H-2: 登録された情報源が公式でなくても、取得できず一次情報がなければ代替の探索を許可する）
+  const primaryFailed = ledger.failedAny().length > 0;
   const situations: Situation[] = [];
   if (conflicts.length) situations.push("conflict");
   if (!primaryOk && primaryFailed) situations.push("official_unavailable");

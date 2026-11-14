@@ -30,7 +30,7 @@ export interface CaseTarget {
   knownSources: { url: string; kind: CaseSourceKind }[];
 }
 
-export type SourceStatus = "fetched" | "failed" | "different_lottery" | "quarantined";
+export type SourceStatus = "fetched" | "failed" | "different_lottery" | "quarantined" | "unreported";
 export interface SourceRecord {
   url: string;
   kind: CaseSourceKind;
@@ -164,7 +164,8 @@ export class CaseLedger {
   }
 
   recordFetchOk(rec: Omit<SourceRecord, "status" | "contributed" | "quotes" | "identity">): SourceRecord {
-    const r: SourceRecord = { ...rec, status: "quarantined", contributed: [], quotes: {} };
+    // 取得できたが、まだAIから報告されていない（報告があれば、同一抽選の照合で fetched / different_lottery / quarantined になる）
+    const r: SourceRecord = { ...rec, status: "unreported", contributed: [], quotes: {} };
     this.sources.set(urlKey(rec.url), r);
     return r;
   }
@@ -223,7 +224,9 @@ export class CaseLedger {
       else groups.push([e]);
     }
     const refOf = (e: Entry) => ({ url: e.sourceUrl, kind: e.kind, tier: e.tier, ...(e.basis ? { basis: e.basis } : {}), quote: e.quote, at: e.at });
-    const origins = (g: Entry[]) => new Set(g.filter((e) => !e.seed).map((e) => e.origin)).size;
+    // 独立した裏付けの数: 一次情報は出どころごと。二次情報は、まとめサイト・検索で見つけた第三者のページ・SNSの投稿どうしが同じ元の告知を写している可能性が高いため、
+    // 「まとめ類」を1つにまとめて数える（URLが違うだけで独立とは数えない）。応募サービスの主催者本文は別の種類として1つと数える（9H-2: まとめサイト2件だけで「確定」になっていた）
+    const origins = (g: Entry[]) => new Set(g.filter((e) => !e.seed).map((e) => (e.tier === "primary" ? `p:${e.origin}` : e.kind === "platform" ? "platform" : "summary"))).size;
     const hasPrimary = (g: Entry[]) => g.some((e) => e.tier === "primary" && !e.seed);
     const valueOfGroup = (g: Entry[]): string => {
       if (isDateField(field)) {

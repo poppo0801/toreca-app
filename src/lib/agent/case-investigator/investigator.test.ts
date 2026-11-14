@@ -129,7 +129,10 @@ describe("9H-1 シナリオ4: 複数情報源の項目単位の統合", () => {
     add("https://matome.example.invalid/f", "aggregator", "u:https://origin.example.invalid/post", facts, o);
     expect(l.resolve("applyDeadline")).toMatchObject({ independentOrigins: 1, state: "unverified" });
     add("https://matome.example.invalid/g", "aggregator", "u:other", facts, o);
-    expect(l.resolve("applyDeadline")).toMatchObject({ independentOrigins: 2, state: "confirmed" });
+    // まとめサイトどうし（出どころのURLが違っても）は、同じ元の告知を写している可能性が高いため、独立した裏付けとは数えない
+    expect(l.resolve("applyDeadline")).toMatchObject({ independentOrigins: 1, state: "unverified" });
+    add("https://livepocket.jp/e/z", "platform", "u:platform", facts, o);
+    expect(l.resolve("applyDeadline")).toMatchObject({ independentOrigins: 2, state: "confirmed" }); // 主催者の応募サービスのページ＋まとめ類で2つ
   });
   it("商品が7件（本文）と4件（画像）のように一方が他方を含むときは、矛盾にせず和集合で統合する", () => {
     const { l, add } = mk();
@@ -163,7 +166,7 @@ describe("9H-1 シナリオ5: 矛盾する情報を無条件に採用しない",
     l.integrate("https://a.example.invalid/1", facts, [{ field: "applyDeadline", value: "2026-11-13 11:59", quote: "q", sourceUrl: "https://a.example.invalid/1" }]);
     l.recordFetchOk({ url: "https://b.example.invalid/2", kind: "aggregator", tier: "secondary", fetchedAt: "t", origin: "u:2", derivedFrom: null, injection: false });
     l.integrate("https://b.example.invalid/2", facts, [{ field: "applyDeadline", value: "2026-11-13 12:00", quote: "q", sourceUrl: "https://b.example.invalid/2" }]);
-    expect(l.resolve("applyDeadline")).toMatchObject({ state: "confirmed", adopted: "2026-11-13 11:59" });
+    expect(l.resolve("applyDeadline")).toMatchObject({ state: "unverified", adopted: "2026-11-13 11:59" }); // 矛盾にはならないが、まとめ類どうしは独立と数えないので未確認
     const m = new CaseLedger(target({ knownSources: [] }), () => "t");
     m.recordFetchOk({ url: "https://s.example.invalid/old", kind: "store_official", tier: "primary", fetchedAt: "t", publishedAt: "2026-11-10T00:00:00Z", origin: "u:old", derivedFrom: null, injection: false, account: "s" });
     m.integrate("https://s.example.invalid/old", facts, [{ field: "applyDeadline", value: "2026-11-15 12:00", quote: "q", sourceUrl: "x" }]);
@@ -310,5 +313,21 @@ describe("9H-1 根拠の検証と蓄積", () => {
     expect(rankingHint(mem, "official.example.invalid")).toBeLessThan(0);
     expect(rankingHint(mem, "x.com")).toBeGreaterThan(0);
     expect(rankingHint(mem, "unknown.example.invalid")).toBe(0);
+  });
+});
+
+describe("9H-2 実評価で見つかった誤統合の再発防止", () => {
+  it("系列が不明な案件では、商品名だけが一致する別の店舗・別の回の告知を同一と認めず保留にする", () => {
+    const t = { products: ["ハドウシーカー"], applyDeadline: "2026-11-16 20:59" };
+    expect(matchIdentity(t, { chain: "別の系列", store: "札幌店", products: ["ハドウシーカー"], applyDeadline: "2026-11-08" }).verdict).toBe("unknown");
+    expect(matchIdentity(t, { chain: "別の系列", products: ["ハドウシーカー"], applyDeadline: "2026-11-16 20:58" }).verdict).toBe("same"); // 商品＋応募締切が一致
+    expect(matchIdentity({ ...t, store: "葛西店" }, { products: ["ハドウシーカー"], store: "葛西店" }).verdict).toBe("same"); // 商品＋店舗が一致
+  });
+  it("登録された情報源が取得できず一次情報もないときは、公式が一次でなくても代替の探索を許可する", () => {
+    const l = new CaseLedger(target({ knownSources: [{ url: "https://x.com/a/status/1", kind: "social_other" }] }), () => "t");
+    l.recordFetchFail("https://x.com/a/status/1", "social_other", "secondary", "robots_blocked", "robots");
+    const s = assess(l, { maxFetches: 6, maxSearches: 3 });
+    expect(s.situation).toBe("official_unavailable");
+    expect(s.policy.maxSearches).toBe(3);
   });
 });

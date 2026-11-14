@@ -64,7 +64,9 @@ export function matchIdentity(target: IdentityFacts, page: IdentityFacts): Ident
     else if (gap > OTHER_ROUND_DAYS) mismatched.push("応募期間（別の回の可能性）");
   }
   if (mismatched.length) return { verdict: "different", matched, mismatched };
-  // 一致の裏づけ: 系列か商品のどちらかが一致していること（店舗・期間の一致だけでは足りない）
-  if (matched.includes("系列") || matched.includes("商品")) return { verdict: "same", matched, mismatched };
+  // 一致の裏づけ: 系列が一致している、または（系列を比べられないときは）商品が一致し、かつ応募締切か店舗も一致していること。
+  // 商品名だけの一致は、同じ商品を扱う別の店舗・別の回の抽選を混ぜる原因になる（9H-2の評価で、系列が不明な案件に別の店舗の告知が統合された）ため、同一とは認めず保留にする
+  if (matched.includes("系列")) return { verdict: "same", matched, mismatched };
+  if (matched.includes("商品") && (matched.includes("応募締切") || matched.includes("店舗"))) return { verdict: "same", matched, mismatched };
   return { verdict: "unknown", matched, mismatched };
 }

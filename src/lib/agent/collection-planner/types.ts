@@ -140,6 +140,8 @@ export interface PlannerWorld {
   fetchPage(url: string): Promise<{ ok: boolean; title?: string; text?: string; links?: { url: string; text: string }[]; reason?: string; /** 告知日時・更新日時（取得できたとき。Stage 9H） */ publishedAt?: string }>;
   /** 公開検索（有料API・未承認のときは未設定にする）。未設定なら検索ツールは登録されない */
   search?(query: string): Promise<{ title: string; url: string; snippet: string }[]>;
+  /** 直前の検索の費用（円。実検索のときだけ。Stage 9H-2。調査の費用の上限に数える） */
+  lastSearchCostJpy?(): number;
   /** 投稿画像の読み取り（画像の文字起こし。外部AIを使う場合は費用が発生するため承認制） */
   readImage?(url: string): Promise<{ text: string }>;
   /** 取得したページの解析プレビュー（読み取りのみ。解析エンジンが設定されているときだけ登録される） */

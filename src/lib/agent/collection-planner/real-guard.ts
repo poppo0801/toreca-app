@@ -21,7 +21,7 @@ export class GuardStop extends Error {
 
 export interface LedgerEntry {
   caseId: string;
-  kind: "agent" | "extract";
+  kind: "agent" | "extract" | "search";
   jpy: number;
   inputTokens: number;
   outputTokens: number;
@@ -95,6 +95,13 @@ export class RealRunGuard {
     this.consecutiveErrors = 0;
     this.persist();
     return jpy;
+  }
+  /** トークン料金以外の費用（外部検索の料金など。Stage 9H-2）を台帳へ記録する。呼び出しの前に precheck で最大費用を確認すること */
+  chargeJpy(kind: LedgerEntry["kind"], jpy: number): void {
+    this.spent += jpy;
+    this.caseSpent += jpy;
+    this.entries.push({ caseId: this.caseId, kind, jpy, inputTokens: 0, outputTokens: 0 });
+    this.persist();
   }
   apiError(): void {
     this.consecutiveErrors += 1;

@@ -51,6 +51,11 @@ export interface StepRecord {
   situationBefore: Situation | null;
   resultSummary: string;
   rationale?: string;
+  /** 実行後の不足・矛盾の項目（不足情報の変化の記録。Stage 9H-2） */
+  missingAfter?: string[];
+  conflictsAfter?: string[];
+  /** 構造化した結果: 検索結果の一覧・取得した情報源の分類・報告の採用/不採用/統合しなかった理由（原文は保存しない） */
+  detail?: unknown;
 }
 export interface PolicyChange {
   atStep: number;
@@ -88,6 +93,7 @@ export const INVESTIGATOR_SYSTEM = `あなたは、トレーディングカー�
 - まず get_case_state で、調べている抽選の識別情報・項目ごとの状況（確定/未確認/矛盾）・不足・調査量の方針を読む。調査の途中でも、状況が変わったら読み直して方針を決め直す。
 - 状況に応じて調査量を変える。公式情報が十分に確認できているなら、最小限の裏付けだけで終える。一部の項目が不足しているなら、その項目だけを調べる。矛盾があるなら、更新・訂正の告知を優先して探す。公式情報が取得できないなら、検索語を考えて代替の情報源（公式X・店舗の告知・応募ページ・抽選まとめ）を探す。二次情報しかないなら、出どころが独立した情報源で照合する。
 - 検索語・調べる先・順序は、あなたが選ぶ。結果を見て検索語を変える。同じ検索語・同じURLは使えない。
+- 調査量の割り当ては、状況で自動的に変わる。取得に失敗した（公式が取得できない）・不足や矛盾が見つかったときは割り当てが増える。ツールの結果に付く「最新の調査方針」を毎回確認し、開始時の割り当てだけで調査を諦めない。
 - ページを取得したら、読み取れた項目だけを report_page_findings で報告する。各項目に、そのページの本文にそのまま書かれた短い抜粋を付ける。書かれていない項目は報告しない（推測しない）。そのページが調べている抽選と同じ企画かを判断できるよう、ページの系列・店舗・商品・応募期間も identity に入れる。別の抽選（別の商品・別の回・別の店舗）の情報は混ぜない。
 - 転載・引用のページは、出どころが同じなら独立した裏付けにならない。元の告知（一次情報）を探して確認する。
 - 「公式だから正しい」「複数のサイトに書いてあるから正しい」とは考えない。公式でも古い・別の回の情報があり得る。
@@ -149,11 +155,15 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
       ...t,
       async run(input, ctx) {
         const before = built.current().situation;
-        const rec = (ok: boolean, summary: string) => steps.push({ seq: steps.length, tool: name, purpose: short(String(input.purpose ?? ""), 200), target: short(String(input.url ?? input.query ?? ""), 300), ok, situationBefore: before, resultSummary: short(summary, 300) });
+        const rec = (ok: boolean, summary: string, detail?: unknown) => {
+          const a = assess(ledger, ceilings);
+          steps.push({ seq: steps.length, tool: name, purpose: short(String(input.purpose ?? ""), 200), target: short(String(input.url ?? input.query ?? ""), 300), ok, situationBefore: before, resultSummary: short(summary, 300), missingAfter: a.missing.map(String), conflictsAfter: a.conflicts.map(String), ...(detail !== undefined ? { detail } : {}) });
+        };
         try {
           const r = await t.run(input, ctx);
-          const d = (r.data ?? {}) as { failed?: boolean; reason?: string };
-          rec(!d.failed, d.failed ? String(d.reason ?? "失敗") : r.content.replace(/<[^>]+>/g, "").replace(/\s+/g, " "));
+          const d = (r.data ?? {}) as { failed?: boolean; reason?: string; results?: unknown; sourceKind?: string; identity?: unknown; accepted?: unknown; rejected?: unknown; skipped?: unknown; failKind?: string };
+          const detail = d.results ? { results: d.results } : d.identity ? { identity: d.identity, accepted: d.accepted, rejected: d.rejected, skipped: d.skipped } : d.sourceKind ? { sourceKind: d.sourceKind } : d.failKind ? { failKind: d.failKind } : undefined;
+          rec(!d.failed, d.failed ? String(d.reason ?? "失敗") : r.content.replace(/<[^>]+>/g, "").replace(/\s+/g, " "), detail);
           return r;
         } catch (e) {
           rec(false, (e as Error).message ?? "失敗");
@@ -188,6 +198,18 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     },
   });
   aiFinish = parseFinish(run.output) ?? aiFinish;
+  // AIが各行動の前に書いた判断の理由（実AIのとき。モックは書かない）を、実行順に対応づけて記録する
+  {
+    let text = "";
+    let idx = 0;
+    for (const e of run.trace) {
+      if (e.t === "step") text = e.text ?? "";
+      else if (e.t === "tool" && steps[idx]) {
+        if (text) steps[idx].rationale = short(text, 300);
+        idx += 1;
+      }
+    }
+  }
   const final = assess(ledger, ceilings);
 
   // 終了理由: システムの上限が最優先。次に台帳の状況（AIの「十分」の申告だけでは十分にしない）

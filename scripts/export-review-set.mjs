@@ -15,6 +15,14 @@ const opt = (name, def) => args.find((a) => a.startsWith(`--${name}=`))?.split("
 const total = Math.max(5, Math.min(60, Number(opt("count", "30")) || 30));
 const withBody = args.includes("--with-body");
 const dupGroupsWanted = Number(opt("dup-groups", "3"));
+// Stage 9H-2: 評価済みの事例を除いて選ぶ（未使用の新規事例の書き出し）。--exclude-answers=<評価結果.json>（ローカルのファイルを読むだけ）
+const excludeFile = opt("exclude-answers", "");
+const excludedCaseIds = new Set();
+if (excludeFile) {
+  const a = JSON.parse((await import("node:fs")).readFileSync(excludeFile, "utf8"));
+  for (const r of a.results ?? []) excludedCaseIds.add(r.caseId);
+  console.log(`評価済みの事例 ${excludedCaseIds.size}件を除いて選びます`);
+}
 
 const isProd = process.env.TOREMANE_TARGET === "production";
 if (!isProd) {
@@ -44,7 +52,8 @@ async function all(table, cols, filter = (q) => q) {
 }
 
 // 1) 軽量な候補一覧（本文・草稿なし）
-const lite = await all("collection_candidates", "id,status,triage,triage_reason,reasons,kind,source_url,dedupe_key,origin_host,service_host,lottery_id,created_at,fetched_at,title");
+const liteAll = await all("collection_candidates", "id,status,triage,triage_reason,reasons,kind,source_url,dedupe_key,origin_host,service_host,lottery_id,created_at,fetched_at,title");
+const lite = liteAll.filter((c) => !excludedCaseIds.has(`k-${String(c.id).slice(0, 8)}`));
 
 // 2) 特殊事例（店舗選択式・複数商品・店舗不明）の判定には草稿が必要。対象の状態の草稿だけ読む（メモリ上のみ。選ばなかった事例は出力しない）
 const draftRows = await all("collection_candidates", "id,draft", (q) => q.in("status", ["auto_registered", "pending", "duplicate"]));

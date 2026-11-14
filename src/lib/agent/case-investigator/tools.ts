@@ -68,7 +68,7 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
     situation: s.situation,
     situations: s.situations,
     done: s.done,
-    policy: { ...s.policy, fetchesLeft: Math.max(0, s.policy.maxFetches - counts.fetches), searchesLeft: Math.max(0, s.policy.maxSearches - counts.searches) },
+    policy: { ...s.policy, fetchesLeft: Math.max(0, s.policy.maxFetches - counts.fetches), searchesLeft: Math.max(0, s.policy.maxSearches - counts.searches), note: "この割り当ては状況に応じて自動で増減します（取得に失敗した・不足や矛盾が見つかったときは増え、十分になれば減ります）。調査の結果ごとに最新の方針が返ります。現在の割り当てだけで諦めず、結果に付く最新の方針を確認してください" },
     missing: s.missing.map((f) => FIELD_LABEL[f]),
     conflicts: s.conflicts.map((f) => FIELD_LABEL[f]),
     gaps: s.gaps.slice(0, 10),
@@ -77,7 +77,8 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
     const inj = detectInjection(text);
     return { content: wrapUntrusted(text.slice(0, 4000) + tail, source), untrusted: true, data: inj.length ? { injection: inj } : undefined };
   };
-  const refuse = (reason: string, extra: object = {}): ToolOutput => ({ content: `取得できません: ${reason}`, data: { failed: true, reason, ...extra } });
+  // 拒否・失敗の結果にも、最新の状況と調査量の方針（残りの取得・検索回数）を付ける。失敗で状況が変わり割り当てが増えても、AIが読み直さずに「もう調べられない」と誤解しないため（9H-2の第1段階で判明）
+  const refuse = (reason: string, extra: object = {}): ToolOutput => ({ content: `取得できません: ${reason}\n[最新の調査方針] ${JSON.stringify({ situation: last.situation, fetchesLeft: Math.max(0, last.policy.maxFetches - counts.fetches), searchesLeft: Math.max(0, last.policy.maxSearches - counts.searches), missing: last.missing.map((f) => FIELD_LABEL[f]), conflicts: last.conflicts.map((f) => FIELD_LABEL[f]), note: "状況が変わると割り当ては自動で増減します。代替の情報源を探すときは search_public_web を使えます" })}`, data: { failed: true, reason, ...extra } });
 
   reg.register({
     name: "get_case_state",
@@ -111,7 +112,7 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       access: "read_external",
       consumes: "search",
       dedupeKey: (i) => String(i.query ?? "").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim(),
-      async run(input) {
+      async run(input, ctx) {
         const q = String(input.query ?? "");
         const safe = queryIsSafe(q, o.privateTerms);
         if (!safe.ok) return refuse(safe.reason, { unsafeQuery: true });
@@ -119,8 +120,11 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
         counts.searches += 1;
         queries.push(q);
         const rs = await search(q);
+        // 実検索の費用（外部検索の料金）は、この調査の費用の上限に数える
+        ctx.budget.addCost(o.world.lastSearchCostJpy?.() ?? 0);
         for (const r of rs.slice(0, 8)) if (/^https?:\/\//.test(r.url)) searchResults.set(norm(r.url), { title: r.title, snippet: r.snippet, query: q });
-        return untrusted(rs.slice(0, 8).map((r) => `${r.title} ${r.url}\n${r.snippet}`).join("\n\n") || "（結果なし）", "search");
+        const out = untrusted(rs.slice(0, 8).map((r) => `${r.title} ${r.url}\n${r.snippet}`).join("\n\n") || "（結果なし）", "search");
+        return { ...out, data: { ...(out.data as object | undefined), results: rs.slice(0, 8).map((r) => ({ title: r.title, url: r.url })) } };
       },
     } satisfies AgentTool);
   }
