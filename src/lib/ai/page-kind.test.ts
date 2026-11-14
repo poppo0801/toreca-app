@@ -36,6 +36,9 @@ describe("classifyPage", () => {
     const text = "「30th CELEBRATION」関連商品 抽選への今後の手続き・お問い合わせについて\n抽選作業が完了し、順次当選者様へ当選メールをお送りしております。\n当選者様 店頭予約期間： 8月24日 ～ 9月6日 お一人様 1BOX";
     expect(classifyPage({ text })).toMatchObject({ kind: "past_lottery", actionable: false });
   });
+  it("「抽選販売」よくあるお問い合わせ（応募期間なし）は、タイトルに抽選販売の語があっても説明", () => {
+    expect(classifyPage({ text: "お知らせ：「抽選販売」よくあるお問い合わせについて\n抽選販売の期間中は多くのお問い合わせをいただきます。Pontaカードの登録氏名の変更について…" })).toMatchObject({ kind: "lottery_explainer", actionable: false });
+  });
   it("商品紹介・店舗案内など抽選に触れないページは対象外", () => {
     expect(classifyPage({ text: "ハドウシーカー 商品情報\n発売日 11月27日 価格 6,000円 収録 30パック入り" })).toMatchObject({ kind: "general", actionable: false });
     expect(classifyPage({ text: "津田沼店 店舗情報 営業時間 11:00〜20:00 アクセス JR津田沼駅" })).toMatchObject({ kind: "general", actionable: false });

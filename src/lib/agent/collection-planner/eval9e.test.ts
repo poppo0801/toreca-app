@@ -39,15 +39,15 @@ describe("Stage 9E: 抽選ではないページの誤認識（実在のページ
     expect(before.fn).toBe(0);
   });
   it("新方式は、実在の抽選の告知を見落とさず、抽選ではないページを登録の対象にしない", () => {
-    expect(after.fn).toBe(0);
-    expect(after.fp).toBe(0);
-    expect(after.scored).toBeGreaterThanOrEqual(80);
     if (process.env.WRITE_EVAL === "1") {
       mkdirSync("eval/runs/investigation-9e", { recursive: true });
       const bySet = (sc: typeof after, f: (g: (typeof gold)[number]) => boolean) => scoreClassification(gold.filter(f), (u) => (sc === before ? legacy(u) : current(u)));
-      const sets = ["real", "live1", "live2"].map((s) => ({ set: s, before: bySet(before, (g) => g.set === s), after: bySet(after, (g) => g.set === s) }));
+      const sets = ["real", "live1", "live2", "live3"].map((s) => ({ set: s, before: bySet(before, (g) => g.set === s), after: bySet(after, (g) => g.set === s) }));
       writeFileSync("eval/runs/investigation-9e/page-class.json", JSON.stringify({ before, after, sets }, null, 1));
     }
+    expect(after.fn).toBe(0);
+    expect(after.fp).toBe(0);
+    expect(after.scored).toBeGreaterThanOrEqual(80);
   });
 });
 

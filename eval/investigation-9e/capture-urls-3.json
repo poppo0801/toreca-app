@@ -1,0 +1,19 @@
+{
+  "note": "9E バッチ3（ホールドアウト）: ページ判定の調整・正解作成のあとに取得した、見ていないページ。評価のための取得（robots尊重・1.5秒間隔・無料）",
+  "urls": [
+    "https://www.c-labo.jp/shop/fukuokatenjin/blog/624514/",
+    "https://www.c-labo.jp/shop/tennouji/blog/624505/",
+    "https://www.c-labo.jp/shop/hakatamarui/blog/624493/",
+    "https://www.c-labo.jp/shop/oita/blog/624460/",
+    "https://www.c-labo.jp/shop/tennouji/blog/624458/",
+    "https://www.c-labo.jp/shop/tennouji/blog/624454/",
+    "https://geo-online.co.jp/news/787",
+    "https://geo-online.co.jp/news/732",
+    "https://geo-online.co.jp/news/776",
+    "https://geo-online.co.jp/news/723",
+    "https://www.pokemon-card.com/info/005629.html",
+    "https://www.pokemon-card.com/info/005612.html",
+    "https://www.pokemoncenter-online.com/news/?id=20260929",
+    "https://www.pokemon-team-masters.com/pages/news/news-detail/news-detail?id=8"
+  ]
+}

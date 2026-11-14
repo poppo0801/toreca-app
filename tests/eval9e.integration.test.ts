@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Stage 9E: 自律調査の評価（開発用ローカルDB・凍結した実在ページの再生。取得は外部に出ない）
  *   既定（無料）: 固定の方針（adaptive-scout）＋無料のルール抽出で全シナリオを実行し、誤登録が無いことを検証する。
@@ -19,6 +20,7 @@ import { getExtractor } from "@/lib/ai/provider";
 import { EMPTY_FLEX } from "@/lib/lottery-input";
 import type { Db } from "@/lib/server/lottery-service";
 import { createInvestigationWorld } from "@/lib/server/agent/investigation-world";
+import { runInvestigation } from "@/lib/server/agent/investigation-run";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 import { saveLegacy } from "./helpers/legacy";
 
@@ -29,6 +31,8 @@ const LABEL = process.env.E9E_LABEL ?? (REAL ? "real" : "free");
 const ids = (process.env.E9E_SCENARIOS ?? "S01,S02,S03,S04,S05,S06,S07,S08,M1").split(",").filter(Boolean);
 const REPEAT = Number(process.env.E9E_REPEAT ?? 1);
 const LEDGER = `${OUT}/ledger.json`;
+/** 実際の公開サイトへ取得する（robots.txt尊重・同一サイト3回・1.5秒間隔・登録しない dry-run）。凍結ページの再生ではない */
+const LIVE = process.env.E9E_LIVE === "1";
 
 interface Spec {
   master: { chains: { name: string; aliases: string[]; storeUrl: string; stores: string[] }[]; products: string[] };
@@ -100,29 +104,32 @@ describe.skipIf(!dbTestsEnabled)(`Stage 9E 自律調査の評価（${REAL ? "実
     return { hid, registeredIds: undefined as undefined };
   }
 
+  /** 実API評価のときは実AIの頭脳・解析エンジン（同じ費用の関門を通す）。無料のときは固定の方針＋ルール抽出 */
+  function brainFor(caseId: string): { llm: AgentLLM; extractor: ReturnType<typeof getExtractor>; system?: string; task?: string; maxReviews: number } {
+    if (!(REAL && guard && realCfg)) return { llm: new AdaptiveScoutBrain(), extractor: null, maxReviews: 0 };
+    guard.startCase(caseId);
+    const client = guard.wrapClient(new Anthropic({ apiKey: realCfg.apiKey, maxRetries: 0, timeout: 60_000 }), "agent");
+    // 解析エンジンも実AI（本番と同じ読み取りのプロンプト）。同じ関門を通す
+    const ex = getExtractor({ ANTHROPIC_API_KEY: realCfg.apiKey, AI_MODEL: realCfg.model });
+    // 切り分け（ablation）: E9E_BRAIN=fixed で頭脳だけ固定の方針、E9E_EXTRACT=rule で解析だけルール抽出（既定は両方とも実AI）
+    const fixedBrain = process.env.E9E_BRAIN === "fixed";
+    return {
+      llm: fixedBrain ? new AdaptiveScoutBrain() : createRealBrain(client, realCfg.model),
+      extractor: process.env.E9E_EXTRACT === "rule" ? null : ex ? guard.wrapExtractor(ex) : null,
+      system: fixedBrain ? undefined : process.env.E9E_SYSTEM_FILE ? readFileSync(process.env.E9E_SYSTEM_FILE, "utf8") : INVESTIGATION_SYSTEM,
+      task: fixedBrain ? undefined : INVESTIGATION_TASK,
+      maxReviews: fixedBrain || process.env.E9E_REVIEWS === "0" ? 0 : 1,
+    };
+  }
+
   async function run(sc: Spec["scenarios"][number], hid: string, label: string, run: number): Promise<InvestigationRecord> {
     const d = resolveControls({ runsToday: 0, costTodayJpy: 0, workerDailyAiLimit: 30, aiCallsToday: 0 }, { mode: "dry_run", realApi: REAL });
     if (!d.ok) throw new Error(d.reason);
-    const controls = { ...d.controls, throttle: { ...d.controls.throttle, minIntervalMs: 0 } };
-    let llm: AgentLLM = new AdaptiveScoutBrain();
-    let extractor = null as ReturnType<typeof getExtractor>;
-    let system: string | undefined;
-    let task: string | undefined;
-    let maxReviews = 0;
-    if (REAL && guard && realCfg) {
-      guard.startCase(`${sc.id}#${run}`);
-      const client = guard.wrapClient(new Anthropic({ apiKey: realCfg.apiKey, maxRetries: 0, timeout: 60_000 }), "agent");
-      llm = createRealBrain(client, realCfg.model);
-      // 解析エンジンも実AI（本番と同じ読み取りのプロンプト）。同じ関門を通す
-      const ex = getExtractor({ ANTHROPIC_API_KEY: realCfg.apiKey, AI_MODEL: realCfg.model });
-      extractor = ex ? guard.wrapExtractor(ex) : null;
-      system = process.env.E9E_SYSTEM_FILE ? readFileSync(process.env.E9E_SYSTEM_FILE, "utf8") : INVESTIGATION_SYSTEM;
-      task = INVESTIGATION_TASK;
-      maxReviews = process.env.E9E_REVIEWS === "0" ? 0 : 1;
-    }
-    const { world } = createInvestigationWorld({ db: sys, householdId: hid, now: NOW, live: true, fetcher, extractor });
+    const controls = LIVE ? d.controls : { ...d.controls, throttle: { ...d.controls.throttle, minIntervalMs: 0 } };
+    const { llm, extractor, system, task, maxReviews } = brainFor(`${sc.id}#${run}`);
+    const { world } = createInvestigationWorld({ db: sys, householdId: hid, now: LIVE ? new Date() : NOW, live: true, fetcher: LIVE ? undefined : fetcher, extractor });
     void label;
-    return executeInvestigation({ llm, world, controls, sleep: async () => {}, system, task, maxReviews });
+    return executeInvestigation({ llm, world, controls, sleep: LIVE ? undefined : async () => {}, system, task, maxReviews });
   }
 
   beforeAll(() => {
@@ -194,5 +201,29 @@ describe.skipIf(!dbTestsEnabled)(`Stage 9E 自律調査の評価（${REAL ? "実
     const mis = results.flatMap((r) => r.score.misRegistrations);
     expect(mis, JSON.stringify(mis)).toEqual([]);
     expect(results.length).toBeGreaterThan(0);
+  }, 900_000);
+
+  it.skipIf(!REAL || process.env.E9E_EXEC !== "1")("execute（隔離した開発DB）: 実AIの調査結果を自動反映しても、二重登録・誤登録・誤補完が起きず、応募記録は変わらない", async () => {
+    const sc = spec.scenarios.find((x) => x.id === "M1")!;
+    const { hid } = await seed(90, sc);
+    const before = (await sys.from("lotteries").select("id,store_id,source_kind,apply_deadline_precision,apply_deadline_date").eq("household_id", hid).is("archived_at", null)).data ?? [];
+    const b = brainFor("EXEC-M1");
+    const r = await runInvestigation({ db: sys, householdId: hid, now: NOW, mode: "execute", live: true, actor: null, asService: true, llm: b.llm, extractor: b.extractor, system: b.system, task: b.task, maxReviews: b.maxReviews, realApi: true, fetcher, sleep: async () => {}, minIntervalMs: 0 });
+    if (!r.ok) throw new Error(r.error);
+    const after = (await sys.from("lotteries").select("id,store_id,source_kind,apply_deadline_precision,apply_deadline_date,cautions,source_urls").eq("household_id", hid).is("archived_at", null)).data ?? [];
+    const created = after.filter((l) => !before.some((x) => x.id === l.id));
+    writeFileSync(`${OUT}/exec-M1.json`, JSON.stringify({ applied: r.applied, steps: r.record.steps.map((x) => ({ tool: x.tool, target: x.target, ok: x.ok, decidedBy: x.decidedBy })), createdCount: created.length, before: before.length, after: after.length, spentJpy: guard?.spentJpy }, null, 1));
+    // 抽選の件数: 新規登録は applied.registered と一致。同じ店舗・同じ商品の重複はない
+    expect(after.length).toBe(before.length + (r.applied?.registered.length ?? 0));
+    const keys = after.map((l) => l.store_id);
+    expect(new Set(keys).size).toBe(keys.length);
+    // 日時が不明だった自動登録の抽選は、情報源の本文から補完される（期限は 2026-11-05）
+    const tsu = after.find((l) => l.source_kind === "auto" && (l.source_urls as string[]).some((u) => u.includes("623703")));
+    expect(tsu?.apply_deadline_date).toBe("2026-11-05");
+    // 手動登録の抽選（高崎店）は変更されない
+    const man = after.find((l) => l.source_kind === "manual");
+    expect(man?.apply_deadline_date).toBe("2026-11-15");
+    // 抽選の告知ではない一覧ページは登録されない
+    expect(after.some((l) => (l.source_urls as string[]).some((u) => u === "https://www.c-labo.jp/" || u === "https://geo-online.co.jp/"))).toBe(false);
   }, 900_000);
 });

@@ -46,4 +46,9 @@ describe("RuleExtractor", () => {
   it("「応募時に店舗を選択」の記載は店舗選択式として読み取る（AIの読み取りと同じ項目）", async () => {
     expect((await read("キデイランド 抽選販売 応募時に店舗を選択してください")).raw.apply_unit).toBe("store_select");
   });
+  it("ナビゲーション・サイドバーに他の店舗名・商品名が並んでいても、ページの題に出てくる店舗・商品を読み取る", async () => {
+    const { raw } = await read("テスト玩具 ハドウシーカー 抽選販売のお知らせ 本店\n店舗一覧 本店 ニンジャスピナー 新着 ハドウシーカー\n応募期間 11/16〜11/20");
+    expect(raw.store_name).toBe("本店");
+    expect((raw.products as { name: string }[]).map((p) => p.name)).toEqual(["ハドウシーカー"]);
+  });
 });

@@ -2,6 +2,7 @@ import "server-only";
 import { AdaptiveScoutBrain } from "@/lib/agent/collection-planner/adaptive";
 import { executeInvestigation, type InvestigationRecord } from "@/lib/agent/collection-planner/executor";
 import type { AgentLLM } from "@/lib/agent/core";
+import type { LotteryExtractor } from "@/lib/ai/provider";
 import type { PlannerWorld } from "@/lib/agent/collection-planner/types";
 import { applyPreviews, decideControls, failRun, finishRun, saveMonitorCandidates, startRun, type AppliedSummary } from "@/lib/server/agent/investigation-service";
 import { createInvestigationWorld } from "@/lib/server/agent/investigation-world";
@@ -24,20 +25,26 @@ export async function runInvestigation(o: {
   /** ログインなし（service_role）で実行する場合 */
   asService?: boolean;
   llm?: AgentLLM;
+  /** 実AI（Stage 9E。承認された範囲だけ）: 解析エンジン・プロンプト・検証の指摘による追加調査の回数・実API使用の区分（日次の費用の上限を適用） */
+  extractor?: LotteryExtractor | null;
+  system?: string;
+  task?: string;
+  maxReviews?: number;
+  realApi?: boolean;
   /** テスト用: 取得・待機の差し替え */
   fetcher?: PlannerWorld["fetchPage"];
   sleep?: (ms: number) => Promise<void>;
   minIntervalMs?: number;
 }): Promise<RunInvestigationResult> {
-  const decided = await decideControls(o.db, o.householdId, o.now, { mode: o.mode, realApi: false });
+  const decided = await decideControls(o.db, o.householdId, o.now, { mode: o.mode, realApi: o.realApi ?? false });
   if (!decided.ok) return { ok: false, error: decided.reason };
   const llm = o.llm ?? new AdaptiveScoutBrain();
-  const runId = await startRun(o.db, o.householdId, { mode: o.mode, brain: `${llm.name}（実APIなし）` });
+  const runId = await startRun(o.db, o.householdId, { mode: o.mode, brain: `${llm.name}${o.realApi ? "" : "（実APIなし）"}` });
   if (!runId) return { ok: false, error: "調査の記録を作れませんでした" };
   try {
-    const { world, drafts } = createInvestigationWorld({ db: o.db, householdId: o.householdId, now: o.now, live: o.live, fetcher: o.fetcher, previous: decided.previous.map((p) => ({ host: p.host, attempts: p.attempts, failures: p.failures, lastFailKind: p.lastFailKind, yielded: p.yielded })) });
+    const { world, drafts } = createInvestigationWorld({ db: o.db, householdId: o.householdId, now: o.now, live: o.live, fetcher: o.fetcher, extractor: o.extractor, previous: decided.previous.map((p) => ({ host: p.host, attempts: p.attempts, failures: p.failures, lastFailKind: p.lastFailKind, yielded: p.yielded })) });
     const controls = o.minIntervalMs === undefined ? decided.controls : { ...decided.controls, throttle: { ...decided.controls.throttle, minIntervalMs: o.minIntervalMs } };
-    const record = await executeInvestigation({ llm, world, controls, sleep: o.sleep });
+    const record = await executeInvestigation({ llm, world, controls, sleep: o.sleep, system: o.system, task: o.task, maxReviews: o.maxReviews });
     let applied: AppliedSummary | null = null;
     if (o.mode === "execute") {
       const sig = await world.signals();

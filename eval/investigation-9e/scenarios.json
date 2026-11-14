@@ -114,7 +114,7 @@
     },
     {
       "id": "S06",
-      "title": "同じ抽選が別の情報源で既に登録済み。重複と新規を見分けられるか",
+      "title": "取得に失敗していた情報源の再確認。同じ抽選が別の情報源で既に登録済み（重複）か、新規かを見分けられるか",
       "chains": [
         "カードラボ"
       ],
@@ -128,6 +128,12 @@
             "https://x.com/c_labo_takasaki/status/1"
           ],
           "auto": false
+        }
+      ],
+      "failedSources": [
+        {
+          "name": "高崎店のブログ",
+          "url": "https://www.c-labo.jp/shop/takasaki/blog/624548/"
         }
       ]
     },
@@ -195,6 +201,10 @@
         {
           "name": "イトーヨーカドー 抽選ページ",
           "url": "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx"
+        },
+        {
+          "name": "高崎店のブログ",
+          "url": "https://www.c-labo.jp/shop/takasaki/blog/624548/"
         }
       ]
     }

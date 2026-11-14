@@ -46,8 +46,14 @@ export class RuleExtractor implements LotteryExtractor {
       .filter((x) => x.n.length >= 2 && hasAny(text, x.n, x.n))
       .sort((a, b) => b.n.length - a.n.length);
     const chainName = chainHits[0]?.canon ?? "";
-    const stores = this.master.stores.filter((s) => (!chainName || s.chainName === chainName) && s.name.length >= 2 && text.includes(s.name));
-    const products = this.master.products.filter((p) => p.length >= 2 && productKey(text).includes(productKey(p))).slice(0, 5);
+    // 店舗・商品: ページの題（先頭行）に出てくるものを優先する。ナビゲーション・サイドバーに並ぶ他の店舗名・商品名に引きずられない（題に無ければ本文全体から）
+    const head = text.split("\n", 1)[0] ?? "";
+    const allStores = this.master.stores.filter((s) => (!chainName || s.chainName === chainName) && s.name.length >= 2 && text.includes(s.name));
+    const storesInHead = allStores.filter((s) => head.includes(s.name));
+    const stores = storesInHead.length === 1 ? storesInHead : allStores;
+    const allProducts = this.master.products.filter((p) => p.length >= 2 && productKey(text).includes(productKey(p)));
+    const productsInHead = allProducts.filter((p) => productKey(head).includes(productKey(p)));
+    const products = (productsInHead.length > 0 ? productsInHead : allProducts).slice(0, 5);
     const range = RANGE.exec(text);
     let start: D = null;
     let deadline: D = null;

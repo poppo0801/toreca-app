@@ -11,3 +11,4 @@ for (const r of s.results) {
   if (per) console.log(`   ${per}`);
   if (c.misRegistrations.length) console.log(`   !! ${JSON.stringify(c.misRegistrations)}`);
 }
+for (const r of s.results) for (const a of r.score.aiActions ?? []) console.log(`   AI判断 ${r.score.scenario}#${r.run} ${a.url.split("/").slice(-2).join("/")}: AI=${a.action} 正解=${a.expected} ${a.ok === null ? "-" : a.ok ? "○" : "×"}`);

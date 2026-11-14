@@ -20,8 +20,8 @@ export interface GoldPage {
   basis: string;
 }
 
-export function loadGoldPages(file = `${DIR}/gold-pages.json`): GoldPage[] {
-  return read<{ pages: GoldPage[] }>(file).pages;
+export function loadGoldPages(files: string[] = [`${DIR}/gold-pages.json`, `${DIR}/gold-pages-3.json`]): GoldPage[] {
+  return files.flatMap((f) => read<{ pages: GoldPage[] }>(f).pages);
 }
 
 type RawLink = { url?: string; href?: string; text: string };
@@ -46,8 +46,8 @@ export function loadFrozenPages(): Map<string, PageData> {
 
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 /** 凍結したページの本文のハッシュを検査する。不一致（改変・欠落）の URL を返す。空なら整合 */
-export function verifyFrozen(pages: Map<string, PageData>, hashesFile = `${DIR}/frozen-hashes.json`): string[] {
-  const { hashes } = read<{ hashes: Record<string, string> }>(hashesFile);
+export function verifyFrozen(pages: Map<string, PageData>, hashesFiles = [`${DIR}/frozen-hashes.json`, `${DIR}/frozen-hashes-3.json`]): string[] {
+  const hashes: Record<string, string> = Object.assign({}, ...hashesFiles.map((f) => read<{ hashes: Record<string, string> }>(f).hashes));
   const bad: string[] = [];
   for (const [url, h] of Object.entries(hashes)) {
     const p = pages.get(url);
@@ -98,6 +98,8 @@ export interface UrlGold {
   store: string | null;
   product: string;
   deadline: string | null;
+  /** 評価の基準日（2026-11-14）で応募期間がすでに終了している。新規に登録してはいけない（既存の抽選の補完は可） */
+  expired?: boolean;
 }
 export interface ScenarioGold {
   reachable: string[];
@@ -120,6 +122,8 @@ export interface ScenarioScore {
   reached: { target: number; reached: number };
   /** 抽選の告知を見つけたか（見つけるべきシナリオ）／見つけない（見つけるべきでないシナリオ）の正否 */
   findLotteryOk: boolean;
+  /** AIが提出した判断（action）と、正解の照合（AIの意思決定の採点。固定ロジックの判定とは別） */
+  aiActions: { url: string; action: string | null; expected: string | null; ok: boolean | null }[];
   perUrl: { url: string; recognized: boolean; chainOk: boolean; storeOk: boolean | null; productOk: boolean; dispositionOk: boolean | null; deadlineOk: boolean | null; disposition: string; registrable: boolean }[];
   /** 抽選ではないページを抽選と認識した（誤認識） */
   nonLotteryRecognized: string[];
@@ -166,6 +170,7 @@ export function scoreScenario(id: string, rec: InvestigationRecord, gold: Scenar
     const deadlineOk = g.deadline ? p.applyDeadline === g.deadline : null;
     perUrl.push({ url, recognized: p.recognized, chainOk, storeOk, productOk, dispositionOk, deadlineOk, disposition: p.disposition.kind, registrable: p.registrable });
     if (p.registrable) {
+      if (g.expired && (!expected || expected === "new")) mis.push({ url, reason: `応募期間が終了している抽選（締切 ${g.deadline}）を新規に登録可能と判定` });
       if (!chainOk) mis.push({ url, reason: `系列が違う（${p.chainName}≠${g.chain}）` });
       if (storeOk === false) mis.push({ url, reason: `店舗が違う（${p.storeName}≠${g.store}）` });
       if (!productOk) mis.push({ url, reason: `商品が違う（${p.products.join("・")}≠${g.product}）` });
@@ -173,7 +178,20 @@ export function scoreScenario(id: string, rec: InvestigationRecord, gold: Scenar
     }
     if (expected === "complete" && p.disposition.kind === "complete" && !p.disposition.targetLotteryId) mis.push({ url, reason: "補完の対象が不明" });
   }
+  const aiActions: ScenarioScore["aiActions"] = [];
+  for (const f of rec.review?.accepted.findings ?? []) {
+    if (f.kind !== "lottery_info" || !f.url) continue;
+    const u = normUrl(f.url);
+    const g = gold.urls[u] ?? gold.urls[`${u}/`] ?? gold.urls[u.replace(/\/$/, "")];
+    const nl = gold.notLottery.map(normUrl);
+    const expected = nl.includes(u) || nl.includes(`${u}/`) ? "not_lottery" : (sg.disposition[u] ?? sg.disposition[`${u}/`] ?? sg.disposition[u.replace(/\/$/, "")] ?? sg.disposition.default ?? null);
+    // 期限切れの告知は、新規としない判断（investigate・not_lottery）も正しい。補完・重複は、期限にかかわらず既存との関係で決まる
+    const ok = f.action ? (g?.expired && expected === "new" ? ["investigate", "not_lottery"].includes(f.action) : f.action === expected) : null;
+    aiActions.push({ url: u, action: f.action ?? null, expected, ok });
+  }
   const recognizedGold = rec.previews.some((p) => p.recognized && (gold.urls[normUrl(p.url)] || gold.urls[`${normUrl(p.url)}/`]));
+  // AIが本文を読み、抽選の告知（応募期間が終了済みのものを含む）と判断した正解のURL。解析（プレビュー）を使わなくても、告知を見つけたとみなす
+  const identifiedGold = (rec.review?.accepted.findings ?? []).some((f) => f.kind === "lottery_info" && !!f.url && (f.pageKind === "lottery_announcement" || f.pageKind === "past_lottery") && !!(gold.urls[normUrl(f.url)] || gold.urls[`${normUrl(f.url)}/`]));
   const fetchCount = rec.steps.filter((s) => s.tool === "check_official_site" || s.tool === "follow_external_link").length;
   const decidedBy: Record<string, number> = {};
   for (const s of rec.steps) decidedBy[s.decidedBy ?? "unknown"] = (decidedBy[s.decidedBy ?? "unknown"] ?? 0) + 1;
@@ -182,7 +200,8 @@ export function scoreScenario(id: string, rec: InvestigationRecord, gold: Scenar
     fetchedUrls: fetched,
     analyzedUrls: analyzed,
     reached: { target: sg.reachable.length, reached: sg.reachable.filter((u) => fetched.includes(normUrl(u)) || fetched.includes(normUrl(u).replace(/\/$/, ""))).length },
-    findLotteryOk: sg.shouldFindLottery ? recognizedGold : !rec.previews.some((p) => p.recognized),
+    findLotteryOk: sg.shouldFindLottery ? recognizedGold || identifiedGold : !rec.previews.some((p) => p.recognized),
+    aiActions,
     perUrl,
     nonLotteryRecognized,
     misRegistrations: mis,

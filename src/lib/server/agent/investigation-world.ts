@@ -1,6 +1,6 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
-import { normalizeExtraction } from "@/lib/ai/extraction";
+import { jstToday, normalizeExtraction } from "@/lib/ai/extraction";
 import { estimateCostJpy } from "@/lib/ai-cost";
 import { RuleExtractor } from "@/lib/ai/rule-extractor";
 import { classifyPage } from "@/lib/ai/page-kind";
@@ -104,6 +104,8 @@ ${page.text}` });
     if (draft.summary.items.length === 0) blockers.push("商品が読み取れません");
     else if (draft.summary.items.some((i) => !["exact", "alias", "code"].includes(i.kind))) blockers.push("商品がマスターと確実に一致しません");
     if (dup.length > 0) blockers.push("登録済みの抽選と同じものの可能性があります");
+    // 応募締切がすでに過ぎている抽選は、新規に登録しない（既存の抽選の補完・更新は別）
+    if (deadline && deadline < jstToday(o.now)) blockers.push(`応募期間がすでに終了しています（応募締切 ${deadline}）`);
     if (draft.modePending) blockers.push("複数商品の応募方式が確定できません");
     drafts.set(page.url, input);
     return { url: page.url, pageKind: kind.kind, pageKindReason: kind.reasons[0] ?? "", aiJudgedLottery: ex.isLotteryAnnouncement, recognized, chainName, storeName: isSelect ? "応募時に店舗を選択" : input.store.name, products, applyDeadline: deadline, missing, disposition, registrable: blockers.length === 0, blockers, costJpy: out.usage ? (estimateCostJpy(out.model, out.usage.input, out.usage.output) ?? 0) : 0 };

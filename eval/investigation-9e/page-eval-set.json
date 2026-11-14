@@ -1,0 +1,40 @@
+{
+ "version": 1,
+ "note": "実AIによるページ単位の評価の対象（実行前に固定。抽選に触れる抽選ではないページ＝困難な負例と、抽選の告知。正解は gold-pages*.json / gold-scenarios.json）",
+ "negatives": [
+  "https://www.pokemon-card.com/",
+  "https://www.pokemon-card.com/info/",
+  "https://www.c-labo.jp/",
+  "https://www.c-labo.jp/shop/tsudanuma/",
+  "https://geo-online.co.jp/",
+  "https://www.hmv.co.jp/",
+  "https://www.c-labo.jp/shop/tsudanuma/blog/581202/",
+  "https://www.c-labo.jp/information/612840/",
+  "https://geo-online.co.jp/news/791",
+  "https://www.c-labo.jp/blog/",
+  "https://www.c-labo.jp/information/",
+  "https://geo-online.co.jp/news/",
+  "https://geo-online.co.jp/news/732",
+  "https://geo-online.co.jp/news/776",
+  "https://geo-online.co.jp/news/723"
+ ],
+ "lotteries": [
+  "https://www.c-labo.jp/shop/nagoyaekimae/blog/624574/",
+  "https://www.c-labo.jp/shop/kokura/blog/624560/",
+  "https://www.c-labo.jp/shop/nipponbashi/blog/624555/",
+  "https://www.c-labo.jp/shop/nipponbashi/blog/624550/",
+  "https://www.c-labo.jp/shop/takasaki/blog/624548/",
+  "https://www.c-labo.jp/shop/kagoshima/blog/624542/",
+  "https://www.c-labo.jp/shop/otaro/blog/624536/",
+  "https://www.c-labo.jp/shop/okayamanishi/blog/624532/",
+  "https://www.c-labo.jp/shop/niigata/blog/624529/",
+  "https://www.c-labo.jp/shop/tsudanuma/blog/623703",
+  "https://geo-online.co.jp/news/789",
+  "https://geo-online.co.jp/news/790",
+  "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx",
+  "https://livepocket.jp/e/u6fu3",
+  "https://livepocket.jp/e/z-8_2",
+  "https://livepocket.jp/e/05tt3",
+  "https://www.pokemoncenter-online.com/news/?id=20260929"
+ ]
+}

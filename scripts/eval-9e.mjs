@@ -20,6 +20,10 @@ if (arg("scenarios")) env.E9E_SCENARIOS = arg("scenarios");
 if (arg("repeat")) env.E9E_REPEAT = arg("repeat");
 if (arg("system")) env.E9E_SYSTEM_FILE = arg("system");
 if (arg("reviews")) env.E9E_REVIEWS = arg("reviews");
+if (rest.includes("--exec")) env.E9E_EXEC = "1";
+if (rest.includes("--live")) env.E9E_LIVE = "1"; // 実際の公開サイトへ取得（robots尊重・間隔1.5秒・dry-run）
+if (arg("brain")) env.E9E_BRAIN = arg("brain"); // fixed|real（切り分け）
+if (arg("extract")) env.E9E_EXTRACT = arg("extract"); // rule|real（切り分け）
 
 if (cmd === "real") {
   const cap = Number(arg("approved-max-jpy"));

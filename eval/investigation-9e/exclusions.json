@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "note": "評価側の不具合（正解データの不足・シナリオの設計の問題）。AIや判定ロジックの誤判定とは別に報告する。凍結した正解・入力は変更せず、ここで除外を宣言する（8Fの方式）。除外した件数は、報告で「除外前・除外後」の両方を示す。",
+  "exclusions": [
+    {
+      "set": "gold-9e-1",
+      "scenario": "S02",
+      "url": "https://geo-online.co.jp/news/789",
+      "kind": "gold_incomplete",
+      "reason": "正解データに応募締切が無く、評価の基準日（2026-11-14）で応募期間が終了していることが反映されていなかった。ページ本文に『応募期間は11/9(月) 11:00～11/12(木) 17:59』と明記されている（作業者がページ本文で確認）。期限切れの告知を新規としない判断（not_lottery/investigate）は妥当"
+    },
+    {
+      "set": "gold-9e-1",
+      "scenario": "S02",
+      "url": "https://geo-online.co.jp/news/790",
+      "kind": "gold_incomplete",
+      "reason": "同上（応募期間 11/9〜11/12 17:59。ページ本文で確認）"
+    },
+    {
+      "set": "gold-9e-1",
+      "scenario": "S02",
+      "url": "https://geo-online.co.jp/news/788",
+      "kind": "gold_incomplete",
+      "reason": "同上（応募期間 11/2〜11/5 17:59。ページ本文で確認）。GEO の3件はいずれも評価の基準日で応募期間が終了済み"
+    },
+    {
+      "set": "gold-9e-1",
+      "scenario": "S05",
+      "url": "https://www.c-labo.jp/shop/nipponbashi/blog/624555/",
+      "kind": "gold_incomplete",
+      "reason": "S05 の正解に『既定の判定（default）』が無く、登録済みの抽選と無関係の別の告知（未登録）の判定が採点されなかった。正しい判定は new（登録済みは津田沼店のみ）"
+    },
+    {
+      "set": "gold-9e-1",
+      "scenario": "S06",
+      "url": "https://www.c-labo.jp/shop/takasaki/blog/624548/",
+      "kind": "scenario_design",
+      "reason": "S06 は、登録済みの高崎店の抽選と同じ告知を、AIが調べる手がかりが無い設計だった（登録済みの抽選は不足情報の手がかりに出ない）。r2 以降は、取得失敗の情報源として手がかりを与える設計に変更した",
+      "labels": [
+        "baseline-fixed-v1",
+        "real-r1"
+      ]
+    }
+  ]
+}
