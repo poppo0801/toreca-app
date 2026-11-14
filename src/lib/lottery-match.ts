@@ -3,7 +3,7 @@ import { isOnlineStoreName } from "@/lib/store-online";
 import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { normName } from "@/lib/norm";
 import { chainCanonicalKey } from "@/lib/chain-normalize";
-import { productNameCandidates, tidyProductName } from "@/lib/product-name";
+import { normalizeProductCode, productNameCandidates, splitProductName, tidyProductName } from "@/lib/product-name";
 import { flexToJstDate } from "@/lib/finance";
 import { jstDateString } from "@/lib/datetime";
 import type { AppData, Chain, Lottery, Product, Store } from "@/types/domain";
@@ -238,6 +238,21 @@ export function matchProduct(name: string, code: string, products: Product[]): M
   if (c) {
     const byCode = active.find((p) => p.code && p.code.toLowerCase() === c);
     if (byCode) return { kind: "code", item: byCode, candidates: [] };
+  }
+  // 括弧書きの型番（【EB-05】）は、マスターの型番に一致するときだけ商品を確定する。型番だけで一致しなくても、型番を除いた名称で下の照合を続ける
+  const nameCodes = splitProductName(name).codes;
+  if (nameCodes.length > 0) {
+    const byNameCode = active.filter((p) => p.code && nameCodes.includes(normalizeProductCode(p.code)));
+    if (byNameCode.length === 1) {
+      // 型番が一致し、名称も一致する（または名称が型番だけ）ときだけ採用する。名称に商品を区別する語（特別版など）が余るときは、型番を理由に紐づけず名称の照合へ進む
+      const rest = productKey(splitProductName(name).cleaned);
+      const target = byNameCode[0];
+      const tk = [target.officialName, ...target.aliases].map(productKey);
+      // 名称がマスター名を含む（ブランド名・シリーズ名が前に付く表記: 「ONE PIECE Heroines Edition vol.2【EB-05】」）ときも採用する。ただし、より具体的な別の商品名（特別版など）を含むときは採用しない
+      const longest = Math.max(0, ...tk.filter((k) => k.length >= 4 && rest.includes(k)).map((k) => k.length));
+      const moreSpecific = active.some((p) => p.id !== target.id && [p.officialName, ...p.aliases].map(productKey).some((k) => k.length > longest && k.length >= 4 && rest.includes(k)));
+      if (!rest || tk.some((k) => k === rest) || (longest > 0 && !moreSpecific)) return { kind: "code", item: target, candidates: [] };
+    }
   }
   const names = (p: Product) => [p.officialName, ...p.aliases, ...(p.code ? [p.code] : [])];
   const strict = decide(rankByName(name, active, names, productKey));

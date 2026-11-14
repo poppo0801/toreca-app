@@ -37,6 +37,17 @@ export interface ProductNameParts {
   quoted: string;
   /** 取り除いた語（履歴・表示用） */
   removed: string[];
+  /** 括弧書きの商品型番（【EB-05】など。Stage 9F）。商品名には含めず、マスターの型番との照合にだけ使う */
+  codes: string[];
+}
+
+/** 商品型番（英字1〜4文字＋数字1〜3桁。「EB-05」「SV8a」「EB05」）。括弧書きの中身がこれだけのときだけ型番とみなす（「第3弾」「特別版」などは対象外） */
+const PRODUCT_CODE = /^[A-Za-z]{1,4}[-ー]?\d{1,3}[A-Za-z]?$/;
+/** 型番を照合用の形にそろえる（全角→半角・大文字・ハイフンの有無は区別しない形ではなく、ハイフン付きの標準形 EB-05） */
+export function normalizeProductCode(raw: string): string {
+  const s = raw.normalize("NFKC").trim().replace(/ー/g, "-").toUpperCase();
+  const m = /^([A-Z]{1,4})-?(\d{1,3}[A-Z]?)$/.exec(s);
+  return m ? `${m[1]}-${m[2]}` : s;
 }
 
 export function splitProductName(raw: string): ProductNameParts {
@@ -51,7 +62,13 @@ export function splitProductName(raw: string): ProductNameParts {
     s = s.slice(brand[0].length).trim();
   }
   const conditions: string[] = [];
+  const codes: string[] = [];
   s = s.replace(BRACKET_RE, (m, inner: string) => {
+    if (PRODUCT_CODE.test(inner.trim())) {
+      codes.push(normalizeProductCode(inner));
+      removed.push(m);
+      return " ";
+    }
     if (!isConditionText(inner)) return m;
     conditions.push(inner.trim());
     removed.push(m);
@@ -67,7 +84,7 @@ export function splitProductName(raw: string): ProductNameParts {
   }
   s = s.replace(/\s+/g, " ").trim();
   const q =s.match(/[『「]([^』」]{2,60})[』」]/);
-  return { cleaned: s, quoted: q ? q[1].trim() : "", removed, conditions };
+  return { cleaned: s, quoted: q ? q[1].trim() : "", removed, conditions, codes };
 }
 
 /**
