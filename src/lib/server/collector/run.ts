@@ -36,6 +36,7 @@ import { caseFromOpen } from "@/lib/case-model/from-open";
 import { summarizeIntegration, type IntegrationInput, type IntegrationResult } from "@/lib/case-model/integrate";
 import { buildJudgment, investigationNeeds, type InvestigationState } from "@/lib/case-model/judgment";
 import { applyCaseFileToExtraction } from "@/lib/case-model/merge";
+import { applyCaseFileLegacy } from "@/lib/case-model/legacy-merge";
 import { humanHintsFor, knownChainNames, type HumanKnowledge } from "@/lib/case-model/human-knowledge";
 import type { InvestigateFn } from "@/lib/case-model/investigation-types";
 import { emptyCase, type Actor, type CaseFile, type DecisionRecord, UnreflectedInfo, CaseFieldKey } from "@/lib/case-model/types";
@@ -137,6 +138,8 @@ export interface CollectDeps {
   xIdentities?: Map<string, SavedIdentity>;
   /** Stage 9H-3B: AI調査の呼び出し（テスト・開発用の差し替え。未指定なら investigation-hook。共通基盤のフラグが無効なら使われない） */
   investigate?: InvestigateFn;
+  /** Stage 9H-3F: 調査結果の合流方式。legacy=従来の規則（3方式の比較のB方式）／未指定=統合処理（9H-3E）。判断履歴のフラグが有効なときだけ使われる */
+  mergeMode?: "legacy" | "integrated";
   /** Stage 9H-3B: 過去の人間の評価から作った参考情報（未指定ならフラグ有効時に評価JSONから読み込む） */
   humanKnowledge?: HumanKnowledge;
   /** 情報源の分類に使う文脈（解析の開始時に読み込む） */
@@ -728,7 +731,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       : [];
     // 統合した結果を、抽出結果・応募単位の判定の入力・判断の記録へ反映する（調査結果があればそれも一緒に統合する）
     const applyIntegrated = (inv: CaseFile) => {
-      const m = applyCaseFileToExtraction(baseEx, inv, { humanLocked: [], siblings, sourceUrl: q.url });
+      // 3方式の比較（9H-3F）のB方式: 同じ調査結果を、従来の合流規則（統合処理を使わない）で反映する。既定は統合処理
+      const m = deps.mergeMode === "legacy" ? { ...applyCaseFileLegacy(baseEx, inv, { humanLocked: [] }), integration: null as IntegrationResult | null } : applyCaseFileToExtraction(baseEx, inv, { humanLocked: [], siblings, sourceUrl: q.url });
       baseEx = m.extraction;
       // 応募単位（店舗選択式か）と選べる店舗は、あとの応募単位の判定（decideApplyUnit）が `result.extraction` から読むため、統合の判断をそちらにも渡す（渡さないと調査の判断が判定に届かない）
       const okRes = result as Extract<ExtractResult, { ok: true }>;
@@ -763,7 +767,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       } else invState = { ...invState, skipped: resp.skipped };
     } else if (invState.needed) invState = { ...invState, skipped: uni.investigate ? "no_need" : "investigate_flag_off" };
     // 調査をしない・できない場合でも、同じ抽選の別の候補があれば統合する
-    if (siblings.length > 0 && !invCase) applyIntegrated(emptyCase(c.id, nowIso));
+    if (siblings.length > 0 && !invCase && deps.mergeMode !== "legacy") applyIntegrated(emptyCase(c.id, nowIso));
   }
   const hint = author ? applyAccountHint(baseEx, deps.xLinks?.get(author), data) : null;
   const draft = buildDraft(hint?.extraction ?? baseEx, data, { sourceUrl: q.url });

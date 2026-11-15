@@ -30,7 +30,7 @@ export interface MergeResult {
   held: number;
 }
 
-const curOf = (out: ExtractedLottery, k: CaseFieldKey): string | null => {
+export const curOf = (out: ExtractedLottery, k: CaseFieldKey): string | null => {
   switch (k) {
     case "chain": return out.chainName || null;
     case "store": return out.storeName || null;
@@ -49,7 +49,7 @@ const curOf = (out: ExtractedLottery, k: CaseFieldKey): string | null => {
 };
 
 /** 抽出形式へ値を設定する。形式に変換できない値は false（呼び出し側が未反映情報へ残す） */
-const setOn = (out: ExtractedLottery, k: CaseFieldKey, v: string): boolean => {
+export const setOn = (out: ExtractedLottery, k: CaseFieldKey, v: string): boolean => {
   switch (k) {
     case "chain": out.chainName = v; return true;
     case "store": out.storeName = v; return true;
