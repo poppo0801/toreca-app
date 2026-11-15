@@ -14,7 +14,8 @@ import { runAgent, ToolRegistry, type AgentLLM, type AgentUsage, type TraceEvent
 import { HostThrottle } from "@/lib/agent/collection-planner/throttle";
 import type { ResolvedControls } from "@/lib/agent/collection-planner/controls";
 import type { PlannerWorld } from "@/lib/agent/collection-planner/types";
-import { CaseLedger, type CaseTarget, type FieldRecord, type SourceRecord } from "./ledger";
+import { digest } from "@/lib/case-model/redact";
+import { CaseLedger, type CaseTarget, type ExtraRecord, type FieldRecord, type SourceRecord } from "./ledger";
 import { assess, type Situation, type Sufficiency } from "./sufficiency";
 import { buildCaseTools } from "./tools";
 import { EMPTY_CLASSIFY_CTX, type ClassifyContext } from "./source-class";
@@ -76,6 +77,12 @@ export interface CaseInvestigationResult {
   /** 調査中の状況の再評価の履歴（方針の変更） */
   policyChanges: PolicyChange[];
   fields: FieldRecord[];
+  /** 台帳の主要項目に含まれない項目（系列・受取方法）の統合結果（9H-3B） */
+  extraFields: FieldRecord[];
+  /** 抽選形態・選べる店舗・当選発表の終了日（9H-3B） */
+  extras: ExtraRecord[];
+  /** 取得したが報告されなかったページ（読んだ内容が台帳に反映されていない） */
+  unreported: string[];
   sources: SourceRecord[];
   steps: StepRecord[];
   queries: string[];
@@ -85,6 +92,8 @@ export interface CaseInvestigationResult {
   usage: AgentUsage;
   injectionFlags: number;
   followUps: number;
+  /** AIへ渡した入力（指示文・参考情報）。判断過程を再実行なしで追えるように保存する（9H-3D）。システム指示文はハッシュのみ */
+  inputs?: { task: string; context: string[]; systemDigest: string; model?: string };
 }
 
 export const INVESTIGATOR_SYSTEM = `あなたは、トレーディングカードの抽選販売の情報を調べる調査エージェントです。1つの抽選（案件）について、情報源を自分で探して調べ、情報を完成させます。
@@ -99,7 +108,9 @@ export const INVESTIGATOR_SYSTEM = `あなたは、トレーディングカー�
 - 「公式だから正しい」「複数のサイトに書いてあるから正しい」とは考えない。公式でも古い・別の回の情報があり得る。
 - LivePocket等では、主催者が書いた説明本文と、サービス側の受付期間の表示は別。説明本文に応募期間・発表日があればそれを優先する。
 - Xの投稿は、本文を優先する。画像に載っていない商品でも、本文に書かれていれば調査対象に含める。
-- 応募期間・当選発表の期間・購入期間・受取期間を混同しない。
+- 応募期間・当選発表の期間・購入期間・受取期間を混同しない。当選発表が期間のときは、値を「YYYY-MM-DD〜YYYY-MM-DD」で報告する（開始と終了を両方残す）。
+- 応募時に応募者が店舗を選ぶ（店舗選択式）か、店舗ごとに別の受付かを、ページの構造から判断できたら applyUnit で報告する（根拠の抜粋が必要）。選べる店舗の一覧を店舗の値として報告しない。
+- 取得したページは、調べている抽選と同じかどうかにかかわらず、読み取れたことを report_page_findings で報告する（別の抽選なら identity で違いが分かるようにする）。
 
 守ること:
 - 使えるのは読み取りのツールだけ。データの登録・更新・削除はできない。
@@ -123,6 +134,8 @@ export interface InvestigateInput {
   sleep?: (ms: number) => Promise<void>;
   /** 検証層の指摘を受けて、AIが追加調査できる回数（既定1。同じ予算・同じ上限の中だけ） */
   maxReviews?: number;
+  /** AIへ渡す参考情報（Xアカウントの表示名・過去の人間の判断など。告知ではない。9H-3B） */
+  context?: string[];
 }
 
 export async function investigateCase(i: InvestigateInput): Promise<CaseInvestigationResult> {
@@ -163,7 +176,9 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
           const r = await t.run(input, ctx);
           const d = (r.data ?? {}) as { failed?: boolean; reason?: string; results?: unknown; sourceKind?: string; identity?: unknown; accepted?: unknown; rejected?: unknown; skipped?: unknown; failKind?: string };
           const detail = d.results ? { results: d.results } : d.identity ? { identity: d.identity, accepted: d.accepted, rejected: d.rejected, skipped: d.skipped } : d.sourceKind ? { sourceKind: d.sourceKind } : d.failKind ? { failKind: d.failKind } : undefined;
-          rec(!d.failed, d.failed ? String(d.reason ?? "失敗") : r.content.replace(/<[^>]+>/g, "").replace(/\s+/g, " "), detail);
+          // AIが報告した内容（項目・値・根拠の抜粋・同一抽選の識別・応募単位）も記録する（9H-3D。判断過程を再実行なしで追えるように）
+          const reported = name === "report_page_findings" ? { identity: input.identity, applyUnit: input.applyUnit, observations: Array.isArray(input.observations) ? (input.observations as Record<string, unknown>[]).slice(0, 20).map((o) => ({ field: o.field, value: short(String(o.value ?? ""), 200), quote: short(String(o.quote ?? ""), 200) })) : [] } : undefined;
+          rec(!d.failed, d.failed ? String(d.reason ?? "失敗") : r.content.replace(/<[^>]+>/g, "").replace(/\s+/g, " "), reported ? { ...((detail ?? {}) as object), reported } : detail);
           return r;
         } catch (e) {
           rec(false, (e as Error).message ?? "失敗");
@@ -178,11 +193,12 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     const r = o as { reason?: string; note?: string } | null;
     return r && ["sufficient", "no_improvement", "cannot_continue"].includes(String(r.reason)) ? { reason: r.reason as AiFinishReason, note: short(String(r.note ?? ""), 300) } : null;
   };
+  const taskText = `次の抽選の情報を調べてください。系列: ${i.target.chain}／店舗: ${i.target.store ?? (i.target.storeMode === "select_on_apply" ? "応募時に選択" : "不明")}／商品: ${i.target.products.join("・") || "不明"}。${i.context?.length ? `\n【参考情報（告知ではありません。手がかりとしてだけ使い、今回の告知の記載を優先する）】\n${i.context.slice(0, 8).map((x) => `- ${x}`).join("\n")}\n` : ""}まず get_case_state を読んでください。`;
   const run = await runAgent({
     llm: i.llm,
     tools: reg,
     system: INVESTIGATOR_SYSTEM,
-    task: `次の抽選の情報を調べてください。系列: ${i.target.chain}／店舗: ${i.target.store ?? (i.target.storeMode === "select_on_apply" ? "応募時に選択" : "不明")}／商品: ${i.target.products.join("・") || "不明"}。まず get_case_state を読んでください。`,
+    task: taskText,
     limits: i.controls.limits,
     now: clock,
     maxReviews: i.maxReviews ?? 1,
@@ -194,6 +210,8 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
       const left = { fetches: s.policy.maxFetches - built.counts.fetches, searches: s.policy.maxSearches - built.counts.searches };
       if (left.fetches <= 0 && left.searches <= 0) return null;
       const lines = s.gaps.slice(0, 5).map((g) => `- ${g.detail}`);
+      // 取得したのに報告していないページ（読んだ内容が台帳に反映されていない）。終了の申告だけでは記録されない（9H-3B）
+      for (const u of ledger.unreported().slice(0, 3)) lines.push(`- 取得済みの ${u.url} の内容が報告されていません。調べている抽選と同じなら report_page_findings で報告し、別の抽選・古い情報なら、その旨を判断して構いません`);
       return { feedback: `検証: 申告は「${aiFinish?.reason ?? "不明"}」ですが、台帳の状況は「${s.situation}」で、まだ次の点が残っています。\n${lines.join("\n")}\n割り当ての残り: 取得${Math.max(0, left.fetches)}回・検索${Math.max(0, left.searches)}回。追加で調べるか、調べても得られないと判断するなら no_improvement で終了してください。`, meta: { situation: s.situation, gaps: s.gaps.length } };
     },
   });
@@ -235,6 +253,9 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     final,
     policyChanges,
     fields: ledger.allFields(),
+    extraFields: ledger.extraFields(),
+    extras: ledger.extras(),
+    unreported: ledger.unreported().map((s) => s.url),
     sources,
     steps,
     queries: built.queries,
@@ -243,5 +264,6 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     usage: run.usage,
     injectionFlags: run.usage.injectionFlags,
     followUps: run.usage.followUps,
+    inputs: { task: taskText, context: (i.context ?? []).slice(0, 8), systemDigest: digest(INVESTIGATOR_SYSTEM), model: i.llm.name },
   };
 }

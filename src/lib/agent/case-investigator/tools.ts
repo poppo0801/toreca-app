@@ -12,9 +12,10 @@ import { HostThrottle } from "@/lib/agent/collection-planner/throttle";
 import type { PageData, PlannerWorld } from "@/lib/agent/collection-planner/types";
 import { FIELD_LABEL, type FieldKey } from "@/lib/collector/fields";
 import { assess, type Ceilings, type Sufficiency } from "./sufficiency";
-import { CaseLedger, type FetchFailKind, type Observation } from "./ledger";
+import { CaseLedger, type ExtraObservation, type FetchFailKind, type Observation } from "./ledger";
 import { basisOfQuote, classifyCaseSource, detectOrigin, hostOf, squash, tierOfCase, type ClassifyContext } from "./source-class";
 import type { IdentityFacts } from "./identity";
+import { verifyOrganizer } from "./organizer";
 
 const norm = (u: string): string => u.trim().replace(/#.*$/, "");
 const purposeProp = { purpose: { type: "string", description: "この調査の目的・理由（短く。記録に残る）" } };
@@ -49,6 +50,15 @@ export function queryIsSafe(q: string, privateTerms: string[] = []): { ok: true 
 const failKindOf = (reason: string): FetchFailKind => (/robots|ロボット/i.test(reason) ? "robots_blocked" : /ログイン|login|認証/i.test(reason) ? "login_required" : /時間|timeout|タイムアウト/i.test(reason) ? "timeout" : /制限|断|回避|取得できません|許可/.test(reason) ? "refused" : "http_error");
 
 const DATE_VALUE = /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/;
+const DATE_RANGE = /^(\d{4}-\d{2}-\d{2})(?: \d{2}:\d{2})?\s*(?:〜|~|～|\/|\s-\s|–|—)\s*(\d{4}-\d{2}-\d{2})(?: \d{2}:\d{2})?$/;
+/** 当選発表の期間（開始〜終了）。期間の記載を「日時の形式が正しくない」として捨てない（9H-3B。AIが読んだ期間が台帳で失われていた） */
+export function parseDateRange(value: string): { start: string; end: string } | null {
+  const m = DATE_RANGE.exec(value.trim());
+  return m && m[2] >= m[1] ? { start: m[1], end: m[2] } : null;
+}
+const STORE_SPLIT = /[／/、,・\n]/;
+export const looksLikeStoreList = (v: string): boolean => v.split(STORE_SPLIT).map((s) => s.trim()).filter(Boolean).length >= 3;
+const UNITS = ["store_select", "store_independent", "single"];
 
 export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pages: Map<string, PageData>; searchResults: Map<string, { title: string; snippet: string; query: string }>; queries: string[]; counts: { fetches: number; searches: number }; current(): Sufficiency } {
   const reg = new ToolRegistry();
@@ -160,9 +170,11 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       pages.set(url, { url, title: r.title ?? "", text: r.text ?? "", links: r.links ?? [] });
       const origin = detectOrigin(url, text);
       const inj = detectInjection(text);
-      o.ledger.recordFetchOk({ url, kind: cls.kind, tier: cls.tier, fetchedAt: o.now(), ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), origin: origin.origin, derivedFrom: origin.derivedFrom, ...(cls.account ? { account: cls.account } : {}), injection: inj.length > 0 });
+      // 応募サービスのページは、主催者が調べている抽選の系列・店舗と同じと確認できたときだけ、本文を一次扱いにする（確認できなければ未確認＝二次のまま）
+      const organizer = verifyOrganizer({ kind: cls.kind, url, text, links: r.links ?? [], target: { chain: o.ledger.target.chain, store: o.ledger.target.store }, classify: o.classify });
+      o.ledger.recordFetchOk({ url, kind: cls.kind, tier: cls.tier, fetchedAt: o.now(), ...(organizer.status !== "not_applicable" ? { organizer } : {}), ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), origin: origin.origin, derivedFrom: origin.derivedFrom, ...(cls.account ? { account: cls.account } : {}), injection: inj.length > 0 });
       const links = (r.links ?? []).slice(0, 15).map((l) => `- ${l.text.slice(0, 60)} ${l.url}`).join("\n");
-      const head = `[情報源の分類] 種類=${cls.kind}／${cls.tier === "primary" ? "一次情報" : "二次情報"}${origin.derivedFrom ? `／転載元=${origin.derivedFrom}` : ""}${r.publishedAt ? `／告知日時=${r.publishedAt}` : ""}\n`;
+      const head = `[情報源の分類] 種類=${cls.kind}／${cls.tier === "primary" ? "一次情報" : "二次情報"}${organizer.status === "not_applicable" ? "" : `／主催者の確認=${organizer.status === "verified" ? "確認済み（主催者本文を一次情報として扱う）" : "未確認（二次情報のまま）"}（${organizer.basis}）`}${origin.derivedFrom ? `／転載元=${origin.derivedFrom}` : ""}${r.publishedAt ? `／告知日時=${r.publishedAt}` : ""}\n`;
       const out = untrusted(`${head}${text}`, url, links ? `\n\n[リンク]\n${links}` : "");
       return { ...out, data: { ...(out.data as object | undefined), url, sourceKind: cls.kind, links: r.links } };
     },
@@ -177,6 +189,7 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       properties: {
         url: { type: "string", description: "取得済みのページのURL" },
         identity: { type: "object", properties: { chain: { type: "string" }, store: { type: "string" }, storeSelect: { type: "boolean" }, products: { type: "array", items: { type: "string" } }, applyStart: { type: "string" }, applyDeadline: { type: "string" } }, description: "そのページが扱っている抽選の系列・店舗・商品・応募期間（同一抽選の照合に使う）" },
+        applyUnit: { type: "object", properties: { unit: { type: "string", enum: UNITS, description: "応募の単位。応募時に応募者が店舗を選ぶ=store_select／店舗ごとに別の受付=store_independent／1件の応募=single" }, selectableStores: { type: "array", items: { type: "string" }, description: "店舗選択式のとき、そのページに書かれている選べる店舗名" }, quote: { type: "string", description: "根拠となる、そのページの本文にそのまま書かれた短い抜粋" } }, description: "応募の単位の判断（店舗選択式か）。根拠の抜粋が必要。店舗選択式のとき、選べる店舗の一覧を店舗の値として報告しない" },
         observations: { type: "array", items: { type: "object", properties: { field: { type: "string", enum: FIELD_ENUM }, value: { type: "string" }, quote: { type: "string" } }, required: ["field", "value", "quote"] } },
         ...purposeProp,
       },
@@ -194,19 +207,47 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       const raw = Array.isArray(input.observations) ? (input.observations as Record<string, unknown>[]) : [];
       const rejected: { field: string; reason: string }[] = [];
       const ok: Observation[] = [];
+      const extras: ExtraObservation[] = [];
+      // 応募の単位（店舗選択式か）。根拠の抜粋がページに実在するときだけ受け入れる（9H-3B。AIの判断を台帳に残す欄が無く、店舗の羅列が店舗の値になっていた）
+      const unitIn = (input.applyUnit ?? null) as { unit?: string; selectableStores?: unknown; quote?: string } | null;
+      let storeSelect = false;
+      let selectable: string[] = [];
+      if (unitIn && UNITS.includes(String(unitIn.unit))) {
+        const uq = String(unitIn.quote ?? "").trim();
+        if (!uq || !body.includes(squash(uq))) rejected.push({ field: "applyUnit", reason: "根拠の原文が、取得したページの本文に見つからない（推測・要約は採用しない）" });
+        else {
+          extras.push({ key: "form", value: unitIn.unit === "single" ? "other" : String(unitIn.unit), quote: uq.slice(0, 200) });
+          if (unitIn.unit === "store_select") {
+            storeSelect = true;
+            const names = (Array.isArray(unitIn.selectableStores) ? unitIn.selectableStores : []).map((x) => String(x).trim()).filter(Boolean);
+            selectable = names.filter((n) => body.includes(squash(n)));
+            for (const n of names.filter((n) => !selectable.includes(n))) rejected.push({ field: "selectableStores", reason: `店舗名「${n}」がページの本文に見つからない` });
+            if (selectable.length) extras.push({ key: "selectableStores", value: selectable.join(" / "), quote: uq.slice(0, 200) });
+          }
+        }
+      }
       for (const r of raw.slice(0, 20)) {
         const field = String(r.field ?? "") as FieldKey;
         const value = String(r.value ?? "").trim();
         const quote = String(r.quote ?? "").trim();
+        const basis = () => basisOfQuote(src?.kind ?? "unknown", quote, `${page.title}\n${page.text}`);
         if (!FIELD_ENUM.includes(field)) rejected.push({ field, reason: "未対応の項目" });
         else if (!value) rejected.push({ field, reason: "値が空" });
         else if (!quote || !body.includes(squash(quote))) rejected.push({ field, reason: "根拠の原文が、取得したページの本文に見つからない（推測・要約は採用しない）" });
-        else if (["applyStart", "applyDeadline", "resultDate"].includes(field) && !DATE_VALUE.test(value)) rejected.push({ field, reason: "日時の形式が正しくない（YYYY-MM-DD または YYYY-MM-DD HH:MM）" });
-        else ok.push({ field, value, quote: quote.slice(0, 200), sourceUrl: page.url, basis: basisOfQuote(src?.kind ?? "unknown", quote, `${page.title}\n${page.text}`) });
+        else if (field === "store" && storeSelect) rejected.push({ field, reason: "店舗選択式のため、店舗の値にしない（選べる店舗として applyUnit に記録）" });
+        else if (field === "store" && looksLikeStoreList(value)) rejected.push({ field, reason: "複数の店舗の羅列は店舗の値にできない。応募時に店舗を選ぶのか、店舗ごとの受付かを applyUnit で報告する" });
+        else if (field === "resultDate" && parseDateRange(value)) {
+          // 当選発表の期間: 開始を resultDate、終了を追加項目 resultEnd に保持する（期間を捨てない）
+          const rg = parseDateRange(value)!;
+          ok.push({ field, value: rg.start, quote: quote.slice(0, 200), sourceUrl: page.url, basis: basis() });
+          extras.push({ key: "resultEnd", value: rg.end, quote: quote.slice(0, 200) });
+        } else if (["applyStart", "applyDeadline", "resultDate"].includes(field) && !DATE_VALUE.test(value)) rejected.push({ field, reason: "日時の形式が正しくない（YYYY-MM-DD または YYYY-MM-DD HH:MM。当選発表の期間は「YYYY-MM-DD〜YYYY-MM-DD」）" });
+        else ok.push({ field, value, quote: quote.slice(0, 200), sourceUrl: page.url, basis: basis() });
       }
-      const r = o.ledger.integrate(url, facts, ok);
+      const r = o.ledger.integrate(url, { ...facts, ...(storeSelect && facts.storeSelect === undefined ? { storeSelect: true } : {}) }, ok, extras);
       const s = reassess(`${hostOf(url)}の報告を反映`);
-      return { content: JSON.stringify({ identity: r.identity, accepted: r.accepted.map((x) => x.field), skipped: r.skipped, rejected, ...stateJson(s) }), data: { identity: r.identity, accepted: r.accepted.map((x) => x.field), rejected, skipped: r.skipped } };
+      const acceptedExtras = r.identity.verdict === "same" ? extras.map((x) => x.key) : [];
+      return { content: JSON.stringify({ identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], skipped: r.skipped, rejected, ...stateJson(s) }), data: { identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], rejected, skipped: r.skipped } };
     },
   } satisfies AgentTool);
 

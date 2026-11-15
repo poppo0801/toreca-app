@@ -124,6 +124,31 @@
     } else box.appendChild(el("p", { class: "missing", text: "画像は取得できていません。" + (s.imageNote || "") }));
   }
 
+  /** Stage 9H-3E: 統合した最終候補の根拠（1抽選＝1評価）。比較の結果（方式名は伏せる）・統合に使った情報源・採用/不採用の理由・未確認・重複と店舗選択式の判断 */
+  function renderIntegration(c, box) {
+    var g = c.integration;
+    if (!g) return;
+    box.appendChild(el("h2", { text: "統合の根拠（最終登録候補の評価用）" }));
+    (g.compare || []).forEach(function (r) {
+      box.appendChild(el("h3", { text: r.label }));
+      var t = el("table", { class: "kv" });
+      kv(t, "系列", r.extracted && r.extracted.chain); kv(t, "店舗", r.extracted && r.extracted.store); kv(t, "商品", r.extracted && r.extracted.products);
+      kv(t, "応募開始", r.extracted && r.extracted.applyStart); kv(t, "応募締切", r.extracted && r.extracted.applyDeadline); kv(t, "当選発表", r.extracted && r.extracted.resultDate);
+      kv(t, "応募条件", r.extracted && r.extracted.conditions);
+      box.appendChild(t);
+    });
+    function list(title, items) {
+      box.appendChild(el("h3", { text: title }));
+      if ((items || []).length) box.appendChild(el("ul", {}, items.map(function (x) { return el("li", { text: x }); })));
+      else box.appendChild(el("p", { class: "none", text: "（なし）" }));
+    }
+    list("統合に使用した情報源", g.sources);
+    list("採用した情報と採用理由", g.adopted);
+    list("採用しなかった情報と理由", g.rejected);
+    list("未確認・矛盾が残る項目", g.unresolved);
+    list("重複・店舗選択式の判断", g.judgments);
+  }
+
   function renderAi(c) {
     var box = $("ai");
     box.textContent = "";
@@ -153,6 +178,7 @@
       box.appendChild(el("h3", { text: "注意・警告" }));
       box.appendChild(el("ul", {}, notes.map(function (n) { return el("li", { text: n }); })));
     }
+    renderIntegration(c, box);
     if ((c.duplicateOf || []).length) {
       box.appendChild(el("h3", { text: "比較対象の登録済み抽選" }));
       c.duplicateOf.forEach(function (dup) {

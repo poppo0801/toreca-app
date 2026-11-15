@@ -13,6 +13,7 @@ import { productKey } from "@/lib/lottery-match";
 import { normName } from "@/lib/norm";
 import { matchIdentity, type IdentityFacts, type IdentityResult } from "./identity";
 import type { CaseSourceKind, Tier } from "./source-class";
+import type { OrganizerCheck } from "./organizer";
 
 export type FetchFailKind = "robots_blocked" | "http_error" | "timeout" | "login_required" | "refused";
 
@@ -53,6 +54,8 @@ export interface SourceRecord {
   injection: boolean;
   /** 根拠に使った原文（短い抜粋。項目ごと） */
   quotes: Partial<Record<FieldKey, string>>;
+  /** 応募サービスのページの主催者の確認（9H-3C）。確認できたときだけ、主催者本文の項目を一次情報として扱う */
+  organizer?: OrganizerCheck;
 }
 
 export interface Observation {
@@ -138,12 +141,28 @@ function sameValue(f: FieldKey, a: string, b: string): boolean {
   return cmpKey(f, a) === cmpKey(f, b);
 }
 
+/** 共通モデル（case-model）の項目のうち、台帳の項目（FieldKey）に無いもの。抽選形態・選べる店舗・当選発表の終了日（9H-3B） */
+export type ExtraKey = "form" | "selectableStores" | "resultEnd";
+export interface ExtraObservation {
+  key: ExtraKey;
+  value: string;
+  quote: string;
+}
+export interface ExtraRecord extends ExtraObservation {
+  sourceUrl: string;
+  kind: CaseSourceKind;
+  tier: Tier;
+  basis?: "organizer_body" | "platform_meta";
+  at: string;
+}
+
 export const CORE_FIELDS: FieldKey[] = ["items", "applyDeadline", "applyStart", "store"];
 export const OPTIONAL_FIELDS: FieldKey[] = ["resultDate", "conditions", "applyMethod", "applyUrl"];
 
 export class CaseLedger {
   readonly sources = new Map<string, SourceRecord>();
   private readonly entries: Entry[] = [];
+  private readonly extraList: ExtraRecord[] = [];
   private readonly manual: Set<FieldKey>;
   constructor(readonly target: CaseTarget, readonly now: () => string) {
     this.manual = new Set(target.manualFields);
@@ -176,7 +195,7 @@ export class CaseLedger {
   }
 
   /** ページの報告を統合する。同一抽選と確認できなければ統合しない（別の抽選は隔離・拒否、不明は保留） */
-  integrate(url: string, facts: IdentityFacts, obs: Observation[]): { identity: IdentityResult; accepted: Observation[]; skipped: { field: FieldKey; reason: string }[] } {
+  integrate(url: string, facts: IdentityFacts, obs: Observation[], extras: ExtraObservation[] = []): { identity: IdentityResult; accepted: Observation[]; skipped: { field: FieldKey; reason: string }[] } {
     const src = this.sources.get(urlKey(url));
     if (!src || src.status === "failed") return { identity: { verdict: "unknown", matched: [], mismatched: [] }, accepted: [], skipped: obs.map((o) => ({ field: o.field, reason: "未取得の情報源" })) };
     // 比べる側の事実: 目標の識別情報＋現時点で採用している応募締切
@@ -199,11 +218,13 @@ export class CaseLedger {
         skipped.push({ field: o.field, reason: "手動で確定した項目のため上書きしない" });
         continue;
       }
-      this.entries.push({ field: o.field, value: o.value, sourceUrl: src.url, kind: src.kind, tier: src.tier, origin: src.origin, account: src.account, at: src.fetchedAt, publishedAt: src.publishedAt, basis: o.basis, quote: o.quote });
+      this.entries.push({ field: o.field, value: o.value, sourceUrl: src.url, kind: src.kind, tier: effectiveTier(src, o.basis), origin: src.origin, account: src.account, at: src.fetchedAt, publishedAt: src.publishedAt, basis: o.basis, quote: o.quote });
       src.quotes[o.field] = o.quote.slice(0, 160);
       if (!src.contributed.includes(o.field)) src.contributed.push(o.field);
       accepted.push(o);
     }
+    // 共通モデルの追加項目（抽選形態・選べる店舗・当選発表の終了日）。同一抽選と確認できたページからだけ受け入れる
+    for (const x of extras) this.extraList.push({ ...x, sourceUrl: src.url, kind: src.kind, tier: effectiveTier(src, obs.find((o) => o.basis)?.basis), basis: obs.find((o) => o.basis)?.basis, at: src.fetchedAt });
     return { identity, accepted, skipped };
   }
 
@@ -282,9 +303,22 @@ export class CaseLedger {
   allFields(): FieldRecord[] {
     return [...CORE_FIELDS, ...OPTIONAL_FIELDS].map((f) => this.resolve(f));
   }
+  /** 追加項目の記録（一次情報を優先） */
+  extras(): ExtraRecord[] {
+    return [...this.extraList].sort((a, b) => Number(b.tier === "primary") - Number(a.tier === "primary"));
+  }
+  /** 台帳の主要項目に含まれない項目（系列・受取方法）の統合結果。観測があるものだけ */
+  extraFields(): FieldRecord[] {
+    return (["chain", "receiveMethod"] as FieldKey[]).filter((f) => this.entries.some((e) => e.field === f)).map((f) => this.resolve(f));
+  }
+  /** 取得できたが、AIから報告されていないページ（読んだ内容が台帳に反映されていない） */
+  unreported(): SourceRecord[] {
+    return [...this.sources.values()].filter((s) => s.status === "unreported");
+  }
   /** 取得に成功した一次情報の情報源があるか */
   hasPrimaryFetched(): boolean {
-    return [...this.sources.values()].some((s) => s.status === "fetched" && s.tier === "primary");
+    // 主催者を確認できた応募サービスの本文（項目単位で一次扱い）も含める
+    return [...this.sources.values()].some((s) => s.status === "fetched" && s.tier === "primary") || this.entries.some((e) => !e.seed && e.tier === "primary");
   }
   failedPrimary(): SourceRecord[] {
     return [...this.sources.values()].filter((s) => s.status === "failed" && s.tier === "primary");
@@ -296,6 +330,14 @@ export class CaseLedger {
   snapshotSources(): SourceRecord[] {
     return [...this.sources.values()].filter((s) => s.fetchedAt);
   }
+}
+
+/**
+ * 項目の根拠の層。応募サービスのページは、主催者の同一性を確認できたときだけ、主催者本文（organizer_body）の項目を一次扱いにする。
+ * サービス側の受付表示（platform_meta）・主催者を確認できないページ・他のサービスは、情報源の層のまま（ドメイン全体を一次にしない）
+ */
+function effectiveTier(src: SourceRecord, basis: "organizer_body" | "platform_meta" | undefined): Tier {
+  return src.kind === "platform" && src.organizer?.status === "verified" && basis === "organizer_body" ? "primary" : src.tier;
 }
 
 function rank(e: Entry): number {

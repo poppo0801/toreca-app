@@ -167,3 +167,30 @@ export async function decideCandidateAction(input: { id: string; accept: boolean
   revalidatePath("/settings/investigation");
   return { ok: true };
 }
+
+/** Stage 9H-3C: 収集した候補の判断履歴（AIが受け取った情報・AIの判断・固定ロジックや調査による変更と理由・最終の登録候補）。開発環境のみ。読み取りのみ */
+export interface JudgmentRow {
+  id: string;
+  title: string;
+  url: string;
+  status: string;
+  at: string;
+  judgment: import("@/lib/case-model/judgment").Judgment;
+}
+export async function loadJudgmentsAction(): Promise<R<{ rows: JudgmentRow[] }>> {
+  if (!isStoreResearchEnabled()) return { ok: false, error: "この画面は開発環境でのみ使えます" };
+  const c = await ctx();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const { data, error } = await anyDb(c.db)
+    .from("collection_candidates")
+    .select("id,title,source_url,status,updated_at,judgment:draft->judgment")
+    .eq("household_id", c.householdId)
+    .not("draft->judgment", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(30);
+  if (error) return { ok: false, error: "判断履歴を読み込めませんでした" };
+  const rows = ((data ?? []) as { id: string; title: string; source_url: string; status: string; updated_at: string; judgment: JudgmentRow["judgment"] | null }[])
+    .filter((r) => !!r.judgment)
+    .map((r) => ({ id: r.id, title: r.title, url: r.source_url, status: r.status, at: r.updated_at, judgment: r.judgment as JudgmentRow["judgment"] }));
+  return { ok: true, rows };
+}

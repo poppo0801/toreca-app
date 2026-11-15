@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { decideCandidateAction, loadInvestigationAction, loadRunDetailAction, runInvestigationAction, type CandidateRow, type InvestigationContext, type RunDetail, type RunRow } from "@/app/(app)/settings/investigation/actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { JudgmentPanel } from "@/components/judgment-panel";
 
 /**
  * 情報収集エージェントの調査状況（開発用の管理画面。Stage 9D）。調査の状態・調べた情報源・見つけた候補・登録/補完/更新/重複の判定・費用・停止理由を確認する。
@@ -128,6 +129,7 @@ export function InvestigationView() {
           </div>
         ))}
       </section>
+      <JudgmentPanel />
     </div>
   );
 }

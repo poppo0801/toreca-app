@@ -68,14 +68,19 @@ describe("住所調査AIは本番で有効にならない", () => {
     ]);
     // 自動収集・API: エージェントの部品を読み込まない。例外は、収集後のグループ判定の呼び出し口（grouping-hook.ts）だけ。
     // 環境の判定（TOREMANE_ENV=local）を通ったあとに、動的に読み込む（静的な読み込みは無い）
-    const HOOK = "src/lib/server/collector/grouping-hook.ts";
+    // Stage 9H-3B: 収集中のAI調査の呼び出し口（investigation-hook.ts）も同じ作り（環境の判定のあとに動的に読み込む）
+    const HOOKS = ["src/lib/server/collector/grouping-hook.ts", "src/lib/server/collector/investigation-hook.ts"];
     const norm = (x: string) => x.replaceAll("\\", "/");
-    for (const f of src.filter((x) => (/src\/app\/api\//.test(norm(x)) || /collector/.test(x)) && norm(x) !== HOOK)) expect(readFileSync(f, "utf8"), f).not.toMatch(/store-location|lib\/agent\/|lib\/server\/agent\//);
-    const hook = readFileSync(HOOK, "utf8");
-    expect(hook).not.toMatch(/^import .* from "@\/lib\/(server\/)?agent\//m);
-    const guard = hook.indexOf('process.env.TOREMANE_ENV !== "local"');
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(hook.indexOf("await import("));
+    for (const f of src.filter((x) => (/src\/app\/api\//.test(norm(x)) || /collector/.test(x)) && !HOOKS.includes(norm(x)))) expect(readFileSync(f, "utf8"), f).not.toMatch(/store-location|lib\/agent\/|lib\/server\/agent\//);
+    for (const HOOK of HOOKS) {
+      const hook = readFileSync(HOOK, "utf8");
+      expect(hook, HOOK).not.toMatch(/^import .* from "@\/lib\/(server\/)?agent\//m);
+      const guard = hook.indexOf('process.env.TOREMANE_ENV !== "local"');
+      expect(guard, HOOK).toBeGreaterThan(-1);
+      expect(guard, HOOK).toBeLessThan(hook.indexOf("await import("));
+    }
+    // 共通モデル（case-model）は、AI・調査の部品を読み込まない（収集処理が静的に読み込んでよい純粋な部品だけにする）
+    for (const f of src.filter((x) => norm(x).startsWith("src/lib/case-model/"))) expect(readFileSync(f, "utf8"), f).not.toMatch(/lib\/agent\/|lib\/server\/agent\/|server-only/);
   });
   it("開発専用のサーバーアクションは、すべて冒頭で開発環境の判定をする。調査画面は本番で404", () => {
     for (const f of ["src/app/(app)/settings/store-research/actions.ts", "src/app/(app)/settings/store-research/proposal-actions.ts"]) {
