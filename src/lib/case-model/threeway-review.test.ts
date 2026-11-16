@@ -122,3 +122,31 @@ describe("9H-3I: 店舗選択式の判断（確認済み／推定／不明）の
     expect(ex.lotteryForm).toBe("store_independent");
   });
 });
+
+describe("9H-3I: 隔離案件（案件単位の安全停止）も評価対象に残す。未確定・要確認として表示し、欠測を明示し、採点から黙って除外しない", () => {
+  const q = (id: string, views: Partial<Record<"A" | "B" | "C", View | null>> = {}): ThreewayCase => ({ ...mk(id, views), quarantine: { reasons: ["商品構成の不一致（added_different）: 異なる商品が増えた（30th CELEBRATION カードセット 9種セット）"] } });
+  it("隔離案件は『隔離（未確定・要確認）』として表示され、理由と『正解を決めつけていない』旨が出る。評価ツールの事例集として有効。方式名は出ない", () => {
+    const b = buildThreewaySet([q("a"), mk("b")], { setId: "rs-q" });
+    expect(Core.validateSet(b.set).ok).toBe(true);
+    const c = (b.set.cases as { tags: string[]; ai: { notices: string[]; warnings: string[] } }[]).find((x) => x.tags.includes("隔離（未確定・要確認）"))!;
+    expect(c.ai.notices.join("\n")).toContain("【隔離案件・未確定・要確認】");
+    expect(c.ai.notices.join("\n")).toContain("決めつけていません");
+    expect(c.ai.warnings.join("\n")).toContain("added_different");
+    expect(JSON.stringify(b.set)).not.toMatch(/従来方式|AI方式|統合方式|"A"|"B"|"C"/);
+  });
+  it("結果が存在しない方式は『欠測』と明示し、別の方式の値を代わりに表示しない", () => {
+    const b = buildThreewaySet([q("a", { B: null })], { setId: "rs-miss" });
+    const c = (b.set.cases as { ai: { notices: string[] }; integration: { compare: { label: string; extracted: unknown }[] } }[])[0];
+    expect(c.ai.notices.join("\n")).toContain("欠測（結果が存在しない方式）");
+    expect(c.integration.compare.filter((x) => x.extracted === null)).toHaveLength(1);
+    expect(c.integration.compare.find((x) => x.extracted === null)!.label).toContain("欠測");
+  });
+  it("全方式が欠測の隔離案件（取得失敗など）も、対象に残る。採点では、隔離案件を評価件数・採点に含め、未評価の隔離案件は明示する", () => {
+    const cs = [q("x"), q("y", { A: null, B: null, C: null })];
+    const b = buildThreewaySet(cs, { setId: "rs-score-q" });
+    const idOf = (cid: string) => Object.entries(b.key).find(([, k]) => k.caseId === cid)![0];
+    const sc = scoreThreeway([{ caseId: idOf("x"), human: { verdict: "partial", corrections: [{ field: "product", correctValue: "拡張パック ハドウシーカー" }] } }], b, cs);
+    expect(sc.quarantined).toEqual([{ caseId: "x", evaluated: true, unknown: false }, { caseId: "y", evaluated: false, unknown: false }]);
+    expect(sc.evaluated).toBe(1);
+  });
+});

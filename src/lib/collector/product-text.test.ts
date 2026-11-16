@@ -62,13 +62,15 @@ const RUNS = "backups/eval-9h3i/runs";
 const has = existsSync(RUNS);
 describe.skipIf(!has)("保存済みの実AI調査結果（フルコンプ）での再現", () => {
   it("停止原因の商品変更は『同じ商品への詳細（購入数量・価格）の追加だけ』と分類され、修正後は停止しない。別商品は混入していない", () => {
-    let j: { arms: { C: { judgment?: { decisions?: { stage: string; kind: string; field: string; before: string; after: string }[] } } } } | null = null;
+    type Dec = { stage: string; kind: string; field: string; before: string; after: string };
+    // 修正前の実行（商品に詳細が付いて停止した記録）を探す。後の再利用の実行（整え直した結果）には、この変更は残らない
+    let d: Dec | undefined;
     for (const r of readdirSync(RUNS).sort()) {
       const f = `${RUNS}/${r}/case-k-2c187ae1.json`;
-      if (existsSync(f)) j = JSON.parse(readFileSync(f, "utf8"));
+      if (!existsSync(f)) continue;
+      const j = JSON.parse(readFileSync(f, "utf8")) as { arms: { C: { judgment?: { decisions?: Dec[] } } } | null };
+      d = d ?? (j.arms?.C.judgment?.decisions ?? []).find((x) => x.stage === "merge" && x.kind === "changed" && x.field === "items");
     }
-    expect(j).not.toBeNull();
-    const d = (j!.arms.C.judgment?.decisions ?? []).find((x) => x.stage === "merge" && x.kind === "changed" && x.field === "items");
     expect(d).toBeDefined();
     const c = classifyItemsChange(String(d!.before).split(" / "), String(d!.after).split(" / "));
     expect(c.kind).toBe("detail_only");

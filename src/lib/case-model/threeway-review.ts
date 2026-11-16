@@ -60,6 +60,8 @@ export interface ThreewayCase {
   sources: string[];
   /** 各方式の店舗選択式の判断（確認済み／推定／不明。登録候補に構造化して記録されたもの。9H-3I）。無ければ null */
   forms?: Record<Arm, FormRec | null>;
+  /** 隔離案件（案件単位の安全停止）。未確定・要確認として表示し、集計から黙って除外しない（9H-3I） */
+  quarantine?: { reasons: string[] } | null;
 }
 
 export interface FormRec {
@@ -109,7 +111,9 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
     const labelOf = (a: Arm) => `候補${order.indexOf(a) + 1}`;
     const base = order[0];
     key[id] = { caseId: c.caseId, base, order: Object.fromEntries(order.map((a) => [labelOf(a), a])) };
-    const v = c.views[base] ?? (Object.values(c.views).find(Boolean) as View | null);
+    // 結果が存在しない方式は欠測として明示する（別の方式の値を代わりに表示しない）
+    const v = c.views[base] ?? null;
+    const missingArms = (['A', 'B', 'C'] as Arm[]).filter((a) => !c.views[a]);
     const diffs = FIELDS.filter((f) => new Set((["A", "B", "C"] as Arm[]).map((a) => JSON.stringify(c.views[a]?.[f] ?? null))).size > 1);
     const adopted = (c.integration?.adoptions ?? []).filter((a) => a.value !== null).map((a) => `${a.field}: ${a.value}（${a.reason}。出典: ${a.from.join("・") || "固定ロジックの推定"}）`);
     const rejected = [...(c.integration?.adoptions ?? []).flatMap((a) => a.rejected.map((x) => `${a.field}: ${x.value}（${x.from || "候補"}。${x.reason}）`)), ...(c.integration?.excluded ?? []).map((e) => `${e.label}: 統合しない（${e.reason}）`)];
@@ -118,7 +122,7 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
       sourceRef: { table: "eval-9h3i", id },
       category: "special",
       categoryLabel: c.patternLabels[0] ?? "新規案件",
-      tags: c.patternLabels,
+      tags: [...(c.quarantine ? ['隔離（未確定・要確認）'] : []), ...c.patternLabels],
       source: { url: c.source.url, title: c.source.title, kind: "new", fetchedAt: null, createdAt: null, bodyText: null, bodyNote: "本文は保存していません。情報元URLの現在の内容と照らして評価してください（掲載が終了・更新されている場合があります）", bodyFetchedAt: null, images: [], imageNote: "画像は取得していません" },
       ai: {
         decision: { status: "candidate", label: "最終登録候補（候補1〜3のうち1つを表示）", triage: null, triageReason: null },
@@ -126,12 +130,12 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
         extracted: v ? { ...v, lotteryForm: v.lotteryForm ?? (c.forms?.[base]?.state === "confirmed" && c.forms?.[base]?.form === "store_independent" ? "store_independent" : null) } : null,
         evidence: [],
         formJudgment: forDisplay(c.forms?.[base]),
-        notices: [...(c.forms ? (["A", "B", "C"] as Arm[]).map((a) => formLine(labelOf(a), c.forms?.[a])) : []), `候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
-        warnings: (c.integration?.unresolved ?? []).map((u) => u.detail),
+        notices: [...(c.quarantine ? [`【隔離案件・未確定・要確認】安全条件により、この抽選だけを隔離しました（他の抽選は継続）。理由: ${c.quarantine.reasons.join(' / ').slice(0, 400)}。結果は保存してあります。商品構成と抽選単位（同じ抽選か、別々の抽選か）が正しいかを、人間が確認してください（正解を決めつけていません）`] : []), ...(missingArms.length ? [`欠測（結果が存在しない方式）: ${missingArms.map((a) => labelOf(a)).join('・')}`] : []), ...(c.forms ? (["A", "B", "C"] as Arm[]).map((a) => formLine(labelOf(a), c.forms?.[a])) : []), `候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
+        warnings: [...(c.quarantine ? c.quarantine.reasons.map((r) => `隔離: ${r}`.slice(0, 300)) : []), ...(c.integration?.unresolved ?? []).map((u) => u.detail)],
       },
       duplicateOf: [],
       integration: {
-        compare: order.map((a) => ({ label: labelOf(a), extracted: c.views[a] })),
+        compare: order.map((a) => ({ label: c.views[a] ? labelOf(a) : `${labelOf(a)}（欠測: この方式の結果なし）`, extracted: c.views[a] })),
         sources: c.sources.slice(0, 14),
         adopted: adopted.slice(0, 24),
         rejected: rejected.slice(0, 24),
@@ -221,6 +225,8 @@ export interface ThreewayScore {
   decisions: { caseId: string; correct: string | null }[];
   /** 人間が「判断できない」とした抽選（採点しない） */
   unknown: string[];
+  /** 隔離案件（未確定・要確認）。評価した案件は評価件数・採点に含まれる。評価されていない隔離案件も、ここに明示する（黙って除外しない） */
+  quarantined: { caseId: string; evaluated: boolean; unknown: boolean }[];
 }
 
 const TOOL_FIELDS = ["chain", "store", "product", "applyPeriod", "resultDate", "conditions", "lotteryForm", "receiveMethod"];
@@ -264,7 +270,9 @@ export function scoreThreeway(answers: AnswerResult[], build: ThreewayBuild, cas
     }
     // 統合・除外の誤り: 処理判断を「誤り」とした場合の正しい値は decisions に残す
   }
-  return { arms, evaluated, goldFields, decisions, unknown };
+  const seen = new Set(answers.filter((r) => r.human.verdict).map((r) => build.key[r.caseId]?.caseId));
+  const quarantined = cases.filter((c) => c.quarantine).map((c) => ({ caseId: c.caseId, evaluated: seen.has(c.caseId) && !unknown.includes(c.caseId), unknown: unknown.includes(c.caseId) }));
+  return { arms, evaluated, goldFields, decisions, unknown, quarantined };
 }
 
 export { splitList };
@@ -277,6 +285,7 @@ export interface RunCaseFile {
   error: string | null;
   members: { id: string; url: string | null; title: string }[];
   arms: Record<Arm, { openCards: number; input: unknown; judgment: { integration?: IntegrationSummary | null } | null; formJudgment?: FormRec | null }> | null;
+  stopJudgments?: { reason: string; newRule: string }[];
   investigation: { result: { sources: { url: string; kind: string; tier: string; status: string; fetchedAt?: string }[] } } | null;
 }
 
@@ -301,11 +310,12 @@ export const PATTERN_JA: Record<string, string> = {
   normal: "特に問題のない通常抽選",
 };
 
-export function casesFromRunFiles(files: RunCaseFile[], anchorUrl: (id: string) => { url: string; title: string }): ThreewayCase[] {
+export function casesFromRunFiles(files: RunCaseFile[], anchorUrl: (id: string) => { url: string; title: string }, opts: { quarantine?: Record<string, { reasons: string[] }> } = {}): ThreewayCase[] {
+  // エラーで結果が無い案件も、隔離として評価対象に残す（全方式が欠測）
   return files
-    .filter((f) => f.arms && !f.error)
+    .filter((f) => (f.arms && !f.error) || opts.quarantine?.[f.caseId])
     .map((f) => {
-      const a = f.arms!;
+      const a = f.arms ?? ({ A: { openCards: 0, input: null, judgment: null }, B: { openCards: 0, input: null, judgment: null }, C: { openCards: 0, input: null, judgment: null } } as NonNullable<RunCaseFile['arms']>);
       const src = anchorUrl(f.caseId);
       return {
         caseId: f.caseId,
@@ -315,6 +325,7 @@ export function casesFromRunFiles(files: RunCaseFile[], anchorUrl: (id: string) 
         views: { A: viewFromInput(a.A.input), B: viewFromInput(a.B.input), C: viewFromInput(a.C.input) },
         cards: { A: a.A.openCards, B: a.B.openCards, C: a.C.openCards },
         forms: { A: a.A.formJudgment ?? null, B: a.B.formJudgment ?? null, C: a.C.formJudgment ?? null },
+        quarantine: opts.quarantine?.[f.caseId] ?? null,
         integration: a.C.judgment?.integration ?? null,
         sources: [...new Set([...f.members.map((m) => `候補: ${m.url ?? m.title}`), ...(f.investigation?.result.sources ?? []).filter((s) => s.fetchedAt).map((s) => `${s.tier === "primary" ? "一次" : "二次"}・${s.kind}・${s.status}: ${s.url}`)])],
       };

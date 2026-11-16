@@ -16,17 +16,20 @@ describe.skipIf(!ON || !existsSync(`${OUT}/plan.json`))("3方式の評価セッ�
   it("実行結果から事例集を作る。評価結果があれば、3方式を採点する", () => {
     const plan = JSON.parse(readFileSync(`${OUT}/plan.json`, "utf8")) as { digest: string; cases: { caseId: string; baseline: { sourceUrl: string | null; sourceTitle: string } }[] };
     // 事例ごとに、エラーのない最新の実行結果を使う
+    // 隔離案件（案件単位の安全停止）は、結果の有無にかかわらず評価対象に残す（未確定・要確認として表示）
+    const qf = `${OUT}/quarantine.json`;
+    const quarantine = (existsSync(qf) ? JSON.parse(readFileSync(qf, "utf8")) : {}) as Record<string, { reasons: string[] }>;
     const latest = new Map<string, RunCaseFile & { startedAt: string }>();
     for (const run of readdirSync(`${OUT}/runs`).sort()) {
       for (const f of readdirSync(`${OUT}/runs/${run}`).filter((x) => x.startsWith("case-"))) {
         const j = JSON.parse(readFileSync(`${OUT}/runs/${run}/${f}`, "utf8")) as RunCaseFile & { startedAt: string };
-        if (j.arms && !j.error) latest.set(j.caseId, j);
+        if ((j.arms && !j.error) || quarantine[j.caseId]) latest.set(j.caseId, j);
       }
     }
     const cases = casesFromRunFiles([...latest.values()], (id) => {
       const c = plan.cases.find((x) => x.caseId === id);
       return { url: c?.baseline.sourceUrl ?? "", title: c?.baseline.sourceTitle ?? id };
-    });
+    }, { quarantine });
     const build = buildThreewaySet(cases, { setId: `rs-9h3i-${plan.digest}` });
     writeFileSync(`${OUT}/review-set-9h3i.json`, JSON.stringify(build.set, null, 1));
     writeFileSync(`${OUT}/review-key-9h3i.json`, JSON.stringify({ note: "評価が終わるまで開かない", key: build.key }, null, 1));
