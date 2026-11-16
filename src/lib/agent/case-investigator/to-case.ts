@@ -86,8 +86,9 @@ export function resultToCaseFile(r: CaseInvestigationResult, target: CaseTarget,
   // AIの報告が安全検証で拒否・保留された項目を、項目単位で記録する（どの検証が・なぜ。台帳に入らなかったAIの判断を追えるようにする）
   for (const s of r.steps ?? []) {
     if (s.tool !== "report_page_findings") continue;
-    const d = (s.detail ?? {}) as { rejected?: { field: string; reason: string }[]; skipped?: { field: string; reason: string }[] };
+    const d = (s.detail ?? {}) as { rejected?: { field: string; reason: string }[]; skipped?: { field: string; reason: string }[]; normalized?: { field: string; from: string; to: string; details: string[] }[] };
     const where = s.target ? `（${s.target.slice(0, 80)}）` : "";
+    for (const x of d.normalized ?? []) addDecision(c, { stage: "investigation", field: "items", kind: "noted", before: x.from, after: x.to, by: "fixed", reason: `商品名から説明（${x.details.join(" / ")}）を分けた。商品名は正式な名称だけを使い、詳細は別の情報として扱う${where}` });
     for (const x of d.rejected ?? []) addDecision(c, { stage: "investigation", field: KEY_MAP[x.field as FieldKey] ?? "general", kind: "rejected", before: null, after: null, by: "fixed", reason: `検証で不採用${where}: ${x.reason}` });
     for (const x of d.skipped ?? []) addDecision(c, { stage: "investigation", field: KEY_MAP[x.field as FieldKey] ?? "general", kind: "held", before: null, after: null, by: "fixed", reason: `統合しない${where}: ${x.reason}` });
   }

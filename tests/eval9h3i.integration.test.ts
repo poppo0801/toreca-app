@@ -13,6 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CaseInvestigationResult } from "@/lib/agent/case-investigator/engine";
 import type { CaseTarget } from "@/lib/agent/case-investigator/ledger";
 import { investigateForCollection, realInvestigationDeps } from "@/lib/server/agent/case-bridge";
+import { classifyItemsChange, isItemsChangeUnsafe, sanitizeItemsValue } from "@/lib/collector/product-text";
+import { readdirSync } from "node:fs";
 import { resultToCaseFile, withoutStructure } from "@/lib/agent/case-investigator/to-case";
 import type { WorldLogEntry } from "@/lib/server/agent/case-world";
 import type { Db } from "@/lib/server/lottery-service";
@@ -52,6 +54,21 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
     const real = realInvestigationDeps({ env, ledgerDir: OUT });
     if (!real.ok) throw new Error(real.reason);
 
+    // 保存済みの調査結果の再利用（E9H3I_REUSE）。APIは呼ばない（費用0）。調査の結果は修正後の規則（商品名と詳細の分離）で整える
+    const reuseIds = (process.env.E9H3I_REUSE ?? "").split(",").filter(Boolean);
+    const loadSaved = (id: string): { r: CaseInvestigationResult; t: CaseTarget } => {
+      let found: { r: CaseInvestigationResult; t: CaseTarget } | null = null;
+      for (const run of readdirSync(`${OUT}/runs`).sort()) {
+        try {
+          const j = JSON.parse(readFileSync(`${OUT}/runs/${run}/case-${id}.json`, "utf8")) as { investigation: { result: CaseInvestigationResult; target: CaseTarget } | null };
+          if (j.investigation) found = { r: j.investigation.result, t: j.investigation.target };
+        } catch {
+          /* この実行には無い */
+        }
+      }
+      if (!found) throw new Error(`再利用できる保存済みの調査結果が無い: ${id}`);
+      return found;
+    };
     const runId = new Date().toISOString().replace(/[:.]/g, "-");
     const dir = `${OUT}/runs/${runId}`;
     mkdirSync(dir, { recursive: true });
@@ -70,7 +87,14 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
         // B（9H-3F相当）は、Cの調査結果から構造解析で補った項目を除いて再生する。調査はCで1回だけ
         result = await tw.runCase3I(
           c,
-          (req) => investigateForCollection(req, { ...real.deps, onResult: (r, t) => { captured = { r, t }; } }),
+          reuseIds.includes(c.caseId)
+            ? async () => {
+                const sv = loadSaved(c.caseId);
+                const fixed = { ...sv.r, fields: sv.r.fields.map((f) => (f.field === "items" && f.adopted ? { ...f, adopted: sanitizeItemsValue(f.adopted) } : f)) };
+                captured = { r: fixed, t: sv.t };
+                return { caseFile: resultToCaseFile(fixed, sv.t, new Date().toISOString()), stopReason: fixed.stopReason };
+              }
+            : (req) => investigateForCollection(req, { ...real.deps, onResult: (r, t) => { captured = { r, t }; } }),
           () => {
             const cc = captured as { r: CaseInvestigationResult; t: CaseTarget } | null;
             if (!cc) return { skipped: "no_investigation_result" } as never;
@@ -87,8 +111,23 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
 
       const bad: string[] = [];
       if (error) bad.push(`実行エラー: ${error.slice(0, 120)}`);
-      const changed = (result?.arms.C.judgment?.decisions ?? []).filter((d) => d.stage === "merge" && d.kind === "changed" && ["chain", "store", "items"].includes(String(d.field)));
-      if (changed.length) bad.push(`調査・統合が系列・店舗・商品を変更（誤統合の疑い）: ${changed.map((d) => `${d.field} ${d.before}→${d.after}`).join(" / ")}`);
+      // 商品の変更は「同じ商品の詳細（価格・購入制限）の追加・表記揺れ」と「別商品の混入・置き換え・判断不能」を区別する（9H-3I）。系列・店舗の変更は従来どおり停止。
+      // 修正前の規則（商品名が変わったら停止）の判定と、修正後の判定を、根拠つきでログに残す
+      const stopJudgments: { field: string; before: string; after: string; oldRule: "stop"; newRule: string; reason: string }[] = [];
+      const changedAll = (result?.arms.C.judgment?.decisions ?? []).filter((d) => d.stage === "merge" && d.kind === "changed" && ["chain", "store", "items"].includes(String(d.field)));
+      for (const d of changedAll) {
+        if (d.field !== "items") {
+          bad.push(`調査・統合が系列・店舗を変更（誤統合の疑い）: ${d.field} ${d.before}→${d.after}`);
+          continue;
+        }
+        const ch = classifyItemsChange(String(d.before ?? "").split(" / ").filter(Boolean), String(d.after ?? "").split(" / ").filter(Boolean));
+        stopJudgments.push({ field: "items", before: String(d.before ?? "").slice(0, 160), after: String(d.after ?? "").slice(0, 160), oldRule: "stop", newRule: isItemsChangeUnsafe(ch) ? "stop" : "continue", reason: `${ch.kind}: ${ch.reason}` });
+        if (isItemsChangeUnsafe(ch)) bad.push(`調査・統合が商品を変更（${ch.kind}）: ${ch.reason}`);
+      }
+      if (stopJudgments.length) {
+        const f = `${OUT}/runs/${runId}/case-${c.caseId}.json`;
+        writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, "utf8")), stopJudgments }, null, 1));
+      }
       const estC = (result?.arms.C.draft as { formJudgment?: { state?: string } } | null)?.formJudgment;
       if (estC?.state === "estimated" && result?.arms.C.status === "auto_registered") bad.push("推定の店舗選択式が確認なしに自動登録された");
       if (cap1 && cap1.r.injectionFlags > 0) bad.push("本文に命令らしき文面を検出");

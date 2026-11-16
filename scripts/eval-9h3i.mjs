@@ -34,6 +34,6 @@ if (Number(ledger.spentJpy) + 5 >= cap) throw new Error("累計費用が承認�
 const r = spawnSync("npx", ["vitest", "run", "--no-file-parallelism", "--testTimeout=3600000", "--hookTimeout=120000", "tests/eval9h3i.integration.test.ts"], {
   stdio: "inherit",
   shell: true,
-  env: { ...process.env, RUN_DB_TESTS: "1", E9H3I: "1", E9H3I_CASES: cases.join(","), E9H3I_CAP_JPY: String(cap), E9H3I_PER_CASE_JPY: String(perCase), E9H3I_CONFIRM: "yes" },
+  env: { ...process.env, RUN_DB_TESTS: "1", E9H3I: "1", E9H3I_CASES: cases.join(","), E9H3I_REUSE: (arg("reuse") ?? ""), E9H3I_CAP_JPY: String(cap), E9H3I_PER_CASE_JPY: String(perCase), E9H3I_CONFIRM: "yes" },
 });
 process.exit(r.status ?? 1);

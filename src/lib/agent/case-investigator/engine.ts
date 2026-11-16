@@ -179,8 +179,8 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
         };
         try {
           const r = await t.run(input, ctx);
-          const d = (r.data ?? {}) as { failed?: boolean; reason?: string; results?: unknown; sourceKind?: string; identity?: unknown; accepted?: unknown; rejected?: unknown; skipped?: unknown; failKind?: string };
-          const detail = d.results ? { results: d.results } : d.identity ? { identity: d.identity, accepted: d.accepted, rejected: d.rejected, skipped: d.skipped } : d.sourceKind ? { sourceKind: d.sourceKind } : d.failKind ? { failKind: d.failKind } : undefined;
+          const d = (r.data ?? {}) as { failed?: boolean; reason?: string; results?: unknown; sourceKind?: string; identity?: unknown; accepted?: unknown; rejected?: unknown; skipped?: unknown; normalized?: unknown[]; failKind?: string };
+          const detail = d.results ? { results: d.results } : d.identity ? { identity: d.identity, accepted: d.accepted, rejected: d.rejected, skipped: d.skipped, ...(Array.isArray(d.normalized) && d.normalized.length ? { normalized: d.normalized } : {}) } : d.sourceKind ? { sourceKind: d.sourceKind } : d.failKind ? { failKind: d.failKind } : undefined;
           // AIが報告した内容（項目・値・根拠の抜粋・同一抽選の識別・応募単位）も記録する（9H-3D。判断過程を再実行なしで追えるように）
           const reported = name === "report_page_findings" ? { identity: input.identity, applyUnit: input.applyUnit, observations: Array.isArray(input.observations) ? (input.observations as Record<string, unknown>[]).slice(0, 20).map((o) => ({ field: o.field, value: short(String(o.value ?? ""), 200), quote: short(String(o.quote ?? ""), 200) })) : [] } : undefined;
           rec(!d.failed, d.failed ? String(d.reason ?? "失敗") : r.content.replace(/<[^>]+>/g, "").replace(/\s+/g, " "), reported ? { ...((detail ?? {}) as object), reported } : detail);

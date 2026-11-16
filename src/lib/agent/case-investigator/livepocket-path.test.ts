@@ -97,3 +97,19 @@ describe("調査エージェントが取得したLivePocketの本文 → 構造�
     expect(c.fields.form.value ?? null).toBeNull();
   });
 });
+
+describe("9H-3I: AIが商品名にページの説明（購入数量・価格）を付けて報告しても、台帳には正式な商品名だけが入る", () => {
+  it("商品名＋購入可能数＋販売価格 → 商品名だけを採用し、分けた詳細を判断履歴に残す。商品は1件のまま（別商品として増えない）", async () => {
+    const { c } = await run("select", { identity: IDENT, observations: [DEADLINE, { field: "items", value: "ハドウシーカー 購入可能数：お一人様1BOXまで 販売価格：6000円（税込）", quote: "【抽選販売】ハドウシーカー フルコンプ" }] });
+    const items = String(c.fields.items.value ?? "");
+    expect(items).toContain("ハドウシーカー");
+    expect(items).not.toContain("購入可能数");
+    expect(items).not.toContain("6000円");
+    expect(items.split(" / ")).toHaveLength(1);
+    expect(JSON.stringify(c.decisions)).toContain("商品名から説明");
+  });
+  it("商品名が無く説明（価格）だけの報告は、商品として採用しない", async () => {
+    const { c } = await run("select", { identity: IDENT, observations: [DEADLINE, { field: "items", value: "販売価格：6000円（税込）", quote: "【抽選販売】ハドウシーカー フルコンプ" }] });
+    expect(String(c.fields.items.value ?? "")).not.toContain("6000円");
+  });
+});

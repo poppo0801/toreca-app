@@ -16,6 +16,7 @@ import { CaseLedger, urlKey, type ExtraObservation, type FetchFailKind, type Obs
 import { basisOfQuote, classifyCaseSource, detectOrigin, hostOf, squash, tierOfCase, type ClassifyContext } from "./source-class";
 import type { IdentityFacts } from "./identity";
 import { verifyOrganizer } from "./organizer";
+import { splitProductDetail } from "@/lib/collector/product-text";
 import { analyzeLivePocket, type LivePocketStructure } from "@/lib/collector/livepocket-structure";
 
 /** 取得したLivePocketページの構造解析の記録（9H-3H）。同じ抽選のページ（identity=same）だけが台帳の抽選形態に反映される */
@@ -227,6 +228,8 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       const facts = ((input.identity ?? {}) as IdentityFacts) ?? {};
       const raw = Array.isArray(input.observations) ? (input.observations as Record<string, unknown>[]) : [];
       const rejected: { field: string; reason: string }[] = [];
+      /** 商品名から分けた詳細（価格・購入制限など。9H-3I）。商品名は正式な名称だけを台帳に入れ、詳細は別に記録する */
+      const normalized: { field: string; from: string; to: string; details: string[] }[] = [];
       const ok: Observation[] = [];
       const extras: ExtraObservation[] = [];
       // 応募の単位（店舗選択式か）。根拠の抜粋がページに実在するときだけ受け入れる（9H-3B。AIの判断を台帳に残す欄が無く、店舗の羅列が店舗の値になっていた）
@@ -249,11 +252,19 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       }
       for (const r of raw.slice(0, 20)) {
         const field = String(r.field ?? "") as FieldKey;
-        const value = String(r.value ?? "").trim();
+        let value = String(r.value ?? "").trim();
         const quote = String(r.quote ?? "").trim();
+        // 商品名にページの説明（購入数量・価格など）が混ざっているときは、商品名だけにする。商品名が残らないときは採用しない
+        if (r.field === "items" && value) {
+          const sp = splitProductDetail(value);
+          if (sp.details.length > 0) {
+            normalized.push({ field: "items", from: value.slice(0, 120), to: sp.name, details: sp.details.map((d) => d.slice(0, 80)) });
+            value = sp.name;
+          }
+        }
         const basis = () => basisOfQuote(src?.kind ?? "unknown", quote, `${page.title}\n${page.text}`);
         if (!FIELD_ENUM.includes(field)) rejected.push({ field, reason: "未対応の項目" });
-        else if (!value) rejected.push({ field, reason: "値が空" });
+        else if (!value) rejected.push({ field, reason: field === "items" ? "商品名が判断できない（説明・価格だけで正式な商品名が無い）" : "値が空" });
         else if (!quote || !body.includes(squash(quote))) rejected.push({ field, reason: "根拠の原文が、取得したページの本文に見つからない（推測・要約は採用しない）" });
         else if (field === "store" && storeSelect) rejected.push({ field, reason: "店舗選択式のため、店舗の値にしない（選べる店舗として applyUnit に記録）" });
         else if (field === "store" && looksLikeStoreList(value)) rejected.push({ field, reason: "複数の店舗の羅列は店舗の値にできない。応募時に店舗を選ぶのか、店舗ごとの受付かを applyUnit で報告する" });
@@ -270,7 +281,7 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       if (lp) lp.identity = r.identity.verdict;
       const s = reassess(`${hostOf(url)}の報告を反映`);
       const acceptedExtras = r.identity.verdict === "same" ? extras.map((x) => x.key) : [];
-      return { content: JSON.stringify({ identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], skipped: r.skipped, rejected, ...stateJson(s) }), data: { identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], rejected, skipped: r.skipped } };
+      return { content: JSON.stringify({ identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], skipped: r.skipped, rejected, ...(normalized.length ? { normalized } : {}), ...stateJson(s) }), data: { identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], rejected, skipped: r.skipped, normalized } };
     },
   } satisfies AgentTool);
 
