@@ -239,6 +239,8 @@ export interface ThreewayScore {
   unknown: string[];
   /** 隔離案件（未確定・要確認）。評価した案件は評価件数・採点に含まれる。評価されていない隔離案件も、ここに明示する（黙って除外しない） */
   quarantined: { caseId: string; evaluated: boolean; unknown: boolean }[];
+  /** 抽選ごとの採点（9H-3K。人間の評価に基づく指標の集計用）。verdict は人間の総合判定、decision は処理判断の修正 */
+  perCase: Record<string, { verdict: string; decision: string | null; arms: Record<Arm, { correct: number; wrong: number; missing: number; major: number; wrongFields: string[] }> }>;
 }
 
 const TOOL_FIELDS = ["chain", "store", "product", "applyPeriod", "resultDate", "conditions", "lotteryForm", "receiveMethod"];
@@ -249,6 +251,7 @@ export function scoreThreeway(answers: AnswerResult[], build: ThreewayBuild, cas
   let evaluated = 0;
   const decisions: ThreewayScore["decisions"] = [];
   const unknown: string[] = [];
+  const perCase: ThreewayScore["perCase"] = {};
   for (const r of answers) {
     const k = build.key[r.caseId];
     const c = k && cases.find((x) => x.caseId === k.caseId);
@@ -271,6 +274,7 @@ export function scoreThreeway(answers: AnswerResult[], build: ThreewayBuild, cas
     const dec = corr.get("decision");
     decisions.push({ caseId: k.caseId, correct: dec ?? null });
     const baseView = c.views[k.base];
+    const pc: ThreewayScore["perCase"][string] = (perCase[k.caseId] = { verdict: h.verdict, decision: dec ?? null, arms: { A: { correct: 0, wrong: 0, missing: 0, major: 0, wrongFields: [] }, B: { correct: 0, wrong: 0, missing: 0, major: 0, wrongFields: [] }, C: { correct: 0, wrong: 0, missing: 0, major: 0, wrongFields: [] } } });
     for (const f of TOOL_FIELDS) {
       let gold: string | null = null;
       if (corr.has(f) && corr.get(f)) gold = corr.get(f)!;
@@ -283,6 +287,9 @@ export function scoreThreeway(answers: AnswerResult[], build: ThreewayBuild, cas
         any = true;
         arms[a][s] += 1;
         (arms[a].perField[f] ??= []).push(s);
+        pc.arms[a][s] += 1;
+        if (s === "wrong") pc.arms[a].wrongFields.push(f);
+        if (s === "wrong" && (f === "chain" || f === "store" || f === "lotteryForm")) pc.arms[a].major += 1;
         if (s === "wrong" && (f === "chain" || f === "store" || f === "lotteryForm")) arms[a].major += 1;
       }
       if (any) goldFields += 1;
@@ -291,7 +298,7 @@ export function scoreThreeway(answers: AnswerResult[], build: ThreewayBuild, cas
   }
   const seen = new Set(answers.filter((r) => r.human.verdict).map((r) => build.key[r.caseId]?.caseId));
   const quarantined = cases.filter((c) => c.quarantine).map((c) => ({ caseId: c.caseId, evaluated: seen.has(c.caseId) && !unknown.includes(c.caseId), unknown: unknown.includes(c.caseId) }));
-  return { arms, evaluated, goldFields, decisions, unknown, quarantined };
+  return { arms, evaluated, goldFields, decisions, unknown, quarantined, perCase };
 }
 
 export { splitList };

@@ -9,7 +9,7 @@
  *  - 中止: 費用上限・異常な繰り返し・調査が系列/店舗/商品を変更・統合に別の店舗の候補が入った疑い・根拠のない確定・本文に命令らしき文面
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { runVerification, type CaseSignals } from "@/lib/case-model/verification-runner";
+import { isMaterialChainStoreChange, runVerification, type CaseSignals } from "@/lib/case-model/verification-runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CaseInvestigationResult } from "@/lib/agent/case-investigator/engine";
 import type { CaseTarget } from "@/lib/agent/case-investigator/ledger";
@@ -21,9 +21,10 @@ import type { WorldLogEntry } from "@/lib/server/agent/case-world";
 import type { Db } from "@/lib/server/lottery-service";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 import { makeThreeway, type PlanCase } from "./helpers/threeway";
+import { checkRegionConditions, isRegionExcluded, regionContradictions, regionEvidence, resolveRegionConditions, type PoolForRegion } from "@/lib/case-model/region-check";
 
 const ON = process.env.E9H3I === "1";
-const OUT = "backups/eval-9h3i";
+const OUT = process.env.E9H3I_OUT ?? "backups/eval-9h3i";
 const CAP = Number(process.env.E9H3I_CAP_JPY ?? 0);
 const PER_CASE = Number(process.env.E9H3I_PER_CASE_JPY ?? 12);
 const ids = (process.env.E9H3I_CASES ?? "").split(",").filter(Boolean);
@@ -39,7 +40,19 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
     const hid = (await a.db.rpc("bootstrap_household")).data as string;
     await a.db.from("collection_settings").insert({ household_id: hid, auto_register: false, worker_enabled: false });
     // 抽出の精度を評価するため、地域の条件は全都道府県にする（9H-3Iは東京都のみで、地域外の案件が情報を取得する前に除外され、最終候補が空になっていた）
-    tw = makeThreeway({ sys, u1: a.db, hid, allRegions: process.env.E9H3I_ALL_REGIONS !== "off" });
+    // 9H-3K: E9H3I_REGIONS=production のとき、本番相当の収集条件（候補プールの書き出しにある本番の収集設定。無ければ本番の判定の記録からの推定）で実行する。
+    // 条件が本番の判定の記録と矛盾する場合（対象地域なのに地域で除外された記録がある）は、評価を開始しない
+    if (process.env.E9H3I_REGIONS === "production") {
+      const planFile = JSON.parse(readFileSync(`${OUT}/plan.json`, "utf8")) as { poolFile: string };
+      const pool = JSON.parse(readFileSync(planFile.poolFile, "utf8")) as PoolForRegion;
+      const resolved = resolveRegionConditions(pool);
+      const contradictions = regionContradictions(resolved.conditions.prefectures, regionEvidence(pool));
+      if (contradictions.length) throw new Error(`評価の地域条件が本番の記録と矛盾します。評価を開始しません: ${contradictions.join(" / ")}`);
+      const mismatch = checkRegionConditions(resolved.conditions, resolved.conditions);
+      if (mismatch) throw new Error(mismatch);
+      writeFileSync(`${OUT}/region-conditions.json`, JSON.stringify({ at: new Date().toISOString(), source: resolved.source, note: resolved.note, prefectures: resolved.conditions.prefectures, includeOnline: resolved.conditions.includeOnline, statusMode: resolved.conditions.statusMode, evidence: regionEvidence(pool) }, null, 1));
+      tw = makeThreeway({ sys, u1: a.db, hid, conditions: resolved.conditions });
+    } else tw = makeThreeway({ sys, u1: a.db, hid, allRegions: process.env.E9H3I_ALL_REGIONS !== "off" });
   });
   afterAll(async () => {
     await tw?.clear();
@@ -63,6 +76,7 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
     type Saved = { error: string | null; arms: unknown; stopJudgments?: { newRule: string; reason: string }[]; investigation: { result: CaseInvestigationResult; target: CaseTarget } | null };
     const savedAll = (id: string): Saved[] => {
       const out: Saved[] = [];
+      if (!existsSync(`${OUT}/runs`)) return out;
       for (const run of readdirSync(`${OUT}/runs`).sort()) {
         try {
           out.push(JSON.parse(readFileSync(`${OUT}/runs/${run}/case-${id}.json`, "utf8")) as Saved);
@@ -134,7 +148,7 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
       const chainStoreChanges: string[] = [];
       for (const d of (result?.arms.C.judgment?.decisions ?? []).filter((x) => x.stage === "merge" && x.kind === "changed" && ["chain", "store", "items"].includes(String(x.field)))) {
         if (d.field !== "items") {
-          chainStoreChanges.push(`${d.field} ${d.before}→${d.after}`);
+          if (isMaterialChainStoreChange(String(d.field), d.before, d.after)) chainStoreChanges.push(`${d.field} ${d.before}→${d.after}`);
           continue;
         }
         const ch = classifyItemsChange(String(d.before ?? "").split(" / ").filter(Boolean), String(d.after ?? "").split(" / ").filter(Boolean));
@@ -148,16 +162,18 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
       const mine = new Set(c.members.map((m) => m.id));
       const foreign = new Set<string>();
       for (const a of ["A", "B", "C"] as const) for (const u of ((result?.arms[a].input as { sourceUrls?: string[] } | null)?.sourceUrls ?? [])) for (const m of u.matchAll(/(k-[0-9a-f]{8})/g)) if (!mine.has(m[1])) foreign.add(m[1]);
+      const regionExcluded = result ? isRegionExcluded({ status: result.arms.A.status, reasons: result.arms.A.reasons as string[] | null, investigationCalls: result.investigationCalls }) : false;
       const signals: CaseSignals = { error: error ?? null, itemsChanges, chainStoreChanges, injectionFlags: cap1?.r.injectionFlags ?? 0, unsupportedConfirmed: unsupported, loops, costJpy, investigationCalls: result?.investigationCalls ?? 0, estimateAutoRegistered: estC?.state === "estimated" && result?.arms.C.status === "auto_registered", foreignCaseIds: [...foreign], guardStopped: real.guard.stopped };
       // 全過程（元データ・AI調査結果・3方式の統合結果・停止判定の根拠）を、隔離する案件も含めて保存する
-      writeFileSync(`${OUT}/runs/${runId}/case-${c.caseId}.json`, JSON.stringify({ caseId: c.caseId, patterns: c.patterns, planDigest: plan.digest, startedAt: new Date(t0).toISOString(), ms, costJpy, error: error ?? null, members: c.members, arms: result ? Object.fromEntries((["A", "B", "C"] as const).map((a) => [a, { ...result!.arms[a], draft: undefined, formJudgment: (result!.arms[a].draft as { formJudgment?: unknown } | null)?.formJudgment ?? null, provenance: (result!.arms[a].draft as { provenance?: unknown } | null)?.provenance ?? null }])) : null, investigationCalls: result?.investigationCalls ?? 0, investigation: cap1 ? { result: cap1.r, target: cap1.t } : null, stopJudgments, worldLog: real.log.slice(logStart) as WorldLogEntry[] }, null, 1));
-      summary.push({ caseId: c.caseId, patterns: c.patterns, costJpy, ms, cards: result ? { A: result.arms.A.openCards, B: result.arms.B.openCards, C: result.arms.C.openCards } : null, stopReason: cap1?.r.stopReason ?? null, steps: cap1?.r.usage.steps ?? 0, searches: cap1?.r.usage.searches ?? 0, fetches: cap1?.r.usage.fetches ?? 0, retries: cap1?.r.usage.retries ?? 0 });
+      writeFileSync(`${OUT}/runs/${runId}/case-${c.caseId}.json`, JSON.stringify({ caseId: c.caseId, patterns: c.patterns, planDigest: plan.digest, startedAt: new Date(t0).toISOString(), ms, costJpy, error: error ?? null, outcome: regionExcluded ? "region_excluded" : error ? "error" : "processed", regionConditions: { prefectures: tw.conditions().prefectures, includeOnline: tw.conditions().includeOnline, statusMode: tw.conditions().statusMode }, members: c.members, arms: result ? Object.fromEntries((["A", "B", "C"] as const).map((a) => [a, { ...result!.arms[a], draft: undefined, formJudgment: (result!.arms[a].draft as { formJudgment?: unknown } | null)?.formJudgment ?? null, provenance: (result!.arms[a].draft as { provenance?: unknown } | null)?.provenance ?? null }])) : null, investigationCalls: result?.investigationCalls ?? 0, investigation: cap1 ? { result: cap1.r, target: cap1.t } : null, stopJudgments, worldLog: real.log.slice(logStart) as WorldLogEntry[] }, null, 1));
+      summary.push({ caseId: c.caseId, outcome: regionExcluded ? "region_excluded" : "processed", patterns: c.patterns, costJpy, ms, cards: result ? { A: result.arms.A.openCards, B: result.arms.B.openCards, C: result.arms.C.openCards } : null, stopReason: cap1?.r.stopReason ?? null, steps: cap1?.r.usage.steps ?? 0, searches: cap1?.r.usage.searches ?? 0, fetches: cap1?.r.usage.fetches ?? 0, retries: cap1?.r.usage.retries ?? 0 });
       return signals;
     };
 
     const v = await runVerification({
       caseIds: picked.map((c) => c.caseId),
       done,
+      free: new Set(reuseIds),
       limits: { perCaseCapJpy: PER_CASE, totalCapJpy: CAP, spentBeforeJpy: real.guard.spentJpy },
       execute,
       onOutcome: (o) => {

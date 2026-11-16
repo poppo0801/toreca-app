@@ -20,6 +20,8 @@ export interface PlanMember {
   url: string | null;
   title: string;
   input: { chain: string; store: string; storeMode: string; selectable: string[]; products: string[]; applyStart: string | null; applyDeadline: string | null; resultDate: string | null; resultEnd: string | null; conditions: string; receiveMethod: string; applyMethod: string };
+  /** 本番の初期読み取りで得た根拠の抜粋（項目名・原文）。評価では、これを初期読み取りの根拠として再現する（9H-3K） */
+  evidence?: { field: string; quote: string }[];
 }
 export interface PlanCase {
   caseId: string;
@@ -64,6 +66,8 @@ export interface Env {
   knowledge?: HumanKnowledge;
   /** true のとき、地域の条件を全都道府県にする（抽出の精度を評価するため。9H-3J）。地域外の案件が、情報を取得する前に除外され、最終候補が空になるのを避ける */
   allRegions?: boolean;
+  /** 収集条件（地域など）を、本番相当の値で指定する（9H-3K。指定時は allRegions より優先） */
+  conditions?: CollectionConditions;
 }
 
 const ALL_PREFECTURES = ["北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県", "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県", "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県", "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県", "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県"];
@@ -95,18 +99,19 @@ export function makeThreeway(env: Env) {
       raw.apply_unit = select ? "store_select" : "unknown";
       raw.selectable_stores = i.selectable;
       raw.notes = "";
-      raw.evidence = [];
+      // 9H-3K: 本番の初期読み取りで得た根拠の抜粋（本番のAIが、実際の本文から抜き出したもの）を再現する。評価用の簡略化で根拠が全て空になり、商品の根拠が常に「根拠なし」と判定されるのを避ける
+      raw.evidence = Object.fromEntries((current!.evidence ?? []).map((e) => [e.field === "items" ? "products" : e.field, e.quote]));
       raw.warnings = [];
       return { ...o, raw };
     },
   };
-  const cond = (): CollectionConditions => ({ ...DEFAULT_CONDITIONS, prefectures: env.allRegions ? ALL_PREFECTURES : ["東京都"] });
+  const cond = (): CollectionConditions => env.conditions ?? ({ ...DEFAULT_CONDITIONS, prefectures: env.allRegions ? ALL_PREFECTURES : ["東京都"] });
   const refNow = (m: PlanMember) => new Date(new Date(`${(str(m.input.applyDeadline).slice(0, 10) || "2026-11-10")}T12:00:00+09:00`).getTime() - 86400_000);
   const deps = (m: PlanMember, extra: Partial<CollectDeps>): CollectDeps => ({
     db: sys, householdId: hid, trigger: "cron", now: refNow(m), actor: null, canRegister: false, serviceRegister: false, extractor: extractor as never, xClient: null,
     // 収集側の取得は、初期の読み取りの再現（見出しのみ）。調査側の取得は呼び出し側が決める
-    fetchPage: async (u: string) => ({ ok: true, finalUrl: u, status: 200, contentType: "text/html", body: `<html><head><title>${m.title}</title></head><body><p>${m.title} の抽選販売のお知らせです。詳細は応募ページをご確認ください。（収集側の入力は初期の読み取りを再現）</p></body></html>`, truncated: false }) as never,
-    fetchOembed: async (u: string) => ({ ok: true, text: `${m.title} の抽選販売のお知らせです。詳細は応募ページをご確認ください。`, author: /x\.com\/([^/]+)\/status/.exec(u)?.[1] ?? "", notice: [], postedOn: "" }) as never,
+    fetchPage: async (u: string) => ({ ok: true, finalUrl: u, status: 200, contentType: "text/html", body: `<html><head><title>${m.title}</title></head><body><p>${m.title} の抽選販売のお知らせです。詳細は応募ページをご確認ください。（収集側の入力は初期の読み取りを再現）</p>${(m.evidence ?? []).map((e) => `<p>${e.quote}</p>`).join("")}</body></html>`, truncated: false }) as never,
+    fetchOembed: async (u: string) => ({ ok: true, text: `${m.title} の抽選販売のお知らせです。詳細は応募ページをご確認ください。${(m.evidence ?? []).map((e) => e.quote).join(" ")}`, author: /x\.com\/([^/]+)\/status/.exec(u)?.[1] ?? "", notice: [], postedOn: "" }) as never,
     ...(env.knowledge ? { humanKnowledge: env.knowledge } : {}),
     ...extra,
   });
@@ -260,5 +265,5 @@ export function makeThreeway(env: Env) {
     await clear();
     return { caseId: c.caseId, arms: { A, B, C }, investigation: captured, investigationCalls: calls };
   }
-  return { runCase, runCase3I, clear, flags };
+  return { runCase, runCase3I, clear, flags, conditions: cond };
 }

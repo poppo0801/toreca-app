@@ -39,7 +39,7 @@ describe.skipIf(!ON || !POOL || !existsSync(POOL))("新規案件の確定（候�
     const hk = buildHumanKnowledge(answers as never);
     const chains = new Set((hk.forms?.records ?? []).filter((r) => r.status === "active").map((r) => chainCanonicalKey(r.chain)));
     const trend: ChainTrendInfo = { known: chains, selectLean: new Set([...chains].filter((k) => chainFormTendency(k, recordsFor(hk.forms?.records, k)).lean === "store_select")) };
-    const { selected, report } = selectNewCases(pool.candidates, evaluated, { today, trend });
+    const { selected, report } = selectNewCases(pool.candidates, evaluated, { today, trend, ...(process.env.SEL_TARGET ? { target: Number(process.env.SEL_TARGET), min: Number(process.env.SEL_MIN ?? 15), max: Number(process.env.SEL_MAX ?? 24), perChain: Number(process.env.SEL_PER_CHAIN ?? 3), skipRegionExcluded: process.env.SEL_SKIP_REGION === "1" } : {}) });
     const cases = selected.map((g) => {
       const anchor = [...g.members].sort((a, b) => rank(a) - rank(b) || roundup(a) - roundup(b) || filled(b) - filled(a) || a.id.localeCompare(b.id))[0];
       const i = anchor.input;

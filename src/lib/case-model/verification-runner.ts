@@ -10,6 +10,8 @@
  */
 import type { ItemsChange } from "@/lib/collector/product-text";
 import { isItemsChangeUnsafe } from "@/lib/collector/product-text";
+import { sameChainName } from "@/lib/chain-normalize";
+import { normName } from "@/lib/norm";
 
 export interface CaseSignals {
   /** 案件の実行エラー（個別案件の取得・解析の失敗など） */
@@ -94,7 +96,7 @@ export interface VerificationSummary {
  * 案件を1件ずつ実行する。完了済み・隔離済み（done）は実行しない。案件単位の問題は隔離して続け、検証全体の停止条件に当たったときだけ止める。
  * execute は、案件を実行して信号（費用・調査の回数・変更の分類など）を返す。例外は案件の失敗（共通の異常を示す文面なら全体停止）。
  */
-export async function runVerification(o: { caseIds: string[]; done: Set<string>; limits: Limits; execute: (caseId: string) => Promise<CaseSignals>; onOutcome?: (c: CaseOutcome, s: CaseSignals | null) => void }): Promise<VerificationSummary> {
+export async function runVerification(o: { caseIds: string[]; done: Set<string>; limits: Limits; execute: (caseId: string) => Promise<CaseSignals>; /** 保存済みの結果の再生など、費用が発生しない案件（費用の事前確認の対象外） */ free?: Set<string>; onOutcome?: (c: CaseOutcome, s: CaseSignals | null) => void }): Promise<VerificationSummary> {
   const outcomes: CaseOutcome[] = [];
   let spent = o.limits.spentBeforeJpy;
   let globalStop: string | null = null;
@@ -108,7 +110,7 @@ export async function runVerification(o: { caseIds: string[]; done: Set<string>;
       continue;
     }
     // 次の1件で上限を超える恐れがあるときは、実行しない（呼び出しの前に止める）
-    if (spent + o.limits.perCaseCapJpy > o.limits.totalCapJpy) {
+    if (!o.free?.has(id) && spent + o.limits.perCaseCapJpy > o.limits.totalCapJpy) {
       globalStop = `次の1件（上限${o.limits.perCaseCapJpy}円）で全体の上限${o.limits.totalCapJpy}円を超える恐れ（累計${spent.toFixed(2)}円）`;
       outcomes.push({ caseId: id, status: "not_run", reasons: [globalStop], costJpy: 0 });
       continue;
@@ -133,4 +135,21 @@ export async function runVerification(o: { caseIds: string[]; done: Set<string>;
   }
   const count = (st: CaseStatus) => outcomes.filter((x) => x.status === st).length;
   return { outcomes, executed: count("completed") + count("quarantined"), completed: count("completed"), quarantined: count("quarantined"), skippedDone: count("skipped_done"), notRun: count("not_run"), spentJpy: Number(spent.toFixed(4)), globalStop };
+}
+
+/**
+ * 系列・店舗の変更が、安全停止（隔離）の対象になる「実質的な変更」か（9H-3K）。
+ * 系列名の表記違い（Yellow Submarine → イエローサブマリン、既存の系列名への解決）は、同じ系列として扱う＝隔離しない。
+ * 正規化しても一致しない変更（別の系列・別の店舗）だけを、誤統合の疑いとして扱う。
+ */
+export function isMaterialChainStoreChange(field: string, before: unknown, after: unknown): boolean {
+  const b = String(before ?? "").trim();
+  const a = String(after ?? "").trim();
+  if (b === a) return false;
+  if (field === "chain") {
+    if (!b || !a) return true;
+    return !sameChainName(b, a);
+  }
+  if (field === "store") return normName(b) !== normName(a);
+  return true;
 }

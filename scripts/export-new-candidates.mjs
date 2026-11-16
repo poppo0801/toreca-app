@@ -97,7 +97,10 @@ for (const s of stores) {
     /* 不正なURLは無視 */
   }
 }
+// 収集の条件（9H-3K。評価の地域条件を本番設定と一致させるため）。地域・通販・受付状況・応募/受取方法・商品の絞り込み方式だけ。自宅の位置・距離の値・世帯IDは書き出さない
+const st = (await db.from("collection_settings").select("prefectures,include_online,status_mode,track_upcoming,apply_methods,receive_methods,product_mode").limit(5)).data ?? [];
+const collectionSettings = st.length === 1 ? { prefectures: st[0].prefectures ?? [], includeOnline: st[0].include_online ?? true, statusMode: st[0].status_mode ?? "open", trackUpcoming: st[0].track_upcoming ?? true, applyMethods: st[0].apply_methods ?? [], receiveMethods: st[0].receive_methods ?? [], productMode: st[0].product_mode ?? "all" } : null;
 mkdirSync("backups/eval-9h3f", { recursive: true });
 const file = `backups/eval-9h3f/pool-${isProd ? "production" : "local"}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-writeFileSync(file, JSON.stringify({ format: "toremane-candidate-pool", version: 1, target: isProd ? "production" : "local", exportedAt: new Date().toISOString(), days, officialHostsByChain, candidates }, null, 1));
+writeFileSync(file, JSON.stringify({ format: "toremane-candidate-pool", version: 1, target: isProd ? "production" : "local", exportedAt: new Date().toISOString(), days, officialHostsByChain, collectionSettings, candidates }, null, 1));
 console.log(`書き出し: ${file}（解析済みの候補 ${candidates.length}件。選定はオフラインで行う）`);

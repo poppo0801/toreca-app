@@ -95,3 +95,14 @@ describe("再開と集計の整合性", () => {
     expect(s.outcomes.filter((o) => o.status === "quarantined").map((o) => o.caseId)).toEqual(["b", "c"]);
   });
 });
+
+import { isMaterialChainStoreChange } from "./verification-runner";
+describe("系列・店舗の変更の判定（9H-3K）", () => {
+  it("系列名の表記違い（英語・カタカナ・既存名への解決）は隔離しない。別の系列・店舗への変更は隔離する", () => {
+    expect(isMaterialChainStoreChange("chain", "Yellow Submarine", "イエローサブマリン")).toBe(false);
+    expect(isMaterialChainStoreChange("chain", "ゲオ", "ブックオフ")).toBe(true);
+    expect(isMaterialChainStoreChange("chain", "", "ゲオ")).toBe(true);
+    expect(isMaterialChainStoreChange("store", "渋谷店", "新宿店")).toBe(true);
+    expect(isMaterialChainStoreChange("store", "渋谷店", "渋谷 店")).toBe(false);
+  });
+});

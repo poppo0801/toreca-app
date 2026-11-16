@@ -302,7 +302,7 @@ export interface SelectionReport {
   chains: Record<string, number>;
 }
 
-export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[], opts: { today: string; target?: number; min?: number; max?: number; perChain?: number; trend?: ChainTrendInfo }): { selected: NewGroup[]; report: SelectionReport } {
+export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[], opts: { today: string; target?: number; min?: number; max?: number; perChain?: number; trend?: ChainTrendInfo; skipRegionExcluded?: boolean }): { selected: NewGroup[]; report: SelectionReport } {
   const target = opts.target ?? 12;
   const min = opts.min ?? 10;
   const max = opts.max ?? 15;
@@ -315,7 +315,8 @@ export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[
   for (const cg of groupPool(pool, { refine: false })) if (excludedReason(cg, evaluated)) for (const m of cg.members) coarseExcluded.add(m.id);
   for (const g of groups) {
     const why = excludedReason(g, evaluated) ?? (g.members.some((m) => coarseExcluded.has(m.id)) ? "評価済みの抽選と同じまとまり（再分割前）に含まれる" : null) ?? (g.members.every((m) => m.reasons.some((r) => /ポケモンカード以外|別ゲーム/.test(r))) ? "ポケモンカード以外の商品（対象外ゲーム。地域・期限の除外検証には使わない）" : null);
-    if (why) excluded.push({ id: g.id, reason: why });
+    const regionWhy = !why && opts.skipRegionExcluded && g.members.some((m) => m.status === "excluded" && (m.region || /対象外の地域/.test(m.reasons.join(" ")))) ? "本番の地域条件で除外された抽選（抽出の精度評価には使わない。地域除外の確認は別のテスト）" : null;
+    if (why ?? regionWhy) excluded.push({ id: g.id, reason: (why ?? regionWhy) as string });
     else kept.push(g);
   }
   for (const g of kept) g.patterns = tagPatterns(g, kept, { today: opts.today, trend: opts.trend });
