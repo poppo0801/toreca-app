@@ -65,5 +65,5 @@ describe.skipIf(!ON || !POOL || !existsSync(POOL))("新規案件の確定（候�
     writeFileSync(`${OUT}/selection-report.json`, JSON.stringify({ ...report, poolFile: POOL, poolExportedAt: pool.exportedAt, poolTarget: pool.target, evaluatedEntries: evaluated.length }, null, 1));
     writeFileSync(`${OUT}/plan.json`, JSON.stringify({ frozenAt: new Date().toISOString(), stage: "9H-3F", digest, poolFile: POOL, budget: { model: "claude-haiku-5-5", search: "anthropic web_search（既存）" }, report, cases }, null, 1));
     expect(cases.length).toBeGreaterThan(0);
-  });
+  }, 300_000);
 });

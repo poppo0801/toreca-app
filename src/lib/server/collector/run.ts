@@ -62,6 +62,9 @@ import { judgeForm } from "@/lib/lottery-form";
 import { addTrace, buildUnderstanding, decideApplyUnit, hasSiblingStorePages, type TraceStep } from "@/lib/collector/understanding";
 import { knowledgeFor } from "@/lib/collector/knowledge/chain-knowledge";
 import { buildReferencePacket } from "@/lib/case-model/reference";
+import { resolveChainName } from "@/lib/case-model/chain-resolve";
+import { inferenceLabel, inferStoreForm, platformOf, tendencyFor, type FormInference } from "@/lib/case-model/form-inference";
+import { analyzeLivePocket } from "@/lib/collector/livepocket-structure";
 import { spotCheckEligible, spotCheckRate } from "@/lib/case-model/spot-check";
 import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { planMultiProduct } from "@/lib/collector/multi-product";
@@ -698,6 +701,15 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     if (xc.chainName) baseEx = { ...baseEx, chainName: xc.chainName };
     else chainWarn.push(...xc.warnings);
   }
+  // Stage 9H-3G（フラグ有効時のみ）: 系列名を、登録済みの系列マスターと人間が確定した別名に合わせる（表記揺れ・別名のみ。似た名前の別系列は寄せず、候補を注意で示す）
+  let chainResolveNote = "";
+  if (unifiedMode().judgment && baseEx.chainName.trim()) {
+    const cr = resolveChainName({ name: baseEx.chainName, masters: data.chains, human: deps.humanKnowledge });
+    if (cr.changed) {
+      baseEx = { ...baseEx, chainName: cr.name };
+      chainResolveNote = cr.note;
+    } else if (cr.source === "none" && cr.candidates.length > 0) chainWarn.push(cr.note);
+  }
   // ---- Stage 9H-3B: 共通基盤（開発環境のみ・フラグ）。AIの読み取りを案件ファイルとして記録し、調査が必要かを判定する。
   // 調査が有効で必要なら、調査結果をこの入口（buildDraft の前）で合流させる。以降の店舗選択式の判定・重複・登録判定は既存の経路のまま。フラグが無効なら何もしない
   const uni = unifiedMode();
@@ -780,12 +792,14 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const secondary: string[] = [...(hint?.used ?? []), ...(idHint?.used ?? [])];
   // Stage 9C: AIの応募単位の読み取りと、固定ロジックの構造検査を突き合わせて抽選形態を決める。AIの判断を根拠なく上書きせず、変更は trace に残す
   const traceSteps: TraceStep[] = [];
+  let formEstimate: FormInference | null = null;
   const pushTrace = (s: TraceStep) => {
     const n = addTrace(traceSteps, s);
     traceSteps.length = 0;
     traceSteps.push(...n);
   };
   pushTrace({ stage: "ai", field: "unit", value: result.extraction.applyUnit ?? "unknown", by: "ai" });
+  if (chainResolveNote) pushTrace({ stage: "match", field: "chain", value: baseEx.chainName, by: "master", note: chainResolveNote });
   pushTrace({ stage: "ai", field: "store", value: result.extraction.storeName || "(なし)", by: "ai" });
   pushTrace({ stage: "match", field: "store", value: `${draft.summary.store}:${input.store.name || "(なし)"}`, by: "master" });
   const chainKnow = knowledgeFor(input.chain.name);
@@ -826,6 +840,30 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       secondary.push(`応募時に店舗を選ぶ構造の記載があるため、店舗選択式の1件として登録します（${known.name || "特定できた店舗"}は選べる店舗の1つ）`);
       // Stage 9H-3B: 店舗を1つ特定できていたのを、構造の記載で店舗選択式に変えた理由の記録（判断履歴のフラグが有効なときだけ）
       if (unifiedMode().judgment) pushTrace({ stage: "fixed", field: "form", value: "store_select", by: "fixed", note: `特定できた店舗（${known.name || "不明"}）を、告知の店舗選択欄の記載により選べる店舗の1つとして扱い、店舗選択式の1件にした` });
+    }
+  }
+  // ---- Stage 9H-3G（フラグ有効時のみ）: 店舗選択式の判断を、確認済み／推定／不明に分けて記録する。
+  // 今回の告知に根拠が無いときだけ、過去の確認済みの実績・系列の傾向を判断材料にする（優先順位は form-inference.ts）。推定だけを根拠に、店舗別の独立抽選を削除・統合しない
+  if (unifiedMode().judgment && input.storeMode !== "select_on_apply") {
+    const lpText = platformOf(q.url) === "livepocket" ? formTexts.join("\n") : "";
+    const lp = lpText ? analyzeLivePocket({ text: lpText }) : null;
+    const jd = judgeForm({ storeMode: input.storeMode ?? "fixed", requirementTags: input.requirementTags, texts: formTexts, sourceUrls: input.sourceUrls, knowledge: chainKnow, perStorePages: hasSiblingStorePages(input, data.lotteries), selectableStoreCount: result.extraction.selectableStoreNames?.length ?? 0 });
+    const tendency = tendencyFor({ human: deps.humanKnowledge, chain: input.chain.name, knowledge: chainKnow, platform: platformOf(q.url) });
+    const storeKnown = !!input.store.name.trim() && input.store.name !== SELECT_STORE_PLACEHOLDER;
+    const inf = inferStoreForm({ judgement: jd, aiUnit: result.extraction.applyUnit, livepocket: lp, storeKnown, platform: platformOf(q.url), tendency });
+    if (inf.state !== "unknown" || inf.priorOverridden) pushTrace({ stage: "form", field: "form", value: `${inf.form}:${inf.state}`, by: "fixed", note: [inferenceLabel(inf), ...inf.basis, ...(inf.refs?.length ? [`参照した実績: ${inf.refs.join(", ")}`] : [])].join(" / ").slice(0, 500) });
+    if (lp && lp.klass !== "C") pushTrace({ stage: "form", field: "form", value: `livepocket:${lp.klass}`, by: "fixed", note: lp.reasons.join(" / ").slice(0, 300) });
+    if (inf.state === "estimated") {
+      formEstimate = inf;
+      if (inf.action === "apply") {
+        const ph = data.stores.find((s) => s.chainId === input.chain.id && s.name === SELECT_STORE_PLACEHOLDER);
+        input.storeMode = "select_on_apply";
+        input.store = { id: ph?.id ?? null, name: SELECT_STORE_PLACEHOLDER, prefecture: "" };
+        draft.summary.store = ph ? "exact" : "none";
+        secondary.push(`【推定】応募時に店舗を選ぶ抽選と推定して登録します（${inf.basis[0] ?? "系列の過去の実績"}）`.slice(0, 160));
+        pushTrace({ stage: "fixed", field: "store", value: "select_on_apply", by: "fixed", note: "【推定】今回の告知に根拠が無く、系列の過去の実績から店舗選択式と推定した（確認が必要）" });
+      }
+      draft.warnings.push(`店舗選択式は推定です（${inf.action === "apply" ? "登録の形に反映" : "店舗が特定できているため登録の形は変えず、確認候補"}・信頼度${inf.confidence === "medium" ? "中" : "低"}）。${inf.basis[0] ?? ""}`.slice(0, 200));
     }
   }
   // 複数のTCGを案内する投稿では、ポケモンカード以外の明細を外す（ポケモンカードの明細が残るときだけ）
@@ -949,7 +987,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
   const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w) && !isUnmanagedConflict(w));
   const fieldConflicts = conflictLabels(myFields);
-  const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目があります: ${fieldConflicts.join("・")}` : conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : null;
+  const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目があります: ${fieldConflicts.join("・")}` : conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : (formEstimate as FormInference | null)?.action === "apply" ? "店舗選択式は系列の過去の実績からの推定です（確認が必要）" : null;
   // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）。
   // 別の情報源が同じ抽選を告知した場合（片方にだけ受付開始日がある等、読み取れた項目が違っても）、同じ抽選として追跡を引き継ぐ
   // 具体的な系列がある受付前・詳細未発表の抽選（または追跡中の予告の続報で、まだ登録できないもの）だけを追跡する

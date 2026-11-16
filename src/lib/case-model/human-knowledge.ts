@@ -9,21 +9,25 @@
 import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { normName } from "@/lib/norm";
 import { productKey } from "@/lib/lottery-match";
+import { buildFormRecords, platformOf, type EvalResultLike, type FormLedgerEvent, type FormRecord } from "./form-learning";
 
 export interface AnswerLike {
   caseId?: string;
-  aiOriginal?: { extracted?: { chain?: string | null; store?: string | null; products?: string[] | null } };
-  human?: { verdict?: string; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; comment?: string };
+  aiOriginal?: { extracted?: { chain?: string | null; store?: string | null; products?: string[] | null; applyDeadline?: string | null; lotteryForm?: string | null }; warnings?: string[]; notices?: string[] };
+  source?: { url?: string };
+  human?: { verdict?: string; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; confirmedCorrectFields?: string[]; unknownOnlyFields?: string[]; comment?: string; evaluatedAt?: string };
 }
 export interface AnswersFileLike {
   setId?: string;
   results?: AnswerLike[];
+  /** 無効化リスト（形式 form-invalidations）。過去の誤った評価を取り消す（9H-3H） */
+  invalidate?: { key?: string; caseId?: string; reason?: string }[];
 }
 
 export type HumanEntry =
   | { kind: "chain_alias"; alias: string; canonical: string; caseId: string; caseIds?: string[] }
   | { kind: "product_alias"; alias: string; canonical: string; caseId: string; caseIds?: string[] }
-  | { kind: "store_form"; chain: string; form: "store_select"; caseId: string; caseIds?: string[] }
+  | { kind: "store_form"; chain: string; form: "store_select"; platform?: string; caseId: string; caseIds?: string[] }
   | { kind: "store_name"; chain: string; store: string; caseId: string; caseIds?: string[] }
   | { kind: "decision"; chain: string; decision: string; caseId: string; caseIds?: string[] }
   | { kind: "note"; chain: string; text: string; caseId: string; caseIds?: string[] };
@@ -31,6 +35,8 @@ export type HumanEntry =
 export interface HumanKnowledge {
   version: 1;
   entries: HumanEntry[];
+  /** 抽選形態の実績（肯定・否定の双方向。同じ抽選は1実績・新しい評価で更新・無効化を反映）と、その追加・更新・無効化の履歴（9H-3H） */
+  forms?: { records: FormRecord[]; log: FormLedgerEvent[] };
 }
 
 const SELECT_WORDS = ["店舗選択式", "店舗選択", "応募時に店舗選択"];
@@ -72,7 +78,7 @@ export function buildHumanKnowledge(files: AnswersFileLike[]): HumanKnowledge {
       for (const c of h.corrections ?? []) {
         const v = (c.correctValue ?? "").trim();
         // 店舗選択式: 店舗欄の訂正だけでなく、評価者が別の欄に書いた場合（商品欄に「店舗選択式」）も同じ判断として扱う
-        if (v && chain && (c.field === "store" || c.field === "product" || c.field === "lotteryForm") && isSelect(v)) add({ kind: "store_form", chain, form: "store_select", caseId });
+        if (v && chain && (c.field === "store" || c.field === "product" || c.field === "lotteryForm") && isSelect(v)) add({ kind: "store_form", chain, form: "store_select", ...(platformOf(r.source?.url) ? { platform: platformOf(r.source?.url) } : {}), caseId });
         else if (c.field === "store" && v && chain) add({ kind: "store_name", chain, store: v, caseId });
         if (c.field === "product" && v && !isSelect(v)) {
           // 商品名の正規化: AIが読んだ商品名（装飾つき）と、評価者が正した商品名
@@ -84,7 +90,13 @@ export function buildHumanKnowledge(files: AnswersFileLike[]): HumanKnowledge {
       if (note && chain) add({ kind: "note", chain, text: note.slice(0, 160), caseId });
     }
   }
-  return { version: 1, entries };
+  // 抽選形態の実績（双方向）。系列は、評価者が直した系列名を優先する
+  const chainOf = (r: EvalResultLike): string => {
+    const fix = (r.human?.corrections ?? []).find((c) => c.field === "chain" && (c.correctValue ?? "").trim());
+    return (fix?.correctValue ?? r.aiOriginal?.extracted?.chain ?? "").trim();
+  };
+  const forms = buildFormRecords(files as never, chainOf);
+  return { version: 1, entries, forms };
 }
 
 /** 評価で系列名と確認された名称（マスターに無い系列も含む）。表示名から系列を読み取る手がかり（参考）に使う */

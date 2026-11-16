@@ -27,6 +27,8 @@ export interface PlanCase {
   patterns: string[];
   members: PlanMember[];
   anchorId: string;
+  /** true のとき、メンバーの系列名からは系列マスターを作らない（呼び出し側が登録済みの系列を用意する） */
+  skipChainMasters?: boolean;
   target: { id: string; chain: string; products: string[] };
   classify?: { officialHosts: string[]; officialAccounts: string[]; aggregatorHosts: string[]; aggregatorAccounts: string[] };
 }
@@ -41,6 +43,8 @@ export interface ArmResult {
   status: string;
   /** 利用者が見る確認待ちの候補（カード）の数。同じ抽選が何枚に分かれているか */
   openCards: number;
+  /** 登録候補の下書き全体（警告・理解の記録を確認するため） */
+  draft?: unknown;
   input: unknown;
   judgment: Judgment | null;
   reasons: unknown;
@@ -110,7 +114,7 @@ export function makeThreeway(env: Env) {
   const cand = async (n: string) => (await sys.from("collection_candidates").select("id,status,job_state,reasons,draft").eq("household_id", hid).eq("dedupe_key", U(n)).maybeSingle()).data!;
   const open = async () => ((await sys.from("collection_candidates").select("id").eq("household_id", hid).like("dedupe_key", "%q9h3f.example.invalid%").eq("status", "pending").eq("job_state", "review")).data ?? []).length;
   const masters = async (c: PlanCase) => {
-    for (const name of [...new Set(c.members.map((m) => m.input.chain).filter(Boolean))]) {
+    for (const name of c.skipChainMasters ? [] : [...new Set(c.members.map((m) => m.input.chain).filter(Boolean))]) {
       if (!(await sys.from("chains").select("id").eq("household_id", hid).eq("name", name).maybeSingle()).data) {
         const ch = (await u1.from("chains").insert({ household_id: hid, name }).select("id").single()).data!.id as string;
         await u1.from("stores").insert({ household_id: hid, chain_id: ch, name: "応募時に店舗選択", prefecture: "" });
@@ -135,7 +139,7 @@ export function makeThreeway(env: Env) {
   };
   const arm = async (a: "A" | "B" | "C", anchor: string): Promise<ArmResult> => {
     const c = await cand(anchor);
-    return { arm: a, status: c.status, openCards: await open(), input: (c.draft as { input?: unknown } | null)?.input ?? null, judgment: (c.draft as { judgment?: Judgment } | null)?.judgment ?? null, reasons: c.reasons };
+    return { arm: a, status: c.status, openCards: await open(), draft: c.draft, input: (c.draft as { input?: unknown } | null)?.input ?? null, judgment: (c.draft as { judgment?: Judgment } | null)?.judgment ?? null, reasons: c.reasons };
   };
 
   /** 1つの抽選を3方式で処理する。realInvestigate は実AI調査（またはモック）。BとCで同じ調査結果を使う */

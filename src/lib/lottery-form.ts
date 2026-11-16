@@ -110,6 +110,9 @@ const CROSS_STORE_LIMIT: RegExp[] = [
   /(重複|同時|複数)(して)?応募.{0,8}(店舗|店).{0,6}(無効|不可|禁止)/,
 ];
 
+/** 他の解析（LivePocketの構造解析など）が同じ文面の検査を使うための公開 */
+export const FORM_PATTERNS = { SELECT_FIELD, PER_STORE, CROSS_STORE_LIMIT, RESTRICTION } as const;
+
 const hit = (res: RegExp[], t: string): boolean => res.some((re) => re.test(t));
 
 export function judgeForm(input: FormInput): FormJudgement {

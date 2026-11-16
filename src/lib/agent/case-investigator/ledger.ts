@@ -101,7 +101,7 @@ const dt = (v: string): { date: string; time: string } | null => {
   const m = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/.exec(v.trim());
   return m ? { date: m[1], time: m[2] ?? "" } : null;
 };
-const urlKey = (u: string): string => u.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+export const urlKey = (u: string): string => u.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
 const SHORT_URL = /^https?:\/\/(t\.co|bit\.ly|lin\.ee|buff\.ly|ow\.ly|goo\.gl|amzn\.to)\//i;
 
 /** 値の比較用の形（表記の揺れで矛盾にしない） */
@@ -226,6 +226,17 @@ export class CaseLedger {
     // 共通モデルの追加項目（抽選形態・選べる店舗・当選発表の終了日）。同一抽選と確認できたページからだけ受け入れる
     for (const x of extras) this.extraList.push({ ...x, sourceUrl: src.url, kind: src.kind, tier: effectiveTier(src, obs.find((o) => o.basis)?.basis), basis: obs.find((o) => o.basis)?.basis, at: src.fetchedAt });
     return { identity, accepted, skipped };
+  }
+
+  /**
+   * 取得済みで同一抽選と確認できたページに、追加項目（抽選形態・選べる店舗）を足す（9H-3H。ページ本文の構造解析の結果）。
+   * 主催者を確認できた応募サービスの本文は一次扱い（本文の層）。同一抽選と確認できていないページには足さない。足したら true
+   */
+  addExtras(url: string, extras: ExtraObservation[], basis: "organizer_body" | "platform_meta" | undefined): boolean {
+    const src = this.sources.get(urlKey(url));
+    if (!src || src.status !== "fetched" || src.identity?.verdict !== "same") return false;
+    for (const x of extras) this.extraList.push({ ...x, sourceUrl: src.url, kind: src.kind, tier: effectiveTier(src, basis), basis, at: src.fetchedAt });
+    return extras.length > 0;
   }
 
   /** 項目を統合して、採用値・状態・根拠・矛盾を返す */

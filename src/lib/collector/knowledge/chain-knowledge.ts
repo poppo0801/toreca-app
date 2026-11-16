@@ -7,12 +7,17 @@
 import raw from "./chain-knowledge.json";
 import { sameChainName } from "@/lib/chain-normalize";
 
-export const KNOWN_TRAITS = ["restriction_implies_select", "per_store_pages", "multi_product_events", "name_variants", "online_channel_name"] as const;
+export const KNOWN_TRAITS = ["restriction_implies_select", "per_store_pages", "multi_product_events", "name_variants", "online_channel_name", "typical_store_select"] as const;
 export type TraitCode = (typeof KNOWN_TRAITS)[number];
 
 export interface ChainTrait {
   code: TraitCode;
   note: string;
+  /** typical_store_select 用: history=人間が確認した実績に基づく（観測件数 observed）／general=系列の一般的な傾向。どちらも参考情報（今回の告知の記載を優先） */
+  strength?: "history" | "general";
+  observed?: number;
+  /** 実績を確認した応募方式（livepocket / form / web）。無ければ方式を問わない */
+  platform?: string;
 }
 export interface ChainKnowledge {
   id: string;
@@ -21,12 +26,12 @@ export interface ChainKnowledge {
   source: string;
 }
 
-const isTrait = (t: { code: string; note: string }): t is ChainTrait => (KNOWN_TRAITS as readonly string[]).includes(t.code);
+const isTrait = (t: { code: string }): t is ChainTrait => (KNOWN_TRAITS as readonly string[]).includes(t.code);
 
-export const CHAIN_KNOWLEDGE: ChainKnowledge[] = (raw.entries as { id: string; names: string[]; traits: { code: string; note: string }[]; source: string }[]).map((e) => ({
+export const CHAIN_KNOWLEDGE: ChainKnowledge[] = (raw.entries as { id: string; names: string[]; traits: { code: string; note: string; strength?: string; observed?: number; platform?: string }[]; source: string }[]).map((e) => ({
   id: e.id,
   names: e.names,
-  traits: e.traits.filter(isTrait),
+  traits: e.traits.filter(isTrait).map((t) => ({ ...t, strength: t.strength === "history" || t.strength === "general" ? t.strength : undefined })) as ChainTrait[],
   source: e.source,
 }));
 

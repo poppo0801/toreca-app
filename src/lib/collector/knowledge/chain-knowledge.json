@@ -4,40 +4,136 @@
   "entries": [
     {
       "id": "kiddyland",
-      "names": ["キデイランド", "Kiddy Land", "KIDDY LAND", "キディランド"],
+      "names": [
+        "キデイランド",
+        "Kiddy Land",
+        "KIDDY LAND",
+        "キディランド"
+      ],
       "traits": [
-        { "code": "restriction_implies_select", "note": "LivePocketの応募ページが店舗別でも、応募できる店舗がいずれか1つに制限される場合がある。その場合は店舗別独立ではなく店舗選択式（応募ページの注意事項で確認する）" },
-        { "code": "per_store_pages", "note": "応募ページ（URL）が店舗ごとに分かれていることがある。URLが店舗別であることだけでは独立抽選と判断しない" }
+        {
+          "code": "restriction_implies_select",
+          "note": "LivePocketの応募ページが店舗別でも、応募できる店舗がいずれか1つに制限される場合がある。その場合は店舗別独立ではなく店舗選択式（応募ページの注意事項で確認する）"
+        },
+        {
+          "code": "per_store_pages",
+          "note": "応募ページ（URL）が店舗ごとに分かれていることがある。URLが店舗別であることだけでは独立抽選と判断しない"
+        }
       ],
       "source": "利用者の運用確認（2026-11）"
     },
     {
       "id": "rakuten-books",
-      "names": ["楽天ブックス", "Rakuten Books"],
+      "names": [
+        "楽天ブックス",
+        "Rakuten Books"
+      ],
       "traits": [
-        { "code": "multi_product_events", "note": "同じ期間・同じ条件で複数商品を対象にした抽選が行われることがある。同一企画なら1つの抽選カードに複数商品として登録する。応募単位が商品別・条件や期間が異なる場合は統合しない" }
+        {
+          "code": "multi_product_events",
+          "note": "同じ期間・同じ条件で複数商品を対象にした抽選が行われることがある。同一企画なら1つの抽選カードに複数商品として登録する。応募単位が商品別・条件や期間が異なる場合は統合しない"
+        }
       ],
       "source": "利用者の運用確認（2026-11）"
     },
     {
       "id": "bookoff",
-      "names": ["BOOKOFF", "ブックオフ", "BOOK・OFF"],
+      "names": [
+        "BOOKOFF",
+        "ブックオフ",
+        "BOOK・OFF"
+      ],
       "traits": [
-        { "code": "name_variants", "note": "系列名の表記が複数ある（BOOK・OFF / BOOKOFF / ブックオフ）。系列名の正規化で同じ系列として扱う" }
+        {
+          "code": "name_variants",
+          "note": "系列名の表記が複数ある（BOOK・OFF / BOOKOFF / ブックオフ）。系列名の正規化で同じ系列として扱う"
+        }
       ],
       "source": "利用者の運用確認（2026-11）"
     },
     {
       "id": "geo",
-      "names": ["GEO", "ゲオ"],
-      "traits": [{ "code": "name_variants", "note": "「GEO（ゲオ）」のように読みが括弧書きで付く" }],
+      "names": [
+        "GEO",
+        "ゲオ"
+      ],
+      "traits": [
+        {
+          "code": "name_variants",
+          "note": "「GEO（ゲオ）」のように読みが括弧書きで付く"
+        },
+        {
+          "code": "typical_store_select",
+          "strength": "general",
+          "observed": 2,
+          "note": "ゲオの抽選は、応募時に受取店舗を選ぶ店舗選択式が基本（人間の評価で2抽選が店舗選択式）。今回の告知に店舗別の独立受付の記載があるときは、告知を優先する"
+        }
+      ],
       "source": "利用者の運用確認（2026-11）"
     },
     {
       "id": "ito-yokado",
-      "names": ["イトーヨーカドー"],
-      "traits": [{ "code": "online_channel_name", "note": "「イトーヨーカドーネット通販」は系列「イトーヨーカドー」の通販チャネル。系列は同じ（店舗・チャネルは別）" }],
+      "names": [
+        "イトーヨーカドー"
+      ],
+      "traits": [
+        {
+          "code": "online_channel_name",
+          "note": "「イトーヨーカドーネット通販」は系列「イトーヨーカドー」の通販チャネル。系列は同じ（店舗・チャネルは別）"
+        }
+      ],
       "source": "利用者の運用確認（2026-11）"
+    },
+    {
+      "id": "famima-online",
+      "names": [
+        "ファミマオンライン",
+        "FamilyMart Online",
+        "ファミリーマートオンライン"
+      ],
+      "traits": [
+        {
+          "code": "typical_store_select",
+          "strength": "general",
+          "observed": 1,
+          "note": "ファミマオンラインの抽選は、受取店舗を応募時に選ぶ店舗選択式が基本（人間の評価で確認）。告知に店舗別の独立受付の記載があるときは、告知を優先する"
+        }
+      ],
+      "source": "人間の評価（Stage 9H-3F）"
+    },
+    {
+      "id": "toreca-station",
+      "names": [
+        "トレカステーション",
+        "トレカステーション公式"
+      ],
+      "traits": [
+        {
+          "code": "typical_store_select",
+          "strength": "history",
+          "observed": 1,
+          "note": "トレカステーションは、今回の評価（1抽選）で店舗選択式だった。同じ系列でも抽選ごとに構造が違う可能性があるため、今回の告知で確認する"
+        }
+      ],
+      "source": "人間の評価（Stage 9H-3F）"
+    },
+    {
+      "id": "aeon-kids-republic",
+      "names": [
+        "イオンキッズリパブリック",
+        "イオンキッズキパブリック",
+        "KIDS REPUBLIC",
+        "キッズリパブリック"
+      ],
+      "traits": [
+        {
+          "code": "typical_store_select",
+          "strength": "history",
+          "observed": 1,
+          "note": "イオンのキッズリパブリックの抽選は、今回の評価（1抽選）で店舗選択式だった。同じ系列でも抽選ごとに構造が違う可能性があるため、今回の告知で確認する"
+        }
+      ],
+      "source": "人間の評価（Stage 9H-3F）"
     }
   ]
 }

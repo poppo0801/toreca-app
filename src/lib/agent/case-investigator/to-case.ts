@@ -90,6 +90,11 @@ export function resultToCaseFile(r: CaseInvestigationResult, target: CaseTarget,
     const cs = c.sources.find((x) => x.url === s.url);
     if (cs) cs.note = [cs.note, `主催者: ${s.organizer.status === "verified" ? "確認済み" : "未確認"}（${s.organizer.basis}）`].filter(Boolean).join(" / ");
   }
+  // LivePocketの構造解析（9H-3H）: 抽選形態に反映したか／反映しなかった理由（C・食い違い・別の抽選）を記録する
+  for (const lp of r.livepocket ?? []) {
+    const k = lp.structure.klass;
+    addDecision(c, { stage: "investigation", field: "form", kind: lp.applied ? "adopted" : "held", before: lp.url, after: lp.applied?.form ?? null, by: "fixed", reason: `LivePocketの構造解析=${k === "A" ? "店舗選択式" : k === "B" ? "店舗別独立" : k === "conflict" ? "食い違い（人の確認）" : "不明"}（${lp.structure.confidence === "high" ? "信頼度高" : lp.structure.confidence === "medium" ? "信頼度中" : "信頼度低"}）${lp.applied ? "。抽選形態の根拠に使った" : "。抽選形態には反映していない"}: ${lp.note}`.slice(0, 300) });
+  }
   for (const u of r.unreported ?? []) addDecision(c, { stage: "investigation", field: "general", kind: "dropped", before: u, after: null, by: "fixed", reason: "取得したが報告されなかったため、台帳に反映していない" });
   for (const n of r.notMerged) addDecision(c, { stage: "investigation", field: "general", kind: "rejected", before: n.url, after: null, by: "fixed", reason: n.reason });
   addDecision(c, { stage: "investigation", field: "general", kind: "noted", before: null, after: r.stopReason, by: "investigation", reason: `調査の終了: ${r.stopLabel}` });

@@ -1,5 +1,5 @@
 import "server-only";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { buildHumanKnowledge, type AnswersFileLike, type HumanKnowledge } from "@/lib/case-model/human-knowledge";
 
@@ -13,7 +13,8 @@ let cache: { key: string; value: HumanKnowledge } | null = null;
 export function loadHumanKnowledge(dir: string = process.env.HUMAN_KNOWLEDGE_DIR ?? join(process.cwd(), "backups", "review-answers")): HumanKnowledge {
   try {
     const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
-    const key = files.join("|");
+    // 更新（評価の追記・無効化リストの編集）を次回の収集から反映するため、ファイル名だけでなく更新時刻も鍵にする
+    const key = files.map((f) => { try { return `${f}:${statSync(join(dir, f)).mtimeMs}`; } catch { return f; } }).join("|");
     if (cache?.key === key) return cache.value;
     const parsed: AnswersFileLike[] = [];
     for (const f of files) {

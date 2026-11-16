@@ -21,9 +21,29 @@ describe("同一抽選の重複判定（異なるURL・店舗表記・商品表�
       C({ input: { chain: "イトーヨーカドーネット通販", store: "通販", products: ["MEGA 拡張パック ハドウシーカー(シュリンクなし)"], applyDeadline: "2026-11-25" } }),
       C({ input: { chain: "イトーヨーカドー", store: "通販", products: ["ハドウシーカー"], applyDeadline: "2026-11-25 23:59" } }),
       C({ url: "https://example.invalid/same", input: { chain: "別の店", products: ["ニンジャスピナー"], applyDeadline: "2026-12-01" } }),
-      C({ url: "https://example.invalid/same", input: { chain: "別の店2", products: ["別の商品2"], applyDeadline: "2026-12-30" } }),
+      C({ url: "https://example.invalid/same", input: { chain: "別の店", products: ["ニンジャスピナー"], applyDeadline: "2026-12-01 23:59" } }),
     ]);
     expect(g.map((x) => x.members.length).sort()).toEqual([2, 2]);
+  });
+  it("連鎖的な誤統合をしない: 同じ系列でも商品・応募締切が違う抽選、系列が違う抽選は分ける。商品・日付が無い候補は、合うまとまりが1つだけのときに付ける", () => {
+    const g = groupPool([
+      C({ input: { chain: "ゲオ", store: "", products: ["ハドウシーカー"], applyDeadline: "2026-11-12 17:59" } }),
+      C({ input: { chain: "ゲオ", store: "", products: ["30th CELEBRATION"], applyDeadline: "2026-11-12 17:59" } }),
+      C({ input: { chain: "ゲオ", store: "", products: ["ハドウシーカー", "30th CELEBRATION"], applyDeadline: "2026-11-12 17:59" } }),
+      C({ input: { chain: "ラフテリア", store: "", products: ["30th CELEBRATION"], applyDeadline: "2026-11-08" } }),
+      C({ input: { chain: "ラフテリア", store: "", products: ["30th CELEBRATION"], applyDeadline: "2026-11-03" } }),
+      C({ input: { chain: "", store: "", products: ["30th CELEBRATION"], applyDeadline: "2026-11-08" } }),
+    ]);
+    expect(g.map((x) => x.members.length).sort()).toEqual([1, 1, 1, 1, 2]);
+  });
+  it("店舗が不明（空）の候補が、同じ系列・商品・締切の別々の店舗の抽選を1つにつなげない", () => {
+    const g = groupPool([
+      C({ input: { chain: "TSUTAYA", store: "", products: ["ハドウシーカー"], applyDeadline: "2026-11-15 23:59" } }),
+      C({ input: { chain: "TSUTAYA", store: "北千住店", products: ["ハドウシーカー"], applyDeadline: "2026-11-15 20:00" } }),
+      C({ input: { chain: "TSUTAYA", store: "鎌ケ谷店", products: ["ハドウシーカー"], applyDeadline: "2026-11-15 21:45" } }),
+      C({ input: { chain: "TSUTAYA", store: "TSUTAYA鎌ケ谷店", products: ["ハドウシーカー"], applyDeadline: "2026-11-15 21:45" } }),
+    ]);
+    expect(g.map((x) => x.members.length).sort()).toEqual([1, 1, 2]);
   });
   it("店舗ごとの独立した抽選（同じ系列・商品・期間で別の店舗）と、店舗が一方だけ分かる候補は、まとめない", () => {
     const g = groupPool([C({ input: { store: "札幌店" } }), C({ input: { store: "なんば店" } }), C({ input: { store: "" } })]);

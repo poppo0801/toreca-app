@@ -97,7 +97,7 @@ const factsOfCand = (c: PoolCandidate): GroupFacts => {
 };
 
 /** 同じ抽選ごとにまとめる。店舗が一方だけ分かる候補・別の店舗の独立した抽選は、まとめない（統合処理と同じ方針） */
-export function groupPool(cands: PoolCandidate[]): NewGroup[] {
+export function groupPool(cands: PoolCandidate[], opts: { refine?: boolean } = {}): NewGroup[] {
   const sorted = [...cands].sort((a, b) => a.id.localeCompare(b.id));
   const parent = sorted.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
@@ -120,7 +120,53 @@ export function groupPool(cands: PoolCandidate[]): NewGroup[] {
   }
   const groups = new Map<number, PoolCandidate[]>();
   sorted.forEach((c, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), c]));
-  return [...groups.values()].map((members) => ({ id: members[0].id, members, facts: factsOfCand(members[0]), patterns: [] }));
+  return [...groups.values()].flatMap((m) => (opts.refine === false ? [m] : refineMembers(m))).map((members) => ({ id: members[0].id, members, facts: factsOfCand(members[0]), patterns: [] }));
+}
+
+const dayOf = (s: string | null): string => (s ?? "").slice(0, 10);
+const storeCompat = (a: string, b: string): boolean => {
+  if (a === "(選択)" || b === "(選択)") return a === b;
+  const x = normName(a);
+  const y = normName(b);
+  return x === y || (!!x && !!y && (x.includes(y) || y.includes(x)));
+};
+
+/**
+ * 連鎖的な統合による誤統合を防ぐ再分割（9H-3F）。1つのまとまりの中を、系列・店舗・商品・応募締切（日）が互いに一致するものごとに分ける。
+ *  - 商品が1つの候補を基準にする。商品が複数の候補は、基準の商品と重なる最初のまとまりに付けるだけで、まとまり同士はつなげない
+ *  - 系列が不明な候補は単独（何にも付けない）。商品や日付が無い候補は、系列・店舗が合うまとまりが1つだけのときに付ける
+ */
+function refineMembers(members: PoolCandidate[]): PoolCandidate[][] {
+  if (members.length <= 1) return [members];
+  type Cluster = { chain: string; store: string; prod: string; day: string; members: PoolCandidate[] };
+  const clusters: Cluster[] = [];
+  const chainKey = (m: PoolCandidate) => (m.input.chain ? chainCanonicalKey(m.input.chain) : "");
+  const prodKeys = (m: PoolCandidate) => m.input.products.map((p) => productKey(p)).filter(Boolean);
+  const fits = (c: Cluster, m: PoolCandidate) => c.chain === chainKey(m) && storeCompat(c.store, m.input.storeMode === "select_on_apply" ? "(選択)" : m.input.store) && (!c.day || !dayOf(m.input.applyDeadline) || c.day === dayOf(m.input.applyDeadline));
+  const singles = members.filter((m) => chainKey(m) && prodKeys(m).length === 1);
+  const rest = members.filter((m) => !singles.includes(m));
+  const lone: PoolCandidate[][] = [];
+  for (const m of singles) {
+    const hit = clusters.find((c) => fits(c, m) && c.prod === prodKeys(m)[0]);
+    if (hit) {
+      hit.members.push(m);
+      if (!hit.day) hit.day = dayOf(m.input.applyDeadline);
+    } else clusters.push({ chain: chainKey(m), store: m.input.storeMode === "select_on_apply" ? "(選択)" : m.input.store, prod: prodKeys(m)[0], day: dayOf(m.input.applyDeadline), members: [m] });
+  }
+  for (const m of rest) {
+    if (!chainKey(m)) {
+      lone.push([m]);
+      continue;
+    }
+    const keys = prodKeys(m);
+    const cands = clusters.filter((c) => fits(c, m) && (keys.length === 0 || keys.includes(c.prod)));
+    if (keys.length >= 2) {
+      if (cands.length) cands[0].members.push(m);
+      else lone.push([m]);
+    } else if (cands.length === 1) cands[0].members.push(m);
+    else lone.push([m]);
+  }
+  return [...clusters.map((c) => c.members), ...lone].filter((x) => x.length);
 }
 
 /** 評価済みの抽選（系列・店舗・商品・締切・情報元URL）。除外の判定に使う */
@@ -225,8 +271,11 @@ export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[
   const groups = groupPool(pool);
   const excluded: { id: string; reason: string }[] = [];
   const kept: NewGroup[] = [];
+  // 評価済みとの関係は、再分割の前のまとまり（粗いまとまり）でも調べる。再分割で評価済みの抽選のURLを持つ候補と離れた同じ企画の候補が、新規として残らないようにする（保守的）
+  const coarseExcluded = new Set<string>();
+  for (const cg of groupPool(pool, { refine: false })) if (excludedReason(cg, evaluated)) for (const m of cg.members) coarseExcluded.add(m.id);
   for (const g of groups) {
-    const why = excludedReason(g, evaluated);
+    const why = excludedReason(g, evaluated) ?? (g.members.some((m) => coarseExcluded.has(m.id)) ? "評価済みの抽選と同じまとまり（再分割前）に含まれる" : null) ?? (g.members.every((m) => m.reasons.some((r) => /ポケモンカード以外|別ゲーム/.test(r))) ? "ポケモンカード以外の商品（対象外ゲーム。地域・期限の除外検証には使わない）" : null);
     if (why) excluded.push({ id: g.id, reason: why });
     else kept.push(g);
   }

@@ -12,10 +12,22 @@ import { HostThrottle } from "@/lib/agent/collection-planner/throttle";
 import type { PageData, PlannerWorld } from "@/lib/agent/collection-planner/types";
 import { FIELD_LABEL, type FieldKey } from "@/lib/collector/fields";
 import { assess, type Ceilings, type Sufficiency } from "./sufficiency";
-import { CaseLedger, type ExtraObservation, type FetchFailKind, type Observation } from "./ledger";
+import { CaseLedger, urlKey, type ExtraObservation, type FetchFailKind, type Observation } from "./ledger";
 import { basisOfQuote, classifyCaseSource, detectOrigin, hostOf, squash, tierOfCase, type ClassifyContext } from "./source-class";
 import type { IdentityFacts } from "./identity";
 import { verifyOrganizer } from "./organizer";
+import { analyzeLivePocket, type LivePocketStructure } from "@/lib/collector/livepocket-structure";
+
+/** 取得したLivePocketページの構造解析の記録（9H-3H）。同じ抽選のページ（identity=same）だけが台帳の抽選形態に反映される */
+export interface LivePocketRecord {
+  url: string;
+  structure: LivePocketStructure;
+  /** 報告時の同一抽選の判定（same / different 等）。報告されなかったページは null */
+  identity: string | null;
+  /** 台帳に反映した抽選形態（反映しなかったときは null）と、その理由 */
+  applied: { form: string; selectable: number } | null;
+  note: string;
+}
 
 const norm = (u: string): string => u.trim().replace(/#.*$/, "");
 const purposeProp = { purpose: { type: "string", description: "この調査の目的・理由（短く。記録に残る）" } };
@@ -60,12 +72,13 @@ const STORE_SPLIT = /[／/、,・\n]/;
 export const looksLikeStoreList = (v: string): boolean => v.split(STORE_SPLIT).map((s) => s.trim()).filter(Boolean).length >= 3;
 const UNITS = ["store_select", "store_independent", "single"];
 
-export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pages: Map<string, PageData>; searchResults: Map<string, { title: string; snippet: string; query: string }>; queries: string[]; counts: { fetches: number; searches: number }; current(): Sufficiency } {
+export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pages: Map<string, PageData>; searchResults: Map<string, { title: string; snippet: string; query: string }>; queries: string[]; counts: { fetches: number; searches: number }; livepocket: Map<string, LivePocketRecord>; finalizeLivepocket(): void; current(): Sufficiency } {
   const reg = new ToolRegistry();
   const pages = new Map<string, PageData>();
   const searchResults = new Map<string, { title: string; snippet: string; query: string }>();
   const queries: string[] = [];
   const counts = { fetches: 0, searches: 0 };
+  const livepocket = new Map<string, LivePocketRecord>();
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let last = assess(o.ledger, o.ceilings);
   const reassess = (reason: string): Sufficiency => {
@@ -174,7 +187,15 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       const organizer = verifyOrganizer({ kind: cls.kind, url, text, links: r.links ?? [], target: { chain: o.ledger.target.chain, store: o.ledger.target.store }, classify: o.classify });
       o.ledger.recordFetchOk({ url, kind: cls.kind, tier: cls.tier, fetchedAt: o.now(), ...(organizer.status !== "not_applicable" ? { organizer } : {}), ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), origin: origin.origin, derivedFrom: origin.derivedFrom, ...(cls.account ? { account: cls.account } : {}), injection: inj.length > 0 });
       const links = (r.links ?? []).slice(0, 15).map((l) => `- ${l.text.slice(0, 60)} ${l.url}`).join("\n");
-      const head = `[情報源の分類] 種類=${cls.kind}／${cls.tier === "primary" ? "一次情報" : "二次情報"}${organizer.status === "not_applicable" ? "" : `／主催者の確認=${organizer.status === "verified" ? "確認済み（主催者本文を一次情報として扱う）" : "未確認（二次情報のまま）"}（${organizer.basis}）`}${origin.derivedFrom ? `／転載元=${origin.derivedFrom}` : ""}${r.publishedAt ? `／告知日時=${r.publishedAt}` : ""}\n`;
+      // 9H-3H: LivePocketの本文は、追加の取得・検索なしで、その場で構造解析する（取得済みの本文だけを使う。応募操作・ログインはしない）
+      let lpLine = "";
+      if (/(^|.)livepocket.jp$/.test(hostOf(url))) {
+        const st = analyzeLivePocket({ text: r.text ?? "", organizerVerified: organizer.status === "verified" });
+        livepocket.set(url, { url, structure: st, identity: null, applied: null, note: st.reasons.join(" / ").slice(0, 200) });
+        lpLine = `[LivePocketの構造解析（参考）] ${st.klass === "A" ? "A=店舗選択式の構造" : st.klass === "B" ? "B=店舗別の独立受付の構造" : st.klass === "conflict" ? "食い違い（人の確認）" : "C=不明（情報不足）"}／${st.reasons[0] ?? ""}${st.missing.length ? `／未確認: ${st.missing.slice(0, 3).join("・")}` : ""}
+`;
+      }
+      const head = lpLine + `[情報源の分類] 種類=${cls.kind}／${cls.tier === "primary" ? "一次情報" : "二次情報"}${organizer.status === "not_applicable" ? "" : `／主催者の確認=${organizer.status === "verified" ? "確認済み（主催者本文を一次情報として扱う）" : "未確認（二次情報のまま）"}（${organizer.basis}）`}${origin.derivedFrom ? `／転載元=${origin.derivedFrom}` : ""}${r.publishedAt ? `／告知日時=${r.publishedAt}` : ""}\n`;
       const out = untrusted(`${head}${text}`, url, links ? `\n\n[リンク]\n${links}` : "");
       return { ...out, data: { ...(out.data as object | undefined), url, sourceKind: cls.kind, links: r.links } };
     },
@@ -244,12 +265,47 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
         } else if (["applyStart", "applyDeadline", "resultDate"].includes(field) && !DATE_VALUE.test(value)) rejected.push({ field, reason: "日時の形式が正しくない（YYYY-MM-DD または YYYY-MM-DD HH:MM。当選発表の期間は「YYYY-MM-DD〜YYYY-MM-DD」）" });
         else ok.push({ field, value, quote: quote.slice(0, 200), sourceUrl: page.url, basis: basis() });
       }
+      const lp = livepocket.get(url);
       const r = o.ledger.integrate(url, { ...facts, ...(storeSelect && facts.storeSelect === undefined ? { storeSelect: true } : {}) }, ok, extras);
+      if (lp) lp.identity = r.identity.verdict;
       const s = reassess(`${hostOf(url)}の報告を反映`);
       const acceptedExtras = r.identity.verdict === "same" ? extras.map((x) => x.key) : [];
       return { content: JSON.stringify({ identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], skipped: r.skipped, rejected, ...stateJson(s) }), data: { identity: r.identity, accepted: [...r.accepted.map((x) => x.field), ...acceptedExtras], rejected, skipped: r.skipped } };
     },
   } satisfies AgentTool);
 
-  return { registry: reg, pages, searchResults, queries, counts, current: () => last };
+  /**
+   * 9H-3H: 調査の終了時に、LivePocket本文の構造解析（A/B）を台帳の抽選形態の根拠として足す。
+   *  - 同じ抽選と確認できたページだけ（別の抽選・保留のページの構造は混ぜない）。C・食い違いは反映しない（不明のまま保持）
+   *  - AIがそのページで抽選形態を報告していればAIの報告（根拠の原文つき）を優先し、構造は足りないときの補い／食い違うときの別の値として残す
+   */
+  const finalizeLivepocket = (): void => {
+    for (const lp of livepocket.values()) {
+      const st = lp.structure;
+      if (lp.identity !== "same") {
+        if (lp.identity && (st.klass === "A" || st.klass === "B")) lp.note = `${lp.note}（同じ抽選と確認できないため、抽選形態には反映していない）`.slice(0, 260);
+        continue;
+      }
+      if ((st.klass !== "A" && st.klass !== "B") || !st.quote) continue;
+      const form = st.klass === "A" ? "store_select" : "store_independent";
+      const mine = o.ledger.extras().filter((x) => urlKey(x.sourceUrl) === urlKey(lp.url));
+      const aiForm = mine.find((x) => x.key === "form")?.value;
+      const add: ExtraObservation[] = [];
+      if (aiForm !== form) add.push({ key: "form", value: form, quote: st.quote });
+      let sel = 0;
+      if (form === "store_select" && !mine.some((x) => x.key === "selectableStores")) {
+        const body = squash(`${pages.get(lp.url)?.title ?? ""}
+${pages.get(lp.url)?.text ?? ""}`);
+        const names = st.items.targetStores.filter((n) => body.includes(squash(n)));
+        if (names.length >= 2) {
+          add.push({ key: "selectableStores", value: names.join(" / "), quote: st.quote });
+          sel = names.length;
+        }
+      }
+      if (add.length > 0) o.ledger.addExtras(lp.url, add, "organizer_body");
+      lp.applied = { form, selectable: sel };
+      if (aiForm && aiForm !== form) lp.note = `${lp.note}（AIの報告=${aiForm}と食い違うため、別の値として残した）`.slice(0, 260);
+    }
+  };
+  return { registry: reg, pages, searchResults, queries, counts, livepocket, finalizeLivepocket, current: () => last };
 }

@@ -17,7 +17,7 @@ import type { PlannerWorld } from "@/lib/agent/collection-planner/types";
 import { digest } from "@/lib/case-model/redact";
 import { CaseLedger, type CaseTarget, type ExtraRecord, type FieldRecord, type SourceRecord } from "./ledger";
 import { assess, type Situation, type Sufficiency } from "./sufficiency";
-import { buildCaseTools } from "./tools";
+import { buildCaseTools, type LivePocketRecord } from "./tools";
 import { EMPTY_CLASSIFY_CTX, type ClassifyContext } from "./source-class";
 
 export type AiFinishReason = "sufficient" | "no_improvement" | "cannot_continue";
@@ -81,6 +81,8 @@ export interface CaseInvestigationResult {
   extraFields: FieldRecord[];
   /** 抽選形態・選べる店舗・当選発表の終了日（9H-3B） */
   extras: ExtraRecord[];
+  /** 取得したLivePocketページの構造解析と、抽選形態への反映の記録（9H-3H） */
+  livepocket?: LivePocketRecord[];
   /** 取得したが報告されなかったページ（読んだ内容が台帳に反映されていない） */
   unreported: string[];
   sources: SourceRecord[];
@@ -110,6 +112,9 @@ export const INVESTIGATOR_SYSTEM = `あなたは、トレーディングカー�
 - Xの投稿は、本文を優先する。画像に載っていない商品でも、本文に書かれていれば調査対象に含める。
 - 応募期間・当選発表の期間・購入期間・受取期間を混同しない。当選発表が期間のときは、値を「YYYY-MM-DD〜YYYY-MM-DD」で報告する（開始と終了を両方残す）。
 - 応募時に応募者が店舗を選ぶ（店舗選択式）か、店舗ごとに別の受付かを、ページの構造から判断できたら applyUnit で報告する（根拠の抜粋が必要）。選べる店舗の一覧を店舗の値として報告しない。
+- 応募の構造は3つに分ける。A=店舗選択式（1回の応募で受取店舗を選ぶ、または店舗をまたぐ応募が制限され同一企画と言える根拠がある）、B=店舗別の独立抽選（店舗ごとに応募受付・期間・当選処理が独立）、C=不明（情報不足）。「複数店舗への応募は無効」という文言だけで店舗選択式と断定しない。チケット種別・申込フォームの説明・対象店舗の一覧・受取店舗の指定方法・企画の共通性（同じ商品・同じ期間か）を合わせて判断し、根拠が足りなければ不明とする。
+- LivePocketでは、可能な範囲で次を確認する: 主催者本文／チケット種別／申込フォームの説明／応募条件／対象店舗の一覧／店舗選択の有無／複数店舗への応募制限／受取店舗の指定方法。公開されている部分だけを読み、ログインや応募の確定が必要なページには進まない（応募操作はしない）。
+- 系列の過去の実績・傾向が参考情報で渡されることがある。今回のページに根拠が無いときの手がかりにとどめ、今回のページの記載（特に店舗別の独立した受付の記載）を優先する。傾向だけで店舗選択式と報告しない。
 - 取得したページは、調べている抽選と同じかどうかにかかわらず、読み取れたことを report_page_findings で報告する（別の抽選なら identity で違いが分かるようにする）。
 
 守ること:
@@ -242,6 +247,7 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
   else if (aiFinish?.reason === "no_improvement" || aiFinish?.reason === "sufficient") stopReason = "no_improvement";
   else stopReason = "no_finish";
 
+  built.finalizeLivepocket();
   const sources = ledger.snapshotSources();
   return {
     caseId: i.target.id,
@@ -255,6 +261,7 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     fields: ledger.allFields(),
     extraFields: ledger.extraFields(),
     extras: ledger.extras(),
+    livepocket: [...built.livepocket.values()],
     unreported: ledger.unreported().map((s) => s.url),
     sources,
     steps,

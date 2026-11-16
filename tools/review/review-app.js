@@ -229,6 +229,16 @@
       } else {
         val = el("input", { id: "fv-" + f.key, type: "text", placeholder: "正しい値", "aria-label": f.label + "の正しい値", maxlength: "4000" });
         val.value = fs.value;
+        // 抽選形態は、店舗選択式と店舗別独立の両方を明示的に訂正できる（学習は人間の明示的な確定だけを使う）
+        if (f.key === "lotteryForm") {
+          val.setAttribute("list", "dl-lottery-form");
+          val.placeholder = "正しい形態（店舗選択式／店舗別独立／通販のみ／判断不能）";
+          if (!document.getElementById("dl-lottery-form")) {
+            var dl = el("datalist", { id: "dl-lottery-form" });
+            ["店舗選択式", "店舗別独立", "通販のみ", "判断不能"].forEach(function (t) { dl.appendChild(el("option", { value: t })); });
+            document.body.appendChild(dl);
+          }
+        }
       }
       val.addEventListener("input", function () { fs.value = val.value; touch(ev); save(); });
       val.addEventListener("change", function () { fs.value = val.value; touch(ev); save(); });
