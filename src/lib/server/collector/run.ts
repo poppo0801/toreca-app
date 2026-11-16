@@ -703,7 +703,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   // Stage 9H-3G（フラグ有効時のみ）: 系列名を、登録済みの系列マスターと人間が確定した別名に合わせる（表記揺れ・別名のみ。似た名前の別系列は寄せず、候補を注意で示す）
   let chainResolveNote = "";
-  if (unifiedMode().judgment && baseEx.chainName.trim()) {
+  // 9H-3F相当との比較用（9H-3I）: COLLECT_FORM_INFERENCE=off で、9H-3G・3Hの系列名の解決・店舗選択式の推定を無効にする（既定は有効）
+  const formOn = unifiedMode().judgment && process.env.COLLECT_FORM_INFERENCE !== "off";
+  if (formOn && baseEx.chainName.trim()) {
     const cr = resolveChainName({ name: baseEx.chainName, masters: data.chains, human: deps.humanKnowledge });
     if (cr.changed) {
       baseEx = { ...baseEx, chainName: cr.name };
@@ -793,6 +795,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // Stage 9C: AIの応募単位の読み取りと、固定ロジックの構造検査を突き合わせて抽選形態を決める。AIの判断を根拠なく上書きせず、変更は trace に残す
   const traceSteps: TraceStep[] = [];
   let formEstimate: FormInference | null = null;
+  /** 店舗選択式の判断の構造化した記録（確認済み／推定／不明。警告文から推測しないため。9H-3I）。評価・学習はこの値を参照する */
+  let formJudgment: Record<string, unknown> | null = null;
   const pushTrace = (s: TraceStep) => {
     const n = addTrace(traceSteps, s);
     traceSteps.length = 0;
@@ -844,13 +848,14 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   // ---- Stage 9H-3G（フラグ有効時のみ）: 店舗選択式の判断を、確認済み／推定／不明に分けて記録する。
   // 今回の告知に根拠が無いときだけ、過去の確認済みの実績・系列の傾向を判断材料にする（優先順位は form-inference.ts）。推定だけを根拠に、店舗別の独立抽選を削除・統合しない
-  if (unifiedMode().judgment && input.storeMode !== "select_on_apply") {
+  if (formOn && input.storeMode !== "select_on_apply") {
     const lpText = platformOf(q.url) === "livepocket" ? formTexts.join("\n") : "";
     const lp = lpText ? analyzeLivePocket({ text: lpText }) : null;
     const jd = judgeForm({ storeMode: input.storeMode ?? "fixed", requirementTags: input.requirementTags, texts: formTexts, sourceUrls: input.sourceUrls, knowledge: chainKnow, perStorePages: hasSiblingStorePages(input, data.lotteries), selectableStoreCount: result.extraction.selectableStoreNames?.length ?? 0 });
     const tendency = tendencyFor({ human: deps.humanKnowledge, chain: input.chain.name, knowledge: chainKnow, platform: platformOf(q.url) });
     const storeKnown = !!input.store.name.trim() && input.store.name !== SELECT_STORE_PLACEHOLDER;
     const inf = inferStoreForm({ judgement: jd, aiUnit: result.extraction.applyUnit, livepocket: lp, storeKnown, platform: platformOf(q.url), tendency });
+    formJudgment = { state: inf.state, form: inf.form, rank: inf.rank, confidence: inf.confidence, action: inf.action, priorUsed: inf.priorUsed, priorOverridden: inf.priorOverridden, refs: inf.refs ?? [], basis: inf.basis.slice(0, 3), ...(lp ? { livepocket: { klass: lp.klass, confidence: lp.confidence, missing: lp.missing.slice(0, 4) } } : {}) };
     if (inf.state !== "unknown" || inf.priorOverridden) pushTrace({ stage: "form", field: "form", value: `${inf.form}:${inf.state}`, by: "fixed", note: [inferenceLabel(inf), ...inf.basis, ...(inf.refs?.length ? [`参照した実績: ${inf.refs.join(", ")}`] : [])].join(" / ").slice(0, 500) });
     if (lp && lp.klass !== "C") pushTrace({ stage: "form", field: "form", value: `livepocket:${lp.klass}`, by: "fixed", note: lp.reasons.join(" / ").slice(0, 300) });
     if (inf.state === "estimated") {
@@ -866,6 +871,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
       draft.warnings.push(`店舗選択式は推定です（${inf.action === "apply" ? "登録の形に反映" : "店舗が特定できているため登録の形は変えず、確認候補"}・信頼度${inf.confidence === "medium" ? "中" : "低"}）。${inf.basis[0] ?? ""}`.slice(0, 200));
     }
   }
+  else if (formOn && input.storeMode === "select_on_apply") formJudgment = { state: "confirmed", form: "store_select", rank: 1, confidence: unitDecision.confidence, action: "none", priorUsed: false, priorOverridden: false, refs: [], basis: [unitDecision.by === "ai" ? "AIの読み取り・調査から店舗選択式" : "告知の構造の根拠から店舗選択式", ...unitDecision.notes.slice(0, 2)] };
   // 複数のTCGを案内する投稿では、ポケモンカード以外の明細を外す（ポケモンカードの明細が残るときだけ）
   const dropIdx = new Set(otherTcgItemIndexes(input.items));
   if (dropIdx.size > 0) {
@@ -1035,7 +1041,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
         investigation: invState && { ...invState, remaining: investigationNeeds(caseFromInput(input, c.id, nowIso), { fetchRestricted: !!q.viaList, duplicateDoubt: draft.duplicates.length > 0 && !draft.duplicates.some((d) => d.level === "high") }).reasons },
       })
     : null;
-  const stored = { ...(judgment ? { judgment } : {}), disposition: decideDisposition({ dups: draft.duplicates, recognized: wording }), understanding: buildUnderstanding(input, { unit: unitDecision, trace: traceSteps, evidence: Object.fromEntries(Object.entries(draft.evidence).map(([k, v]) => [k, (v?.quote ?? "").slice(0, 120)])) }), input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}), fields: myFields, assessment: assess, ...(relatedIds.length > 0 ? { related: relatedIds } : {}), ...(mergeLog ? { mergeLog: [mergeLog] } : {}) } as unknown as Json;
+  const stored = { ...(judgment ? { judgment } : {}), ...(formJudgment ? { formJudgment } : {}), disposition: decideDisposition({ dups: draft.duplicates, recognized: wording }), understanding: buildUnderstanding(input, { unit: unitDecision, trace: traceSteps, evidence: Object.fromEntries(Object.entries(draft.evidence).map(([k, v]) => [k, (v?.quote ?? "").slice(0, 120)])) }), input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}), fields: myFields, assessment: assess, ...(relatedIds.length > 0 ? { related: relatedIds } : {}), ...(mergeLog ? { mergeLog: [mergeLog] } : {}) } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）

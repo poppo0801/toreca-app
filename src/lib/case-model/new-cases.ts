@@ -53,6 +53,12 @@ export type NewPattern =
   | "region_exclude"
   | "expired"
   | "multi_source"
+  | "livepocket_select"
+  | "livepocket_independent"
+  | "livepocket_unclear"
+  | "chain_trend"
+  | "trend_conflict"
+  | "independent_diff"
   | "normal";
 
 export const PATTERN_LABEL: Record<NewPattern, string> = {
@@ -67,6 +73,12 @@ export const PATTERN_LABEL: Record<NewPattern, string> = {
   region_exclude: "地域除外",
   expired: "期限切れ",
   multi_source: "複数情報源の統合が必要",
+  livepocket_select: "LivePocket（店舗選択式に見える）",
+  livepocket_independent: "LivePocket（店舗別の独立応募に見える）",
+  livepocket_unclear: "LivePocket（応募形態が不明）",
+  chain_trend: "系列の傾向を参照できる（過去の確認済みの実績あり）",
+  trend_conflict: "系列の傾向（店舗選択式）と異なる形に見える（店舗を特定済み）",
+  independent_diff: "同じ店舗で商品・応募期間が異なる独立抽選",
   normal: "特に問題のない通常抽選",
 };
 
@@ -209,7 +221,15 @@ const LISTING = ["pokeso.jp", "torecabiyori.com", "cardchusen.com", "nyuka-now.c
 const FORMS = ["docs.google.com", "forms.gle"];
 
 /** 候補群のパターン（複数該当あり。「店舗ごとの独立抽選」は、プールの中に同じ系列・商品・近い期間で別の店舗の抽選がある場合） */
-export function tagPatterns(g: NewGroup, all: NewGroup[], opts: { today: string }): NewPattern[] {
+/** 系列の過去の実績（人間の確認済み）の要約。chain_trend / trend_conflict の判定に使う（正解の値は渡さない。系列と傾向の向きだけ） */
+export interface ChainTrendInfo {
+  /** 実績のある系列の正規形キー */
+  known: Set<string>;
+  /** 店舗選択式に傾く系列の正規形キー */
+  selectLean: Set<string>;
+}
+
+export function tagPatterns(g: NewGroup, all: NewGroup[], opts: { today: string; trend?: ChainTrendInfo }): NewPattern[] {
   const p = new Set<NewPattern>();
   const m0 = g.members[0];
   const hosts = g.members.map((m) => host(m.url));
@@ -228,6 +248,20 @@ export function tagPatterns(g: NewGroup, all: NewGroup[], opts: { today: string 
   if (g.members.some((m) => m.status === "excluded" && (m.region || /地域|都道府県|対象外/.test(m.reasons.join(" "))))) p.add("region_exclude");
   if (g.members.some((m) => m.status === "excluded" && /受付終了|終了|期限切れ/.test(m.reasons.join(" "))) || (!!g.facts.applyDeadline && g.facts.applyDeadline.slice(0, 10) < opts.today && g.members.every((m) => m.status !== "auto_registered"))) p.add("expired");
   if (g.members.length >= 2) p.add("multi_source");
+  // 9H-3I: LivePocketの形態・系列の傾向・独立抽選の差（候補の入力から見える範囲の分類。実際の正解は人間の評価で決まる）
+  if (hosts.includes("livepocket.jp")) {
+    const lpm = g.members.filter((m) => host(m.url) === "livepocket.jp");
+    if (lpm.some((m) => m.input.storeMode === "select_on_apply" || m.input.selectable.length >= 2)) p.add("livepocket_select");
+    else if (lpm.some((m) => !!m.input.store.trim() && m.input.storeMode !== "select_on_apply" && !/オンライン|通販/.test(m.input.store))) p.add("livepocket_independent");
+    else p.add("livepocket_unclear");
+  }
+  const ck = g.facts.chain ? chainCanonicalKey(g.facts.chain) : "";
+  if (ck && opts.trend?.known.has(ck)) {
+    p.add("chain_trend");
+    if (opts.trend.selectLean.has(ck) && !!g.facts.store && !g.facts.storeSelect) p.add("trend_conflict");
+  }
+  const sameStoreOther = all.some((o) => o !== g && !!ck && !!o.facts.chain && chainCanonicalKey(o.facts.chain) === ck && !!g.facts.store && !!o.facts.store && normName(g.facts.store) === normName(o.facts.store) && !o.facts.storeSelect && !g.facts.storeSelect && (o.facts.products.some((x) => g.facts.products.every((y) => productKey(x) !== productKey(y))) || (dayGap(o.facts.applyDeadline, g.facts.applyDeadline) ?? 0) > 3));
+  if (sameStoreOther) p.add("independent_diff");
   const issues = ["official_unreachable", "store_select", "store_independent", "identity_unclear", "date_conflict", "region_exclude", "expired", "multi_source"] as NewPattern[];
   if (g.members.some((m) => m.status === "auto_registered") && m0.input.chain && (m0.input.store || m0.input.storeMode === "select_on_apply") && !!g.facts.applyDeadline && !issues.some((x) => p.has(x))) p.add("normal");
   return [...p];
@@ -235,18 +269,23 @@ export function tagPatterns(g: NewGroup, all: NewGroup[], opts: { today: string 
 
 /** 偏りを抑えた選定の優先順（まれなパターンの枠を先に埋める）と、パターンごとの枠 */
 const ORDER: [NewPattern, number][] = [
+  ["livepocket_select", 1],
+  ["livepocket_independent", 1],
+  ["livepocket_unclear", 1],
+  ["trend_conflict", 1],
+  ["store_select", 1],
+  ["store_independent", 1],
+  ["independent_diff", 1],
+  ["chain_trend", 2],
   ["region_exclude", 1],
   ["expired", 1],
-  ["store_independent", 2],
   ["date_conflict", 1],
-  ["identity_unclear", 2],
-  ["multi_source", 2],
-  ["official_unreachable", 2],
-  ["store_select", 2],
+  ["identity_unclear", 1],
+  ["official_unreachable", 1],
+  ["multi_source", 1],
   ["x_main", 1],
-  ["livepocket", 1],
   ["official_direct", 1],
-  ["normal", 2],
+  ["normal", 1],
 ];
 
 export interface SelectionReport {
@@ -263,7 +302,7 @@ export interface SelectionReport {
   chains: Record<string, number>;
 }
 
-export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[], opts: { today: string; target?: number; min?: number; max?: number; perChain?: number }): { selected: NewGroup[]; report: SelectionReport } {
+export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[], opts: { today: string; target?: number; min?: number; max?: number; perChain?: number; trend?: ChainTrendInfo }): { selected: NewGroup[]; report: SelectionReport } {
   const target = opts.target ?? 12;
   const min = opts.min ?? 10;
   const max = opts.max ?? 15;
@@ -279,7 +318,7 @@ export function selectNewCases(pool: PoolCandidate[], evaluated: EvaluatedFacts[
     if (why) excluded.push({ id: g.id, reason: why });
     else kept.push(g);
   }
-  for (const g of kept) g.patterns = tagPatterns(g, kept, { today: opts.today });
+  for (const g of kept) g.patterns = tagPatterns(g, kept, { today: opts.today, trend: opts.trend });
   const chainOf = (g: NewGroup) => (g.facts.chain ? chainCanonicalKey(g.facts.chain) : "(不明)");
   const prodOf = (g: NewGroup) => (g.facts.products[0] ? productKey(g.facts.products[0]) : "");
   const chosen: NewGroup[] = [];

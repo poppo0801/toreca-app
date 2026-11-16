@@ -28,6 +28,14 @@ const SOURCE_STATUS: Record<SourceRecord["status"], CaseSource["status"]> = { fe
 
 const refsOf = (f: FieldRecord): EvidenceRef[] => f.sources.filter((s) => s.url && !s.url.startsWith("(")).map((s) => ({ url: s.url, kind: s.kind, tier: s.tier, ...(s.basis ? { basis: s.basis as EvidenceRef["basis"] } : {}), ...(s.quote ? { quote: s.quote } : {}), at: s.at }));
 
+/**
+ * 9H-3F相当の再現（9H-3I）: 同じ調査結果から、LivePocket本文の構造解析で補った項目（via=structure）を除く。
+ * AIの報告・取得した情報は同じで、9H-3Hで追加した構造解析の反映だけが無い状態になる（BとCの差が新機能によるものか確認するため）
+ */
+export function withoutStructure(r: CaseInvestigationResult): CaseInvestigationResult {
+  return { ...r, extras: (r.extras ?? []).filter((x) => x.via !== "structure"), livepocket: (r.livepocket ?? []).map((x) => ({ ...x, applied: null, note: `${x.note}（9H-3F相当: 構造解析は反映しない）`.slice(0, 260) })) };
+}
+
 export function resultToCaseFile(r: CaseInvestigationResult, target: CaseTarget, at: string): CaseFile {
   const c = emptyCase(target.id, at);
   for (const s of r.sources) {

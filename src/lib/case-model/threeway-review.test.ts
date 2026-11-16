@@ -98,3 +98,27 @@ describe("実行結果の保存ファイル → 評価セット", () => {
     expect(cs[0].views.C?.lotteryForm).toBe("store_select");
   });
 });
+
+describe("9H-3I: 店舗選択式の判断（確認済み／推定／不明）の表示と、評価データへの構造化した記録", () => {
+  const F = (state: "confirmed" | "estimated" | "unknown", form: string, extra: object = {}) => ({ state, form, rank: state === "unknown" ? null : 3, confidence: "low", basis: ["根拠のテスト"], ...extra });
+  const withForms = (id: string) => ({ ...mk(id), forms: { A: null, B: null, C: F("estimated", "store_select", { refs: ["k"], livepocket: { klass: "C", confidence: "low", missing: [] } }) } });
+  it("候補ごとの判断（確認済み／推定／不明）とLivePocketの構造が評価画面の注意欄に出る。表示した候補の構造化した判断が評価データ（ai）に入る。方式名は出ない", () => {
+    const cases = ["a", "b", "c"].map((x) => withForms(x));
+    const b = buildThreewaySet(cases, { setId: "rs-forms", at: "2026-11-16T00:00:00Z" });
+    expect(Core.validateSet(b.set).ok).toBe(true);
+    const c0 = (b.set.cases as { ai: { notices: string[]; formJudgment: { state: string } | null } }[])[0];
+    expect(c0.ai.notices.join("\n")).toContain("店舗選択式の判断（候補");
+    expect(c0.ai.notices.join("\n")).toMatch(/推定|記録なし/);
+    const shown = JSON.stringify(b.set);
+    expect(shown).not.toMatch(/従来方式|AI方式|統合方式|9H-3F相当|"A"|"B"|"C"/);
+    // 表示した候補がC（推定）のときだけ、評価データに推定の記録が入る（警告文から推測しない）
+    const base = Object.values(b.key)[0].base;
+    expect(c0.ai.formJudgment?.state ?? null).toBe(base === "C" ? "estimated" : null);
+  });
+  it("表示した候補が『確認済みの店舗別独立』のとき、抽選形態を store_independent として評価に出す（人間が正しいとすれば双方向学習の実績になる）", () => {
+    const c = { ...mk("z"), forms: { A: F("confirmed", "store_independent"), B: F("confirmed", "store_independent"), C: F("confirmed", "store_independent") } };
+    const b = buildThreewaySet([c], { setId: "rs-ind" });
+    const ex = (b.set.cases as { ai: { extracted: { lotteryForm: string | null } } }[])[0].ai.extracted;
+    expect(ex.lotteryForm).toBe("store_independent");
+  });
+});

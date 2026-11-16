@@ -291,14 +291,14 @@ export function buildCaseTools(o: CaseToolOptions): { registry: ToolRegistry; pa
       const mine = o.ledger.extras().filter((x) => urlKey(x.sourceUrl) === urlKey(lp.url));
       const aiForm = mine.find((x) => x.key === "form")?.value;
       const add: ExtraObservation[] = [];
-      if (aiForm !== form) add.push({ key: "form", value: form, quote: st.quote });
+      if (aiForm !== form) add.push({ key: "form", value: form, quote: st.quote, via: "structure" });
       let sel = 0;
       if (form === "store_select" && !mine.some((x) => x.key === "selectableStores")) {
         const body = squash(`${pages.get(lp.url)?.title ?? ""}
 ${pages.get(lp.url)?.text ?? ""}`);
         const names = st.items.targetStores.filter((n) => body.includes(squash(n)));
         if (names.length >= 2) {
-          add.push({ key: "selectableStores", value: names.join(" / "), quote: st.quote });
+          add.push({ key: "selectableStores", value: names.join(" / "), quote: st.quote, via: "structure" });
           sel = names.length;
         }
       }

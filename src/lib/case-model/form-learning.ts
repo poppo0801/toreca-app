@@ -73,7 +73,7 @@ export function parseFormKind(v: string): FormKind | null {
 
 export interface EvalResultLike {
   caseId?: string;
-  aiOriginal?: { extracted?: { chain?: string | null; store?: string | null; products?: string[] | null; applyDeadline?: string | null; lotteryForm?: string | null }; warnings?: string[]; notices?: string[] };
+  aiOriginal?: { extracted?: { chain?: string | null; store?: string | null; products?: string[] | null; applyDeadline?: string | null; lotteryForm?: string | null }; warnings?: string[]; notices?: string[]; formJudgment?: { state?: string; form?: string } | null };
   source?: { url?: string };
   human?: { verdict?: string; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; confirmedCorrectFields?: string[]; unknownOnlyFields?: string[]; comment?: string; evaluatedAt?: string };
 }
@@ -101,7 +101,9 @@ export function formFromEvaluation(r: EvalResultLike, chain: string): { form: Fo
   const h = r.human;
   if (!h || h.usableAsGold === false || h.verdict === "unknown") return null;
   const shown = shownForm(r.aiOriginal?.extracted?.lotteryForm);
-  const wasEstimate = [...(r.aiOriginal?.warnings ?? []), ...(r.aiOriginal?.notices ?? [])].some((w) => /店舗選択式は推定|【推定】/.test(w));
+  // 推定だったかは、構造化した記録（formJudgment）を優先する。無い古い評価だけ、警告文から読む
+  const fj = r.aiOriginal?.formJudgment;
+  const wasEstimate = fj ? fj.state === "estimated" : [...(r.aiOriginal?.warnings ?? []), ...(r.aiOriginal?.notices ?? [])].some((w) => /店舗選択式は推定|【推定】/.test(w));
   // 1) 抽選形態欄（または店舗欄）の訂正
   for (const c of h.corrections ?? []) {
     if (c.field !== "lotteryForm" && c.field !== "store") continue;

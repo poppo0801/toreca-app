@@ -190,5 +190,71 @@ export function makeThreeway(env: Env) {
     await clear();
     return { caseId: c.caseId, arms: { A, B, C }, investigation: captured, investigationCalls: calls };
   }
-  return { runCase, clear, flags };
+  /**
+   * 9H-3I の3方式。同じ初期の読み取り・同じAI調査結果から:
+   *  A: 従来（フラグ無効。調査なし・統合なし）
+   *  B: 9H-3F相当 = AI調査＋9H-3Eの統合。9H-3G・3Hの新機能（系列名の解決・店舗選択式の推定・LivePocket構造解析の反映）は無効。
+   *     C の調査結果から構造解析で補った項目を除いて再生する（bResponse）。限界: AIが調査中に見たツール出力には構造解析の参考行が含まれる
+   *  C: 9H-3H最新版 = AI調査＋統合＋構造解析・系列傾向・双方向学習
+   * 調査は C で1回だけ実行し、B は保存した結果を再生する（調査の回数が1を超えたら呼び出し側が中止する）。
+   */
+  async function runCase3I(c: PlanCase, realInvestigate: InvestigateFn, bResponse: (captured: InvestigationResponse) => InvestigationResponse): Promise<ThreewayResult> {
+    const anchor = c.members.find((m) => m.id === c.anchorId) ?? c.members[0];
+    const others = c.members.filter((m) => m !== anchor);
+    let captured: InvestigationResponse | null = null;
+    let calls = 0;
+    const skipSibling = async () => ({ skipped: "sibling_not_investigated" }) as never;
+    // ---- A
+    await clear();
+    await masters(c);
+    flags("off");
+    for (const m of [...others, anchor]) {
+      current = m;
+      await add(m.id, m);
+      await run(m, {});
+    }
+    const A = await arm("A", anchor.id);
+    // ---- C
+    await clear();
+    await masters(c);
+    flags("on");
+    delete process.env.COLLECT_FORM_INFERENCE;
+    for (const m of others) {
+      current = m;
+      await add(m.id, m);
+      await run(m, { investigate: skipSibling });
+    }
+    current = anchor;
+    await add(anchor.id, anchor);
+    await run(anchor, {
+      investigate: async (req) => {
+        calls += 1;
+        captured = await realInvestigate(req);
+        return captured;
+      },
+    });
+    const C = await arm("C", anchor.id);
+    // ---- B（9H-3F相当）
+    await clear();
+    await masters(c);
+    flags("on");
+    process.env.COLLECT_FORM_INFERENCE = "off";
+    try {
+      for (const m of others) {
+        current = m;
+        await add(m.id, m);
+        await run(m, { investigate: skipSibling });
+      }
+      current = anchor;
+      await add(anchor.id, anchor);
+      await run(anchor, { investigate: async () => (captured ? bResponse(captured) : ({ skipped: "no_investigation_result" } as never)) });
+    } finally {
+      delete process.env.COLLECT_FORM_INFERENCE;
+    }
+    const B = await arm("B", anchor.id);
+    flags("off");
+    await clear();
+    return { caseId: c.caseId, arms: { A, B, C }, investigation: captured, investigationCalls: calls };
+  }
+  return { runCase, runCase3I, clear, flags };
 }

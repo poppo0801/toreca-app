@@ -147,6 +147,8 @@ export interface ExtraObservation {
   key: ExtraKey;
   value: string;
   quote: string;
+  /** structure=LivePocket本文の構造解析で補った項目（AIの報告ではない）。9H-3F相当の再現のために区別して残す（9H-3I） */
+  via?: "structure";
 }
 export interface ExtraRecord extends ExtraObservation {
   sourceUrl: string;

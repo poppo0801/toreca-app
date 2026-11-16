@@ -3,7 +3,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { classifyCaseSource, type ClassifyContext } from "@/lib/agent/case-investigator/source-class";
-import { evaluatedFromAnswers, PATTERN_LABEL, selectNewCases, type PoolCandidate } from "./new-cases";
+import { evaluatedFromAnswers, PATTERN_LABEL, selectNewCases, type ChainTrendInfo, type PoolCandidate } from "./new-cases";
+import { buildHumanKnowledge } from "./human-knowledge";
+import { chainFormTendency, recordsFor } from "./form-learning";
+import { chainCanonicalKey } from "@/lib/chain-normalize";
 
 /**
  * Stage 9H-3F: 新規案件の確定（対象一覧の凍結）。通常のテストでは実行されない（BUILD_9H3F=1 のときだけ。backups/ は Git管理外）。
@@ -19,6 +22,9 @@ const POOL = process.env.POOL_FILE ?? "";
 interface PoolFile { exportedAt: string; target: string; officialHostsByChain?: Record<string, string[]>; candidates: PoolCandidate[] }
 
 const LISTING = ["pokeso.jp", "torecabiyori.com", "cardchusen.com", "nyuka-now.com"];
+/** 複数の店舗・抽選をまとめた投稿（地域別のまとめ）。基準の候補には、できるだけ使わない */
+const roundup = (c: PoolCandidate) => (/地方 ||d+件/.test(c.title) ? 1 : 0);
+const STAGE = process.env.STAGE_LABEL ?? "9H-3F";
 const rank = (c: PoolCandidate) => (c.status === "auto_registered" ? 0 : c.status === "pending" ? 1 : c.status === "duplicate" ? 2 : 3);
 const filled = (c: PoolCandidate) => [c.input.chain, c.input.store, c.input.applyStart, c.input.applyDeadline, c.input.resultDate, c.input.conditions].filter(Boolean).length;
 
@@ -29,9 +35,13 @@ describe.skipIf(!ON || !POOL || !existsSync(POOL))("新規案件の確定（候�
     const answers = readdirSync("backups/review-answers").filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync(`backups/review-answers/${f}`, "utf8")));
     const evaluated = evaluatedFromAnswers(answers);
     const today = new Date().toISOString().slice(0, 10);
-    const { selected, report } = selectNewCases(pool.candidates, evaluated, { today });
+    // 系列の傾向（人間の確認済みの実績）の有無と向き。値そのものは渡さない（選定のパターン分類にだけ使う）
+    const hk = buildHumanKnowledge(answers as never);
+    const chains = new Set((hk.forms?.records ?? []).filter((r) => r.status === "active").map((r) => chainCanonicalKey(r.chain)));
+    const trend: ChainTrendInfo = { known: chains, selectLean: new Set([...chains].filter((k) => chainFormTendency(k, recordsFor(hk.forms?.records, k)).lean === "store_select")) };
+    const { selected, report } = selectNewCases(pool.candidates, evaluated, { today, trend });
     const cases = selected.map((g) => {
-      const anchor = [...g.members].sort((a, b) => rank(a) - rank(b) || filled(b) - filled(a) || a.id.localeCompare(b.id))[0];
+      const anchor = [...g.members].sort((a, b) => rank(a) - rank(b) || roundup(a) - roundup(b) || filled(b) - filled(a) || a.id.localeCompare(b.id))[0];
       const i = anchor.input;
       const select = i.storeMode === "select_on_apply";
       const hosts = pool.officialHostsByChain?.[i.chain] ?? [];
@@ -63,7 +73,7 @@ describe.skipIf(!ON || !POOL || !existsSync(POOL))("新規案件の確定（候�
     const digest = createHash("sha256").update(JSON.stringify(cases.map((c) => c.caseId))).digest("hex").slice(0, 16);
     mkdirSync(OUT, { recursive: true });
     writeFileSync(`${OUT}/selection-report.json`, JSON.stringify({ ...report, poolFile: POOL, poolExportedAt: pool.exportedAt, poolTarget: pool.target, evaluatedEntries: evaluated.length }, null, 1));
-    writeFileSync(`${OUT}/plan.json`, JSON.stringify({ frozenAt: new Date().toISOString(), stage: "9H-3F", digest, poolFile: POOL, budget: { model: "claude-haiku-5-5", search: "anthropic web_search（既存）" }, report, cases }, null, 1));
+    writeFileSync(`${OUT}/plan.json`, JSON.stringify({ frozenAt: new Date().toISOString(), stage: STAGE, digest, poolFile: POOL, budget: { model: "claude-haiku-5-5", search: "anthropic web_search（既存）" }, report, cases }, null, 1));
     expect(cases.length).toBeGreaterThan(0);
   }, 300_000);
 });

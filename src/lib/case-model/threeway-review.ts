@@ -58,7 +58,27 @@ export interface ThreewayCase {
   integration: IntegrationSummary | null;
   /** 情報源（調査で使ったURLなど） */
   sources: string[];
+  /** 各方式の店舗選択式の判断（確認済み／推定／不明。登録候補に構造化して記録されたもの。9H-3I）。無ければ null */
+  forms?: Record<Arm, FormRec | null>;
 }
+
+export interface FormRec {
+  state: "confirmed" | "estimated" | "unknown";
+  form: string;
+  rank: number | null;
+  confidence: string;
+  action?: string;
+  basis: string[];
+  refs?: string[];
+  priorOverridden?: boolean;
+  livepocket?: { klass: string; confidence: string; missing: string[] };
+}
+const FORM_STATE_JA: Record<string, string> = { confirmed: "確認済み", estimated: "推定", unknown: "不明" };
+const FORM_JA: Record<string, string> = { store_select: "店舗選択式", store_independent: "店舗別独立", other: "その他（通販など）", unknown: "不明" };
+/** LivePocketの構造の区分（A/B/C）は、方式名（A/B/C）と紛らわしいので、評価画面には言葉で出す */
+const LP_JA: Record<string, string> = { A: "店舗選択式の構造", B: "店舗別独立の構造", C: "判断材料不足", conflict: "食い違い" };
+const forDisplay = (f: FormRec | null | undefined): FormRec | null => (f ? { ...f, livepocket: f.livepocket ? { ...f.livepocket, klass: LP_JA[f.livepocket.klass] ?? f.livepocket.klass } : undefined } : null);
+const formLine = (label: string, f: FormRec | null | undefined): string => (f ? `店舗選択式の判断（${label}）: ${FORM_STATE_JA[f.state] ?? f.state}・${FORM_JA[f.form] ?? f.form}${f.rank ? `（優先順位${f.rank}・信頼度${f.confidence}）` : ""}${f.livepocket ? `／LivePocket構造=${LP_JA[f.livepocket.klass] ?? f.livepocket.klass}` : ""}${f.priorOverridden ? "／系列の傾向より今回の情報を優先" : ""}／${f.basis[0] ?? ""}` : `店舗選択式の判断（${label}）: 記録なし`).slice(0, 300);
 
 export interface ThreewayBuild {
   set: Record<string, unknown>;
@@ -95,7 +115,7 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
     const rejected = [...(c.integration?.adoptions ?? []).flatMap((a) => a.rejected.map((x) => `${a.field}: ${x.value}（${x.from || "候補"}。${x.reason}）`)), ...(c.integration?.excluded ?? []).map((e) => `${e.label}: 統合しない（${e.reason}）`)];
     out.push({
       caseId: id,
-      sourceRef: { table: "eval-9h3f", id },
+      sourceRef: { table: "eval-9h3i", id },
       category: "special",
       categoryLabel: c.patternLabels[0] ?? "新規案件",
       tags: c.patternLabels,
@@ -103,9 +123,10 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
       ai: {
         decision: { status: "candidate", label: "最終登録候補（候補1〜3のうち1つを表示）", triage: null, triageReason: null },
         reasons: [`この抽選の3つの最終候補（候補1〜3）を「統合の根拠」欄に並べています。表示している最終候補の各項目について、正しければ「正しい」、誤りなら正しい値を入力してください。3つに共通して間違っている項目や、どの候補にもない正しい値も入力できます。`],
-        extracted: v ?? null,
+        extracted: v ? { ...v, lotteryForm: v.lotteryForm ?? (c.forms?.[base]?.state === "confirmed" && c.forms?.[base]?.form === "store_independent" ? "store_independent" : null) } : null,
         evidence: [],
-        notices: [`候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
+        formJudgment: forDisplay(c.forms?.[base]),
+        notices: [...(c.forms ? (["A", "B", "C"] as Arm[]).map((a) => formLine(labelOf(a), c.forms?.[a])) : []), `候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
         warnings: (c.integration?.unresolved ?? []).map((u) => u.detail),
       },
       duplicateOf: [],
@@ -255,7 +276,7 @@ export interface RunCaseFile {
   patterns: string[];
   error: string | null;
   members: { id: string; url: string | null; title: string }[];
-  arms: Record<Arm, { openCards: number; input: unknown; judgment: { integration?: IntegrationSummary | null } | null }> | null;
+  arms: Record<Arm, { openCards: number; input: unknown; judgment: { integration?: IntegrationSummary | null } | null; formJudgment?: FormRec | null }> | null;
   investigation: { result: { sources: { url: string; kind: string; tier: string; status: string; fetchedAt?: string }[] } } | null;
 }
 
@@ -271,6 +292,12 @@ export const PATTERN_JA: Record<string, string> = {
   region_exclude: "地域除外",
   expired: "期限切れ",
   multi_source: "複数情報源の統合が必要",
+  livepocket_select: "LivePocket（店舗選択式に見える）",
+  livepocket_independent: "LivePocket（店舗別の独立応募に見える）",
+  livepocket_unclear: "LivePocket（応募形態が不明）",
+  chain_trend: "系列の傾向を参照できる",
+  trend_conflict: "系列の傾向と異なる形に見える",
+  independent_diff: "同じ店舗で商品・期間が異なる独立抽選",
   normal: "特に問題のない通常抽選",
 };
 
@@ -287,6 +314,7 @@ export function casesFromRunFiles(files: RunCaseFile[], anchorUrl: (id: string) 
         source: src,
         views: { A: viewFromInput(a.A.input), B: viewFromInput(a.B.input), C: viewFromInput(a.C.input) },
         cards: { A: a.A.openCards, B: a.B.openCards, C: a.C.openCards },
+        forms: { A: a.A.formJudgment ?? null, B: a.B.formJudgment ?? null, C: a.C.formJudgment ?? null },
         integration: a.C.judgment?.integration ?? null,
         sources: [...new Set([...f.members.map((m) => `候補: ${m.url ?? m.title}`), ...(f.investigation?.result.sources ?? []).filter((s) => s.fetchedAt).map((s) => `${s.tier === "primary" ? "一次" : "二次"}・${s.kind}・${s.status}: ${s.url}`)])],
       };
