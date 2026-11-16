@@ -110,3 +110,31 @@ describe("保存済みの調査結果の整え直し（sanitizeItemsValue）", (
     expect(sanitizeItemsValue("拡張パック ハドウシーカー / スペシャルデッキセット MEGA 販売価格：3000円")).toBe("拡張パック ハドウシーカー / スペシャルデッキセット MEGA");
   });
 });
+
+describe("数量・入数の表記（1BOX・30パック入）は商品名の詳細として分ける（9H-3J）", () => {
+  it("「ハドウシーカー 1BOX（30パック入）」→ 商品名は『ハドウシーカー』。同じ商品の表記違いとして、隔離しない", () => {
+    expect(splitProductDetail("ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 1BOX（30パック入）").name).toBe("ポケモンカードゲーム MEGA 拡張パック ハドウシーカー");
+    expect(splitProductDetail("「ストームエメラルダ」(1BOX)").name).toBe("「ストームエメラルダ」");
+    const ch = classifyItemsChange(["ポケモン Pokemon ポケモンカードゲーム MEGA 拡張パック ハドウシーカー"], ["ポケモン Pokemon ポケモンカードゲーム MEGA 拡張パック ハドウシーカー", "ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 1BOX（30パック入）"]);
+    expect(ch.kind).toBe("detail_only");
+    expect(isItemsChangeUnsafe(ch)).toBe(false);
+    expect(isItemsChangeUnsafe(classifyItemsChange(["拡張パック ハドウシーカー"], ["拡張パック ハドウシーカー", "拡張パック ニンジャスピナー 1BOX"]))).toBe(true);
+  });
+  it("数字を含む正式な商品名（30th CELEBRATION・9種セット・BOXなしの商品名）は壊さない", () => {
+    expect(splitProductDetail("30th CELEBRATION カードセット 9種セット").name).toBe("30th CELEBRATION カードセット 9種セット");
+    expect(splitProductDetail("スペシャルデッキセット MEGA").name).toBe("スペシャルデッキセット MEGA");
+    expect(splitProductDetail("拡張パック ハドウシーカー BOX").name).toBe("拡張パック ハドウシーカー BOX");
+  });
+});
+
+describe.skipIf(!has)("保存済みの実AI調査結果（ヨドバシ）: 数量・入数の表記の違いだけの商品変更は、停止対象にならない", () => {
+  it("「ハドウシーカー 1BOX（30パック入）」の追加は、同じ商品の詳細の追加と判定される（修正前は別商品の追加として隔離された）", () => {
+    let sj: { before: string; after: string }[] = [];
+    for (const r of readdirSync(RUNS).sort()) {
+      const f = `${RUNS}/${r}/case-k-1bd7131b.json`;
+      if (existsSync(f)) sj = (JSON.parse(readFileSync(f, "utf8")) as { stopJudgments?: { before: string; after: string }[] }).stopJudgments ?? sj;
+    }
+    expect(sj.length).toBeGreaterThan(0);
+    for (const d of sj) expect(isItemsChangeUnsafe(classifyItemsChange(d.before.split(" / "), d.after.split(" / ")))).toBe(false);
+  });
+});

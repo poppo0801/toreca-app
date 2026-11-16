@@ -7,8 +7,8 @@
  */
 import { productKey } from "@/lib/lottery-match";
 
-/** 商品の詳細（商品名ではない説明）の開始を示す語。商品名の途中にこれらが現れたら、そこから後ろは詳細として分ける */
-const DETAIL_START = /(購入可能数|購入可能個数|購入制限|購入上限|購入数量|購入数|販売価格|販売金額|価格|税込|税抜|お一人様|お1人様|一人様|1人様|\d[\d,]*\s*円|※)/;
+/** 商品の詳細（商品名ではない説明。価格・購入制限・数量・入数の表記）の開始を示す語。数量の表記（1BOX・30パック入）は商品名の一部ではない（9H-3J）。商品名の途中にこれらが現れたら、そこから後ろは詳細として分ける */
+const DETAIL_START = /(購入可能数|購入可能個数|購入制限|購入上限|購入数量|購入数|販売価格|販売金額|価格|税込|税抜|お一人様|お1人様|一人様|1人様|\d[\d,]*\s*円|※|\(?\d+\s*(?:box|ボックス|箱)\b|\(?\d+\s*(?:パック|個|枚)入り?)/i;
 
 export interface ProductSplit {
   /** 商品名（詳細を除いたもの） */
@@ -26,9 +26,11 @@ export function splitProductDetail(value: string): ProductSplit {
   return { name, details: rest ? [rest] : [] };
 }
 
+/** ゲーム名・ブランド名（ポケモンカードゲーム・Pokemon など）は、どの商品にも付くので、商品の同一性の比較からは除く */
+const BRAND = /ポケモンカードゲーム|ポケモンカード|ポケカ|ポケモン|pok[eé]mon/gi;
 const isSame = (a: string, b: string): boolean => {
-  const x = productKey(a);
-  const y = productKey(b);
+  const x = productKey(a.replace(BRAND, " "));
+  const y = productKey(b.replace(BRAND, " "));
   if (!x || !y) return false;
   if (x === y) return true;
   // 一方が他方を含むときも同じ商品とみなすが、短い方が長い方の7割以上のときだけ（「30th CELEBRATION」と「30th CELEBRATION カードセット」のような別商品を同じとしない。安全側）

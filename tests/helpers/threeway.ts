@@ -62,7 +62,11 @@ export interface Env {
   u1: Db;
   hid: string;
   knowledge?: HumanKnowledge;
+  /** true のとき、地域の条件を全都道府県にする（抽出の精度を評価するため。9H-3J）。地域外の案件が、情報を取得する前に除外され、最終候補が空になるのを避ける */
+  allRegions?: boolean;
 }
+
+const ALL_PREFECTURES = ["北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県", "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県", "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県", "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県", "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県"];
 
 export function makeThreeway(env: Env) {
   const { sys, u1, hid } = env;
@@ -96,7 +100,7 @@ export function makeThreeway(env: Env) {
       return { ...o, raw };
     },
   };
-  const cond = (): CollectionConditions => ({ ...DEFAULT_CONDITIONS, prefectures: ["東京都"] });
+  const cond = (): CollectionConditions => ({ ...DEFAULT_CONDITIONS, prefectures: env.allRegions ? ALL_PREFECTURES : ["東京都"] });
   const refNow = (m: PlanMember) => new Date(new Date(`${(str(m.input.applyDeadline).slice(0, 10) || "2026-11-10")}T12:00:00+09:00`).getTime() - 86400_000);
   const deps = (m: PlanMember, extra: Partial<CollectDeps>): CollectDeps => ({
     db: sys, householdId: hid, trigger: "cron", now: refNow(m), actor: null, canRegister: false, serviceRegister: false, extractor: extractor as never, xClient: null,

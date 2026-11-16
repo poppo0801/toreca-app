@@ -247,3 +247,19 @@ describe("手動で確定した抽選形態は、実績・傾向で変えない"
     expect(r).toMatchObject({ state: "confirmed", form: "store_independent", priorUsed: false, action: "none" });
   });
 });
+
+describe("9H-3J: 系列名の重複判定（英語表記・カタカナ表記・略称）。新規の系列を作る前の既存系列との照合", () => {
+  const masters: MasterChain[] = [{ id: "c-ys", name: "イエローサブマリン" }, { id: "c-geo", name: "GEO" }, { id: "c-other", name: "イエローハット" }];
+  it("Yellow Submarine は、既存の「イエローサブマリン」と同じ系列。英語表記・略称・空白違いも同じ。別の系列（イエローハット）には寄せない", () => {
+    for (const n of ["Yellow Submarine", "YELLOW SUBMARINE", "YellowSubmarine", "イエサブ", "イエローサブマリン"]) expect(resolveChainName({ name: n, masters }), n).toMatchObject({ source: "master", id: "c-ys" });
+    expect(resolveChainName({ name: "イエローハット", masters })).toMatchObject({ id: "c-other" });
+    expect(resolveChainName({ name: "Yellow Hat Shop", masters }).source).toBe("none");
+  });
+  it("登録済みの別名（人間が登録）も使える。確信できない名前は寄せず、新規系列の候補として保留（名前を変えない）", () => {
+    const withAlias: MasterChain[] = [{ id: "c-x", name: "テスト堂", aliases: ["Test-Do"] }];
+    expect(resolveChainName({ name: "test do", masters: withAlias })).toMatchObject({ source: "master", id: "c-x" });
+    const unsure = resolveChainName({ name: "テスト堂モバイル", masters: withAlias });
+    expect(unsure.source).toBe("none");
+    expect(unsure.name).toBe("テスト堂モバイル");
+  });
+});

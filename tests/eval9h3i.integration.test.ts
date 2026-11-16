@@ -38,7 +38,8 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
     userIds.push(a.userId);
     const hid = (await a.db.rpc("bootstrap_household")).data as string;
     await a.db.from("collection_settings").insert({ household_id: hid, auto_register: false, worker_enabled: false });
-    tw = makeThreeway({ sys, u1: a.db, hid });
+    // 抽出の精度を評価するため、地域の条件は全都道府県にする（9H-3Iは東京都のみで、地域外の案件が情報を取得する前に除外され、最終候補が空になっていた）
+    tw = makeThreeway({ sys, u1: a.db, hid, allRegions: process.env.E9H3I_ALL_REGIONS !== "off" });
   });
   afterAll(async () => {
     await tw?.clear();
@@ -57,6 +58,8 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
 
     // 保存済みの調査結果の再利用（E9H3I_REUSE）。APIは呼ばない（費用0）。調査の結果は修正後の規則（商品名と詳細の分離）で整える
     const reuseIds = (process.env.E9H3I_REUSE ?? "").split(",").filter(Boolean);
+    // 再実行（E9H3I_REDO）: 以前の実行が評価の条件の不備（地域条件が東京都のみ）で最終候補が空だった案件を、条件を直して実行し直す。結果は新しい実行として保存し、以前の結果は残す
+    const redoIds = (process.env.E9H3I_REDO ?? "").split(",").filter(Boolean);
     type Saved = { error: string | null; arms: unknown; stopJudgments?: { newRule: string; reason: string }[]; investigation: { result: CaseInvestigationResult; target: CaseTarget } | null };
     const savedAll = (id: string): Saved[] => {
       const out: Saved[] = [];
@@ -80,7 +83,7 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
     const done = new Set<string>();
     for (const c of picked) {
       const sv = savedAll(c.caseId).filter((x) => x.arms && !x.error);
-      if (sv.length === 0 || reuseIds.includes(c.caseId)) continue;
+      if (sv.length === 0 || reuseIds.includes(c.caseId) || redoIds.includes(c.caseId)) continue;
       done.add(c.caseId);
       const stopped = sv[sv.length - 1].stopJudgments?.filter((x) => x.newRule === "stop") ?? [];
       if (stopped.length && !quarantine[c.caseId]) quarantine[c.caseId] = { reasons: stopped.map((x) => `商品構成の不一致: ${x.reason}`), at: new Date().toISOString() };
@@ -147,7 +150,7 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
       for (const a of ["A", "B", "C"] as const) for (const u of ((result?.arms[a].input as { sourceUrls?: string[] } | null)?.sourceUrls ?? [])) for (const m of u.matchAll(/(k-[0-9a-f]{8})/g)) if (!mine.has(m[1])) foreign.add(m[1]);
       const signals: CaseSignals = { error: error ?? null, itemsChanges, chainStoreChanges, injectionFlags: cap1?.r.injectionFlags ?? 0, unsupportedConfirmed: unsupported, loops, costJpy, investigationCalls: result?.investigationCalls ?? 0, estimateAutoRegistered: estC?.state === "estimated" && result?.arms.C.status === "auto_registered", foreignCaseIds: [...foreign], guardStopped: real.guard.stopped };
       // 全過程（元データ・AI調査結果・3方式の統合結果・停止判定の根拠）を、隔離する案件も含めて保存する
-      writeFileSync(`${OUT}/runs/${runId}/case-${c.caseId}.json`, JSON.stringify({ caseId: c.caseId, patterns: c.patterns, planDigest: plan.digest, startedAt: new Date(t0).toISOString(), ms, costJpy, error: error ?? null, members: c.members, arms: result ? Object.fromEntries((["A", "B", "C"] as const).map((a) => [a, { ...result!.arms[a], draft: undefined, formJudgment: (result!.arms[a].draft as { formJudgment?: unknown } | null)?.formJudgment ?? null }])) : null, investigationCalls: result?.investigationCalls ?? 0, investigation: cap1 ? { result: cap1.r, target: cap1.t } : null, stopJudgments, worldLog: real.log.slice(logStart) as WorldLogEntry[] }, null, 1));
+      writeFileSync(`${OUT}/runs/${runId}/case-${c.caseId}.json`, JSON.stringify({ caseId: c.caseId, patterns: c.patterns, planDigest: plan.digest, startedAt: new Date(t0).toISOString(), ms, costJpy, error: error ?? null, members: c.members, arms: result ? Object.fromEntries((["A", "B", "C"] as const).map((a) => [a, { ...result!.arms[a], draft: undefined, formJudgment: (result!.arms[a].draft as { formJudgment?: unknown } | null)?.formJudgment ?? null, provenance: (result!.arms[a].draft as { provenance?: unknown } | null)?.provenance ?? null }])) : null, investigationCalls: result?.investigationCalls ?? 0, investigation: cap1 ? { result: cap1.r, target: cap1.t } : null, stopJudgments, worldLog: real.log.slice(logStart) as WorldLogEntry[] }, null, 1));
       summary.push({ caseId: c.caseId, patterns: c.patterns, costJpy, ms, cards: result ? { A: result.arms.A.openCards, B: result.arms.B.openCards, C: result.arms.C.openCards } : null, stopReason: cap1?.r.stopReason ?? null, steps: cap1?.r.usage.steps ?? 0, searches: cap1?.r.usage.searches ?? 0, fetches: cap1?.r.usage.fetches ?? 0, retries: cap1?.r.usage.retries ?? 0 });
       return signals;
     };

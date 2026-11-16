@@ -71,11 +71,32 @@ export function parseFormKind(v: string): FormKind | null {
   return null;
 }
 
+/** 「対象商品ではない」など、商品名ではなく『この情報元の商品は抽選対象ではない』という指摘 */
+const NOT_TARGET = /対象(商品)?(では|じゃ)ない|対象外(の商品)?|該当(する)?商品(が|は)?(ない|無い|なし)/;
+
+export type CorrectionMeaning =
+  | { kind: "field"; field: string; value: string }
+  /** 商品欄に書かれた抽選形態の指摘（例: 竜のしっぽの「店舗選択式」）。商品名として取り込まない */
+  | { kind: "form_in_wrong_field"; field: string; form: FormKind; value: string }
+  /** 商品欄に書かれた「対象商品ではない」。商品名として取り込まない（情報元と商品が一致しない指摘） */
+  | { kind: "not_target_product"; value: string };
+
+/** 評価ツールの修正欄の意味を検証する。欄と値の意味が合わないものを、そのまま正解として取り込まない */
+export function interpretCorrection(field: string, value: string): CorrectionMeaning {
+  const v = (value ?? "").trim();
+  if (field === "product") {
+    if (NOT_TARGET.test(v)) return { kind: "not_target_product", value: v };
+    const k = parseFormKind(v);
+    if (k) return { kind: "form_in_wrong_field", field, form: k, value: v };
+  }
+  return { kind: "field", field, value: v };
+}
+
 export interface EvalResultLike {
   caseId?: string;
   aiOriginal?: { extracted?: { chain?: string | null; store?: string | null; products?: string[] | null; applyDeadline?: string | null; lotteryForm?: string | null }; warnings?: string[]; notices?: string[]; formJudgment?: { state?: string; form?: string } | null };
   source?: { url?: string };
-  human?: { verdict?: string; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; confirmedCorrectFields?: string[]; unknownOnlyFields?: string[]; comment?: string; evaluatedAt?: string };
+  human?: { verdict?: string | null; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; confirmedCorrectFields?: string[]; unknownOnlyFields?: string[]; comment?: string; evaluatedAt?: string };
 }
 export interface EvalFileLike {
   setId?: string;
@@ -106,6 +127,9 @@ export function formFromEvaluation(r: EvalResultLike, chain: string): { form: Fo
   const wasEstimate = fj ? fj.state === "estimated" : [...(r.aiOriginal?.warnings ?? []), ...(r.aiOriginal?.notices ?? [])].some((w) => /店舗選択式は推定|【推定】/.test(w));
   // 1) 抽選形態欄（または店舗欄）の訂正
   for (const c of h.corrections ?? []) {
+    // 商品欄に書かれた抽選形態の指摘も、抽選形態の訂正として読む（商品名としては扱わない）。評価が確定している（usableAsGold）ものだけがここに届く
+    const m = interpretCorrection(c.field, c.correctValue ?? "");
+    if (m.kind === "form_in_wrong_field") return { form: m.form, ...(shown && shown !== m.form ? { corrected: { from: shown, wasEstimate } } : {}) };
     if (c.field !== "lotteryForm" && c.field !== "store") continue;
     const k = parseFormKind(c.correctValue ?? "");
     if (!k) continue;

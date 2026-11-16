@@ -65,6 +65,7 @@ import { buildReferencePacket } from "@/lib/case-model/reference";
 import { resolveChainName } from "@/lib/case-model/chain-resolve";
 import { inferenceLabel, inferStoreForm, platformOf, tendencyFor, type FormInference } from "@/lib/case-model/form-inference";
 import { analyzeLivePocket } from "@/lib/collector/livepocket-structure";
+import { assessItemProvenance, type ProvenanceAssessment } from "@/lib/collector/source-provenance";
 import { spotCheckEligible, spotCheckRate } from "@/lib/case-model/spot-check";
 import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { planMultiProduct } from "@/lib/collector/multi-product";
@@ -797,6 +798,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   let formEstimate: FormInference | null = null;
   /** 店舗選択式の判断の構造化した記録（確認済み／推定／不明。警告文から推測しないため。9H-3I）。評価・学習はこの値を参照する */
   let formJudgment: Record<string, unknown> | null = null;
+  /** 商品の根拠（出どころ）の記録と、情報源と商品の整合性の判定（9H-3J）。確定候補にできない理由があれば確認待ちにする */
+  let provenance: ProvenanceAssessment | null = null;
   const pushTrace = (s: TraceStep) => {
     const n = addTrace(traceSteps, s);
     traceSteps.length = 0;
@@ -878,6 +881,11 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     input.items = input.items.filter((_, i) => !dropIdx.has(i));
     draft.summary.items = draft.summary.items.filter((_, i) => !dropIdx.has(i));
     secondary.push("ポケモンカード以外の商品を除いた明細");
+  }
+  // 9H-3J（フラグ有効時のみ）: 商品の根拠（URL・最終遷移先・本文の抜粋・情報源の種類・信頼度）を記録する。根拠の原文が本文に無い・まとめサイトの一覧の表示だけのときは、確定候補にしない
+  if (unifiedMode().judgment && process.env.COLLECT_PROVENANCE !== "off" && input.items.length > 0) {
+    provenance = assessItemProvenance({ items: input.items.map((it) => it.product.name), evidence: draft.evidence.items ?? ((): { quote: string; verified: boolean } | null => { const e = (((integration as IntegrationResult | null)?.caseFile ?? (invCase as CaseFile | null))?.fields.items.evidence ?? []).find((x) => !!x.quote); return e?.quote ? { quote: e.quote, verified: true } : null; })(), viaList: !!q.viaList, sourceUrl: q.url, sourceKind: q.kind === "x_post" || q.kind === "x_oembed" ? "x_post" : q.kind === "web_page" ? "web_page" : "unknown" });
+    if (provenance.verdict !== "ok") draft.warnings.push(...provenance.reasons.slice(0, 2).map((r) => r.slice(0, 160)));
   }
   const lh = q.hints;
   if (input.applyDeadline.precision === "unknown" && lh?.deadlineIso) {
@@ -993,7 +1001,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
   const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w) && !isUnmanagedConflict(w));
   const fieldConflicts = conflictLabels(myFields);
-  const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目があります: ${fieldConflicts.join("・")}` : conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : (formEstimate as FormInference | null)?.action === "apply" ? "店舗選択式は系列の過去の実績からの推定です（確認が必要）" : null;
+  const conflict = fieldConflicts.length > 0 ? `情報源間で食い違う項目があります: ${fieldConflicts.join("・")}` : conflictText ? `情報に矛盾の疑いがあります: ${String(conflictText).slice(0, 80)}` : (formEstimate as FormInference | null)?.action === "apply" ? "店舗選択式は系列の過去の実績からの推定です（確認が必要）" : (provenance as ProvenanceAssessment | null)?.verdict && (provenance as ProvenanceAssessment).verdict !== "ok" ? `商品の根拠を確認できていません（${(provenance as ProvenanceAssessment).reasons[0]?.slice(0, 80) ?? ""}）` : null;
   // 続報の照合: 追跡中の予告のうち、系列・商品・店舗が同じものを一意に探す（決められないときは統合せず、関連候補として保持）。
   // 別の情報源が同じ抽選を告知した場合（片方にだけ受付開始日がある等、読み取れた項目が違っても）、同じ抽選として追跡を引き継ぐ
   // 具体的な系列がある受付前・詳細未発表の抽選（または追跡中の予告の続報で、まだ登録できないもの）だけを追跡する
@@ -1041,7 +1049,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
         investigation: invState && { ...invState, remaining: investigationNeeds(caseFromInput(input, c.id, nowIso), { fetchRestricted: !!q.viaList, duplicateDoubt: draft.duplicates.length > 0 && !draft.duplicates.some((d) => d.level === "high") }).reasons },
       })
     : null;
-  const stored = { ...(judgment ? { judgment } : {}), ...(formJudgment ? { formJudgment } : {}), disposition: decideDisposition({ dups: draft.duplicates, recognized: wording }), understanding: buildUnderstanding(input, { unit: unitDecision, trace: traceSteps, evidence: Object.fromEntries(Object.entries(draft.evidence).map(([k, v]) => [k, (v?.quote ?? "").slice(0, 120)])) }), input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}), fields: myFields, assessment: assess, ...(relatedIds.length > 0 ? { related: relatedIds } : {}), ...(mergeLog ? { mergeLog: [mergeLog] } : {}) } as unknown as Json;
+  const stored = { ...(judgment ? { judgment } : {}), ...(formJudgment ? { formJudgment } : {}), ...(provenance ? { provenance } : {}), disposition: decideDisposition({ dups: draft.duplicates, recognized: wording }), understanding: buildUnderstanding(input, { unit: unitDecision, trace: traceSteps, evidence: Object.fromEntries(Object.entries(draft.evidence).map(([k, v]) => [k, (v?.quote ?? "").slice(0, 120)])) }), input, flags: draft.flags, summary: draft.summary, evidence: draft.evidence, modePending: draft.modePending, warnings: draft.warnings.slice(0, 10), notices: result.notices.slice(0, 5), verdict: ev.verdict, ready, provisional, secondary, confirmedAt: nowIso, engine: result.engine, listInfo: listInfoFromQueued(q, nowIso), viaList: !!q.viaList, stage, xpost: xpostSnapshot(q, draft.evidence, nowIso), ...(trackingObj ? { tracking: trackingObj } : {}), ...(cDiff ? { conditionDiff: cDiff } : {}), fields: myFields, assessment: assess, ...(relatedIds.length > 0 ? { related: relatedIds } : {}), ...(mergeLog ? { mergeLog: [mergeLog] } : {}) } as unknown as Json;
   const due = input.applyDeadline.precision === "unknown" ? undefined : { due_at: new Date(input.applyDeadline.precision === "date_time" ? `${input.applyDeadline.date}T${input.applyDeadline.time || "00:00"}:00+09:00` : `${input.applyDeadline.date}T23:59:00+09:00`).toISOString() };
 
   // ---- 内容の変更を検出した再解析: 既存の抽選と比べ、更新の提案か新しい抽選回かを判断する（確定情報は自動では書き換えない）

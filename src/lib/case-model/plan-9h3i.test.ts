@@ -16,7 +16,8 @@ const DIR = "backups/review-answers";
 
 describe.skipIf(!existsSync(PLAN) || !existsSync(DIR))("9H-3I 凍結した対象一覧の整合性", () => {
   const plan = JSON.parse(readFileSync(PLAN, "utf8")) as { cases: { caseId: string; members: PoolCandidate[] }[] };
-  const answers = readdirSync(DIR).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync(`${DIR}/${f}`, "utf8")));
+  // この対象一覧の評価結果（9H-3I）自体は除く。対象一覧を作った時点の評価済み（それ以前）との整合を確認する
+  const answers = readdirSync(DIR).filter((f) => f.endsWith(".json") && !f.includes("9h3i")).map((f) => JSON.parse(readFileSync(`${DIR}/${f}`, "utf8")));
   const evaluated = evaluatedFromAnswers(answers);
 
   it("評価済みの抽選（同一・別バージョン・同じ情報元URL）を1件も含まない", () => {

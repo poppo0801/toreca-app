@@ -18,6 +18,7 @@ import { ONLINE_STORE_NAME, isOnlineStore, isOnlineStoreName } from "@/lib/store
 import { ackCautions, pruneCautionsOnEdit, type EditSnapshot } from "@/lib/live-cautions";
 import type { Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
+import { resolveChainName } from "@/lib/case-model/chain-resolve";
 import { validateLink } from "@/lib/profile-link";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
 import { nextFormColumns, type FormDecl, type FormSource } from "@/lib/lottery-form";
@@ -773,6 +774,13 @@ export async function saveLottery(
     const online = (ss ?? []).filter((r) => isOnlineStore({ name: r.name, salesKind: r.sales_kind }, ch?.name));
     if (online.length === 1) input.store = { id: online[0].id, name: online[0].name, prefecture: "" };
     else if (online.length === 0) input.store = { id: null, name: ONLINE_STORE_NAME, prefecture: "" };
+  }
+  // 9H-3J: 系列が未選択（名前だけ）のときは、新規の系列を作る前に、既存の系列（正式名・別名・英語/カタカナ/略称の表記揺れ）との重複を検査する。
+  // 一意に確認できた既存の系列があれば、それに紐付ける（新規作成しない）。似ているだけの系列には寄せない（その場合は従来どおり）。人間が選んだ系列は変更しない
+  if (!input.chain.id && input.chain.name.trim()) {
+    const [{ data: cs }, { data: als }] = await Promise.all([db.from("chains").select("id,name,archived_at"), db.from("chain_aliases").select("chain_id,alias")]);
+    const r = resolveChainName({ name: input.chain.name, masters: (cs ?? []).map((c) => ({ id: c.id, name: c.name, archived: c.archived_at != null, aliases: (als ?? []).filter((a) => a.chain_id === c.id).map((a) => a.alias) })) });
+    if (r.source === "master") input.chain = { id: r.id, name: r.name };
   }
   // 保存前の確認は互いに独立なので、並行して行う（編集前の注意の状態・新規店舗かどうか。Stage 7O）
   const newStoreName = id === null && !input.store.id && !isDummyStoreName(input.store.name) && input.store.name !== SELECT_STORE_PLACEHOLDER ? input.store.name.trim() : "";

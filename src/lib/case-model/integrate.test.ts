@@ -158,3 +158,21 @@ describe("店舗が一方の候補だけで分かっているとき（逆向き�
     expect(integrateCandidates([inp("a", unknown), inp("b", { ...unknown, applyDeadline: "2026-11-15" })]).members).toHaveLength(2);
   });
 });
+
+describe("9H-3J: 複数商品の混在防止（別の抽選・まとめ投稿の商品を、1つの抽選に混ぜない）", () => {
+  it("基準の候補に無い商品が、別の1つの候補（2商品を併記した投稿）にだけ書かれているとき: 採用せず、未確認として保持する。基準の商品は変えない", () => {
+    const r = integrateCandidates([inp("a", { ...BASE, items: ["ハドウシーカー", "inferred", BODY] }), inp("b", { ...BASE, items: ["ハドウシーカー / 30th CELEBRATION カードセット 9種セット", "inferred", SUMMARY] })]);
+    expect(r.caseFile.fields.items.value).toBe("ハドウシーカー");
+    expect(r.unresolved.map((u) => u.detail).join("")).toContain("30th CELEBRATION カードセット 9種セット");
+    expect(r.adoptions.find((x) => x.field === "items")!.rejected.some((x) => x.value.includes("30th"))).toBe(true);
+  });
+  it("独立した2つ以上の候補が同じ追加商品を挙げているときは、同じ抽選の商品として採用する（複数商品の抽選を壊さない）", () => {
+    const two = "ハドウシーカー / ニンジャスピナー";
+    const r = integrateCandidates([inp("a", { ...BASE, items: ["ハドウシーカー", "inferred", BODY] }), inp("b", { ...BASE, items: [two, "inferred", SUMMARY] }), inp("c", { ...BASE, items: [two, "inferred", { url: "https://other.example.invalid/z", quote: "別の情報源", tier: "secondary" }] })]);
+    expect(r.caseFile.fields.items.value).toContain("ニンジャスピナー");
+  });
+  it("基準の候補が複数商品を持つときは、その商品を保つ", () => {
+    const r = integrateCandidates([inp("a", { ...BASE, items: ["ハドウシーカー / ニンジャスピナー", "inferred", BODY] }), inp("b", { ...BASE, items: ["ハドウシーカー", "inferred", SUMMARY] })]);
+    expect(r.caseFile.fields.items.value).toContain("ニンジャスピナー");
+  });
+});

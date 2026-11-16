@@ -9,13 +9,13 @@
 import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { normName } from "@/lib/norm";
 import { productKey } from "@/lib/lottery-match";
-import { buildFormRecords, platformOf, type EvalResultLike, type FormLedgerEvent, type FormRecord } from "./form-learning";
+import { buildFormRecords, interpretCorrection, platformOf, type EvalResultLike, type FormLedgerEvent, type FormRecord } from "./form-learning";
 
 export interface AnswerLike {
   caseId?: string;
   aiOriginal?: { extracted?: { chain?: string | null; store?: string | null; products?: string[] | null; applyDeadline?: string | null; lotteryForm?: string | null }; warnings?: string[]; notices?: string[] };
   source?: { url?: string };
-  human?: { verdict?: string; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; confirmedCorrectFields?: string[]; unknownOnlyFields?: string[]; comment?: string; evaluatedAt?: string };
+  human?: { verdict?: string | null; usableAsGold?: boolean; corrections?: { field: string; correctValue?: string }[]; confirmedCorrectFields?: string[]; unknownOnlyFields?: string[]; comment?: string; evaluatedAt?: string };
 }
 export interface AnswersFileLike {
   setId?: string;
@@ -30,6 +30,8 @@ export type HumanEntry =
   | { kind: "store_form"; chain: string; form: "store_select"; platform?: string; caseId: string; caseIds?: string[] }
   | { kind: "store_name"; chain: string; store: string; caseId: string; caseIds?: string[] }
   | { kind: "decision"; chain: string; decision: string; caseId: string; caseIds?: string[] }
+  /** 情報元に、抽選対象の商品の記載が見つからなかった（人間が元ページを確認）。商品名の正解ではない（9H-3J） */
+  | { kind: "source_mismatch"; chain: string; caseId: string; caseIds?: string[] }
   | { kind: "note"; chain: string; text: string; caseId: string; caseIds?: string[] };
 
 export interface HumanKnowledge {
@@ -78,6 +80,11 @@ export function buildHumanKnowledge(files: AnswersFileLike[]): HumanKnowledge {
       for (const c of h.corrections ?? []) {
         const v = (c.correctValue ?? "").trim();
         // 店舗選択式: 店舗欄の訂正だけでなく、評価者が別の欄に書いた場合（商品欄に「店舗選択式」）も同じ判断として扱う
+        // 修正欄の意味を検証する。商品欄の「対象商品ではない」は商品名ではなく、情報元と商品が一致しないという指摘
+        if (interpretCorrection(c.field, v).kind === "not_target_product") {
+          if (chain) add({ kind: "source_mismatch", chain, caseId });
+          continue;
+        }
         if (v && chain && (c.field === "store" || c.field === "product" || c.field === "lotteryForm") && isSelect(v)) add({ kind: "store_form", chain, form: "store_select", ...(platformOf(r.source?.url) ? { platform: platformOf(r.source?.url) } : {}), caseId });
         else if (c.field === "store" && v && chain) add({ kind: "store_name", chain, store: v, caseId });
         if (c.field === "product" && v && !isSelect(v)) {
@@ -87,7 +94,7 @@ export function buildHumanKnowledge(files: AnswersFileLike[]): HumanKnowledge {
         if (c.field === "decision" && v && chain && DECISION_LABEL[v]) add({ kind: "decision", chain, decision: v, caseId });
       }
       const note = (h.comment ?? "").trim();
-      if (note && chain) add({ kind: "note", chain, text: note.slice(0, 160), caseId });
+      if (note && chain && interpretCorrection("product", note).kind !== "not_target_product") add({ kind: "note", chain, text: note.slice(0, 160), caseId });
     }
   }
   // 抽選形態の実績（双方向）。系列は、評価者が直した系列名を優先する
@@ -136,6 +143,7 @@ export function humanHintsFor(k: HumanKnowledge, t: HintTarget): string[] {
     if (e.kind === "chain_alias") lines.push(`系列名「${e.alias}」は「${e.canonical}」として扱われた${GUARD}`);
     else if (e.kind === "store_form") lines.push(`${e.chain}: 過去に、応募時に店舗を選ぶ（店舗選択式）と判断された抽選がある。今回も同じ構造かは告知で確認する${GUARD}`);
     else if (e.kind === "store_name") lines.push(`${e.chain}: 店舗名の訂正の例「${e.store}」${GUARD}`);
+    else if (e.kind === "source_mismatch") lines.push(`${e.chain}: 過去に、情報元（まとめサイトの一覧・短縮URL）に書かれた商品が、リンク先のページに見つからなかった例がある。商品の根拠が元ページの本文にあるか確認する${GUARD}`);
     else if (e.kind === "decision") lines.push(`${e.chain}: 過去に「${DECISION_LABEL[e.decision]}」と判断された例がある${GUARD}`);
     else lines.push(`${e.chain}: 評価コメント「${e.text}」${GUARD}`);
   }

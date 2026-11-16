@@ -11,6 +11,8 @@ import { buildThreewaySet, casesFromRunFiles, scoreThreeway, type AnswerResult, 
  */
 const ON = process.env.BUILD_9H3I_REVIEW === "1";
 const OUT = "backups/eval-9h3i";
+/** 事例集の名前（評価済みの事例集・対応表を上書きしない。再評価用は 9h3j など別の名前にする） */
+const TAG = process.env.REVIEW_TAG ?? "9h3i";
 
 describe.skipIf(!ON || !existsSync(`${OUT}/plan.json`))("3方式の評価セットの作成・採点（実データ）", () => {
   it("実行結果から事例集を作る。評価結果があれば、3方式を採点する", () => {
@@ -30,13 +32,13 @@ describe.skipIf(!ON || !existsSync(`${OUT}/plan.json`))("3方式の評価セッ�
       const c = plan.cases.find((x) => x.caseId === id);
       return { url: c?.baseline.sourceUrl ?? "", title: c?.baseline.sourceTitle ?? id };
     }, { quarantine });
-    const build = buildThreewaySet(cases, { setId: `rs-9h3i-${plan.digest}` });
-    writeFileSync(`${OUT}/review-set-9h3i.json`, JSON.stringify(build.set, null, 1));
-    writeFileSync(`${OUT}/review-key-9h3i.json`, JSON.stringify({ note: "評価が終わるまで開かない", key: build.key }, null, 1));
+    const build = buildThreewaySet(cases, { setId: `rs-${TAG}-${plan.digest}`, note: "地域の条件は、抽出の精度を評価するため全都道府県にしています（通常の収集条件の地域除外は別に判断します）" });
+    writeFileSync(`${OUT}/review-set-${TAG}.json`, JSON.stringify(build.set, null, 1));
+    writeFileSync(`${OUT}/review-key-${TAG}.json`, JSON.stringify({ note: "評価が終わるまで開かない", key: build.key }, null, 1));
     if (process.env.SCORE_ANSWERS) {
       const ans = JSON.parse(readFileSync(process.env.SCORE_ANSWERS, "utf8")) as { results: AnswerResult[] };
       const score = scoreThreeway(ans.results, build, cases);
-      writeFileSync(`${OUT}/score-9h3i.json`, JSON.stringify({ answers: process.env.SCORE_ANSWERS, ...score, cases: cases.map((c) => ({ caseId: c.caseId, cards: c.cards })) }, null, 1));
+      writeFileSync(`${OUT}/score-${TAG}.json`, JSON.stringify({ answers: process.env.SCORE_ANSWERS, ...score, cases: cases.map((c) => ({ caseId: c.caseId, cards: c.cards })) }, null, 1));
     }
     expect((build.set.cases as unknown[]).length).toBe(cases.length);
   });

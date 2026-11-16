@@ -237,7 +237,27 @@ export function integrateCandidates(inputs: IntegrationInput[], opts: { humanLoc
       if (k !== "applyDeadline" && ag && gTop(ranked[0]) - gTop(ag) < MARGIN) win = ag;
       if (k === "applyDeadline") win = [...ranked].filter((g) => gTop(ranked[0]) - gTop(g) < MARGIN).sort((a, b) => String(a[0].f.value).localeCompare(String(b[0].f.value)))[0];
     }
-    const value = representative(k, win.map((c) => c.f.value as string));
+    let value = representative(k, win.map((c) => c.f.value as string));
+    // 商品（9H-3J）: 基準の候補（案件の本来の商品）に無い商品は、別の候補（まとめ投稿・別の抽選の告知）にだけ書かれているときは採用しない。
+    // 複数の抽選の商品を、1つの抽選に混在させない。独立した2つ以上の候補が同じ商品を挙げているときだけ、同じ抽選の商品として採用する。判断できない商品は、未確認として保持する
+    const heldItems: { name: string; from: string[] }[] = [];
+    if (k === "items") {
+      const anchorNames = splitList(anchor.caseFile.fields.items.value);
+      if (anchorNames.length > 0) {
+        const has = (m: (typeof members)[number], n: string) => splitList(m.caseFile.fields.items.value).some((x) => productKey(x) === productKey(n) || sameMeaning("items", x, n));
+        const keep: string[] = [];
+        for (const n of splitList(value)) {
+          if (anchorNames.some((a) => productKey(a) === productKey(n) || sameMeaning("items", a, n))) {
+            keep.push(n);
+            continue;
+          }
+          const sup = members.filter((m) => m.id !== anchor.id && has(m, n));
+          if (sup.length >= 2) keep.push(n);
+          else heldItems.push({ name: n, from: sup.map((m) => m.label) });
+        }
+        if (heldItems.length > 0 && keep.length > 0) value = keep.join(" / ");
+      }
+    }
     const best = [...win].sort((a, b) => b.s - a.s)[0];
     const independent = new Set(win.map((c) => originClass(c.f))).size;
     const anyConfirmed = win.some((c) => c.f.state === "confirmed" || c.f.state === "manual");
@@ -258,6 +278,10 @@ export function integrateCandidates(inputs: IntegrationInput[], opts: { humanLoc
       rejected,
     });
     if (conflict) unresolved.push({ field: k, detail: `${label}が食い違っています（${ranked.map((g) => g[0].f.value).join(" / ")}）` });
+    for (const h of heldItems) {
+      unresolved.push({ field: k, detail: `商品「${h.name}」は、別の候補（${h.from.join("・") || "別の情報源"}）にだけ書かれています。同じ抽選の商品か、別の抽選の商品かを確認できないため、採用していません` });
+      rejected.push({ value: h.name, from: h.from.join("・") || "別の候補", reason: "基準の候補にない商品で、独立した複数の候補の裏づけがない（別の抽選の商品の混入を防ぐため採用しない）" });
+    }
   };
 
   // 系列・商品・日時・方法など（店舗に関する項目は別に扱う）

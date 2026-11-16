@@ -19,6 +19,8 @@ const CHAIN_SYNONYMS: [RegExp, string][] = [
   [/^(ヨドバシ|ヨドバシカメラ|yodobashi)/, "yodobashi"],
   [/^(イオン|aeon)(?!九州)/, "aeon"],
   [/^(古本市場|ふるいち)/, "furuichi"],
+  // 英語表記・カタカナ表記・略称（系列の重複登録の防止。同じ系列の別表記だけをここに足す）
+  [/^(イエローサブマリン|イエサブ|yellowsubmarine)/, "yellowsubmarine"],
 ];
 
 /** 販売チャネルを表す語（系列名の末尾に付く。系列を変えない） */

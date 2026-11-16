@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import { splitList } from "./types";
 import type { IntegrationSummary } from "./integrate";
+import { interpretCorrection } from "./form-learning";
 
 export type Arm = "A" | "B" | "C";
 export interface View {
@@ -60,9 +61,18 @@ export interface ThreewayCase {
   sources: string[];
   /** 各方式の店舗選択式の判断（確認済み／推定／不明。登録候補に構造化して記録されたもの。9H-3I）。無ければ null */
   forms?: Record<Arm, FormRec | null>;
+  /** 各方式の商品の根拠（出どころ）の記録（9H-3J）。無ければ null */
+  prov?: Record<Arm, ProvRec | null>;
   /** 隔離案件（案件単位の安全停止）。未確定・要確認として表示し、集計から黙って除外しない（9H-3I） */
   quarantine?: { reasons: string[] } | null;
 }
+
+export interface ProvRec {
+  verdict: string;
+  records: { item: string; sourceUrl: string; finalUrl: string | null; kind: string; tier: string; quote: string; support: string; confidence: string }[];
+}
+const SUPPORT_JA: Record<string, string> = { found_in_source: "本文で確認", list_only: "まとめサイトの一覧の表示のみ（リンク先は未確認）", not_found_in_source: "根拠の原文が本文に見つからない", no_quote: "根拠の原文なし" };
+const provLine = (label: string, p: ProvRec | null | undefined): string | null => (p && p.records.length ? `商品の根拠（${label}）: ${p.records.slice(0, 2).map((r) => `${r.item.slice(0, 30)}＝${SUPPORT_JA[r.support] ?? r.support}・${r.tier === "primary" ? "一次" : "二次"}・信頼度${r.confidence === "high" ? "高" : r.confidence === "medium" ? "中" : "低"}／根拠URL: ${r.sourceUrl.slice(0, 60)}／最終遷移先: ${r.finalUrl ? r.finalUrl.slice(0, 60) : "未取得"}／抜粋: ${r.quote.slice(0, 40)}`).join(" ; ")}`.slice(0, 420) : null);
 
 export interface FormRec {
   state: "confirmed" | "estimated" | "unknown";
@@ -87,7 +97,7 @@ export interface ThreewayBuild {
   key: Record<string, { caseId: string; base: Arm; order: Record<string, Arm> }>;
 }
 
-export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; at?: string }): ThreewayBuild {
+export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; at?: string; note?: string }): ThreewayBuild {
   let st = parseInt(createHash("sha256").update(`${opts.setId}:3way`).digest("hex").slice(0, 8), 16);
   const rnd = () => {
     st = (st + 0x6d2b79f5) | 0;
@@ -130,7 +140,7 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
         extracted: v ? { ...v, lotteryForm: v.lotteryForm ?? (c.forms?.[base]?.state === "confirmed" && c.forms?.[base]?.form === "store_independent" ? "store_independent" : null) } : null,
         evidence: [],
         formJudgment: forDisplay(c.forms?.[base]),
-        notices: [...(c.quarantine ? [`【隔離案件・未確定・要確認】安全条件により、この抽選だけを隔離しました（他の抽選は継続）。理由: ${c.quarantine.reasons.join(' / ').slice(0, 400)}。結果は保存してあります。商品構成と抽選単位（同じ抽選か、別々の抽選か）が正しいかを、人間が確認してください（正解を決めつけていません）`] : []), ...(missingArms.length ? [`欠測（結果が存在しない方式）: ${missingArms.map((a) => labelOf(a)).join('・')}`] : []), ...(c.forms ? (["A", "B", "C"] as Arm[]).map((a) => formLine(labelOf(a), c.forms?.[a])) : []), `候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
+        notices: [...(c.prov ? (["A", "B", "C"] as Arm[]).map((a) => provLine(labelOf(a), c.prov?.[a])).filter((x): x is string => !!x) : []), ...(opts.note ? [opts.note] : []), ...(c.quarantine ? [`【隔離案件・未確定・要確認】安全条件により、この抽選だけを隔離しました（他の抽選は継続）。理由: ${c.quarantine.reasons.join(' / ').slice(0, 400)}。結果は保存してあります。商品構成と抽選単位（同じ抽選か、別々の抽選か）が正しいかを、人間が確認してください（正解を決めつけていません）`] : []), ...(missingArms.length ? [`欠測（結果が存在しない方式）: ${missingArms.map((a) => labelOf(a)).join('・')}`] : []), ...(c.forms ? (["A", "B", "C"] as Arm[]).map((a) => formLine(labelOf(a), c.forms?.[a])) : []), `候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
         warnings: [...(c.quarantine ? c.quarantine.reasons.map((r) => `隔離: ${r}`.slice(0, 300)) : []), ...(c.integration?.unresolved ?? []).map((u) => u.detail)],
       },
       duplicateOf: [],
@@ -162,7 +172,8 @@ const dateNums = (s: string): string[] => [...s.normalize("NFKC").matchAll(/(\d{
 type Score = "correct" | "wrong" | "missing" | "skipped";
 /** 1項目の採点。基準（人間が確定した正しい値）と、方式の値を比べる */
 export function scoreField(field: string, gold: string, v: View | null): Score {
-  if (!v) return "skipped";
+  // 結果が存在しない方式（隔離・除外で最終候補が無い）は、欠測として採点する。黙って除外しない
+  if (!v) return "missing";
   switch (field) {
     case "chain": return norm(v.chain) === "" ? "missing" : norm(v.chain).includes(norm(gold)) || norm(gold).includes(norm(v.chain)) ? "correct" : "wrong";
     case "store": {
@@ -170,7 +181,8 @@ export function scoreField(field: string, gold: string, v: View | null): Score {
       if (/店舗選択/.test(gold)) return /^店舗選択式/.test(v.store) ? "correct" : "wrong";
       return norm(v.store).includes(norm(gold)) || norm(gold).includes(norm(v.store)) ? "correct" : "wrong";
     }
-    case "product": return v.products.length === 0 ? "missing" : v.products.some((p) => norm(p).includes(norm(gold)) || norm(gold).includes(norm(p))) ? "correct" : "wrong";
+    case "product": if (/^対象商品ではない$/.test(gold)) return v.products.length === 0 ? "correct" : "wrong";
+      return v.products.length === 0 ? "missing" : v.products.some((p) => norm(p).includes(norm(gold)) || norm(gold).includes(norm(p))) ? "correct" : "wrong";
     case "applyPeriod": {
       const g = dateNums(gold);
       const mine = [v.applyStart, v.applyDeadline].filter((x): x is string => !!x).flatMap(dateNums);
@@ -248,7 +260,14 @@ export function scoreThreeway(answers: AnswerResult[], build: ThreewayBuild, cas
       continue;
     }
     evaluated += 1;
-    const corr = new Map((h.corrections ?? []).map((x) => [x.field, (x.correctValue ?? "").trim()]));
+    // 修正欄の意味を検証する: 商品欄の抽選形態の指摘は抽選形態として読み、商品名の正解にしない。商品欄の「対象商品ではない」は商品の正解名ではない
+    const corr = new Map<string, string>();
+    for (const x of h.corrections ?? []) {
+      const m = interpretCorrection(x.field, x.correctValue ?? "");
+      if (m.kind === "form_in_wrong_field") corr.set("lotteryForm", m.form === "store_select" ? "店舗選択式" : m.value);
+      else if (m.kind === "not_target_product") corr.set("product", "対象商品ではない");
+      else corr.set(x.field, m.value);
+    }
     const dec = corr.get("decision");
     decisions.push({ caseId: k.caseId, correct: dec ?? null });
     const baseView = c.views[k.base];
@@ -284,7 +303,7 @@ export interface RunCaseFile {
   patterns: string[];
   error: string | null;
   members: { id: string; url: string | null; title: string }[];
-  arms: Record<Arm, { openCards: number; input: unknown; judgment: { integration?: IntegrationSummary | null } | null; formJudgment?: FormRec | null }> | null;
+  arms: Record<Arm, { openCards: number; input: unknown; judgment: { integration?: IntegrationSummary | null } | null; formJudgment?: FormRec | null; provenance?: ProvRec | null }> | null;
   stopJudgments?: { reason: string; newRule: string }[];
   investigation: { result: { sources: { url: string; kind: string; tier: string; status: string; fetchedAt?: string }[] } } | null;
 }
@@ -326,6 +345,7 @@ export function casesFromRunFiles(files: RunCaseFile[], anchorUrl: (id: string) 
         cards: { A: a.A.openCards, B: a.B.openCards, C: a.C.openCards },
         forms: { A: a.A.formJudgment ?? null, B: a.B.formJudgment ?? null, C: a.C.formJudgment ?? null },
         quarantine: opts.quarantine?.[f.caseId] ?? null,
+        prov: { A: a.A.provenance ?? null, B: a.B.provenance ?? null, C: a.C.provenance ?? null },
         integration: a.C.judgment?.integration ?? null,
         sources: [...new Set([...f.members.map((m) => `候補: ${m.url ?? m.title}`), ...(f.investigation?.result.sources ?? []).filter((s) => s.fetchedAt).map((s) => `${s.tier === "primary" ? "一次" : "二次"}・${s.kind}・${s.status}: ${s.url}`)])],
       };
