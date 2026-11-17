@@ -107,7 +107,7 @@ describe("UI-1: NEWの既読は詳細を閉じた時点（開いた時点では�
 
 describe("UI-1: NEW表示は小さな●（大きなバッジを使わない）", () => {
   it("カード右上の角に●を出す（操作を受けない）。NEWの文字は読み上げ用だけ。既読（isNew=false）では出ない", async () => {
-    await act(async () => root.render(createElement(LotteryCard, { lottery: lot() })));
+    await act(async () => root.render(createElement(LotteryCard, { tab: "all", view: "simple", lottery: lot() })));
     const dot = q("new-dot")!;
     expect(dot).not.toBeNull();
     expect(dot.className).toContain("pointer-events-none");
@@ -115,7 +115,7 @@ describe("UI-1: NEW表示は小さな●（大きなバッジを使わない）"
     expect(dot.className).toContain("-top-1");
     expect(dot.querySelector(".sr-only")?.textContent).toBe("NEW");
     expect(document.body.querySelector('[data-testid="lottery-card"] .border-info.text-info')?.textContent ?? "").not.toBe("NEW"); // 旧チップなし
-    await act(async () => root.render(createElement(LotteryCard, { lottery: { ...lot(), isNew: false } })));
+    await act(async () => root.render(createElement(LotteryCard, { tab: "all", view: "simple", lottery: { ...lot(), isNew: false } })));
     expect(q("new-dot")).toBeNull();
   });
 });
@@ -124,7 +124,7 @@ describe("UI-1: シンプル表示の応募ボタン", () => {
   it("未応募は「応募」ボタン。タップで既存の応募処理を1回だけ呼び、カード全体のタップ（詳細を開く）に伝えない。処理中の二重タップは無効", async () => {
     let resolve!: (v: { ok: true; data: AppData }) => void;
     setApplied.mockImplementationOnce(() => new Promise((r) => (resolve = r as never)));
-    await act(async () => root.render(createElement(LotteryCard, { lottery: { ...data.lotteries.find((l) => l.id === "L4")!, isNew: false } })));
+    await act(async () => root.render(createElement(LotteryCard, { tab: "all", view: "simple", lottery: { ...data.lotteries.find((l) => l.id === "L4")!, isNew: false } })));
     const btn = q("my-apply") as HTMLButtonElement;
     expect(btn).not.toBeNull();
     expect(btn.textContent).toBe("応募");
