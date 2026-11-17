@@ -5,8 +5,10 @@
 import { CITY_BY_PREF, PREF_SHORT } from "@/lib/collector/region-cities";
 import { PREFECTURE_LIST } from "@/lib/geo";
 
-export type RegionBasis = "address" | "stated_prefecture" | "store_name_prefecture" | "store_name_city" | "master" | "none";
+export type RegionBasis = "address" | "stated_prefecture" | "store_name_prefecture" | "store_name_city" | "master" | "conflict" | "none";
 export interface RegionJudgement {
+  /** 根拠が食い違ったとき（basis=conflict）の、それぞれの根拠。除外ではなく追加確認の対象。追跡できるよう記録に残す */
+  conflict?: { prefecture: string; basis: RegionBasis; note: string }[];
   /** 判定した都道府県（不明なら空） */
   prefecture: string;
   /** 判定した市区町村・地名（あれば） */
@@ -103,7 +105,26 @@ export function judgeRegion(r: RegionInput): RegionJudgement {
   const statedHits = stated ? prefecturesIn(stated) : [];
   const storeName = norm(r.storeName ?? "");
   const multi = looksMultiStore(storeName);
-  if (statedHits.length === 1 && !multi) return { prefecture: statedHits[0], city: "", basis: "stated_prefecture", note: `告知に記載された都道府県（${statedHits[0]}）`, multiStore: false };
+  if (statedHits.length === 1 && !multi) {
+    // 9H-3N: 告知に出る都道府県は「告知に登場する地名」であり、抽選対象の店舗の所在地とは限らない（複数店舗の告知で、別の店舗の都道府県が紐づくことがある。
+    // 例: 「キデイランド各店」の告知に「吉祥寺店（東京都）」があり、抽選対象の三宮店（兵庫県）が東京都と判定されて除外された）。
+    // 店舗名そのものから別の都道府県が読めるときは、どちらかを推測で選ばず「不明（要確認）」にして、両方の根拠を残す。不明は地域外として除外しない。
+    const fromName = storeName ? regionFromStoreName(storeName) : null;
+    if (fromName && fromName.prefecture !== statedHits[0]) {
+      return {
+        prefecture: "",
+        city: fromName.city,
+        basis: "conflict",
+        note: `告知の都道府県（${statedHits[0]}）と、店舗名の地名（${fromName.note}）が食い違うため、地域は特定しません（店舗の所在地の確認が必要）`,
+        multiStore: false,
+        conflict: [
+          { prefecture: statedHits[0], basis: "stated_prefecture", note: `告知に記載された都道府県（${statedHits[0]}）。抽選対象の店舗の所在地とは限らない` },
+          { prefecture: fromName.prefecture, basis: fromName.basis, note: fromName.note },
+        ],
+      };
+    }
+    return { prefecture: statedHits[0], city: "", basis: "stated_prefecture", note: `告知に記載された都道府県（${statedHits[0]}）`, multiStore: false };
+  }
   if (!storeName) return none("地域を判定できる情報がありません");
   if (multi) return none("複数店舗の一覧のため、地域は特定しません", true);
   const named = prefecturesIn(storeName);
@@ -112,6 +133,17 @@ export function judgeRegion(r: RegionInput): RegionJudgement {
   const c = cityToPrefecture(storeName);
   if (c) return { prefecture: c.prefecture, city: c.city, basis: "store_name_city", note: `店舗名の地名「${c.city}」から${c.prefecture}と判定`, multiStore: false };
   return none("店舗名から地域を判定できません");
+}
+
+/** 店舗名そのものから読める都道府県（店舗名に含まれる都道府県名・市区町村名。複数・曖昧なら null） */
+function regionFromStoreName(storeName: string): { prefecture: string; city: string; basis: RegionBasis; note: string } | null {
+  const s = norm(storeName);
+  if (!s || looksMultiStore(s)) return null;
+  const named = prefecturesIn(s);
+  if (named.length === 1) return { prefecture: named[0], city: "", basis: "store_name_prefecture", note: `店舗名に含まれる地域名から${named[0]}` };
+  if (named.length > 1) return null;
+  const c = cityToPrefecture(s);
+  return c ? { prefecture: c.prefecture, city: c.city, basis: "store_name_city", note: `店舗名の地名「${c.city}」から${c.prefecture}` } : null;
 }
 
 /** 地域外として自動除外した記録（候補の draft.exclusion に残す。物理削除はせず、誤判定時は除外一覧から確認・復元できる） */
@@ -127,9 +159,11 @@ export interface RegionExclusion {
   note: string;
   /** 除外理由（画面に出す文） */
   reason: string;
+  /** 判定に使った入力と、食い違った根拠（追跡用。Stage 9H-3N）。除外の理由を後から確認できるように残す */
+  conflict?: { prefecture: string; basis: RegionBasis; note: string }[];
 }
 export function regionExclusionOf(j: RegionJudgement, o: { at: string; source: string; reason: string }): RegionExclusion {
-  return { kind: "region", at: o.at, source: o.source.slice(0, 300), prefecture: j.prefecture, city: j.city, basis: j.basis, note: j.note, reason: o.reason.slice(0, 200) };
+  return { kind: "region", at: o.at, source: o.source.slice(0, 300), prefecture: j.prefecture, city: j.city, basis: j.basis, note: j.note, reason: o.reason.slice(0, 200), ...(j.conflict ? { conflict: j.conflict } : {}) };
 }
 /** 除外理由が「対象外の地域」か */
 export const isRegionReason = (reasons: string[]) => reasons.some((r) => /対象外の地域/.test(r));

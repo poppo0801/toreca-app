@@ -30,6 +30,14 @@ export interface Tracking {
   /** 正式な抽選として登録した日時と抽選ID */
   promotedAt?: string;
   promotedLotteryId?: string;
+  /** 抽選の予告か正式発表かの総合判断（Stage 9H-3N。announcement.ts）。teaser は通常の抽選候補・件数・通知に含めず、内部で管理する */
+  announcement?: "formal" | "teaser" | "cancelled" | "postponed";
+  /** 予告の経過（有効・昇格・中止・延期・未発表のまま終了） */
+  outcome?: "active" | "promoted" | "cancelled" | "postponed" | "expired";
+  /** 予告段階で取得した情報（正式発表後の調査に再利用する） */
+  carried?: { chain?: string; store?: string; products?: string[]; sourceUrls?: string[]; excerpt?: string };
+  /** 最後の判断と、その根拠（追跡用） */
+  lastJudgement?: { state: "formal" | "teaser" | "cancelled" | "postponed"; confidence: string; at: string; reasons: string[]; toVerify: string[] };
 }
 
 const known = (f?: { precision: string; date?: string | null }) => !!f && f.precision !== "unknown" && !!f.date;
@@ -107,5 +115,11 @@ export function inheritTracking(prev: Tracking | null, now: string, url: string,
     sources: sources.slice(-10),
     history: [...(prev?.history ?? []), ...entries].slice(-30),
     ...(prev?.related ? { related: prev.related } : {}),
+    ...(prev?.announcement ? { announcement: prev.announcement } : {}),
+    ...(prev?.outcome ? { outcome: prev.outcome } : {}),
+    ...(prev?.carried ? { carried: prev.carried } : {}),
+    ...(prev?.lastJudgement ? { lastJudgement: prev.lastJudgement } : {}),
+    ...(prev?.promotedAt ? { promotedAt: prev.promotedAt } : {}),
+    ...(prev?.promotedLotteryId ? { promotedLotteryId: prev.promotedLotteryId } : {}),
   };
 }

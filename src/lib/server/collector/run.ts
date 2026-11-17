@@ -79,6 +79,7 @@ import { addProductsToLottery, autoCompleteConditions, autoCompleteLottery, mark
 import { tryAutoUpdate } from "@/lib/server/collector/auto-update";
 import { ageDaysOf, classifyStage, hasLotteryWording, isSpeculative, STAGE_LABEL } from "@/lib/collector/stage";
 import { diffTracking, inheritTracking, type Tracking } from "@/lib/collector/tracking";
+import { judgeAnnouncement, nextOutcome } from "@/lib/collector/announcement";
 import { conditionDiff, conditionDiffText } from "@/lib/collector/condition-diff";
 import { assessCompleteness } from "@/lib/collector/completeness";
 import { classifySource, conflictLabels, FIELD_LABEL, mergeSides, provenanceFor, type FieldSource, type SourceContext } from "@/lib/collector/fields";
@@ -994,12 +995,30 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const texts = tcgTextsOf({ title: q.title, card: q.card, context: q.context, postText: q.post?.text, quotedText: q.post?.quoted?.text, products: productNamesOf(input) });
   // 利用者が確定した除外ルール（Stage 7H）も、地域・商品・通販の例外と同じ判定（evaluateCandidate）の中で評価する
   const areaSets = userRules.some((r) => r.kind === "area_chain") ? chainAreaSets(data, cond.prefectures) : undefined;
-  const ev = evaluateCandidate(input, cond, { texts, prefecture: knownPref, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now, userRules, chainsInArea: areaSets?.chainsInArea, chainsWithStores: areaSets?.chainsWithStores });
+  const ev = evaluateCandidate(input, cond, { texts, prefecture: knownPref, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now: deps.now, userRules, chainsInArea: areaSets?.chainsInArea, chainsWithStores: areaSets?.chainsWithStores, ...(region.basis === "conflict" ? { regionConflict: region.note.slice(0, 160) } : {}) });
   const { ready, missing, provisional } = isReady(draft, input);
   const stage = classifyStage(input, jstDayString(deps.now));
   // ---- 抽選予告の追跡（Stage 6C）
   // 抽選の実施を示す文言があるか（「新商品が発売される」だけの告知を、抽選予告として追跡しない）
-  const isNotice = stage === "teaser" || stage === "partial";
+  // 9H-3N: 予告か正式発表かは、日付の欠落だけでなく、募集内容が実際に公表されているかを総合判断する（announcement.ts）。
+  // 応募先・日程・条件が公表されていれば、受付開始前・締切不明でも予告にしない。予告は内部管理にとどめ、通常の抽選候補・件数・通知に出さない
+  const annKnown = (f: { precision: string; date?: string | null }) => f.precision !== "unknown" && !!f.date;
+  const ann = judgeAnnouncement({
+    texts: [...texts, input.conditionsText ?? ""],
+    hasProduct: input.items.some((it) => !!it.product.name.trim()),
+    applyStartKnown: annKnown(input.applyStart),
+    applyDeadlineKnown: annKnown(input.applyDeadline),
+    resultDateKnown: !!(input as { resultDate?: { precision: string; date?: string | null } }).resultDate && annKnown((input as unknown as { resultDate: { precision: string; date?: string | null } }).resultDate),
+    hasApplyUrl: !!result.extraction.applyUrl || /応募URL:\s*\S+/.test(input.memo ?? ""),
+    hasConditions: !!(input.conditionsText ?? "").trim() || (input.requirementTags ?? []).length > 0,
+    chainKnown: !!input.chain.name.trim(),
+  });
+  const isNotice = (stage === "teaser" || stage === "partial") && ann.state === "teaser";
+  // 告知が抽選の中止を明示しているときは、登録も追跡もしない。ただし他店・他商品の記載を拾った誤判定を避けるため、自動で除外せず利用者の確認にする
+  if (ann.state === "cancelled" && !old?.tracking?.promotedAt) {
+    await db.from("collection_candidates").update({ status: "pending", job_state: "review", triage: "manual", triage_reason: "告知に抽選の中止の記載があります", manual_reason: "告知に抽選の中止の記載があります。内容を確認してください", manual_since: nowIso, manual_state: "open", reasons: ["告知が抽選の中止を示しているため、登録せず確認待ちにしました"], draft: { input, summary: draft.summary, confirmedAt: nowIso, announcement: { state: "cancelled", reasons: ann.reasons, at: nowIso } } as unknown as Json, ...acct, ...clear }).eq("id", c.id);
+    return { usedAi: true, registered: false, aiFailed: false };
+  }
   // 複数の画像・本文の内容が矛盾するときは、無理に確定せず利用者の判断にする
   const conflictText = [...draft.warnings, ...Object.values(draft.flags)].find((w) => typeof w === "string" && /矛盾|食い違/.test(w) && !isUnmanagedConflict(w));
   const fieldConflicts = conflictLabels(myFields);
@@ -1010,7 +1029,22 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const wantTrack = cond.trackUpcoming && !!input.chain.name.trim() && wording && (ev.verdict === "upcoming" || isNotice || (stage === "upcoming" && !ready) || (!!old?.tracking && !ready));
   const startDate = input.applyStart.precision !== "unknown" && input.applyStart.date ? input.applyStart.date : null;
   const trackingEntries = old ? diffTracking(old.input, input, nowIso, q.url) : [];
-  const trackingObj: Tracking | null = wantTrack || old?.tracking ? { ...inheritTracking(old?.tracking ?? null, nowIso, q.url, startDate, trackingEntries), ...(relatedIds.length > 0 ? { related: relatedIds } : {}) } : null;
+  const trackingBase: Tracking | null = wantTrack || old?.tracking ? { ...inheritTracking(old?.tracking ?? null, nowIso, q.url, startDate, trackingEntries), ...(relatedIds.length > 0 ? { related: relatedIds } : {}) } : null;
+  // 予告の経過（有効・昇格・中止・延期・終了）と、予告段階の情報の引き継ぎ・判断の根拠を記録する。正式発表なら昇格として履歴に残す
+  const trackingObj: Tracking | null = trackingBase
+    ? ((): Tracking => {
+        const prevState = { since: trackingBase.since, lastNewsAt: trackingBase.lastNewsAt, outcome: trackingBase.outcome ?? ("active" as const) };
+        const outcome = nextOutcome({ prev: prevState, judgement: ann, now: deps.now, expectedStart: startDate });
+        return {
+          ...trackingBase,
+          announcement: ann.state,
+          outcome,
+          carried: { chain: input.chain.name || trackingBase.carried?.chain, store: input.store.name || trackingBase.carried?.store, products: input.items.map((it) => it.product.name).filter(Boolean).length > 0 ? input.items.map((it) => it.product.name).filter(Boolean) : trackingBase.carried?.products, sourceUrls: trackingBase.sources.map((s) => s.url).slice(-5), excerpt: (texts.join(" ").slice(0, 160)) },
+          lastJudgement: { state: ann.state, confidence: ann.confidence, at: nowIso, reasons: ann.reasons.slice(0, 2), toVerify: ann.toVerify.slice(0, 3) },
+          ...(outcome === "promoted" && !trackingBase.promotedAt ? { promotedAt: nowIso } : {}),
+        };
+      })()
+    : null;
   // 系列に手動で登録した条件（Stage 5R）との違い。手動条件は書き換えず、確認用に残す
   const regKinds = (data.chainConditions ?? []).filter((cc) => cc.chainId === input.chain.id).map((cc) => cc.kind);
   const cDiff = input.chain.id ? conditionDiff((input.requirementTags ?? []) as RequirementTag[], regKinds) : null;

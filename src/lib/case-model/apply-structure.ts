@@ -162,10 +162,10 @@ export function inferWithStructure(i: LayeredInput): LayeredInference {
   const base = inferStoreForm(i);
   const st = judgeApplyStructure({ texts: i.texts, receiveMethod: i.receiveMethod, chainKnown: i.chainKnown, storeKnown: i.storeKnown, perStorePages: i.perStorePages, base });
   if (base.state !== "unknown" || st.storeSelectNeed !== "required" || st.state !== "estimated") {
-    // 系列の過去の実績だけの推定（この告知自体に根拠が無い）は、登録の形を変えず確認候補にとどめる（9H-3M: 過去評価の誤判定5件はすべてこの型）
-    const v = verificationFor(base, st);
-    const demote = base.state === "estimated" && base.action === "apply" && !v.noticeEvidence;
-    return { ...base, ...(demote ? { action: "propose" as const, basis: [...base.basis, "告知自体に根拠が無く、系列の実績だけの推定のため、登録の形は変えず確認候補にとどめる"] } : {}), structure: st, verification: v };
+    // 系列の過去の実績だけの推定（この告知自体に根拠が無い）には、確認すれば確定できること（verify）を記録して調査・人間の確認へ渡す。
+    // 登録の形（apply）は変えない: 過去評価の設計外85件では、実績だけの推定は正解18件に対し誤り5件で、反映をやめると正解を多く失う（9H-3N で確認。
+    // 9H-3M で一度「反映しない」に変えたが、9H-3G/H の収集経路の結合テスト7件が失敗し、データでも支持されないため取り消した）
+    return { ...base, structure: st, verification: verificationFor(base, st) };
   }
   // 実績が「店舗別独立」「通販のみ」などへ傾く系列は、構造の材料だけでは店舗選択式と推定しない（実績が割れているときも同様）
   if (base.priorUsed) return { ...base, structure: st, verification: verificationFor(base, st) };

@@ -7,6 +7,7 @@ import { autoCompleteLottery } from "@/lib/server/collector/complete";
 import { saveLottery, type Db } from "@/lib/server/lottery-service";
 import type { LotteryInput } from "@/lib/lottery-input";
 import { jstToday } from "@/lib/ai/extraction";
+import { nextSweepLedger } from "@/lib/server/agent/sweep-service";
 
 /**
  * 調査の記録・日次の使用量・開発環境での自動適用（Stage 9D）。
@@ -75,6 +76,8 @@ export async function startRun(db: Db, householdId: string, o: { mode: "dry_run"
 }
 
 export async function finishRun(db: Db, householdId: string, runId: string, r: InvestigationRecord, extra: { applied?: unknown } = {}): Promise<void> {
+  // 9H-3N: 系列横断の調査の台帳（調査したこと・見つかった/未確認）を記録に残す。次回の調査で重複実行を避け、未確認の店舗を間隔を空けて継続するため
+  const sweepLedger = await nextSweepLedger(db, householdId, r.review?.accepted.tasks ?? [], r.review?.accepted.findings ?? [], new Date()).catch(() => ({}));
   const analyses = r.steps.filter((s) => s.tool === "analyze_page_for_lottery" && s.ok).length;
   await anyDb(db)
     .from("agent_investigation_runs")
@@ -83,7 +86,7 @@ export async function finishRun(db: Db, householdId: string, runId: string, r: I
       stop_reason: r.stopReason.slice(0, 300),
       finished_at: new Date().toISOString(),
       usage: { ...r.usage, analyses, totalMs: r.totalMs, costJpy: r.usage.costJpy } as unknown as Json,
-      result: { ...compact(r), applied: extra.applied ?? null } as unknown as Json,
+      result: { ...compact(r), applied: extra.applied ?? null, sweepLedger } as unknown as Json,
       evaluation: r.evaluation as unknown as Json,
       summary: r.summary.slice(0, 600),
     })

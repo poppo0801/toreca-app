@@ -178,7 +178,7 @@ export function judge(c: CandidateLite, data: AppData, cond: CollectionCondition
   const dr = stored as unknown as { listInfo?: { title?: string; card?: string; context?: string }; xpost?: { text?: string; quoted?: { text?: string } } };
   const texts = tcgTextsOf({ title: c.title, card: dr.listInfo?.card, context: dr.listInfo?.context, postText: dr.xpost?.text, quotedText: dr.xpost?.quoted?.text });
   const region = judgeRegion({ masterPrefecture: store?.prefecture, address: store?.address, storeName: input.store.id ? "" : input.store.name, statedPrefecture: input.store.prefecture });
-  const ev = evaluateCandidate(input, cond, { texts, prefecture: region.prefecture, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now });
+  const ev = evaluateCandidate(input, cond, { texts, prefecture: region.prefecture, storeKind: store?.salesKind ?? "physical", distanceKm: dist ? dist.km : null, now, ...(region.basis === "conflict" ? { regionConflict: region.note.slice(0, 160) } : {}) });
   if (ev.verdict === "exclude") {
     const exclusion = isRegionReason(ev.reasons) && region.prefecture ? regionExclusionOf(region, { at: now.toISOString(), source: c.source_url ?? "", reason: ev.reasons.join("・") }) : undefined;
     return { ...base, cls: "F", action: "exclude", reasons: [`収集条件の対象外です（${ev.reasons.join("・")}）`], priority: 6, missing: [], exclusion };

@@ -5,7 +5,7 @@
  */
 
 /** 調査の動機（AIが選ぶ入力）。固定の優先順位ではなく、AIが状況を見て選ぶ */
-export type TaskKind = "release_followup" | "unmonitored_chain" | "missing_info" | "failed_source" | "discover_account" | "verify_candidate";
+export type TaskKind = "release_followup" | "unmonitored_chain" | "missing_info" | "failed_source" | "discover_account" | "verify_candidate" | "chain_sibling";
 
 export interface ReleaseSignal {
   productId: string;
@@ -57,7 +57,20 @@ export interface PreviousRunSignal {
   /** その情報源から見つかった抽選候補の累計 */
   yielded: number;
 }
+/** 系列横断の調査の手がかり（Stage 9H-3N）。蓄積した履歴から発見した系列の開催傾向にもとづく、関連店舗の調査候補。開催の可能性であり、開催の確認ではない */
+export interface SiblingSignal {
+  /** 台帳のキー（調査計画の対象ID） */
+  id: string;
+  chain: string;
+  store: string;
+  probability: number;
+  confidence: "none" | "low" | "medium" | "high";
+  reasons: string[];
+  opportunityKey: string;
+}
 export interface InvestigationSignals {
+  /** 系列横断の調査候補（上限つき。未確認は開催なしと決めつけず、台帳で継続管理する） */
+  siblings?: SiblingSignal[];
   today: string;
   releases: ReleaseSignal[];
   chains: ChainSignal[];

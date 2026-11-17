@@ -14,6 +14,7 @@ import { assessRow, importantChains } from "@/lib/collector/assess-row";
 import { slimDraft } from "@/lib/collector/slim-draft";
 import { loadAppData } from "@/lib/server/lottery-service";
 import { computeMetrics } from "@/lib/collector/metrics";
+import { summarizeTeasers, type TeaserRow } from "@/lib/collector/teaser-summary";
 import { buildCostReport, type CandidateCostRow, type SearchStepRow } from "@/lib/collector/cost-report";
 import type { AiLogRow } from "@/lib/ai-cost";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
@@ -110,6 +111,9 @@ export default async function CollectionPage() {
     db.from("agent_investigation_steps").select("created_at,tool,cost_jpy").gte("created_at", since30c).limit(5000),
   ]);
   const costReport = buildCostReport({ candidates: (metricRows.data ?? []) as unknown as CandidateCostRow[], logs: (costLogs.data ?? []) as unknown as AiLogRow[], searchSteps: costSteps.error ? undefined : ((costSteps.data ?? []) as unknown as SearchStepRow[]), rate: budget.rate });
+  // 9H-3N: 抽選予告の内部管理の状況（通常の候補・件数には含めない。管理・診断画面でだけ確認する）
+  const teaserRows = await db.from("collection_candidates").select("created_at,draft").not("draft->tracking", "is", null).limit(300);
+  const teaserSummary = summarizeTeasers((teaserRows.data ?? []) as unknown as TeaserRow[], new Date());
   const ig = integrityRes.data as { logs_2d?: number; stats_calls_2d?: number; abnormal_reservations?: number } | null;
   const runSummaries = runNotices.summaries;
   // 情報充実度（A〜E）・対応優先度は、表示のたびに保存済みの草稿と最新のマスターから再計算する（古いランクを残さない）
@@ -205,6 +209,7 @@ export default async function CollectionPage() {
         health={health}
         metrics={metrics}
         cost={costReport}
+        teasers={teaserSummary}
         runSummaries={runSummaries}
         ops={ops}
         stats={statRows}

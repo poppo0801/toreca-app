@@ -54,7 +54,7 @@ export const PLAN_SUBMIT_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          kind: { type: "string", enum: ["release_followup", "unmonitored_chain", "missing_info", "failed_source", "discover_account", "verify_candidate"] },
+          kind: { type: "string", enum: ["release_followup", "unmonitored_chain", "missing_info", "failed_source", "discover_account", "verify_candidate", "chain_sibling"] },
           targetId: { type: "string" },
           url: { type: "string" },
           tool: { type: "string" },

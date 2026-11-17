@@ -2,6 +2,7 @@ import "server-only";
 import type { Db } from "@/lib/server/lottery-service";
 import type { InvestigationSignals, PlannerWorld } from "@/lib/agent/collection-planner/types";
 import { sameChainName } from "@/lib/chain-normalize";
+import { loadSiblingSignals } from "@/lib/server/agent/sweep-service";
 
 /**
  * 調査計画の「手がかり」を、データベースから読み取る（Stage 9C・読み取り専用）。書き込みは一切しない。
@@ -58,6 +59,8 @@ export async function loadPlannerSignals(db: Db, householdId: string, now: Date,
     failed,
     monitors: (sources.data ?? []).map((s) => ({ sourceId: s.id, name: s.name, kind: s.kind as "x" | "web", lastNewCount: s.last_new_count, lastSuccessAt: s.last_success_at, url: s.url ?? undefined })),
     previous,
+    // 9H-3N: 系列横断の調査候補（蓄積した履歴から発見した傾向にもとづく。失敗しても他の手がかりには影響させない）
+    siblings: await loadSiblingSignals(db, householdId, now).catch(() => []),
     discovery: { found7d: c7.length, registered7d: c7.filter((c) => c.status === "registered").length, held7d: c7.filter((c) => c.status === "pending").length },
   };
 }

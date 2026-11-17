@@ -92,10 +92,10 @@ describe("過剰適合・誤判定の確認（店舗選択が不要な案件を�
 
 describe("系列の実績だけの推定は、登録の形を変えない（9H-3M 未知案件の検証・過去評価の誤判定5件の型）", () => {
   const sel = (n: number) => chainFormTendency("フルコンプ", Array.from({ length: n }, (_, k) => rec("フルコンプ", "store_select", k + 1)), {});
-  it("告知自体に根拠が無く、店舗が不明＋系列の実績だけ → 推定は残すが apply にしない（確認候補）。確認すべきことを記録する", () => {
+  it("告知自体に根拠が無く、店舗が不明＋系列の実績だけ → 推定（従来どおり登録の形に反映）。ただし確認すべきことを記録して、調査・人間の確認へ渡す", () => {
     const r = run({ texts: ["30th カードセット 抽選受付のお知らせ。応募期間 11/10〜11/12。"], receive: "store", chain: "フルコンプ", tendency: sel(3) });
     expect(r.state).toBe("estimated");
-    expect(r.action).not.toBe("apply");
+    expect(r.action).toBe("apply");
     expect(r.verification.needed).toBe(true);
     expect(r.verification.noticeEvidence).toBe(false);
     expect(r.verification.suggested.length).toBeGreaterThan(0);

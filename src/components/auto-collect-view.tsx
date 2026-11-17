@@ -13,6 +13,7 @@ import type { LotteryDraft } from "@/lib/lottery-match";
 import { RunCounts, RunStateLabel } from "@/components/collection-result-notice";
 import type { PipelineMetrics } from "@/lib/collector/metrics";
 import type { CostReport } from "@/lib/collector/cost-report";
+import type { TeaserSummary } from "@/lib/collector/teaser-summary";
 import { runTitle, type RunSummary } from "@/lib/collector/run-summary";
 import { APPLY_CHANNELS, RECEIVE_KINDS } from "@/lib/collector/conditions";
 import { PREFECTURE_LIST } from "@/lib/geo";
@@ -256,6 +257,40 @@ function MetricsPanel({ m }: { m: PipelineMetrics }) {
   );
 }
 
+/** 抽選予告の内部管理（9H-3N）。予告は通常の抽選候補・件数・通知に含めない。ここで状況を確認できる（件数と、正式発表の確認待ちの内容） */
+function TeaserPanel({ t }: { t: TeaserSummary }) {
+  return (
+    <div className="space-y-1.5 rounded-md bg-muted/50 p-2 text-xs" data-testid="teaser-panel">
+      <p className="font-medium">抽選予告の内部管理（通常の候補には表示しません）</p>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
+        <Kv label="追跡中（非表示）" value={`${t.hidden}件`} />
+        <Kv label="開始が7日以内" value={`${t.soon}件`} />
+        <Kv label="正式発表へ昇格" value={`${t.promoted}件`} />
+        <Kv label="延期" value={`${t.postponed}件`} />
+        <Kv label="中止" value={`${t.cancelled}件`} />
+        <Kv label="未発表のまま終了" value={`${t.expired}件`} />
+      </dl>
+      {t.items.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-muted-foreground">確認待ちの予告（{t.items.length}件）</summary>
+          <ul className="mt-1 space-y-1" data-testid="teaser-items">
+            {t.items.map((i, k) => (
+              <li key={k} className="rounded border bg-background p-1.5">
+                <span className="font-medium">{i.chain}</span>・{i.product}
+                <span className="block text-muted-foreground">
+                  {i.outcome === "postponed" ? "延期・" : ""}初回 {i.since.slice(0, 10)}／最新 {i.lastNewsAt.slice(0, 10)}
+                  {i.startDate ? `／開始予定 ${i.startDate}` : ""}
+                </span>
+                {i.toVerify.length > 0 && <span className="block text-muted-foreground">未発表: {i.toVerify.join("・")}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** 段階別の件数と費用（9H-3L）。費用を下げる判断ではなく、実績の記録。不明な費用は0円にせず「不明」と表示する */
 function CostPanel({ c }: { c: CostReport }) {
   const yen = (v: number | null) => (v === null ? "不明" : `${v.toFixed(2)}円`);
@@ -360,9 +395,12 @@ export function AutoCollectView({
   usage,
   metrics,
   cost,
+  teasers,
   runSummaries,
 }: {
   settings: SettingsView;
+  /** 抽選予告の内部管理の状況（9H-3N） */
+  teasers?: TeaserSummary;
   /** 段階別の件数とAI・検索の費用（直近30日。9H-3L） */
   cost?: CostReport;
   /** 直近30日の品質指標（サーバーで集計） */
@@ -1011,6 +1049,7 @@ export function AutoCollectView({
           <summary className="min-h-8 cursor-pointer text-xs font-medium text-info">日別の統計（30日）</summary>
           <div className="mt-2 space-y-2">
             {cost && <CostPanel c={cost} />}
+            {teasers && teasers.hidden + teasers.promoted + teasers.cancelled + teasers.expired > 0 && <TeaserPanel t={teasers} />}
             <div className="flex h-16 items-end gap-px" role="img" aria-label="日別の新規発見・AI解析・登録の推移" data-testid="stats-chart">
               {[...stats].reverse().map((r) => {
                 const mx = Math.max(1, ...stats.map((x) => Math.max(x.discovered_new + x.discovered_initial, x.ai_calls, x.registered_new)));
