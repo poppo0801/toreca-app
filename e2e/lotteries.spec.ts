@@ -326,7 +326,7 @@ test("収支ページ: 当月表示・月移動・タブ切替・分析ページ
   await expect(page.getByTestId("annual-total")).toContainText("家族全体の合計");
   await expect(page.getByTestId("annual-seller")).toHaveCount(3);
   // メインナビには分析ページを常設しない
-  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(page.viewportSize()!.width >= 768 ? 5 : 5); // 隠れる機能が1つだけなら「その他」を出さず直接表示する（5枠）
+  await expect(page.getByRole("navigation", { name: "メイン" }).first().getByRole("link")).toHaveCount(4); // 既定は固定4項目＋メニュー（メニューはボタンなのでリンクは4つ）
 });
 
 test.describe("レイアウト（Safe Area・固定メニュー）", () => {
@@ -346,8 +346,8 @@ test.describe("レイアウト（Safe Area・固定メニュー）", () => {
       const pc = page.getByTestId("bottom-nav-pc");
       await expect(pc).toBeVisible();
       const links = pc.getByRole("link");
-      expect(await links.count()).toBeGreaterThanOrEqual(5);
-      expect(await links.count()).toBeLessThanOrEqual(8);
+      expect(await links.count()).toBe(4); // 固定4項目（右端は全機能を開く「メニュー」ボタン）
+      await expect(pc.getByTestId("nav-more-pc")).toBeVisible();
       for (const l of await links.all()) {
         await expect(l.locator("svg")).toHaveCount(1);
         expect(((await l.textContent()) ?? "").trim().length).toBeGreaterThan(0);
@@ -624,62 +624,87 @@ test.describe("設定とナビゲーション", () => {
     await ctx.close();
   });
 
-  test("下部メニュー: 項目の非表示・並び替え・「その他」。設定はユーザーごとで、ユーザーを切り替えると変わる", async ({ page, isMobile }) => {
+  test("下部メニュー（UI-1）: 構成A/B・固定項目の入れ替え・メニュー画面。設定はユーザーごとで、ユーザーを切り替えると変わる", async ({ page, isMobile }) => {
     await page.goto("/settings/display");
     const order = page.getByTestId("nav-order");
-    await expect(order.locator("li")).toHaveCount(5);
+    await expect(order.locator("li")).toHaveCount(4); // 既定: 固定4項目＋メニュー
     await order.getByRole("button", { name: "収支を上へ" }).click();
     await expect(order.locator("li").nth(1)).toContainText("収支");
-    // 2つ非表示にすると「その他」ができる（隠れた機能へ辿れる）
-    await order.getByRole("button", { name: "対戦記録を表示しない" }).click();
-    await order.getByRole("button", { name: "購入記録を表示しない" }).click();
-    await expect(page.getByTestId("nav-hidden")).toContainText("対戦記録");
-    if (isMobile) {
-      const nav = page.getByTestId("bottom-nav");
-      await expect(nav.getByRole("link")).toHaveCount(3);
-      await expect(nav.getByTestId("nav-more")).toBeVisible();
-      await nav.getByTestId("nav-more").click();
-      const more = page.getByTestId("more-sheet");
-      await expect(more.getByRole("link", { name: "対戦記録" })).toBeVisible();
-      await more.getByRole("link", { name: "対戦記録" }).click();
-      await expect(page).toHaveURL(/\/battles$/);
-    }
+    // 対戦記録の行を「コレクション」に入れ替える
+    await order.getByLabel("対戦記録を変更").selectOption("collection");
+    await expect(order.locator("li")).toHaveCount(4);
+    const nav = page.getByTestId(isMobile ? "bottom-nav" : "bottom-nav-pc");
+    await expect(nav.getByRole("link")).toHaveCount(4);
+    await expect(nav.getByRole("link", { name: "コレクション" })).toBeVisible();
+    // 「メニュー」の通常タップ／クリックで、全機能のグリッドが開く
+    await nav.getByTestId(isMobile ? "nav-more" : "nav-more-pc").click();
+    const more = page.getByTestId("more-sheet");
+    await expect(more.getByTestId("nav-grid")).toBeVisible();
+    await expect(more.getByRole("link", { name: "対戦記録" })).toBeVisible();
+    await more.getByRole("link", { name: "対戦記録" }).click();
+    await expect(page).toHaveURL(/\/battles$/);
     // 別のユーザーは影響を受けない
     await switchProfile(page, "B");
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
+    await expect(page.getByTestId("nav-order")).toContainText("対戦記録");
     await switchProfile(page, "A");
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(3);
-    // 表示していない機能を戻せる。初期の並びにも戻せる
-    await page.getByTestId("nav-hidden").getByRole("button", { name: "対戦記録を表示する" }).click();
+    await expect(page.getByTestId("nav-order")).toContainText("コレクション");
+    // 構成をA（固定5項目）に切り替えると、メニューボタンが無くなり5項目になる。「設定」の「すべての機能」から全機能へ辿れる
+    await page.getByTestId("nav-mode-five").click();
+    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
+    await expect(page.getByTestId(isMobile ? "bottom-nav" : "bottom-nav-pc").getByRole("link")).toHaveCount(5);
+    await expect(page.getByTestId("nav-more")).toHaveCount(0);
+    await expect(page.getByTestId("quick-order")).toHaveCount(0);
+    await page.goto("/settings");
+    await expect(page.getByTestId("all-features").getByTestId("nav-grid")).toBeVisible();
+    // 初期の構成に戻せる
+    await page.goto("/settings/display");
+    await page.getByTestId("nav-reset").click();
     await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(4);
-    await page.getByRole("button", { name: "初期の並びに戻す" }).click();
-    await expect(page.getByTestId("nav-order").locator("li").nth(1)).toContainText("購入記録");
+    await expect(page.getByTestId("nav-mode-four_menu")).toHaveAttribute("aria-checked", "true");
   });
 
-  test("コレクション: 初期は下部メニューに直接表示され（「その他」は出ない）、下部メニューに直接表示することもできる（メニューが壊れない）", async ({ page, isMobile }) => {
-    await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
-    await expect(page.getByTestId("nav-order")).toContainText("コレクション");
-    if (isMobile) {
-      // 隠れる機能がコレクションだけなら「その他」は出さず、直接表示する
-      await expect(page.getByTestId("nav-more")).toHaveCount(0);
-      await expect(page.getByTestId("bottom-nav").getByRole("link", { name: "コレクション" })).toBeVisible();
-    }
-    // 外すと、隠れた機能が1つだけなので「その他」は出ずに直接表示のまま。もう1つ外すと「その他」ができる
-    await page.getByTestId("nav-order").getByRole("button", { name: "コレクションを表示しない" }).click();
-    await page.getByTestId("nav-order").getByRole("button", { name: "対戦記録を表示しない" }).click();
-    await expect(page.getByTestId("nav-hidden")).toContainText("コレクション");
-    if (isMobile) await expect(page.getByTestId("nav-more")).toBeVisible();
-    await page.getByRole("button", { name: "初期の並びに戻す" }).click();
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
+  test("長押しクイックメニュー（UI-1）: 長押しで展開し、離すと移動、項目の外で離すとキャンセル。通常タップは全機能メニュー", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "タッチ操作（モバイル）の確認");
+    await page.goto("/lotteries");
+    const btn = page.getByTestId("nav-more");
+    const box = (await btn.boundingBox())!;
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    // 長押し → 上へドラッグ → 離す
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    const menu = page.getByTestId("quick-menu");
+    await expect(menu).toBeVisible();
+    const first = menu.locator("[data-quick]").first();
+    const fb = (await first.boundingBox())!;
+    await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2, { steps: 6 });
+    await expect(first).toHaveAttribute("data-hover", "true");
+    await page.mouse.up();
+    await expect(menu).toHaveCount(0);
+    await expect(page).not.toHaveURL(/\/lotteries$/);
+    // 項目の外で離す: キャンセル（移動しない）
+    await page.goto("/lotteries");
+    const b2 = (await page.getByTestId("nav-more").boundingBox())!;
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    await expect(page.getByTestId("quick-menu")).toBeVisible();
+    await page.mouse.move(20, 120, { steps: 6 });
+    await page.mouse.up();
+    await expect(page.getByTestId("quick-menu")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/lotteries$/);
+    // 通常のタップ: 全機能のメニュー
+    await page.getByTestId("nav-more").click();
+    await expect(page.getByTestId("more-sheet")).toBeVisible();
   });
 
   test("設定のコピー: 確認ダイアログのあと、選んだ項目だけがコピーされる（コピーしない項目の説明あり）", async ({ page, isMobile }) => {
     await page.goto("/settings/display");
-    await page.getByTestId("nav-order").getByRole("button", { name: "対戦記録を表示しない" }).click();
-    await page.getByTestId("nav-order").getByRole("button", { name: "購入記録を表示しない" }).click();
+    await page.getByTestId("nav-order").getByLabel("対戦記録を変更").selectOption("collection");
+    await page.getByTestId("nav-order").getByLabel("購入記録を変更").selectOption("settings");
     await page.getByRole("radio", { name: "シンプル", exact: true }).click();
     await page.goto("/settings/users");
     const copy = page.getByTestId("settings-copy");
@@ -687,29 +712,30 @@ test.describe("設定とナビゲーション", () => {
     await copy.getByLabel("コピー先のプロフィール").selectOption({ label: "B" });
     await copy.getByRole("radio", { name: "項目を選んでコピー" }).check();
     await expect(copy.getByTestId("copy-start")).toBeDisabled(); // 項目を選ぶまで押せない
-    await copy.getByRole("checkbox", { name: /下部メニュー/ }).check();
+    await copy.getByRole("checkbox", { name: /下部メニューの固定項目/ }).check();
     await copy.getByTestId("copy-start").click();
     const dlg = page.getByTestId("copy-confirm");
     await expect(dlg).toContainText("Bの現在の設定は上書きされます");
-    await expect(dlg).toContainText("下部メニューの表示項目・並び順");
+    await expect(dlg).toContainText("下部メニューの固定項目・並び順");
     await expect(dlg).not.toContainText("抽選カードのシンプル／詳細表示");
     await dlg.getByRole("button", { name: "キャンセル" }).click();
     // キャンセルでは何も変わらない
     await switchProfile(page, "B");
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(5);
+    await expect(page.getByTestId("nav-order")).toContainText("対戦記録");
     await switchProfile(page, "A");
     await page.goto("/settings/users");
     await copy.getByLabel("コピー先のプロフィール").selectOption({ label: "B" });
     await copy.getByRole("radio", { name: "項目を選んでコピー" }).check();
-    await copy.getByRole("checkbox", { name: /下部メニュー/ }).check();
+    await copy.getByRole("checkbox", { name: /下部メニューの固定項目/ }).check();
     await copy.getByTestId("copy-start").click();
     await page.getByTestId("copy-confirm-ok").click();
     await expect(page.getByTestId("copy-result")).toContainText("コピーしました");
     // B: メニューはコピーされ、カードの表示（選ばなかった項目）は変わらない
     await switchProfile(page, "B");
     await page.goto("/settings/display");
-    await expect(page.getByTestId("nav-order").locator("li")).toHaveCount(3);
+    await expect(page.getByTestId("nav-order")).toContainText("コレクション");
+    await expect(page.getByTestId("nav-order")).toContainText("設定");
     await expect(page.getByRole("radio", { name: "詳細", exact: true })).toHaveAttribute("aria-checked", "true");
     if (isMobile) await expect(page.getByTestId("nav-more")).toBeVisible();
   });

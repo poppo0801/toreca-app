@@ -9,7 +9,7 @@ import { isAnalysisNote, validateExtraction } from "@/lib/ai/validate";
 import { EMPTY_FLEX, lotteryInputSchema, type LotteryInput } from "@/lib/lottery-input";
 import { placeLabel } from "@/lib/lottery-labels";
 import { buildDraft } from "@/lib/lottery-match";
-import { COPY_ITEMS, DEFAULT_NAV, MAX_NAV_SLOTS, NAV_ITEMS, SETTING_KEYS, availableNav, isNavActive, normalizeProfileSettings, resolveNav } from "@/lib/profile-settings";
+import { COPY_ITEMS, SETTING_KEYS, normalizeProfileSettings } from "@/lib/profile-settings";
 
 const NOW = new Date("2026-10-28T03:00:00Z");
 const d = (m: number, day: number, hour: number | null = null, minute: number | null = null, year: number | null = null) => ({ year, month: m, day, hour, minute });
@@ -163,68 +163,4 @@ describe("プロフィール別の設定と下部メニュー", () => {
     expect(SETTING_KEYS).toEqual(COPY_ITEMS.map((c) => c.key));
   });
 
-  it("既定: 「その他」に入る機能が1つだけなら、その他を出さず直接表示する（5枠）。未実装の機能（available:false）は候補に出ない", () => {
-    const r = resolveNav(undefined);
-    expect(r.direct.map((n) => n.id)).toEqual([...DEFAULT_NAV, "collection"]);
-    expect(r.more).toEqual([]);
-    expect(availableNav().some((n) => n.id === "collection")).toBe(true);
-    expect(resolveNav(["collection", "lotteries"]).direct.map((n) => n.id)).toEqual(["collection", "lotteries"]); // コレクションも直接表示にできる
-    NAV_ITEMS.push({ id: "future", href: "/future", label: "未実装", available: false });
-    try {
-      expect(availableNav().some((n) => n.id === "future")).toBe(false);
-      expect(resolveNav(["future", "lotteries"]).direct.map((n) => n.id)).toEqual(["lotteries"]); // 未実装の項目は無視
-    } finally {
-      NAV_ITEMS.pop();
-    }
-  });
-
-  it("隠れた機能があれば「その他」が出る。重複・存在しないIDは除き、全部外しても最低1つは出る。設定への入口（歯車）とは独立", () => {
-    const r = resolveNav(["finance", "lotteries", "lotteries", "nope"]);
-    expect(r.direct.map((n) => n.id)).toEqual(["finance", "lotteries"]);
-    expect(r.more.map((n) => n.id).sort()).toEqual(["battles", "collection", "purchases"]);
-    expect(resolveNav([]).direct).toHaveLength(1);
-    expect(resolveNav(["nope"]).direct).toHaveLength(1);
-    // 枠の上限: 「その他」を含めて最大5枠
-    expect(resolveNav(DEFAULT_NAV).direct.length + (resolveNav(DEFAULT_NAV).more.length ? 1 : 0)).toBeLessThanOrEqual(MAX_NAV_SLOTS);
-  });
-
-  it("機能が増えても1行足すだけで対応できる（5枠を超える場合は直接表示4つ＋その他）", () => {
-    const extra = Array.from({ length: 3 }, (_, i) => ({ id: `x${i}`, href: `/x${i}`, label: `機能${i}`, available: true }));
-    NAV_ITEMS.push(...extra);
-    try {
-      const all = availableNav().map((n) => n.id);
-      const r = resolveNav(all);
-      expect(r.direct).toHaveLength(MAX_NAV_SLOTS - 1);
-      expect(r.more.length).toBeGreaterThan(0);
-      expect(r.direct.length + 1).toBe(MAX_NAV_SLOTS);
-    } finally {
-      NAV_ITEMS.splice(NAV_ITEMS.length - 3, 3);
-    }
-  });
-
-  it("現在地の判定: /records は抽選管理、/settings はどのメニュー項目でもない", () => {
-    const lot = NAV_ITEMS.find((n) => n.id === "lotteries")!;
-    expect(isNavActive(lot, "/records")).toBe(true);
-    expect(NAV_ITEMS.filter((n) => isNavActive(n, "/settings/display"))).toEqual([]);
-  });
-});
-
-describe("「その他」の自動整理（Stage 5H）", () => {
-  it("隠れる機能が1つだけなら直接表示。2つ以上なら「その他」。枠は最大5。並び順は選んだ順を保つ", () => {
-    const one = resolveNav(["finance", "lotteries", "purchases", "battles"]);
-    expect(one.direct.map((n) => n.id)).toEqual(["finance", "lotteries", "purchases", "battles", "collection"]);
-    expect(one.more).toEqual([]);
-    const two = resolveNav(["finance", "lotteries", "purchases"]);
-    expect(two.direct.map((n) => n.id)).toEqual(["finance", "lotteries", "purchases"]);
-    expect(two.more.map((n) => n.id).sort()).toEqual(["battles", "collection"]);
-    // 5つ選んでいて1つ隠れる場合は、「その他」の枠を確保して4つ＋その他（機能へ辿れなくならない）
-    NAV_ITEMS.push({ id: "extra", href: "/extra", label: "追加", available: true });
-    try {
-      const r = resolveNav(["lotteries", "finance", "purchases", "battles", "collection"]);
-      expect(r.direct).toHaveLength(4);
-      expect(r.more.map((n) => n.id)).toEqual(["collection", "extra"]);
-    } finally {
-      NAV_ITEMS.pop();
-    }
-  });
 });

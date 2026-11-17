@@ -296,6 +296,12 @@ export function LotteryCard({
         highlighted && "ring-2 ring-primary",
       )}
     >
+      {/* 未確認（NEW）の印: カード右上の角に少し重なる小さな●（大きなバッジは使わない）。詳細を閉じると消える。操作を受けない */}
+      {lottery.isNew && (
+        <span data-testid="new-dot" className="pointer-events-none absolute -right-1 -top-1 z-10 size-3 rounded-full border-2 border-card bg-info">
+          <span className="sr-only">NEW</span>
+        </span>
+      )}
       {!detailMode && (
         <div className="relative flex items-center gap-1.5 py-1.5 pl-1.5 pr-1.5" data-testid="card-simple">
           {/* ★ は詳細表示と同じカード左上端（画像の列を占有しない）。少し小さくして、店舗名の表示幅を広げる */}
@@ -448,9 +454,8 @@ export function LotteryCard({
                 </div>
                 </>
               )}
-              {(event === "postponed" || notice || lottery.isNew || skipSource || skipException) && (
+              {(event === "postponed" || notice || skipSource || skipException) && (
                 <span className="flex flex-wrap gap-1">
-                  {lottery.isNew && <Chip className="border-info text-info">NEW</Chip>}
                   {event === "postponed" && <Chip className="text-muted-foreground">{EVENT_LABEL[event]}</Chip>}
                   {notice === "unconfirmed" && !appliedTab && <Chip className="border-danger font-bold text-danger">結果未確認</Chip>}
                   {notice === "in_period" && !appliedTab && <Chip className="text-info">発表期間中</Chip>}

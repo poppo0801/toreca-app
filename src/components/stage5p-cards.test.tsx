@@ -134,7 +134,7 @@ describe("全情報・★管理対象の詳細カード（日付・距離・残�
 describe("シンプルカード", () => {
   it("未応募の操作ボタンは丸の中に「未」。★は左上の端、画像は★から少し右にずらす", () => {
     mount("L4", "managed", "simple");
-    expect(text('[data-testid="my-apply"]')).toBe("未");
+    expect(text('[data-testid="my-apply"]')).toBe("応募");
     expect(q('[data-testid="card-star"]')!.className).toContain("left-0");
     expect(q('[data-testid="card-image"]')!.className).toContain("ml-2");
   });

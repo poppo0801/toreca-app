@@ -146,7 +146,10 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         aria-pressed={applied}
         aria-label={applied ? `${profile.label}は応募済み${control.canUndo ? "（解除できます）" : ""}` : `${profile.label}を応募済みにする`}
         disabled={busy || (applied && !control.canUndo)}
-        onClick={() => {
+        onClick={(e) => {
+          // カード全体のタップ（詳細を開く）に伝えない。処理中は二重に実行しない（busy で無効化。ここでも防ぐ）
+          e.stopPropagation();
+          if (busy) return;
           if (applied) setConfirmUndo(true);
           else if (control.kind === "apply" && control.needsChoice) setChoosing(true);
           else if (control.kind === "apply" && control.needsItems) setPickingItems(true);
@@ -155,12 +158,13 @@ export function MyApplyButton({ lottery, compact = false, className }: { lottery
         }}
         className={cn(
           "inline-flex min-h-9 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full border text-xs font-bold disabled:opacity-80",
-          compact ? "size-10" : "px-2.5",
-          applied && compact ? "border-success/60 bg-success/10 text-success" : !applied && compact ? "border-muted-foreground/60 bg-card text-muted-foreground" : applied ? "border-success/60 bg-success/10 text-success" : "border-primary bg-primary text-primary-foreground",
+          // シンプル表示: 未応募は文字つきの「応募」ボタン（主要操作）、応募済みは従来の✓の丸
+          compact ? (applied ? "size-10" : "h-10 min-w-12 px-3") : "px-2.5",
+          applied && compact ? "border-success/60 bg-success/10 text-success" : !applied && compact ? "border-primary bg-primary text-primary-foreground" : applied ? "border-success/60 bg-success/10 text-success" : "border-primary bg-primary text-primary-foreground",
           className,
         )}
       >
-        {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" data-testid="my-apply-spinner" /> : applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <span aria-hidden="true" className="text-sm font-bold leading-none">未</span> : null}
+        {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" data-testid="my-apply-spinner" /> : applied ? <Check className="size-4" strokeWidth={2.6} aria-hidden="true" /> : compact ? <span aria-hidden="true" className="text-xs font-bold leading-none">応募</span> : null}
         {!compact && (applied ? "応募済み" : "応募済みにする")}
       </button>
       {error && (

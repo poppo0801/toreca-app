@@ -142,3 +142,94 @@ export function lotteryLabel(l: Lottery, data: Pick<AppData, "stores" | "product
   const d = l.applyDeadline.precision === "date_time" ? l.applyDeadline.at.slice(0, 10) : l.applyDeadline.precision === "date_only" ? l.applyDeadline.date : "";
   return [store, products, d ? `〜${d.slice(5).replace("-", "/")}` : ""].filter(Boolean).join(" ") || "（名称なし）";
 }
+
+// ---------------------------------------------------------------------------------------------
+// 親カード・子カードの表示用（Stage UI-1）。グループ化の判定ロジックは変えない（表示のための集計だけ）。
+//  - 親カードには、**グループ内で実際に共通している項目だけ**を出す。異なる項目を、特定の店舗の値で代表させない。
+//  - 子カードは、親と共通する項目（商品・日程・条件）を繰り返さず、**異なる項目だけ**を示す。
+// ---------------------------------------------------------------------------------------------
+
+export interface CommonFlex {
+  /** すべての抽選で同じ（不明も含めて同じ）か */
+  same: boolean;
+  /** same のときの共通の値（全部不明なら null） */
+  value: FlexibleDate | null;
+}
+
+export interface GroupDetail {
+  /** 商品の正式名称（略称を使わない）。重複を除く */
+  productNames: string[];
+  /** 全抽選で商品の組が同じ（親の商品として表示してよい） */
+  productsCommon: boolean;
+  /** 親に表示する商品（画像・名称）。共通のときだけ。共通でないときは null（特定の抽選の商品で代表させない） */
+  headProductId: string | null;
+  applyStart: CommonFlex;
+  applyDeadline: CommonFlex;
+  resultDate: CommonFlex;
+  /** 応募条件の本文がすべて同じ（または空）か */
+  conditionsCommon: boolean;
+  /** 応募済みの集計。分母の単位: 店舗（各抽選が別々の店舗）／件（店舗選択式・同じ店舗の抽選を含むなど、店舗数と一致しない） */
+  applied: number;
+  total: number;
+  unit: "店舗" | "件";
+}
+
+const commonFlex = (values: FlexibleDate[]): CommonFlex => {
+  const isos = values.map(flexIso);
+  const first = isos[0] ?? null;
+  const same = isos.every((x) => x === first);
+  return { same, value: same && first !== null ? values[0] : null };
+};
+const normText = (s: string) => s.normalize("NFKC").replace(/[\s　]+/g, "");
+
+export function summarizeGroupDetail(row: GroupRow, data: Pick<AppData, "products" | "applications" | "accounts">, profileId: string): GroupDetail {
+  const all = row.all.length > 0 ? row.all : row.members;
+  const nameOf = (id: string) => data.products.find((p) => p.id === id)?.officialName ?? "商品未登録";
+  const sets = all.map((l) => [...new Set(l.items.map((i) => i.productId))].sort().join(","));
+  const productsCommon = sets.every((s) => s === sets[0]);
+  const names: string[] = [];
+  for (const l of all) for (const it of l.items) if (!names.includes(nameOf(it.productId))) names.push(nameOf(it.productId));
+  const conds = all.map((l) => normText(l.conditionsText ?? ""));
+  const storeIds = all.map((l) => l.storeId).filter((x): x is string => !!x);
+  const everyOwnStore = all.every((l) => l.storeMode !== "select_on_apply" && !!l.storeId) && new Set(storeIds).size === all.length;
+  return {
+    productNames: names,
+    productsCommon,
+    headProductId: productsCommon ? (all[0]?.items[0]?.productId ?? null) : null,
+    applyStart: commonFlex(all.map((l) => l.applyStart)),
+    applyDeadline: commonFlex(all.map((l) => l.applyDeadline)),
+    resultDate: commonFlex(all.map((l) => l.resultDate)),
+    conditionsCommon: conds.every((c) => c === conds[0]),
+    applied: all.filter((l) => !!myApplication(data as AppData, l.id, profileId)).length,
+    total: all.length,
+    unit: everyOwnStore ? "店舗" : "件",
+  };
+}
+
+export interface ChildDiff {
+  start?: FlexibleDate;
+  deadline?: FlexibleDate;
+  result?: FlexibleDate;
+  /** 親と商品の組が異なるときの、この抽選の商品（正式名称） */
+  products?: string[];
+  conditions?: string;
+}
+
+/** 子の抽選で、親（グループ共通）と異なる項目だけを返す。共通の項目は返さない（子カードで繰り返さない） */
+export function childDiff(l: Lottery, d: GroupDetail, data: Pick<AppData, "products">): ChildDiff {
+  const out: ChildDiff = {};
+  if (!d.applyStart.same) out.start = l.applyStart;
+  if (!d.applyDeadline.same) out.deadline = l.applyDeadline;
+  if (!d.resultDate.same) out.result = l.resultDate;
+  if (!d.productsCommon) out.products = [...new Set(l.items.map((i) => data.products.find((p) => p.id === i.productId)?.officialName ?? "商品未登録"))];
+  if (!d.conditionsCommon && (l.conditionsText ?? "").trim()) out.conditions = l.conditionsText.trim();
+  return out;
+}
+
+/** 店舗の住所から「市区町村」だけを取り出す（都道府県のあとの最初の「…市／区／町／村／郡」）。住所が無い・読み取れないときは空 */
+export function cityOfAddress(address: string | null | undefined, prefecture: string): string {
+  const a = (address ?? "").normalize("NFKC").replace(/^〒?\s*\d{3}-?\d{4}\s*/, "").trim();
+  const rest = prefecture && a.startsWith(prefecture) ? a.slice(prefecture.length) : a.replace(/^.+?[都道府県]/, "");
+  const m = /^(.+?[市区町村郡])/.exec(rest.trim());
+  return m ? m[1] : "";
+}
