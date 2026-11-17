@@ -47,7 +47,10 @@ describe.skipIf(!ON || !dbTestsEnabled)("Stage 9H-3I 新規案件での3方式�
       const pool = JSON.parse(readFileSync(planFile.poolFile, "utf8")) as PoolForRegion;
       const resolved = resolveRegionConditions(pool);
       const contradictions = regionContradictions(resolved.conditions.prefectures, regionEvidence(pool));
-      if (contradictions.length) throw new Error(`評価の地域条件が本番の記録と矛盾します。評価を開始しません: ${contradictions.join(" / ")}`);
+      // 9H-3M: 本番の収集設定が確定している（書き出しにある）ときは、記録との矛盾は評価を止めず、証拠として記録して報告する
+      //   （矛盾は、本番の地域除外の判定の誤り・古い記録の可能性を示す。推定した条件のときだけ、条件の誤りとして停止する）
+      if (contradictions.length && resolved.source === "production_settings") console.warn(`地域条件と本番の記録の矛盾（本番の設定は確定済みのため停止しない・記録のみ）: ${contradictions.join(" / ")}`);
+      else if (contradictions.length) throw new Error(`評価の地域条件が本番の記録と矛盾します。評価を開始しません: ${contradictions.join(" / ")}`);
       const mismatch = checkRegionConditions(resolved.conditions, resolved.conditions);
       if (mismatch) throw new Error(mismatch);
       writeFileSync(`${OUT}/region-conditions.json`, JSON.stringify({ at: new Date().toISOString(), source: resolved.source, note: resolved.note, prefectures: resolved.conditions.prefectures, includeOnline: resolved.conditions.includeOnline, statusMode: resolved.conditions.statusMode, evidence: regionEvidence(pool) }, null, 1));

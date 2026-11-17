@@ -54,6 +54,12 @@ describe.skipIf(!RUN)("過去の人間評価での店舗選択式の判定漏れ
           if (beforeSelect) s.beforeFalsePositive++;
         }
         if (predictedSelect && after.priorUsed === false) s.structureOnlyEstimated++;
+        // 登録の形に反映される（action=apply）判断だけの正誤。誤って反映すると、店舗別の抽選が1件の店舗選択式になる
+        if (predictedSelect && after.action === "apply") {
+          if (humanSelect) s.applyTrue = (s.applyTrue ?? 0) + 1;
+          else s.applyFalse = (s.applyFalse ?? 0) + 1;
+        }
+        if (predictedSelect && !after.verification.noticeEvidence && !humanSelect) s.priorOnlyFalse = (s.priorOnlyFalse ?? 0) + 1;
       });
     }
     mkdirSync("backups/review-ledger", { recursive: true });

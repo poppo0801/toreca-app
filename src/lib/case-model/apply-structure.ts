@@ -121,9 +121,35 @@ export interface LayeredInput extends InferInput {
   chainKnown: boolean;
   perStorePages?: boolean;
 }
+/** 追加で確認すれば確定できること（推定のとき。調査・人間の確認に渡す。確認できるまで確定しない） */
+export interface Verification {
+  needed: boolean;
+  /** この告知自体の記載（根拠）があるか。無いとき、系列の実績だけの推定になる */
+  noticeEvidence: boolean;
+  suggested: string[];
+}
+
 export interface LayeredInference extends FormInference {
   /** 実際の応募構造（内部情報）と、店舗選択の要否（別の判断） */
   structure: StructureJudgement;
+  verification: Verification;
+}
+
+/** その告知自体の記載から得た材料（系列の実績・店舗不明だけではない）。これが無い推定は、登録の形を変えない */
+const NOTICE_SIGNALS = new Set<StructureSignal["code"]>(["select_field", "cross_store_limit", "multi_store_scope", "buy_at_applied_store", "pickup_choice"]);
+
+function verificationFor(f: FormInference, st: StructureJudgement): Verification {
+  if (f.state !== "estimated") return { needed: false, noticeEvidence: true, suggested: [] };
+  const noticeEvidence = st.signals.some((s) => s.weight > 0 && NOTICE_SIGNALS.has(s.code));
+  return {
+    needed: true,
+    noticeEvidence,
+    suggested: [
+      "応募ページ（LivePocket・公式の抽選ページ）に、店舗の選択欄・対象店舗の一覧があるか",
+      "同じ告知に「複数の対象店舗」「応募店舗で購入」の記載があるか",
+      ...(noticeEvidence ? [] : ["この推定は系列の過去の実績だけに基づく（告知自体に根拠が無い）。同じ系列でも店舗別に抽選する場合がある"]),
+    ],
+  };
 }
 
 /**
@@ -135,12 +161,17 @@ export interface LayeredInference extends FormInference {
 export function inferWithStructure(i: LayeredInput): LayeredInference {
   const base = inferStoreForm(i);
   const st = judgeApplyStructure({ texts: i.texts, receiveMethod: i.receiveMethod, chainKnown: i.chainKnown, storeKnown: i.storeKnown, perStorePages: i.perStorePages, base });
-  if (base.state !== "unknown" || st.storeSelectNeed !== "required" || st.state !== "estimated") return { ...base, structure: st };
+  if (base.state !== "unknown" || st.storeSelectNeed !== "required" || st.state !== "estimated") {
+    // 系列の過去の実績だけの推定（この告知自体に根拠が無い）は、登録の形を変えず確認候補にとどめる（9H-3M: 過去評価の誤判定5件はすべてこの型）
+    const v = verificationFor(base, st);
+    const demote = base.state === "estimated" && base.action === "apply" && !v.noticeEvidence;
+    return { ...base, ...(demote ? { action: "propose" as const, basis: [...base.basis, "告知自体に根拠が無く、系列の実績だけの推定のため、登録の形は変えず確認候補にとどめる"] } : {}), structure: st, verification: v };
+  }
   // 実績が「店舗別独立」「通販のみ」などへ傾く系列は、構造の材料だけでは店舗選択式と推定しない（実績が割れているときも同様）
-  if (base.priorUsed) return { ...base, structure: st };
+  if (base.priorUsed) return { ...base, structure: st, verification: verificationFor(base, st) };
   const kinds = new Set(st.signals.filter((s) => s.weight > 0).map((s) => s.code)).size;
   const conf: "medium" | "low" = kinds >= 3 ? "medium" : "low";
-  return {
+  const est: FormInference = {
     state: "estimated",
     form: "store_select",
     rank: 4,
@@ -149,8 +180,8 @@ export function inferWithStructure(i: LayeredInput): LayeredInference {
     priorUsed: false,
     priorOverridden: false,
     action: !i.storeKnown && kinds >= 3 ? "apply" : "propose",
-    structure: st,
   };
+  return { ...est, structure: st, verification: verificationFor(est, st) };
 }
 
 /**

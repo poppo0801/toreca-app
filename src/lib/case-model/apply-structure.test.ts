@@ -90,6 +90,28 @@ describe("過剰適合・誤判定の確認（店舗選択が不要な案件を�
   });
 });
 
+describe("系列の実績だけの推定は、登録の形を変えない（9H-3M 未知案件の検証・過去評価の誤判定5件の型）", () => {
+  const sel = (n: number) => chainFormTendency("フルコンプ", Array.from({ length: n }, (_, k) => rec("フルコンプ", "store_select", k + 1)), {});
+  it("告知自体に根拠が無く、店舗が不明＋系列の実績だけ → 推定は残すが apply にしない（確認候補）。確認すべきことを記録する", () => {
+    const r = run({ texts: ["30th カードセット 抽選受付のお知らせ。応募期間 11/10〜11/12。"], receive: "store", chain: "フルコンプ", tendency: sel(3) });
+    expect(r.state).toBe("estimated");
+    expect(r.action).not.toBe("apply");
+    expect(r.verification.needed).toBe(true);
+    expect(r.verification.noticeEvidence).toBe(false);
+    expect(r.verification.suggested.length).toBeGreaterThan(0);
+  });
+  it("告知自体に根拠（全店で1店舗まで・応募店舗で購入）があれば、登録の形に反映してよい（キントレ・トレカ丸）", () => {
+    const r = run({ texts: ["トレカ丸・キントレ・文真堂書店全店で１グループ様1店舗まで応募可能です。応募店舗以外での受け取りはできません。"], receive: "store", chain: "キントレ・トレカ丸", tendency: chainFormTendency("キントレ・トレカ丸", [rec("キントレ・トレカ丸", "store_select", 1)], {}) });
+    expect(r.state).toBe("estimated");
+    expect(r.verification.noticeEvidence).toBe(true);
+  });
+  it("確認済み・不明のときは確認の要求を出さない", () => {
+    const r = run({ texts: ["応募フォームで受取店舗を選択してください。"], receive: "store", chain: "A" });
+    expect(r.state).toBe("confirmed");
+    expect(r.verification.needed).toBe(false);
+  });
+});
+
 describe("応募構造と店舗選択要否の分離", () => {
   it("応募フォームの店舗選択欄がある → select_in_form・必要・確認済み相当の材料", () => {
     const texts = ["応募フォームで受取店舗を選択してください。"];
