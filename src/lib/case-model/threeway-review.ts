@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { splitList } from "./types";
 import type { IntegrationSummary } from "./integrate";
 import { interpretCorrection } from "./form-learning";
+import { pickStrongestForm } from "./apply-structure";
 
 export type Arm = "A" | "B" | "C";
 export interface View {
@@ -139,7 +140,8 @@ export function buildThreewaySet(cases: ThreewayCase[], opts: { setId: string; a
         reasons: [`この抽選の3つの最終候補（候補1〜3）を「統合の根拠」欄に並べています。表示している最終候補の各項目について、正しければ「正しい」、誤りなら正しい値を入力してください。3つに共通して間違っている項目や、どの候補にもない正しい値も入力できます。`],
         extracted: v ? { ...v, lotteryForm: v.lotteryForm ?? (c.forms?.[base]?.state === "confirmed" && c.forms?.[base]?.form === "store_independent" ? "store_independent" : null) } : null,
         evidence: [],
-        formJudgment: forDisplay(c.forms?.[base]),
+        // 9H-3M: 表示する候補にだけ「記録なし」が出て、別の候補の確認済み・推定が失われないよう、同じ抽選の候補の中で最も強い判断を示す（食い違う確認済みは選ばない）
+        formJudgment: forDisplay((c.forms ? pickStrongestForm(Object.values(c.forms)) : null) ?? c.forms?.[base]),
         notices: [...(c.prov ? (["A", "B", "C"] as Arm[]).map((a) => provLine(labelOf(a), c.prov?.[a])).filter((x): x is string => !!x) : []), ...(opts.note ? [opts.note] : []), ...(c.quarantine ? [`【隔離案件・未確定・要確認】安全条件により、この抽選だけを隔離しました（他の抽選は継続）。理由: ${c.quarantine.reasons.join(' / ').slice(0, 400)}。結果は保存してあります。商品構成と抽選単位（同じ抽選か、別々の抽選か）が正しいかを、人間が確認してください（正解を決めつけていません）`] : []), ...(missingArms.length ? [`欠測（結果が存在しない方式）: ${missingArms.map((a) => labelOf(a)).join('・')}`] : []), ...(c.forms ? (["A", "B", "C"] as Arm[]).map((a) => formLine(labelOf(a), c.forms?.[a])) : []), `候補の間で値が違う項目: ${diffs.length ? diffs.join("・") : "なし"}`, `確認待ちのカード数（同じ抽選が何枚に分かれたか）: ${(["A", "B", "C"] as Arm[]).map((a) => `${labelOf(a)}=${c.cards[a]}枚`).join(" / ")}`],
         warnings: [...(c.quarantine ? c.quarantine.reasons.map((r) => `隔離: ${r}`.slice(0, 300)) : []), ...(c.integration?.unresolved ?? []).map((u) => u.detail)],
       },

@@ -63,7 +63,8 @@ import { addTrace, buildUnderstanding, decideApplyUnit, hasSiblingStorePages, ty
 import { knowledgeFor } from "@/lib/collector/knowledge/chain-knowledge";
 import { buildReferencePacket } from "@/lib/case-model/reference";
 import { resolveChainName } from "@/lib/case-model/chain-resolve";
-import { inferenceLabel, inferStoreForm, platformOf, tendencyFor, type FormInference } from "@/lib/case-model/form-inference";
+import { inferenceLabel, platformOf, tendencyFor, type FormInference } from "@/lib/case-model/form-inference";
+import { inferWithStructure } from "@/lib/case-model/apply-structure";
 import { analyzeLivePocket } from "@/lib/collector/livepocket-structure";
 import { assessItemProvenance, type ProvenanceAssessment } from "@/lib/collector/source-provenance";
 import { spotCheckEligible, spotCheckRate } from "@/lib/case-model/spot-check";
@@ -857,8 +858,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
     const jd = judgeForm({ storeMode: input.storeMode ?? "fixed", requirementTags: input.requirementTags, texts: formTexts, sourceUrls: input.sourceUrls, knowledge: chainKnow, perStorePages: hasSiblingStorePages(input, data.lotteries), selectableStoreCount: result.extraction.selectableStoreNames?.length ?? 0 });
     const tendency = tendencyFor({ human: deps.humanKnowledge, chain: input.chain.name, knowledge: chainKnow, platform: platformOf(q.url) });
     const storeKnown = !!input.store.name.trim() && input.store.name !== SELECT_STORE_PLACEHOLDER;
-    const inf = inferStoreForm({ judgement: jd, aiUnit: result.extraction.applyUnit, livepocket: lp, storeKnown, platform: platformOf(q.url), tendency });
-    formJudgment = { state: inf.state, form: inf.form, rank: inf.rank, confidence: inf.confidence, action: inf.action, priorUsed: inf.priorUsed, priorOverridden: inf.priorOverridden, refs: inf.refs ?? [], basis: inf.basis.slice(0, 3), ...(lp ? { livepocket: { klass: lp.klass, confidence: lp.confidence, missing: lp.missing.slice(0, 4) } } : {}) };
+    // 9H-3M: 応募構造（内部情報）と、トレマネで店舗選択が必要か（別の判断）を重ねる。確認済みの判断は変えない
+    const inf = inferWithStructure({ judgement: jd, aiUnit: result.extraction.applyUnit, livepocket: lp, storeKnown, platform: platformOf(q.url), tendency, texts: formTexts, receiveMethod: input.receiveMethod, chainKnown: !!input.chain.name.trim(), perStorePages: hasSiblingStorePages(input, data.lotteries) });
+    formJudgment = { structure: inf.structure.structure, storeSelectNeed: inf.structure.storeSelectNeed, structureSignals: inf.structure.signals.filter((s) => s.weight > 0).map((s) => s.code).slice(0, 6), state: inf.state, form: inf.form, rank: inf.rank, confidence: inf.confidence, action: inf.action, priorUsed: inf.priorUsed, priorOverridden: inf.priorOverridden, refs: inf.refs ?? [], basis: inf.basis.slice(0, 3), ...(lp ? { livepocket: { klass: lp.klass, confidence: lp.confidence, missing: lp.missing.slice(0, 4) } } : {}) };
     if (inf.state !== "unknown" || inf.priorOverridden) pushTrace({ stage: "form", field: "form", value: `${inf.form}:${inf.state}`, by: "fixed", note: [inferenceLabel(inf), ...inf.basis, ...(inf.refs?.length ? [`参照した実績: ${inf.refs.join(", ")}`] : [])].join(" / ").slice(0, 500) });
     if (lp && lp.klass !== "C") pushTrace({ stage: "form", field: "form", value: `livepocket:${lp.klass}`, by: "fixed", note: lp.reasons.join(" / ").slice(0, 300) });
     if (inf.state === "estimated") {

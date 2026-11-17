@@ -1,5 +1,6 @@
 import type { ExtractedFlex, ExtractedLottery, FieldKey } from "@/lib/ai/extraction";
 import { isOnlineStoreName } from "@/lib/store-online";
+import { isSoleShopName } from "@/lib/sole-store";
 import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { normName } from "@/lib/norm";
 import { chainCanonicalKey, independentChainKey } from "@/lib/chain-normalize";
@@ -334,6 +335,7 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
   let chainName = ex.chainName;
   let storeName = ex.storeName;
   let derivedChain: string | null = null;
+  let soleShop = false;
   if (!chainName && storeName) {
     const sn = cleanName(storeName);
     const hit = data.chains
@@ -345,11 +347,17 @@ export function buildDraft(ex: ExtractedLottery, data: AppData, opts: { sourceUr
       chainName = hit.c.name;
       derivedChain = hit.c.name;
       storeName = storeName.trim().startsWith(hit.nm) ? storeName.trim().slice(hit.nm.length).trim() : sn.slice(hit.n.length);
+    } else if (!data.stores.some((s) => cleanName(s.name) === sn) && isSoleShopName(storeName, ex.receiveMethod)) {
+      // 9H-3M: 系列を持たない単独の通販ショップは、店舗名ではなく系列名として扱う（要確認）
+      chainName = storeName.trim();
+      storeName = "";
+      soleShop = true;
     }
   }
   const chainM = matchChain(chainName, data.chains, { stores: data.stores, storeName });
   const chainRef = chainM.item ? { id: chainM.item.id, name: chainM.item.name } : { id: null, name: chainName };
-  if (derivedChain) flags.chain = `店舗名の先頭から系列「${derivedChain}」と推定しました。違う場合は修正してください`;
+  if (soleShop) flags.chain = `通販のみの単独ショップ「${chainName}」を系列名として扱い、店舗名は空にしました。違う場合は修正してください`;
+  else if (derivedChain) flags.chain = `店舗名の先頭から系列「${derivedChain}」と推定しました。違う場合は修正してください`;
   else if (!chainName) flags.chain = "系列名が読み取れませんでした";
   else if (chainM.item?.operationKind === "unconfirmed" && chainM.kind === "partial") flags.chain = `「${chainM.item.brandGroup ?? chainM.item.name}」の所属（直営／その他）を店舗名から判定できません。店舗を確認して系列を選んでください`;
   else if (chainM.item && chainM.kind === "partial") flags.chain = `既存の系列「${chainM.item.name}」を候補にしました（${MATCH_LABEL[chainM.kind]}）`;

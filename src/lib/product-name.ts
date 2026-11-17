@@ -15,7 +15,14 @@ const MARKER_RE = new RegExp(`[【\\[［]\\s*(?:${MARKER_WORDS.join("|")})(?:\\s
 /** 発売日表記（「11/13発売」「11月13日発売」「発売日11/13」） */
 const RELEASE_RE = /(?:\d{1,2}\s*[/月]\s*\d{1,2}\s*日?\s*(?:\(.\))?\s*発売(?:予定)?|発売日\s*[:：]?\s*\d{1,2}\s*[/月]\s*\d{1,2}\s*日?)/g;
 /** ブランド名の接頭辞 */
-const BRAND_RE = /^(?:ポケモンカードゲーム|ポケモンカード|ポケカ|pokemoncardgame)\s*/i;
+const BRAND_WORD = "(?:ポケモンカードゲーム|ポケモンカード|ポケカ|pok[eé]mon\\s*card\\s*game|pok[eé]mon(?=\\s|$)|ポケモン(?=\\s))";
+const BRAND_RE = new RegExp(`^(?:${BRAND_WORD}\\s*)+`, "i");
+/** ブランド名だけの語（名称の途中・末尾に混ざったもの） */
+const BRAND_ONLY = /^(?:ポケモンカードゲーム|ポケモンカード|ポケカ|ポケモン|pok[eé]mon|pok[eé]moncardgame)$/i;
+/** 販売サイトの表記（商品名ではない）。先頭の【サイト名】と、末尾の「｜サイト名」「｜○○.com」 */
+const SITE_WORDS = "(?:yahoo!?ショッピング|ヤフーショッピング|楽天市場|楽天ブックス|amazon(?:\\.co\\.jp|\\.com)?|ヨドバシ(?:[.．]?com|カメラ|ドットコム)?|ビックカメラ(?:[.．]?com)?|ゲオ(?:オンライン)?|公式(?:通販|ストア|オンライン(?:ストア|ショップ)?)|通販サイト?)";
+const SITE_PREFIX_RE = new RegExp(`^[【\\[［]\\s*${SITE_WORDS}\\s*[】\\]］]`, "i");
+const SITE_SEGMENT_RE = new RegExp(`^(?:${SITE_WORDS}|[\\w-]+\\.(?:com|jp|co\\.jp|net)|.{0,12}(?:ショッピング|通販|オンラインストア|ネットショップ))$`, "i");
 
 /**
  * 販売条件・数量の語（Stage 9C）。商品そのものではない付帯情報（「シュリンクなし」「1人2個まで」「特典付き」など）。
@@ -56,6 +63,15 @@ export function splitProductName(raw: string): ProductNameParts {
   s = s.replace(MARKER_RE, (m) => (removed.push(m), " "));
   s = s.replace(RELEASE_RE, (m) => (removed.push(m), " "));
   s = s.replace(/\s+/g, " ").trim();
+  // 9H-3M: 販売サイトの表記（先頭の【Yahoo!ショッピング】・末尾の「｜ヨドバシ.com」）は商品名ではない
+  s = s.replace(SITE_PREFIX_RE, (m) => (removed.push(m), " ")).trim();
+  const segs = s.split(/\s*[|｜]\s*/);
+  if (segs.length >= 2) {
+    const keep = [segs[0], ...segs.slice(1).filter((x) => !SITE_SEGMENT_RE.test(x))];
+    if (keep.length < segs.length) removed.push(...segs.slice(1).filter((x) => SITE_SEGMENT_RE.test(x)));
+    s = keep.join(" ").trim();
+  }
+  // ブランド名の接頭辞（「ポケモン Pokemon ポケモンカードゲーム …」のように重なるものも、まとめて除く）
   const brand = s.match(BRAND_RE);
   if (brand) {
     removed.push(brand[0].trim());
@@ -74,6 +90,24 @@ export function splitProductName(raw: string): ProductNameParts {
     removed.push(m);
     return " ";
   });
+  s = s.replace(/\s+/g, " ").trim();
+  // 重複した語（「… ポケカ スペシャルデッキセットMEGA」のように、同じ名称が繰り返される・名称の途中にブランド名だけの語が混ざる）を除く
+  {
+    const toks = s.split(" ");
+    const out: string[] = [];
+    for (const t of toks) {
+      if (out.length > 0 && BRAND_ONLY.test(t)) {
+        removed.push(t);
+        continue;
+      }
+      if (t.length >= 3 && out.some((o) => normName(o) === normName(t))) {
+        removed.push(t);
+        continue;
+      }
+      out.push(t);
+    }
+    s = out.join(" ");
+  }
   // 括弧のない末尾の販売条件（「ハドウシーカー シュリンクなし」）
   for (;;) {
     const t = s.match(/\s+(\S{2,16})$/);
