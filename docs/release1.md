@@ -52,3 +52,11 @@ Claude Code は `db push`・`main` への push を行わない（権限と方針
 
 ## 7. 本番での確認（読み取り中心）
 既存の抽選一覧・詳細・応募操作／NEWの既読（詳細を閉じたとき）／グループカード／下部ナビ（メニュー・長押し）／151図鑑・価格調査・相場調査メモの表示／既存の購入履歴・コレクション・応募の件数が前後で同じ／情報収集の既存機能。書き込みを伴う確認は、既存データを変えない範囲（利用者が自分のプロフィールで試す。後で削除可能）。
+
+## 8. マイグレーション履歴の整合性調査（読み取り専用・本番に接続せず実施）
+方法: 本番の完全バックアップ（03:36 UTC）を使い捨てDockerへ復元し、`scripts/inspect-schema-inventory.mjs`（テーブル・列・関数・トリガー・RLS・ポリシー・制約・インデックス・ビューの棚卸し。定義はmd5、改行コードは正規化）で開発DB（dev=099〜103適用）・release-1（098＋104）と比較（`scripts/compare-schema-inventory.mjs`）。
+- **本番の実体**: 098までの構造と完全に一致。099〜103（`lottery_group_proposals`・`lottery_source_snapshots`・`agent_*` 3表、関数のオーバーロード変更など）の実体は**本番に無い**。105〜108 に当たるものも**無い**（本番のスキーマはバックアップ2回〔02:58／03:36〕で差分ゼロ）。
+- 本番との差は、`rls_auto_enable()`（Supabaseのプラットフォーム提供のイベントトリガー関数。ローカルに無いだけ）と `member_numbers_member_no_check` の括弧の表記（PostgreSQLの版の違い。意味は同じ）のみ。
+- **本番コピー＋104**: 本番バックアップの復元DBへ104を単独（トランザクション）で適用 → 棚卸しは release-1 と一致（上記2点のみ差）。既存の件数（抽選215・応募102・購入11・コレクション29）は不変。
+- **099〜103の元ファイル**: git の `dev`・`origin/dev`・`ui-1`・`collection-1` で同一内容（blob 同一）。完全バックアップ内の `repo.bundle` にも同じ blob がある（完全復元可能）。104 は `collection-1`・`release-1` で同一。
+- 本番の適用履歴（`supabase_migrations.schema_migrations`）は、バックアップ（publicスキーマのみ）には含まれず、Claude Code には読めない（`--linked` は不可）。**利用者の `npx supabase migration list --linked` が必要**。
