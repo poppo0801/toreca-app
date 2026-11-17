@@ -8,6 +8,8 @@ import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 import { AiQualitySection, AiUsageSection, CardDisplaySection, HomeLocationSection } from "@/components/household-settings";
 import { Accordion, MenuGroup, MenuLink } from "@/components/settings-parts";
+import { NavMenuGrid } from "@/components/nav-menu";
+import { resolveNavConfig } from "@/lib/profile-settings";
 import { FuelSettingsSection } from "@/components/fuel-settings";
 import { ShareSetupSection } from "@/components/share-setup";
 
@@ -18,9 +20,17 @@ const SUPABASE = IS_SUPABASE_MODE;
  * 以前の設定画面にあった項目はすべて、ここから辿れる。
  */
 export function SettingsView() {
-  const { data, profile } = useApp();
+  const { data, profile, settings } = useApp();
+  // 全機能の一覧（下部メニューが「固定5項目」のときは「メニュー」が無いので、ここから全機能に辿れる。「固定4項目＋メニュー」のときは折りたたみ）
+  const cfg = resolveNavConfig(settings, { isAdmin: profile.isAdmin === true, supabase: SUPABASE });
   return (
     <div className="space-y-4" data-testid="settings-menu">
+      <details open={cfg.mode === "five"} className="rounded-lg border bg-card px-3" data-testid="all-features">
+        <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium">すべての機能</summary>
+        <div className="pb-3">
+          <NavMenuGrid items={cfg.menu} activeId={null} />
+        </div>
+      </details>
       <MenuGroup>
         <MenuLink href="/settings/users" title="ユーザー管理" testId="menu-users" />
         {SUPABASE && <MenuLink href="/settings/member-numbers" title="会員番号" testId="menu-member-numbers" />}

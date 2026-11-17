@@ -1,4 +1,4 @@
-import { Banknote, Layers, ReceiptText, Settings, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
+import { Banknote, Bell, Bot, Database, FileSpreadsheet, IdCard, Layers, ListChecks, Palette, ReceiptText, Settings, SlidersHorizontal, Swords, Ticket, Wallet, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** メニュー項目のアイコン（下部メニュー・PCの左ナビ・ページ見出しで共通）。機能を足すときは NAV_ITEMS（profile-settings.ts）と、ここに1行ずつ足す */
@@ -9,6 +9,14 @@ export const NAV_ICON: Record<string, LucideIcon> = {
   battles: Swords,
   collection: Layers,
   settings: Settings,
+  candidates: ListChecks,
+  "member-numbers": IdCard,
+  conditions: SlidersHorizontal,
+  masters: Database,
+  "lottery-data": FileSpreadsheet,
+  collect: Bot,
+  notifications: Bell,
+  display: Palette,
 };
 export const iconOf = (id: string): LucideIcon => NAV_ICON[id] ?? Banknote;
 

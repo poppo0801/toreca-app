@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
-import { Ellipsis, Settings } from "lucide-react";
+import { Settings } from "lucide-react";
 import { AiJobsProvider } from "@/components/ai-jobs-provider";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { ResilienceWatcher } from "@/components/resilience-watcher";
@@ -13,9 +13,10 @@ import { BrandLogo } from "@/components/brand-logo";
 import { NotificationBell } from "@/components/notification-bell";
 import { iconOf } from "@/components/page-heading";
 import { ProfileChip } from "@/components/profile-switcher";
-import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { MenuButton, NavMenuSheet } from "@/components/nav-menu";
+import { IS_SUPABASE_MODE } from "@/lib/data-source";
 import { useKeyboardInset } from "@/lib/use-keyboard-inset";
-import { availableNav, isNavActive, resolveNav, type NavItem } from "@/lib/profile-settings";
+import { activeNavId, resolveNavConfig, type NavItem } from "@/lib/profile-settings";
 import { cn } from "@/lib/utils";
 
 /** プロフィールに保存されたテーマを、そのプロフィールに切り替えたときに適用する */
@@ -36,18 +37,20 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [more, setMore] = useState(false);
   useKeyboardInset();
   useProfileTheme();
-  const nav = resolveNav(settings.nav);
-  const all = availableNav();
+  // 下部メニューの構成（プロフィール別の保存値を、使える機能・権限で補正して使う。管理者専用の機能は管理者だけ）
+  const nav = resolveNavConfig(settings, { isAdmin: profile.isAdmin === true, supabase: IS_SUPABASE_MODE });
+  const activeId = activeNavId(pathname);
   const settingsActive = pathname.startsWith("/settings");
   // ページを移ったら、スクロール領域を先頭へ戻す（ページ全体のスクロールではないため、自動では戻らない）
   useEffect(() => {
     document.getElementById("app-scroll")?.scrollTo({ top: 0 });
   }, [pathname]);
-  const slots = nav.direct.length + (nav.more.length > 0 ? 1 : 0);
+  const menuMode = nav.mode === "four_menu";
+  const slots = nav.direct.length + (menuMode ? 1 : 0);
 
   const link = (n: NavItem, cls: string, activeCls: string, idleCls: string, icon: string) => {
     const Icon = iconOf(n.id);
-    const active = isNavActive(n, pathname);
+    const active = activeId === n.id;
     return (
       <Link key={n.id} href={n.href} aria-current={active ? "page" : undefined} data-nav={n.id} className={cn(cls, active ? activeCls : idleCls)} onClick={() => setMore(false)}>
         <Icon className={icon} aria-hidden="true" />
@@ -101,49 +104,17 @@ function Shell({ children }: { children: React.ReactNode }) {
         <nav aria-label="メイン" data-testid="bottom-nav" className="app-nav relative z-30 shrink-0 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:hidden">
           <div className="grid h-[3.25rem]" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
             {nav.direct.map((n) => link(n, "flex flex-col items-center justify-center gap-0.5 text-[11px]", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
-            {nav.more.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setMore(true)}
-                aria-haspopup="dialog"
-                data-testid="nav-more"
-                className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", nav.more.some((n) => isNavActive(n, pathname)) ? "font-bold text-primary-ink" : "text-muted-foreground")}
-              >
-                <Ellipsis className="size-5" aria-hidden="true" />
-                その他
-              </button>
-            )}
+            {menuMode && <MenuButton quick={nav.quick} active={false} onOpenMenu={() => setMore(true)} className="flex flex-col items-center justify-center gap-0.5 text-[11px] text-muted-foreground" />}
           </div>
         </nav>
         {/* PC: 同じ下部メニュー（入れ物の最下段）に、利用できるすべての機能をアイコン＋名称で並べる（左サイドメニューは廃止）。位置の仕組みはモバイルと共通 */}
         <nav aria-label="メイン" data-testid="bottom-nav-pc" className="app-nav relative z-30 hidden shrink-0 border-t bg-header after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-40 after:bg-header after:content-[''] pb-[max(0px,calc(env(safe-area-inset-bottom)-0.5rem))] px-safe md:block">
           <div className="mx-auto flex h-14 max-w-5xl items-stretch justify-center px-3">
-            {all.map((n) => link(n, "flex min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs hover:bg-muted/60", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
+            {nav.direct.map((n) => link(n, "flex min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs hover:bg-muted/60", "font-bold text-primary-ink", "text-muted-foreground", "size-5"))}
+            {menuMode && <MenuButton quick={nav.quick} active={false} onOpenMenu={() => setMore(true)} testId="nav-more-pc" className="flex min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs text-muted-foreground hover:bg-muted/60" />}
           </div>
         </nav>
-        <Sheet open={more} onOpenChange={setMore}>
-          <SheetContent data-testid="more-sheet" aria-describedby="more-desc">
-            <div className="px-4 pb-2">
-              <SheetTitle>その他</SheetTitle>
-              <SheetDescription id="more-desc">下部メニューに表示していない機能です。</SheetDescription>
-            </div>
-            <SheetBody className="border-t pt-2">
-              <ul className="divide-y">
-                {nav.more.map((n) => {
-                  const Icon = iconOf(n.id);
-                  return (
-                    <li key={n.id}>
-                      <Link href={n.href} onClick={() => setMore(false)} data-more={n.id} className="flex min-h-12 items-center gap-3 px-1 text-sm">
-                        <Icon className="size-5 text-muted-foreground" aria-hidden="true" />
-                        {n.label}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </SheetBody>
-          </SheetContent>
-        </Sheet>
+        <NavMenuSheet open={more} onOpenChange={setMore} items={nav.menu} activeId={activeId} />
       </div>
     </div>
   );
