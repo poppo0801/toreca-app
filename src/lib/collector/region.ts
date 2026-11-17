@@ -140,10 +140,26 @@ function regionFromStoreName(storeName: string): { prefecture: string; city: str
   const s = norm(storeName);
   if (!s || looksMultiStore(s)) return null;
   const named = prefecturesIn(s);
-  if (named.length === 1) return { prefecture: named[0], city: "", basis: "store_name_prefecture", note: `店舗名に含まれる地域名から${named[0]}` };
+  if (named.length === 1) {
+    const full = named[0];
+    // 9H-3O: 店舗名の途中に現れる県名の略称は、別の地名の一部のことがある（「勝田東石川店」の「石川」・「所沢山口店」の「山口」）。
+    // 食い違いの根拠にするのは、県名そのもの（兵庫県）か、店舗名の先頭・漢字以外の直後にある地名だけ
+    const shortName = Object.entries(PREF_SHORT).find(([, f]) => f === full)?.[0];
+    if (!s.includes(full) && !(shortName && standaloneToken(s, shortName))) return null;
+    return { prefecture: full, city: "", basis: "store_name_prefecture", note: `店舗名に含まれる地域名から${full}` };
+  }
   if (named.length > 1) return null;
   const c = cityToPrefecture(s);
-  return c ? { prefecture: c.prefecture, city: c.city, basis: "store_name_city", note: `店舗名の地名「${c.city}」から${c.prefecture}` } : null;
+  // 市区町村名も同様に、漢字の直後（「新守山」の「守山」＝名古屋市の地区で、滋賀県の守山市ではない）なら、食い違いの根拠にしない
+  return c && standaloneToken(s, c.city) ? { prefecture: c.prefecture, city: c.city, basis: "store_name_city", note: `店舗名の地名「${c.city}」から${c.prefecture}` } : null;
+}
+
+/** 地名が店舗名の先頭にあるか、直前が漢字以外（カタカナ・英数字・空白など）か。別の地名の途中に含まれる語（石川・山口・守山など）を除く */
+function standaloneToken(name: string, token: string): boolean {
+  const i = name.indexOf(token);
+  if (i < 0) return false;
+  if (i === 0) return true;
+  return !/[㐀-鿿々〆]/.test(name[i - 1]);
 }
 
 /** 地域外として自動除外した記録（候補の draft.exclusion に残す。物理削除はせず、誤判定時は除外一覧から確認・復元できる） */

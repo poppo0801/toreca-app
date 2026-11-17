@@ -215,6 +215,13 @@ export interface SweepTarget {
 
 export const sweepKey = (chain: string, store: string, oppKey: string) => `${chainKeyOf(chain)}|${storeKeyOf(store)}|${oppKey}`;
 
+/** 調べる対象になる実在の店舗名か（9H-3O: 実調査の計画に「店舗未確認」「おもちゃ文具レジ特設コーナー」が選ばれていた） */
+export function isRealStoreName(s: string): boolean {
+  const t = s.normalize("NFKC").trim();
+  if (!t) return false;
+  return !/未確認|未定|不明|特設|コーナー|レジ|売場|売り場|^(通販|オンライン|ネット|web)|各店|全店|対象店舗/i.test(t);
+}
+
 /** 未確認のときの次回調査までの間隔（日）。回数が増えるほど広げる */
 const backoffDays = (attempts: number) => [1, 2, 4][Math.min(attempts, 3) - 1] ?? 4;
 
@@ -235,6 +242,8 @@ export function planSweep(o: {
   limits?: Partial<SweepLimits>;
   /** この実行で、既に選んだ店舗数（実行全体の上限の管理） */
   usedInRun?: number;
+  /** 収集の対象地域の外にあると分かっている店舗か（9H-3O: 見つかっても地域外で除外される店舗を調べて費用を使わない。所在地が不明なら false＝調べる） */
+  outOfRegion?: (store: string) => boolean;
 }): SweepTarget[] {
   const lim = { ...DEFAULT_SWEEP_LIMITS, ...o.limits };
   const seedStart = dayNum(o.seed.applyStart);
@@ -254,6 +263,8 @@ export function planSweep(o: {
   const out: SweepTarget[] = [];
   for (const s of stores) {
     if (found.has(storeKeyOf(s))) continue;
+    if (!isRealStoreName(s)) continue; // 「店舗未確認」「特設コーナー」「オンライン」などは、調べる店舗ではない
+    if (o.outOfRegion?.(s)) continue;
     const key = sweepKey(o.seed.chain, s, oppKey);
     const e = o.ledger[key];
     if (e) {
@@ -323,6 +334,8 @@ export function buildSiblingSignals(o: {
   ledger: SweepLedger;
   now: Date;
   limits?: Partial<SweepLimits>;
+  /** 収集の対象地域の外にあると分かっている店舗か（所在地が不明なら false） */
+  outOfRegion?: (chain: string, store: string) => boolean;
 }): SiblingSignalOut[] {
   const lim = { ...DEFAULT_SWEEP_LIMITS, ...o.limits };
   const tend = discoverTendencies(o.history, o.knownStoresByChain ?? {});
@@ -334,13 +347,18 @@ export function buildSiblingSignals(o: {
   const opps = clusterOpportunities(o.history);
   const out: SiblingSignalOut[] = [];
   const seenKeys = new Set<string>();
+  // 9H-3O: 商品名の表記違いで開催機会が分かれても、同じ店舗を1回の実行で重複して調べない（同じ系列・店舗は1件。実調査の計画の21件中10件が重複だった）
+  const seenStores = new Set<string>();
   for (const seed of seeds) {
     if (out.length >= lim.maxPerRun) break;
     const opp = opps.find((x) => x.members.includes(seed));
     const prof = tend.profiles.find((p) => chainKeyOf(p.chain) === chainKeyOf(seed.chain)) ?? null;
-    const targets = planSweep({ seed: { ...seed, applyDeadline: seed.applyDeadline ?? opp?.members.map((m) => m.applyDeadline).filter(Boolean).sort().at(-1) ?? null }, profile: prof, global: tend.global, foundStores: opp?.stores ?? [], ledger: o.ledger, now: o.now, limits: lim, usedInRun: out.length });
+    const targets = planSweep({ seed: { ...seed, applyDeadline: seed.applyDeadline ?? opp?.members.map((m) => m.applyDeadline).filter(Boolean).sort().at(-1) ?? null }, profile: prof, global: tend.global, foundStores: opp?.stores ?? [], ledger: o.ledger, now: o.now, limits: lim, usedInRun: out.length, ...(o.outOfRegion ? { outOfRegion: (s: string) => o.outOfRegion!(seed.chain, s) } : {}) });
     for (const t of targets) {
       if (seenKeys.has(t.ledgerKey)) continue;
+      const sk = `${chainKeyOf(t.chain)}|${storeKeyOf(t.store)}`;
+      if (seenStores.has(sk)) continue;
+      seenStores.add(sk);
       seenKeys.add(t.ledgerKey);
       out.push({ id: t.ledgerKey, chain: t.chain, store: t.store, probability: t.probability, confidence: t.confidence, reasons: t.reasons, opportunityKey: t.opportunityKey });
     }

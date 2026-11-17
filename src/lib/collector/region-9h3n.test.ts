@@ -33,6 +33,16 @@ describe("地域判定: 告知に登場する地名と、抽選対象店舗の�
     expect(judgeRegion({ storeName: "", statedPrefecture: "東京都" })).toMatchObject({ prefecture: "東京都" });
     expect(judgeRegion({ storeName: "店", statedPrefecture: "東京都" }).prefecture).toBe("東京都");
   });
+  // 9H-3O: 本番の候補プールの再判定で、店舗名の一部が別の県名・地名に一致する誤った食い違い（18件中14件）が見つかった
+  it("店舗名の途中に別の地名の一部として含まれる語では、食い違いにしない（勝田東石川店の「石川」・所沢山口店の「山口」・新守山店の「守山」）", () => {
+    expect(judgeRegion({ storeName: "勝田東石川店", statedPrefecture: "茨城県" })).toMatchObject({ prefecture: "茨城県", basis: "stated_prefecture" });
+    expect(judgeRegion({ storeName: "所沢山口店", statedPrefecture: "埼玉県" })).toMatchObject({ prefecture: "埼玉県", basis: "stated_prefecture" });
+    expect(judgeRegion({ storeName: "新守山店", statedPrefecture: "愛知県" })).toMatchObject({ prefecture: "愛知県", basis: "stated_prefecture" });
+  });
+  it("店舗名の先頭・カタカナの直後にある地名の食い違いは、従来どおり検出する（三宮・戸田）", () => {
+    expect(judgeRegion({ storeName: "ルビットタウン戸田店", statedPrefecture: "愛知県" }).basis).toBe("conflict");
+    expect(judgeRegion({ storeName: "兵庫県の店", statedPrefecture: "東京都" }).basis).toBe("conflict");
+  });
   it("店舗マスター・住所があれば最優先（食い違いの判定の対象にしない）", () => {
     expect(judgeRegion({ masterPrefecture: "兵庫県", storeName: "三宮店", statedPrefecture: "東京都" })).toMatchObject({ prefecture: "兵庫県", basis: "master" });
     expect(judgeRegion({ address: "東京都千代田区1-1", storeName: "三宮店", statedPrefecture: "東京都" })).toMatchObject({ prefecture: "東京都", basis: "address" });

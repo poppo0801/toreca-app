@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clusterOpportunities, discoverTendencies, markPlanned, planSweep, profileChain, recordResult, roundKindOf, sameOpportunity, type HistoryLottery, type SweepLedger } from "./chain-sweep";
+import { buildSiblingSignals, clusterOpportunities, discoverTendencies, isRealStoreName, markPlanned, planSweep, profileChain, recordResult, roundKindOf, sameOpportunity, type HistoryLottery, type SweepLedger } from "./chain-sweep";
 
 const L = (chain: string, store: string, product: string, start: string, text = "", deadline: string | null = null): HistoryLottery => ({ chain, store, product, applyStart: start, applyDeadline: deadline, text });
 const d = (n: number) => new Date(Date.UTC(2026, 9, 1 + n)).toISOString().slice(0, 10); // 2026-10-01 + n日
@@ -83,6 +83,29 @@ describe("関連店舗の調査計画（起点の抽選から）", () => {
   });
   it("応募期間が終わった開催機会は調べない", () => {
     expect(planSweep({ seed: L("系列A", "A1店", "P", "2026-11-01", "", "2026-11-05"), profile: prof, global: tend.global, foundStores: [], ledger: {}, now })).toEqual([]);
+  });
+  // 9H-3O: 実調査の計画で見つかった不備（店舗でない名称が選ばれた・地域外と分かっている店舗に費用を使った・同じ店舗が重複した）
+  it("店舗でない名称（店舗未確認・特設コーナー・オンライン）は調べる店舗にしない", () => {
+    expect(isRealStoreName("店舗未確認")).toBe(false);
+    expect(isRealStoreName("おもちゃ文具レジ特設コーナー")).toBe(false);
+    expect(isRealStoreName("オンライン")).toBe(false);
+    expect(isRealStoreName("佐大通り店")).toBe(true);
+    const histZ = [0, 20, 40].flatMap((t, i) => ["Z1店", "Z2店", "店舗未確認"].map((s, j) => L("系列Z", s, `商品${i}`, d(t + j))));
+    const tz = discoverTendencies(histZ, { 系列Z: ["Z1店", "Z2店", "店舗未確認"] });
+    const out = planSweep({ seed: L("系列Z", "Z1店", "新", "2026-12-08", "", "2026-12-14"), profile: tz.profiles.find((p) => p.chain === "系列Z")!, global: tz.global, foundStores: [], ledger: {}, now });
+    expect(out.map((x) => x.store)).toEqual(["Z2店"]);
+  });
+  it("対象地域の外にあると分かっている店舗は調べない。所在地が不明な店舗は調べる", () => {
+    const outOfRegion = (s: string) => s === "A2店"; // A2店だけ、店舗マスターの都道府県が対象地域の外
+    const t = planSweep({ seed, profile: prof, global: tend.global, foundStores: [], ledger: {}, now, outOfRegion });
+    expect(t.map((x) => x.store)).not.toContain("A2店");
+    expect(t.map((x) => x.store)).toEqual(expect.arrayContaining(["A3店", "A4店"]));
+  });
+  it("商品名の表記違いで開催機会が分かれても、同じ店舗を1回の実行で重複して調べない", () => {
+    const hist = [...histA, L("系列A", "A1店", "新商品 購入券", "2026-12-08", "", "2026-12-14"), L("系列A", "A1店", "新商品", "2026-12-08", "", "2026-12-14")];
+    const out = buildSiblingSignals({ history: hist, knownStoresByChain: { 系列A: A_STORES }, ledger: {}, now });
+    const stores = out.map((x) => x.store);
+    expect(new Set(stores).size).toBe(stores.length);
   });
 });
 

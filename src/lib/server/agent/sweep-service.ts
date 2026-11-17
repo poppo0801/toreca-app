@@ -25,11 +25,12 @@ export async function nextSweepLedger(db: Db, householdId: string, tasks: SweepT
 /** 登録済みの抽選の履歴（系列・店舗・商品・応募開始/締切）から、関連店舗の調査候補を作る */
 export async function loadSiblingSignals(db: Db, householdId: string, now: Date): Promise<SiblingSignalOut[]> {
   const since = new Date(now.getTime() - 180 * 86_400_000).toISOString().slice(0, 10);
-  const [lots, chains, stores, products] = await Promise.all([
+  const [lots, chains, stores, products, settings] = await Promise.all([
     db.from("lotteries").select("id,chain_id,store_id,apply_start_date,apply_deadline_date,memo").eq("household_id", householdId).is("archived_at", null).gte("apply_start_date", since).limit(2000),
     db.from("chains").select("id,name").eq("household_id", householdId),
-    db.from("stores").select("id,chain_id,name").eq("household_id", householdId).is("archived_at", null),
+    db.from("stores").select("id,chain_id,name,prefecture").eq("household_id", householdId).is("archived_at", null),
     db.from("products").select("id,official_name").eq("household_id", householdId),
+    db.from("collection_settings").select("prefectures").eq("household_id", householdId).maybeSingle(),
   ]);
   const ids = (lots.data ?? []).map((l) => l.id);
   const items = ids.length ? await db.from("lottery_items").select("lottery_id,product_id").in("lottery_id", ids.slice(0, 1000)) : { data: [] as { lottery_id: string; product_id: string }[] };
@@ -48,5 +49,15 @@ export async function loadSiblingSignals(db: Db, householdId: string, now: Date)
   }
   const knownStoresByChain: Record<string, string[]> = {};
   for (const s of stores.data ?? []) (knownStoresByChain[chainName.get(s.chain_id) ?? ""] ??= []).push(s.name);
-  return buildSiblingSignals({ history, knownStoresByChain, ledger: await loadSweepLedger(db, householdId), now });
+  // 9H-3O: 収集の対象地域の外にあると分かっている店舗（店舗マスターの都道府県、無ければ店舗名から読める都道府県）は調べない。所在地が不明なら調べる（弱い推測で除外しない）
+  const target = new Set(((settings.data as { prefectures?: string[] } | null)?.prefectures ?? []).filter(Boolean));
+  const prefOf = new Map<string, string>();
+  for (const s of stores.data ?? []) if (s.prefecture) prefOf.set(`${chainName.get(s.chain_id) ?? ""}|${s.name}`, s.prefecture as string);
+  const outOfRegion = (chain: string, store: string): boolean => {
+    if (target.size === 0) return false;
+    // 店舗名の地名だけでは判断しない（「勝田東石川店」の「石川」のような誤読で、調べるべき店舗を除外しない）。店舗マスターの都道府県が確定しているものだけ
+    const pref = prefOf.get(`${chain}|${store}`);
+    return !!pref && !target.has(pref);
+  };
+  return buildSiblingSignals({ history, knownStoresByChain, ledger: await loadSweepLedger(db, householdId), now, outOfRegion });
 }
