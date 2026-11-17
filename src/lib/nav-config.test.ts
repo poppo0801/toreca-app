@@ -110,3 +110,23 @@ describe("UI-1: 長押しクイックメニューの判定", () => {
     expect(movedTooFar({ x: 0, y: 0 }, { x: 20, y: 0 })).toBe(true);
   });
 });
+
+describe("Collection-1: ナビゲーションへの追加（151図鑑・相場調査メモ）", () => {
+  it("一般ユーザーにも選択肢として出る（保存先のあるモードのみ）。固定項目・メニュー一覧・長押しショートカットのすべてに選べる", () => {
+    expect(ids(navItemsFor(USER))).toEqual(expect.arrayContaining(["zukan", "market-memo"]));
+    expect(ids(navItemsFor({ isAdmin: false, supabase: false }))).not.toContain("zukan");
+    const c = resolveNavConfig({ nav: ["zukan", "market-memo", "lotteries", "finance"], quickNav: ["market-memo", "zukan"] }, USER);
+    expect(ids(c.direct)).toEqual(["zukan", "market-memo", "lotteries", "finance"]);
+    expect(ids(c.quick)).toEqual(["market-memo", "zukan"]);
+    expect(ids(c.menu)).toEqual(expect.arrayContaining(["zukan", "market-memo"]));
+    expect(NAV_ITEMS.find((n) => n.id === "zukan")).toMatchObject({ href: "/zukan", label: "151図鑑" });
+    expect(NAV_ITEMS.find((n) => n.id === "market-memo")).toMatchObject({ href: "/market-memo", label: "相場調査メモ" });
+  });
+  it("既存の設定は壊れない: 追加前の保存値（nav・navMode・quickNav）をそのまま解釈でき、既定の並び・ショートカットは変わらない", () => {
+    expect(ids(resolveNavConfig({}, USER).direct)).toEqual(DEFAULT_NAV);
+    expect(ids(resolveNavConfig({ nav: ["finance", "lotteries", "purchases", "battles"], navMode: "four_menu", quickNav: ["masters", "display"] }, USER).direct)).toEqual(["finance", "lotteries", "purchases", "battles"]);
+    expect(resolveNavConfig({}, USER).quick.map((n) => n.id)).toEqual(["collection", "member-numbers", "masters", "notifications", "display"]);
+    expect(activeNavId("/zukan")).toBe("zukan");
+    expect(activeNavId("/market-memo")).toBe("market-memo");
+  });
+});

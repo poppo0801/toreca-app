@@ -91,6 +91,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "finance", href: "/finance", label: "収支", available: true, match: ["/finance"] },
   { id: "battles", href: "/battles", label: "対戦記録", available: true, match: ["/battles"] },
   { id: "collection", href: "/collection", label: "コレクション", available: true, match: ["/collection"] },
+  { id: "zukan", href: "/zukan", label: "151図鑑", available: true, match: ["/zukan"], supabaseOnly: true },
+  { id: "market-memo", href: "/market-memo", label: "相場調査メモ", available: true, match: ["/market-memo"], supabaseOnly: true },
   { id: "member-numbers", href: "/settings/member-numbers", label: "会員番号", available: true, match: ["/settings/member-numbers"], supabaseOnly: true },
   { id: "conditions", href: "/settings/conditions", label: "抽選条件", available: true, match: ["/settings/conditions"], supabaseOnly: true },
   { id: "masters", href: "/settings/masters", label: "マスター管理", available: true, match: ["/settings/masters"], supabaseOnly: true },
