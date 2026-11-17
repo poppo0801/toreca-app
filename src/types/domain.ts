@@ -105,6 +105,8 @@ export interface Store {
   /** 往復交通費（円）。手動登録のみ。未設定は null（0円とはみなさない） */
   roundTripFare?: number | null;
   memo?: string | null;
+  /** 利用者が登録した店舗の公式サイトURL（一次情報リンクの種類判別に使う。未登録は null） */
+  storeUrl?: string | null;
   /** 営業形態。未設定は実店舗。オンライン専用店舗には都道府県・距離を出さない */
   salesKind?: StoreKind;
 }

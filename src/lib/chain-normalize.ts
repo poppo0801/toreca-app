@@ -23,6 +23,34 @@ const CHAIN_SYNONYMS: [RegExp, string][] = [
   [/^(イエローサブマリン|イエサブ|yellowsubmarine)/, "yellowsubmarine"],
 ];
 
+/**
+ * 独立して管理する系列（Stage 9H-3L）。同じ企業グループでも、抽選の運営主体が異なるものは別系列。
+ * 「イオン」の部分一致で、既存の「イオン」系列へ統合しない。
+ *  - イオンオンライン（イオンスタイルオンラインとは、運営元・応募先URLを確認するまで同一とみなさない）
+ *  - イオンビッグ（ザ・ビッグ、ザ・ビッグエクストラ）
+ *  - イオンキッズリパブリック（キッズリパブリック）
+ * start: 系列名そのもの（先頭一致。正規化後の名称）／within: 文章・表示名の中から探すとき。単独の「ビッグ」は他の店名と紛れるため、「ザ」「イオン」が付くときだけ。
+ */
+export const INDEPENDENT_CHAINS: { key: string; name: string; start: RegExp; within: RegExp }[] = [
+  { key: "aeonkidsrepublic", name: "イオンキッズリパブリック", start: /^(イオン|aeon)?(キッズリパブリック|kidsrepublic|キッズキパブリック)/, within: /(イオン|aeon)?(キッズリパブリック|kidsrepublic|キッズキパブリック)/ },
+  { key: "aeonbig", name: "イオンビッグ", start: /^((イオン|aeon)(ザ|the)?ビッグ|ザビッグ|thebig)/, within: /(イオン|aeon)(ザ|the)?ビッグ|ザビッグ|thebig/ },
+  { key: "aeonstyleonline", name: "イオンスタイルオンライン", start: /^(イオン|aeon)スタイル(オンライン|online)/, within: /(イオン|aeon)スタイル(オンライン|online)/ },
+  { key: "aeononline", name: "イオンオンライン", start: /^(イオン|aeon)(オンライン|online)/, within: /(イオン|aeon)(オンライン|online)/ },
+];
+
+/** 系列名（正式名称・別名）が、独立管理の系列に当たるときのキー。当たらなければ null */
+export function independentChainKey(raw: string): string | null {
+  const t = fold(raw ?? "");
+  return INDEPENDENT_CHAINS.find((e) => e.start.test(t))?.key ?? null;
+}
+
+/** 文章・アカウントの表示名の中に、独立管理の系列の名称があるとき、その系列（なければ null） */
+export function independentChainIn(text: string): { key: string; name: string } | null {
+  const t = fold(text ?? "");
+  const e = INDEPENDENT_CHAINS.find((x) => x.within.test(t));
+  return e ? { key: e.key, name: e.name } : null;
+}
+
 /** 販売チャネルを表す語（系列名の末尾に付く。系列を変えない） */
 const CHANNEL_SUFFIX = /(ネット通販サイト|ネット通販|ネットショッピング|ネットショップ|ネットストア|通販サイト|オンラインショッピング|オンラインショップ|オンラインストア|オンライン通販|オンライン|通販部|通販|公式サイト|公式ストア|公式ショップ|公式|ショップ|ストア|web|ウェブ)+$/;
 
@@ -57,6 +85,9 @@ export function parseChainName(raw: string): ChainNameParts {
   // 括弧を除いた名称が空なら、括弧の中身を名称とする（「（ゲオ）」だけ、など）
   const primary = fold(base) || fold(inner[0] ?? "");
   const readings = inner.map(fold).filter(Boolean);
+  // 独立管理の系列（イオンビッグ・イオンキッズリパブリック・イオンオンライン等）は、チャネル語の除去・「イオン」への寄せの前に確定する
+  const independent = INDEPENDENT_CHAINS.find((e) => e.start.test(primary));
+  if (independent) return { key: independent.key, channel: null, readings };
   let core = primary;
   let channel: "online" | null = null;
   const stripped = core.replace(CHANNEL_SUFFIX, "");

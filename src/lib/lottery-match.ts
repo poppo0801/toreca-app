@@ -2,7 +2,7 @@ import type { ExtractedFlex, ExtractedLottery, FieldKey } from "@/lib/ai/extract
 import { isOnlineStoreName } from "@/lib/store-online";
 import { EMPTY_FLEX, type FlexInput, type LotteryInput } from "@/lib/lottery-input";
 import { normName } from "@/lib/norm";
-import { chainCanonicalKey } from "@/lib/chain-normalize";
+import { chainCanonicalKey, independentChainKey } from "@/lib/chain-normalize";
 import { normalizeProductCode, productNameCandidates, splitProductName, tidyProductName } from "@/lib/product-name";
 import { flexToJstDate } from "@/lib/finance";
 import { jstDateString } from "@/lib/datetime";
@@ -189,7 +189,9 @@ export function matchChain(name: string, chains: Chain[], hint: { stores?: Store
 }
 
 function matchChainBase(name: string, chains: Chain[], hint: { stores?: Store[]; storeName?: string } = {}): MatchResult<Chain> {
-  const active = chains.filter((c) => !c.archived);
+  // 独立管理の系列（イオンビッグ等・9H-3L）は、名称の部分一致・類似で他の系列へ寄せない。入力か候補のどちらかが独立系列で、キーが異なるものは照合の対象外
+  const nameKey = independentChainKey(name);
+  const active = chains.filter((c) => !c.archived && (!(nameKey || independentChainKey(c.name)) || nameKey === independentChainKey(c.name)));
   const ranked = rankByName(name, active, (c) => [c.name, ...(c.aliases ?? [])], chainClean);
   // 同じ系列の別名として複数の系列が登録されている（古本市場／ふるいち等）とき: その店舗が登録されている系列、なければ店舗数の多い系列
   const sure = ranked.filter((r) => r.kind === "exact" || r.kind === "alias");

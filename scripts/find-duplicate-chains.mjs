@@ -37,8 +37,16 @@ const SYN = [
 ];
 const CH = /(ネット通販サイト|ネット通販|ネットショッピング|ネットショップ|ネットストア|通販サイト|オンラインショッピング|オンラインショップ|オンラインストア|オンライン通販|オンライン|通販部|通販|公式サイト|公式ストア|公式ショップ|公式|ショップ|ストア|web|ウェブ)+$/;
 const fold = (s) => s.normalize("NFKC").toLowerCase().replace(/(株式会社|有限会社|\(株\)|（株）)/g, "").replace(/[・･.．,，、。'’"“”`´\-‐–—―_/／\\|｜:：;；!！?？~〜～#＃*＊&＆+＋=＝]/g, "").replace(/[\s　]+/g, "");
+// 独立管理の系列（9H-3L。chain-normalize.ts の INDEPENDENT_CHAINS と同じ規則）。「イオン」と同じ系列とはみなさない
+const INDEP = [
+  [/^(イオン|aeon)?(キッズリパブリック|kidsrepublic|キッズキパブリック)/, "aeonkidsrepublic"],
+  [/^((イオン|aeon)(ザ|the)?ビッグ|ザビッグ|thebig)/, "aeonbig"],
+  [/^(イオン|aeon)スタイル(オンライン|online)/, "aeonstyleonline"],
+  [/^(イオン|aeon)(オンライン|online)/, "aeononline"],
+];
 function keyOf(raw) {
   const nk = raw.normalize("NFKC");
+  { const f = fold(nk.replace(/[（(［[【〈<][^）)］]】〉>]*[）)］]】〉>]/g, " ")) || fold(nk); for (const [re, k] of INDEP) if (re.test(f)) return k; }
   const base = nk.replace(/[（(［\[【〈<][^）)］\]】〉>]*[）)］\]】〉>]/g, " ");
   let core = fold(base) || fold(nk);
   const st = core.replace(CH, "");

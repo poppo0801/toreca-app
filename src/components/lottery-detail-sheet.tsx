@@ -36,6 +36,8 @@ import { storeDistance } from "@/lib/store-distance";
 import { placeInfo } from "@/lib/lottery-taxonomy";
 import { AnnounceView, NotesView, RequirementView } from "@/components/taxonomy-view";
 import { RegistrationOrigin } from "@/components/registration-origin";
+import { SourceLinkList } from "@/components/source-link-list";
+import { hostOfUrl } from "@/lib/source-links";
 import { EligibilitySection } from "@/components/eligibility-mark";
 import { acknowledgeCautionsAction, revertAutoUpdateAction } from "@/app/(app)/lotteries/actions";
 import { addSkipRuleAction, removeSkipRuleAction, setLimitExemptionAction, setSkipExceptionAction } from "@/app/(app)/settings/rules/actions";
@@ -515,6 +517,8 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   )}
                 </Field>
               </dl>
+              {/* 一次情報リンク（種類｜ドメイン）。応募方法・受取方法の直下、発表方法より上。リンクが無いときは何も出さない */}
+              <SourceLinkList lottery={lottery} officialHosts={store?.storeUrl ? [hostOfUrl(store.storeUrl)] : []} className="py-1.5" />
               <dl>
                 <Field label="発表方法" className="py-2">
                   <AnnounceView lottery={lottery} />

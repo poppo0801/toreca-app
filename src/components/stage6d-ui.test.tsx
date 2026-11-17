@@ -175,3 +175,24 @@ describe("Stage 6D: 確認待ち画面（ランク・優先度・即時除外・
     expect(q('[data-testid="cand-detail"]')?.textContent).toContain("判定（B）");
   });
 });
+
+describe("9H-3L: 処理段階と費用の表示", () => {
+  it("統計の中に、段階別の件数（AI前/AI後）・AI費用・費用不明の回数・検索APIの未記録を表示する。不明な費用は0円と表示しない", async () => {
+    const cost = {
+      days: [],
+      stages: { collected: 10, aiAnalyzed: 6, region: { beforeAi: 2, afterAi: 1 }, product: { beforeAi: 0, afterAi: 1 }, duplicate: { beforeAi: 0, afterAi: 2 }, fetchFailed: 1, held: 3 },
+      ai: { calls: 6, costJpy: 12.5, unknownCalls: 1, byModel: [{ model: "claude-haiku-5-5", calls: 5, inputTokens: 50000, outputTokens: 5000, costJpy: 12.5, unknownCalls: 0 }, { model: "（モデル不明）", calls: 1, inputTokens: 0, outputTokens: 0, costJpy: 0, unknownCalls: 1 }], avgPerCallJpy: 2.5, avgPerAnalyzedCandidateJpy: 2.08 },
+      search: { recorded: false, calls: null, costJpy: null },
+      afterAiDiscarded: 4,
+    };
+    root = createRoot(host);
+    await act(async () => root!.render(createElement(AutoCollectView, { ...props, cost } as never)));
+    const t = q('[data-testid="cost-report"]')!.textContent ?? "";
+    expect(t).toContain("収集10件");
+    expect(t).toContain("3（AI前2／AI後1）");
+    expect(t).toContain("12.50円（6回）");
+    expect(t).toContain("うち費用不明1回");
+    expect(t).toContain("検索API未記録");
+    expect(q('[data-testid="cost-by-model"]')!.textContent).toContain("（モデル不明） 1回・0/0トークン・不明");
+  });
+});

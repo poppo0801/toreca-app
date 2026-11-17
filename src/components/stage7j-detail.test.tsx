@@ -169,6 +169,23 @@ describe("Stage 7J: 抽選詳細のレイアウト", () => {
     expect(q("main-ops")!.compareDocumentPosition(admin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("一次情報リンク（9H-3L）: 応募方法・受取方法の直下、発表方法より上に「種類｜ドメイン」で出す。下部の情報元リンク一覧は従来どおり残る。URLが無ければ何も出さない", () => {
+    patch("L1", { sourceUrls: ["https://livepocket.jp/e/abc", "https://shop.example.invalid/lottery"], announcementUrl: "https://result.example.invalid/r" } as Partial<Lottery>);
+    open("L1");
+    const links = q("primary-links")!;
+    expect(links).not.toBeNull();
+    expect([...links.querySelectorAll("a")].map((a) => a.textContent)).toEqual(["当落発表｜result.example.invalid", "LivePocket｜livepocket.jp", "外部サイト｜shop.example.invalid"]);
+    const group = q("info-group")!;
+    const methods = [...group.querySelectorAll("dt")].find((d) => d.textContent?.includes("受取方法"))!;
+    const announce = [...group.querySelectorAll("dt")].find((d) => d.textContent?.includes("発表方法"))!;
+    expect(methods.compareDocumentPosition(links) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // 受取方法より下
+    expect(links.compareDocumentPosition(announce) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // 発表方法より上
+    expect(document.body.querySelectorAll('[data-testid="source-link"]').length).toBe(2); // 下部の一覧は従来どおり
+    patch("L1", { sourceUrls: [], announcementUrl: "" } as Partial<Lottery>);
+    open("L1");
+    expect(q("primary-links")).toBeNull();
+  });
+
   it("スルーの操作は既存のまま（今回のみスルー）", () => {
     open("L1");
     expect(q("skip-once")).not.toBeNull();
