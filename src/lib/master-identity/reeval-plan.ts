@@ -16,7 +16,7 @@ import { findDuplicateCandidates, findDuplicateMasters, type DupCluster } from "
 import { resolveName } from "./resolve";
 import { chainMasters, productMasters, type Snapshot } from "./snapshot";
 
-export type ReevalAction = "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "merge_master" | "review";
+export type ReevalAction = "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "merge_master" | "review" | "fill_fields";
 export interface PlanItem {
   targetType: "lottery" | "candidate" | "chain" | "product";
   targetId: string;
@@ -88,7 +88,7 @@ export function planReevaluation(snap: Snapshot, opts: PlanOptions): Plan {
   for (const c of productClusters) for (const o of c.others) prodKeep.set(o.master.id, c.keep.id);
 
   const items: PlanItem[] = [];
-  const byAction: Plan["summary"]["byAction"] = { archive_duplicate: 0, archive_expired: 0, archive_region: 0, dismiss_candidate: 0, merge_master: 0, review: 0 };
+  const byAction: Plan["summary"]["byAction"] = { archive_duplicate: 0, archive_expired: 0, archive_region: 0, dismiss_candidate: 0, merge_master: 0, review: 0, fill_fields: 0 };
   const push = (it: PlanItem) => {
     items.push(it);
     byAction[it.action]++;
@@ -149,7 +149,12 @@ export function planReevaluation(snap: Snapshot, opts: PlanOptions): Plan {
       push({ targetType: "lottery", targetId: id, action: "archive_expired", risk: "low", proposal: { reason: `応募締切（${deadlineDay(l)}）を過ぎています`, subKind: "expired", evidence: { deadline: deadlineDay(l) } } });
       continue;
     }
-    if (end === null) push({ targetType: "lottery", targetId: id, action: "review", risk: "low", proposal: { reason: "応募締切が不明（無理に整理せず、続報・追加調査で補います）", subKind: "no_deadline" } });
+    // 日付の不足（応募開始・締切・当選発表）。固定ロジックでは補えない（推測で埋めない）ため、AIが情報元URL・公式情報を調べて補う対象にする
+    const missing = [!(l.apply_start_at || l.apply_start_date) && "applyStart", end === null && "applyDeadline", !(l.result_date || l.result_at) && "resultDate"].filter(Boolean) as string[];
+    if (missing.length > 0) {
+      const urls = (l.source_urls as unknown[] | null)?.length ?? 0;
+      push({ targetType: "lottery", targetId: id, action: "review", risk: "low", proposal: { reason: `日付が空欄（${missing.join("・")}）。AIが情報元${urls ? "URL" : "（URLなし。検索）"}を調べて補います（推測では埋めません）`, subKind: "missing_dates", evidence: { missing, sourceUrls: urls } } });
+    }
   }
 
   // ---------------- 抽選候補（確認待ち）

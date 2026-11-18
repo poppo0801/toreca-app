@@ -161,7 +161,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3S: 名寄せ・別名の自律学習
       expect(by(regionAuto)).toEqual(["archive_region"]);
       expect(by(expiredStar)).toEqual([]);
       expect(by(expiredManual)).toEqual([]);
-      expect(by(activeAuto)).toEqual([]);
+      expect(by(activeAuto)).toEqual(["review"]); // 期限内。日付の空欄（当選発表など）は、AIが調べて補う対象（変更はしない）
       expect(items.every((i: any) => i.status === "proposed")).toBe(true);
       // 計画の作成では何も変更しない
       const ls = (await u1.from("lotteries").select("id,archived_at").in("id", [expiredAuto, regionAuto])).data!;
@@ -170,6 +170,11 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3S: 名寄せ・別名の自律学習
       expect(await lotteryProtection(u1, expiredManual)).toMatch(/人が登録/);
     });
     it("適用は区分・上限件数つきで段階的に行い、再実行しても二重に変更しない。適用の直前に保護を再確認する", async () => {
+      // 固定ロジックの暫定判定は、AIが実際の情報源を調べて確認するまで適用しない（9H-3S-2）
+      const pre = await applyReevalBatch(u1, hid, profile, batchId, { actions: ["archive_expired", "archive_region"], limit: 10 });
+      expect((pre as { applied: number }).applied).toBe(0);
+      // AIが確認した（調査済み＋判定 confirm）ことにする（AI調査そのものは tests/stage9h3s2 で検証）
+      await admin.from("master_reeval_items").update({ ai_state: "investigated", ai_result: { verdict: "confirm" } }).eq("batch_id", batchId).in("action", ["archive_expired", "archive_region"]);
       // 計画の後に、対象が★になったら適用しない
       await admin.from("lottery_management").upsert({ lottery_id: regionAuto, household_id: hid, is_managed: true, managed_source: "manual" }, { onConflict: "lottery_id" });
       const a = await applyReevalBatch(u1, hid, profile, batchId, { actions: ["archive_expired", "archive_region"], limit: 10 });

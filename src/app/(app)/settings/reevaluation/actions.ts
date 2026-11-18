@@ -35,7 +35,7 @@ export interface BatchView {
   status: string;
   createdAt: string;
   summary: Record<string, unknown>;
-  counts: Record<string, { proposed: number; applied: number; skipped: number; failed: number; reverted: number }>;
+  counts: Record<string, { proposed: number; applied: number; skipped: number; failed: number; reverted: number; aiConfirmed: number; aiPending: number; aiRefuted: number; aiUnclear: number }>;
   proposals: { id: string; action: string; targetType: string; targetId: string; risk: string; reason: string; relatedId: string | null; status: string; error: string | null }[];
 }
 
@@ -45,11 +45,19 @@ export async function loadReevalAction(): Promise<Result<{ batch: BatchView | nu
   const db = c.db as Any;
   const { data: b } = await db.from("master_reeval_batches").select("id,status,created_at,summary").eq("household_id", c.householdId).neq("status", "aborted").order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!b) return { ok: true, batch: null };
-  const { data: items } = await db.from("master_reeval_items").select("id,action,target_type,target_id,risk,proposal,status,error,seq").eq("batch_id", b.id).order("seq").limit(2000);
+  const { data: items } = await db.from("master_reeval_items").select("id,action,target_type,target_id,risk,proposal,status,error,seq,ai_state,ai_result").eq("batch_id", b.id).order("seq").limit(2000);
   const counts: BatchView["counts"] = {};
   for (const i of items ?? []) {
-    const k = (counts[i.action] ??= { proposed: 0, applied: 0, skipped: 0, failed: 0, reverted: 0 });
-    k[i.status as keyof typeof k]++;
+    const k = (counts[i.action] ??= { proposed: 0, applied: 0, skipped: 0, failed: 0, reverted: 0, aiConfirmed: 0, aiPending: 0, aiRefuted: 0, aiUnclear: 0 });
+    k[i.status as "proposed" | "applied" | "skipped" | "failed" | "reverted"]++;
+    // AIの確認の状態（固定ロジックの暫定判定は、AIが実際の情報源を調べて確認するまで適用しない）
+    if (i.status === "proposed") {
+      const v = (i.ai_result as { verdict?: string } | null)?.verdict;
+      if (i.ai_state === "not_investigated") k.aiPending++;
+      else if (i.ai_state === "investigated" && v === "confirm") k.aiConfirmed++;
+      else if (v === "refute") k.aiRefuted++;
+      else k.aiUnclear++;
+    }
   }
   const proposals = (items ?? [])
     .filter((i: Any) => i.action === "merge_master" || i.action === "review")
@@ -66,7 +74,7 @@ export async function createReevalPlanAction(actor: string | null): Promise<Resu
   return r.ok ? { ok: true, items: r.items } : r;
 }
 
-const applySchema = z.object({ batchId: z.uuid(), action: z.enum(["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate"]), limit: z.number().int().min(1).max(100) });
+const applySchema = z.object({ batchId: z.uuid(), action: z.enum(["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate", "fill_fields"]), limit: z.number().int().min(1).max(100) });
 export async function applyReevalAction(batchId: string, action: ReevalAction, limit: number, actor: string | null): Promise<Result<{ applied: number; failed: number; remaining: number }>> {
   const p = applySchema.safeParse({ batchId, action, limit });
   if (!p.success) return { ok: false, error: "不正な指定です" };

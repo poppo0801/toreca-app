@@ -779,6 +779,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
         () => ({ skipped: "timeout" }) as { skipped: string },
       );
       if ("caseFile" in resp) {
+        // 9H-3S-2: 調査で確認できた系列・商品の表記を、情報源・根拠つきで名寄せ機構へ渡す（根拠が十分な別名は自動登録、足りなければ関連候補）。失敗しても収集は止めない
+        void import("@/lib/server/master-identity/case-learning").then((m) => m.learnFromCaseFile(db, deps.householdId, resp.caseFile)).catch(() => undefined);
         const m = applyIntegrated(resp.caseFile);
         invState = { ...invState, executed: true, outcome: { applied: m.applied, held: m.held, unreflected: m.unreflected.length, stopReason: resp.stopReason } };
       } else invState = { ...invState, skipped: resp.skipped };

@@ -119,9 +119,50 @@ export async function lotteryProtection(db: Db, id: string): Promise<string | nu
 
 type ItemRow = { id: string; target_type: PlanItem["targetType"]; target_id: string; action: ReevalAction; proposal: PlanItem["proposal"]; status: string };
 
+/** 固定ロジックの暫定判定（非表示・除外）は、AIが実際の情報源を調べて確認した（調査済み＋判定 confirm）ものだけを適用する。AIの調査が済んでいないものは適用しない（完了扱いにしない） */
+export const AI_REQUIRED: ReevalAction[] = ["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate"];
+
+// ---- 日付の補完（fill_fields）。AIが確認した値で、既存が空欄の日付だけを埋める。既存の値・人が確定した項目は変えない
+const FILL_COLS: Record<string, { p: string; d: string; at: string }> = {
+  applyStart: { p: "apply_start_precision", d: "apply_start_date", at: "apply_start_at" },
+  applyDeadline: { p: "apply_deadline_precision", d: "apply_deadline_date", at: "apply_deadline_at" },
+  resultDate: { p: "result_precision", d: "result_date", at: "result_at" },
+};
+/** "YYYY-MM-DD" または "YYYY-MM-DD HH:MM"（日本時間）を、列の値へ */
+export function flexColumns(value: string): { precision: string; date: string | null; at: string | null } | null {
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?$/.exec(value.trim());
+  if (!m) return null;
+  return m[2] ? { precision: "date_time", date: null, at: new Date(`${m[1]}T${m[2]}:00+09:00`).toISOString() } : { precision: "date_only", date: m[1], at: null };
+}
+type FillChange = { field: string; to: string };
+
+async function applyFill(db: Db, it: ItemRow): Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }> {
+  const why = await lotteryProtection(db, it.target_id);
+  if (why) return { ok: false, error: `適用しませんでした（${why}）` };
+  const changes = ((it.proposal as unknown as { changes?: FillChange[] }).changes ?? []).filter((c) => FILL_COLS[c.field] && flexColumns(c.to));
+  if (!changes.length) return { ok: false, error: "適用できる変更がありません" };
+  const cols = Object.values(FILL_COLS).flatMap((c) => [c.p, c.d, c.at]).join(",");
+  const { data: cur } = await any(db).from("lotteries").select(cols).eq("id", it.target_id).maybeSingle();
+  if (!cur) return { ok: false, error: "抽選が見つかりません" };
+  const patch: Record<string, unknown> = {};
+  const before: Record<string, unknown> = {};
+  for (const c of changes) {
+    const col = FILL_COLS[c.field];
+    // 既に値が入っている項目（計画の後に人や他の処理が入力した）は変えない
+    if (cur[col.p] !== "unknown") continue;
+    const v = flexColumns(c.to) as NonNullable<ReturnType<typeof flexColumns>>;
+    before[c.field] = { precision: cur[col.p], date: cur[col.d], at: cur[col.at] };
+    Object.assign(patch, { [col.p]: v.precision, [col.d]: v.date, [col.at]: v.at });
+  }
+  if (!Object.keys(patch).length) return { ok: false, error: "適用しませんでした（対象の項目に、計画の後で値が入力されていた）" };
+  const { error } = await any(db).from("lotteries").update(patch).eq("id", it.target_id);
+  return error ? { ok: false, error: "更新できませんでした" } : { ok: true, before, after: Object.fromEntries(changes.filter((c) => before[c.field]).map((c) => [c.field, c.to])) };
+}
+
 const NOTE = "9H-3S再評価";
 
 async function applyOne(db: Db, it: ItemRow, actor: string | null): Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }> {
+  if (it.action === "fill_fields") return applyFill(db, it);
   if (it.target_type === "lottery") {
     const why = await lotteryProtection(db, it.target_id);
     if (why) return { ok: false, error: `適用しませんでした（${why}）` };
@@ -156,16 +197,24 @@ async function applyOne(db: Db, it: ItemRow, actor: string | null): Promise<{ ok
 export async function applyReevalBatch(db: Db, householdId: string, actor: string | null, batchId: string, o: { actions: ReevalAction[]; limit?: number }): Promise<ServiceOut<{ applied: number; failed: number; remaining: number }>> {
   const limit = Math.min(Math.max(o.limit ?? 25, 1), 100);
   const allowed = o.actions.filter((a) => a !== "merge_master" && a !== "review");
+  const needsAi = allowed.filter((a) => AI_REQUIRED.includes(a));
+  const direct = allowed.filter((a) => !AI_REQUIRED.includes(a));
   if (!allowed.length) return { ok: false, error: "適用できる区分がありません" };
   if (await collectionBusy(db)) return { ok: false, error: "収集が実行中のため、少し待ってからもう一度実行してください" };
   const { data: b } = await any(db).from("master_reeval_batches").select("id,status,household_id").eq("id", batchId).eq("household_id", householdId).maybeSingle();
   if (!b) return { ok: false, error: "計画が見つかりません" };
   if (b.status === "aborted") return { ok: false, error: "この計画は破棄されています。計画を作り直してください" };
   await any(db).from("master_reeval_batches").update({ status: "running", started_at: new Date().toISOString() }).eq("id", batchId).in("status", ["planned", "paused"]);
-  const { data: rows } = await any(db).from("master_reeval_items").select("id,target_type,target_id,action,proposal,status").eq("batch_id", batchId).eq("status", "proposed").in("action", allowed).order("seq").limit(limit);
+  // AIが調べて確認した（調査済み＋判定 confirm）ものだけを対象にする。固定ロジックの暫定判定のままのものは、ここに入らない（未適用のまま残る）
+  const base = () => any(db).from("master_reeval_items").select("id,target_type,target_id,action,proposal,status,seq").eq("batch_id", batchId).eq("status", "proposed");
+  const [aiRows, directRows] = await Promise.all([
+    needsAi.length ? base().in("action", needsAi).eq("ai_state", "investigated").eq("ai_result->>verdict", "confirm").order("seq").limit(limit) : { data: [] },
+    direct.length ? base().in("action", direct).eq("ai_state", "investigated").order("seq").limit(limit) : { data: [] },
+  ]);
+  const rows = [...(aiRows.data ?? []), ...(directRows.data ?? [])].sort((a: { seq: number }, b: { seq: number }) => a.seq - b.seq).slice(0, limit);
   let applied = 0;
   let failed = 0;
-  for (const it of (rows ?? []) as ItemRow[]) {
+  for (const it of rows as ItemRow[]) {
     const r = await applyOne(db, it, actor);
     const nowIso = new Date().toISOString();
     if (r.ok) {
@@ -176,22 +225,35 @@ export async function applyReevalBatch(db: Db, householdId: string, actor: strin
       await any(db).from("master_reeval_items").update({ status: /適用しません|変わっている/.test(r.error) ? "skipped" : "failed", error: r.error.slice(0, 400) }).eq("id", it.id).eq("status", "proposed");
     }
   }
-  const { count } = await any(db).from("master_reeval_items").select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("status", "proposed").in("action", allowed);
-  const remaining = (count ?? 0) as number;
+  // 残り＝今回の区分で、AIの確認が済んでいて適用できるもの（AIの確認待ちのものは数えない）
+  const [r1, r2] = await Promise.all([
+    needsAi.length ? any(db).from("master_reeval_items").select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("status", "proposed").in("action", needsAi).eq("ai_state", "investigated").eq("ai_result->>verdict", "confirm") : { count: 0 },
+    direct.length ? any(db).from("master_reeval_items").select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("status", "proposed").in("action", direct).eq("ai_state", "investigated") : { count: 0 },
+  ]);
+  const remaining = ((r1.count ?? 0) + (r2.count ?? 0)) as number;
   await any(db).from("master_reeval_batches").update({ status: "paused" }).eq("id", batchId).eq("status", "running");
   return { ok: true, applied, failed, remaining };
 }
 
 /** 適用した項目を、適用前の状態へ戻す（バッチ全体、または指定した項目だけ） */
 export async function revertReevalBatch(db: Db, actor: string | null, batchId: string, o: { itemIds?: string[] } = {}): Promise<ServiceOut<{ reverted: number; failed: number }>> {
-  let q = any(db).from("master_reeval_items").select("id,target_type,target_id,before_state,status").eq("batch_id", batchId).eq("status", "applied");
+  let q = any(db).from("master_reeval_items").select("id,target_type,target_id,action,before_state,status").eq("batch_id", batchId).eq("status", "applied");
   if (o.itemIds?.length) q = q.in("id", o.itemIds);
   const { data: rows } = await q.limit(1000);
   let reverted = 0;
   let failed = 0;
-  for (const it of (rows ?? []) as { id: string; target_type: string; target_id: string; before_state: Record<string, unknown> | null }[]) {
+  for (const it of (rows ?? []) as { id: string; target_type: string; target_id: string; action: string; before_state: Record<string, unknown> | null }[]) {
     let ok = false;
-    if (it.target_type === "lottery") {
+    if (it.action === "fill_fields" && it.before_state) {
+      // 補完した日付を、補完前の状態（不明）へ戻す。補完の後に人が変更した項目には触れない（補完した値のままのときだけ戻す）
+      const patch: Record<string, unknown> = {};
+      for (const [field, b] of Object.entries(it.before_state as Record<string, { precision: string; date: string | null; at: string | null }>)) {
+        const c = FILL_COLS[field];
+        if (c) Object.assign(patch, { [c.p]: b.precision, [c.d]: b.date, [c.at]: b.at });
+      }
+      const { error } = await any(db).from("lotteries").update(patch).eq("id", it.target_id);
+      ok = !error;
+    } else if (it.target_type === "lottery") {
       const r = await restoreLottery(db, it.target_id, actor);
       if (r.ok) await any(db).from("lotteries").update({ exclusion_reason_code: null, exclusion_reason_note: "" }).eq("id", it.target_id);
       ok = r.ok;

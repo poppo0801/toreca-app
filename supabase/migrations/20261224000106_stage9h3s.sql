@@ -27,6 +27,11 @@ alter table public.product_aliases alter column source set default 'manual';
 alter table public.chains add column short_name text check (short_name is null or char_length(short_name) between 1 and 40);
 alter table public.products add column short_name text check (short_name is null or char_length(short_name) between 1 and 40);
 
+-- 店舗の実所在地の根拠（Stage 9H-3S-2）。AIが公式の店舗一覧などで確認した所在地と根拠を蓄積する。確認済み（公式情報に番地までの住所）のときだけ、都道府県・住所を更新する。
+alter table public.stores
+  add column location_evidence jsonb check (location_evidence is null or jsonb_typeof(location_evidence) = 'object'),
+  add column location_verified_at timestamptz;
+
 -- ---------------------------------------------------------------- 3) 未確定の関連候補
 create table public.master_alias_candidates (
   id uuid primary key default gen_random_uuid(),
@@ -70,8 +75,15 @@ create table public.master_reeval_items (
   target_type text not null check (target_type in ('lottery', 'candidate', 'chain', 'product')),
   target_id uuid not null,
   -- archive_duplicate / archive_expired / archive_region / dismiss_candidate / merge_master / review
-  action text not null check (action in ('archive_duplicate', 'archive_expired', 'archive_region', 'dismiss_candidate', 'merge_master', 'review')),
+  action text not null check (action in ('archive_duplicate', 'archive_expired', 'archive_region', 'dismiss_candidate', 'merge_master', 'review', 'fill_fields')),
   risk text not null default 'low' check (risk in ('low', 'medium', 'high')),
+  -- 自律型AIの再調査（Stage 9H-3S-2）。固定ロジックの提案（暫定）は、AIが実際の情報源を調べて確認する（ai_state=investigated かつ判定が confirm）まで適用しない。
+  --   not_investigated=未調査／investigated=調査済み（実際に情報源を取得できた）／insufficient=取得できたが判断に足りない／failed=情報源を取得できなかった
+  ai_state text not null default 'not_investigated' check (ai_state in ('not_investigated', 'investigated', 'insufficient', 'failed')),
+  -- AIの調査結果の要約（取得できた情報源・補完・差分・不明・判定 confirm/refute/inconclusive・理由）。原文の全文は保存しない
+  ai_result jsonb check (ai_result is null or jsonb_typeof(ai_result) = 'object'),
+  ai_cost_jpy numeric(8, 2) not null default 0 check (ai_cost_jpy >= 0),
+  ai_at timestamptz,
   -- 理由・根拠・関連するID（統合先・重複の相手など）
   proposal jsonb not null default '{}'::jsonb check (jsonb_typeof(proposal) = 'object'),
   status text not null default 'proposed' check (status in ('proposed', 'applied', 'skipped', 'reverted', 'failed')),

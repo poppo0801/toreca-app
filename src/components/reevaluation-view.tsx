@@ -5,7 +5,8 @@ import { applyReevalAction, createReevalPlanAction, loadReevalAction, revertReev
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 
-const ROWS: { action: "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate"; label: string; note: string }[] = [
+const ROWS: { action: "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "fill_fields"; label: string; note: string }[] = [
+  { action: "fill_fields", label: "AIが確認した日付を補完", note: "情報元で確認できた空欄の日付だけ（根拠つき。既存の値は変えません）" },
   { action: "archive_duplicate", label: "重複した抽選を非表示", note: "同じ企画の重複。情報の多い方を残します" },
   { action: "archive_expired", label: "応募締切を過ぎた抽選を非表示", note: "締切から3日以上過ぎた自動収集の未処理" },
   { action: "archive_region", label: "対象地域外の抽選を非表示", note: "収集設定の都道府県の外" },
@@ -69,16 +70,16 @@ export function ReevaluationView() {
           </p>
           <ul className="divide-y rounded-lg border bg-card">
             {ROWS.map((r) => {
-              const c = batch.counts[r.action] ?? { proposed: 0, applied: 0, skipped: 0, failed: 0, reverted: 0 };
+              const c = batch.counts[r.action] ?? { proposed: 0, applied: 0, skipped: 0, failed: 0, reverted: 0, aiConfirmed: 0, aiPending: 0, aiRefuted: 0, aiUnclear: 0 };
               return (
                 <li key={r.action} className="flex flex-wrap items-center gap-2 px-3 py-2.5" data-testid={`reeval-${r.action}`}>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{r.label}</p>
                     <p className="text-xs text-muted-foreground">
-                      {r.note}。未適用 {c.proposed}件・適用済み {c.applied}件{c.skipped ? `・見送り${c.skipped}件` : ""}{c.failed ? `・失敗${c.failed}件` : ""}{c.reverted ? `・戻した${c.reverted}件` : ""}
+                      {r.note}。AI確認済み {c.aiConfirmed}件（適用できる）・AI未調査 {c.aiPending}件（暫定。AIが調べるまで適用しません）{c.aiRefuted ? `・AIが否定${c.aiRefuted}件` : ""}{c.aiUnclear ? `・判断できず${c.aiUnclear}件` : ""}・適用済み {c.applied}件{c.skipped ? `・見送り${c.skipped}件` : ""}{c.failed ? `・失敗${c.failed}件` : ""}{c.reverted ? `・戻した${c.reverted}件` : ""}
                     </p>
                   </div>
-                  <Button size="sm" variant="outline" disabled={pending || c.proposed === 0} onClick={() => run(async () => { const x = await applyReevalAction(batch.id, r.action, 25, profile.id); return x.ok ? `適用 ${x.applied}件・見送り/失敗 ${x.failed}件（残り${x.remaining}件。1回に25件まで）` : x.error; })}>
+                  <Button size="sm" variant="outline" disabled={pending || c.aiConfirmed === 0} onClick={() => run(async () => { const x = await applyReevalAction(batch.id, r.action, 25, profile.id); return x.ok ? `適用 ${x.applied}件・見送り/失敗 ${x.failed}件（残り${x.remaining}件。1回に25件まで）` : x.error; })}>
                     25件ずつ適用
                   </Button>
                 </li>
