@@ -35,12 +35,24 @@ const linkedRef = readFileSync("supabase/.temp/project-ref", "utf8").trim();
 if (!(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").includes(linkedRef)) fail("リンク先と本番の設定の接続先が一致しません");
 const list = sh(["migration", "list", "--linked"]);
 if (list.status !== 0) fail(`migration list に失敗しました（Supabase CLI のログイン・リンクを確認）: ${scrub(list.stderr).slice(0, 300)}`);
-const applied = new Set();
-for (const line of list.stdout.split("\n")) {
-  const m = /^\s*(\d{14})?\s*\|\s*(\d{14})?\s*\|/.exec(line);
-  if (m?.[2]) applied.add(m[2]); // 2列目＝リモート（本番）の適用済み
-}
-if (applied.size === 0) fail("本番の適用履歴を読み取れませんでした");
+// CLI 3.x は JSON（{"migrations":[{"local","remote",…}]}）、旧版は表形式。どちらも「リモート（本番）の適用済み」の版を集める
+const remoteVersions = (out) => {
+  const set = new Set();
+  try {
+    const j = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1));
+    for (const m of j.migrations ?? []) if (m.remote) set.add(String(m.remote));
+    return set;
+  } catch {
+    /* 表形式へ */
+  }
+  for (const line of out.split("\n")) {
+    const m = /^\s*(\d{14})?\s*\|\s*(\d{14})?\s*\|/.exec(line);
+    if (m?.[2]) set.add(m[2]); // 2列目＝リモート（本番）の適用済み
+  }
+  return set;
+};
+const applied = remoteVersions(list.stdout);
+if (applied.size === 0) fail(`本番の適用履歴を読み取れませんでした（出力の先頭: ${JSON.stringify(scrub(list.stdout).slice(0, 300))} / stderr: ${JSON.stringify(scrub(list.stderr).slice(0, 200))}）`);
 const files = readdirSync("supabase/migrations").filter((f) => /^\d{14}_.+\.sql$/.test(f)).sort();
 const pending = files.filter((f) => !applied.has(f.slice(0, 14)));
 const unknownRemote = [...applied].filter((v) => !files.some((f) => f.startsWith(v)));
@@ -54,9 +66,17 @@ const RISKY = [
   [/\btruncate\b/i, "truncate"],
   [/^\s*delete\s+from\b/im, "delete"],
 ];
+// 人が内容を確認済みの検出（誤検知）。ファイルの内容のハッシュに固定するため、ファイルが少しでも変われば無効になり、再び要確認になる
+const REVIEWED = {
+  "20261218000100_stage8f4.sql": { sha: "34ceea061732", labels: ["delete"], reason: "新規の空の表 lottery_source_snapshots の保持期間切れを消す関数の本文（既存の表・データには触れない）" },
+};
 const review = pending.map((f) => {
   const sql = readFileSync(join("supabase/migrations", f), "utf8").replace(/--.*$/gm, "");
-  return { file: f, sha: createHash("sha256").update(readFileSync(join("supabase/migrations", f))).digest("hex").slice(0, 12), risky: RISKY.filter(([re]) => re.test(sql)).map(([, label]) => label) };
+  const sha = createHash("sha256").update(readFileSync(join("supabase/migrations", f))).digest("hex").slice(0, 12);
+  const found = RISKY.filter(([re]) => re.test(sql)).map(([, label]) => label);
+  const ok = REVIEWED[f]?.sha === sha ? REVIEWED[f] : null;
+  const risky = found.filter((l) => !ok?.labels.includes(l));
+  return { file: f, sha, risky, reviewed: ok && found.length !== risky.length ? ok.reason : undefined };
 });
 // 関数の置き換え（drop function → create function）は、互換性を人が確認済みの前提で許容するため、別枠で注意として出す
 const fnDrops = pending.filter((f) => /\bdrop\s+function\b/i.test(readFileSync(join("supabase/migrations", f), "utf8").replace(/--.*$/gm, "")));
@@ -75,7 +95,7 @@ const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdou
 const planSha = createHash("sha256").update(JSON.stringify({ pending: review.map((r) => [r.file, r.sha]), head: process.env.RELEASE_HEAD ?? head, last: [...applied].sort().at(-1) })).digest("hex").slice(0, 16);
 
 console.log(`本番の適用済み: ${applied.size}本（最後: ${[...applied].sort().at(-1)}）／ローカル: ${files.length}本／未適用: ${pending.length}本`);
-for (const r of review) console.log(`  - ${r.file}${r.risky.length ? `  ⚠ 要確認: ${r.risky.join("、")}` : "  （追加のみ）"}`);
+for (const r of review) console.log(`  - ${r.file}${r.risky.length ? `  ⚠ 要確認: ${r.risky.join("、")}` : r.reviewed ? `  （追加のみ。確認済みの検出あり: ${r.reviewed}）` : "  （追加のみ）"}`);
 if (fnDrops.length) console.log(`  注意: 関数の置き換え（drop function→create）を含む: ${fnDrops.join(", ")}（旧い呼び出しの互換性を確認済みか）`);
 console.log(`バックアップ: ${lastBackup ? `${lastBackup.file}（${ageH.toFixed(1)}時間前）` : "なし"}`);
 const older = pending.filter((f) => f.slice(0, 14) < [...applied].sort().at(-1));
@@ -131,7 +151,8 @@ if (push.status !== 0) fail(`適用に失敗しました。以降の処理は行
 const after = await counts();
 const diff = TABLES.filter((t) => before[t] !== after[t]);
 const list2 = sh(["migration", "list", "--linked"]);
-const stillPending = pending.filter((f) => !list2.stdout.split("\n").some((l) => new RegExp(`\\|\\s*${f.slice(0, 14)}\\s*\\|`).test(l)));
+const appliedAfter = remoteVersions(list2.stdout);
+const stillPending = pending.filter((f) => !appliedAfter.has(f.slice(0, 14)));
 console.log(`適用後: 既存表の件数の変化 ${diff.length}件${diff.length ? `（${diff.join(",")}。収集・利用者の操作による増減か確認）` : ""}／未適用の残り ${stillPending.length}本`);
 if (stillPending.length) fail("適用後も未適用の版が残っています");
 console.log("DBの適用: 完了");
