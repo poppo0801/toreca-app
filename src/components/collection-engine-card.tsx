@@ -55,13 +55,13 @@ export function CollectionEngineCard({ stored, note, autonomousAvailable, runs }
     });
 
   return (
-    <Block no="⓪" title="情報収集方式" testId="engine" summary={`${label}${last ? `・最終 ${fmt(last.started_at)} ${STATUS_LABEL[last.status] ?? last.status}` : ""}`} alert={note ? "従来方式で動作中" : null} tip="自律型AI主体: AIが調査対象・検索・追加調査を主導し、既存ロジックは重複判定・地域・登録などの確定処理を担います。既存ロジック主体: 従来の収集フローです。切り替えても、取得済みの抽選・応募履歴は変わりません。">
+    <Block no="⓪" title="情報収集方式" testId="engine" summary={`${label}${last ? `・最終 ${fmt(last.started_at)} ${STATUS_LABEL[last.status] ?? last.status}` : ""}`} alert={note ? "従来方式で動作中" : null} tip="自律型AI主体: AIが調査対象・検索・追加調査を主導し、既存ロジックは重複判定・地域・登録などの確定処理を担い、登録済みの収集元の定期取得も引き続き動きます。既存ロジック主体: 従来の収集フローです。切り替えても、取得済みの抽選・応募履歴は変わりません。">
       <div className="space-y-2" role="radiogroup" aria-label="情報収集方式">
         <label className="flex items-start gap-2 text-sm">
           <input type="radio" name="engine" className="mt-1" checked={value === "autonomous"} disabled={!autonomousAvailable || pending} onChange={() => setValue("autonomous")} data-testid="engine-autonomous" />
           <span>
             自律型AI主体（新方式・推奨）
-            <span className="block text-xs text-muted-foreground">AIが情報収集と調査を主導。既存ロジックは補助・安全制御{autonomousAvailable ? "" : "（開発環境のみ）"}</span>
+            <span className="block text-xs text-muted-foreground">AIが情報収集と調査を主導。既存ロジックは補助・安全制御{autonomousAvailable ? "" : "（この環境では有効になっていません）"}</span>
           </span>
         </label>
         <label className="flex items-start gap-2 text-sm">

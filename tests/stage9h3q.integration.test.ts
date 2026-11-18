@@ -212,6 +212,19 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3Q: 自律型収集の統合", () => 
     expect((await tbl("collection_settings").select("autonomous_lock_until").eq("household_id", hid).single()).data.autonomous_lock_until).toBeNull();
   });
 
+  it("実行時間の上限などで途中終了した記録（期限切れの実行中）は、次の開始時に失敗として閉じられ、費用は上限額として計上される。調査の成果は先に保存される", async () => {
+    await tbl("discovery_runs").update({ slot: "old5" }).eq("household_id", hid);
+    const stale = (await tbl("discovery_runs").insert({ household_id: hid, trigger: "cron", status: "running", slot: "stale", started_at: new Date(NOW.getTime() - 20 * 60_000).toISOString(), cost_jpy: 0 }).select("id").single()).data;
+    const r = await runAutonomousCollection(deps(world(), { perMissionJpy: 15, slot: "fresh-slot" }));
+    expect(r.ok || "skipped" in r || "error" in r).toBe(true);
+    const row = (await tbl("discovery_runs").select("status,cost_jpy,error").eq("id", stale.id).single()).data;
+    expect(row.status).toBe("failed");
+    expect(Number(row.cost_jpy)).toBe(15);
+    expect(row.error).toContain("上限額");
+    // 呼び出し口が決めた調査機会（slot）で記録される
+    if (r.ok) expect((await tbl("discovery_runs").select("slot").eq("id", r.runId).single()).data.slot).toBe("fresh-slot");
+  });
+
   it("方式を切り替えても、取得済みの抽選・応募・根拠は維持される（削除・初期化しない）", async () => {
     const before = { l: await count("lotteries"), o: await count("lottery_discovery_origins") };
     await setSettings({ collection_engine: "legacy", collection_engine_changed_at: new Date().toISOString() });
@@ -276,6 +289,12 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3Q: 自律型収集の統合", () => 
     expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "30", AUTONOMOUS_MONTHLY_CAP_JPY: "300" })).toBe(18);
     expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "30", AUTONOMOUS_MONTHLY_CAP_JPY: "20" })).toBe(8); // 月の上限が先に尽きる
     expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "10", AUTONOMOUS_MONTHLY_CAP_JPY: "300" })).toBe(0);
+    await tbl("discovery_runs").delete().eq("household_id", hid);
+    // 既定の上限は 日次100円・月次1,500円。実行中の記録は、費用が確定していなくても1件の上限額（既定15円）を消費したものとして数える（同時実行・途中終了で超えない）
+    expect(await budgetRemainingJpy(sys, hid, NOW, {})).toBe(100);
+    await tbl("discovery_runs").insert({ household_id: hid, trigger: "cron", status: "running", slot: "b2", started_at: NOW.toISOString(), cost_jpy: 0 });
+    expect(await budgetRemainingJpy(sys, hid, NOW, {})).toBe(85);
+    // 期限切れの実行中の記録は、次の実行の開始時に、上限額を消費したものとして閉じられる（費用が不明でも予算を超えない）
     await tbl("discovery_runs").delete().eq("household_id", hid);
     // 例外で途中終了しても、消費した費用を記録する
     let spent = 0;

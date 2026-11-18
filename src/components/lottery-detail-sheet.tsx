@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { chainStoreLine, isOnlineStore } from "@/lib/store-online";
 import { markLotterySeen } from "@/app/(app)/lotteries/seen-actions";
 import { ChevronDown, ExternalLink, Star, TriangleAlert } from "lucide-react";
@@ -319,15 +319,32 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [ruleMsg, setRuleMsg] = useState<string | null>(null);
 
-  // 詳細を開いたらNEWを解除する（確認済み）。保存先のあるモードのみ。表示中はこの回のNEWの印を残す
-  const seenId = persistent && open && lottery.isNew ? lottery.id : null;
+  // NEWの既読処理（UI-1）: 詳細を開いた時点では解除せず、**詳細を閉じた時点**で行う（閉じるボタン・戻る・スワイプのどれでも）。
+  // 閉じたかどうかは、開いた状態から閉じる操作（onOpenChange(false)）または open が false になったことだけで判断する。
+  // 画面の破棄（別画面への遷移でのアンマウント）だけでは既読にしない。通信に失敗したときは既読にせず、NEWを残す。
+  const seenRef = useRef<string | null>(null);
+  const markOnClose = useCallback(() => {
+    const id = seenRef.current;
+    if (!id) return;
+    seenRef.current = null;
+    void markLotterySeen(id)
+      .then((r) => {
+        if (r.ok) void reload();
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
-    if (!seenId) return;
-    void markLotterySeen(seenId).then((r) => {
-      if (r.ok) void reload();
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 開いた時に1回だけ
-  }, [seenId]);
+    if (open && persistent && lottery.isNew) seenRef.current = lottery.id;
+    if (!open) markOnClose();
+  }, [open, persistent, lottery.isNew, lottery.id, markOnClose]);
+  const handleOpenChange = useCallback(
+    (v: boolean) => {
+      if (!v) markOnClose();
+      onOpenChange(v);
+    },
+    [markOnClose, onOpenChange],
+  );
 
   const chain = data.chains.find((c) => c.id === lottery.chainId);
   const store = data.stores.find((s) => s.id === lottery.storeId);
@@ -364,7 +381,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent data-testid="lottery-detail-sheet" aria-describedby="lottery-detail-desc">
           <div className="flex items-start gap-2 px-4 pb-2 pt-1">
             <div className="min-w-0 flex-1">
@@ -421,7 +438,11 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                   {reception && <Chip className={cn("shrink-0", RECEPTION_TONE[reception])} data-testid="reception-chip">{reception}</Chip>}
                   {notice === "unconfirmed" && <Chip className="shrink-0 border-danger font-bold text-danger">結果未確認</Chip>}
                   {notice === "in_period" && <Chip className="shrink-0 text-info">発表期間中</Chip>}
-                  {lottery.isNew && <Chip className="shrink-0 border-info text-info">NEW</Chip>}
+                  {lottery.isNew && (
+                    <span data-testid="new-dot" className="inline-block size-2.5 shrink-0 rounded-full bg-info">
+                      <span className="sr-only">NEW</span>
+                    </span>
+                  )}
                 </div>
                 <StatusStrip lottery={lottery} />
               </div>
@@ -721,7 +742,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                       // 一覧が管理画面を持つ（グループ化でこのカードが親カードの中へ移っても、画面が消えない）。詳細は閉じる
                       if (manageGroup) {
                         manageGroup(lottery);
-                        onOpenChange(false);
+                        handleOpenChange(false);
                       } else setGrouping(true);
                     }} data-testid="lottery-group-open">
                     {lottery.groupId ? "グループを管理" : "グループにまとめる"}
@@ -766,7 +787,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
           onClose={() => setConfirmArchive(false)}
           onDone={() => {
             setConfirmArchive(false);
-            onOpenChange(false);
+            handleOpenChange(false);
           }}
         />
       )}

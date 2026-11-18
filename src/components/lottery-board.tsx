@@ -443,7 +443,7 @@ function LotteryBoardInner() {
                   renderLottery(r.lottery)
                 ) : (
                   <li key={r.key} className="grid grid-cols-[minmax(0,1fr)]">
-                    <LotteryGroupCard row={r} renderChild={renderLottery} forceOpen={focusTarget ? r.members.some((m) => m.id === focusTarget) : false} onManage={setGroupManaging} />
+                    <LotteryGroupCard row={r} renderChild={renderLottery} forceOpen={focusTarget ? r.members.some((m) => m.id === focusTarget) : false} onManage={setGroupManaging} compactChildren={tab === "all" || tab === "managed"} />
                   </li>
                 ),
               )}

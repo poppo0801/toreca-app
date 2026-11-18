@@ -18,7 +18,7 @@ import type { PageFetcher, SearchProvider } from "@/lib/agent/store-location/too
  * 本番のAPIキーは使わない。関門を通らなければ ok=false（理由つき）を返し、実AIには接続しない。キー・認証情報は理由に含めない。
  * このステージでは、この部品を使った有料の実地検証は行っていない（9H-3Rの導入前に、少額の予算で確認する）。
  */
-export const PER_MISSION_DEFAULT_JPY = 8;
+export const PER_MISSION_DEFAULT_JPY = 15;
 
 export type RealDiscoveryDeps = { ok: true; guard: RealRunGuard; llmFor: () => AgentLLM; search: SearchProvider; perMissionJpy: number; ledgerFile: string } | { ok: false; reason: string };
 

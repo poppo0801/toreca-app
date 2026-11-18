@@ -67,6 +67,10 @@ export interface AutonomousDeps {
   /** 1回の呼び出しで実行するミッション数と、使える時間（定期実行は約60秒以内） */
   maxMissions?: number;
   timeBudgetMs?: number;
+  /** 1回の呼び出し全体（調査＋登録）の時間の目安。登録処理はこの範囲で打ち切る。既定は 調査の上限＋40秒 */
+  totalBudgetMs?: number;
+  /** 調査機会（枠）のキー。呼び出し口が決める（発売日の近さで枠の時刻が変わるため）。省略時は定期収集の時刻から決める */
+  slot?: string;
   /** ログインなし（service_role）からの登録 */
   asService?: boolean;
   env?: { toremaneEnv?: string; enabled?: boolean };
@@ -121,10 +125,14 @@ export async function loadMissionSources(db: Db, householdId: string, now: Date)
 }
 
 /** AIの発見を、既存の登録経路へ渡す（再解析→AIの報告との照合→既存の重複照合・安全条件・自動登録）。AIの報告を無条件には信用しない */
-export async function intakeRecord(o: { db: Db; householdId: string; record: DiscoveryRunRecord; world: RealDiscoveryWorld; now: Date; autoRegister: boolean; actor: string | null; asService?: boolean; extractor?: LotteryExtractor | null; runId: string }): Promise<IntakeOutcome[]> {
+export async function intakeRecord(o: { db: Db; householdId: string; record: DiscoveryRunRecord; world: RealDiscoveryWorld; now: Date; autoRegister: boolean; actor: string | null; asService?: boolean; extractor?: LotteryExtractor | null; runId: string; /** 登録処理の締め切り（epoch ms）。過ぎたら残りは登録せず確認待ちにする（調査の記録には保存済みで、成果は失われない） */ deadlineAt?: number }): Promise<IntakeOutcome[]> {
   const out: IntakeOutcome[] = [];
   for (const c of candidatesFromRecord(o.record)) {
     const base = { url: c.sourceUrl, store: c.store };
+    if (o.deadlineAt !== undefined && Date.now() > o.deadlineAt) {
+      out.push({ ...base, outcome: "held", reason: "実行時間の上限に近づいたため、登録を見送りました（調査の記録には保存済み。次回以降に確認できます）" });
+      continue;
+    }
     if (c.status !== "adopt") {
       out.push({ ...base, outcome: "held", reason: `確認が必要なため登録しません（${c.attention[0] ?? "根拠の一部が不足"}）` });
       continue;
@@ -197,8 +205,9 @@ export async function runAutonomousCollection(d: AutonomousDeps): Promise<Autono
   const cost0 = d.costSoFar?.() ?? 0;
   try {
     // 異常終了で残った実行中の記録を閉じる
-    await anyDb(db).from("discovery_runs").update({ status: "failed", error: "実行が完了しないまま期限を過ぎたため終了として記録", finished_at: now.toISOString() }).eq("household_id", hid).eq("status", "running").lt("started_at", new Date(now.getTime() - LOCK_MS).toISOString());
-    const slot = slotKeyOf(now, [settings?.schedule_hour_jst, settings?.schedule_hour2_jst]);
+    // 費用は不明のため、1件の上限額を消費したものとして安全側に記録する（日次・月次の上限を超えないため）
+    await anyDb(db).from("discovery_runs").update({ status: "failed", error: "実行が完了しないまま期限を過ぎたため終了として記録（費用は上限額を消費したものとして計上）", finished_at: now.toISOString(), cost_jpy: d.perMissionJpy ?? 12 }).eq("household_id", hid).eq("status", "running").lt("started_at", new Date(now.getTime() - LOCK_MS).toISOString());
+    const slot = d.slot ?? slotKeyOf(now, [settings?.schedule_hour_jst, settings?.schedule_hour2_jst]);
     const ins = await anyDb(db).from("discovery_runs").insert({ household_id: hid, trigger: d.trigger, status: "running", slot, started_at: now.toISOString() }).select("id").single();
     if (ins.error) return { ok: false, skipped: true, reason: "自律型の収集が実行中です（記録を作れませんでした）" };
     runId = (ins.data as { id: string }).id;
@@ -221,8 +230,11 @@ export async function runAutonomousCollection(d: AutonomousDeps): Promise<Autono
       now: () => Date.now(),
       sleep: d.sleep,
     });
+    // 調査の成果を先に保存する（登録処理の途中で実行時間の上限に達しても、調査の記録・費用は失われない）
+    await anyDb(db).from("discovery_runs").update({ records: res.records.map(compactRecord) as unknown as Json, mission_ids: missions.map((m) => m.id), cost_jpy: res.totalCostJpy, duration_ms: Date.now() - t0 }).eq("id", runId);
     const outcomes: IntakeOutcome[] = [];
-    for (const r of res.records) outcomes.push(...(await intakeRecord({ db, householdId: hid, record: r, world: d.world, now, autoRegister: settings?.auto_register !== false, actor: d.actor, asService: d.asService, extractor: d.extractor, runId })));
+    const deadlineAt = t0 + (d.totalBudgetMs ?? timeBudget + 40_000);
+    for (const r of res.records) outcomes.push(...(await intakeRecord({ db, householdId: hid, record: r, world: d.world, now, autoRegister: settings?.auto_register !== false, actor: d.actor, asService: d.asService, extractor: d.extractor, runId, deadlineAt })));
     const counts = countsOf(res.records, outcomes);
     const stops = res.records.map((r) => r.stop.reason);
     const status = res.records.length > 0 && stops.every((s) => s === "llm_failure") ? "failed" : stops.some((s) => ["cost_limit", "time_limit", "step_limit", "fetch_limit", "search_limit"].includes(s)) ? "limit_reached" : "completed";

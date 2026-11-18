@@ -134,3 +134,49 @@ describe("9H-3R: 本番での有効化条件と費用管理（本番の収集方
     expect(sameStore("北店", "A", "大北店", "A")).toBe(false);
   });
 });
+
+describe("本番運用の調査機会・費用（9H-3R-Release）", () => {
+  it("繁忙期: 発売日が3日前〜7日後にあるときだけ。調査機会は通常4回・繁忙期8回", async () => {
+    const { isBusyPeriod, opportunityHours } = await import("@/lib/collector/engine-setting");
+    expect(isBusyPeriod("2026-11-20", ["2026-11-27"])).toBe(true); // 7日後
+    expect(isBusyPeriod("2026-11-19", ["2026-11-27"])).toBe(false); // 8日後
+    expect(isBusyPeriod("2026-11-30", ["2026-11-27"])).toBe(true); // 3日後（経過）
+    expect(isBusyPeriod("2026-12-01", ["2026-11-27"])).toBe(false);
+    expect(isBusyPeriod("2026-11-20", [null, undefined, "不正"])).toBe(false);
+    expect(opportunityHours(false)).toHaveLength(4);
+    expect(opportunityHours(true)).toHaveLength(8);
+  });
+  it("費用の上限の既定は 日次100円・月次1,500円・1件15円。不正な値は既定に戻す", async () => {
+    const { autonomousCaps } = await import("@/lib/collector/engine-setting");
+    expect(autonomousCaps({})).toEqual({ dailyJpy: 100, monthlyJpy: 1500, perMissionJpy: 15 });
+    expect(autonomousCaps({ AUTONOMOUS_DAILY_CAP_JPY: "abc", AUTONOMOUS_MONTHLY_CAP_JPY: "-5", COLLECT_AUTONOMOUS_PER_MISSION_JPY: "0" })).toEqual({ dailyJpy: 100, monthlyJpy: 1500, perMissionJpy: 15 });
+    expect(autonomousCaps({ AUTONOMOUS_DAILY_CAP_JPY: "60" }).dailyJpy).toBe(60);
+  });
+  it("時間配分: 既定は調査100秒＋登録40秒。環境変数で短くでき、120秒を超えない", async () => {
+    const { autonomousTimeBudget } = await import("@/lib/collector/engine-setting");
+    expect(autonomousTimeBudget({})).toEqual({ missionMs: 100_000, totalMs: 140_000 });
+    expect(autonomousTimeBudget({ AUTONOMOUS_TIME_BUDGET_MS: "35000" })).toEqual({ missionMs: 35_000, totalMs: 75_000 });
+    expect(autonomousTimeBudget({ AUTONOMOUS_TIME_BUDGET_MS: "900000" }).missionMs).toBe(120_000);
+    expect(autonomousTimeBudget({ AUTONOMOUS_TIME_BUDGET_MS: "100" }).missionMs).toBe(100_000);
+  });
+  it("費用の配分: 上限に近ければ開始しない。枠の2件目以降は残りの機会への配分に収まるときだけ", async () => {
+    const { paceDecision } = await import("@/lib/collector/engine-setting");
+    expect(paceDecision({ dailyRemaining: 100, monthlyRemaining: 1500, slotSpent: 0, slotsLeftToday: 4, perMissionJpy: 15 }).ok).toBe(true);
+    expect(paceDecision({ dailyRemaining: 14, monthlyRemaining: 1500, slotSpent: 0, slotsLeftToday: 1, perMissionJpy: 15 })).toMatchObject({ ok: false });
+    expect(paceDecision({ dailyRemaining: 100, monthlyRemaining: 10, slotSpent: 0, slotsLeftToday: 4, perMissionJpy: 15 }).reason).toContain("今月");
+    // 4回の機会・残り100円: 1枠の配分は25円。1件目で10円使っても、2件目（10円）は収まる。3件目は収まらない
+    expect(paceDecision({ dailyRemaining: 90, monthlyRemaining: 1500, slotSpent: 10, slotsLeftToday: 4, perMissionJpy: 15 }).ok).toBe(true);
+    expect(paceDecision({ dailyRemaining: 80, monthlyRemaining: 1500, slotSpent: 20, slotsLeftToday: 4, perMissionJpy: 15 }).ok).toBe(false);
+    // 残りの機会が少ないほど、配分は大きい
+    expect(paceDecision({ dailyRemaining: 60, monthlyRemaining: 1500, slotSpent: 20, slotsLeftToday: 1, perMissionJpy: 15 }).ok).toBe(true);
+  });
+  it("通常期は、直前の調査で何も見つからなければ残りを見送る。繁忙期・失敗・成果ありは続ける", async () => {
+    const { slotWorthContinuing } = await import("@/lib/collector/engine-setting");
+    const empty = { status: "completed", found: 0, registered: 0, held: 0 };
+    expect(slotWorthContinuing({ busy: false, previous: [] }).ok).toBe(true);
+    expect(slotWorthContinuing({ busy: false, previous: [empty] }).ok).toBe(false);
+    expect(slotWorthContinuing({ busy: true, previous: [empty] }).ok).toBe(true);
+    expect(slotWorthContinuing({ busy: false, previous: [{ ...empty, found: 1 }] }).ok).toBe(true);
+    expect(slotWorthContinuing({ busy: false, previous: [{ ...empty, status: "failed" }] }).ok).toBe(true);
+  });
+});
