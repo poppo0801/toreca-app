@@ -19,8 +19,8 @@ import { assertProductionTarget } from "./lib/target.mjs";
 assertProductionTarget("release-db.mjs");
 const mode = process.argv[2];
 const arg = (n) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=")[1];
-if (!["plan", "apply"].includes(mode)) {
-  console.error("使い方: npm run prod -- scripts/release-db.mjs <plan|apply> [--plan-sha=…] --yes-production");
+if (!["plan", "approve", "apply"].includes(mode)) {
+  console.error("使い方: npm run prod -- scripts/release-db.mjs <plan|approve|apply> [--plan-sha=…] --yes-production");
   process.exit(2);
 }
 const sh = (args) => spawnSync("npx", ["supabase", ...args], { encoding: "utf8", shell: true, maxBuffer: 1 << 26 });
@@ -99,7 +99,23 @@ if (mode === "plan") {
   process.exit(blockers.length ? 3 : 0);
 }
 
-// ---- apply
+// ---- approve: 利用者が最終承認した計画の指紋を記録する（承認の発言を受けた後にだけ実行する。承認前は実行しない）。plan と一致しなければ記録しない
+const APPROVAL = "backups/release/db-approval.json";
+if (mode === "approve") {
+  if (arg("plan-sha") !== planSha) fail(`計画の指紋が一致しません（指定: ${arg("plan-sha") ?? "なし"} / 現在: ${planSha}）`);
+  if (blockers.length) fail(blockers.join(" / "));
+  mkdirSync("backups/release", { recursive: true });
+  writeFileSync(APPROVAL, JSON.stringify({ planSha, approvedAt: new Date().toISOString(), pending: review.map((r) => r.file) }, null, 1));
+  console.log(`承認を記録しました（plan-sha: ${planSha}。有効期間12時間）`);
+  process.exit(0);
+}
+
+// ---- apply: 承認の記録（同じ plan-sha・12時間以内）が無ければ実行しない
+let approval = null;
+try { approval = JSON.parse(readFileSync(APPROVAL, "utf8")); } catch { /* なし */ }
+if (!approval || approval.planSha !== planSha || Date.now() - new Date(approval.approvedAt).getTime() > 12 * 3600_000) {
+  fail("この計画の承認の記録がありません（承認前、または12時間を過ぎています）。利用者の最終承認の後に approve を実行してください");
+}
 if (arg("plan-sha") !== planSha) fail(`計画の指紋が承認時と一致しません（承認: ${arg("plan-sha") ?? "なし"} / 現在: ${planSha}）。状態が変わったため、計画を出し直して承認を取り直してください`);
 if (pending.length === 0) fail("適用する移行がありません");
 if (blockers.length) fail(blockers.join(" / "));

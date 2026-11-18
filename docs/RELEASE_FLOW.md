@@ -2,8 +2,8 @@
 
 Stage 9H-3R-Release で整備。**本番反映は「計画 → 利用者の承認（1回）→ 承認後は一括実行」**。ブランチ保護・CI必須・Claude Code の権限設定は変更・回避しない。詳細な個別手順の例は `docs/PRODUCTION_ROLLOUT_9H.md`。
 
-## 0. 前提（初回だけ利用者の操作。§6）
-GitHub CLI（`gh`）のサインイン／Claude Code に本番反映用の入口の許可を1度だけ与える／（環境変数も自動化するなら）Vercel のトークン。これらが無い項目は、その段階で止まり、利用者の操作を案内する。
+## 0. 前提（初回だけ利用者の操作。§6。2026-11-18 に完了）
+GitHub CLI（`gh`）のサインイン（済）／Vercel CLI のログイン（済）／`.claude/settings.local.json` の許可（済。Git管理外）。これらが切れている項目は、その段階で止まり、利用者の操作を案内する。`gh`・`vercel` は `%LOCALAPPDATA%\Programs\gh\bin`・npm グローバルにあり、PowerShell では先に PATH を通す。
 
 ## 1. 準備（承認前。Claude Code が実行。本番は読み取りのみ）
 | # | 内容 | コマンド・確認 |
@@ -20,7 +20,7 @@ GitHub CLI（`gh`）のサインイン／Claude Code に本番反映用の入口
 
 ## 2. 承認後の一括実行（細かな追加承認なし。重大な問題があれば停止して報告）
 1. **直前確認**: `git fetch`・本番のデプロイ済みコミット・`plan` を再実行し、**plan-sha が承認時と同じ**こと（違えば停止して再承認）。PR の CI がまだ緑で、head が承認時と同じこと。
-2. **DB更新**（必要なときだけ。§3 の順序）: `npm run prod -- scripts/release-db.mjs apply --plan-sha=<承認した値> --yes-production`（`db push --include-all`。前後で既存表の件数が不変・未適用が残らないことを確認。失敗したらそこで停止し、自動のやり直し・巻き戻しはしない）
+2. **DB更新**（必要なときだけ。§3 の順序）: 先に `release-db.mjs approve --plan-sha=<承認した値>` で**承認の記録**（`backups/release/db-approval.json`。plan と一致・12時間有効。**利用者の最終承認の発言を受けた後にだけ**実行）→ `npm run prod -- scripts/release-db.mjs apply --plan-sha=<承認した値> --yes-production`。承認の記録が無い・指紋が違う・期限切れなら apply は実行されない（`db push --include-all`。前後で既存表の件数が不変・未適用が残らないことを確認。失敗したらそこで停止し、自動のやり直し・巻き戻しはしない）
 3. **PRのマージ**: `gh pr merge <番号> --merge`（**`--admin` は使わない**。保護の条件を満たさなければマージされず、そこで停止）。Vercel が自動デプロイ。
 4. **デプロイ確認**: `npm run verify:prod` を繰り返し、「デプロイ: commit」がマージしたコミットになるまで待つ（上限10分）。全項目合格すること。
 5. **本番動作確認**: `npm run prod -- scripts/check-release-9h.mjs --yes-production --compare=backups/release-9h/pre-snapshot.json`（既存の件数・列・表・収集方式・RLS）／Cron: 収集の最終実行（`collection_runs`・`discovery_runs` の新しい行・エラー）を読み取りで確認。
@@ -48,9 +48,10 @@ AI費用の上限（日次100円・月次1,500円・1件15円）は環境変数�
 | 操作 | 状態 | 備考 |
 |---|---|---|
 | Git・テスト・ビルド・バックアップ・復元演習・本番の読み取り確認・移行の計画 | **自動** | 既存の入口（`npm run prod`・`backup:full`）で実施済み |
-| GitHub PR作成・CI確認・マージ | **`gh` のサインイン後に自動** | 初回だけ: `winget install --id GitHub.cli` → `gh auth login`（ブラウザでサインイン）。権限はあなたのアカウントのもの。保護は変更しない |
-| 本番DBマイグレーション | **許可の追加後に自動** | Claude Code の設定は `db push`・`--linked` の直接実行を禁止。承認済みの計画だけ適用する入口 `scripts/release-db.mjs` を使う。**利用者が内容を確認し、`.claude/settings.local.json` に `Bash(npm run prod -- scripts/release-db.mjs*)` の許可を追加**（設定ファイルの変更は利用者の判断。Claude は自分で権限を広げない） |
+| GitHub PR作成・CI確認・マージ | **自動**（`gh` サインイン済み） | PR #3（dev→main）。main のルールセット: PR必須（承認0）・force push禁止・CI必須の指定なし（運用で CI 緑を待つ）。`--admin` は使わない |
+| 本番DBマイグレーション | **自動**（許可済み・承認ゲートつき） | `scripts/release-db.mjs`（plan→approve→apply）。Claude Code の設定は `db push`・`--linked` の直接実行を禁止したまま。入口の許可は `.claude/settings.local.json`。apply は承認の記録（同じ plan-sha・12時間以内）が無いと動かない |
 | Vercel のデプロイ | **自動**（main へのマージで） | Vercel と GitHub は連携済み（Production Branch=main）。完了確認は `verify:prod` |
-| Vercel の環境変数（`AUTONOMOUS_COLLECTION=on` など） | **手動**（現状） | ダッシュボードで設定→再デプロイ。自動化するには、利用者が Vercel のトークンを `.env.production-ops` に置き、環境変数用の入口を追加（未実装。必要なら次の段階で） |
-| Cronの確認 | **自動（読み取り）** | 実行履歴をDBで確認。pg_cron の設定自体の確認（`select * from cron.job;`）は Supabase の SQL エディタ（利用者） |
-| Vercel の Fluid Compute の確認・即時のロールバック（Promote） | **手動** | ダッシュボード操作 |
+| Vercel の環境変数（`AUTONOMOUS_COLLECTION=on` など） | **自動**（Vercel CLI ログイン済み） | 確認: `vercel env ls`（値は伏せ字）。設定: `echo on \| vercel env add AUTONOMOUS_COLLECTION production`、削除: `vercel env rm AUTONOMOUS_COLLECTION production --yes`。環境変数は**次のデプロイから**有効（設定後に再デプロイが必要）。設定・削除は承認の対象 |
+| Cronの確認 | **自動（読み取り）** | `npm run prod -- scripts/check-cron-prod.mjs --yes-production`（呼び出しの応答・間隔・収集の実行履歴）。`cron.job` の定義そのものは `--linked` が禁止のため読まない（間隔から確認。定義の確認が必要なら Supabase の SQL エディタ `select * from cron.job;`） |
+| Vercel の Fluid Compute・実行時間 | **自動（読み取り）** | `vercel api /v9/projects/toreca-app`（Fluid=有効・既定の最大実行時間300秒・Hobby）。コードの maxDuration=180秒は範囲内 |
+| 即時のロールバック（Promote） | 自動可（承認の対象） | `vercel promote <直前のデプロイ>` または revert の PR |
