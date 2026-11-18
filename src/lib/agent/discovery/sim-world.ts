@@ -3,6 +3,7 @@
  * 検索は語の一致で上位を返す（実検索の代わり）。取得は登録されたページだけ。制限（robots）を再現できる。
  */
 import type { DiscoveryWorld, ExistingLottery, KnownStore } from "./types";
+import { sameStore } from "./verify";
 
 export interface SimPage {
   title: string;
@@ -40,7 +41,7 @@ export function createSimWorld(spec: SimWorldSpec): SimWorld {
     lastSearchCostJpy: () => spec.searchCostJpy ?? 0,
     async existing(q) {
       const ex = spec.existing ?? [];
-      return ex.filter((e) => (!!q.url && e.sourceUrls.includes(q.url)) || ((!q.chain || norm(e.chain) === norm(q.chain)) && (!q.store || norm(e.store).replace(/店$/, "") === norm(q.store).replace(/店$/, "")) && (!q.product || e.products.some((p) => norm(p).includes(norm(q.product ?? "")) || norm(q.product ?? "").includes(norm(p))))));
+      return ex.filter((e) => (!!q.url && e.sourceUrls.includes(q.url)) || ((!q.chain || norm(e.chain) === norm(q.chain)) && (!q.store || sameStore(e.store, e.chain, q.store, q.chain)) && (!q.product || e.products.some((p) => norm(p).includes(norm(q.product ?? "")) || norm(q.product ?? "").includes(norm(p))))));
     },
     async knownStores(chain) {
       return spec.stores?.[chain] ?? [];

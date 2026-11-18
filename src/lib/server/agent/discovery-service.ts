@@ -59,6 +59,8 @@ export interface AutonomousDeps {
   costRecorder?: { record(missionId: string, costJpy: number): void };
   beforeMission?: (m: DiscoveryMission) => void;
   perMissionJpy?: number;
+  /** 実行中の費用の累計（円）。例外・途中終了でも、消費した費用を調査履歴に記録するために使う */
+  costSoFar?: () => number;
   /** 解析エンジン（既定は無料の規則ベース。実AIの解析は呼び出し側が承認された範囲で渡す） */
   extractor?: LotteryExtractor | null;
   sleep?: (ms: number) => Promise<void>;
@@ -67,7 +69,7 @@ export interface AutonomousDeps {
   timeBudgetMs?: number;
   /** ログインなし（service_role）からの登録 */
   asService?: boolean;
-  env?: { toremaneEnv?: string };
+  env?: { toremaneEnv?: string; enabled?: boolean };
 }
 
 export async function releaseLock(db: Db, householdId: string): Promise<void> {
@@ -132,7 +134,7 @@ export async function intakeRecord(o: { db: Db; householdId: string; record: Dis
       out.push({ ...base, outcome: "skipped", reason: "取得済みのページが見つからないため再解析できません" });
       continue;
     }
-    const iw = createInvestigationWorld({ db: o.db, householdId: o.householdId, now: o.now, live: false, extractor: o.extractor, fetcher: async () => ({ ok: true, title: page.title, text: page.text, links: page.links }) });
+    const iw = createInvestigationWorld({ db: o.db, householdId: o.householdId, now: o.now, live: false, allowProvisionalStore: true, ...(c.store && !c.selectMode ? { storeHint: c.store } : {}), extractor: o.extractor, fetcher: async () => ({ ok: true, title: page.title, text: page.text, links: page.links }) });
     let preview;
     try {
       preview = await iw.world.analyze!({ url: c.sourceUrl, title: page.title, text: page.text, links: page.links });
@@ -183,7 +185,7 @@ export function countsOf(records: DiscoveryRunRecord[], outcomes: IntakeOutcome[
 export async function runAutonomousCollection(d: AutonomousDeps): Promise<AutonomousResult> {
   const { db, householdId: hid, now } = d;
   const settings = (await anyDb(db).from("collection_settings").select("collection_engine,prefectures,auto_register,schedule_hour_jst,schedule_hour2_jst").eq("household_id", hid).maybeSingle()).data as { collection_engine?: string; prefectures?: string[]; auto_register?: boolean; schedule_hour_jst?: number; schedule_hour2_jst?: number | null } | null;
-  const eff = resolveEffectiveEngine({ stored: settings?.collection_engine, loadFailed: !settings, toremaneEnv: d.env?.toremaneEnv ?? process.env.TOREMANE_ENV });
+  const eff = resolveEffectiveEngine({ stored: settings?.collection_engine, loadFailed: !settings, toremaneEnv: d.env?.toremaneEnv ?? process.env.TOREMANE_ENV, enabled: d.env?.enabled ?? process.env.AUTONOMOUS_COLLECTION === "on" });
   if (eff.engine !== "autonomous") return { ok: false, skipped: true, reason: eff.note ?? "収集方式が自律型AI主体ではありません" };
   // 従来方式の収集が実行中なら開始しない（同時に本登録処理を行わない）
   const legacyRunning = await db.from("collection_runs").select("id").eq("household_id", hid).eq("status", "running").gte("started_at", new Date(now.getTime() - 30 * 60_000).toISOString()).limit(1);
@@ -192,6 +194,7 @@ export async function runAutonomousCollection(d: AutonomousDeps): Promise<Autono
   if (!(await acquireLock(db, hid, now))) return { ok: false, skipped: true, reason: "自律型の収集が実行中です（二重起動しません）" };
 
   let runId: string | undefined;
+  const cost0 = d.costSoFar?.() ?? 0;
   try {
     // 異常終了で残った実行中の記録を閉じる
     await anyDb(db).from("discovery_runs").update({ status: "failed", error: "実行が完了しないまま期限を過ぎたため終了として記録", finished_at: now.toISOString() }).eq("household_id", hid).eq("status", "running").lt("started_at", new Date(now.getTime() - LOCK_MS).toISOString());
@@ -240,7 +243,9 @@ export async function runAutonomousCollection(d: AutonomousDeps): Promise<Autono
   } catch (e) {
     // 失敗は記録に残す。応募・既存の抽選・方式の設定には影響させない（自動で従来方式へ切り替えない）
     const msg = ((e as Error).message ?? "不明なエラー").slice(0, 250);
-    if (runId) await anyDb(db).from("discovery_runs").update({ status: "failed", error: msg, finished_at: new Date().toISOString() }).eq("id", runId);
+    // 失敗・途中終了でも、消費した費用は記録する（本番の日次・月次の上限は、この記録から計算する）
+    const spent = Math.max(0, (d.costSoFar?.() ?? 0) - cost0);
+    if (runId) await anyDb(db).from("discovery_runs").update({ status: "failed", error: msg, finished_at: new Date().toISOString(), cost_jpy: Math.round(spent * 100) / 100 }).eq("id", runId);
     return { ok: false, error: msg, runId };
   } finally {
     await releaseLock(db, hid).catch(() => undefined);

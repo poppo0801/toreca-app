@@ -98,3 +98,39 @@ describe("実AI・実検索の関門（有料。承認なしには接続しな�
     expect(new ToolRegistry().names()).toEqual([]);
   });
 });
+
+describe("9H-3R: 本番での有効化条件と費用管理（本番の収集方式は変更しない。許可は環境変数で明示）", () => {
+  it("開発環境、または AUTONOMOUS_COLLECTION=on のときだけ自律型を使える。許可がなければ設定が autonomous でも従来方式（保存値は保持）", async () => {
+    const { autonomousAllowed } = await import("./engine-setting");
+    expect(autonomousAllowed({ TOREMANE_ENV: "local" })).toBe(true);
+    expect(autonomousAllowed({ AUTONOMOUS_COLLECTION: "on" })).toBe(true);
+    expect(autonomousAllowed({})).toBe(false);
+    expect(autonomousAllowed({ AUTONOMOUS_COLLECTION: "yes" })).toBe(false);
+    expect(resolveEffectiveEngine({ stored: "autonomous" })).toMatchObject({ engine: "legacy", stored: "autonomous" });
+    expect(resolveEffectiveEngine({ stored: "autonomous", enabled: true })).toMatchObject({ engine: "autonomous", note: null });
+    // 許可を外すだけで従来方式に戻る（設定・データは変えない）
+    expect(resolveEffectiveEngine({ stored: "autonomous", enabled: false }).engine).toBe("legacy");
+  });
+  const prodEnv = { AUTONOMOUS_COLLECTION: "on", ANTHROPIC_API_KEY: "sk-prod-secret" };
+  const factory = () => ({ messages: { create: () => { throw new Error("呼ばれてはいけない"); } } });
+  it("本番の接続: 許可・キー・残り予算が揃わなければ接続しない（理由にキーを含めない）。予算が1件の上限に満たなければ開始しない", () => {
+    expect(realDiscoveryDeps({ env: {}, clientFactory: factory }).ok).toBe(false);
+    expect(realDiscoveryDeps({ env: { AUTONOMOUS_COLLECTION: "on" }, budgetRemainingJpy: 50, clientFactory: factory }).ok).toBe(false);
+    const noBudget = realDiscoveryDeps({ env: prodEnv, clientFactory: factory });
+    expect(noBudget.ok).toBe(false);
+    const low = realDiscoveryDeps({ env: prodEnv, budgetRemainingJpy: 3, clientFactory: factory });
+    expect(low).toMatchObject({ ok: false });
+    expect(JSON.stringify([noBudget, low])).not.toContain("sk-prod-secret");
+    const ok = realDiscoveryDeps({ env: prodEnv, budgetRemainingJpy: 25, clientFactory: factory });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.guard.spentJpy).toBe(0);
+      expect(ok.ledgerFile).toBe("(db)");
+    }
+  });
+  it("店舗名の屋号・ブランド名つきの表記を同じ店舗として扱う（短い名称では同一視しない）", async () => {
+    const { sameStore } = await import("@/lib/agent/discovery/verify");
+    expect(sameStore("ビデオインアメリカ 西七条店", "トレカチャンピオン（ビデオインアメリカ西七条店）", "西七条店", "トレカチャンピオン")).toBe(true);
+    expect(sameStore("北店", "A", "大北店", "A")).toBe(false);
+  });
+});

@@ -7,6 +7,7 @@ import { AnthropicWebSearch } from "@/lib/agent/anthropic";
 import { RealRunGuard, type LedgerState } from "@/lib/agent/collection-planner/real-guard";
 import { createDiscoveryBrain } from "@/lib/agent/discovery/real-brain";
 import { checkRealApi } from "@/lib/agent/real-gate";
+import { DEFAULT_AI_MODEL } from "@/lib/ai-cost";
 import type { PageFetcher, SearchProvider } from "@/lib/agent/store-location/tools";
 
 /**
@@ -21,8 +22,30 @@ export const PER_MISSION_DEFAULT_JPY = 8;
 
 export type RealDiscoveryDeps = { ok: true; guard: RealRunGuard; llmFor: () => AgentLLM; search: SearchProvider; perMissionJpy: number; ledgerFile: string } | { ok: false; reason: string };
 
-export function realDiscoveryDeps(o: { env: Record<string, string | undefined>; clientFactory?: (apiKey: string) => unknown; ledgerDir?: string; fetcher?: PageFetcher }): RealDiscoveryDeps {
+/**
+ * 本番（Vercel）での接続。開発環境の関門（real-gate.ts）とは別に、明示的な許可（AUTONOMOUS_COLLECTION=on）と、DBに記録された費用から決めた「今日・今月の残り予算」を使う。
+ *   キー: AUTONOMOUS_ANTHROPIC_API_KEY（あれば）、なければ既存の ANTHROPIC_API_KEY（既存のAI解析と同じ契約・追加契約なし）
+ *   予算: 呼び出し側（autonomous-hook）が、DBの実行履歴（discovery_runs.cost_jpy）から日次・月次の上限の残りを計算して渡す。残りが1件の上限に満たなければ開始しない
+ *   台帳: Vercelではファイルに書けないため、費用の記録は調査履歴（DB）に残す（実行の前後で更新。失敗・途中終了でも消費分を記録する）
+ */
+function prodDeps(o: { env: Record<string, string | undefined>; clientFactory?: (apiKey: string) => unknown; budgetRemainingJpy?: number }): RealDiscoveryDeps {
   const e = o.env;
+  if (e.AUTONOMOUS_COLLECTION !== "on") return { ok: false, reason: "本番での自律型AI主体が有効になっていません（AUTONOMOUS_COLLECTION=on が必要）" };
+  const key = (e.AUTONOMOUS_ANTHROPIC_API_KEY ?? e.ANTHROPIC_API_KEY)?.trim();
+  if (!key) return { ok: false, reason: "AIのAPIキーが設定されていません" };
+  const perMission = Number(e.COLLECT_AUTONOMOUS_PER_MISSION_JPY) > 0 ? Number(e.COLLECT_AUTONOMOUS_PER_MISSION_JPY) : PER_MISSION_DEFAULT_JPY;
+  const remaining = o.budgetRemainingJpy;
+  if (remaining === undefined) return { ok: false, reason: "今日・今月の残り予算を確認できないため、有料の実行は開始しません" };
+  if (remaining < perMission) return { ok: false, reason: `今日または今月の費用の上限に達しているため開始しません（残り ${remaining.toFixed(1)}円）` };
+  const model = e.AUTONOMOUS_MODEL?.trim() || DEFAULT_AI_MODEL;
+  const guard = new RealRunGuard({ capJpy: remaining, perCaseJpy: perMission, model, spentBefore: 0 });
+  const raw = (o.clientFactory ? o.clientFactory(key) : new Anthropic({ apiKey: key, maxRetries: 0, timeout: 60_000 })) as Anthropic;
+  return { ok: true, guard, llmFor: () => createDiscoveryBrain(guard.wrapClient(raw, "agent"), model), search: new AnthropicWebSearch(raw, model), perMissionJpy: perMission, ledgerFile: "(db)" };
+}
+
+export function realDiscoveryDeps(o: { env: Record<string, string | undefined>; clientFactory?: (apiKey: string) => unknown; ledgerDir?: string; fetcher?: PageFetcher; /** 本番: 今日・今月の残り予算（円） */ budgetRemainingJpy?: number }): RealDiscoveryDeps {
+  const e = o.env;
+  if (e.TOREMANE_ENV !== "local") return prodDeps(o);
   const cap = Number(e.COLLECT_AUTONOMOUS_CAP_JPY);
   if (!(cap > 0)) return { ok: false, reason: "実AIの累計上限（COLLECT_AUTONOMOUS_CAP_JPY）が未設定です" };
   const g = checkRealApi({ env: e, confirm: e.COLLECT_AUTONOMOUS_CONFIRM === "yes", runsToday: 0 });

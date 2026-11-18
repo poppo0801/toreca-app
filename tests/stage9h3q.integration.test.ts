@@ -34,6 +34,7 @@ const world = (over: Partial<SimWorldSpec> = {}): SimWorldSpec => ({
   pages: {
     [SEED]: { title: "ハドウシーカー 抽選のお知らせ", text: `テスト玩具 梅田店 ハドウシーカー 抽選販売 応募受付\n【抽選】系列: テスト玩具 / 店舗: 梅田店 / 商品: ハドウシーカー / 応募期間: ${md(1)}〜${md(6)}`, links: [{ url: STORES, text: "店舗一覧" }] },
     [ROOT]: { title: "テスト玩具 公式", text: "公式サイト 抽選販売のご案内", links: [{ url: STORES, text: "店舗一覧" }] },
+    [ROOT.replace(/\/$/, "")]: { title: "テスト玩具 公式", text: "公式サイト 抽選販売のご案内", links: [{ url: STORES, text: "店舗一覧" }] },
     [STORES]: { title: "店舗一覧", text: "テスト玩具 店舗一覧\n- 梅田店（大阪府）\n- 三宮店（兵庫県）\n- 難波店（大阪府）\n- 東京駅店（東京都）", searchable: false },
     ...page("三宮店", "s-sannomiya"),
     ...page("難波店", "s-namba"),
@@ -244,6 +245,69 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3Q: 自律型収集の統合", () => 
       expect((await tbl("collection_settings").select("collection_engine").eq("household_id", hid).single()).data.collection_engine).toBe("autonomous");
     } finally {
       process.env.TOREMANE_ENV = saved;
+    }
+  });
+
+  it("店舗マスターに無い未知の店舗も、公式の店舗一覧から見つけて、仮登録（未確認の新規店舗）として登録する。系列が不明なものは登録しない", async () => {
+    await tbl("discovery_runs").update({ slot: "old6" }).eq("household_id", hid);
+    const spec = world();
+    spec.pages[STORES].text += "\n- 新規開拓店（大阪府）";
+    Object.assign(spec.pages, page("新規開拓店", "s-newshop"));
+    const before = await lots();
+    const out = await runAutonomousCollection(deps(spec));
+    if (!out.ok) throw new Error(JSON.stringify(out));
+    expect(out.outcomes.filter((o) => o.outcome === "registered").length, JSON.stringify({ o: out.outcomes, l: out.records[0]?.leads.map((l) => [l.lead.store, l.decision.status, l.decision.reason]), f: out.records[0]?.followUps.map((f) => `${f.action}:${f.input}`), stop: out.records[0]?.stop, m: out.counts })).toBe(1);
+    const added = (await lots()).filter((l) => !before.some((b) => b.id === l.id));
+    expect(added).toHaveLength(1);
+    const store = (await sys.from("stores").select("name,chain_id").eq("id", added[0].store_id!).single()).data!;
+    expect(store.name).toBe("新規開拓店");
+    expect(store.chain_id).toBe(chainId);
+    // 根拠が保存される
+    const o = ((await tbl("lottery_discovery_origins").select("source_url,evidence_quote").eq("lottery_id", added[0].id)).data ?? []) as { source_url: string; evidence_quote: string }[];
+    expect(o).toHaveLength(1);
+    expect(o[0].source_url).toContain("s-newshop");
+  });
+
+  it("本番の費用管理: 調査履歴の費用から今日・今月の残り予算を計算する。失敗・途中終了でも消費した費用が記録される", async () => {
+    const { budgetRemainingJpy } = await import("@/lib/server/collector/autonomous-hook");
+    await tbl("discovery_runs").delete().eq("household_id", hid);
+    expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "30", AUTONOMOUS_MONTHLY_CAP_JPY: "300" })).toBe(30);
+    await tbl("discovery_runs").insert({ household_id: hid, trigger: "cron", status: "completed", slot: "b1", started_at: NOW.toISOString(), cost_jpy: 12 });
+    expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "30", AUTONOMOUS_MONTHLY_CAP_JPY: "300" })).toBe(18);
+    expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "30", AUTONOMOUS_MONTHLY_CAP_JPY: "20" })).toBe(8); // 月の上限が先に尽きる
+    expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "10", AUTONOMOUS_MONTHLY_CAP_JPY: "300" })).toBe(0);
+    await tbl("discovery_runs").delete().eq("household_id", hid);
+    // 例外で途中終了しても、消費した費用を記録する
+    let spent = 0;
+    const r = await runAutonomousCollection(deps(world(), { costSoFar: () => spent, llmFor: () => { spent = 6.5; throw new Error("想定外の例外"); } }));
+    expect(r.ok).toBe(false);
+    const row = (await tbl("discovery_runs").select("status,cost_jpy").eq("household_id", hid).order("started_at", { ascending: false }).limit(1)).data[0];
+    expect(row.status).toBe("failed");
+    expect(Number(row.cost_jpy)).toBe(6.5);
+    expect((await tbl("collection_settings").select("collection_engine,autonomous_lock_until").eq("household_id", hid).single()).data).toEqual({ collection_engine: "autonomous", autonomous_lock_until: null });
+  });
+
+  it("本番で明示的に許可（AUTONOMOUS_COLLECTION=on）しても、キー・予算が揃わなければ実行せず理由を記録する。許可がなければ何もしない", async () => {
+    const { runAutonomousInCron } = await import("@/lib/server/collector/autonomous-hook");
+    const keep = { e: process.env.TOREMANE_ENV, a: process.env.AUTONOMOUS_COLLECTION, k: process.env.ANTHROPIC_API_KEY, k2: process.env.AUTONOMOUS_ANTHROPIC_API_KEY };
+    try {
+      delete process.env.TOREMANE_ENV;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.AUTONOMOUS_ANTHROPIC_API_KEY;
+      process.env.AUTONOMOUS_COLLECTION = "off";
+      expect(await runAutonomousInCron({ db: sys, householdId: hid, now: NOW, hours: [6, 18], extractor: null })).toMatchObject({ status: "disabled" });
+      process.env.AUTONOMOUS_COLLECTION = "on";
+      await tbl("discovery_runs").delete().eq("household_id", hid);
+      const before = await count("lotteries");
+      const r = await runAutonomousInCron({ db: sys, householdId: hid, now: NOW, hours: [6, 18], extractor: null });
+      expect(r.status).toBe("skipped");
+      expect(r.message).toContain("キー");
+      expect(await count("lotteries")).toBe(before);
+    } finally {
+      for (const [k, v] of [["TOREMANE_ENV", keep.e], ["AUTONOMOUS_COLLECTION", keep.a], ["ANTHROPIC_API_KEY", keep.k], ["AUTONOMOUS_ANTHROPIC_API_KEY", keep.k2]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
   });
 

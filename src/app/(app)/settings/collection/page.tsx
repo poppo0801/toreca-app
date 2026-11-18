@@ -202,10 +202,10 @@ export default async function CollectionPage() {
       {await (async (householdIdForEngine: string) => {
         // 情報収集方式（9H-3Q）: 設定・最終実行の状況。読み込みに失敗しても画面全体は表示する（従来方式として扱う）
         const eo = await loadOpsStatus(db as never, householdIdForEngine).catch(() => null);
-        const eff = resolveEffectiveEngine({ stored: eo?.stored, loadFailed: !eo || eo.loadFailed, toremaneEnv: process.env.TOREMANE_ENV });
+        const eff = resolveEffectiveEngine({ stored: eo?.stored, loadFailed: !eo || eo.loadFailed, toremaneEnv: process.env.TOREMANE_ENV, enabled: process.env.AUTONOMOUS_COLLECTION === "on" });
         return (
           <div className="mb-3">
-            <CollectionEngineCard stored={eff.stored} note={eff.note} autonomousAvailable={process.env.TOREMANE_ENV === "local"} runs={(eo?.runs ?? []) as never} />
+            <CollectionEngineCard stored={eff.stored} note={eff.note} autonomousAvailable={process.env.TOREMANE_ENV === "local" || process.env.AUTONOMOUS_COLLECTION === "on"} runs={(eo?.runs ?? []) as never} />
           </div>
         );
       })(hh.data.id)}

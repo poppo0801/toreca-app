@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { resolveEffectiveEngine } from "@/lib/collector/engine-setting";
+import { autonomousAllowed, resolveEffectiveEngine } from "@/lib/collector/engine-setting";
 import { createClient } from "@/lib/supabase/server";
 import { runAutonomousManual } from "@/lib/server/collector/autonomous-hook";
 import { getExtractor } from "@/lib/ai/provider";
@@ -24,7 +24,7 @@ export async function setCollectionEngineAction(engine: string): Promise<EngineA
   if (!p.success) return { ok: false, error: "不正な指定です" };
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
-  if (p.data === "autonomous" && process.env.TOREMANE_ENV !== "local") return { ok: false, error: "自律型AI主体は開発環境のみで利用できます（本番への導入は別の手順で行います）" };
+  if (p.data === "autonomous" && !autonomousAllowed({ TOREMANE_ENV: process.env.TOREMANE_ENV, AUTONOMOUS_COLLECTION: process.env.AUTONOMOUS_COLLECTION })) return { ok: false, error: "自律型AI主体はこの環境で有効になっていません（環境変数 AUTONOMOUS_COLLECTION=on が必要です）" };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい列は生成型に無い（マイグレーション104）
   const { data, error } = await (c.db as any).from("collection_settings").update({ collection_engine: p.data, collection_engine_changed_at: new Date().toISOString() }).eq("household_id", c.householdId).select("collection_engine");
   if (error || !data || data.length !== 1) return { ok: false, error: "保存できませんでした。画面を再読み込みしてもう一度お試しください" };
@@ -37,7 +37,7 @@ export async function runAutonomousNowAction(): Promise<EngineActionResult> {
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
   const row = (await (c.db as any).from("collection_settings").select("collection_engine").eq("household_id", c.householdId).maybeSingle()).data as { collection_engine?: string } | null; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const eff = resolveEffectiveEngine({ stored: row?.collection_engine, loadFailed: !row, toremaneEnv: process.env.TOREMANE_ENV });
+  const eff = resolveEffectiveEngine({ stored: row?.collection_engine, loadFailed: !row, toremaneEnv: process.env.TOREMANE_ENV, enabled: process.env.AUTONOMOUS_COLLECTION === "on" });
   if (eff.engine !== "autonomous") return { ok: false, error: eff.note ?? "収集方式が自律型AI主体ではありません" };
   const out = await runAutonomousManual({ db: c.db, householdId: c.householdId, extractor: getExtractor() });
   revalidatePath("/settings/collection");

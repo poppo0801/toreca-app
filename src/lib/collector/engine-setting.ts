@@ -18,11 +18,14 @@ export interface EffectiveEngine {
   note: string | null;
 }
 
-export function resolveEffectiveEngine(o: { stored: unknown; loadFailed?: boolean; toremaneEnv?: string }): EffectiveEngine {
+/** 自律型AI主体を使ってよい環境か。開発環境（TOREMANE_ENV=local）、または明示的な許可（AUTONOMOUS_COLLECTION=on。本番は利用者が環境変数で有効にしたときだけ） */
+export const autonomousAllowed = (env: { TOREMANE_ENV?: string; AUTONOMOUS_COLLECTION?: string }): boolean => env.TOREMANE_ENV === "local" || env.AUTONOMOUS_COLLECTION === "on";
+
+export function resolveEffectiveEngine(o: { stored: unknown; loadFailed?: boolean; toremaneEnv?: string; /** 本番での明示的な許可（AUTONOMOUS_COLLECTION=on） */ enabled?: boolean }): EffectiveEngine {
   if (o.loadFailed) return { engine: "legacy", stored: null, note: "収集方式の設定を読み込めなかったため、今回は従来方式で実行します（設定は変更していません）" };
   const stored = parseEngine(o.stored);
   if (stored === null) return { engine: "legacy", stored: null, note: "収集方式の設定が不正なため、従来方式で実行します" };
-  if (stored === "autonomous" && o.toremaneEnv !== "local") return { engine: "legacy", stored, note: "自律型AI主体は開発環境のみで利用できます（本番の導入は別の手順）。従来方式で実行します" };
+  if (stored === "autonomous" && o.toremaneEnv !== "local" && !o.enabled) return { engine: "legacy", stored, note: "自律型AI主体はこの環境で有効になっていません（環境変数 AUTONOMOUS_COLLECTION=on が必要）。従来方式で実行します" };
   return { engine: stored, stored, note: null };
 }
 

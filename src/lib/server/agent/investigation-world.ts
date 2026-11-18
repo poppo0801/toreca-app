@@ -41,6 +41,10 @@ export function createInvestigationWorld(o: {
   previous?: InvestigationSignals["previous"];
   /** テスト用: 取得の差し替え */
   fetcher?: PlannerWorld["fetchPage"];
+  /** 自律探索の登録経路（9H-3R）: 店舗マスターに無い店舗でも、名称が明確で近い候補が無ければ、仮登録（未確認の新規店舗）として扱う。既存の収集の isReady と同じ基準 */
+  allowProvisionalStore?: boolean;
+  /** 自律探索（9H-3R）: 再解析の解析エンジンが店舗名を読めない（マスターに無い店舗など）場合だけ、検証層が根拠の原文で確認済みの店舗名を使う。読めた場合は解析の結果を優先する（AIの報告との照合は別に行う） */
+  storeHint?: string;
 }): InvestigationWorld {
   const drafts = new Map<string, LotteryInput>();
   let data: AppData | null = null;
@@ -67,6 +71,7 @@ export function createInvestigationWorld(o: {
       });
     const out = await extractor.extract({ kind: "url", text: `${page.title}\n${page.text}`, sourceUrl: page.url, now: o.now });
     const ex = normalizeExtraction(out.raw, o.now);
+    if (o.storeHint && !ex.storeName.trim() && ex.applyUnit !== "store_select") ex.storeName = o.storeHint;
     const draft = buildDraft(ex, d, { sourceUrl: page.url });
     const input = draft.input;
     const chainName = input.chain.name || ex.chainName;
@@ -100,7 +105,9 @@ ${page.text}` });
     if (!kind.actionable) blockers.push(`ページの主題が抽選の告知と確認できません（${KIND_LABEL[kind.kind]}: ${kind.reasons[0] ?? ""}）`);
     if (!recognized) blockers.push("抽選として認識できません");
     if (draft.summary.chain !== "exact" && draft.summary.chain !== "alias") blockers.push("系列を確実に特定できません");
-    if (!isSelect && draft.summary.store !== "exact" && draft.summary.store !== "alias") blockers.push("店舗を確実に特定できません（応募時に店舗を選ぶ抽選ではありません）");
+    const storeName0 = input.store.name.trim();
+    const provisionalStore = !!o.allowProvisionalStore && !isSelect && !input.store.id && draft.summary.store === "none" && draft.candidates.store.length === 0 && storeName0.length >= 2 && storeName0.length <= 40 && !/https?:|www\./i.test(storeName0);
+    if (!isSelect && !provisionalStore && draft.summary.store !== "exact" && draft.summary.store !== "alias") blockers.push("店舗を確実に特定できません（応募時に店舗を選ぶ抽選ではありません）");
     if (draft.summary.items.length === 0) blockers.push("商品が読み取れません");
     else if (draft.summary.items.some((i) => !["exact", "alias", "code"].includes(i.kind))) blockers.push("商品がマスターと確実に一致しません");
     if (dup.length > 0) blockers.push("登録済みの抽選と同じものの可能性があります");

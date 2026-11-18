@@ -9,7 +9,8 @@ import { HostThrottle } from "@/lib/agent/collection-planner/throttle";
 import { judgeRegion } from "@/lib/collector/region";
 import type { MissionBudget } from "./controls";
 import type { DiscoveryMission, DiscoveryWorld, FocusDeclaration, FollowUp, RecordedLead, SourceUse } from "./types";
-import { storeKeyOf, urlKeyOf, verifyLead, type VerifyContext } from "./verify";
+import { classifyCaseSource, type CaseSourceKind } from "@/lib/agent/case-investigator/source-class";
+import { sameStore, urlKeyOf, verifyLead, type VerifyContext } from "./verify";
 
 const hostOf = (u: string): string => {
   try {
@@ -18,6 +19,7 @@ const hostOf = (u: string): string => {
     return "";
   }
 };
+const SOURCE_LABEL: Record<CaseSourceKind, string> = { organizer_official: "公式サイト", store_official: "店舗の公式ページ", official_social: "公式SNS", platform: "応募サービス", aggregator: "まとめサイト", social_other: "SNS投稿", unknown: "種類不明の情報源" };
 const lotteryWord = /抽選|応募|エントリー|予約受付|当選/;
 /** 個人情報・認証情報らしき検索語は送らない */
 const UNSAFE_QUERY = /[\w.+-]+@[\w-]+\.[\w.]+|0\d{1,4}-?\d{1,4}-?\d{3,4}|password|パスワード|api[_ -]?key|秘密鍵/i;
@@ -62,7 +64,7 @@ export function buildDiscoveryTools(o: BuildToolsOptions): ToolRegistry {
   const throttle = o.throttle ?? new HostThrottle(o.budget.throttle);
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const stepOf = (ctx: { budget: { usage: { steps: number } } }) => ctx.budget.usage.steps;
-  const vctx = (): VerifyContext => ({ pages: new Map([...state.pages].map(([u, p]) => [u, { title: p.title, text: p.text }])), targetPrefectures: mission.targetPrefectures, knownStores: knownStoresCache, world, seen: state.seen });
+  const vctx = (): VerifyContext => ({ pages: new Map([...state.pages].map(([u, p]) => [u, { title: p.title, text: p.text }])), targetPrefectures: mission.targetPrefectures, knownStores: knownStoresCache, world, seen: state.seen, classify: (u) => { const c = classifyCaseSource(u, { officialHosts: [...state.allowed].map(hostOf).filter(Boolean), officialAccounts: [], aggregatorHosts: [], aggregatorAccounts: [] }); return { label: SOURCE_LABEL[c.kind], secondary: c.tier === "secondary" }; } });
   let knownStoresCache: Awaited<ReturnType<DiscoveryWorld["knownStores"]>> = [];
   const chainOf = (i: Record<string, unknown>): string => String(i.chain ?? mission.trigger.chain ?? "");
 
@@ -193,7 +195,7 @@ export function buildDiscoveryTools(o: BuildToolsOptions): ToolRegistry {
     access: "read_internal",
     async run(i, ctx) {
       const store = String(i.store ?? "");
-      const m = knownStoresCache.find((s) => storeKeyOf(s.name) === storeKeyOf(store));
+      const m = knownStoresCache.find((s) => sameStore(s.name, chainOf(i), store, chainOf(i)));
       const j = judgeRegion({ masterPrefecture: m?.prefecture ?? null, address: m?.address ?? null, storeName: store, statedPrefecture: i.statedPrefecture ? String(i.statedPrefecture) : null });
       const t = mission.targetPrefectures;
       const verdict = t.length === 0 ? "対象（地域の制限なし）" : j.basis === "none" || j.basis === "conflict" || !j.prefecture ? "不明（除外されません）" : t.includes(j.prefecture) ? `対象地域の内（${j.prefecture}）` : `対象地域の外（${j.prefecture}）`;

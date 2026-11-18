@@ -60,7 +60,7 @@ async function handle(req: NextRequest) {
     }
     // 収集方式（Stage 9H-3Q）: 設定を実行ごとに読み直す。読めない・不正なら従来方式（設定は書き換えない）。自律型は開発環境のみ
     const engRow = await db.from("collection_settings").select("collection_engine").eq("household_id", t.household_id).maybeSingle();
-    const eng = resolveEffectiveEngine({ stored: (engRow.data as { collection_engine?: string } | null)?.collection_engine, loadFailed: !!engRow.error, toremaneEnv: process.env.TOREMANE_ENV });
+    const eng = resolveEffectiveEngine({ stored: (engRow.data as { collection_engine?: string } | null)?.collection_engine, loadFailed: !!engRow.error, toremaneEnv: process.env.TOREMANE_ENV, enabled: process.env.AUTONOMOUS_COLLECTION === "on" });
     if (eng.engine === "autonomous" && t.schedule_enabled) {
       // 自律型AI主体（開発環境のみ）: 時間枠・排他・実AIの関門・費用の上限は呼び出し口が判定する。失敗しても、ワーカーなど他の処理は続ける
       const r = await runAutonomousInCron({ db, householdId: t.household_id, now, hours: [t.schedule_hour_jst, t.schedule_hour2_jst], extractor: getExtractor() });

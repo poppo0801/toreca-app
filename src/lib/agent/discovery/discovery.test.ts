@@ -297,3 +297,59 @@ describe("自律型エンジンの組み立て（共通の候補の形で返す�
     expect(brain.name).toBeTruthy();
   });
 });
+
+describe("9H-3R: 実Web検証で見つかった不具合の回帰（店舗名の表記揺れ・費用の関門による停止）", () => {
+  it("店舗名の表記揺れ（先頭の系列名・括弧書き・末尾の店）を同じ店舗として照合する。別の店舗は同一視しない", async () => {
+    const { sameStore } = await import("./verify");
+    expect(sameStore("カードラボ大阪日本橋店", "カードラボ", "大阪日本橋店", "カードラボ")).toBe(true);
+    expect(sameStore("ビデオインアメリカ 西七条店（inトレカチャンピオン）", "ビデオインアメリカ（inトレカチャンピオン）", "西七条店", "ビデオインアメリカ")).toBe(true);
+    expect(sameStore("大阪日本橋店", "カードラボ", "大阪梅田店", "カードラボ")).toBe(false);
+    expect(sameStore("", undefined, "A店", undefined)).toBe(false);
+  });
+  it("既存が系列名つきの店舗名で報告されても、既存の再発見として新規に数えない", async () => {
+    const spec = withHome(base());
+    spec.existing = [ex("三宮店", { sourceUrls: [] })];
+    spec.pages["https://toy.example.invalid/n/sannomiya"].text = L("テスト玩具三宮店");
+    const { record } = await run(spec);
+    const l = record.leads.find((x) => x.lead.store?.includes("三宮"));
+    if (l) expect(l.decision.credit).not.toBe("ai_new");
+  });
+  it("費用の関門（累計・1件の上限の見込み）による停止は、AIの障害ではなく費用の上限として記録される", async () => {
+    const guard = { name: "guard", step: async () => { throw new Error("1ケースの費用が上限（12円）に達する見込みのため、このケースを止めました"); } };
+    const m = mission();
+    const record = await runDiscovery({ mission: m, world: createSimWorld(withHome(base())), llm: guard as never, budget: allocateMission(m), sleep: async () => {} });
+    expect(record.stop.reason).toBe("cost_limit");
+  });
+});
+
+describe("9H-3R: 屋号違いの系列名でも既存を見落とさない", () => {
+  it("括弧書きで屋号が付いた系列名と、既存の系列名を関連づける。無関係な系列は関連づけない", async () => {
+    const { chainsRelated } = await import("./verify");
+    expect(chainsRelated("ビデオインアメリカ（inトレカチャンピオン）", "トレカチャンピオン")).toBe(true);
+    expect(chainsRelated("カードラボ", "カードラボ")).toBe(true);
+    expect(chainsRelated("トレカチャンピオン", "カードラボ")).toBe(false);
+    expect(chainsRelated("", "カードラボ")).toBe(false);
+  });
+});
+
+describe("9H-3R: 原文の照合（整形された引用は通し、作られた引用は通さない）と二次情報の扱い", () => {
+  it("記号・空白・区切りを整えた引用や、表の項目の並べ替えは、ページの記載と照合できる。ページに無い内容は通らない", async () => {
+    const { quoteInPage } = await import("./verify");
+    const page = "ハドウシーカー。トレカチャンピオンなんば日本橋店の会員様限定DM抽選（1BOX 税込6,000円の購入権）。受付期間11/16(月)〜11/22(日)。当選発表11/25(水)";
+    expect(quoteInPage("トレカチャンピオン なんば日本橋店 会員様限定DM抽選 受付期間 11/16(月)〜11/22(日)", page)).toBe(true);
+    expect(quoteInPage("受付期間11/16(月)〜11/22(日) / 当選発表11/25(水) / ハドウシーカー", page)).toBe(true);
+    expect(quoteInPage("トレカチャンピオン なんば日本橋店 は 12/25 に 先着順 で 販売", page)).toBe(false);
+    expect(quoteInPage("全く別の店舗の告知 応募期間 1/1〜1/3 抽選", page)).toBe(false);
+    expect(quoteInPage("短い", page)).toBe(false);
+  });
+  it("二次情報（まとめサイトなど）の記載は、採用候補でも要確認に残す。公式サイトの記載は二次情報扱いにしない", async () => {
+    const spec = withHome(base());
+    spec.pages["https://blog.other.example.invalid/sannomiya"] = spec.pages["https://toy.example.invalid/n/sannomiya"];
+    delete spec.pages["https://toy.example.invalid/n/sannomiya"];
+    const { record } = await run(spec);
+    const sec = record.leads.find((x) => x.decision.status === "adopt" && x.lead.url.includes("blog.other"));
+    expect(sec?.decision.attention.join()).toContain("二次情報");
+    const off = record.leads.find((x) => x.decision.status === "adopt" && x.lead.url.includes("toy.example"));
+    expect(off?.decision.attention.join() ?? "").not.toContain("二次情報");
+  });
+});

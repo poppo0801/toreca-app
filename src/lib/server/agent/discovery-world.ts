@@ -1,5 +1,6 @@
 import "server-only";
 import type { RealRunGuard } from "@/lib/agent/collection-planner/real-guard";
+import { chainsRelated, sameStore } from "@/lib/agent/discovery/verify";
 import type { DiscoveryWorld, ExistingLottery, KnownStore } from "@/lib/agent/discovery/types";
 import type { PageFetcher, SearchProvider } from "@/lib/agent/store-location/tools";
 import { sameChainName } from "@/lib/chain-normalize";
@@ -69,7 +70,7 @@ export function createRealDiscoveryWorld(o: { db: Db; householdId: string; fetch
     async existing(q) {
       const { lotteries } = await load();
       return lotteries
-        .filter((l) => (!!q.url && l.sourceUrls.includes(q.url)) || ((!q.chain || sameChainName(l.chain, q.chain)) && (!q.store || l.store.replace(/店$/, "") === q.store.replace(/店$/, "")) && (!q.product || l.products.some((p) => p.includes(q.product ?? "") || (q.product ?? "").includes(p)))))
+        .filter((l) => (!!q.url && l.sourceUrls.includes(q.url)) || ((!q.chain || chainsRelated(l.chain, q.chain)) && (!q.store || sameStore(l.store, l.chain, q.store, q.chain)) && (!q.product || l.products.some((p) => p.includes(q.product ?? "") || (q.product ?? "").includes(p)))))
         .slice(0, 20);
     },
     async knownStores(chain) {
