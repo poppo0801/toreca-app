@@ -69,7 +69,8 @@ describe("住所調査AIは本番で有効にならない", () => {
     // 自動収集・API: エージェントの部品を読み込まない。例外は、収集後のグループ判定の呼び出し口（grouping-hook.ts）だけ。
     // 環境の判定（TOREMANE_ENV=local）を通ったあとに、動的に読み込む（静的な読み込みは無い）
     // Stage 9H-3B: 収集中のAI調査の呼び出し口（investigation-hook.ts）も同じ作り（環境の判定のあとに動的に読み込む）
-    const HOOKS = ["src/lib/server/collector/grouping-hook.ts", "src/lib/server/collector/investigation-hook.ts"];
+    // Stage 9H-3Q: 自律型収集の呼び出し口（autonomous-hook.ts）も同じ作り
+    const HOOKS = ["src/lib/server/collector/grouping-hook.ts", "src/lib/server/collector/investigation-hook.ts", "src/lib/server/collector/autonomous-hook.ts"];
     const norm = (x: string) => x.replaceAll("\\", "/");
     for (const f of src.filter((x) => (/src\/app\/api\//.test(norm(x)) || /collector/.test(x)) && !HOOKS.includes(norm(x)))) expect(readFileSync(f, "utf8"), f).not.toMatch(/store-location|lib\/agent\/|lib\/server\/agent\//);
     for (const HOOK of HOOKS) {

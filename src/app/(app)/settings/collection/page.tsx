@@ -1,4 +1,7 @@
 import { PageHeading } from "@/components/page-heading";
+import { CollectionEngineCard } from "@/components/collection-engine-card";
+import { resolveEffectiveEngine } from "@/lib/collector/engine-setting";
+import { loadOpsStatus } from "@/lib/server/collector/engine-status";
 import Link from "next/link";
 import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
 import { CollectionMaintenance } from "@/components/collection-maintenance";
@@ -196,6 +199,16 @@ export default async function CollectionPage() {
         </Link>
       </p>
       <PageHeading navId="settings" className="mb-3">抽選情報の自動収集</PageHeading>
+      {await (async (householdIdForEngine: string) => {
+        // 情報収集方式（9H-3Q）: 設定・最終実行の状況。読み込みに失敗しても画面全体は表示する（従来方式として扱う）
+        const eo = await loadOpsStatus(db as never, householdIdForEngine).catch(() => null);
+        const eff = resolveEffectiveEngine({ stored: eo?.stored, loadFailed: !eo || eo.loadFailed, toremaneEnv: process.env.TOREMANE_ENV });
+        return (
+          <div className="mb-3">
+            <CollectionEngineCard stored={eff.stored} note={eff.note} autonomousAvailable={process.env.TOREMANE_ENV === "local"} runs={(eo?.runs ?? []) as never} />
+          </div>
+        );
+      })(hh.data.id)}
       {/* 要手動確認（システムが解決できなかった案件）。優先収集メモとは別の一覧。ここから候補の編集フォームを直接開く */}
       <EditRequestProvider>
       <div className="mb-3">

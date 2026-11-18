@@ -5,7 +5,7 @@
  *   - 探索実績（StrategyMemory）は再利用しやすい plain JSON。AIが自分の実績を分析して調査戦略を改善するための材料（既存ロジック・手動登録が先に見つけたものは数えない）
  */
 import type { AgentLLM } from "@/lib/agent/core";
-import { SESSION_CAPS } from "./controls";
+import { allocateMission, SESSION_CAPS, type MissionBudget } from "./controls";
 import { runDiscovery, type DiscoveryRunRecord } from "./engine";
 import type { DiscoveryMission, DiscoveryWorld } from "./types";
 
@@ -118,6 +118,10 @@ export interface SessionInput {
   /** 実AI・実検索のとき必須: 費用の台帳（記録できないなら有料の実行は始めない） */
   costRecorder?: { record(missionId: string, costJpy: number): void };
   sessionCapJpy?: number;
+  /** 割り当ての調整（上限を下げる用途だけ。絶対上限 DISCOVERY_CAPS は超えられない＝呼び出し側が下げた値だけを返す） */
+  adjustBudget?: (m: DiscoveryMission, b: MissionBudget) => MissionBudget;
+  /** ミッション開始前の呼び出し（費用の台帳の案件開始など） */
+  beforeMission?: (m: DiscoveryMission) => void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -145,11 +149,20 @@ export async function runDiscoverySession(s: SessionInput): Promise<SessionResul
       skipped.push({ missionId: m.id, reason: "全体の費用の上限に達したため開始しません" });
       continue;
     }
-    const rec = await runDiscovery({ mission: m, world: s.world, llm: s.llmFor(m), real: s.real, now: s.now, sleep: s.sleep });
+    s.beforeMission?.(m);
+    const b0 = allocateMission(m, { real: s.real });
+    const rec = await runDiscovery({ mission: m, world: s.world, llm: s.llmFor(m), budget: s.adjustBudget ? lowerOnly(b0, s.adjustBudget(m, b0)) : b0, real: s.real, now: s.now, sleep: s.sleep });
     total += rec.usage.costJpy;
     s.costRecorder?.record(m.id, rec.usage.costJpy);
     records.push(rec);
     memory = updateStrategy(memory, rec, new Date((s.now ?? Date.now)()).toISOString());
   }
   return { records, memory, skipped, totalCostJpy: Math.round(total * 100) / 100 };
+}
+
+/** 調整後の割り当ては、元の割り当てより大きくならない（上限を引き上げる手段にしない） */
+function lowerOnly(a: MissionBudget, b: MissionBudget): MissionBudget {
+  const l = a.limits;
+  const m = b.limits;
+  return { ...a, limits: { ...l, maxSteps: Math.min(l.maxSteps, m.maxSteps), maxSearches: Math.min(l.maxSearches, m.maxSearches), maxFetches: Math.min(l.maxFetches, m.maxFetches), maxCostJpy: Math.min(l.maxCostJpy, m.maxCostJpy), maxMs: Math.min(l.maxMs, m.maxMs) }, rationale: b.rationale };
 }
