@@ -14,7 +14,9 @@ import { lotteryKeyOf } from "./form-learning";
 const PLAN = "backups/eval-9h3k/plan.json";
 const DIR = "backups/review-answers";
 
-describe.skipIf(!existsSync(PLAN) || !existsSync(DIR))("9H-3K 凍結した対象一覧の整合性", () => {
+// 評価データ（backups/。Git管理外）が無い環境（CI）では、テストが0件でファイルが失敗扱いにならないよう、スキップ表示を1件置く
+it.skipIf(true)("評価データ（backups/）が無い環境ではこのファイルの検証をスキップ", () => {});
+if (existsSync(PLAN) && existsSync(DIR)) describe("9H-3K 凍結した対象一覧の整合性", () => {
   const plan = JSON.parse(readFileSync(PLAN, "utf8")) as { cases: { caseId: string; members: PoolCandidate[] }[] };
   // 9H-3Iまでの全評価を対象に、評価済みが含まれないことを確認する
   const answers = readdirSync(DIR).filter((f) => f.endsWith(".json") && !f.startsWith("review-answers-rs-9h3k-")).map((f) => JSON.parse(readFileSync(`${DIR}/${f}`, "utf8")));
@@ -46,7 +48,7 @@ describe.skipIf(!existsSync(PLAN) || !existsSync(DIR))("9H-3K 凍結した対象
   });
 });
 
-describe.skipIf(!existsSync(PLAN) || !existsSync("backups/eval-9h3i/plan.json") || !existsSync("backups/eval-9h3f/plan.json"))("9H-3K 過去の対象一覧との重複", () => {
+if (existsSync(PLAN) && existsSync("backups/eval-9h3i/plan.json") && existsSync("backups/eval-9h3f/plan.json")) describe("9H-3K 過去の対象一覧との重複", () => {
   it("9H-3F・9H-3Iの対象（候補ID・情報元URL）を1件も含まない", () => {
     const u = (x: string | null) => (x ?? "").replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
     const prev = new Set<string>();

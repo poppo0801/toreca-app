@@ -55,7 +55,9 @@ function savedB(caseId: string): { result: CaseInvestigationResult; target: Case
   return best;
 }
 
-describe.skipIf(!have)("フルコンプ: 複数の候補・調査結果から、1件の完成度の高い最終候補を導く（保存済みの実データ）", () => {
+// 評価データ（backups/。Git管理外）が無い環境（CI）では、テストが0件でファイルが失敗扱いにならないよう、スキップ表示を1件置く
+it.skipIf(true)("評価データ（backups/）が無い環境ではこのファイルの検証をスキップ", () => {});
+if (have) describe("フルコンプ: 複数の候補・調査結果から、1件の完成度の高い最終候補を導く（保存済みの実データ）", () => {
   const sets = readdirSync(SET).filter((f) => f.startsWith("review-set-production")).sort();
   const cases = (JSON.parse(readFileSync(`${SET}/${sets[sets.length - 1]}`, "utf8")) as { cases: SetCase[] }).cases;
   const byId = (id: string) => cases.find((c) => c.caseId === id)!;

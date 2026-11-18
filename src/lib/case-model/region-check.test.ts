@@ -23,7 +23,7 @@ describe("評価の地域条件の検査（9H-3K）", () => {
 
 /** 本番の候補プール（読み取り専用の書き出し）と、地域条件の整合（別途の正常性テスト） */
 const POOL = "backups/eval-9h3f/pool-production-2026-11-16T01-35-35-964Z.json";
-describe.skipIf(!existsSync(POOL))("地域除外の正常性（本番の記録との整合）", () => {
+if (existsSync(POOL)) describe("地域除外の正常性（本番の記録との整合）", () => {
   const pool = JSON.parse(readFileSync(POOL, "utf8")) as { candidates: PoolCandidate[] };
   it("コードの既定の対象地域（東京都・千葉県・神奈川県を含む）は、本番の判定の記録と矛盾する＝本番の設定は既定と異なる（9H-3Kで検出した不一致）", () => {
     const ev = regionEvidence(pool);

@@ -32,7 +32,7 @@ describe("修正欄の意味の検証", () => {
 });
 
 const FILE = "backups/review-answers/review-answers-rs-9h3i-dc1f633b6e3b6432-2026-11-16T13-25-44-000Z.json";
-describe.skipIf(!existsSync(FILE))("保存済みの人間評価（9H-3I・12件）の分類", () => {
+if (existsSync(FILE)) describe("保存済みの人間評価（9H-3I・12件）の分類", () => {
   const f = JSON.parse(readFileSync(FILE, "utf8")) as { results: { caseId: string; human: { verdict: string | null; usableAsGold: boolean; corrections: { field: string; correctValue: string }[] } }[] };
   const keyFile = "backups/eval-9h3i/review-key-9h3i.json";
   const key = existsSync(keyFile) ? (JSON.parse(readFileSync(keyFile, "utf8")) as { key: Record<string, { caseId: string }> }).key : {};

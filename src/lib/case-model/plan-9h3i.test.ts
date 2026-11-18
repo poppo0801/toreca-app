@@ -14,7 +14,9 @@ import { lotteryKeyOf } from "./form-learning";
 const PLAN = "backups/eval-9h3i/plan.json";
 const DIR = "backups/review-answers";
 
-describe.skipIf(!existsSync(PLAN) || !existsSync(DIR))("9H-3I 凍結した対象一覧の整合性", () => {
+// 評価データ（backups/。Git管理外）が無い環境（CI）では、テストが0件でファイルが失敗扱いにならないよう、スキップ表示を1件置く
+it.skipIf(true)("評価データ（backups/）が無い環境ではこのファイルの検証をスキップ", () => {});
+if (existsSync(PLAN) && existsSync(DIR)) describe("9H-3I 凍結した対象一覧の整合性", () => {
   const plan = JSON.parse(readFileSync(PLAN, "utf8")) as { cases: { caseId: string; members: PoolCandidate[] }[] };
   // この対象一覧の評価結果（9H-3I）自体は除く。対象一覧を作った時点の評価済み（それ以前）との整合を確認する
   const answers = readdirSync(DIR).filter((f) => f.endsWith(".json") && !f.includes("9h3i")).map((f) => JSON.parse(readFileSync(`${DIR}/${f}`, "utf8")));
