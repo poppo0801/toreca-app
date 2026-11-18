@@ -10,7 +10,7 @@
 4. `database-schema.md`：DB設計草案。実装前に制約・日時・認可を修正（実スキーマの正本は `supabase/migrations/`）
 5. `implementation-plan.md`：実装順序と合格条件
 6. `user-checklist.md`：人が行う必要がある操作
-7. `docs/RESTORE.md`：バックアップからの復元手順（復元基準タグ `pre-agent-stage8a`）。調査結果は `docs/stage8a.md`
+7. `docs/RELEASE_FLOW.md`：本番反映の標準フロー（計画→承認1回→一括実行）。`docs/RESTORE.md`：バックアップからの復元手順（復元基準タグ `pre-agent-stage8a`）。調査結果は `docs/stage8a.md`
 8. `docs/PRODUCT_VISION.md`：開発方針・自律型AIの構想・権限設計・ロードマップ（実装済みと構想を区別）
 9. `docs/UI_UX_GUIDELINES.md`：UI/UX原則と、過去の不具合の再発防止（UI作業の前に必読。旧 `docs/ui-design-guidelines.md` を統合）
 10. `docs/ARCHITECTURE.md`：技術構成・データフロー・環境の現状と未解決リスク
