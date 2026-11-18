@@ -102,6 +102,9 @@ export class InMemoryRepository implements LotteryRepository {
   async dissolveLotteryGroup() {
     return UNSUPPORTED;
   }
+  async decideGroupProposal() {
+    return UNSUPPORTED;
+  }
   async addManualPurchase() {
     return UNSUPPORTED;
   }

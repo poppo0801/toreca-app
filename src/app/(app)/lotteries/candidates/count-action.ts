@@ -1,6 +1,7 @@
 "use server";
 
 import { closedReviewIds } from "@/lib/server/collector/closed-ids";
+import { NOT_INTERNAL_TEASER } from "@/lib/collector/teaser-filter";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -11,7 +12,7 @@ export async function reviewCandidateCountAction(): Promise<number> {
     const db = await createClient();
     const { data: auth } = await db.auth.getUser();
     if (!auth.user) return 0;
-    const [{ count }, closed] = await Promise.all([db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("job_state", "review").neq("status", "auto_registered"), closedReviewIds(db as never, new Date())]);
+    const [{ count }, closed] = await Promise.all([db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("job_state", "review").neq("status", "auto_registered").or(NOT_INTERNAL_TEASER), closedReviewIds(db as never, new Date())]);
     return Math.max(0, (count ?? 0) - closed.size);
   } catch {
     return 0;

@@ -35,3 +35,4 @@ e2e/ai-live-output
 
 # Stage 8D-1: 評価基盤のシステム出力（正解とは分離。Git管理外）
 eval/runs/
+eval/lottery-grouping-real/pool.json

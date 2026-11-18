@@ -27,6 +27,8 @@ import { AnnouncePicker, RequirementPicker } from "@/components/taxonomy-picker"
 import { classifyAnnouncement, classifyRequirements, foldAnnounceNote, type AnnounceMethod, type RequirementDetails, type RequirementTag } from "@/lib/lottery-taxonomy";
 import { InfoTip } from "@/components/ui/info-tip";
 import { StoreMultiPicker, type NewStoreDraft } from "@/components/store-multi-picker";
+import { SourceLinkList } from "@/components/source-link-list";
+import { hostOfUrl } from "@/lib/source-links";
 import { opKeeper, recoverUncertain } from "@/lib/operation-id";
 import { cn } from "@/lib/utils";
 import type { AppData, Lottery } from "@/types/domain";
@@ -931,6 +933,15 @@ export function LotteryFormDialog({
           )}
           <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
             <SheetBody className="space-y-3 border-t pt-3">
+              {/* 情報元リンク（読み取り専用。種類｜ドメイン）。タップで外部ページを開く。入力中の内容・スクロール位置は保持される（シートは閉じない） */}
+              <SourceLinkList
+                lottery={{ announcementUrl: v.announcementUrl, sourceUrls: urlsText.split("\n").map((s) => s.trim()).filter(Boolean) }}
+                officialHosts={((u) => (u ? [hostOfUrl(u)] : []))(data.stores.find((s) => s.id === v.store.id)?.storeUrl)}
+                max={4}
+                className="-mt-1"
+                testId="form-source-links"
+                ariaLabel="情報元リンク"
+              />
               {isEdit && (
                 <Button type="button" variant="outline" size="sm" className="min-h-10 w-full" onClick={() => setSupOpen(true)} data-testid="ai-supplement-open">
                   <Sparkles className="size-4 text-primary-ink" aria-hidden="true" /> AIで情報を補完
@@ -1329,10 +1340,23 @@ export function LotteryFormDialog({
                 </label>
               </div>
               {flagPanel("announcement")}
-              <label className="block text-sm">
-                <span className="text-[13px] font-medium">情報源URL（1行に1つ）</span>
-                <textarea value={urlsText} onChange={(e) => setUrlsText(e.target.value)} rows={1} className={cn(field, "py-2")} />
-              </label>
+              {/* 情報源URL: 登録済みの情報源があるときは読み取り専用の表示（上部のリンク）にし、修正は折りたたみの中から。URLが無い（新規の手動登録など）ときは、従来どおり入力欄を出す */}
+              {(() => {
+                const input = (
+                  <label className="block text-sm">
+                    <span className="text-[13px] font-medium">情報源URL（1行に1つ）</span>
+                    <textarea value={urlsText} onChange={(e) => setUrlsText(e.target.value)} rows={1} className={cn(field, "py-2")} data-testid="source-urls-input" />
+                  </label>
+                );
+                return initial.urlsText.trim() ? (
+                  <details className="text-sm" data-testid="source-urls-edit">
+                    <summary className="flex min-h-9 cursor-pointer items-center text-[13px] text-muted-foreground">情報源URLを修正する</summary>
+                    {input}
+                  </details>
+                ) : (
+                  input
+                );
+              })()}
 
               {/* 7. 応募条件・制限 */}
               <div className="space-y-1 text-sm">

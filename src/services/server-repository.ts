@@ -8,6 +8,7 @@ import {
   groupLotteriesAction,
   ungroupLotteryAction,
   dissolveLotteryGroupAction,
+  decideGroupProposalAction,
   loadAppDataAction,
   saveLotteryAction,
   setAppliedAction,
@@ -62,7 +63,8 @@ export class ServerActionRepository implements LotteryRepository {
   archiveLottery = (actor: string, id: string) => archiveLotteryAction(id, actor);
   excludeLottery = (actor: string, id: string, ex: Parameters<typeof excludeLotteryAction>[1]) => excludeLotteryAction(id, ex, actor);
   groupLotteries = (actor: string, ids: string[], opts: Parameters<typeof groupLotteriesAction>[1] = {}) => groupLotteriesAction(ids, opts, actor);
-  ungroupLottery = (actor: string, id: string) => ungroupLotteryAction(id, actor);
-  dissolveLotteryGroup = (actor: string, id: string) => dissolveLotteryGroupAction(id, actor);
+  ungroupLottery = (actor: string, id: string, reason?: Parameters<typeof ungroupLotteryAction>[2]) => ungroupLotteryAction(id, actor, reason);
+  dissolveLotteryGroup = (actor: string, id: string, reason?: Parameters<typeof dissolveLotteryGroupAction>[2]) => dissolveLotteryGroupAction(id, actor, reason);
+  decideGroupProposal = (actor: string, id: string, decision: "approve" | "reject", note: string | null = null) => decideGroupProposalAction(id, decision, note, actor);
   addManualPurchase = (actor: string, input: Parameters<typeof addManualPurchaseAction>[0]) => addManualPurchaseAction(input, actor);
 }

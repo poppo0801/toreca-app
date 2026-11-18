@@ -18,8 +18,10 @@ import { ONLINE_STORE_NAME, isOnlineStore, isOnlineStoreName } from "@/lib/store
 import { ackCautions, pruneCautionsOnEdit, type EditSnapshot } from "@/lib/live-cautions";
 import type { Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
+import { resolveChainName } from "@/lib/case-model/chain-resolve";
 import { validateLink } from "@/lib/profile-link";
 import { dbToFlex, lotteryInputSchema, validateMultiMode, type LotteryInput } from "@/lib/lottery-input";
+import { nextFormColumns, type FormDecl, type FormSource } from "@/lib/lottery-form";
 import type { Database, Json } from "@/types/database";
 import type {
   AppData,
@@ -27,6 +29,7 @@ import type {
   EventState,
   FulfillmentStatus,
   ItemUnit,
+  LotteryGroupProposal,
   MultiMode,
   ProductKind,
   ProfileColor,
@@ -220,6 +223,67 @@ async function loadUsage(db: Db, householdId?: string): Promise<Pick<AppData, "b
  * 後から追加したテーブル（対戦記録・世帯設定）。マイグレーション未適用の環境でも主要な画面を止めないよう、
  * 取得に失敗したら「未設定」(undefined) として扱う。自宅の住所の文字列はここでは読まない（設定画面だけが読む）。
  */
+// ---- グループ候補の決定（承認・却下・自動実行。Stage 8F。AIは使わない DB 操作）
+export interface ResolveResult {
+  status: string;
+  groupId: string | null;
+  replayed: boolean;
+  reason: string | null;
+}
+/** 提案の決定。asHouseholdId が指定されたときは service_role 専用の入口（自動収集）を使う */
+export async function resolveProposal(db: Db, proposalId: string, action: "approve" | "reject" | "auto_apply", note: string | null, actor: string | null, asHouseholdId: string | null = null): Promise<ServiceResult<ResolveResult>> {
+  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return fail("リクエストが不正です");
+  const a = db as any; // eslint-disable-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に無い
+  const { data, error } = asHouseholdId
+    ? await a.rpc("resolve_lottery_group_proposal_as", { p_id: proposalId, p_action: action, p_note: note, p_actor: actor, p_household: asHouseholdId })
+    : await a.rpc("resolve_lottery_group_proposal_tx", { p_id: proposalId, p_action: action, p_note: note, p_actor: actor });
+  if (error) {
+    const m = error.message ?? "";
+    if (/already belongs/.test(m)) return fail("すでに別のグループに所属している抽選が含まれています。グループ管理で調整してください");
+    if (/same chain/.test(m)) return fail("同じ系列の抽選だけをグループにできます");
+    if (/not found/.test(m)) return fail("提案が見つかりません");
+    return fail(mapDbError(error));
+  }
+  const r = data as { ok: boolean; status: string; groupId?: string; replayed?: boolean; reason?: string };
+  return ok({ status: r.status, groupId: r.groupId ?? null, replayed: !!r.replayed, reason: r.reason ?? null });
+}
+
+const DECISION_ERROR: Record<string, string> = {
+  members_changed: "対象の抽選が除外・変更されたため、提案は無効になりました",
+  group_gone: "追加先のグループが解除されたため、提案は無効になりました",
+  already_grouped: "対象の抽選がすでに別のグループに所属しているため、提案は無効になりました",
+  separated_before: "以前に手動で分けた組を含むため、提案は無効になりました",
+  not_pending: "この提案はすでに処理されています",
+};
+export async function decideGroupProposal(db: Db, proposalId: string, action: "approve" | "reject", note: string | null, actor: string | null): Promise<ServiceResult<{ status: string; groupId: string | null }>> {
+  const r = await resolveProposal(db, proposalId, action, note ? note.slice(0, 500) : null, actor);
+  if (!r.ok) return r;
+  if (action === "approve" && !["approved", "applied"].includes(r.value.status)) return fail(DECISION_ERROR[r.value.reason ?? r.value.status] ?? "提案を実行できませんでした");
+  return ok({ status: r.value.status, groupId: r.value.groupId });
+}
+
+
+/** 承認待ちのグループ候補（画面の一覧用。Stage 8F）。表が無い（未適用）環境・本番では空（読み込みを失敗させない） */
+export async function loadPendingGroupProposals(db: Db, householdId?: string): Promise<LotteryGroupProposal[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表は生成型に無い
+    let q = (db as any).from("lottery_group_proposals").select("id,kind,subject_lottery_id,lottery_ids,target_group_id,confidence,rationale,common,mismatches,missing,evidence,engine,created_at").eq("status", "pending").eq("tier", "suggest").in("kind", ["new_group", "add_to_group"]).order("created_at", { ascending: false }).limit(50);
+    if (householdId) q = q.eq("household_id", householdId);
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return (data as { id: string; kind: string; subject_lottery_id: string; lottery_ids: string[]; target_group_id: string | null; confidence: number; rationale: string; common: string[]; mismatches: { field: string; detail: string; severity: string }[]; missing: string[]; evidence: { strongSignals?: string[]; basis?: string[]; sources?: { url?: string; fetchedAt?: string }[] } | null; engine: string; created_at: string }[]).map((p) => ({
+      id: p.id, kind: p.kind as "new_group" | "add_to_group", subjectId: p.subject_lottery_id, lotteryIds: p.lottery_ids, targetGroupId: p.target_group_id, confidence: p.confidence, rationale: p.rationale,
+      common: Array.isArray(p.common) ? p.common : [],
+      mismatches: Array.isArray(p.mismatches) ? p.mismatches.map((m) => ({ field: m.field, detail: m.detail, severity: m.severity as "hard" | "gap" | "soft" })) : [],
+      missing: Array.isArray(p.missing) ? p.missing : [], strongSignals: p.evidence?.strongSignals ?? [], basis: Array.isArray(p.evidence?.basis) ? p.evidence!.basis!.slice(0, 12) : undefined,
+      sources: Array.isArray(p.evidence?.sources) ? p.evidence!.sources!.filter((x) => x.url).slice(0, 6).map((x) => ({ url: String(x.url), fetchedAt: String(x.fetchedAt ?? "") })) : undefined, engine: p.engine, createdAt: p.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+
 async function loadOptional(db: Db, householdId?: string): Promise<{ battles: AppData["battles"]; settings: AppData["settings"]; chainAliases: { chain_id: string; alias: string }[]; storeAliases: { store_id: string; alias: string }[]; profileSettings: AppData["profileSettings"]; chainConditions: AppData["chainConditions"]; chainConditionStates: AppData["chainConditionStates"]; lotteryGroups: AppData["lotteryGroups"] }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新テーブルは生成型に無い環境でも動かす
   const from = (t: string): any => {
@@ -337,6 +401,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   };
   // 主要なテーブルの取得と同時に、設定・開封実績・標準画像も並行して取得する（以前は主要テーブルの後に順番に取得していた＝往復が3段増えていた。Stage 7O）
   const optionalP = loadOptional(db, householdId);
+  const proposalsP = loadPendingGroupProposals(db, householdId); // 承認待ちのグループ候補（Stage 8F。表が無い・本番では空）
   const usageP = loadUsage(db, householdId);
   // 購入記録の標準画像（Stage 7E）。取得できなくても他のデータは読み込む
   const defaultImagesP = (async () => {
@@ -350,7 +415,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     return out;
   })();
   // 主要テーブルの取得に失敗して先に例外になっても、未処理の拒否にならないようにする
-  for (const p of [optionalP, usageP, defaultImagesP]) void p.catch(() => undefined);
+  for (const p of [optionalP, usageP, defaultImagesP, proposalsP]) void p.catch(() => undefined);
   const q = await Promise.all([
     sel("profiles").order("sort_order").order("created_at"),
     sel("profile_target_rules"),
@@ -418,7 +483,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
   const imageUrl = (i: { id: string; sha256: string }, size: "full" | "thumb") => `/api/product-image/${i.id}?v=${i.sha256.slice(0, 12)}&s=${size}`;
 
   const liveLotteryIds = new Set(lotteries.map((l) => l.id));
-  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates, lotteryGroups }, usage, defaultImages] = await Promise.all([optionalP, usageP, defaultImagesP]);
+  const [{ battles, settings, chainAliases, storeAliases, profileSettings, chainConditions, chainConditionStates, lotteryGroups }, usage, defaultImages, groupProposals] = await Promise.all([optionalP, usageP, defaultImagesP, proposalsP]);
 
   return {
     profiles: profiles.map((p) => {
@@ -443,7 +508,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       };
     }),
     chains: chains.map((c) => ({ id: c.id, name: chainDisplayName({ name: c.name, brandGroup: c.brand_group, operationKind: c.operation_kind as "direct" | "other" | "unconfirmed" | null }), provisional: c.is_provisional, archived: c.archived_at != null, logoSrc: c.logo_path && c.logo_sha256 ? chainLogoUrl(c.id, c.logo_sha256) : null, brandGroup: c.brand_group ?? null, operationKind: (c.operation_kind ?? null) as "direct" | "other" | "unconfirmed" | null, boxShrinkHint: (c.box_shrink_hint ?? null) as BoxShrinkHint | null, storeSelectDefault: !!c.store_select_default, aliases: chainAliases.filter((a) => a.chain_id === c.id).map((a) => a.alias) })),
-    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null, salesKind: isStoreKind(s.sales_kind) ? s.sales_kind : "physical" })),
+    stores: stores.map((s) => ({ id: s.id, chainId: s.chain_id, name: s.name, prefecture: s.prefecture, provisional: s.is_provisional, archived: s.archived_at != null, aliases: storeAliases.filter((a) => a.store_id === s.id).map((a) => a.alias), address: s.address_optional || null, lat: s.latitude === null ? null : Number(s.latitude), lng: s.longitude === null ? null : Number(s.longitude), roundTripFare: s.round_trip_fare ?? null, memo: s.memo || null, storeUrl: s.store_url || null, salesKind: isStoreKind(s.sales_kind) ? s.sales_kind : "physical" })),
     products: products.map((p) => ({
       id: p.id,
       officialName: p.official_name,
@@ -485,6 +550,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
     })),
     campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, chainId: c.chain_id, storeRule: c.store_rule as "one_store" | "multi" })),
     ...(lotteryGroups ? { lotteryGroups } : {}),
+    ...(groupProposals.length > 0 ? { groupProposals } : {}),
     lotteries: lotteries.map((l) => ({
       id: l.id,
       groupId: (l as unknown as { bulk_group_id?: string | null }).bulk_group_id ?? undefined,
@@ -529,12 +595,17 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       memo: l.memo,
       boxShrinkHint: (l.box_shrink_hint ?? null) as BoxShrinkHint | null,
       storeMode: (l.store_mode ?? "fixed") as "fixed" | "select_on_apply" | "none",
+      formDecl: ((): import("@/types/domain").Lottery["formDecl"] => {
+        const r = l as unknown as { lottery_form?: string | null; lottery_form_source?: string | null };
+        return r.lottery_form && r.lottery_form_source ? ({ form: r.lottery_form, source: r.lottery_form_source } as import("@/types/domain").Lottery["formDecl"]) : null;
+      })(),
       selectableStores: Array.isArray(l.selectable_stores) ? (l.selectable_stores as { name?: unknown; prefecture?: unknown }[]).flatMap((x) => (typeof x?.name === "string" && x.name ? [{ name: x.name, prefecture: typeof x.prefecture === "string" ? x.prefecture : "" }] : [])) : [],
       createdAt: l.created_at,
       updatedAt: l.updated_at,
       unconfirmedFields: l.unconfirmed_fields ?? [],
       cautions: Array.isArray(l.cautions) ? (l.cautions as unknown as NonNullable<import("@/types/domain").Lottery["cautions"]>) : [],
       confidence: (l.confidence ?? null) as import("@/types/domain").Lottery["confidence"],
+      updateHistory: (Array.isArray((l as unknown as { update_history?: unknown }).update_history) ? ((l as unknown as { update_history: Record<string, unknown>[] }).update_history) : []).flatMap((h) => (typeof h?.id === "string" && typeof h?.at === "string" ? [{ id: h.id, at: h.at, summary: Array.isArray(h.summary) ? (h.summary as unknown[]).filter((x): x is string => typeof x === "string") : [], sourceUrl: typeof h.sourceUrl === "string" ? h.sourceUrl : "", official: h.official === true, ...(typeof h.revertedAt === "string" ? { revertedAt: h.revertedAt } : {}) }] : [])),
     })),
     management: mgmt
       .filter((m) => liveLotteryIds.has(m.lottery_id))
@@ -704,6 +775,13 @@ export async function saveLottery(
     if (online.length === 1) input.store = { id: online[0].id, name: online[0].name, prefecture: "" };
     else if (online.length === 0) input.store = { id: null, name: ONLINE_STORE_NAME, prefecture: "" };
   }
+  // 9H-3J: 系列が未選択（名前だけ）のときは、新規の系列を作る前に、既存の系列（正式名・別名・英語/カタカナ/略称の表記揺れ）との重複を検査する。
+  // 一意に確認できた既存の系列があれば、それに紐付ける（新規作成しない）。似ているだけの系列には寄せない（その場合は従来どおり）。人間が選んだ系列は変更しない
+  if (!input.chain.id && input.chain.name.trim()) {
+    const [{ data: cs }, { data: als }] = await Promise.all([db.from("chains").select("id,name,archived_at"), db.from("chain_aliases").select("chain_id,alias")]);
+    const r = resolveChainName({ name: input.chain.name, masters: (cs ?? []).map((c) => ({ id: c.id, name: c.name, archived: c.archived_at != null, aliases: (als ?? []).filter((a) => a.chain_id === c.id).map((a) => a.alias) })) });
+    if (r.source === "master") input.chain = { id: r.id, name: r.name };
+  }
   // 保存前の確認は互いに独立なので、並行して行う（編集前の注意の状態・新規店舗かどうか。Stage 7O）
   const newStoreName = id === null && !input.store.id && !isDummyStoreName(input.store.name) && input.store.name !== SELECT_STORE_PLACEHOLDER ? input.store.name.trim() : "";
   const [prevSnap, storeExisted] = await Promise.all([
@@ -716,6 +794,9 @@ export async function saveLottery(
       return (ss ?? []).some((r) => storeKey(r.name, chain?.name) === storeKey(newStoreName, chain?.name));
     })(),
   ]);
+  // 抽選形態の記録（8F-6）: 手動の分類を、収集・AIが上書きしないために、保存前の状態を読む
+  const prevForm = id !== null ? ((await (db as any).from("lotteries").select("store_mode,lottery_form_source").eq("id", id).maybeSingle()).data as { store_mode: string | null; lottery_form_source: string | null } | null) : null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const formCols = nextFormColumns({ isNew: id === null, byUser: !opts.autoCollected && !opts.asService, prevMode: prevForm?.store_mode ?? null, prevSource: (prevForm?.lottery_form_source ?? null) as FormSource | null, nextMode: input.storeMode });
   const payload = buildLotteryPayload(input, id, actor);
   const { data, error } = opts.asService && id === null
     ? await db.rpc("save_lottery_tx_as", { p: payload as never, p_actor: actor as string, p_household: householdId })
@@ -737,7 +818,8 @@ export async function saveLottery(
       store_mode: input.storeMode,
       selectable_stores: input.storeMode === "select_on_apply" && input.selectableStores.length > 0 ? input.selectableStores : null,
       requirement_details: sanitizeRequirementDetails(input.requirementDetails) as unknown as Database["public"]["Tables"]["lotteries"]["Update"]["requirement_details"],
-    })
+      ...(formCols ?? {}),
+    } as never)
     .eq("id", data as string);
   if (tax.error) return fail("抽選は保存しましたが、発表方法・応募条件の分類を保存できませんでした。もう一度保存してください");
   if (newStoreName && !storeExisted && !opts.autoCollected && !opts.asService) {
@@ -1045,16 +1127,27 @@ export async function groupLotteries(db: Db, lotteryIds: string[], opts: GroupOp
   }
   return ok({ groupId: data as string });
 }
-export async function ungroupLottery(db: Db, lotteryId: string, actor: string | null): Promise<ServiceResult> {
+/** 解除の理由（Stage 8F）。分類（別の企画・期間が違う・条件が違う・その他）と自由記述。今後のAIの判断に使う（同じ組を自動でまとめ直さない） */
+export interface UngroupReason {
+  code?: "different_campaign" | "period_differs" | "conditions_differ" | "other";
+  note?: string;
+}
+const REASON_CODES = ["different_campaign", "period_differs", "conditions_differ", "other"];
+/** 理由があるときだけ、DB関数へ渡す（理由の引数が無い旧い構造でも、理由なしなら動く） */
+const reasonArgs = (r?: UngroupReason): Record<string, string> => ({
+  ...(r?.code && REASON_CODES.includes(r.code) ? { p_reason: r.code } : {}),
+  ...(r?.note?.trim() ? { p_note: r.note.trim().slice(0, 300) } : {}),
+});
+export async function ungroupLottery(db: Db, lotteryId: string, actor: string | null, reason?: UngroupReason): Promise<ServiceResult> {
   if (!uuid.safeParse(lotteryId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
-  const { error } = await (db as any).rpc("ungroup_lottery_tx", { p_lottery: lotteryId, p_actor: actor });
+  const { error } = await (db as any).rpc("ungroup_lottery_tx", { p_lottery: lotteryId, p_actor: actor, ...reasonArgs(reason) });
   return error ? fail(mapDbError(error)) : ok(undefined);
 }
-export async function dissolveLotteryGroup(db: Db, groupId: string, actor: string | null): Promise<ServiceResult> {
+export async function dissolveLotteryGroup(db: Db, groupId: string, actor: string | null, reason?: UngroupReason): Promise<ServiceResult> {
   if (!uuid.safeParse(groupId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい関数は生成型に含まれない場合がある
-  const { error } = await (db as any).rpc("dissolve_lottery_group_tx", { p_group: groupId, p_actor: actor });
+  const { error } = await (db as any).rpc("dissolve_lottery_group_tx", { p_group: groupId, p_actor: actor, ...reasonArgs(reason) });
   if (error) return fail(/group not found/.test(error.message ?? "") ? "グループが見つかりません（解除済みです）" : mapDbError(error));
   return ok(undefined);
 }
@@ -1073,6 +1166,14 @@ export async function archiveLottery(db: Db, lotteryId: string, actor: string | 
   const { data, error } = await db.from("lotteries").update({ archived_at: nowIso(), updated_by_profile_id: actor }).eq("id", lotteryId).select("id").maybeSingle();
   if (error) return fail(mapDbError(error));
   return data ? ok(undefined) : fail("対象のデータが見つかりません");
+}
+
+/** 退避した抽選を元に戻す（整理の取り消し）。応募・購入履歴は退避中も保持されている */
+export async function restoreLottery(db: Db, lotteryId: string, actor: string | null): Promise<ServiceResult> {
+  if (!uuid.safeParse(lotteryId).success) return fail("リクエストが不正です");
+  const { data, error } = await db.from("lotteries").update({ archived_at: null, updated_by_profile_id: actor }).eq("id", lotteryId).not("archived_at", "is", null).select("id").maybeSingle();
+  if (error) return fail(mapDbError(error));
+  return data ? ok(undefined) : fail("元に戻せる抽選が見つかりません");
 }
 
 // ------------------------------------------------------------------ ★・応募・当落・購入・スルー
@@ -1592,4 +1693,26 @@ export async function updateProfileSettings(db: Db, profileId: string, raw: Prof
     .maybeSingle();
   if (error) return fail(error.code === "23505" ? "同じ表示名のユーザーが既にいます" : mapDbError(error));
   return data ? ok(undefined) : fail("対象のデータが見つかりません");
+}
+
+/**
+ * 抽選形態を手動で設定・解除する（Stage 8F-6）。手動の設定は、AI・収集・再解析が上書きしない。form=null で設定を解除する（構造からの判別に戻る）。
+ * 店舗の指定方式（store_mode）・応募・当選・購入・通知・期限は変更しない。分類の記録だけを変える。
+ */
+export async function setLotteryForm(db: Db, lotteryId: string, form: FormDecl["form"] | null, actor: string | null): Promise<ServiceResult<void>> {
+  if (!uuid.safeParse(lotteryId).success || (actor !== null && !uuid.safeParse(actor).success)) return fail("リクエストが不正です");
+  if (form !== null && !["store_select", "store_independent", "other"].includes(form)) return fail("抽選形態が不正です");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい列は生成型に含まれない場合がある
+  const { error, data } = await (db as any).from("lotteries").update(form === null ? { lottery_form: null, lottery_form_source: null } : { lottery_form: form, lottery_form_source: "manual" }).eq("id", lotteryId).select("id");
+  if (error) return fail(mapDbError(error));
+  if (!data || data.length === 0) return fail("対象のデータが見つかりません");
+  // 分類が変わったので、この抽選に関する承認待ちのグループ候補は無効にする（次の判定で、新しい分類にもとづいて出し直す）。応募・当選・購入の記録には触れない
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表は生成型に含まれない場合がある
+  const pend = await (db as any).from("lottery_group_proposals").select("id,proposal_key").eq("status", "pending").or(`subject_lottery_id.eq.${lotteryId},lottery_ids.cs.{${lotteryId}}`);
+  // 同じ組の候補を新しい分類で出し直せるよう、無効にした候補のキーを退避する（一意キーの衝突を避ける）
+  for (const p of (pend.data ?? []) as { id: string; proposal_key: string }[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db as any).from("lottery_group_proposals").update({ status: "superseded", decision_note: "form_changed", proposal_key: `${p.proposal_key}~fc${Date.now()}` }).eq("id", p.id).eq("status", "pending");
+  }
+  return ok(undefined);
 }

@@ -1,4 +1,5 @@
 import { normalizeAlias } from "@/lib/masters";
+import { chainCanonicalKey } from "@/lib/chain-normalize";
 
 /** 別名の最大数と長さ */
 export const MAX_CHAIN_ALIASES = 20;
@@ -24,9 +25,9 @@ export function checkChainAliases(
 ): { values: string[]; problems: AliasProblem[] } {
   const own = normalizeAlias(ownName);
   const owner = new Map<string, string>(); // 正規化した表記 → 他の系列名
-  for (const c of chains) if (c.id !== chainId) owner.set(normalizeAlias(c.name), c.name);
+  for (const c of chains) if (c.id !== chainId) { owner.set(normalizeAlias(c.name), c.name); owner.set(chainCanonicalKey(c.name), c.name); }
   const nameOf = new Map(chains.map((c) => [c.id, c.name]));
-  for (const a of aliases) if (a.chainId !== chainId) owner.set(normalizeAlias(a.alias), nameOf.get(a.chainId) ?? "別の系列");
+  for (const a of aliases) if (a.chainId !== chainId) { const nm = nameOf.get(a.chainId) ?? "別の系列"; owner.set(normalizeAlias(a.alias), nm); owner.set(chainCanonicalKey(a.alias), nm); }
   const seen = new Set<string>([own]);
   const values: string[] = [];
   const problems: AliasProblem[] = [];
@@ -39,7 +40,7 @@ export function checkChainAliases(
     }
     const key = normalizeAlias(alias);
     if (!key) continue;
-    const other = owner.get(key);
+    const other = owner.get(key) ?? owner.get(chainCanonicalKey(alias));
     if (other) {
       problems.push({ alias, message: `「${alias}」は別の系列「${other}」の名称または別名と同じです。系列を統合するか、別名を見直してください` });
       continue;

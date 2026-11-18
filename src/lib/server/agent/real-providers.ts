@@ -1,5 +1,6 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
+import { identifiersFromHtml } from "@/lib/agent/lottery-grouping/identifiers";
 import type { FetchedPage, PageFetcher } from "@/lib/agent/store-location/tools";
 import { buildQuery } from "@/lib/geocode";
 import { fetchCandidates } from "@/lib/server/geocode-service";
@@ -20,7 +21,7 @@ export class SafePageFetcher implements PageFetcher {
     const r = await fetchRespectingRobots(url, { timeoutMs: 10_000, maxBytes: 1_000_000 });
     if (!r.ok) return { ok: false, message: r.message };
     const page = extractPageText(r.body, r.finalUrl, 20_000);
-    return { ok: true, url, finalUrl: r.finalUrl, title: page.title ?? "", text: page.text, links: page.links };
+    return { ok: true, url, finalUrl: r.finalUrl, title: page.title ?? "", text: page.text, links: page.links, identifiers: identifiersFromHtml(r.body).map((x) => ({ kind: x.kind, value: x.value })) };
   }
 }
 

@@ -2,6 +2,7 @@ import { CandidatesView } from "@/components/candidates-view";
 import type { CandidateView } from "@/components/auto-collect-view";
 import { assessRow, importantChains } from "@/lib/collector/assess-row";
 import { closedReviewIds } from "@/lib/server/collector/closed-ids";
+import { NOT_INTERNAL_TEASER } from "@/lib/collector/teaser-filter";
 import { conditionsFromRow } from "@/lib/server/collector/run";
 import { loadAppData } from "@/lib/server/lottery-service";
 import { isSupabaseMode } from "@/lib/supabase/env";
@@ -22,7 +23,7 @@ export default async function CandidatesPage() {
   const now = new Date();
   const cols = "id,source_id,title,source_url,status,reasons,draft,lottery_id,fetched_at,job_state,kind,attempts,next_run_at,last_error,due_at,last_changed_at,memo_id,triage,manual_state,manual_reason";
   const [rev, settings, closed, appData] = await Promise.all([
-    db.from("collection_candidates").select(cols).eq("job_state", "review").in("status", ["pending", "failed"]).is("lottery_id", null).order("created_at", { ascending: false }).limit(500),
+    db.from("collection_candidates").select(cols).eq("job_state", "review").in("status", ["pending", "failed"]).is("lottery_id", null).or(NOT_INTERNAL_TEASER).order("created_at", { ascending: false }).limit(500),
     db.from("collection_settings").select("*").limit(1).maybeSingle(),
     closedReviewIds(db as never, now).catch(() => new Set<string>()),
     loadAppData(db as never, hh.data.id).catch(() => null),

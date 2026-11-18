@@ -120,10 +120,14 @@ export function commonality(l: Lottery): { chain: string; products: string; star
 }
 export const commonalityKey = (l: Lottery): string => Object.values(commonality(l)).join("|");
 
-/** 手動グループ化の候補: 選んだ抽選と、系列・商品・応募期間・発表日・応募方式が同じで、まだグループに入っていない抽選 */
+/**
+ * 手動グループ化の候補: 選んだ抽選と、系列・商品・応募期間・発表日・応募方式が同じで、まだグループに入っていない、別の店舗の抽選。
+ * 8F-5: 同一店舗の重複（グループ化ではなく重複管理の対象）と、店舗選択式の抽選（グループ化の対象外）は候補にしない。
+ */
 export function suggestGroupMates(base: Lottery, all: Lottery[]): Lottery[] {
   const k = commonalityKey(base);
-  return all.filter((l) => l.id !== base.id && !l.groupId && commonalityKey(l) === k);
+  if (base.storeMode === "select_on_apply") return [];
+  return all.filter((l) => l.id !== base.id && !l.groupId && commonalityKey(l) === k && l.storeMode !== "select_on_apply" && !(base.storeId && l.storeId && base.storeId === l.storeId));
 }
 
 /** グループ化の根拠（basis）。共通している項目と、異なる項目を記録する（手動・AIのどちらでも、あとから確認できる）。店舗ごとのURL・条件の違いは許容する */

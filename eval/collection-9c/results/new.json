@@ -1,0 +1,395 @@
+{
+ "mode": "new",
+ "summary": {
+  "account/synthetic": {
+   "n": 4,
+   "ok": 4
+  },
+  "chain/synthetic": {
+   "n": 8,
+   "ok": 8
+  },
+  "chain/user_reported": {
+   "n": 3,
+   "ok": 3
+  },
+  "dup/synthetic": {
+   "n": 4,
+   "ok": 4
+  },
+  "dup/user_reported": {
+   "n": 2,
+   "ok": 2
+  },
+  "form/synthetic": {
+   "n": 5,
+   "ok": 5
+  },
+  "form/user_reported": {
+   "n": 1,
+   "ok": 1
+  },
+  "multi/synthetic": {
+   "n": 4,
+   "ok": 4
+  },
+  "multi/user_reported": {
+   "n": 1,
+   "ok": 1
+  },
+  "product/synthetic": {
+   "n": 6,
+   "ok": 6
+  },
+  "product/user_reported": {
+   "n": 1,
+   "ok": 1
+  }
+ },
+ "results": [
+  {
+   "id": "C01",
+   "kind": "chain",
+   "p": "user_reported",
+   "ok": true,
+   "item": 1,
+   "got": "BOOKOFF",
+   "expect": "BOOKOFF"
+  },
+  {
+   "id": "C02",
+   "kind": "chain",
+   "p": "user_reported",
+   "ok": true,
+   "item": 1,
+   "got": "GEO",
+   "expect": "GEO"
+  },
+  {
+   "id": "C03",
+   "kind": "chain",
+   "p": "user_reported",
+   "ok": true,
+   "item": 1,
+   "got": "イトーヨーカドー",
+   "expect": "イトーヨーカドー"
+  },
+  {
+   "id": "C04",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "BOOKOFF",
+   "expect": "BOOKOFF"
+  },
+  {
+   "id": "C05",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "BOOKOFF",
+   "expect": "BOOKOFF"
+  },
+  {
+   "id": "C06",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "GEO",
+   "expect": "GEO"
+  },
+  {
+   "id": "C07",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "イトーヨーカドー",
+   "expect": "イトーヨーカドー"
+  },
+  {
+   "id": "C08",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "イトーヨーカドー",
+   "expect": "イトーヨーカドー"
+  },
+  {
+   "id": "C09",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "C10",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "C11",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "P01",
+   "kind": "product",
+   "p": "user_reported",
+   "ok": true,
+   "item": 7,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P02",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P03",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P04",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P05",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "P06",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "P07",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "F01",
+   "kind": "form",
+   "p": "user_reported",
+   "ok": true,
+   "item": 8,
+   "got": "store_select",
+   "expect": "store_select"
+  },
+  {
+   "id": "F02",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "store_select",
+   "expect": "store_select"
+  },
+  {
+   "id": "F03",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "unknown",
+   "expect": "unknown"
+  },
+  {
+   "id": "F04",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "unknown",
+   "expect": "unknown"
+  },
+  {
+   "id": "F05",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "store_select",
+   "expect": "store_select"
+  },
+  {
+   "id": "F06",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "store_independent",
+   "expect": "store_independent"
+  },
+  {
+   "id": "D01",
+   "kind": "dup",
+   "p": "user_reported",
+   "ok": true,
+   "item": 4,
+   "got": "duplicate",
+   "expect": "duplicate"
+  },
+  {
+   "id": "D02",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "new",
+   "expect": "new"
+  },
+  {
+   "id": "D03",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "duplicate",
+   "expect": "duplicate"
+  },
+  {
+   "id": "D04",
+   "kind": "dup",
+   "p": "user_reported",
+   "ok": true,
+   "item": 6,
+   "got": "duplicate",
+   "expect": "duplicate"
+  },
+  {
+   "id": "D05",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "new",
+   "expect": "new"
+  },
+  {
+   "id": "D06",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "new",
+   "expect": "new"
+  },
+  {
+   "id": "M01",
+   "kind": "multi",
+   "p": "user_reported",
+   "ok": true,
+   "item": 9,
+   "got": "merge",
+   "expect": "merge"
+  },
+  {
+   "id": "M02",
+   "kind": "multi",
+   "p": "synthetic",
+   "ok": true,
+   "got": "separate",
+   "expect": "separate"
+  },
+  {
+   "id": "M03",
+   "kind": "multi",
+   "p": "synthetic",
+   "ok": true,
+   "got": "separate",
+   "expect": "separate"
+  },
+  {
+   "id": "M04",
+   "kind": "multi",
+   "p": "synthetic",
+   "ok": true,
+   "got": "separate",
+   "expect": "separate"
+  },
+  {
+   "id": "M05",
+   "kind": "multi",
+   "p": "synthetic",
+   "ok": true,
+   "got": "separate",
+   "expect": "separate"
+  },
+  {
+   "id": "A01",
+   "kind": "account",
+   "p": "synthetic",
+   "ok": true,
+   "got": [
+    "トレカキャピタル",
+    "渋谷店"
+   ],
+   "expect": [
+    "トレカキャピタル",
+    "渋谷店"
+   ]
+  },
+  {
+   "id": "A02",
+   "kind": "account",
+   "p": "synthetic",
+   "ok": true,
+   "got": [
+    "キデイランド",
+    "原宿店"
+   ],
+   "expect": [
+    "キデイランド",
+    "原宿店"
+   ]
+  },
+  {
+   "id": "A03",
+   "kind": "account",
+   "p": "synthetic",
+   "ok": true,
+   "got": [
+    "トレカキャピタル",
+    null
+   ],
+   "expect": [
+    "トレカキャピタル",
+    null
+   ]
+  },
+  {
+   "id": "A04",
+   "kind": "account",
+   "p": "synthetic",
+   "ok": true,
+   "got": [
+    null,
+    null
+   ],
+   "expect": [
+    null,
+    null
+   ]
+  }
+ ]
+}

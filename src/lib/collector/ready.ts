@@ -21,7 +21,9 @@ export function isReady(draft: LotteryDraft, input: LotteryInput = draft.input):
   else missing.push("系列を確実に特定できません");
   // オンライン販売で店舗名が無い場合は、既存の運用に合わせて店舗名「通販」を使う（Stage 7S）
   const storeName = input.store.name.trim() || (online ? "通販" : "");
-  if (sure(draft.summary.store) && input.store.id) {
+  if (input.storeMode === "select_on_apply") {
+    /* 応募時に店舗を選ぶ抽選（店舗は応募者が選ぶ）。店舗が特定できないことは不足ではない（Stage 9C: 後段の判定が「店舗不明」に戻していた不具合の修正） */
+  } else if (sure(draft.summary.store) && input.store.id) {
     /* 既存の店舗 */
   } else if (!input.store.id && storeName && (draft.summary.store === "none" || !input.store.name.trim()) && draft.candidates.store.length === 0 && clearName(storeName)) provisional.push(`店舗「${storeName}」`);
   else missing.push("店舗を確実に特定できません");

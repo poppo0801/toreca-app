@@ -49,7 +49,8 @@ function meta(html: string, key: string): string {
   return decodeEntities(/content=["']([^"']*)["']/i.exec(tag)?.[1] ?? "").trim();
 }
 
-export function extractPageText(html: string, baseUrl: string, maxChars = 20_000): PageText {
+/** maxLinks: 集めるリンクの最大数（既定40。調査エージェントは、ナビゲーションで枠を使い切って告知へのリンクを落とさないよう、多めに指定する） */
+export function extractPageText(html: string, baseUrl: string, maxChars = 20_000, maxLinks = 40): PageText {
   const title = decodeEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "").replace(/\s+/g, " ").trim() || meta(html, "og:title");
   const description = meta(html, "og:description") || meta(html, "description");
 
@@ -62,7 +63,7 @@ export function extractPageText(html: string, baseUrl: string, maxChars = 20_000
     const text = decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
     try {
       const abs = new URL(decodeEntities(href), baseUrl);
-      if ((abs.protocol === "http:" || abs.protocol === "https:") && text && links.length < 40) links.push({ text: text.slice(0, 80), href: abs.toString() });
+      if ((abs.protocol === "http:" || abs.protocol === "https:") && text && links.length < maxLinks) links.push({ text: text.slice(0, 80), href: abs.toString() });
     } catch {
       // 不正なリンクは無視
     }

@@ -169,7 +169,11 @@ test("操作ごとの所要時間と通信回数（ページ切替・設定・�
       const s0 = Date.now();
       await mine.click();
       // 反応: ボタンのスピナー（押した直後）→ 保存完了（応募済みの表示）
-      await expect(mine.getByTestId("my-apply-spinner")).toBeVisible({ timeout: 5_000 });
+      // スピナーは保存が速いとすぐ消え、検出の間隔の間に見逃すことがある（不安定の原因）。「スピナー」または「応募済み」のどちらかが5秒以内に現れれば、反応したとみなす
+      await expect(async () => {
+        const spinning = (await mine.getByTestId("my-apply-spinner").count()) > 0;
+        expect(spinning || (await mine.getAttribute("data-state")) === "applied").toBe(true);
+      }).toPass({ timeout: 5_000, intervals: [20, 20, 50, 100] });
       reactions.push(Date.now() - s0);
       await expect(mine).toHaveAttribute("data-state", "applied", { timeout: 15_000 });
       times.push(Date.now() - s0);

@@ -1,0 +1,29 @@
+{
+  "note": "9E: 実在の公開ページの取得対象（評価の入力にするための取得。robots尊重・1.5秒間隔・無料）。正解（種別）は取得後にページ本文を読んで別ファイルに書く（AIの出力は使わない）",
+  "urls": [
+    "https://www.pokemon-card.com/",
+    "https://www.pokemon-card.com/products/",
+    "https://www.pokemon-card.com/info/",
+    "https://www.kiddyland.co.jp/",
+    "https://www.kiddyland.co.jp/news/",
+    "https://www.c-labo.jp/",
+    "https://www.c-labo.jp/shop/tsudanuma/",
+    "https://www.c-labo.jp/beginner/",
+    "https://www.bookoff.co.jp/",
+    "https://geo-online.co.jp/",
+    "https://books.rakuten.co.jp/",
+    "https://www.toysrus.co.jp/",
+    "https://www.biccamera.com/",
+    "https://www.yamada-denki.jp/",
+    "https://www.edion.com/",
+    "https://www.amiami.jp/",
+    "https://www.suruga-ya.jp/",
+    "https://www.hmv.co.jp/",
+    "https://www.7net.omni7.jp/",
+    "https://www.pokemon.co.jp/",
+    "https://www.pokemon-card.com/rules/",
+    "https://www.pokemon-card.com/card-search/",
+    "https://www.pokemon-card.com/event/",
+    "https://www.pokemon-card.com/howtoplay/"
+  ]
+}

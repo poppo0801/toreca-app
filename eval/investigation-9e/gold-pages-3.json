@@ -1,0 +1,99 @@
+{
+ "version": 1,
+ "note": "ホールドアウト（調整後に取得した見ていないページ）の正解",
+ "pages": [
+  {
+   "url": "https://www.c-labo.jp/shop/fukuokatenjin/blog/624514/",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ（応募期間 11/13〜11/15）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tennouji/blog/624505/",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "各種再販商品の抽選販売のご案内（4商品。応募期間 11/13〜11/15）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/hakatamarui/blog/624493/",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ（応募期間 11/13〜11/15）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/oita/blog/624460/",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ（応募期間 11/13〜11/15）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tennouji/blog/624458/",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "再販抽選販売のお知らせ（応募期間 11/13〜11/15）"
+  },
+  {
+   "url": "https://www.c-labo.jp/shop/tennouji/blog/624454/",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選予約のご案内（応募期間 11/13〜11/15）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/787",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "抽選販売受付のお知らせ（応募期間 11/2〜11/5。日付上は終了済みだが、告知としては抽選の告知）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/732",
+   "set": "live3",
+   "kind": "lottery_explainer",
+   "actionable": false,
+   "basis": "『抽選販売』よくあるお問い合わせ（Pontaカード・ログイン等の説明。応募期間なし）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/776",
+   "set": "live3",
+   "kind": "general",
+   "actionable": false,
+   "basis": "なりすましアカウントへの注意（抽選の告知ではない）"
+  },
+  {
+   "url": "https://geo-online.co.jp/news/723",
+   "set": "live3",
+   "kind": "general",
+   "actionable": false,
+   "basis": "Ponta会員ID連携手続き中止のお知らせ（抽選の告知ではない）"
+  },
+  {
+   "url": "https://www.pokemon-card.com/info/005629.html",
+   "set": "live3",
+   "kind": null,
+   "actionable": null,
+   "ambiguous": true,
+   "basis": "イベント（シティリーグ）の事前抽選エントリー期間の延長。店舗の購入抽選ではなくイベント参加の抽選。登録対象かは利用者の方針による"
+  },
+  {
+   "url": "https://www.pokemon-card.com/info/005612.html",
+   "set": "live3",
+   "kind": null,
+   "actionable": null,
+   "ambiguous": true,
+   "basis": "イベント（チャンピオンズリーグ）のエントリー期間延長。店舗の購入抽選ではなくイベント参加の抽選。登録対象かは利用者の方針による"
+  },
+  {
+   "url": "https://www.pokemoncenter-online.com/news/?id=20260929",
+   "set": "live3",
+   "kind": "lottery_announcement",
+   "actionable": true,
+   "basis": "ポケモンセンターオンラインの追加抽選販売の案内（応募枠・応募のSTEPあり。期間の表は本文に出ていない）"
+  }
+ ]
+}

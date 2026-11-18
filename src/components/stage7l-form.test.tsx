@@ -324,3 +324,28 @@ describe("Stage 7L: 店舗別の一括登録", () => {
     expect([...(q("store-mode") as HTMLSelectElement).options].map((o) => o.value)).toEqual(["fixed", "select_on_apply", "none"]);
   });
 });
+
+describe("Stage 9H-3L: 編集画面の情報元リンク", () => {
+  it("情報元URLがあるとき、上部に「種類｜ドメイン」の外部リンクを出し、URL入力欄は折りたたみの中（読み取り専用の表示が主）。リンクを開いても入力内容は失われない", async () => {
+    const lottery: Lottery = { ...data.lotteries[0], sourceUrls: ["https://livepocket.jp/e/abc", "https://shop.example.invalid/lottery"], announcementUrl: "" };
+    await mountEdit(lottery);
+    const links = [...document.body.querySelectorAll<HTMLAnchorElement>('[data-testid="form-source-links"] a')];
+    expect(links.map((a) => a.textContent)).toEqual(["LivePocket｜livepocket.jp", "外部サイト｜shop.example.invalid"]);
+    expect(links.every((a) => a.target === "_blank" && a.rel.includes("noopener"))).toBe(true);
+    const details = q("source-urls-edit") as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect((q("source-urls-input") as HTMLTextAreaElement).value).toContain("livepocket.jp/e/abc"); // 既存の編集機能は残っている
+    await setValue(memoField(), "リンク確認前の入力");
+    await click(links[0]); // リンクをタップ（別タブで開く。このシートは閉じない）
+    expect(memoField().value).toBe("リンク確認前の入力");
+    expect(q("lottery-form")).not.toBeNull();
+  });
+  it("情報元URLが無い（新規の手動登録など）ときは、リンクを出さず、URL入力欄をそのまま出す", async () => {
+    const lottery: Lottery = { ...data.lotteries[0], sourceUrls: [], announcementUrl: "" };
+    await mountEdit(lottery);
+    expect(q("form-source-links")).toBeNull();
+    expect(q("source-urls-edit")).toBeNull();
+    expect(q("source-urls-input")).not.toBeNull();
+  });
+});

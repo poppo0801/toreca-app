@@ -1,4 +1,7 @@
 import { PageHeading } from "@/components/page-heading";
+import { CollectionEngineCard } from "@/components/collection-engine-card";
+import { resolveEffectiveEngine } from "@/lib/collector/engine-setting";
+import { loadOpsStatus } from "@/lib/server/collector/engine-status";
 import Link from "next/link";
 import { Block, AutoCollectView, type CandidateView, type HealthView, type OpsView, type RunView, type SettingsView, type SourceView, type StatRow } from "@/components/auto-collect-view";
 import { CollectionMaintenance } from "@/components/collection-maintenance";
@@ -14,6 +17,9 @@ import { assessRow, importantChains } from "@/lib/collector/assess-row";
 import { slimDraft } from "@/lib/collector/slim-draft";
 import { loadAppData } from "@/lib/server/lottery-service";
 import { computeMetrics } from "@/lib/collector/metrics";
+import { summarizeTeasers, type TeaserRow } from "@/lib/collector/teaser-summary";
+import { buildCostReport, type CandidateCostRow, type SearchStepRow } from "@/lib/collector/cost-report";
+import type { AiLogRow } from "@/lib/ai-cost";
 import { loadRunNotices } from "@/lib/server/collector/run-notices";
 import { healthWarnings, jstDayString } from "@/lib/collector/queue";
 import { nextSlotAt } from "@/lib/collector/schedule";
@@ -80,7 +86,7 @@ export default async function CollectionPage() {
     db.from("collection_candidates").select("id,status,reasons,resolved_at").in("status", ["excluded", "duplicate"]).limit(3000),
     db.from("collection_candidates").select("id").in("status", ["excluded", "duplicate"]).not("draft->input", "is", null).limit(3000),
     closedReviewIds(db as never, now).catch(() => new Set<string>()),
-    db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000),
+    db.from("collection_candidates").select("status,job_state,created_at,completed_at,due_at,fail_kind,cost_jpy,ai_calls,triage,reasons").gte("created_at", new Date(now.getTime() - 30 * 86400_000).toISOString()).limit(3000),
     // 整合性チェック（Stage 6A）: AI解析の利用ログと日別統計の差、異常な予算予約、直近の定期収集の結果
     db.rpc("collection_integrity", { p_household: hhId0 }),
     db.from("collection_runs").select("started_at,result,sources_ok,sources_failed,items_found").not("slot_date", "is", null).order("started_at", { ascending: false }).limit(1).maybeSingle(),
@@ -101,6 +107,16 @@ export default async function CollectionPage() {
   // 応募受付が終了した確認待ちは通常の一覧・件数から外す（候補は削除しない）
   const closedIds = closedRes;
   const metrics = computeMetrics(metricRows.data ?? [], now);
+  // 段階別の件数とAI・検索の費用（9H-3L）。既存の記録（候補・AI利用ログ・調査の記録）だけを集計する。調査の記録が無い環境（本番はマイグレーション未適用）は「未記録」
+  const since30c = new Date(now.getTime() - 30 * 86400_000).toISOString();
+  const [costLogs, costSteps] = await Promise.all([
+    db.from("ai_extraction_logs").select("created_at,kind,status,engine,model,input_tokens,output_tokens").gte("created_at", since30c).limit(5000),
+    db.from("agent_investigation_steps").select("created_at,tool,cost_jpy").gte("created_at", since30c).limit(5000),
+  ]);
+  const costReport = buildCostReport({ candidates: (metricRows.data ?? []) as unknown as CandidateCostRow[], logs: (costLogs.data ?? []) as unknown as AiLogRow[], searchSteps: costSteps.error ? undefined : ((costSteps.data ?? []) as unknown as SearchStepRow[]), rate: budget.rate });
+  // 9H-3N: 抽選予告の内部管理の状況（通常の候補・件数には含めない。管理・診断画面でだけ確認する）
+  const teaserRows = await db.from("collection_candidates").select("created_at,draft").not("draft->tracking", "is", null).limit(300);
+  const teaserSummary = summarizeTeasers((teaserRows.data ?? []) as unknown as TeaserRow[], new Date());
   const ig = integrityRes.data as { logs_2d?: number; stats_calls_2d?: number; abnormal_reservations?: number } | null;
   const runSummaries = runNotices.summaries;
   // 情報充実度（A〜E）・対応優先度は、表示のたびに保存済みの草稿と最新のマスターから再計算する（古いランクを残さない）
@@ -183,6 +199,16 @@ export default async function CollectionPage() {
         </Link>
       </p>
       <PageHeading navId="settings" className="mb-3">抽選情報の自動収集</PageHeading>
+      {await (async (householdIdForEngine: string) => {
+        // 情報収集方式（9H-3Q）: 設定・最終実行の状況。読み込みに失敗しても画面全体は表示する（従来方式として扱う）
+        const eo = await loadOpsStatus(db as never, householdIdForEngine).catch(() => null);
+        const eff = resolveEffectiveEngine({ stored: eo?.stored, loadFailed: !eo || eo.loadFailed, toremaneEnv: process.env.TOREMANE_ENV, enabled: process.env.AUTONOMOUS_COLLECTION === "on" });
+        return (
+          <div className="mb-3">
+            <CollectionEngineCard stored={eff.stored} note={eff.note} autonomousAvailable={process.env.TOREMANE_ENV === "local" || process.env.AUTONOMOUS_COLLECTION === "on"} runs={(eo?.runs ?? []) as never} />
+          </div>
+        );
+      })(hh.data.id)}
       {/* 要手動確認（システムが解決できなかった案件）。優先収集メモとは別の一覧。ここから候補の編集フォームを直接開く */}
       <EditRequestProvider>
       <div className="mb-3">
@@ -195,6 +221,8 @@ export default async function CollectionPage() {
         counts={counts}
         health={health}
         metrics={metrics}
+        cost={costReport}
+        teasers={teaserSummary}
         runSummaries={runSummaries}
         ops={ops}
         stats={statRows}

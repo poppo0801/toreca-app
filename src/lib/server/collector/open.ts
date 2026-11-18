@@ -1,5 +1,6 @@
 import "server-only";
 import { classifySource, provenanceFor, type FieldMap, type FieldSource, type SourceContext } from "@/lib/collector/fields";
+import { sourceBasis } from "@/lib/collector/source-basis";
 import type { Summary } from "@/lib/collector/completeness";
 import type { OpenLite } from "@/lib/collector/supplement";
 import type { Tracking } from "@/lib/collector/tracking";
@@ -41,7 +42,8 @@ export function toOpenLite(row: OpenRow, ctx: SourceContext): OpenLite | null {
   const quotedId = post?.quoted?.id;
   const at = d.confirmedAt ?? row.created_at;
   const origin = quotedId ? `x:${quotedId}` : postId ? `x:${postId}` : d.viaList ? `list:${url}` : `u:${urlIdentity(url) ?? url}`;
-  const source: FieldSource = { url, kind, origin, at, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
+  const basis = sourceBasis(url, { viaList: !!d.viaList });
+  const source: FieldSource = { ...(basis ? { basis } : {}), url, kind, origin, at, ...(sc.account ? { account: sc.account } : {}), ...(postId ? { postId } : {}) };
   const fields = d.fields && Object.keys(d.fields).length > 0 ? d.fields : provenanceFor(d.input, source);
   return {
     id: row.id,
@@ -65,4 +67,14 @@ export async function loadOpen(db: Db, householdId: string, ctx: SourceContext, 
   if (opts.ids) q = q.in("id", opts.ids);
   const { data } = await q;
   return (data ?? []).map((r) => toOpenLite(r as OpenRow, ctx)).filter((x): x is OpenLite => !!x);
+}
+
+/** 最近、自動登録した抽選の元の候補（Stage 9A）。補足投稿（応募条件だけの投稿）の補完先の探索に使う。抽選IDも返す */
+export async function loadRecentRegistered(db: Db, householdId: string, ctx: SourceContext, days = 14): Promise<(OpenLite & { lotteryId: string })[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data } = await db.from("collection_candidates").select("id,source_url,created_at,draft,lottery_id").eq("household_id", householdId).eq("status", "auto_registered").not("lottery_id", "is", null).gte("created_at", since).limit(200);
+  return (data ?? []).flatMap((r) => {
+    const o = toOpenLite(r as OpenRow, ctx);
+    return o && r.lottery_id ? [{ ...o, lotteryId: r.lottery_id as string }] : [];
+  });
 }

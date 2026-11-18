@@ -203,9 +203,10 @@ export interface Relevance {
 }
 
 /** ポケモンカードの抽選告知らしいか。ポケモンカード以外のTCGが主題なら除外。何も手掛かりが無ければ uncertain */
-export function judgeRelevance(text: string, opts: { fromPokemonList?: boolean } = {}): Relevance {
+export function judgeRelevance(text: string, opts: { fromPokemonList?: boolean; /** 商品マスターの名称・略称・別名（Stage 9B）。商品名だけの告知（「ポケカ」と書かれていない）もポケモンカードの告知として扱う */ knownTerms?: string[] } = {}): Relevance {
   const t = text.normalize("NFKC");
-  const pk = POKEMON.test(t);
+  const tl = t.toLowerCase();
+  const pk = POKEMON.test(t) || (opts.knownTerms ?? []).some((w) => tl.includes(w));
   const other = OTHER.test(t);
   if (other && !POKEMON_STRICT.test(t)) return { relevant: false, uncertain: false, reason: "ポケモンカード以外のTCGの告知です" };
   if (pk && LOTTERY.test(t)) return { relevant: true, uncertain: false, reason: "" };

@@ -7,6 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getExtractor, ExtractorError, type ExtractOutput, type ExtractRequest, type LotteryExtractor } from "@/lib/ai/provider";
+import { revertAutoUpdate } from "@/lib/server/collector/auto-update";
 import { applyCandidateUpdate, recheckPages, runCollection, runWorker, type CollectDeps } from "@/lib/server/collector/run";
 import type { SafeFetchResult } from "@/lib/server/safe-fetch";
 import type { Db } from "@/lib/server/lottery-service";
@@ -281,26 +282,36 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
     expect(r3.ok && r3.aiCalls).toBe(0);
     expect((await cand()).change_count).toBe(0);
 
-    // 3) 締切延長 → 内容の変更を検出 → 更新の提案（抽選はまだ変わらない）
+    // 3) 締切延長 → 内容の変更を検出 → 同じ情報源の更新なので、人の承認を待たず自動更新（Stage 9B）。更新前後・情報源が履歴に残り、元に戻せる。メモ等・応募の記録は変わらない
     const extend = (day: number) => shifted((raw) => ((raw.apply_deadline as { day: number }).day = day));
+    const before = (await u1.from("lotteries").select("memo,conditions_text,source_urls,apply_deadline_at,updated_at").eq("id", lotId).single()).data!;
     const r4 = await run("1/22(金) 20:00まで 兵庫県・LivePocket", extend(22));
     expect(r4.ok && r4.aiCalls).toBe(1);
     c = await cand();
-    expect(c).toMatchObject({ job_state: "review", kind: "update", change_count: 1 });
-    expect(c.reasons.join("")).toContain("応募締切");
-    const before = (await u1.from("lotteries").select("memo,conditions_text,source_urls,apply_deadline_at,updated_at").eq("id", lotId).single()).data!;
+    expect(c).toMatchObject({ job_state: "completed", kind: "new", change_count: 1 });
+    expect(c.reasons.join("")).toContain("自動更新");
+    const afterAuto = (await u1.from("lotteries").select("memo,conditions_text,source_urls,apply_deadline_at,update_history").eq("id", lotId).single()).data as unknown as { memo: string | null; conditions_text: string | null; source_urls: string[]; apply_deadline_at: string; update_history: { id: string; labels: string[]; before: Record<string, unknown>; sourceUrl: string; revertedAt?: string }[] };
+    expect(afterAuto.apply_deadline_at).toBe("2027-01-22T14:59:00+00:00");
+    expect(afterAuto.update_history).toHaveLength(1);
+    expect(afterAuto.update_history[0].labels).toContain("応募締切");
+    expect(afterAuto.update_history[0].sourceUrl).toBe(URL);
+    expect(afterAuto.memo).toBe(before.memo);
+    expect(afterAuto.conditions_text).toBe(before.conditions_text);
     expect(await lotteryCount()).toBe(1);
-    // 利用者が抽選を編集した（確定情報）→ 提案の反映は拒否され、編集は保たれる
+    // 誤更新の復旧: 元に戻せる。戻した内容と同じ変更は、再び自動では反映されない
+    const rv = await revertAutoUpdate(u1, lotId, afterAuto.update_history[0].id, profile);
+    expect(rv.ok, JSON.stringify(rv)).toBe(true);
+    expect((await u1.from("lotteries").select("apply_deadline_at").eq("id", lotId).single()).data!.apply_deadline_at).toBe(before.apply_deadline_at);
+    expect((await revertAutoUpdate(u1, lotId, afterAuto.update_history[0].id, profile)).ok).toBe(false); // 二重に戻せない
+    // 利用者が抽選を編集した（確定情報）→ 以後の変更は自動では反映されず、更新の提案（人の確認）になる。編集は保たれる
     await u1.from("lotteries").update({ memo: "利用者のメモ" }).eq("id", lotId);
-    const conflict = await applyCandidateUpdate(u1, c.id);
-    expect(conflict.ok).toBe(false);
-    expect(!conflict.ok && conflict.message).toContain("編集");
-    expect((await u1.from("lotteries").select("memo,apply_deadline_at").eq("id", lotId).single()).data).toMatchObject({ memo: "利用者のメモ", apply_deadline_at: before.apply_deadline_at });
-    // 再度の変更 → 新しい提案（編集後の状態を基準に）→ 反映できる。反映するのは日時だけ
+    await u1.from("lotteries").update({ cautions_updated_at: new Date(Date.now() - 3600_000).toISOString() }).eq("id", lotId); // 手動編集が自動処理より十分後だった状態にする
     const r5 = await run("1/23(土) 20:00まで 兵庫県・LivePocket", extend(23));
     expect(r5.ok && r5.aiCalls).toBe(1);
     c = await cand();
-    expect(c).toMatchObject({ job_state: "review", kind: "update" });
+    expect(c, JSON.stringify(c.reasons)).toMatchObject({ job_state: "review", kind: "update" });
+    expect(c.reasons.join("")).toContain("手動");
+    expect((await u1.from("lotteries").select("memo,apply_deadline_at").eq("id", lotId).single()).data).toMatchObject({ memo: "利用者のメモ", apply_deadline_at: before.apply_deadline_at });
     const applied = await applyCandidateUpdate(u1, c.id);
     expect(applied.ok).toBe(true);
     const after = (await u1.from("lotteries").select("memo,conditions_text,source_urls,apply_deadline_at").eq("id", lotId).single()).data!;

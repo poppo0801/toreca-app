@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "checkedAt": "2026-11-14",
+  "note": "Stage 8F-4 の評価データ（組 8f4）の定義。アプリが実際に収集・登録した抽選（本番の読み取り専用の書き出し pool.json）から、8F-2/8F-3 とは別の対象（subject）を選び、正解は取得した公式の販売ページ（pages-8f4.json。取得日時・ハッシュつき）の内容から決めた。AIの判定結果は使わない。正解 none は、各店舗の抽選が店舗ごとの別のイベント（イベントIDが異なる・販売元が店舗ごと・期間が店舗ごとに異なる）と、取得したページで確認できたもの。確認できないものは unknown。同じ実在の抽選を 8F-2 の比較相手として使っているため、組は独立ではない（対象は別）。",
+  "cases": [
+    { "subject": "L025", "category": "period_differs", "label": "none", "note": "ふるいちイオンモール伊丹店の30th。店舗別のLivePocketイベント（イベントID 1134754）。他店舗とはイベントID・期間が異なる" },
+    { "subject": "L031", "category": "period_differs", "label": "none", "note": "古本市場深井店の30th（イベントID 1134915）。店舗別・期間が異なる" },
+    { "subject": "L043", "category": "period_differs", "label": "none", "note": "ふるいちイオンモール神戸北店の30th（イベントID 1137523）。店舗別・期間が異なる" },
+    { "subject": "L050", "category": "conditions_differ", "label": "none", "note": "古本市場小平店の30th（20BOX・イベントID 1139415）。数量・期間が他店舗と異なる店舗別のイベント" },
+    { "subject": "L066", "category": "period_differs", "label": "none", "note": "古本市場竹の塚店の30th（イベントID 1138194）。店舗別・期間が異なる" },
+    { "subject": "L067", "category": "period_differs", "label": "none", "note": "古本市場魚住店の30th（アプリ会員限定・イベントID 1138864）。店舗別・期間が異なる" },
+    { "subject": "L086", "category": "period_differs", "label": "none", "note": "古本市場東住吉店の30th（イベントID 1140258）。店舗別・期間が異なる" },
+    { "subject": "L111", "category": "period_differs", "label": "none", "note": "古本市場三田店の30th（イベントID 1140619）。店舗別・期間が異なる" },
+    { "subject": "L009", "category": "period_differs", "label": "none", "note": "ふるいち高野店のストームエメラルダ（イベントID 1140532）。店舗別・期間が異なる" },
+    { "subject": "L090", "category": "period_differs", "label": "none", "note": "古本市場千里丘店のストームエメラルダ（イベントID 1140481）。店舗別・期間が異なる" },
+    { "subject": "L094", "category": "period_differs", "label": "none", "note": "カードラボ販売買取センターNAMBAの30th（再販）。店舗ブログの告知は店舗別（カードラボなんば店・津田沼店・オタロード本店とは別日程・別告知）" },
+    { "subject": "L061", "category": "period_differs", "label": "none", "note": "カードラボ津田沼店のハドウシーカー。津田沼店のブログの告知は店舗別。マルイ海老名店は別日程（11/3〜11/19）の別告知" },
+    { "subject": "L122", "category": "source_mixed", "label": "unknown", "note": "GEOのハドウシーカー＋30th（集約アカウントのX投稿由来）。GEOの公式告知は商品ごとに2件（news/789・790）で同じ日程・条件。X投稿由来の登録が、公式告知の登録と同じ抽選の別経路か（重複）、別の抽選かは、確認できなかった（Xは取得できない）" }
+  ]
+}

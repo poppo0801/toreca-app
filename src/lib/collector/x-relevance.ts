@@ -5,6 +5,8 @@
  * 他のTCGが主題のもの・抽選と無関係な長文・古い投稿は解析しない。
  */
 import { judgeRelevance, looksLikeLottery } from "@/lib/collector/listing";
+import { normName } from "@/lib/norm";
+import { productNameCandidates } from "@/lib/product-name";
 
 export type XPass = "text" | "image" | "quote" | "link";
 export type XSkip = "other_tcg" | "no_signal" | "stale";
@@ -24,17 +26,35 @@ const IMAGE_CENTRIC_MAX = 60;
 
 const bare = (s: string) => s.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, "");
 
-export function judgeXPost(p: XJudgeInput, now: Date): { pass: true; basis: XPass } | { pass: false; skip: XSkip } {
+/** 商品名として単独では意味を持たない語（シリーズ名・商品区分）。これだけで関連ありとはしない */
+const GENERIC_TERM = /^(?:ポケモンカードゲーム|ポケモンカード|ポケカ|拡張パック|強化拡張パック|ハイクラスパック|スペシャルセット|スペシャルデッキセット|スターターセット|スタートデッキ|メガ|mega|box|ボックス|パック|セット|デッキ|抽選|予約|再販|新弾)$/i;
+
+/**
+ * 商品マスターの名称・本体名・別名から、告知が関連商品に触れているかを見る語を作る（Stage 9B）。
+ * 4文字未満・単独では意味を持たない語（拡張パック等）は除く。「ポケカ」と書かれていない告知も、登録済みの商品名・略称があれば関連ありとして扱う（略称・表記揺れへの対応）。
+ */
+export function productTerms(products: { officialName: string; aliases?: string[] }[]): string[] {
+  const out = new Set<string>();
+  for (const p of products) {
+    for (const raw of [...productNameCandidates(p.officialName), ...(p.aliases ?? [])]) {
+      const t = normName(raw).toLowerCase();
+      if (t.length >= 4 && !GENERIC_TERM.test(t)) out.add(t);
+    }
+  }
+  return [...out];
+}
+
+export function judgeXPost(p: XJudgeInput, now: Date, opts: { knownTerms?: string[] } = {}): { pass: true; basis: XPass } | { pass: false; skip: XSkip } {
   if (p.createdAt) {
     const age = (now.getTime() - new Date(p.createdAt).getTime()) / 86_400_000;
     if (Number.isFinite(age) && age > X_STALE_DAYS) return { pass: false, skip: "stale" };
   }
   const q = p.quoted ?? null;
   const all = [p.text, q?.text ?? ""].join("\n");
-  const rel = judgeRelevance(all, { fromPokemonList: false });
+  const rel = judgeRelevance(all, { fromPokemonList: false, knownTerms: opts.knownTerms });
   // 他のTCGが主題（ポケモンカードの言及が無い）なら、画像があっても解析しない
   if (!rel.relevant && !rel.uncertain) return { pass: false, skip: "other_tcg" };
-  if (rel.relevant) return { pass: true, basis: p.text && judgeRelevance(p.text, {}).relevant ? "text" : "quote" };
+  if (rel.relevant) return { pass: true, basis: p.text && judgeRelevance(p.text, { knownTerms: opts.knownTerms }).relevant ? "text" : "quote" };
   // ポケモンカードの言及が本文に無い: 画像・引用・リンクがあり、抽選の語がある、または本文が短い（画像中心）ときだけ解析する
   const hasImg = p.images.length > 0 || (q?.images.length ?? 0) > 0;
   const lottery = looksLikeLottery(all);

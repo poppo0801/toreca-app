@@ -14,7 +14,7 @@ export type InputKind = "text" | "image" | "url" | "x_url";
  * 解析仕様（プロンプト・ツール定義・検証ルール）のバージョン。精度をバージョンごとに比べられるよう、解析ログに記録する。
  * プロンプトやツール定義、検証ロジックを変えたら更新する。
  */
-export const PROMPT_VERSION = "2026-11-07.1";
+export const PROMPT_VERSION = "2026-11-14.1";
 
 export interface ExtractRequest {
   kind: InputKind;
@@ -87,6 +87,10 @@ const SYSTEM_PROMPT = `あなたは日本のトレーディングカード（ポ
 - 購入手続き（支払い・購入ページでの手続き）の期間と、店舗での受取（お渡し）の期間が別々に書かれているときだけ、購入手続き・支払いの期間を procedure_start / procedure_deadline に、店舗受取の期間を receive_start / receive_deadline に入れる。同じ期間として書かれている、または区別が読み取れないときは receive_start / receive_deadline は null にし、購入・受取の期間は procedure_start / procedure_deadline に入れる。発送手続きの期間・受取期限も、書かれていれば同様に区別する。書かれていない期限を推測で補わない。
 - 抽選方式 lottery_kind: 応募締切のある通常の抽選は normal。応募後も抽選が続き、期間やリセットで入れ替わるキャンペーン（応募後も継続して抽選される）は ongoing。商品ごとに招待リクエストを送り、招待が届いた人が購入できる販売（招待制）は invite。判断できなければ unknown。招待・継続の有効期限が告知に書かれていれば valid_until（無期限とは仮定しない）。同じURLが使い回される継続抽選では、日付や回の記載から新しい回かどうかを warnings に書く（リセットが確定していない場合は断定しない）。
 
+- X投稿などで本文と画像が同時に与えられたとき、本文と画像は補い合う情報。本文に明記された商品・店舗・応募情報は、画像に載っていないことだけを理由に除外しない（画像が全商品・全情報を載せているとは限らない）。本文が7商品、画像が4商品なら7商品とも記録する。画像が明らかに別の抽選（別の店舗・別の企画）を示すときは混ぜず、warnings に書く。投稿が他の告知の転載・要約で、リンク先の本文が与えられていれば、リンク先の記載を優先して補う。
+- LivePocket・チケット販売サービスのページでは、サービス側の表示（「販売受付期間」など）と、主催者が書いた説明本文が別々にあることがある。応募開始・締切・当選発表が説明本文に明記されていれば、説明本文の記載を優先する。サービス側の表示と1〜数分しか違わない締切（11:59と12:00、23:59と翌0:00など）は、同じ締切の表記差として、早い方を採用する（不明にしない）。
+- 当選発表の表現: 「販売開始日までにメール」「○日までに連絡」は、発表の終わりだけの記載（開始日は不明）。「販売開始日までに」は、販売開始日が書かれていればその日を result_date に入れ、warnings に「当選発表は○日までのメール連絡（開始日は不明）」と書く。「11月16日〜11月21日に発表」は result_date=11/16、result_end_date=11/21。「11月26日を目途」「予定」は確定日ではないので warnings に「予定日」と書く。応募期間・当選発表期間・購入期間・受取期間は別の項目として混同しない。
+
 例（要点だけ。実際の告知の表記どおりに返す）:
 - 「1人1BOXまで」「お一人様1点まで」→ 購入数量の上限。purchase_limit_text に書き、limit_basis は unknown（応募回数の記載があるときだけ設定）。
 - 「応募は1ご家族様につき1口」「1家族1アカウント」→ limit_basis=family, limit_max_count=1。「1アカウント1回」→ account。
@@ -152,6 +156,8 @@ export const RECORD_LOTTERY_TOOL = {
       receive_start: { ...dateSchema, description: "購入手続きと別に、店舗受取の期間が書かれているときだけ: 受取の開始日時。無ければ null" },
       receive_deadline: { ...dateSchema, description: "購入手続きと別に、店舗受取の期間が書かれているときだけ: 受取の期限。無ければ null" },
       lottery_kind: { type: "string", enum: ["normal", "ongoing", "invite", "unknown"], description: "抽選方式。通常=normal / 継続抽選=ongoing / 招待制販売=invite / 不明=unknown" },
+      apply_unit: { type: "string", enum: ["store_select", "store_independent", "per_product", "single", "unknown"], description: "応募の単位。応募時に応募者が受取店舗を選ぶ=store_select／店舗ごとに別の受付=store_independent／商品ごとに別の応募=per_product／1件の応募=single／読み取れない=unknown。「1店舗のみ応募可」の記載だけで店舗選択式と断定しない（応募フォームの店舗選択欄・応募ページの構造で判断する）" },
+      selectable_stores: { type: "array", items: { type: "string" }, description: "店舗選択式のとき、告知に挙げられている選べる店舗名。無ければ空配列" },
       valid_until: { ...dateSchema, description: "継続抽選・招待の有効期限（書かれているときだけ）。無ければ null" },
       announcement_method: { type: "string", description: "当選発表の方法（メール、マイページ等）" },
       announcement_url: { type: "string" },

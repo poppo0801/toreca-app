@@ -208,9 +208,9 @@ export type AgentMessage =
   | { role: "tool"; callId: string; name: string; content: string; isError?: boolean };
 
 export type LlmStep =
-  | { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage }
+  | { kind: "tool_calls"; calls: ToolCall[]; text?: string; raw?: unknown[]; usage: LlmUsage; /** APIの停止理由（記録用。Stage 8F-3） */ stopReason?: string }
   /** 提出。calls・raw は、提出のあとに検証結果を返して会話を続けるとき（再調査）に使う（提出を含む同じ応答の呼び出しと、応答の原本）。無ければ会話側で補う */
-  | { kind: "final"; output: unknown; usage: LlmUsage; calls?: ToolCall[]; raw?: unknown[] };
+  | { kind: "final"; output: unknown; usage: LlmUsage; calls?: ToolCall[]; raw?: unknown[]; stopReason?: string };
 
 export class TransientLlmError extends Error {}
 
@@ -301,6 +301,11 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     budget.addLlm(step.usage);
     trace.push({ t: "step", n: budget.usage.steps, text: step.kind === "tool_calls" ? step.text : undefined });
     if (step.kind === "final") {
+      // 再調査の依頼のあと、AIが再提出せず（ツールを呼ばず説明だけで終了・出力の途切れ）空の出力になったときは、直前の有効な提出を失わない（8F-7）
+      if (rounds > 0 && lastSubmitted !== undefined && /(^|:)(no_tool_call|max_tokens)$/.test(step.stopReason ?? "")) {
+        trace.push({ t: "review", round: rounds, feedback: "再調査の依頼のあと再提出が無かったため、直前の提出を採用", meta: { keptPrevious: true } });
+        return finish("completed", "submitted", lastSubmitted);
+      }
       lastSubmitted = step.output;
       // 独立した検証 → 不足があれば、具体的な理由を返して追加調査を促す。回数の上限・予算の余力（予測）が無ければ再調査しない
       if (input.review && rounds < (input.maxReviews ?? 0) && !budget.exceeded() && budget.hasHeadroom()) {

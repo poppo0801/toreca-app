@@ -1,0 +1,286 @@
+{
+ "mode": "old",
+ "summary": {
+  "chain/synthetic": {
+   "n": 8,
+   "ok": 8
+  },
+  "chain/user_reported": {
+   "n": 3,
+   "ok": 0
+  },
+  "dup/synthetic": {
+   "n": 4,
+   "ok": 4
+  },
+  "dup/user_reported": {
+   "n": 2,
+   "ok": 0
+  },
+  "form/synthetic": {
+   "n": 5,
+   "ok": 4
+  },
+  "form/user_reported": {
+   "n": 1,
+   "ok": 0
+  },
+  "product/synthetic": {
+   "n": 6,
+   "ok": 5
+  },
+  "product/user_reported": {
+   "n": 1,
+   "ok": 0
+  }
+ },
+ "results": [
+  {
+   "id": "C01",
+   "kind": "chain",
+   "p": "user_reported",
+   "ok": false,
+   "item": 1,
+   "got": null,
+   "expect": "BOOKOFF"
+  },
+  {
+   "id": "C02",
+   "kind": "chain",
+   "p": "user_reported",
+   "ok": false,
+   "item": 1,
+   "got": null,
+   "expect": "GEO"
+  },
+  {
+   "id": "C03",
+   "kind": "chain",
+   "p": "user_reported",
+   "ok": false,
+   "item": 1,
+   "got": null,
+   "expect": "イトーヨーカドー"
+  },
+  {
+   "id": "C04",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "BOOKOFF",
+   "expect": "BOOKOFF"
+  },
+  {
+   "id": "C05",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "BOOKOFF",
+   "expect": "BOOKOFF"
+  },
+  {
+   "id": "C06",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "GEO",
+   "expect": "GEO"
+  },
+  {
+   "id": "C07",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "イトーヨーカドー",
+   "expect": "イトーヨーカドー"
+  },
+  {
+   "id": "C08",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": "イトーヨーカドー",
+   "expect": "イトーヨーカドー"
+  },
+  {
+   "id": "C09",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "C10",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "C11",
+   "kind": "chain",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "P01",
+   "kind": "product",
+   "p": "user_reported",
+   "ok": false,
+   "item": 7,
+   "got": null,
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P02",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P03",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": false,
+   "got": null,
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P04",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "P05",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "P06",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": null,
+   "expect": null
+  },
+  {
+   "id": "P07",
+   "kind": "product",
+   "p": "synthetic",
+   "ok": true,
+   "got": "ハドウシーカー",
+   "expect": "ハドウシーカー"
+  },
+  {
+   "id": "F01",
+   "kind": "form",
+   "p": "user_reported",
+   "ok": false,
+   "item": 8,
+   "got": "unknown",
+   "expect": "store_select"
+  },
+  {
+   "id": "F02",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": false,
+   "got": "unknown",
+   "expect": "store_select"
+  },
+  {
+   "id": "F03",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "unknown",
+   "expect": "unknown"
+  },
+  {
+   "id": "F04",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "unknown",
+   "expect": "unknown"
+  },
+  {
+   "id": "F05",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "store_select",
+   "expect": "store_select"
+  },
+  {
+   "id": "F06",
+   "kind": "form",
+   "p": "synthetic",
+   "ok": true,
+   "got": "store_independent",
+   "expect": "store_independent"
+  },
+  {
+   "id": "D01",
+   "kind": "dup",
+   "p": "user_reported",
+   "ok": false,
+   "item": 4,
+   "got": "new",
+   "expect": "duplicate"
+  },
+  {
+   "id": "D02",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "new",
+   "expect": "new"
+  },
+  {
+   "id": "D03",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "duplicate",
+   "expect": "duplicate"
+  },
+  {
+   "id": "D04",
+   "kind": "dup",
+   "p": "user_reported",
+   "ok": false,
+   "item": 6,
+   "got": "new",
+   "expect": "duplicate"
+  },
+  {
+   "id": "D05",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "new",
+   "expect": "new"
+  },
+  {
+   "id": "D06",
+   "kind": "dup",
+   "p": "synthetic",
+   "ok": true,
+   "got": "new",
+   "expect": "new"
+  }
+ ]
+}

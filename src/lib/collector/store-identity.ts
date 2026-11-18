@@ -7,6 +7,7 @@
  *  - 抽選まとめ・情報アカウントは店舗として扱わない（公式の投稿を引用して紹介しているだけ）
  *  - 照合の根拠（basis）を返し、二次情報として明示できるようにする
  */
+import { independentChainIn, independentChainKey } from "@/lib/chain-normalize";
 import { matchChain, matchStore } from "@/lib/lottery-match";
 import { PREFECTURE_LIST } from "@/lib/geo";
 import type { XProfile } from "@/lib/collector/x-posts";
@@ -60,8 +61,10 @@ export function parseAccountName(displayName: string, username: string, chains: 
     .filter((x) => norm(x.n).length >= 2)
     .sort((a, b) => norm(b.n).length - norm(a.n).length);
   const nn = norm(name);
-  const hit = cands.find((x) => nn.includes(norm(x.n)));
-  const kw = CHAIN_KEYWORDS.find((k) => k.re.test(name)) ?? CHAIN_KEYWORDS.find((k) => k.re.test(username));
+  // 独立管理の系列（イオンビッグ・イオンキッズリパブリック・イオンオンライン。9H-3L）: 「イオン」を含むだけで既存の「イオン」系列に寄せない。マスターに同じ独立系列があるときだけそれを使う
+  const indep = independentChainIn(name) ?? independentChainIn(username);
+  const hit = cands.find((x) => nn.includes(norm(x.n)) && (indep ? independentChainKey(x.n) === indep.key : !independentChainKey(x.n)));
+  const kw = indep ? { name: indep.name, re: new RegExp(indep.name) } : (CHAIN_KEYWORDS.find((k) => k.re.test(name)) ?? CHAIN_KEYWORDS.find((k) => k.re.test(username)));
   const chainName = hit?.chain ?? kw?.name ?? "";
   if (!chainName) return none;
   // 店舗名: 系列名を除いた残りから「○○店」を取る

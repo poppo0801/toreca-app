@@ -1,0 +1,810 @@
+{
+  "version": 1,
+  "note": "Stage 8F-3 の評価入力（公式ページの内容から再構成した登録＋本番の実在の登録）。正解は含まない",
+  "cases": [
+    {
+      "id": "M01",
+      "title": "ホビーステーション 池袋本店 30th CELEBRATION",
+      "category": "multi_store_same",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://livepocket.jp/e/m3_6v",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R001",
+        "store": "池袋本店",
+        "chain": "ホビーステーション",
+        "products": [
+          "30th CELEBRATION"
+        ],
+        "qty": 1,
+        "start": "2026-08-04T12:00",
+        "deadline": "2026-08-06T23:59",
+        "result": "2026-08-13",
+        "apply": "web",
+        "receive": "store",
+        "tags": [
+          "member_registration",
+          "id_check"
+        ],
+        "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+        "urls": [
+          "https://livepocket.jp/e/m3_6v"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R002",
+          "store": "秋葉原ラジオ会館店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R003",
+          "store": "町田店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R004",
+          "store": "津田沼店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "evidence": {
+        "R001": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（池袋本店）",
+        "R002": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（秋葉原ラジオ会館店）",
+        "R003": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（町田店）",
+        "R004": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（津田沼店）"
+      }
+    },
+    {
+      "id": "M02",
+      "title": "ホビーステーション 神戸三宮 ハドウシーカー",
+      "category": "multi_store_same",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://livepocket.jp/e/075sp",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R005",
+        "store": "神戸三宮",
+        "chain": "ホビーステーション",
+        "products": [
+          "ハドウシーカー"
+        ],
+        "qty": 1,
+        "start": "2026-10-26T12:00",
+        "deadline": "2026-10-28T23:59",
+        "result": "2026-11-05",
+        "apply": "web",
+        "receive": "store",
+        "tags": [
+          "member_registration",
+          "photo_id",
+          "livepocket_account",
+          "one_store_only"
+        ],
+        "conditions": "Livepocket会員登録が必要。LivePocketアカウントの氏名とマイナンバーカードの氏名が一致すること。応募は対象店舗の中から1店舗のみ。",
+        "urls": [
+          "https://livepocket.jp/e/075sp"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R006",
+          "store": "名古屋大須本店",
+          "chain": "ホビーステーション",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-10-26T12:00",
+          "deadline": "2026-10-28T23:59",
+          "result": "2026-11-05",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。支払い時にマイナンバーカードで本人確認し、カード氏名とLivePocketアカウント氏名が一致すること。1人2BOXまで。当選者は応募店舗で代金前払い（現金のみ）。店頭購入のみ。譲渡・代理購入は不可。",
+          "urls": [
+            "https://livepocket.jp/e/075sp"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R007",
+          "store": "金沢店",
+          "chain": "ホビーステーション",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-10-26T12:00",
+          "deadline": "2026-10-28T23:59",
+          "result": "2026-11-05",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。支払い時にマイナンバーカードで本人確認し、カード氏名とLivePocketアカウント氏名が一致すること。1人2BOXまで。当選者は応募店舗で代金前払い（現金のみ）。店頭購入のみ。譲渡・代理購入は不可。",
+          "urls": [
+            "https://livepocket.jp/e/075sp"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R008",
+          "store": "新潟店",
+          "chain": "ホビーステーション",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-10-26T12:00",
+          "deadline": "2026-10-28T23:59",
+          "result": "2026-11-05",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。支払い時にマイナンバーカードで本人確認し、カード氏名とLivePocketアカウント氏名が一致すること。1人2BOXまで。当選者は応募店舗で代金前払い（現金のみ）。店頭購入のみ。譲渡・代理購入は不可。",
+          "urls": [
+            "https://livepocket.jp/e/075sp"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "evidence": {
+        "R006": "【当選者代金前払い必要】ホビーステーション「ポケモンカードゲーム 拡張パック ハドウシーカー」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（名古屋大須本店）",
+        "R007": "【当選者代金前払い必要】ホビーステーション「ポケモンカードゲーム 拡張パック ハドウシーカー」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（金沢店）",
+        "R008": "【当選者代金前払い必要】ホビーステーション「ポケモンカードゲーム 拡張パック ハドウシーカー」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（新潟店）"
+      }
+    },
+    {
+      "id": "M03",
+      "title": "ホビーステーション 大宮店 30th CELEBRATION カードセット 9種セット",
+      "category": "multi_store_same",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://livepocket.jp/e/tjphs",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R009",
+        "store": "大宮店",
+        "chain": "ホビーステーション",
+        "products": [
+          "30th CELEBRATION カードセット 9種セット"
+        ],
+        "qty": 1,
+        "start": "2026-11-10T12:00",
+        "deadline": "2026-11-12T23:59",
+        "result": "2026-11-25",
+        "apply": "web",
+        "receive": "store",
+        "tags": [
+          "member_registration",
+          "id_check"
+        ],
+        "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。マイナンバーカードで本人確認し、氏名がアカウントと一致すること。9種セットは1セットまで。店頭購入のみ。複数応募・複数アカウント・譲渡・代理購入は無効またはキャンセル。",
+        "urls": [
+          "https://livepocket.jp/e/tjphs"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R010",
+          "store": "所沢店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION カードセット 9種セット"
+          ],
+          "qty": 1,
+          "start": "2026-11-10T12:00",
+          "deadline": "2026-11-12T23:59",
+          "result": "2026-11-25",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。マイナンバーカードで本人確認し、氏名がアカウントと一致すること。9種セットは1セットまで。店頭購入のみ。複数応募・複数アカウント・譲渡・代理購入は無効またはキャンセル。",
+          "urls": [
+            "https://livepocket.jp/e/tjphs"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R011",
+          "store": "本厚木店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION カードセット 9種セット"
+          ],
+          "qty": 1,
+          "start": "2026-11-10T12:00",
+          "deadline": "2026-11-12T23:59",
+          "result": "2026-11-25",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。マイナンバーカードで本人確認し、氏名がアカウントと一致すること。9種セットは1セットまで。店頭購入のみ。複数応募・複数アカウント・譲渡・代理購入は無効またはキャンセル。",
+          "urls": [
+            "https://livepocket.jp/e/tjphs"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R012",
+          "store": "池袋本店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION カードセット 9種セット"
+          ],
+          "qty": 1,
+          "start": "2026-11-10T12:00",
+          "deadline": "2026-11-12T23:59",
+          "result": "2026-11-25",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から1店舗のみ応募可能。マイナンバーカードで本人確認し、氏名がアカウントと一致すること。9種セットは1セットまで。店頭購入のみ。複数応募・複数アカウント・譲渡・代理購入は無効またはキャンセル。",
+          "urls": [
+            "https://livepocket.jp/e/tjphs"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "evidence": {
+        "R009": "ホビーステーション「ポケモンカードゲームMEGA 30th CELEBRATION カードセット ９種セット（再販）」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（大宮店）",
+        "R010": "ホビーステーション「ポケモンカードゲームMEGA 30th CELEBRATION カードセット ９種セット（再販）」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（所沢店）",
+        "R011": "ホビーステーション「ポケモンカードゲームMEGA 30th CELEBRATION カードセット ９種セット（再販）」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（本厚木店）",
+        "R012": "ホビーステーション「ポケモンカードゲームMEGA 30th CELEBRATION カードセット ９種セット（再販）」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。（池袋本店）"
+      }
+    },
+    {
+      "id": "M04",
+      "title": "イトーヨーカドー 大船店 ハドウシーカー",
+      "category": "source_mixed",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://livepocket.jp/e/luo8lp88-d",
+          "fetchedAt": "2026-11-06T15:24:31.812341+00:00"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R013",
+        "store": "大船店",
+        "chain": "イトーヨーカドー",
+        "products": [
+          "ハドウシーカー"
+        ],
+        "qty": 1,
+        "start": "2026-11-06T10:00",
+        "deadline": "2026-11-08T23:59",
+        "result": null,
+        "apply": "web",
+        "receive": "store",
+        "tags": [
+          "member_registration",
+          "id_check",
+          "photo_id",
+          "livepocket_account"
+        ],
+        "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+        "urls": [
+          "https://livepocket.jp/e/luo8lp88-d"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R014",
+          "store": "船橋店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-11-06T10:00",
+          "deadline": "2026-11-08T23:59",
+          "result": null,
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+          "urls": [
+            "https://livepocket.jp/e/luo8lp88-d"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R015",
+          "store": "若葉台店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-11-06T10:00",
+          "deadline": "2026-11-08T23:59",
+          "result": null,
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+          "urls": [
+            "https://livepocket.jp/e/luo8lp88-d"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R016",
+          "store": "甲子園店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": null,
+          "deadline": "2026-11-08T23:59",
+          "result": "2026-11-15",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご購入希望のご本人様につき1回限り。アンケートで「氏名（カタカナ）」「生年月日」「電話番号」の入力が必要で、未記入の申込は抽選対象外。",
+          "urls": [
+            "https://livepocket.jp/e/luo8lp88-d"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "evidence": {
+        "R013": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売 販売元 イトーヨーカドー TOYLO 結果発表予定日 11月中旬（大船店）",
+        "R014": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売 販売元 イトーヨーカドー TOYLO 結果発表予定日 11月中旬（船橋店）",
+        "R015": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売 販売元 イトーヨーカドー TOYLO 結果発表予定日 11月中旬（若葉台店）"
+      }
+    },
+    {
+      "id": "M05",
+      "title": "ホビーステーション 大宮店 30th CELEBRATION",
+      "category": "add_to_group",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://livepocket.jp/e/m3_6v",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R017",
+        "store": "大宮店",
+        "chain": "ホビーステーション",
+        "products": [
+          "30th CELEBRATION"
+        ],
+        "qty": 1,
+        "start": "2026-08-04T12:00",
+        "deadline": "2026-08-06T23:59",
+        "result": "2026-08-13",
+        "apply": "web",
+        "receive": "store",
+        "tags": [
+          "member_registration",
+          "id_check"
+        ],
+        "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+        "urls": [
+          "https://livepocket.jp/e/m3_6v"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R018",
+          "store": "池袋本店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed",
+          "group": "G1"
+        },
+        {
+          "id": "R019",
+          "store": "町田店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed",
+          "group": "G1"
+        },
+        {
+          "id": "R020",
+          "store": "津田沼店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed",
+          "group": "G1"
+        },
+        {
+          "id": "R021",
+          "store": "所沢店",
+          "chain": "ホビーステーション",
+          "products": [
+            "30th CELEBRATION"
+          ],
+          "qty": 1,
+          "start": "2026-08-04T12:00",
+          "deadline": "2026-08-06T23:59",
+          "result": "2026-08-13",
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check"
+          ],
+          "conditions": "LivePocket会員登録が必要。お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。同一商品の複数回の応募、複数アカウントを用いた応募につきましては全て無効とさせて頂きます。応募店舗で現金前払い（電子決済不可）。公的な本人確認書類が必要。譲渡・代理購入は不可。購入は店頭のみ。",
+          "urls": [
+            "https://livepocket.jp/e/m3_6v"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "groups": [
+        {
+          "id": "G1",
+          "origin": "bulk_registration",
+          "members": [
+            "R018",
+            "R019",
+            "R020"
+          ]
+        }
+      ],
+      "evidence": {
+        "R017": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（大宮店）",
+        "R018": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（池袋本店）",
+        "R019": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（町田店）",
+        "R020": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（津田沼店）",
+        "R021": "ホビーステーション「ポケモンカードゲーム 拡張パック 30th CELEBRATION」抽選販売 お一人様につき対象店舗の中から１店舗のみご応募が可能です。※複数店舗にご応募された場合は無効となりますのでご注意ください。（所沢店）"
+      }
+    },
+    {
+      "id": "M06",
+      "title": "イトーヨーカドー 大船店 ハドウシーカー",
+      "category": "insufficient",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://livepocket.jp/e/luo8lp88-d",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        },
+        {
+          "url": "https://livepocket.jp/e/s2dtfw7rvo",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R022",
+        "store": "大船店",
+        "chain": "イトーヨーカドー",
+        "products": [
+          "ハドウシーカー"
+        ],
+        "qty": 1,
+        "start": "2026-11-06T10:00",
+        "deadline": "2026-11-08T23:59",
+        "result": null,
+        "apply": "web",
+        "receive": "store",
+        "tags": [
+          "member_registration",
+          "id_check",
+          "photo_id",
+          "livepocket_account"
+        ],
+        "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+        "urls": [
+          "https://livepocket.jp/e/luo8lp88-d"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R023",
+          "store": "大和鶴間店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-11-06T10:00",
+          "deadline": "2026-11-08T23:59",
+          "result": null,
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+          "urls": [
+            "https://livepocket.jp/e/s2dtfw7rvo"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R024",
+          "store": "アリオ蘇我店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-11-06T10:00",
+          "deadline": "2026-11-08T23:59",
+          "result": null,
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+          "urls": [
+            "https://livepocket.jp/e/s2dtfw7rvo"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "evidence": {}
+    },
+    {
+      "id": "M07",
+      "title": "イトーヨーカドー 通販 ハドウシーカー",
+      "category": "conditions_differ",
+      "capturedAt": "2026-11-13T00:00:00Z",
+      "sources": [
+        {
+          "url": "https://x.com/pokecayoyaku/status/2120779334613086258",
+          "fetchedAt": "2026-11-12T12:03:33.370239+00:00"
+        },
+        {
+          "url": "https://livepocket.jp/e/luo8lp88-d",
+          "fetchedAt": "2026-11-13T00:00:00Z"
+        }
+      ],
+      "provenance": "公式ページの内容から再構成した登録を含む（実在の登録は real）",
+      "subject": {
+        "id": "R025",
+        "store": "通販",
+        "chain": "イトーヨーカドー",
+        "products": [
+          "ハドウシーカー"
+        ],
+        "qty": 1,
+        "start": "2026-11-12T12:00",
+        "deadline": "2026-11-13T11:59",
+        "result": "2026-11-27T11:00",
+        "apply": "web",
+        "receive": "shipping",
+        "tags": [],
+        "conditions": "7iDをお持ちのお客様（抽選申し込み及び購入時に7iDでのログインが必要）。二要素認証用電話番号を設定済みのお客様（抽選申し込み終了日までに登録が必要。お申し込み期間内に設定が無い場合は抽選対象外）。目的の如何にかかわらず転売、その他商用目的での抽選申し込み及び購入は禁止。",
+        "urls": [
+          "https://x.com/pokecayoyaku/status/2120779334613086258",
+          "https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx",
+          "https://x.com/pokecayoyaku/status/2120778213836390589",
+          "https://x.com/pokecachan/status/2120793323745276344",
+          "https://t.co/ysx09iiH67"
+        ],
+        "storeMode": "fixed"
+      },
+      "others": [
+        {
+          "id": "R026",
+          "store": "大船店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-11-06T10:00",
+          "deadline": "2026-11-08T23:59",
+          "result": null,
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+          "urls": [
+            "https://livepocket.jp/e/luo8lp88-d"
+          ],
+          "storeMode": "fixed"
+        },
+        {
+          "id": "R027",
+          "store": "船橋店",
+          "chain": "イトーヨーカドー",
+          "products": [
+            "ハドウシーカー"
+          ],
+          "qty": 1,
+          "start": "2026-11-06T10:00",
+          "deadline": "2026-11-08T23:59",
+          "result": null,
+          "apply": "web",
+          "receive": "store",
+          "tags": [
+            "member_registration",
+            "id_check",
+            "photo_id",
+            "livepocket_account"
+          ],
+          "conditions": "LivePocketの新規会員登録（無料）が必要。申込はご本人につき1回限り。同一人物による複数アカウントや重複応募は全て無効。購入はご本人のみ（代理不可）。店頭で顔写真付きの身分証明書の原本を提示し、LivePocketの登録名と完全一致が必要。申込時に氏名・生年月日・電話番号などのアンケート記入が必要。",
+          "urls": [
+            "https://livepocket.jp/e/luo8lp88-d"
+          ],
+          "storeMode": "fixed"
+        }
+      ],
+      "evidence": {
+        "R025": "既存の系列に近い名称があります（イトーヨーカドー）。該当するものを選んでください\n応募制限（1人1回など）が読み取れませんでした / 購入数量の上限と読み取れるため、応募回数の制限は未確認にしました\n店舗名が読み取れませんでした（オンライン抽選などの場合も、店舗名を入力してください）\n応募URL: https://iyec.itoyokado.co.jp/shop/pages/apply_pomega_04.aspx\n購入数量・上限: 抽選のお申し込みはお一人様1点限りとなります。複数のお申し込みが確認された場合抽選対象外となります。\nこちらの商品は先着販売ではありません。\n当選メールは当選者本人のみ有効で、第三者への譲渡はできません。\nご購入時に別途送料税込660円（沖縄県は税込2,200円）がかかります。\n当商品はキャンセル不可です。\n落選の案内は行われません。\n抽選状況はマイページの「抽選履歴一覧」で確認できます。\n在庫状況によっては、抽選販売終了後に繰上げ抽選・通常販売を実施する場合があります。\n7iDをお持ちのお客様（抽選申し込み及び購入時に7iDでのログインが必要）。二要素認証用電話番号を設定済みのお客様（抽選申し込み終了日までに登録が必要。お申し込み期間内に設定が無い場合は抽選対象外）。目的の如何にかかわらず転売、その他商用目的での抽選申し込み及び購入は禁止。\n当選通知メール（イトーヨーカドーネット通販より送付）",
+        "R026": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売 販売元 イトーヨーカドー TOYLO 結果発表予定日 11月中旬（大船店）",
+        "R027": "【イトーヨーカドー】ポケモンカードゲーム MEGA 拡張パック ハドウシーカー 抽選販売 販売元 イトーヨーカドー TOYLO 結果発表予定日 11月中旬（船橋店）"
+      }
+    }
+  ]
+}

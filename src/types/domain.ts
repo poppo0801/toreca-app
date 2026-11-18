@@ -105,6 +105,8 @@ export interface Store {
   /** 往復交通費（円）。手動登録のみ。未設定は null（0円とはみなさない） */
   roundTripFare?: number | null;
   memo?: string | null;
+  /** 利用者が登録した店舗の公式サイトURL（一次情報リンクの種類判別に使う。未登録は null） */
+  storeUrl?: string | null;
   /** 営業形態。未設定は実店舗。オンライン専用店舗には都道府県・距離を出さない */
   salesKind?: StoreKind;
 }
@@ -238,6 +240,8 @@ export interface Lottery {
   storeMode?: "fixed" | "select_on_apply" | "none";
   /** 応募時に選べる店舗（取得できたときだけ） */
   selectableStores?: { name: string; prefecture: string }[];
+  /** 抽選形態の記録（8F-6）。source=manual は利用者の設定で、AI・収集は上書きしない。未設定は構造から判別 */
+  formDecl?: { form: "store_select" | "store_independent" | "other"; source: "manual" | "rule" | "ai" } | null;
   campaignId?: string;
   chainId: string;
   storeId: string | null;
@@ -293,6 +297,8 @@ export interface Lottery {
   unconfirmedFields?: string[];
   /** 注意付き自動登録の注意情報（Stage 7A）。項目別・理由別。注意が無ければ空 */
   cautions?: import("@/lib/collector/attention").Caution[];
+  /** 自動更新の履歴（Stage 9B）。収集が根拠のある変更を自動で反映したときの、更新内容・情報源・時刻。元に戻せる */
+  updateHistory?: { id: string; at: string; summary: string[]; sourceUrl: string; official: boolean; revertedAt?: string }[];
   /** 信頼度（内部管理） */
   confidence?: import("@/lib/collector/attention").Confidence | null;
   /** 最終更新（他端末での更新を検出するため）。モックでは未設定 */
@@ -311,6 +317,34 @@ export interface LotteryGroup {
   origin: "bulk_registration" | "manual" | "save_and_duplicate" | "duplicate" | "ai";
   /** グループ化の根拠（共通の項目・複製元など） */
   basis: Record<string, unknown>;
+}
+
+/**
+ * AIが提示したグループ候補（Stage 8F）。利用者が承認すると、既存の手動グループと同じ親子カードになる（origin = "ai"）。
+ * 理由・共通点・相違点・信頼度は、AIの文章ではなく検証層が事実と照合して決めたもの。
+ */
+export interface LotteryGroupProposal {
+  id: string;
+  /** new_group=新規グループ / add_to_group=既存グループへ追加 */
+  kind: "new_group" | "add_to_group";
+  /** 判定の対象になった抽選 */
+  subjectId: string;
+  /** グループに入れる抽選（新規は対象＋相手、追加は対象のみ） */
+  lotteryIds: string[];
+  targetGroupId: string | null;
+  /** 0〜100。事実の一致の度合い（AIの自己申告ではない） */
+  confidence: number;
+  rationale: string;
+  common: string[];
+  mismatches: { field: string; detail: string; severity: "hard" | "gap" | "soft" }[];
+  missing: string[];
+  strongSignals: string[];
+  /** 判断の根拠（区分と理由の箇条書き。検証層が事実から作る。無い場合あり） */
+  basis?: string[];
+  /** 判断に使った、AIが取得した情報源（URLと取得日時。無い場合あり） */
+  sources?: { url: string; fetchedAt: string }[];
+  engine: string;
+  createdAt: string;
 }
 
 export interface Management {
@@ -498,6 +532,8 @@ export interface AppData {
   campaigns: Campaign[];
   /** 抽選グループ（解散していないもの。Stage 8U-2）。未適用の環境・モックでは省略 */
   lotteryGroups?: LotteryGroup[];
+  /** 承認待ちのグループ候補（AIの判定。Stage 8F。開発環境のみで作られる。表が無い・本番では省略） */
+  groupProposals?: LotteryGroupProposal[];
   lotteries: Lottery[];
   management: Management[];
   applications: Application[];

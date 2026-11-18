@@ -12,15 +12,20 @@ import { bumpRetry, refreshBookmarkStates, unresolvedBookmarkCandidateIds } from
 import { processGeocodeBatch } from "@/lib/server/geocode-service";
 import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
+import { resolveEffectiveEngine } from "@/lib/collector/engine-setting";
+import { runAutonomousInCron } from "@/lib/server/collector/autonomous-hook";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 自律型AI主体の1回（調査100秒＋登録）が収まるよう、既定の60秒から延ばす（Vercel の Fluid Compute では Hobby/Pro とも上限300秒）。
+// Fluid Compute が無効で上限が60秒のプランでは、環境変数 AUTONOMOUS_TIME_BUDGET_MS=35000 にして60秒内に収める（docs/PRODUCTION_ROLLOUT_9H.md）
+export const maxDuration = 180;
 
 /**
  * 自動収集の定期実行の入口。Supabase Cron(pg_cron + pg_net)が数分おきに `Authorization: Bearer $CRON_SECRET` 付きで呼ぶ。
  *  1) 定期収集が有効で、指定時刻(日本時間。1日1〜2回。例 6:00・18:00)を過ぎていて、その時刻のスロットでまだ収集していなければ、収集元を確認して新規・変更をキューに追加する
  *  2) 定期ワーカーが有効なら、解析待ちを優先順位順に小分けで解析する（解析待ちが無ければ何もせずすぐ終了する）
  * 1回の呼び出しは約60秒以内に終わる。残りは次の呼び出しが引き継ぐ（HTTPレスポンス後の処理には依存しない）。
+ * 収集方式（9H-3Q）が「自律型AI主体」（開発環境のみ）の場合、1) は自律探索（1回の呼び出しでミッション1件。同じ時刻の枠で最大回数まで）に置き換わる。2) は共通。
  * 定期実行ではログインが無いため、候補の作成まで。抽選の自動登録は手動実行か候補画面で行う。
  */
 async function handle(req: NextRequest) {
@@ -55,6 +60,18 @@ async function handle(req: NextRequest) {
     } catch {
       /* 補完に失敗しても収集は続ける */
     }
+    // 収集方式（Stage 9H-3Q）: 設定を実行ごとに読み直す。読めない・不正なら従来方式（設定は書き換えない）。自律型は開発環境、または本番で AUTONOMOUS_COLLECTION=on のとき
+    const engRow = await db.from("collection_settings").select("collection_engine").eq("household_id", t.household_id).maybeSingle();
+    const eng = resolveEffectiveEngine({ stored: (engRow.data as { collection_engine?: string } | null)?.collection_engine, loadFailed: !!engRow.error, toremaneEnv: process.env.TOREMANE_ENV, enabled: process.env.AUTONOMOUS_COLLECTION === "on" });
+    if (eng.engine === "autonomous" && t.schedule_enabled) {
+      // 自律型AI主体: 調査機会・排他・実AIの関門・費用の上限は呼び出し口が判定する。失敗しても、ワーカーなど他の処理は続ける
+      const r = await runAutonomousInCron({ db, householdId: t.household_id, now, extractor: getExtractor() });
+      if (r.status === "ran") {
+        collected++;
+        continue; // 続きは次の呼び出し（同じ枠で最大回数まで）
+      }
+    }
+    // 従来方式の定期収集（登録済みの収集元の取得）は、自律型の調査が動かない呼び出しで引き続き実行する（既存の収集を止めない。自律型は上乗せの探索）
     if (t.schedule_enabled) {
       // 手動収集の履歴とは独立に、今日の定期収集のスロットで未取得の収集元だけを取得する（失敗した収集元は間隔をおいて再試行）
       const plan = await planScheduledCollection(db, t.household_id, now, [t.schedule_hour_jst, t.schedule_hour2_jst]);

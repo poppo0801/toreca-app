@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { z } from "zod";
 import { buildSchema, ENTITIES, ENTITY_KEYS, normalizeAlias, toDbValues } from "@/lib/masters";
 import { checkChainAliases } from "@/lib/chain-alias";
+import { sameChainName } from "@/lib/chain-normalize";
 import { createClient } from "@/lib/supabase/server";
 import { processGeocodeBatch, requeueFailedGeocoding } from "@/lib/server/geocode-service";
 import type { Db } from "@/lib/server/lottery-service";
@@ -74,6 +75,13 @@ export async function saveRecord(
     const checked = checkChainAliases(id ? id.data! : null, String(dbValues.name ?? ""), list.data, cs ?? [], (as ?? []).map((a) => ({ chainId: a.chain_id, alias: a.alias })));
     if (checked.problems.length > 0) return fail(checked.problems[0].message);
     aliasPlan = checked.values;
+  }
+  // Stage 9C: 新しい系列は、表記の違い（記号・括弧書きの読み・通販の語）だけで既存の系列と同じなら作らない（別名の追加を案内する）。共通ブランドの系列（直営/その他）は対象外
+  if (entity.key === "chains" && !id) {
+    const [{ data: cs }, { data: as }] = await Promise.all([ctx.supabase.from("chains").select("id,name,brand_group,archived_at"), ctx.supabase.from("chain_aliases").select("chain_id,alias")]);
+    const name = String(dbValues.name ?? "");
+    const hit = (cs ?? []).find((c) => !c.brand_group && !c.archived_at && (sameChainName(c.name, name) || (as ?? []).some((a) => a.chain_id === c.id && sameChainName(a.alias, name))));
+    if (hit) return fail(`「${name}」は既存の系列「${hit.name}」と表記が違うだけの同じ系列です。新しく作らず、「${hit.name}」の別名に追加してください`);
   }
   // 店舗の位置は緯度と経度が両方あるときだけ有効（片方だけでは距離を計算できない）
   if (entity.key === "stores" && (dbValues.latitude == null) !== (dbValues.longitude == null)) return fail("緯度と経度は両方入力してください（住所から位置を取得することもできます）");

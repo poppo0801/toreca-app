@@ -10,6 +10,7 @@
 import { normName } from "@/lib/norm";
 import { productKey, type MatchKind } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
+import { relateDateTimes } from "./date-phrases";
 
 export type FieldKey = "chain" | "store" | "items" | "applyStart" | "applyDeadline" | "resultDate" | "announcement" | "applyMethod" | "applyUrl" | "conditions" | "procedureStart" | "procedureDeadline" | "receiveStart" | "receiveDeadline" | "receiveMethod" | "location";
 export const FIELD_LABEL: Record<FieldKey, string> = {
@@ -51,6 +52,11 @@ export interface FieldSource {
   /** 情報源のアカウント・ホスト（同じ情報源の新しい情報による更新の判定に使う） */
   account?: string;
   at: string;
+  /**
+   * Stage 9G: 値の出どころの層。organizer_body=主催者が書いた説明本文（LivePocket等の本文）/ platform_meta=サービス側の表示（「販売受付期間」など）。
+   * 日時が食い違うとき、主催者の本文をサービス側の表示より優先する（無条件に同一視しない）。省略時は区別しない
+   */
+  basis?: "organizer_body" | "platform_meta";
 }
 
 export interface FieldProv {
@@ -298,6 +304,28 @@ export function mergeSides(carrier: Side, other: Side): MergeResult {
     }
     // 違う値
     if (cp?.manual) continue; // 手動で確定した項目は上書きしない
+    // 日時の意味が同じ表記差（11:59と12:00・23:59と翌0:00の境界表現、同じ日の日付のみと時刻つき）は矛盾にしない。安全側（早い方・詳しい方）を採用する（Stage 9G）
+    if (k === "applyDeadline" || k === "applyStart" || k === "resultDate") {
+      const rel = relateDateTimes({ date: carrier.input[k].date ?? "", time: carrier.input[k].time }, { date: other.input[k].date ?? "", time: other.input[k].time });
+      if (rel.same && rel.adopt) {
+        const keep = rel.adopt.date === (carrier.input[k].date ?? "") && (rel.adopt.time ?? "") === (carrier.input[k].time ?? "");
+        if (!keep) {
+          copyField(k, other.input, input, other.summary, summary);
+          fields[k] = { value: ov.slice(0, 120), source: osrc, state: cp?.state ?? "unverified", origins: [...new Set([...(cp?.origins ?? [csrc.origin]), osrc.origin])] };
+        } else if (cp) fields[k] = { ...cp, origins: [...new Set([...cp.origins, osrc.origin])] };
+        updated.push(k);
+        continue;
+      }
+      // 主催者の説明本文とサービス側の表示で食い違うときは、主催者の本文を採用する（矛盾として止めない）
+      if (osrc.basis && csrc.basis && osrc.basis !== csrc.basis) {
+        if (osrc.basis === "organizer_body") {
+          copyField(k, other.input, input, other.summary, summary);
+          fields[k] = { value: ov.slice(0, 120), source: osrc, state: isOfficial(osrc.kind) ? "confirmed" : "unverified", origins: [osrc.origin], alt: { value: cv.slice(0, 120), source: csrc } };
+        }
+        updated.push(k);
+        continue;
+      }
+    }
     if (sameSource(csrc, osrc)) {
       // 同じ情報源（同じアカウント・ホスト）の情報は、新しい方が更新後の値。矛盾としない
       if (osrc.at > csrc.at) {

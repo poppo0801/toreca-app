@@ -85,6 +85,8 @@ export interface EvalContext {
   /** 対象地域に店舗がある系列・店舗マスターを持つ系列（エリア外系列のルールの判定に使う） */
   chainsInArea?: ReadonlySet<string>;
   chainsWithStores?: ReadonlySet<string>;
+  /** 地域の根拠が食い違っている（告知の都道府県と店舗名の地名など。Stage 9H-3N）。地域外として除外せず、店舗名からの再推測もしない。要確認にする */
+  regionConflict?: string;
 }
 
 const JST = "Asia/Tokyo";
@@ -154,11 +156,12 @@ export function prefectureFromStoreName(name: string): string {
 
 export function evaluateCandidate(input: LotteryInput, cond: CollectionConditions, rawCtx: EvalContext): Evaluation {
   // 地域は、店舗マスター・住所・告知の都道府県 → 店舗名の地域名・市区町村名の順に判定する。複数店舗の一覧・曖昧な地名は不明のままにする（Stage 7A）
-  const hinted = rawCtx.prefecture || (input.receiveMethod === "shipping" ? "" : judgeRegion({ storeName: input.store?.name ?? "" }).prefecture);
+  const hinted = rawCtx.prefecture || (rawCtx.regionConflict || input.receiveMethod === "shipping" ? "" : judgeRegion({ storeName: input.store?.name ?? "" }).prefecture);
   const ctx: EvalContext = { ...rawCtx, prefecture: resolveTargetPrefecture(hinted, cond.prefectures) };
   const excluded: string[] = [];
   const review: string[] = [];
   const notes: string[] = [];
+  if (rawCtx.regionConflict) review.push(`店舗の所在地を確認してください（${rawCtx.regionConflict}）`);
 
   // ---- 商品のTCG種別（ポケモンカード以外は対象外。種別が不明なだけでは除外しない。複数TCGの案内はポケモンカードを残す）
   const tcg = judgeTcg([...(ctx.texts ?? []), ...productNamesOf(input)]);

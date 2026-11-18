@@ -1,0 +1,23 @@
+{
+  "note": "9E バッチ2: 一覧ページ（カードラボ・GEO）からたどれる個別の告知と、告知ではないお知らせ。評価のための取得（robots尊重・1.5秒間隔・無料）",
+  "urls": [
+    "https://www.c-labo.jp/shop/nagoyaekimae/blog/624574/",
+    "https://www.c-labo.jp/shop/kokura/blog/624560/",
+    "https://www.c-labo.jp/shop/nipponbashi/blog/624555/",
+    "https://www.c-labo.jp/shop/nipponbashi/blog/624550/",
+    "https://www.c-labo.jp/shop/takasaki/blog/624548/",
+    "https://www.c-labo.jp/shop/kagoshima/blog/624542/",
+    "https://www.c-labo.jp/shop/otaro/blog/624536/",
+    "https://www.c-labo.jp/shop/okayamanishi/blog/624532/",
+    "https://www.c-labo.jp/shop/niigata/blog/624529/",
+    "https://www.c-labo.jp/shop/tsudanuma/blog/623696/",
+    "https://www.c-labo.jp/shop/tsudanuma/blog/581202/",
+    "https://www.c-labo.jp/information/620246/",
+    "https://www.c-labo.jp/information/612840/",
+    "https://geo-online.co.jp/news/788",
+    "https://geo-online.co.jp/news/791",
+    "https://www.c-labo.jp/blog/",
+    "https://www.c-labo.jp/information/",
+    "https://geo-online.co.jp/news/"
+  ]
+}

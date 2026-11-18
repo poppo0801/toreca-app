@@ -87,3 +87,9 @@
 - 複数店舗抽選のグループ: 既存の `lottery_bulk_groups`（+ `lotteries.bulk_group_id`）を表示グループへ一般化。親カードは表示専用（`lottery-group-card.tsx`・`lib/lottery-group.ts`）で、子は独立した抽選。履歴 `lottery_group_events`。DB関数 `group_lotteries_tx`・`ungroup_lottery_tx`・`dissolve_lottery_group_tx`・`duplicate_lottery_tx`（1トランザクション）。
 - 除外: `lottery_exclusions`（追記専用）＋ `exclude_lottery_tx`。入力欄の自動スクロール: `lib/input-reveal.ts`（AppShell の `InputReveal`）。候補の編集の一時保存: `lib/lottery-resume.ts`（localStorage・10分・1件）。
 - 詳細: `docs/stage8u.md`。本番反映: `docs/PRODUCTION_ROLLOUT_8D.md` §9。
+
+## Stage 8F の追加（抽選グループのAI判定。開発環境のみ・本番無効）
+- 部品: `src/lib/agent/lottery-grouping/`（`compare`＝事実の比較／`tools`＝読み取り専用ツール／`verify`＝検証層（固定ロジック。auto・suggest・single・hold と信頼度を決める。AIの自己申告は使わない）／`run`＝エージェント実行＋追加調査／`mock`＝疑似AI／`flags`＝`TOREMANE_ENV=local` だけ有効）。保存・実行は `src/lib/server/agent/lottery-grouping-service.ts`、AIの選択は `lottery-grouping-engine.ts`（既定はモック。実APIは real-gate の関門＋`GROUPING_REAL_CONFIRM=yes`）。
+- データ: `lottery_group_proposals`（提案。一意キーで同じ組を繰り返さない。マイグレーション099）。グループ化は既存の `group_lotteries_tx`（`origin='ai'`）。手動で分けた組の記憶は `lottery_group_events.detail`（`wasWith`・`reason`）を再利用。DB関数 `resolve_lottery_group_proposal_tx`（承認・却下・自動実行。冪等・行ロック）／`_as`（service_role 専用。自動収集）／`lottery_pairs_separated`。
+- 連携: 収集で自動登録した直後・候補を確認して登録した直後に `collector/grouping-hook.ts`（環境判定のあとに動的読み込み。失敗しても収集は止めない。本番では何もしない）。画面からの承認・却下は `lottery-service.ts`（AIを使わない）。
+- 詳細・精度評価・設計判断は `docs/stage8f.md`。

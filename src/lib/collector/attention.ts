@@ -77,7 +77,19 @@ export interface RegistrationContext {
   /** 店舗が特定できているか（マスター照合済み、または明確な仮登録、オンライン、選択式） */
   storeResolved: boolean;
   now: string;
+  /** 告知に抽選・応募の文言があるか（Stage 9A）。false のときだけ、日時が不明な告知を登録しない（未指定は「ある」として扱う） */
+  wording?: boolean;
+  /** 告知（投稿）からの経過日数。不明は null/未指定（古さを理由に止めない） */
+  sourceAgeDays?: number | null;
+  /** 憶測・未確定の表現の告知か（Stage 9A）。日時が不明な告知を登録するときだけ参照する */
+  speculative?: boolean;
 }
+
+/** 応募締切が不明のまま、告知（確認）からこの日数を超えたものは、「終了候補」の注意を付ける（非表示・削除・終了日時の推測はしない） */
+export const STALE_UNKNOWN_DEADLINE_DAYS = 21;
+
+/** 終了候補の注意（日時が長く確認できていない。表示は続け、情報源の再確認を続ける） */
+export const endCandidateCaution = (now: string, days?: number): Caution => ({ code: "end_candidate", field: "applyDeadline", message: `${days != null ? `告知から${Math.floor(days)}日が経過し、` : "長期間、"}応募の日時を確認できていません。すでに終了している可能性があります（情報源の再確認を続けています）`, at: now });
 
 const md = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
@@ -140,9 +152,12 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   if (/情報源URLがありません/.test(miss)) blockers.push("情報源（確認できるURL）がありません");
   if (c.verdictReasons.some((r) => /指定商品か判断できません/.test(r))) blockers.push("商品を判別できず、収集対象の商品か判断できません");
   if (c.duplicateCount > 0) blockers.push("同じ抽選か別の抽選か判断できません（重複の疑い）");
-  if (c.stage === "teaser" || c.stage === "partial") blockers.push("応募の日時が未発表です（抽選予告として追跡します）");
-  else if (c.verdict === "upcoming") blockers.push("受付前です（受付が始まるまで追跡します）");
-  else if (input.applyDeadline.precision === "unknown") blockers.push("応募締切が不明です");
+  // Stage 9A: 応募の日時が未発表・不明・受付前でも、抽選の告知と認識できれば登録する（不明な日時は「未確認」として保持し、あとから補完する）。
+  // 確認待ちに残すのは、抽選・応募に関する文言が確認できない場合と、締切が不明のまま告知から長く経過している（終了済みの可能性が高い）場合だけ
+  const deadlineUnknown = input.applyDeadline.precision === "unknown" || !input.applyDeadline.date;
+  const noticeLike = deadlineUnknown || c.stage === "teaser" || c.stage === "partial" || c.verdict === "upcoming";
+  if (noticeLike && c.wording === false) blockers.push("抽選・応募に関する文言が確認できません（抽選の告知か判断できません）");
+  if (deadlineUnknown && c.speculative) blockers.push("憶測・未確定の表現の告知です（確定した抽選か判断できません）");
   if (c.textConflict && SERIOUS_TEXT_CONFLICT.test(c.textConflict)) blockers.push(`抽選の内容に重大な矛盾があります: ${c.textConflict.slice(0, 60)}`);
   const cf = conflictCautions(c.fields, c.now);
   blockers.push(...cf.blockers);
@@ -151,6 +166,9 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   // ---- B: 注意付きで登録する
   cautions.push(...cf.cautions);
   if (c.textConflict && !cf.cautions.some((x) => x.field === "applyDeadline")) cautions.push({ code: "text_conflict", field: "other", message: `情報に矛盾の疑いがあります: ${c.textConflict.slice(0, 80)}`, at: c.now });
+  // 告知から長く経過して日時が不明: 登録は止めず（有効な抽選を見えなくしない）、終了している可能性を注意として示す。終了日時は推測しない（Stage 9B）
+  if (deadlineUnknown && c.sourceAgeDays != null && c.sourceAgeDays > STALE_UNKNOWN_DEADLINE_DAYS) cautions.push(endCandidateCaution(c.now, c.sourceAgeDays));
+  if (deadlineUnknown) cautions.push({ code: "deadline_unknown", field: "applyDeadline", message: c.stage === "teaser" || c.stage === "partial" ? "応募の日時が未発表または確認できていません（告知の続報で自動的に補います）" : "応募締切が確認できていません", at: c.now });
   if (!flexDate(input.resultDate)) cautions.push({ code: "result_date_unknown", field: "resultDate", message: "当選発表日が確認できていません", at: c.now });
   const hasReceive = !!flexDate(input.receiveStart) || !!flexDate(input.receiveDeadline) || !!flexDate(input.procedureStart) || !!flexDate(input.procedureDeadline);
   if (!hasReceive) cautions.push({ code: "receive_period_unknown", field: "receivePeriod", message: "購入・受取期間が確認できていません", at: c.now });
@@ -163,7 +181,7 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   }
   if (c.modePending) cautions.push({ code: "mode_unconfirmed", field: "mode", message: "複数商品の応募方式が確認できていません（全商品を対象として登録しています）", at: c.now });
   // 店舗: 特定できないときは、系列の設定（店舗選択式を基本とする）に従って店舗選択式として登録する。設定がなければ仮の店舗名で登録する（店舗を推測しない）
-  if (!c.storeResolved) {
+  if (!c.storeResolved && input.storeMode !== "select_on_apply") {
     if (c.chainStoreSelectDefault) {
       patch = { storeMode: "select_on_apply", noteStoreSelect: true };
       cautions.push({ code: "store_select_assumed", field: "store", message: "受取店舗が確定していません。この系列は応募時に店舗を選ぶ抽選が多いため、店舗選択式として登録しています（告知で確認してください）", at: c.now });

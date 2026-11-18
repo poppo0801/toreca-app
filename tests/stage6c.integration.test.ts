@@ -76,64 +76,43 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
   });
 
   // ------------------------------------------------------------ 予告の追跡 → 続報 → 正式登録
-  it("1) 抽選予告（受付開始・締切が未発表）は、除外も要手動確認もせず、追跡候補として保持する（登録しない）", async () => {
-    plan = {};
+  it("1) 抽選予告（受付開始・締切が未発表）も、抽選の告知と認識できれば登録する（Stage 9A）。日時は推測せず『未確認』の注意として保持し、要手動確認・保留にしない", async () => {
+    plan = { store: "本店" };
     await add("t1", "テスト玩具6Cで6C商品の抽選を近日実施予定です");
     await run();
     const c = await cand("t1");
-    expect(c.status).toBe("pending");
-    expect(c.job_state).toBe("review");
-    expect(c.triage).toBe("auto_retry"); // 手動確認ではない
-    expect(dr(c).stage).toBe("teaser");
-    expect(dr(c).tracking?.since).toBeTruthy();
-    expect(c.reasons[0]).toContain("抽選予告");
-    expect((await lots()).length).toBe(0);
+    expect(c.status, JSON.stringify(c.reasons)).toBe("auto_registered");
+    expect(c.triage).toBe("auto_register");
+    const ls = await lots();
+    expect(ls).toHaveLength(1);
+    const lot = (await sys.from("lotteries").select("cautions,apply_deadline_precision,apply_start_precision").eq("id", ls[0].id).single()).data as unknown as { cautions: { code: string }[]; apply_deadline_precision: string; apply_start_precision: string };
+    expect(lot.apply_deadline_precision).toBe("unknown"); // 日時を推測で入れない
+    expect(lot.cautions.map((x) => x.code)).toContain("deadline_unknown");
   });
 
-  it("2) 続報（受付開始日・締切・応募URL・条件・店舗が判明）は、同じ抽選として予告の候補を更新する。別抽選として登録しない。更新履歴に情報源と日時が残る", async () => {
+  it("2) 続報（受付開始日・締切・応募URL・条件・店舗が判明）は、同じ抽選として既存の抽選を自動補完する。別の抽選として二重に登録しない。補完された日時は注意が解除される", async () => {
     plan = { store: "本店", start: jst(2, 10), deadline: jst(5, 23, 59), applyUrl: "https://shop.example.invalid/apply", conditions: "会員登録が必要" };
     await add("t2", "テスト玩具6C本店で6C商品の抽選受付を開始します。応募方法は公式アプリ https://shop.example.invalid/apply");
-    await run(); // 現在応募可能のみ＋追跡ON: 受付前なので登録せず追跡を続ける
-    const old = await cand("t1");
+    await run();
+    const ls = await lots();
+    expect(ls, JSON.stringify((await cand("t2")).reasons)).toHaveLength(1); // 二重登録しない
     const c = await cand("t2");
-    expect(old.status).toBe("excluded"); // 続報の候補へ統合（削除しない）
-    expect(old.reasons[0]).toContain("統合");
-    expect(c.triage).toBe("auto_retry");
-    expect(dr(c).stage).toBe("upcoming");
-    expect(dr(c).tracking?.startDate).toBe(ymd(jst(2, 10)));
-    const kinds = dr(c).tracking!.history.map((h) => h.kind).sort();
-    expect(kinds).toEqual(["apply_url_known", "conditions_known", "deadline_known", "start_known", "store_added"]);
-    expect(dr(c).tracking!.history.every((h) => h.source === U("t2") && !!h.at)).toBe(true);
-    expect(dr(c).tracking!.since).toBe(dr(await cand("t1")).tracking!.since); // 追跡の開始は最初の発見
-    expect(dr(c).tracking!.sources.map((s) => s.url)).toEqual([U("t1"), U("t2")]);
-    expect((await lots()).length).toBe(0); // 応募可能として登録・表示されない
+    expect(["duplicate", "auto_registered"]).toContain(c.status);
+    const lot = (await sys.from("lotteries").select("cautions,apply_deadline_precision,apply_deadline_at").eq("id", ls[0].id).single()).data as unknown as { cautions: { code: string }[]; apply_deadline_precision: string; apply_deadline_at: string | null };
+    expect(lot.apply_deadline_precision).not.toBe("unknown"); // 続報で締切が分かった
+    expect(lot.apply_deadline_at).toBeTruthy();
+    expect(lot.cautions.map((x) => x.code)).not.toContain("deadline_unknown");
   });
 
-  it("3) 追跡中は保留回数・締切の近さを理由に要手動確認へ移さず、受付前のまま除外もされない（保留の再調査）", async () => {
-    const c = await cand("t2");
-    await sys.from("collection_candidates").update({ hold_count: 30, next_run_at: new Date(NOW.getTime() - 60_000).toISOString() }).eq("id", c.id);
-    await runHoldPass(deps(), { max: 10, timeLeft: () => 30_000 });
-    const after = await cand("t2");
-    expect(after.status).toBe("pending");
-    expect(after.triage).toBe("auto_retry");
-    expect(new Date(after.next_run_at!).getTime()).toBeGreaterThan(NOW.getTime());
-  });
-
-  it("4) 受付が始まり、詳細が確定すると、通常の登録判定で正式登録に移行する。予告の候補は同じ抽選として整理され、履歴は引き継がれる", async () => {
+  it("4) 受付が始まり、詳細が確定した告知は、同じ抽選として既存の抽選に統合される（二重に登録しない）。締切が変わった場合は暫定の値を採用し、相違を注意として残す", async () => {
     plan = { store: "本店", start: jst(-1, 10), deadline: jst(4, 23, 59), applyUrl: "https://shop.example.invalid/apply", conditions: "会員登録が必要" };
     await add("t3", "テスト玩具6C本店で6C商品の抽選受付中です。応募はこちら");
     await run();
     const c = await cand("t3");
-    expect(c.status, JSON.stringify(c.reasons)).toBe("auto_registered");
+    expect(c.status, JSON.stringify(c.reasons)).toBe("duplicate");
     const lotsNow = await lots();
     expect(lotsNow).toHaveLength(1);
     expect(c.lottery_id).toBe(lotsNow[0].id);
-    const prev = await cand("t2");
-    expect(prev.status).toBe("duplicate"); // 予告の候補は同じ抽選として整理
-    expect(prev.lottery_id).toBe(lotsNow[0].id);
-    expect(dr(c).tracking?.promotedLotteryId).toBe(lotsNow[0].id);
-    expect(dr(c).tracking?.history.length).toBeGreaterThanOrEqual(5); // 予告からの更新履歴を引き継ぐ
-    expect(dr(c).tracking?.sources.map((s) => s.url)).toEqual([U("t1"), U("t2"), U("t3")]);
   });
 
   it("5) さらに同じ内容の告知が来ても、重複して登録しない", async () => {
@@ -163,39 +142,36 @@ describe.skipIf(!dbTestsEnabled)("Stage 6C", () => {
   });
 
   // ------------------------------------------------------------ 複数の予告に一致 → 無理に統合しない
-  it("8) 同じ系列・商品の予告が複数あって決められない続報は、統合せず関連候補として保持する", async () => {
+  it("8) 店舗が違う予告は別々に登録する。あとから届いた店舗不明の続報は、どちらの抽選か決められないため統合せず、確認待ちにする（誤統合しない）", async () => {
+    const before = (await lots()).length;
     plan = { chain: "別の系列6C", product: "6C商品", store: "甲店" };
     await add("a1", "別の系列6Cの店頭および通販で、6C商品の抽選販売を近日中に実施する予定です");
     await run();
     plan = { chain: "別の系列6C", product: "6C商品", store: "乙店" };
     await add("a2", "別の系列6Cの店頭および通販で、6C商品の抽選販売を近日中に実施する予定です（別の告知）");
     await run();
-    const a1 = await cand("a1");
-    expect(dr(a1).tracking, JSON.stringify({ s: a1.status, j: a1.job_state, r: a1.reasons, t: a1.triage })).toBeTruthy();
-    expect(dr(await cand("a2")).tracking).toBeTruthy();
+    expect((await cand("a1")).status).toBe("auto_registered");
+    expect((await cand("a2")).status).toBe("auto_registered");
+    expect((await lots()).length).toBe(before + 2);
     plan = { chain: "別の系列6C", product: "6C商品", store: "", start: jst(3, 10), deadline: jst(6, 23, 59) };
     await add("a3", "別の系列6Cの店頭および通販で、6C商品の抽選受付を開始します。詳細は公式アプリ");
     await run();
     const c = await cand("a3");
-    expect(dr(c).tracking?.related?.length, JSON.stringify({ s: c.status, j: c.job_state, r: c.reasons, t: c.triage, tr: dr(c).tracking })).toBe(2); // 一意に決まらないので統合しない
-    expect((await cand("a1")).status).toBe("pending");
-    expect((await cand("a2")).status).toBe("pending");
+    expect(c.status).not.toBe("auto_registered");
+    expect((await lots()).length).toBe(before + 2); // 店舗が決められない続報は、どちらにも統合しない
   });
 
-  it("8b) 別の情報源が同じ抽選を告知し、読み取れた項目が違っても（片方に受付開始日が無くても）、同じ抽選として追跡を引き継ぐ（本番のホビーゾーンの事例）", async () => {
+  it("8b) 別の情報源が同じ抽選を告知しても（店舗不明で同じ系列・商品・締切）、同じ抽選として扱い、二重に登録しない（本番のホビーゾーンの事例）", async () => {
+    const before = (await lots()).length;
     plan = { chain: "ホビー系列6C", product: "6C商品", store: "", start: jst(8, 0), deadline: jst(10, 21) };
     await add("h1", "ホビー系列6Cの店頭で6C商品の抽選を実施します。応募期間は店頭POPで掲示（抽選応募）");
     await run();
-    expect(dr(await cand("h1")).tracking?.startDate).toBe(ymd(jst(8, 0)));
+    expect((await cand("h1")).status).toBe("auto_registered");
     plan = { chain: "ホビー系列6C", product: "6C商品", store: "", deadline: jst(10, 21) }; // 受付開始日を読み取れなかった別の投稿
     await add("h2", "ホビー系列6Cより6C商品の抽選が発表。応募期間は店頭POPで掲示（抽選応募）");
     await run();
-    const second = await cand("h2");
-    expect(second.triage).toBe("auto_retry");
-    expect(dr(second).tracking?.startDate).toBe(ymd(jst(8, 0))); // 受付開始予定を引き継ぐ
-    expect(dr(second).tracking?.sources.map((s) => s.url)).toEqual([U("h1"), U("h2")]);
-    expect((await cand("h1")).status).toBe("excluded"); // 同じ抽選として統合（二重に追跡しない）
-    expect((await lots()).length).toBe(1); // 応募可能な抽選としては登録されない（既存の1件のみ）
+    expect((await cand("h2")).status).toBe("duplicate");
+    expect((await lots()).length).toBe(before + 1);
   });
 
   // ------------------------------------------------------------ 設定との整合
