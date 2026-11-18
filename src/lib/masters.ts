@@ -87,6 +87,7 @@ export const ENTITIES: Record<EntityKey, Entity> = {
     subFields: ["memo"],
     fields: [
       { name: "name", label: "系列名", type: "text", required: true, max: 80 },
+      { name: "short_name", label: "略称（表示用・任意。別名とは別です）", type: "text", max: 40 },
       { name: "default_application_rule", label: "標準の応募ルール", type: "textarea", max: 1000 },
       { name: "memo", label: "メモ", type: "textarea", max: 2000 },
       {
@@ -143,6 +144,7 @@ export const ENTITIES: Record<EntityKey, Entity> = {
     subFields: ["category", "product_code", "product_code_kind", "packs_per_box"],
     fields: [
       { name: "official_name", label: "正式名称", type: "text", required: true, max: 120 },
+      { name: "short_name", label: "略称（表示用・任意。抽選の一覧など狭い画面で優先して表示します。別名とは別です）", type: "text", max: 40 },
       { name: "product_code", label: "商品コード（任意。公式番号があれば公式番号、なければ独自コード）", type: "text", max: 30 },
       {
         name: "product_code_kind",
@@ -179,18 +181,18 @@ export const ENTITIES: Record<EntityKey, Entity> = {
   },
   product_aliases: {
     key: "product_aliases",
-    label: "商品の略称",
+    label: "商品の別名",
     retire: "delete",
     titleField: "alias",
     subFields: ["product_id"],
     fields: [
       { name: "product_id", label: "商品", type: "select", required: true, ref: "products" },
-      { name: "alias", label: "略称", type: "text", required: true, max: 80 },
+      { name: "alias", label: "別名（同じ商品を指す別の表記。照合・検索・AIの学習用。表示用の略称は商品の編集画面で設定）", type: "text", required: true, max: 80 },
     ],
   },
   chain_aliases: {
     key: "chain_aliases",
-    label: "系列の別表記",
+    label: "系列の別名",
     retire: "delete",
     titleField: "alias",
     subFields: ["chain_id"],
@@ -374,7 +376,8 @@ export function buildSchema(entity: Entity) {
         s = f.required ? t.min(1, `${f.label}を入力してください`) : t;
       }
     }
-    shape[f.name] = s;
+    // 略称（9H-3S）は後から足した任意項目。未指定（古い入力）は空欄＝未設定として受け付ける
+    shape[f.name] = f.name === "short_name" ? z.preprocess((v) => v ?? "", s) : s;
   }
   return z.object(shape).strict();
 }
@@ -383,6 +386,7 @@ export function buildSchema(entity: Entity) {
 export function toDbValues(entity: Entity, values: Record<string, unknown>): Record<string, unknown> {
   const out = { ...values };
   // 未選択（空）は未設定(NULL)。推測で区分・販売形態を決めない
+  if ((entity.key === "products" || entity.key === "chains") && typeof out.short_name === "string") out.short_name = out.short_name.trim() === "" ? null : out.short_name.trim();
   if (entity.key === "products" && out.product_kind === "") out.product_kind = null;
   if (entity.key === "chains" && out.box_shrink_hint === "") out.box_shrink_hint = null;
   if (entity.key === "products") {

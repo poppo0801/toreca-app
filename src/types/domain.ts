@@ -131,6 +131,10 @@ export interface Product {
   id: string;
   officialName: string;
   aliases: string[];
+  /** 利用者が設定した表示専用の略称（Stage 9H-3S）。抽選一覧など狭い画面で優先して表示する。AIは自動で変更しない */
+  shortName?: string | null;
+  /** 略称の導入前から登録されていた別名（由来 legacy）。略称が未設定のときだけ、従来どおり一覧の表示名に使う（表示を変えないための移行） */
+  legacyAliases?: string[];
   code: string;
   /** 商品ごとの入数。固定30Pと決めつけない（仮登録・単品/セット商品では未設定=null） */
   packsPerBox: number | null;
