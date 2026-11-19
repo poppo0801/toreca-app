@@ -2,6 +2,7 @@ import "server-only";
 import { planReevaluation, type PlanItem, type ReevalAction } from "@/lib/master-identity/reeval-plan";
 import type { Snapshot } from "@/lib/master-identity/snapshot";
 import { excludeLottery, restoreLottery, type Db } from "@/lib/server/lottery-service";
+import { mergeProvisionalMaster, revertMasterMerge, type MergeBefore } from "@/lib/server/master-identity/merge-service";
 
 /**
  * 既存の抽選・抽選候補の一括再評価（Stage 9H-3S）。
@@ -206,7 +207,12 @@ async function applyConsolidate(db: Db, it: ItemRow, actor: string | null): Prom
 }
 
 
-async function applyOne(db: Db, it: ItemRow, actor: string | null): Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }> {
+async function applyOne(db: Db, it: ItemRow, actor: string | null, householdId: string): Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }> {
+  if (it.action === "merge_master") {
+    const into = it.proposal.relatedId;
+    if (!into || (it.target_type !== "chain" && it.target_type !== "product")) return { ok: false, error: "適用できる変更がありません" };
+    return mergeProvisionalMaster(db, householdId, it.target_type, it.target_id, into, actor);
+  }
   if (it.action === "fill_fields") return applyFill(db, it);
   if (it.action === "consolidate_lotteries") return applyConsolidate(db, it, actor);
   if (it.target_type === "lottery") {
@@ -242,9 +248,11 @@ async function applyOne(db: Db, it: ItemRow, actor: string | null): Promise<{ ok
 /** 計画の項目を、区分（action）ごと・上限件数つきで適用する。適用の対象外（merge_master・review）は何もしない */
 export async function applyReevalBatch(db: Db, householdId: string, actor: string | null, batchId: string, o: { actions: ReevalAction[]; limit?: number }): Promise<ServiceOut<{ applied: number; failed: number; remaining: number }>> {
   const limit = Math.min(Math.max(o.limit ?? 25, 1), 100);
-  const allowed = o.actions.filter((a) => a !== "merge_master" && a !== "review");
+  const allowed = o.actions.filter((a) => a !== "review");
   const needsAi = allowed.filter((a) => AI_REQUIRED.includes(a));
-  const direct = allowed.filter((a) => !AI_REQUIRED.includes(a));
+  // マスターの統合は、(1)確認済みの別名・表記揺れの一致（確信度 high）または (2)AIが調べて同一と確認したもの。統合元が仮登録・参照が限定的なものだけが適用される（merge-service）
+  const mergeMaster = allowed.includes("merge_master");
+  const direct = allowed.filter((a) => !AI_REQUIRED.includes(a) && a !== "merge_master");
   if (!allowed.length) return { ok: false, error: "適用できる区分がありません" };
   if (await collectionBusy(db)) return { ok: false, error: "収集が実行中のため、少し待ってからもう一度実行してください" };
   const { data: b } = await any(db).from("master_reeval_batches").select("id,status,household_id").eq("id", batchId).eq("household_id", householdId).maybeSingle();
@@ -252,16 +260,19 @@ export async function applyReevalBatch(db: Db, householdId: string, actor: strin
   if (b.status === "aborted") return { ok: false, error: "この計画は破棄されています。計画を作り直してください" };
   await any(db).from("master_reeval_batches").update({ status: "running", started_at: new Date().toISOString() }).eq("id", batchId).in("status", ["planned", "paused"]);
   // AIが調べて確認した（調査済み＋判定 confirm）ものだけを対象にする。固定ロジックの暫定判定のままのものは、ここに入らない（未適用のまま残る）
-  const base = () => any(db).from("master_reeval_items").select("id,target_type,target_id,action,proposal,status,seq").eq("batch_id", batchId).eq("status", "proposed");
+  const base = () => any(db).from("master_reeval_items").select("id,target_type,target_id,action,proposal,status,seq,ai_state,ai_result").eq("batch_id", batchId).eq("status", "proposed");
+  const mergeRows = mergeMaster
+    ? (((await base().eq("action", "merge_master").order("seq").limit(limit * 4)).data ?? []) as { proposal: { evidence?: { confidence?: string } }; ai_state?: string; ai_result?: { verdict?: string } }[]).filter((r) => r.proposal?.evidence?.confidence === "high" || (r.ai_state === "investigated" && r.ai_result?.verdict === "confirm"))
+    : [];
   const [aiRows, directRows] = await Promise.all([
     needsAi.length ? base().in("action", needsAi).eq("ai_state", "investigated").eq("ai_result->>verdict", "confirm").order("seq").limit(limit) : { data: [] },
     direct.length ? base().in("action", direct).eq("ai_state", "investigated").order("seq").limit(limit) : { data: [] },
   ]);
-  const rows = [...(aiRows.data ?? []), ...(directRows.data ?? [])].sort((a: { seq: number }, b: { seq: number }) => a.seq - b.seq).slice(0, limit);
+  const rows = [...mergeRows, ...(aiRows.data ?? []), ...(directRows.data ?? [])].sort((a: { seq: number }, b: { seq: number }) => a.seq - b.seq).slice(0, limit);
   let applied = 0;
   let failed = 0;
   for (const it of rows as ItemRow[]) {
-    const r = await applyOne(db, it, actor);
+    const r = await applyOne(db, it, actor, householdId);
     const nowIso = new Date().toISOString();
     if (r.ok) {
       applied++;
@@ -299,6 +310,8 @@ export async function revertReevalBatch(db: Db, actor: string | null, batchId: s
       }
       const { error } = await any(db).from("lotteries").update(patch).eq("id", it.target_id);
       ok = !error;
+    } else if (it.action === "merge_master" && it.before_state) {
+      ok = await revertMasterMerge(db, it.before_state as unknown as MergeBefore);
     } else if (it.action === "consolidate_lotteries" && it.before_state) {
       const b = it.before_state as { keep?: Record<string, unknown>; archived?: string[] };
       let all = true;

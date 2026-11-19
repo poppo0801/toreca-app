@@ -16,6 +16,7 @@ import type { ResolvedControls } from "@/lib/agent/collection-planner/controls";
 import type { PlannerWorld } from "@/lib/agent/collection-planner/types";
 import { digest } from "@/lib/case-model/redact";
 import { CaseLedger, type CaseTarget, type ExtraRecord, type FieldRecord, type SourceRecord } from "./ledger";
+import { alternativeNudge, summarizeAlternatives, type AlternativeSummary } from "./alternatives";
 import { assess, type Situation, type Sufficiency } from "./sufficiency";
 import { buildCaseTools, type LivePocketRecord } from "./tools";
 import { EMPTY_CLASSIFY_CTX, type ClassifyContext } from "./source-class";
@@ -86,6 +87,8 @@ export interface CaseInvestigationResult {
   /** 取得したが報告されなかったページ（読んだ内容が台帳に反映されていない） */
   unreported: string[];
   sources: SourceRecord[];
+  /** 取得できなかった情報源と、代わりに取得できた情報源・確認できなかったこと（9H-3T） */
+  alternatives: AlternativeSummary;
   steps: StepRecord[];
   queries: string[];
   fetched: string[];
@@ -194,6 +197,7 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
   }
 
   let aiFinish: CaseFinish | null = null;
+  let nudged = false;
   const parseFinish = (o: unknown): CaseFinish | null => {
     const r = o as { reason?: string; note?: string } | null;
     return r && ["sufficient", "no_improvement", "cannot_continue"].includes(String(r.reason)) ? { reason: r.reason as AiFinishReason, note: short(String(r.note ?? ""), 300) } : null;
@@ -211,8 +215,16 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     review: async (info) => {
       aiFinish = parseFinish(info.output);
       const s = built.current();
-      if (aiFinish?.reason === "cannot_continue" || s.done) return null;
       const left = { fetches: s.policy.maxFetches - built.counts.fetches, searches: s.policy.maxSearches - built.counts.searches };
+      // 取得できない情報源（X・短縮URL・アクセス制限など）で「続けられない」と終えようとしたとき、代替の情報源の探索を一度だけ促す（9H-3T）
+      if (aiFinish?.reason === "cannot_continue" && !s.done) {
+        const nudge = alternativeNudge(ledger.failedAny(), left.searches, nudged);
+        if (nudge) {
+          nudged = true;
+          return { feedback: nudge };
+        }
+      }
+      if (aiFinish?.reason === "cannot_continue" || s.done) return null;
       if (left.fetches <= 0 && left.searches <= 0) return null;
       const lines = s.gaps.slice(0, 5).map((g) => `- ${g.detail}`);
       // 取得したのに報告していないページ（読んだ内容が台帳に反映されていない）。終了の申告だけでは記録されない（9H-3B）
@@ -264,6 +276,7 @@ export async function investigateCase(i: InvestigateInput): Promise<CaseInvestig
     livepocket: [...built.livepocket.values()],
     unreported: ledger.unreported().map((s) => s.url),
     sources,
+    alternatives: summarizeAlternatives(sources),
     steps,
     queries: built.queries,
     fetched: [...built.pages.keys()],
