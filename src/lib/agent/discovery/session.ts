@@ -6,7 +6,7 @@
  */
 import type { AgentLLM } from "@/lib/agent/core";
 import { allocateMission, SESSION_CAPS, type MissionBudget } from "./controls";
-import { runDiscovery, type DiscoveryRunRecord } from "./engine";
+import { runDiscovery, type DiscoveryRunRecord, type NextMission } from "./engine";
 import type { DiscoveryMission, DiscoveryWorld } from "./types";
 
 // ---------------------------------------------------------------- 探索実績
@@ -25,15 +25,45 @@ export interface HostStrategy {
   failures: number;
   aiNewLeads: number;
 }
+/** ミッションごとの調査履歴（9U）。同じミッションを成果なく繰り返さない（AIが決めた再調査までの時間を尊重する） */
+export interface MissionMemory {
+  runs: number;
+  lastRunAt: string;
+  /** この時刻より前には、同じミッションを再び選ばない（AIの revisit_hours、無ければ既定の間隔） */
+  nextEligibleAt: string;
+  lastAdopt: number;
+  lastHold: number;
+  by: "ai" | "default";
+}
+/** 次に調べる対象の待ち行列（AIの提案・保留中の手がかりの確認）。期限つき・件数に上限 */
+export interface FrontierItem {
+  id: string;
+  next: NextMission;
+  source: "ai" | "hold";
+  addedAt: string;
+}
 export interface StrategyMemory {
   version: 1;
   chains: Record<string, ChainStrategy>;
   hosts: Record<string, HostStrategy>;
+  missions?: Record<string, MissionMemory>;
+  frontier?: FrontierItem[];
+}
+export const FRONTIER_MAX = 20;
+export const FRONTIER_TTL_MS = 7 * 86_400_000;
+const HOUR = 3_600_000;
+/** AIが再調査までの時間を示さなかったときの既定の間隔（成果が無いほど長くする。上限48時間）。AIが示したときはそれを使う */
+export function defaultRevisitHours(r: DiscoveryRunRecord): number {
+  const produced = (r.counts?.adopt ?? 0) + (r.counts?.hold ?? 0);
+  return produced > 0 ? 12 : 24;
+}
+export function missionIdOfNext(n: NextMission): string {
+  return n.kind === "chain" ? `chain:${n.chain}` : n.kind === "product" ? `product:${n.product}` : `lead:${n.chain}|${n.store ?? ""}|${n.product ?? ""}`;
 }
 export const emptyStrategy = (): StrategyMemory => ({ version: 1, chains: {}, hosts: {} });
 
 export function updateStrategy(mem: StrategyMemory, r: DiscoveryRunRecord, at: string): StrategyMemory {
-  const next: StrategyMemory = { version: 1, chains: { ...mem.chains }, hosts: { ...mem.hosts } };
+  const next: StrategyMemory = { version: 1, chains: { ...mem.chains }, hosts: { ...mem.hosts }, missions: mem.missions, frontier: mem.frontier };
   const chains = new Set<string>([r.trigger.chain, ...r.leads.map((l) => l.lead.chain)].filter((x): x is string => !!x));
   for (const c of chains) {
     const p = next.chains[c] ?? { runs: 0, aiNew: 0, alreadyKnown: 0, costJpy: 0, barrenStreak: 0, lastRunAt: at };
@@ -45,6 +75,29 @@ export function updateStrategy(mem: StrategyMemory, r: DiscoveryRunRecord, at: s
     const p = next.hosts[s.host] ?? { fetches: 0, failures: 0, aiNewLeads: 0 };
     next.hosts[s.host] = { ...p, fetches: p.fetches + 1, failures: p.failures + (s.ok ? 0 : 1) };
   }
+  // ミッション単位の履歴: 次に選べる時刻（AIが決めた再調査までの時間）を記録する
+  const hours = r.revisitHours ?? defaultRevisitHours(r);
+  const nowMs = Number.isFinite(Date.parse(at)) ? Date.parse(at) : Date.now();
+  const atIso = new Date(nowMs).toISOString();
+  const prevM = mem.missions?.[r.missionId];
+  const missions = { ...(mem.missions ?? {}) };
+  missions[r.missionId] = { runs: (prevM?.runs ?? 0) + 1, lastRunAt: atIso, nextEligibleAt: new Date(nowMs + hours * HOUR).toISOString(), lastAdopt: r.counts?.adopt ?? 0, lastHold: r.counts?.hold ?? 0, by: r.revisitHours != null ? "ai" : "default" };
+  // 古い履歴は整理する（30日より前の実行・件数の上限）
+  for (const [k, v] of Object.entries(missions)) if (nowMs - Date.parse(v.lastRunAt) > 30 * 86_400_000) delete missions[k];
+  next.missions = missions;
+  // 待ち行列: 実行済みのミッションを除き、AIの提案と保留中の手がかり（根拠が足りず保留したもの）を加える。期限切れ・上限超過は捨てる
+  let frontier = (mem.frontier ?? []).filter((f) => f.id !== r.missionId && nowMs - Date.parse(f.addedAt) <= FRONTIER_TTL_MS);
+  const add = (n: NextMission, source: FrontierItem["source"]) => {
+    const id = missionIdOfNext(n);
+    if (id === r.missionId || frontier.some((f) => f.id === id)) return;
+    const done = next.missions?.[id];
+    if (done && Date.parse(done.nextEligibleAt) > nowMs) return;
+    frontier.push({ id, next: n, source, addedAt: atIso });
+  };
+  for (const n of r.nextMissions ?? []) add(n, "ai");
+  for (const l of r.leads) if (l.decision.status === "hold" && l.lead.chain) add({ kind: "lead", chain: l.lead.chain, store: l.lead.store, product: l.lead.products[0], url: l.lead.url, reason: `保留: ${l.decision.reason}`.slice(0, 200) }, "hold");
+  frontier = frontier.slice(-FRONTIER_MAX);
+  next.frontier = frontier;
   for (const l of r.leads) {
     if (l.decision.credit !== "ai_new") continue;
     try {
@@ -82,6 +135,8 @@ export interface MissionSources {
   idleChains?: { name: string; storeCount: number }[];
   memory?: StrategyMemory;
   maxMissions?: number;
+  /** 現在時刻（ミリ秒）。再調査までの時間・待ち行列の期限の判定に使う（省略時は today の0時） */
+  nowMs?: number;
 }
 
 const daysBetween = (a: string, b: string): number => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
@@ -105,7 +160,26 @@ export function buildMissions(s: MissionSources): DiscoveryMission[] {
     scored.push({ m: { id: `lottery:${key}`, trigger: { kind: "lottery", chain: l.chain, store: l.store, product: l.product, sourceUrl: l.sourceUrl }, context: strategyHints(mem, l.chain), ...base }, score: 60 - (c?.barrenStreak ?? 0) * 8 + (c?.aiNew ?? 0) * 2 });
   }
   for (const c of s.idleChains ?? []) scored.push({ m: { id: `chain:${c.name}`, trigger: { kind: "chain", chain: c.name }, context: [...strategyHints(mem, c.name), `登録済みの店舗: ${c.storeCount}件`], ...base }, score: 20 + Math.min(c.storeCount, 30) / 3 - (mem.chains[c.name]?.barrenStreak ?? 0) * 6 });
-  return scored.sort((a, b) => b.score - a.score).slice(0, s.maxMissions ?? SESSION_CAPS.maxMissions).map((x) => x.m);
+  // 待ち行列（AIの提案・保留中の手がかりの確認）。固定の巡回ではなく、AIが見つけた次の対象を優先して調べる
+  for (const f of mem.frontier ?? []) {
+    const n = f.next;
+    const id = f.id;
+    const reason = n.reason ? `${f.source === "hold" ? "前回の保留の確認" : "前回の調査でAIが提案"}: ${n.reason}` : "";
+    const trigger: DiscoveryMission["trigger"] = n.kind === "product" ? { kind: "product", product: n.product } : n.kind === "chain" ? { kind: "chain", chain: n.chain } : { kind: "lead", chain: n.chain, store: n.store, product: n.product, sourceUrl: n.url };
+    scored.push({ m: { id, trigger, context: [reason, ...strategyHints(mem, n.chain)].filter(Boolean), ...base }, score: f.source === "ai" ? 90 : 80 });
+  }
+  // 再調査までの時間（AIが決めた、または既定）がまだ経っていないミッションは選ばない。同じ対象を成果なく繰り返し調べて、他の対象に広がらなくなるのを防ぐ
+  const nowMs = s.nowMs ?? Date.parse(`${s.today}T00:00:00+09:00`);
+  const eligible = scored.filter((x) => {
+    const m = mem.missions?.[x.m.id];
+    return !m || Date.parse(m.nextEligibleAt) <= nowMs;
+  });
+  const seen = new Set<string>();
+  return eligible
+    .sort((a, b) => b.score - a.score)
+    .filter((x) => (seen.has(x.m.id) ? false : (seen.add(x.m.id), true)))
+    .slice(0, s.maxMissions ?? SESSION_CAPS.maxMissions)
+    .map((x) => x.m);
 }
 
 // ---------------------------------------------------------------- セッション

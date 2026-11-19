@@ -176,6 +176,22 @@ export function buildDiscoveryTools(o: BuildToolsOptions): ToolRegistry {
     },
   } satisfies AgentTool);
 
+  if (world.resolveName) {
+    reg.register({
+      name: "resolve_name",
+      description: "系列名・商品名が、登録済みのマスター（別名・過去の学習を含む）と同じものか照合する（読み取りのみ）。表記が違っても同じなら、既存の名称に合わせて記録できる。未知の名称は、新しい系列・商品の可能性がある。",
+      inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["chain", "product"] }, name: { type: "string" }, ...becauseProp }, required: ["kind", "name"], additionalProperties: false },
+      access: "read_internal",
+      async run(i, ctx) {
+        const kind = i.kind === "product" ? "product" : "chain";
+        const name = String(i.name ?? "").slice(0, 120);
+        const r = await world.resolveName!(kind, name);
+        state.follow.push({ atStep: stepOf(ctx), action: "lookup", input: `名称 ${name}`, because: because(i), outcome: r.status });
+        return { content: `${name}: ${r.status === "matched" ? "既存と同じ" : r.status === "candidate" ? "近い名称あり（同一は未確認）" : "該当なし"}／${r.note}` };
+      },
+    } satisfies AgentTool);
+  }
+
   reg.register({
     name: "lookup_existing_lottery",
     description: "すでに登録・収集されている抽選を探す（読み取りのみ）。見つけた店舗の抽選が既にあるかを確認し、重複した調査・報告を避ける。出どころ（従来の収集／手動登録）と、人間が確認済みかも分かる。",
