@@ -153,10 +153,23 @@ export function inTab(data: AppData, lottery: Lottery, tab: Tab, _now: Date, sco
   return tabOf(data, lottery, scope) === tab;
 }
 
+/**
+ * 抽選の地域判定。通常は店舗の都道府県で判定する（所在地不明・通販・発送のみは除外しない）。
+ * 店舗選択式（応募時に店舗を選ぶ）は、店舗マスターが仮の店舗（都道府県なし）になるため、**選べる店舗の都道府県**で判定する:
+ * 選べる店舗のどれかが対象地域内、または都道府県が不明なら表示する。すべて対象地域外（都道府県が分かっている）なら地域外。選べる店舗が未登録なら従来どおり（除外しない）。
+ */
+export function matchLotteryRegion(prefectures: readonly string[], lottery: Pick<Lottery, "storeMode" | "selectableStores" | "receiveMethod">, store: { prefecture?: string | null; salesKind?: string } | undefined): boolean {
+  const choices = lottery.storeMode === "select_on_apply" ? (lottery.selectableStores ?? []) : [];
+  if (choices.length > 0 && lottery.receiveMethod !== "shipping") {
+    return prefectures.length === 0 || choices.some((c) => !c.prefecture || prefectures.includes(c.prefecture));
+  }
+  return matchRegion(prefectures, store?.prefecture, lottery.receiveMethod === "shipping" || (store?.salesKind ?? "physical") !== "physical");
+}
+
 function matchFilters(data: AppData, lottery: Lottery, f: Filters): boolean {
   if (f.chainId && lottery.chainId !== f.chainId) return false;
   const store = data.stores.find((s) => s.id === lottery.storeId);
-  if (!matchRegion(f.prefectures, store?.prefecture, lottery.receiveMethod === "shipping" || (store?.salesKind ?? "physical") !== "physical")) return false;
+  if (!matchLotteryRegion(f.prefectures, lottery, store)) return false;
   if (f.receiveMethod && lottery.receiveMethod !== f.receiveMethod) return false;
   if (f.storeId && lottery.storeId !== f.storeId) return false;
   if (f.applyMethod && lottery.applyMethod !== f.applyMethod) return false;
