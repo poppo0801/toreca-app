@@ -63,6 +63,20 @@ describe("店舗の所在地の判断（assessRegion）", () => {
   });
 });
 
+describe("所在地の候補の向き（likely。確定ではない）", () => {
+  it("候補止まり・食い違いでも、見つかった住所の向きを参考として示す。verdict は unknown のまま（除外しない）", () => {
+    const cand = { status: "candidate", prefecture: "富山県", address: "富山県富山市x", sources: [{ url: "https://mtg-jp.com/a", official: false }, { url: "https://example.org/b", official: false }] } as never;
+    const r = assessRegion(cand, ["大阪府", "兵庫県"]);
+    expect(r.verdict).toBe("unknown");
+    expect(r.likely).toEqual({ direction: "out_of_area", prefecture: "富山県", independentSources: 2 });
+    expect(assessRegion({ ...(cand as object), prefecture: "大阪府", status: "conflict" } as never, ["大阪府"]).likely?.direction).toBe("in_area");
+  });
+  it("住所が無い・確認できなかった場合は向きも示さない", () => {
+    expect(assessRegion({ status: "insufficient", prefecture: null, address: null, sources: [] } as never, ["大阪府"]).likely).toBeUndefined();
+    expect(assessRegion({ status: "not_found", prefecture: "東京都", address: null, sources: [] } as never, ["大阪府"]).likely).toBeUndefined();
+  });
+});
+
 describe("別名学習の材料（nameObservations）", () => {
   it("確認済みの系列・商品の表記を、根拠（公式／独立した複数の情報源）つきで渡す。未確認は渡さない", () => {
     const r = res({ fields: [f("items", "テストパック / 別パック", { origins: 2 })], extra: [f("chain", "A書店")] });

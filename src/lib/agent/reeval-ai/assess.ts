@@ -158,10 +158,24 @@ export function nameObservations(r: CaseInvestigationResult): NameObservation[] 
   return out;
 }
 
-export type RegionVerdict = { verdict: "out_of_area" | "in_area" | "unknown"; prefecture: string | null; basis: string; official: boolean };
+export type RegionVerdict = {
+  verdict: "out_of_area" | "in_area" | "unknown";
+  prefecture: string | null;
+  basis: string;
+  official: boolean;
+  /**
+   * 確認済みではないが、調査で住所が見つかった（候補）ときの向きの目安（Stage 9W）。**確定ではない**: verdict は unknown のまま、地域で除外・非表示にしない。
+   * 人が確認する画面で「地域外の可能性」を示すための参考情報。
+   */
+  likely?: { direction: "out_of_area" | "in_area"; prefecture: string; independentSources: number };
+};
 /** 店舗の実所在地の調査結果（検証層を通ったもの）を、対象地域と照らして判断する。確認済み（公式の店舗一覧に住所）だけを確定とし、推測で地域外としない */
 export function assessRegion(res: Pick<ResearchResult, "status" | "prefecture" | "sources" | "address">, targetPrefectures: string[]): RegionVerdict {
   const official = res.sources.some((s) => s.official);
+  if (res.status !== "confirmed" && res.prefecture && res.address && (res.status === "candidate" || res.status === "conflict")) {
+    const hosts = new Set(res.sources.map((x) => { try { return new URL(x.url).hostname.replace(/^www./, ""); } catch { return x.url; } }));
+    return { verdict: "unknown", prefecture: res.prefecture, basis: `所在地を確定できない（状態: ${res.status}）。調査で見つかった住所は ${res.prefecture}（未確認の候補）。地域外と推測して除外しない`, official, likely: { direction: targetPrefectures.includes(res.prefecture) ? "in_area" : "out_of_area", prefecture: res.prefecture, independentSources: hosts.size } };
+  }
   if (res.status !== "confirmed" || !res.prefecture) return { verdict: "unknown", prefecture: res.prefecture ?? null, basis: `所在地を確定できない（状態: ${res.status}）。地域外と推測して除外しない`, official };
   return targetPrefectures.includes(res.prefecture)
     ? { verdict: "in_area", prefecture: res.prefecture, basis: `公式情報で確認した所在地は対象地域内（${res.prefecture}）`, official }
