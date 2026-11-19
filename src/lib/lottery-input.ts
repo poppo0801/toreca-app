@@ -79,6 +79,8 @@ const itemSchema = z.object({
   unit: z.enum(["box", "pack", "set", "piece"]),
 });
 
+/** 1つの抽選に登録できる商品（明細）の最大数。10種を超える構成の抽選（例: カードセット9種＋スターターセット3種＝12種）が、自動登録で「Too big」になり手動確認に回っていたため引き上げ（Stage 9W）。 */
+export const MAX_LOTTERY_ITEMS = 30;
 export const lotteryInputSchema = z.object({
   chain: masterRef("系列", 80),
   /**
@@ -96,7 +98,7 @@ export const lotteryInputSchema = z.object({
   newCampaign: z
     .object({ name: z.string().trim().min(1, "キャンペーン名を入力してください").max(100), storeRule: z.enum(["one_store", "multi"]) })
     .nullable(),
-  items: z.array(itemSchema).min(1, "商品を1つ以上追加してください").max(10),
+  items: z.array(itemSchema).min(1, "商品を1つ以上追加してください").max(MAX_LOTTERY_ITEMS),
   applyStart: flexInputSchema,
   applyDeadline: flexInputSchema,
   resultDate: flexInputSchema,
