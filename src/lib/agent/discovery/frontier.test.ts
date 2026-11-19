@@ -77,5 +77,7 @@ describe("AIの提案の検証（形式のみ）", () => {
     expect(out.some((m) => m.product === "商品F")).toBe(false);
     expect(out.find((m) => m.chain === "G")?.url).toBe("https://ok.example/p");
     expect(out).toHaveLength(5);
+    // 系列名として不自然な文字列（実評価で提案された「兵庫県・京都府の店舗（TSUTAYA・ブックオフ…）」の形）は取り込まない
+    expect(sanitizeNextMissions([{ kind: "chain", chain: "兵庫県・京都府の店舗（TSUTAYA・ブックオフ・カードラボ等）", reason: "r" }, { kind: "chain", chain: "ブックオフ", reason: "r" }]).map((m) => m.chain)).toEqual(["ブックオフ"]);
   });
 });

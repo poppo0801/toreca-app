@@ -262,6 +262,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3Q: 自律型収集の統合", () => 
   });
 
   it("店舗マスターに無い未知の店舗も、公式の店舗一覧から見つけて、仮登録（未確認の新規店舗）として登録する。系列が不明なものは登録しない", async () => {
+    await tbl("discovery_strategy").delete().eq("household_id", hid); // 9U: 直前のテストで調べたミッションは再調査までの間隔があるため、探索履歴を空にする
     await tbl("discovery_runs").update({ slot: "old6" }).eq("household_id", hid);
     const spec = world();
     spec.pages[STORES].text += "\n- 新規開拓店（大阪府）";
@@ -282,6 +283,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 9H-3Q: 自律型収集の統合", () => 
   });
 
   it("本番の費用管理: 調査履歴の費用から今日・今月の残り予算を計算する。失敗・途中終了でも消費した費用が記録される", async () => {
+    await tbl("discovery_strategy").delete().eq("household_id", hid); // 9U: 直前のテストで調べたミッションは再調査までの間隔があるため、探索履歴を空にして同じミッションを選べる状態にする
     const { budgetRemainingJpy } = await import("@/lib/server/collector/autonomous-hook");
     await tbl("discovery_runs").delete().eq("household_id", hid);
     expect(await budgetRemainingJpy(sys, hid, NOW, { AUTONOMOUS_DAILY_CAP_JPY: "30", AUTONOMOUS_MONTHLY_CAP_JPY: "300" })).toBe(30);
