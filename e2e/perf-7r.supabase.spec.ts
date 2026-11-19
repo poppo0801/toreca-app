@@ -72,7 +72,7 @@ test("設定画面の表示時間（マスター管理・自動収集）", async
         };
         page.on("response", onResp);
         const t0 = Date.now();
-        await page.locator(`a[href="${href}"]`).first().click();
+        await page.locator(`a[href="${href}"]:visible`).first().click();
         await page.waitForURL(new RegExp(`${href}$`));
         urls.push(Date.now() - t0);
         await page.locator(ready).first().waitFor({ state: "visible" });

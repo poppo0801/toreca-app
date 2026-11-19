@@ -40,7 +40,15 @@ async function measure(page: Page, how: "goto" | "spa" | "reload" = "goto") {
   const t0 = Date.now();
   if (how === "goto") await page.goto("/collection", { waitUntil: "commit" });
   else if (how === "reload") await page.reload({ waitUntil: "commit" });
-  else await page.locator('[data-nav="collection"]:visible').first().click();
+  else {
+    // 下部メニューの既定は4項目＋「メニュー」（コレクションは直接のタブではない）。直接のタブに無ければ、メニューの機能一覧から開く
+    const direct = page.locator('[data-nav="collection"]:visible').first();
+    if (await direct.count()) await direct.click();
+    else {
+      await page.getByTestId("nav-more").click();
+      await page.getByTestId("more-sheet").locator('[data-more="collection"]').click();
+    }
+  }
   const since = () => Date.now() - t0;
   const out: Record<string, number> = {};
   await page.getByTestId("add-card").waitFor();

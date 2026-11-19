@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseQueryRows } from "./query-output.mjs";
 
 /** 検証用コンテナの管理ユーザー（Supabaseのイメージは supabase_admin。通常のpostgresイメージなら DRILL_DB_USER=postgres） */
 const DB_USER = process.env.DRILL_DB_USER ?? "supabase_admin";
@@ -48,10 +49,10 @@ export function queryJson(target, sql) {
   const file = join(dir, "q.sql");
   writeFileSync(file, sql);
   try {
-    const r = run("npx", ["supabase", "db", "query", "--linked", "-f", file]);
+    const r = run("npx", ["supabase", "db", "query", "--linked", "--output-format", "json", "-f", file]);
     if (r.status !== 0) throw new Error((r.stderr || r.stdout || "").slice(0, 600));
     const out = r.stdout;
-    const rows = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1)).rows;
+    const rows = parseQueryRows(out);
     return typeof rows[0].res === "string" ? JSON.parse(rows[0].res) : rows[0].res;
   } finally {
     rmSync(dir, { recursive: true, force: true });

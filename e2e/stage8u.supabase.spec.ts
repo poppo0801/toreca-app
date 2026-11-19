@@ -100,8 +100,10 @@ test("複数店舗抽選のグループ（親カード・展開・子の応募�
     // ---- 展開: 子が店舗別に出る。子で応募済みにすると、親の応募済み件数へ即時反映
     await parent.getByTestId("group-toggle").click();
     await expect(parent.getByTestId("group-toggle")).toHaveAttribute("aria-expanded", "true");
-    const child1 = parent.getByTestId("lottery-card").filter({ hasText: "8U一号店" });
-    await expect(parent.getByTestId("lottery-card")).toHaveCount(3);
+    // UI-1以降、一覧（要チェック）の子はコンパクトな行（group-child）。店舗別の通常カード（lottery-card）ではない
+    const child1 = parent.getByTestId("group-child").filter({ hasText: "8U一号店" });
+    await expect(parent.getByTestId("group-child")).toHaveCount(3);
+    await expect(parent.getByTestId("lottery-card")).toHaveCount(0);
     await noHorizontalOverflow(page);
     await page.screenshot({ path: "docs/screenshots/stage8u-group-open.png" });
     await child1.getByTestId("my-apply").first().click();
