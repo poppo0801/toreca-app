@@ -14,6 +14,7 @@ import { allocateMission, type MissionBudget } from "./controls";
 import { buildDiscoveryTools, newState, type DiscoveryState } from "./tools";
 import type { DiscoveryMission, DiscoveryWorld, FinishReason, FocusDeclaration, FollowUp, RecordedLead, SourceUse, StopReason } from "./types";
 import { urlKeyOf } from "./verify";
+import { discoveryReview } from "./review";
 
 export const DISCOVERY_SYSTEM = `あなたはトレカの抽選販売情報を探す調査員です。与えられた目的（ミッション）を理解し、あなた自身が調査の対象・方法・順序を決めます。
 目的: 抽選販売を実施している店舗を、できるだけ漏れなく・正確に見つけること。特に、すでに登録されている店舗以外（未知の店舗）の抽選を見つけること。
@@ -149,6 +150,8 @@ export interface RunDiscoveryInput {
   sleep?: (ms: number) => Promise<void>;
   /** 指示文の差し替え（新旧の比較評価用。通常は使わない） */
   system?: string;
+  /** 終了前の検証（9V。review.ts）を使うか。**既定は使わない**（実AIの比較で効果が統計的に確認できず、費用が約3割増えたため本番の挙動は変えない。評価・試験でだけ true） */
+  selfReview?: boolean;
 }
 
 export async function runDiscovery(i: RunDiscoveryInput): Promise<DiscoveryRunRecord> {
@@ -157,7 +160,7 @@ export async function runDiscovery(i: RunDiscoveryInput): Promise<DiscoveryRunRe
   const officialUrl = (await i.world.chainOfficialUrl?.(i.mission.trigger.chain ?? "").catch(() => null)) ?? null;
   if (officialUrl) state.allowed.add(urlKeyOf(officialUrl));
   const tools = buildDiscoveryTools({ mission: i.mission, world: i.world, budget, state, throttle: new HostThrottle(budget.throttle, i.now), sleep: i.sleep });
-  const run = await runAgent({ llm: i.llm, system: i.system ?? DISCOVERY_SYSTEM, task: missionTask(i.mission, { officialUrl }), tools, limits: budget.limits, now: i.now });
+  const run = await runAgent({ llm: i.llm, system: i.system ?? DISCOVERY_SYSTEM, task: missionTask(i.mission, { officialUrl }), tools, limits: budget.limits, now: i.now, ...(i.selfReview !== true ? {} : { review: discoveryReview(state, { maxCostJpy: budget.limits.maxCostJpy ?? 25 }), maxReviews: 1 }) });
   return buildRecord(i.mission, budget, state, run);
 }
 
