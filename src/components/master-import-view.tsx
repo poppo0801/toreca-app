@@ -6,6 +6,7 @@ import { IMAGE_KIND_LABELS, OUTCOME_LABEL, decideImage, imageKey, indexZipEntrie
 import { readImageZip, type ReadZip } from "@/lib/master-excel/zip-read";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { InfoNote } from "@/components/ui/info-tip";
 import { MAX_FILE_BYTES, type MasterKind, type PreviewResult, type PreviewRow, type RowStatus } from "@/lib/master-excel/schema";
 import { cn } from "@/lib/utils";
 
@@ -396,7 +397,7 @@ export function MasterImportView({ history }: { history: ImportHistoryRow[] }) {
             ))}
           </ul>
         )}
-        <p className="text-[11px] text-muted-foreground">履歴にはファイル名と件数、変更した管理番号・項目名を記録します。アップロードしたファイル本体と、変更前後の値は保存しません。</p>
+        <InfoNote text="履歴にはファイル名と件数、変更した管理番号・項目名を記録します。アップロードしたファイル本体と、変更前後の値は保存しません。" />
       </section>
     </div>
   );

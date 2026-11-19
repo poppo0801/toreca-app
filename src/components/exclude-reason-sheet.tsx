@@ -238,7 +238,7 @@ export function ExcludeReasonSheet({ candidate, others, onClose, onDone }: { can
 
           {reason === "untrusted" && (
             <div className="space-y-2" data-testid="reason-untrusted-form">
-              <p className="text-xs text-muted-foreground">除外の対象を選びます。系列の除外は、その系列が実施する抽選全体が対象です（情報源が不明でも作れます）。情報源（Xアカウント・サイト）の除外は別のルールです。投稿本文に系列名があるだけの別の系列は除外せず、登録済みの抽選カードも削除しません。設定の収集ルールから解除できます。</p>
+              <p className="text-xs text-muted-foreground">除外の対象を選びます。系列は、その系列の抽選全体が対象です。登録済みの抽選カードは削除しません。設定の収集ルールから解除できます。</p>
               {sources.length === 0 && <p className="text-sm text-warn">除外の対象にできる系列・情報源が見つかりません（系列がマスター未登録で、Xアカウント・個別サイトでもありません）。</p>}
               <div className="space-y-1.5" role="radiogroup" aria-label="除外の対象">
                 {sources.map((s) => (
@@ -264,7 +264,7 @@ export function ExcludeReasonSheet({ candidate, others, onClose, onDone }: { can
 
           {reason === "duplicate" && (
             <div className="space-y-2" data-testid="reason-dup-form">
-              <p className="text-xs text-muted-foreground">同じ抽選として扱う登録済みの抽選・候補を選びます。この候補の情報源URLは、統合先に参照として残ります。店舗が異なる抽選は別の抽選のため統合できません（店舗選択式の抽選を除く）。</p>
+              <p className="text-xs text-muted-foreground">同じ抽選として扱う登録済みの抽選・候補を選びます（店舗が異なる抽選は統合できません。店舗選択式を除く）。情報源URLは統合先に残ります。</p>
               {dups.length === 0 && <p className="text-sm text-warn" data-testid="dup-none">自動では統合先の候補が見つかりませんでした。下の検索から、登録済みの抽選・確認待ちの候補を探せます。</p>}
               <DupList items={dups} pick={dupPick} onPick={setDupPick} />
               <label className="block text-sm">

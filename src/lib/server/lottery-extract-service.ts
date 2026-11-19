@@ -6,8 +6,9 @@ import { validateExtraction } from "@/lib/ai/validate";
 import { ExtractorError, PROMPT_VERSION, type ExtractRequest, type InputKind, type LotteryExtractor } from "@/lib/ai/provider";
 import { splitTallImages } from "@/lib/server/image-split";
 import { MAX_TILES } from "@/lib/image-tiles";
-import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
-import { fetchXPost, isXHost, type XFetchResult } from "@/lib/server/x-source";
+import { fetchRespectingRobots, safeFetch, type SafeFetchResult } from "@/lib/server/safe-fetch";
+import { classifyUrlInput } from "@/lib/url-input";
+import { fetchXPost, type XFetchResult } from "@/lib/server/x-source";
 
 /** X投稿の統合取得の結果（collector/x-rich.ts の XRichResult と同じ形） */
 export type XRichInput =
@@ -61,6 +62,27 @@ export interface ExtractDeps {
   fetchX?: (url: string) => Promise<XFetchResult>;
   /** X投稿を本文・画像・リンク先まで統合して取得する（Stage 4C。指定すると fetchX より優先） */
   fetchXRich?: (url: string) => Promise<XRichInput>;
+  /** 短縮URLの転送先を返す（本文は取得しない）。未指定なら安全な取得部品で最初の転送先を確認する。取得できなければ null */
+  expandUrl?: (url: string) => Promise<string | null>;
+}
+
+/** 短縮URLの転送先を最大3回まで辿る（各回、転送先は安全な取得部品の検査を通る。本文は読まない） */
+async function expandShortUrl(url: string, deps: ExtractDeps): Promise<string | null> {
+  const expand =
+    deps.expandUrl ??
+    (async (u: string) => {
+      const r = await safeFetch(u, { noFollow: true, timeoutMs: 4_000, accept: ["text/html", "text/plain"] });
+      return r.ok && r.finalUrl && r.finalUrl !== u ? r.finalUrl : null;
+    });
+  let cur = url;
+  for (let i = 0; i < 3; i++) {
+    const next = await expand(cur);
+    if (!next) return i === 0 ? null : cur;
+    cur = next;
+    const c = classifyUrlInput(cur);
+    if (!c.ok || !c.shortened) return cur;
+  }
+  return cur;
 }
 
 export const MAX_TEXT_CHARS = 20_000;
@@ -105,24 +127,41 @@ export async function runExtraction(input: ExtractInput, deps: ExtractDeps): Pro
     }
     case "url":
     case "x_url": {
-      // 入力欄と種類が食い違っても、URLを見て取得方法を選ぶ（Xの投稿URLは公式の埋め込み取得、それ以外は通常のページ取得）
-      kind = isXHost(input.url) ? "x_url" : "url";
+      // 入力欄の種類に関わらず、URL（短縮URLは転送先）を見て取得方法を選ぶ（Xの投稿URLは公式の埋め込み取得、それ以外は通常のページ取得）。
+      // ここで判別するのはURLの形式だけで、情報源の公式性・信頼性の評価は別（取得後の検証・照合）
+      const cls = classifyUrlInput(input.url);
+      if (!cls.ok) return { ok: false, kind: "url", code: "empty_input", message: cls.message };
+      let target = cls.url;
+      let targetKind = cls.kind;
+      if (cls.shortened) {
+        const expanded = await expandShortUrl(cls.url, deps);
+        if (!expanded) return { ok: false, kind: "url", code: "fetch_failed", message: "短縮URLの転送先を確認できませんでした（リンクが無効か、転送先に接続できません）。転送先のURLを直接入力するか、告知の文章・スクリーンショットを使ってください", suggest: "text" };
+        const c2 = classifyUrlInput(expanded);
+        if (!c2.ok) return { ok: false, kind: "url", code: "fetch_failed", message: "短縮URLの転送先が取得できない形式でした。転送先のURLを直接入力してください", suggest: "text" };
+        target = c2.url;
+        targetKind = c2.kind;
+        notices.push(`短縮URLを転送先（${c2.host}）に展開して取得しました`);
+      }
+      kind = targetKind === "x" ? "x_url" : "url";
       if (kind === "x_url" && deps.fetchXRich) {
-        const x = await deps.fetchXRich(input.url);
+        const x = await deps.fetchXRich(target);
         if (!x.ok) return { ok: false, kind, code: "fetch_failed", message: x.message, suggest: "text" };
         notices.push(...x.notices);
         // 本文＋添付画像（複数）＋リンク先の本文を、1つの入力として解析する
         const hasImg = x.images.length > 0;
         if (hasImg) kind = "image";
-        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), images: hasImg ? x.images : undefined, sourceUrl: input.url.trim(), postedOn: x.postedOn || undefined, now: deps.now };
+        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), images: hasImg ? x.images : undefined, sourceUrl: target, postedOn: x.postedOn || undefined, now: deps.now };
       } else if (kind === "x_url") {
-        const x = await fetchX(input.url);
+        const x = await fetchX(target);
         if (!x.ok) return { ok: false, kind, code: "fetch_failed", message: x.message, suggest: "text" };
         notices.push(...x.notice);
-        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), sourceUrl: input.url.trim(), postedOn: x.postedOn || undefined, now: deps.now };
+        req = { kind, text: x.text.slice(0, MAX_TEXT_CHARS), sourceUrl: target, postedOn: x.postedOn || undefined, now: deps.now };
       } else {
-        const page = await fetchPage(input.url);
+        const page = await fetchPage(target);
         if (!page.ok) return { ok: false, kind, code: "fetch_failed", message: `${page.message}。告知の文章をコピーして貼り付けるか、スクリーンショットを読み取ってください`, suggest: "text" };
+        // 転送の結果がXの投稿だった場合（一般のURLからXへ転送）は、Xの取得方法で読み直す
+        const landed = classifyUrlInput(page.finalUrl);
+        if (landed.ok && landed.kind === "x" && page.finalUrl !== target) return runExtraction({ kind: "url", url: page.finalUrl }, deps);
         const text = extractPageText(page.body, page.finalUrl);
         if (text.text.length < 30) {
           return {

@@ -120,7 +120,7 @@ export function SettingsView() {
           <div className="space-y-2 text-sm">
             <p>{SUPABASE ? "Supabase（ログイン・プロフィール・マスター・抽選は実データ）。" : "ローカルモック（架空データ・リロードで初期化）。"}</p>
             <p className="text-xs text-muted-foreground">現在の操作プロフィール: {profile.label}</p>
-            <p className="text-xs text-muted-foreground">操作中のユーザーはヘッダー右上のアイコンからも切り替えられます（この端末にのみ保存され、本人認証ではありません）。</p>
+            <p className="text-xs text-muted-foreground">ヘッダー右上のアイコンでも切り替えられます（この端末のみ・本人認証ではありません）。</p>
             {SUPABASE && (
               <form action={signOut} onSubmit={() => clearResume()}>
                 <Button type="submit" variant="outline">

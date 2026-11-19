@@ -193,7 +193,7 @@ run("ui1")("ui1: 画面から文章を読み取り→登録フォームへ反映
   const form = page.getByTestId("lottery-form");
   await form.getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
-  await ai.getByRole("tab", { name: "文章" }).click();
+  await ai.getByRole("tab", { name: "文書" }).click();
   await ai.getByLabel("告知の文章を貼り付け").fill(TEXT_FULL);
   const resp = page.waitForResponse((r) => r.url().includes("/api/lottery-extract"));
   await ai.getByRole("button", { name: "読み取る" }).click();
