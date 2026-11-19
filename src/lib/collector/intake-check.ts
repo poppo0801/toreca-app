@@ -23,6 +23,15 @@ export interface ReanalysisView {
 
 const nk = (s: string) => s.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 const storeKey = (s: string) => nk(s).replace(/店$/, "");
+/** 店舗名の先頭の系列名（「ブックオフ豊中三国店」の「ブックオフ」）は、店舗の識別に含めない。AIは系列名つき・再解析は店舗名のみ（またはその逆）と表記が分かれても同じ店舗とみなす（9U: 実運用で、この差だけで登録が止まっていた） */
+const storeKeyWithoutChain = (store: string, ...chains: string[]) => {
+  let k = storeKey(store);
+  for (const c of chains) {
+    const ck = nk(c);
+    if (ck.length >= 2 && k.startsWith(ck) && k.length > ck.length) k = k.slice(ck.length);
+  }
+  return k;
+};
 const productKey = (s: string) => nk(s).replace(/[【\[（(][^】\]）)]*[】\]）)]/g, "");
 
 export function checkReanalysis(h: IntakeHint, r: ReanalysisView): { ok: true } | { ok: false; reason: string } {
@@ -31,7 +40,7 @@ export function checkReanalysis(h: IntakeHint, r: ReanalysisView): { ok: true } 
     if (!r.selectMode) return { ok: false, reason: "AIは店舗選択式と報告しましたが、再解析では店舗選択式と確認できません" };
   } else if (h.store) {
     if (r.selectMode || !r.storeName) return { ok: false, reason: "再解析で店舗を確認できません（別店舗の告知の取り込みを防ぐため登録しません）" };
-    if (storeKey(h.store) !== storeKey(r.storeName)) return { ok: false, reason: `再解析の店舗（${r.storeName}）がAIの報告（${h.store}）と一致しません` };
+    if (storeKeyWithoutChain(h.store, h.chain, r.chainName) !== storeKeyWithoutChain(r.storeName, h.chain, r.chainName)) return { ok: false, reason: `再解析の店舗（${r.storeName}）がAIの報告（${h.store}）と一致しません` };
   }
   if (h.products.length > 0 && r.products.length > 0 && !h.products.some((a) => r.products.some((b) => productKey(a) && productKey(b) && (productKey(a).includes(productKey(b)) || productKey(b).includes(productKey(a)))))) return { ok: false, reason: "再解析の商品がAIの報告と一致しません" };
   return { ok: true };
