@@ -937,7 +937,6 @@ export function LotteryFormDialog({
               <SourceLinkList
                 lottery={{ announcementUrl: v.announcementUrl, sourceUrls: urlsText.split("\n").map((s) => s.trim()).filter(Boolean) }}
                 officialHosts={((u) => (u ? [hostOfUrl(u)] : []))(data.stores.find((s) => s.id === v.store.id)?.storeUrl)}
-                max={4}
                 className="-mt-1"
                 testId="form-source-links"
                 ariaLabel="情報元リンク"
@@ -1228,7 +1227,6 @@ export function LotteryFormDialog({
                     <div className="mt-1">
                       <ClearableDateInput label="当選発表の終了日" value={v.resultEndDate ?? ""} min={v.resultDate.date || undefined} onChange={(x) => set("resultEndDate", x)} />
                     </div>
-                    {v.resultDate.precision === "unknown" && <p className="mt-0.5 text-[11px] text-warn">開始日も入力してください</p>}
                   </div>
                 ) : (
                   <span aria-hidden="true" />

@@ -132,7 +132,7 @@ describe("当落発表の期間指定", () => {
     expect(resultSortKey(lot(UNKNOWN_DATE))).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("入力検証: 終了日は開始日以降。開始日が無い終了日は保存できない。空は単一日", () => {
+  it("入力検証: 終了日は開始日以降。開始日が無い終了日だけの登録も可（Stage 9Y）。空は単一日", () => {
     const base = createMockData(NOW);
     const l = base.lotteries.find((x) => x.id === "L1")!;
     const valid = {
@@ -164,7 +164,8 @@ describe("当落発表の期間指定", () => {
     expect(ok({ resultEndDate: "2026-11-07" })).toBe(true);
     expect(ok({ resultEndDate: "2026-11-06" })).toBe(false);
     expect(ok({ resultEndDate: "11/10" })).toBe(false);
-    expect(ok({ resultDate: EMPTY_FLEX, resultEndDate: "2026-11-10" })).toBe(false);
+    expect(ok({ resultDate: EMPTY_FLEX, resultEndDate: "2026-11-10" })).toBe(true); // 終了日だけ（Stage 9Y）
+    expect(ok({ resultDate: EMPTY_FLEX, resultEndDate: "11/10" })).toBe(false);
     // 時刻つきの開始 + 終了日
     expect(ok({ resultDate: { precision: "date_time", date: "2026-11-07", time: "12:00" }, resultEndDate: "2026-11-10" })).toBe(true);
   });

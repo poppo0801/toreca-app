@@ -1,5 +1,5 @@
 import { profileSeesLottery } from "@/lib/eligibility";
-import { formatFlexMdW, formatPeriodMdW, formatResultMdW, formatShort, isPast, isResultFinished, isResultInPeriod, jstDateString, resultStartDay, formatResultShort } from "@/lib/datetime";
+import { formatFlexMdW, formatPeriodMdW, formatResultMdW, formatShort, isPast, isResultFinished, hasResultEndOnly, isResultInPeriod, jstDateString, resultStartDay } from "@/lib/datetime";
 import type { AppData, Application, FlexibleDate, Lottery, LotteryKind } from "@/types/domain";
 
 /**
@@ -47,12 +47,17 @@ export function groupOngoing(data: AppData, profileId: string, productName: (pro
 
 // ------------------------------------------------------------------ 当落発表の状況
 
+/** 発表の判定に使う項目（applyDeadline は、発表開始が未登録のときの期間中判定にだけ使う） */
+type ResultFields = Pick<Lottery, "resultDate" | "resultEndDate"> & Partial<Pick<Lottery, "applyDeadline">>;
+
 export type ResultStage = "unknown" | "before" | "in_period" | "overdue";
 
 /** 発表の状況。unknown=発表日不明 / before=発表前 / in_period=発表日（期間中を含む） / overdue=発表日を過ぎている */
-export function resultStage(l: Pick<Lottery, "resultDate" | "resultEndDate">, now: Date): ResultStage {
-  if (l.resultDate.precision === "unknown") return "unknown";
+export function resultStage(l: ResultFields, now: Date): ResultStage {
+  if (l.resultDate.precision === "unknown" && !l.resultEndDate) return "unknown";
   if (isResultFinished(l, now) === true) return "overdue";
+  // 開始が未登録（終了日だけ）: 応募締切の翌日（内部の推定）以降なら発表期間中。推定できなければ判定しない（unknown）
+  if (hasResultEndOnly(l)) return isResultInPeriod(l, now) ? "in_period" : "unknown";
   const start = resultStartDay(l);
   if (!start) return "unknown";
   const today = jstDateString(now);
@@ -62,7 +67,7 @@ export function resultStage(l: Pick<Lottery, "resultDate" | "resultEndDate">, no
 }
 
 /** 発表基準のカウントダウン表示。発表日不明は null（無理に出さない） */
-export function resultCountdown(l: Pick<Lottery, "resultDate" | "resultEndDate">, now: Date): { label: string; tone: "normal" | "warn" | "info" | "danger" } | null {
+export function resultCountdown(l: ResultFields, now: Date): { label: string; tone: "normal" | "warn" | "info" | "danger" } | null {
   const stage = resultStage(l, now);
   if (stage === "unknown") return null;
   if (stage === "overdue") return { label: "結果未確認", tone: "danger" };
@@ -78,7 +83,7 @@ export function resultCountdown(l: Pick<Lottery, "resultDate" | "resultEndDate">
 }
 
 /** 発表前の当落記録は確認ダイアログを出す（誤登録防止） */
-export const needsResultConfirm = (l: Pick<Lottery, "resultDate" | "resultEndDate">, now: Date): boolean => resultStage(l, now) === "before";
+export const needsResultConfirm = (l: ResultFields, now: Date): boolean => resultStage(l, now) === "before";
 
 // ------------------------------------------------------------------ 当選後の購入・受取
 
@@ -195,4 +200,4 @@ export function wonSortRank(p: WonProgress): number {
 }
 
 /** 発表日の表示（太字で強調する用）。曜日つき・時刻なし。不明は「発表日未確認」 */
-export const resultDayText = (l: Pick<Lottery, "resultDate" | "resultEndDate">, now: Date): string => formatResultMdW(l, now) ?? "発表日未確認";
+export const resultDayText = (l: ResultFields, now: Date): string => formatResultMdW(l, now) ?? "発表日未確認";

@@ -173,11 +173,9 @@ export const lotteryInputSchema = z.object({
       if ((both ? `${rs.date}T${rs.time}` : rs.date) > (both ? `${re.date}T${re.time}` : re.date)) ctx.addIssue({ code: "custom", message: "受取の開始が終了より後になっています", path: ["receiveStart"] });
     }
   }
-  // 当選発表の期間: 開始日が必要で、最終日は開始日以降
+  // 当選発表の期間: 終了日だけでも登録できる（開始日が不明なとき）。開始日があるときは、最終日は開始日以降
   if (v.resultEndDate) {
-    if (v.resultDate.precision === "unknown" || !v.resultDate.date) {
-      ctx.addIssue({ code: "custom", message: "発表の終了日を入れるときは、開始日も入力してください", path: ["resultEndDate"] });
-    } else if (v.resultEndDate < v.resultDate.date) {
+    if (v.resultDate.precision !== "unknown" && v.resultDate.date && v.resultEndDate < v.resultDate.date) {
       ctx.addIssue({ code: "custom", message: "発表の終了日が開始日より前になっています", path: ["resultEndDate"] });
     }
   }

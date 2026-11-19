@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, FileImage, Loader2, Sparkles, X } from "lucide-react";
+import { AlertTriangle, FileImage, FileText, Link2, Loader2, Sparkles, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,17 @@ import { buildDraft } from "@/lib/lottery-match";
 import type { LotteryInput } from "@/lib/lottery-input";
 import type { ExtractResult } from "@/lib/server/lottery-extract-service";
 import { cn } from "@/lib/utils";
+import { classifyUrlInput } from "@/lib/url-input";
+
+type Tab = "image" | "text" | "url";
+const TABS: { key: Tab; label: string; icon: typeof FileText; source: string }[] = [
+  { key: "image", label: "画像", icon: FileImage, source: "画像" },
+  { key: "text", label: "文書", icon: FileText, source: "文書" },
+  { key: "url", label: "URL", icon: Link2, source: "URL" },
+];
 
 /**
- * 編集画面の「AIで情報を補完」。公式サイトのスクリーンショットなどの画像（複数可）を読み取り、いまの入力内容との差分を見せる。
+ * 編集画面の「AIで情報を補完」。画像（複数可）・文章・URLのいずれかを、既存のAI読み取り（/api/lottery-extract）で解析し、いまの入力内容との差分を見せる。
  *  - 空欄・未設定への補完は初めから選択済み、食い違う項目は選択なし（選んだ項目だけがフォームに反映される）
  *  - 反映先はフォームの入力値のみ。保存は利用者が通常どおり行う。画像で確認できない項目は候補にならない
  *  - 利用回数・費用は通常のAI読み取りと同じ記録・上限に計上される
@@ -39,6 +47,9 @@ export function AiSupplementDialog({
   onApply: (next: LotteryInput) => void;
 }) {
   const { data } = useApp();
+  const [tab, setTab] = useState<Tab>("image");
+  const [text, setText] = useState("");
+  const [url, setUrl] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<"prep" | "ai">("ai");
@@ -49,21 +60,31 @@ export function AiSupplementDialog({
   const [mock, setMock] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const canRun = !busy && (tab === "image" ? files.length > 0 : tab === "text" ? text.trim().length >= 10 : url.trim() !== "");
+
   const run = async () => {
+    if (tab === "url") {
+      const c = classifyUrlInput(url);
+      if (!c.ok) return setFail(c.message);
+    }
     setBusy(true);
     setFail(null);
     setItems(null);
     setNotes([]);
     try {
       const fd = new FormData();
-      fd.set("kind", "image");
+      fd.set("kind", tab);
       if (hint) fd.set("hint", hint);
-      setPhase("prep");
-      const prepared = await prepareAiImages(files);
-      setNotes(prepared.notices);
-      if (prepared.error) return setFail(prepared.error);
-      for (const f of prepared.files) fd.append("images", f);
-      setPhase("ai");
+      if (tab === "text") fd.set("text", text);
+      if (tab === "url") fd.set("url", url);
+      if (tab === "image") {
+        setPhase("prep");
+        const prepared = await prepareAiImages(files);
+        setNotes(prepared.notices);
+        if (prepared.error) return setFail(prepared.error);
+        for (const f of prepared.files) fd.append("images", f);
+        setPhase("ai");
+      }
       const res = await fetch("/api/lottery-extract", { method: "POST", body: fd });
       const json = (await res.json().catch(() => null)) as ExtractResult | { ok: false; code: string; message: string } | null;
       if (!json) return setFail("サーバーから想定外の応答が返りました。時間をおいて再度お試しください");
@@ -92,7 +113,7 @@ export function AiSupplementDialog({
   const apply = () => {
     const chosen = (items ?? []).filter((i) => picked.has(i.key));
     if (chosen.length === 0) return onOpenChange(false);
-    onApply(applySupplement(current, chosen, { source: "画像", today: jstDateString(new Date()) }));
+    onApply(applySupplement(current, chosen, { source: TABS.find((t) => t.key === tab)!.source, today: jstDateString(new Date()) }));
     onOpenChange(false);
   };
 
@@ -105,7 +126,7 @@ export function AiSupplementDialog({
           <Sparkles className="size-4 text-primary-ink" aria-hidden="true" />
           AIで情報を補完
         </DialogTitle>
-        <DialogDescription className="text-xs">画像から読み取れた情報だけを候補にします。反映する項目を選んでください。</DialogDescription>
+        <DialogDescription className="sr-only">画像・文章・URLから読み取った内容と、いまの入力内容を比べます。</DialogDescription>
         <AiBudgetNote />
 
         {items ? (
@@ -150,7 +171,7 @@ export function AiSupplementDialog({
             {diffCount > 0 && (
               <p role="alert" className="flex gap-1.5 text-xs text-warn">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                既存の情報と食い違う項目があります。画像を確認して、反映するものだけ選んでください（初期は選択していません）。
+                既存の情報と食い違う項目があります。元の情報を確認して、反映するものだけ選んでください（初期は選択していません）。
               </p>
             )}
             {notes.length > 0 && (
@@ -174,6 +195,44 @@ export function AiSupplementDialog({
           </div>
         ) : (
           <div className="mt-3 space-y-3">
+            <div role="tablist" aria-label="入力方法" className="grid grid-cols-3 gap-1">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  role="tab"
+                  type="button"
+                  aria-selected={tab === t.key}
+                  data-testid={`ai-supplement-tab-${t.key}`}
+                  onClick={() => {
+                    setTab(t.key);
+                    setFail(null);
+                  }}
+                  className={cn("flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-md border px-1 text-xs", tab === t.key ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}
+                >
+                  <t.icon className="size-4" aria-hidden="true" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {tab === "text" && (
+              <label className="block text-sm">
+                告知の文章を貼り付け
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  rows={7}
+                  maxLength={20000}
+                  className="mt-1 w-full rounded-md border bg-input px-3 py-2 text-sm"
+                  data-testid="ai-supplement-text"
+                />
+              </label>
+            )}
+            {tab === "url" && (
+              <label className="block text-sm">
+                告知のURL
+                <input value={url} onChange={(e) => setUrl(e.target.value)} inputMode="url" placeholder="https://" className="mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm" data-testid="ai-supplement-url" />
+              </label>
+            )}
             <input
               ref={fileRef}
               type="file"
@@ -188,10 +247,12 @@ export function AiSupplementDialog({
                 e.target.value = "";
               }}
             />
-            <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => fileRef.current?.click()} disabled={busy || files.length >= MAX_TILES}>
-              <FileImage className="size-4" aria-hidden="true" /> 画像を追加（{files.length}/{MAX_TILES}）
-            </Button>
-            {files.length > 0 && (
+            {tab === "image" && (
+              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => fileRef.current?.click()} disabled={busy || files.length >= MAX_TILES}>
+                <FileImage className="size-4" aria-hidden="true" /> 画像を追加（{files.length}/{MAX_TILES}）
+              </Button>
+            )}
+            {tab === "image" && files.length > 0 && (
               <ul className="space-y-1" aria-label="選択した画像">
                 {files.map((f, i) => (
                   <li key={`${f.name}-${i}`} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs">
@@ -212,10 +273,10 @@ export function AiSupplementDialog({
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 キャンセル
               </Button>
-              <Button onClick={run} disabled={busy || files.length === 0} data-testid="ai-supplement-run">
+              <Button onClick={run} disabled={!canRun} data-testid="ai-supplement-run">
                 {busy ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" aria-hidden="true" /> {phase === "prep" ? "画像を準備中…" : "AIが読み取り中…"}
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" /> {phase === "prep" && tab === "image" ? "画像を準備中…" : "AIが読み取り中…"}
                   </>
                 ) : (
                   "読み取る"
