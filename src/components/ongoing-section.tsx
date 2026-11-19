@@ -6,6 +6,7 @@ import { useApp } from "@/components/app-provider";
 import { ChainLogo } from "@/components/chain-logo";
 import { LotteryDetailSheet } from "@/components/lottery-detail-sheet";
 import { groupOngoing } from "@/lib/lottery-flow";
+import { compactName } from "@/lib/master-identity/display";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,7 +19,8 @@ export function OngoingSection() {
   const [open, setOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const groups = useMemo(
-    () => groupOngoing(data, profile.id, (id) => data.products.find((p) => p.id === id)?.aliases[0] ?? data.products.find((p) => p.id === id)?.officialName ?? "商品未登録"),
+    // 略称（表示専用）を優先。未設定のときは、導入前の別名（従来の表示）→ 正式名称。AIが学習した別名は表示に使わない（9H-3S）
+    () => groupOngoing(data, profile.id, (id) => { const p = data.products.find((x) => x.id === id); return p ? compactName({ officialName: p.officialName, shortName: p.shortName, legacyAliases: p.legacyAliases ?? p.aliases }) : "商品未登録"; }),
     [data, profile.id],
   );
   const total = groups.reduce((n, g) => n + g.rows.length, 0);

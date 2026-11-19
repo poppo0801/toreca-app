@@ -145,7 +145,8 @@ const TABLES = ["households", "profiles", "lotteries", "lottery_items", "applica
 const counts = async () => Object.fromEntries(await Promise.all(TABLES.map(async (t) => [t, (await db.from(t).select("*", { count: "exact", head: true })).count])));
 const before = await counts();
 console.log("\n本番へ適用します（db push --include-all）…");
-const push = sh(["db", "push", "--linked", "--include-all"]);
+// --yes: CLI がエージェント実行では確認を求めるため。ここに到達するのは、承認の記録・指紋の一致・バックアップ・dry-run の全てを満たしたときだけ
+const push = sh(["db", "push", "--linked", "--include-all", "--yes"]);
 console.log(scrub(push.stdout).split("\n").slice(-12).join("\n"));
 if (push.status !== 0) fail(`適用に失敗しました。以降の処理は行いません（自動のやり直し・巻き戻しはしません。トランザクション単位で失敗した版は適用されていません）: ${scrub(push.stderr).slice(0, 500)}`);
 const after = await counts();

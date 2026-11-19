@@ -38,3 +38,13 @@ if (runs.error) console.log(`  読み取れませんでした: ${runs.error.mess
 else for (const r of runs.data) console.log(`  - ${jst(r.started_at)} ${r.phase ?? ""} ${r.status} ${r.trigger ?? ""} ${r.stop_reason ?? ""}`);
 const dr = await db.from("discovery_runs").select("id", { count: "exact", head: true });
 console.log(`\n③ 自律型の調査履歴（discovery_runs）: ${dr.error || dr.count == null ? "表なし（マイグレーション未適用）" : `${dr.count}件`}`);
+const dl = await db.from("discovery_runs").select("*").order("started_at", { ascending: false }).limit(5);
+if (!dl.error) {
+  for (const r of dl.data) {
+    const pick = ["status", "trigger", "slot", "mission_ids", "records", "found", "registered", "cost_jpy", "duration_ms", "stop_reason", "error"].filter((k) => k in r).map((k) => `${k}=${Array.isArray(r[k]) ? r[k].length : typeof r[k] === "object" && r[k] ? JSON.stringify(r[k]).slice(0, 80) : String(r[k]).slice(0, 80)}`);
+    console.log(`  - ${jst(r.started_at)} ${pick.join(" ")}`);
+  }
+  const month = new Date().toISOString().slice(0, 7);
+  const sum = dl.data.reduce((s, r) => s + Number(r.cost_jpy ?? 0), 0);
+  console.log(`  直近${dl.data.length}件の費用合計: ${sum.toFixed(2)}円（上限: 日次100円・月次1,500円・1件15円）／月 ${month}`);
+}

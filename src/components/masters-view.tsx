@@ -507,9 +507,12 @@ function MasterItem({
             {badges}
           </p>
           {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
+          {(entity.key === "products" || entity.key === "chains") && typeof row.short_name === "string" && row.short_name.trim() !== "" && (
+            <p className="truncate text-xs text-muted-foreground" data-testid="short-name">略称: {row.short_name}</p>
+          )}
           {entity.key === "chains" && rows.chain_aliases.some((a) => a.chain_id === row.id) && (
             <p className="truncate text-xs text-muted-foreground" data-testid="chain-alias-list">
-              別名: {rows.chain_aliases.filter((a) => a.chain_id === row.id).map((a) => String(a.alias)).join("・")}
+              別名: {rows.chain_aliases.filter((a) => a.chain_id === row.id).map((a) => `${String(a.alias)}${a.status === "inferred" ? "（AI推定）" : ""}`).join("・")}
             </p>
           )}
           {entity.key === "stores" && (
@@ -695,7 +698,7 @@ function RecordDialog({ entity, rows, record, trigger, preset }: { entity: Entit
             ))}
             {entity.key === "chains" && (
               <div className="space-y-1.5 text-sm" data-testid="chain-aliases">
-                <p>別名（略称・別表記。任意）</p>
+                <p>別名（別表記・旧名称など。照合・検索・AIの学習用。任意）</p>
                 {aliases.length > 0 && (
                   <ul className="flex flex-wrap gap-1.5" aria-label="別名">
                     {aliases.map((a) => (
