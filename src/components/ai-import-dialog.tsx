@@ -12,14 +12,14 @@ import { buildDraft, type LotteryDraft } from "@/lib/lottery-match";
 import { prepareAiImages } from "@/lib/client-image";
 import { MAX_TILES } from "@/lib/image-tiles";
 import { cn } from "@/lib/utils";
+import { classifyUrlInput } from "@/lib/url-input";
 
-type Tab = "text" | "image" | "url" | "x_url";
+type Tab = "text" | "image" | "url";
 
 const TABS: { key: Tab; label: string; icon: typeof FileText }[] = [
-  { key: "text", label: "文章", icon: FileText },
+  { key: "text", label: "文書", icon: FileText },
   { key: "image", label: "画像", icon: FileImage },
-  { key: "url", label: "店舗URL", icon: Link2 },
-  { key: "x_url", label: "X投稿", icon: Link2 },
+  { key: "url", label: "URL", icon: Link2 },
 ];
 
 const MAX_IMAGES = MAX_TILES;
@@ -42,7 +42,6 @@ export function AiImportDialog({
   const [tab, setTab] = useState<Tab>("text");
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
-  const [xUrl, setXUrl] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<"prep" | "ai">("ai");
@@ -52,9 +51,14 @@ export function AiImportDialog({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const extraNotes = done ? [...done.result.notices, ...done.draft.warnings, ...done.draft.generalNotes] : [];
-  const canSubmit = !busy && (tab === "text" ? text.trim().length >= 10 : tab === "image" ? files.length > 0 : tab === "url" ? url.trim() !== "" : xUrl.trim() !== "");
+  const canSubmit = !busy && (tab === "text" ? text.trim().length >= 10 : tab === "image" ? files.length > 0 : url.trim() !== "");
 
   const run = async () => {
+    // URLは形式だけここで確認する（X投稿か一般のページかはサーバーが自動で判別。公式サイトに限らない）
+    if (tab === "url") {
+      const c = classifyUrlInput(url);
+      if (!c.ok) return setFail({ code: "invalid_url", message: c.message });
+    }
     setBusy(true);
     setFail(null);
     setDone(null);
@@ -64,7 +68,6 @@ export function AiImportDialog({
       fd.set("kind", tab);
       if (tab === "text") fd.set("text", text);
       if (tab === "url") fd.set("url", url);
-      if (tab === "x_url") fd.set("url", xUrl);
       if (tab === "image") {
         // 縦長の画像は、文字が読めるよう幅を保って分割する（縮小だけだと読めなくなる）
         setPhase("prep");
@@ -98,7 +101,7 @@ export function AiImportDialog({
           <Sparkles className="size-4 text-primary-ink" aria-hidden="true" />
           AIで読み取る
         </DialogTitle>
-        <DialogDescription className="text-xs">告知の文章・画像・URLから抽選情報を読み取ります。</DialogDescription>
+        <DialogDescription className="sr-only">告知の文書・画像・URLから抽選情報を読み取ります。</DialogDescription>
         <AiBudgetNote />
 
         {done ? (
@@ -147,7 +150,7 @@ export function AiImportDialog({
           </div>
         ) : (
           <div className="mt-3 space-y-3">
-            <div role="tablist" aria-label="入力方法" className="grid grid-cols-4 gap-1">
+            <div role="tablist" aria-label="入力方法" className="grid grid-cols-3 gap-1">
               {TABS.map((t) => (
                 <button
                   key={t.key}
@@ -229,32 +232,16 @@ export function AiImportDialog({
             )}
             {tab === "url" && (
               <label className="block text-sm">
-                店舗・公式サイトのURL
+                告知のURL
                 <input
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   inputMode="url"
                   placeholder="https://"
                   className="mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm"
+                  data-testid="ai-url-input"
                 />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  公開ページの文章のみ読み取ります（ログインが必要なページ、取得を許可していないサイト、画像だけの告知は読み取れません）。
-                </span>
-              </label>
-            )}
-            {tab === "x_url" && (
-              <label className="block text-sm">
-                Xの投稿URL
-                <input
-                  value={xUrl}
-                  onChange={(e) => setXUrl(e.target.value)}
-                  inputMode="url"
-                  placeholder="https://x.com/ユーザー名/status/…"
-                  className="mt-1 min-h-11 w-full rounded-md border bg-input px-3 text-sm"
-                />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  公開されている投稿の文章のみ取得します（画像・非公開・削除済みの投稿は取得できません。その場合は文章のコピーやスクリーンショットをご利用ください）。
-                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">X投稿・店舗サイトなど。公開ページの文章のみ読み取れます（ログインが必要・画像だけの告知は不可）。</span>
               </label>
             )}
 
@@ -266,7 +253,7 @@ export function AiImportDialog({
                 </p>
                 {fail.suggest && (
                   <Button size="sm" variant="outline" onClick={() => { setTab(fail.suggest!); setFail(null); }}>
-                    {fail.suggest === "text" ? "文章を貼り付ける" : "画像で読み取る"}
+                    {fail.suggest === "text" ? "文書を貼り付ける" : "画像で読み取る"}
                   </Button>
                 )}
                 {fail.code === "not_configured" && (

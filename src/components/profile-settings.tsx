@@ -6,6 +6,7 @@ import { useBusy } from "@/lib/use-busy";
 import { useApp } from "@/components/app-provider";
 import { ICON_MARKS, ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
+import { InfoNote } from "@/components/ui/info-tip";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { recipientsOf } from "@/lib/notifications";
 import { linkCandidates } from "@/lib/profile-link";
@@ -118,9 +119,9 @@ function ProfileEditor({ profile, onClose }: { profile: Profile; onClose: () => 
                   </option>
                 ))}
               </select>
-              <span className="mt-0.5 block text-xs text-muted-foreground">紐づけると、そのメインの「応募済み」「当選」タブにこのユーザーの履歴も表示されます。変更しても応募・当落の履歴は変わりません。</span>
+              <InfoNote text="紐づけると、そのメインの「応募済み」「当選」タブにこのユーザーの履歴も表示されます。変更しても応募・当落の履歴は変わりません。" />
             </label>
-            <p className="text-xs text-muted-foreground">対象系列の抽選だけを表示・操作できます（通知も対象系列のみ）。未選択のときは何も表示しません。</p>
+            <p className="text-xs text-muted-foreground">対象系列だけを表示・操作します（通知も同様）。未選択なら何も表示しません。</p>
             <input
               type="search"
               aria-label="系列を検索"

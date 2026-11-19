@@ -123,7 +123,7 @@ test("ログイン→ユーザー切替→マスター登録・非表示→ロ�
   await page.getByRole("button", { name: "＋ 追加" }).click();
   await page.getByLabel(/系列名/).fill(name);
   await page.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("既に登録");
+  await expect(page.getByRole("alert")).toContainText(/既に登録|同じ系列です/);
   await page.getByRole("button", { name: "キャンセル" }).click();
 
   // 個別の非表示ボタンは無く、「表示管理」で選んで一括で非表示にする（削除ではない）
@@ -534,9 +534,17 @@ test("AIで読み取る: 文章→確認→フォーム入力→保存（未設�
   const dialog = page.getByRole("dialog").first();
   await dialog.getByTestId("ai-open").click();
   const ai = page.getByRole("dialog").filter({ hasText: "AIで読み取る" }).last();
-  // 4つの入力方法
-  await expect(ai.getByRole("tab")).toHaveCount(4);
-  await ai.getByRole("tab", { name: "文章" }).click();
+  // 3つの入力方法（文書・画像・URL。URLはX投稿と一般のページを自動判別）
+  await expect(ai.getByRole("tab")).toHaveCount(3);
+  await expect(ai.getByRole("tab", { name: "URL" })).toBeVisible();
+  await ai.getByRole("tab", { name: "URL" }).click();
+  await expect(ai.getByTestId("ai-url-input")).toBeVisible();
+  await expect(ai.getByRole("tab", { name: "X投稿" })).toHaveCount(0);
+  await ai.getByTestId("ai-url-input").fill("example");
+  await ai.getByRole("button", { name: "読み取る" }).click();
+  await expect(ai.getByTestId("ai-fail")).toContainText("形式");
+  await page.screenshot({ path: "docs/screenshots/ai-import-url-tab.png" });
+  await ai.getByRole("tab", { name: "文書" }).click();
   await ai.getByLabel("告知の文章を貼り付け").fill("【複数商品】抽選販売のお知らせ。サンプル電機 三宮店。応募は1月20日まで。");
   await ai.getByRole("button", { name: "読み取る" }).click();
 
@@ -1369,9 +1377,10 @@ test("コレクション: 手入力・画像からAI登録・重複は所有記�
   await expect(detail).toHaveCount(0);
   await expect(page.getByTestId("card-tile")).toHaveCount(3);
 
-  // 下部メニュー: コレクションは直接開ける（隠れる機能が1つだけなので「その他」は出ない）
+  // 下部メニュー: 既定は4項目＋「メニュー」。コレクションはメニューの機能一覧から開く
   await page.goto("/lotteries");
-  await page.getByTestId("bottom-nav").getByRole("link", { name: "コレクション" }).click();
+  await page.getByTestId("nav-more").click();
+  await page.getByTestId("more-sheet").getByRole("link", { name: "コレクション" }).click();
   await expect(page).toHaveURL(/\/collection$/);
 });
 
