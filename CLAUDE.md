@@ -5,7 +5,10 @@
 
 > **2026-11-19 仕様管理の追記**: 仕様の決定・変更・実装状態の区別は `docs/SPEC_GOVERNANCE.md` に従い、既存資料の古い記述・矛盾は `docs/SPEC_ALIGNMENT.md` を確認する。**情報収集の最上位方針は「自律型AIが探索・調査・判断・登録を主導し、固定ロジックは補助と安全基盤」**であり、既存コードの制約を正式な製品仕様と混同しない。以下のStage 8系の長文は当時の履歴であり、現行進捗ではない。最新Stageの完了・本番反映状況はGitHub PRと各Stage報告で確認する。
 
-## 参照ファイル（優先順）
+## 仕様管理の最初の参照先（2026-11-19以降）
+作業開始時に `docs/CURRENT_SPEC.md`、`docs/SPEC_GOVERNANCE.md`、`docs/DECISION_REGISTER.md` を確認し、開発の優先順位・状態は `docs/ACTIVE_ROADMAP.md` を参照する。以下の旧参照一覧は各分野の詳細資料の索引として使う。古いStageの「現在」「次」は現行進捗を意味しない。**文書だけのPRのマージと、アプリ本番反映を伴うPRのマージを区別する。**
+
+## 参照ファイル（旧資料の索引）
 1. `requirements.md`：プロダクト要件の正本
 2. `architecture-decisions.md`：技術上の判断、要件を損なわない範囲で適用
 3. `ui-spec.md`：画面・操作ルール（一部が現状と異なる。差異は `docs/DEVELOPMENT_LOG.md` の未解決事項）
