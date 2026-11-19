@@ -8,7 +8,7 @@ export interface DiscoveryMission {
   id: string;
   trigger: {
     /** product=新商品の発売／lottery=見つかった抽選の周辺／chain=系列の網羅確認 */
-    kind: "product" | "lottery" | "chain";
+    kind: "product" | "lottery" | "chain" | "lead";
     product?: string;
     chain?: string;
     /** 起点の抽選の店舗（lottery のとき。参考情報。ここ以外の店舗も探索対象） */
@@ -55,6 +55,8 @@ export interface DiscoveryWorld {
   /** 店舗マスターの店舗（系列ごと）。公式の店舗一覧との突き合わせに使う */
   knownStores(chain: string): Promise<KnownStore[]>;
   chainOfficialUrl?(chain: string): Promise<string | null>;
+  /** 系列・商品の名称を、既存のマスター（正式名・確認済み/推定の別名・過去の学習）に照合する（読み取りのみ。9U） */
+  resolveName?(kind: "chain" | "product", name: string): Promise<{ status: "matched" | "candidate" | "none"; masterName?: string; note: string }>;
 }
 
 /** AIが報告する「抽選の手がかり」。決めるのは検証層（verify.ts） */

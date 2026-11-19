@@ -4,6 +4,8 @@ import { chainsRelated, sameStore } from "@/lib/agent/discovery/verify";
 import type { DiscoveryWorld, ExistingLottery, KnownStore } from "@/lib/agent/discovery/types";
 import type { PageFetcher, SearchProvider } from "@/lib/agent/store-location/tools";
 import { sameChainName } from "@/lib/chain-normalize";
+import { resolveName } from "@/lib/master-identity/resolve";
+import { loadMasterEntries } from "@/lib/server/master-identity/alias-service";
 import { createCaseWorld, type WorldLogEntry } from "@/lib/server/agent/case-world";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -76,6 +78,16 @@ export function createRealDiscoveryWorld(o: { db: Db; householdId: string; fetch
     async knownStores(chain) {
       const { stores } = await load();
       return stores.filter((s) => sameChainName(s.chain, chain)).map(({ name, prefecture, address }) => ({ name, prefecture, address }));
+    },
+    async resolveName(kind, name) {
+      // 登録・収集・再調査と同じ名寄せ（正式名・確認済み/推定の別名・複合名称・表記揺れ）。読み取りのみ
+      const r = resolveName(kind, name, await loadMasterEntries(o.db, o.householdId, kind));
+      if (r.status === "matched") return { status: "matched", masterName: r.match.masterName, note: `既存のマスター「${r.match.masterName}」と同じ名称として扱われる（${r.match.via}）` };
+      if (r.status === "candidate" || r.status === "ambiguous") {
+        const c = r.status === "candidate" ? r.candidates[0] : null;
+        return { status: "candidate", masterName: c?.masterName, note: c ? `「${c.masterName}」と近いが、同一とは確認できていない（${c.reason}）` : "複数の既存マスターに当たり、1つに決まらない" };
+      }
+      return { status: "none", note: "既存のマスターに該当なし（未知の名称の可能性）" };
     },
     async chainOfficialUrl(chain) {
       // 店舗に登録されたURLのうち、最も多いサイトの入口（利用者が登録した情報）

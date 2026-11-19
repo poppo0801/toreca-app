@@ -215,7 +215,7 @@ export async function runAutonomousCollection(d: AutonomousDeps): Promise<Autono
 
     const memory = await loadStrategy(db, hid);
     const doneInSlot = new Set(((await anyDb(db).from("discovery_runs").select("mission_ids").eq("household_id", hid).eq("slot", slot).neq("status", "skipped").limit(50)).data ?? []).flatMap((r: { mission_ids: string[] }) => r.mission_ids ?? []));
-    const missions = buildMissions({ ...(await loadMissionSources(db, hid, now)), targetPrefectures: settings?.prefectures ?? [], memory, maxMissions: 12 }).filter((m) => !doneInSlot.has(m.id)).slice(0, d.maxMissions ?? 1);
+    const missions = buildMissions({ ...(await loadMissionSources(db, hid, now)), targetPrefectures: settings?.prefectures ?? [], memory, maxMissions: 12, nowMs: now.getTime() }).filter((m) => !doneInSlot.has(m.id)).slice(0, d.maxMissions ?? 1);
 
     const timeBudget = d.timeBudgetMs ?? 45_000;
     const res = await runDiscoverySession({
