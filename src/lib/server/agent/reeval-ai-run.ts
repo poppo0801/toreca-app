@@ -58,9 +58,9 @@ export async function runAiReevaluation(db: Db, householdId: string, actor: stri
   // 費用は、バッチへ積み上げる（実行ごとの合計。通常収集の予算とは別枠）。この実行の分だけを、開始時点との差で数える
   const startSpent = deps.spentJpy();
   const priorCost = Number((batch.params as { costJpy?: number }).costJpy ?? 0);
-  const { data: items } = await a.from("master_reeval_items").select("id,target_type,target_id,action,proposal,seq").eq("batch_id", batchId).eq("status", "proposed").eq("ai_state", "not_investigated").in("action", ["review", "archive_region", "archive_expired", "archive_duplicate", "consolidate_lotteries", "dismiss_candidate"]).order("seq").limit(1000);
+  const { data: items } = await a.from("master_reeval_items").select("id,target_type,target_id,action,proposal,seq").eq("batch_id", batchId).eq("status", "proposed").eq("ai_state", "not_investigated").in("action", ["review", "archive_region", "archive_expired", "archive_duplicate", "consolidate_lotteries", "dismiss_candidate", "merge_master"]).order("seq").limit(1000);
   const NAME_SUB = ["master_candidate", "name_candidate"];
-  const all = ((items ?? []) as Item[]).filter((i) => (i.target_type === "lottery" && (i.action !== "review" || i.proposal.subKind === "missing_dates")) || (i.action === "review" && NAME_SUB.includes(i.proposal.subKind ?? "")) || (i.target_type === "candidate" && i.action === "dismiss_candidate"));
+  const all = ((items ?? []) as Item[]).filter((i) => (i.target_type === "lottery" && (i.action !== "review" || i.proposal.subKind === "missing_dates")) || (i.action === "review" && NAME_SUB.includes(i.proposal.subKind ?? "")) || (i.action === "merge_master" && (i.target_type === "chain" || i.target_type === "product") && !!i.proposal.relatedId && (i.proposal as { evidence?: { confidence?: string } }).evidence?.confidence !== "high") || (i.target_type === "candidate" && i.action === "dismiss_candidate"));
   if (all.length === 0) return report;
 
   const lotAll = all.filter((i) => i.target_type === "lottery");
@@ -150,24 +150,28 @@ export async function runAiReevaluation(db: Db, householdId: string, actor: stri
       break;
     }
     // ---- 名称の同一性（系列・商品の表記揺れ）: AIがWebで調べ、根拠が揃えば別名を学習する
-    if (it.action === "review" && NAME_SUB.includes(it.proposal.subKind ?? "")) {
+    if ((it.action === "review" && NAME_SUB.includes(it.proposal.subKind ?? "")) || it.action === "merge_master") {
       const ev = (it.proposal as { evidence?: { kind?: string; observed?: string; candidateMasterId?: string; candidateName?: string } }).evidence ?? {};
       let q: NameQuery | null = null;
       if (it.proposal.subKind === "name_candidate" && ev.observed && ev.candidateMasterId) {
         const ms = await loadMasterEntries(db, householdId, "chain");
         const cand = ms.find((m) => m.id === ev.candidateMasterId);
         if (cand) q = { kind: "chain", observed: ev.observed, candidateId: cand.id, candidateName: cand.name, candidateAliases: (cand.aliases ?? []).map((x) => x.text) };
-      } else if (it.proposal.subKind === "master_candidate" && (it.target_type === "chain" || it.target_type === "product") && it.proposal.relatedId) {
+      } else if ((it.proposal.subKind === "master_candidate" || it.action === "merge_master") && (it.target_type === "chain" || it.target_type === "product") && it.proposal.relatedId) {
         const ms = await loadMasterEntries(db, householdId, it.target_type);
         const me = ms.find((m) => m.id === it.target_id);
         const cand = ms.find((m) => m.id === it.proposal.relatedId);
         if (me && cand) q = { kind: it.target_type, observed: me.name, candidateId: cand.id, candidateName: cand.name, candidateAliases: (cand.aliases ?? []).map((x) => x.text) };
       }
       if (!q) continue;
-      const out = await resolveNameWithAi(db, householdId, deps, q, actor, it.proposal.subKind === "master_candidate" ? { excludeMasterId: it.target_id } : {});
+      const out = await resolveNameWithAi(db, householdId, deps, q, actor, it.proposal.subKind === "master_candidate" || it.action === "merge_master" ? { excludeMasterId: it.target_id } : {});
       report.units++;
       if (out.learned) report.learned.push(out.learned);
       await save(it, out);
+      // 重複の候補（音の近さなど）をAIが同一と確認したら、統合の項目を作る（統合元が仮登録のときだけ適用される。元に戻せる）
+      if (it.proposal.subKind === "master_candidate" && out.verdict === "confirm" && (it.target_type === "chain" || it.target_type === "product") && it.proposal.relatedId) {
+        await a.from("master_reeval_items").upsert({ batch_id: batchId, household_id: householdId, seq: 100000 + it.seq, target_type: it.target_type, target_id: it.target_id, action: "merge_master", risk: "medium", proposal: { reason: `AIが調べて「${q.candidateName}」と同じと確認（${String(out.summary.rationale ?? "").slice(0, 100)}）`, relatedId: it.proposal.relatedId, evidence: { keep: q.candidateName, from: q.observed, confidence: "ai_confirmed", cites: out.summary.cites ?? null } }, ai_state: "investigated", ai_result: { verdict: "confirm", ...out.summary }, ai_cost_jpy: 0, ai_at: new Date().toISOString() }, { onConflict: "batch_id,target_type,target_id,action", ignoreDuplicates: true });
+      }
       continue;
     }
     // ---- 抽選候補（確認待ち）: 候補の下書きと情報源を、AIが調べ直す

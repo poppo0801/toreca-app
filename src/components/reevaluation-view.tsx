@@ -6,8 +6,9 @@ import type { ReevalEstimate } from "@/lib/server/master-identity/reeval-ai-hook
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
 
-const ROWS: { action: "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "fill_fields" | "consolidate_lotteries"; label: string; note: string }[] = [
+const ROWS: { action: "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "fill_fields" | "consolidate_lotteries" | "merge_master"; label: string; note: string }[] = [
   { action: "consolidate_lotteries", label: "同じ抽選の店舗別カードを1件の店舗選択式へ統合", note: "AIが情報源で店舗選択式と確認できたものだけ。統合元は非表示（元に戻せます）。応募・購入の記録があるカードは触りません" },
+  { action: "merge_master", label: "仮登録の重複マスターを正式なマスターへ統合", note: "確認済みの別名・表記揺れの一致、またはAIが同一と確認したもの。統合元が仮登録で、参照が抽選・店舗・別名だけのものに限る（抽選の参照先を付け替え、応募・当選・購入の履歴は変わりません。統合元は非表示・名称は別名に残し、元に戻せます）" },
   { action: "fill_fields", label: "AIが確認した日付を補完", note: "情報元で確認できた空欄の日付だけ（根拠つき。既存の値は変えません）" },
   { action: "archive_duplicate", label: "重複した抽選を非表示", note: "同じ企画の重複。情報の多い方を残します" },
   { action: "archive_expired", label: "応募締切を過ぎた抽選を非表示", note: "締切から3日以上過ぎた自動収集の未処理" },

@@ -183,7 +183,7 @@ export async function reinvestigateLottery(deps: AiDeps, l: ExistingLottery, now
     aiState: a.aiState,
     verdict: a.deadline === "passed" ? "confirm" : a.deadline === "extended" || a.deadline === "open" ? "refute" : "inconclusive",
     assessment: a,
-    summary: { fetched: a.fetched, failed: a.failed, fills: a.fills, differs: a.differs, unknown: a.unknown, deadline: a.deadline, stop: a.stopReason, queries: result.queries.length, notes: a.notes },
+    summary: { fetched: a.fetched, failed: a.failed, fills: a.fills, differs: a.differs, unknown: a.unknown, deadline: a.deadline, stop: a.stopReason, queries: result.queries.length, notes: a.notes, alternatives: result.alternatives && result.alternatives.blocked.length ? { blocked: result.alternatives.blocked.map((b) => ({ host: b.host, reason: b.reason })).slice(0, 4), reached: result.alternatives.found.map((f) => ({ host: f.host, tier: f.tier, status: f.status })).slice(0, 6), recovered: result.alternatives.recovered, unresolved: result.alternatives.unresolved } : null },
     costJpy: deps.spentJpy() - before,
     result,
   };
