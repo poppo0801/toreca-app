@@ -120,7 +120,7 @@ export async function lotteryProtection(db: Db, id: string): Promise<string | nu
 type ItemRow = { id: string; target_type: PlanItem["targetType"]; target_id: string; action: ReevalAction; proposal: PlanItem["proposal"]; status: string };
 
 /** 固定ロジックの暫定判定（非表示・除外）は、AIが実際の情報源を調べて確認した（調査済み＋判定 confirm）ものだけを適用する。AIの調査が済んでいないものは適用しない（完了扱いにしない） */
-export const AI_REQUIRED: ReevalAction[] = ["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate"];
+export const AI_REQUIRED: ReevalAction[] = ["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate", "consolidate_lotteries"];
 
 // ---- 日付の補完（fill_fields）。AIが確認した値で、既存が空欄の日付だけを埋める。既存の値・人が確定した項目は変えない
 const FILL_COLS: Record<string, { p: string; d: string; at: string }> = {
@@ -161,8 +161,54 @@ async function applyFill(db: Db, it: ItemRow): Promise<{ ok: true; before: unkno
 
 const NOTE = "9H-3S再評価";
 
+// ---- 同じ抽選の店舗別カードの統合（consolidate_lotteries）。AIが情報源で店舗選択式と確認したものだけ。統合先を1件の店舗選択式に変え、統合元は非表示（物理削除しない）にして、対応関係と変更前の状態を記録する
+type KeepRow = { id: string; chain_id: string; store_id: string | null; store_mode: string; selectable_stores: unknown; lottery_form: string | null; lottery_form_source: string | null; apply_deadline_date: string | null; apply_deadline_at: string | null; archived_at: string | null; stores: { name: string; prefecture: string } | null };
+const dayOf = (r: KeepRow): number | null => {
+  const s = r.apply_deadline_date ?? (r.apply_deadline_at ? new Date(Date.parse(r.apply_deadline_at) + 9 * 3600_000).toISOString().slice(0, 10) : null);
+  return s ? Date.parse(s) : null;
+};
+async function applyConsolidate(db: Db, it: ItemRow, actor: string | null): Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }> {
+  const memberIds = ((it.proposal.evidence as { memberIds?: string[] } | undefined)?.memberIds ?? []).filter((x) => typeof x === "string");
+  if (memberIds.length < 2 || !memberIds.includes(it.target_id)) return { ok: false, error: "適用できる変更がありません" };
+  const why = await lotteryProtection(db, it.target_id);
+  if (why) return { ok: false, error: `適用しませんでした（統合先: ${why}）` };
+  const { data } = await any(db).from("lotteries").select("id,chain_id,store_id,store_mode,selectable_stores,lottery_form,lottery_form_source,apply_deadline_date,apply_deadline_at,archived_at,stores(name,prefecture)").in("id", memberIds);
+  const rows = (data ?? []) as KeepRow[];
+  const keep = rows.find((r) => r.id === it.target_id);
+  if (!keep || keep.archived_at || keep.store_mode !== "fixed") return { ok: false, error: "適用しませんでした（統合先の状態が計画時と変わっている）" };
+  if (keep.lottery_form_source === "manual") return { ok: false, error: "適用しませんでした（統合先の抽選形態は利用者が手動で設定している）" };
+  const movable: KeepRow[] = [];
+  const skipped: string[] = [];
+  for (const o of rows.filter((r) => r.id !== keep.id)) {
+    const gapOk = (() => {
+      const a = dayOf(keep);
+      const b = dayOf(o);
+      return a === null || b === null ? a === b : Math.abs(a - b) <= 3 * 86_400_000;
+    })();
+    if (o.archived_at || o.chain_id !== keep.chain_id || o.store_mode !== "fixed" || !gapOk || (await lotteryProtection(db, o.id))) skipped.push(o.id);
+    else movable.push(o);
+  }
+  if (movable.length === 0) return { ok: false, error: "適用しませんでした（統合できる店舗別カードが無い。保護されている・状態が変わった）" };
+  const stores = [keep, ...movable].map((r) => r.stores).filter((s): s is { name: string; prefecture: string } => !!s).map((s) => ({ name: s.name, prefecture: s.prefecture ?? "" }));
+  const before = { keep: { store_mode: keep.store_mode, store_id: keep.store_id, selectable_stores: keep.selectable_stores, lottery_form: keep.lottery_form, lottery_form_source: keep.lottery_form_source }, archived: movable.map((m) => m.id), skippedProtected: skipped };
+  const { data: upd, error } = await any(db).from("lotteries").update({ store_mode: "select_on_apply", store_id: null, selectable_stores: stores, lottery_form: "store_select", lottery_form_source: "ai", updated_by_profile_id: actor }).eq("id", keep.id).eq("store_mode", "fixed").is("archived_at", null).select("id");
+  if (error || !upd?.length) return { ok: false, error: "統合先を更新できませんでした" };
+  const done: string[] = [];
+  for (const m of movable) {
+    const r = await excludeLottery(db, m.id, { reason: "duplicate", duplicateOfId: keep.id, note: `${NOTE}: 同じ抽選の店舗別カードを店舗選択式の1件へ統合` }, actor);
+    if (r.ok) done.push(m.id);
+  }
+  if (done.length === 0) {
+    await any(db).from("lotteries").update(before.keep).eq("id", keep.id); // 統合元を1件も非表示にできなかったときは、統合先を元に戻す
+    return { ok: false, error: "統合元を非表示にできなかったため、統合しませんでした" };
+  }
+  return { ok: true, before: { ...before, archived: done }, after: { keepId: keep.id, selectableStores: stores.length, archived: done, skippedProtected: skipped } };
+}
+
+
 async function applyOne(db: Db, it: ItemRow, actor: string | null): Promise<{ ok: true; before: unknown; after: unknown } | { ok: false; error: string }> {
   if (it.action === "fill_fields") return applyFill(db, it);
+  if (it.action === "consolidate_lotteries") return applyConsolidate(db, it, actor);
   if (it.target_type === "lottery") {
     const why = await lotteryProtection(db, it.target_id);
     if (why) return { ok: false, error: `適用しませんでした（${why}）` };
@@ -253,6 +299,17 @@ export async function revertReevalBatch(db: Db, actor: string | null, batchId: s
       }
       const { error } = await any(db).from("lotteries").update(patch).eq("id", it.target_id);
       ok = !error;
+    } else if (it.action === "consolidate_lotteries" && it.before_state) {
+      const b = it.before_state as { keep?: Record<string, unknown>; archived?: string[] };
+      let all = true;
+      for (const id of b.archived ?? []) {
+        const r = await restoreLottery(db, id, actor);
+        if (r.ok) await any(db).from("lotteries").update({ exclusion_reason_code: null, exclusion_reason_note: "" }).eq("id", id);
+        else all = false;
+      }
+      // 統合先は、この再評価が変更した状態（店舗選択式・AI判定）のときだけ元に戻す（その後に利用者が変えたものには触れない）
+      const { error } = await any(db).from("lotteries").update(b.keep ?? {}).eq("id", it.target_id).eq("store_mode", "select_on_apply").eq("lottery_form_source", "ai");
+      ok = all && !error;
     } else if (it.target_type === "lottery") {
       const r = await restoreLottery(db, it.target_id, actor);
       if (r.ok) await any(db).from("lotteries").update({ exclusion_reason_code: null, exclusion_reason_note: "" }).eq("id", it.target_id);

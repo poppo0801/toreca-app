@@ -74,8 +74,8 @@ create table public.master_reeval_items (
   seq int not null,
   target_type text not null check (target_type in ('lottery', 'candidate', 'chain', 'product')),
   target_id uuid not null,
-  -- archive_duplicate / archive_expired / archive_region / dismiss_candidate / merge_master / review
-  action text not null check (action in ('archive_duplicate', 'archive_expired', 'archive_region', 'dismiss_candidate', 'merge_master', 'review', 'fill_fields')),
+  -- archive_duplicate / archive_expired / archive_region / dismiss_candidate / merge_master / review / fill_fields / consolidate_lotteries（Stage 9H-3S-3: 同じ抽選を店舗別に重複登録したカードを、AIが情報源で確認して1件の店舗選択式へ統合。統合元は非表示・元に戻せる）
+  action text not null check (action in ('archive_duplicate', 'archive_expired', 'archive_region', 'dismiss_candidate', 'merge_master', 'review', 'fill_fields', 'consolidate_lotteries')),
   risk text not null default 'low' check (risk in ('low', 'medium', 'high')),
   -- 自律型AIの再調査（Stage 9H-3S-2）。固定ロジックの提案（暫定）は、AIが実際の情報源を調べて確認する（ai_state=investigated かつ判定が confirm）まで適用しない。
   --   not_investigated=未調査／investigated=調査済み（実際に情報源を取得できた）／insufficient=取得できたが判断に足りない／failed=情報源を取得できなかった

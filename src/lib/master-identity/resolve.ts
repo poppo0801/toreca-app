@@ -9,9 +9,10 @@
  *   5) どれでもない → none
  * 別名の状態: confirmed（人が確定）と inferred（AIが根拠つきで学習）を区別して返す。inferred だけを根拠に別名を増やさない（誤統合の強化を防ぐ）のは learning.ts。
  */
-import { chainCanonicalKey, sameChainName } from "@/lib/chain-normalize";
+import { chainCanonicalKey, independentChainKey, sameChainName } from "@/lib/chain-normalize";
 import { foldName, nameSegments, type MasterKind } from "./names";
 import { sameProductName, similarProductName } from "./product-identity";
+import { kanaFold, phoneticSimilarity, PHONETIC_CANDIDATE_MIN, readingKey } from "./reading";
 
 export interface AliasEntry {
   text: string;
@@ -54,7 +55,19 @@ export function sameName(kind: MasterKind, a: string, b: string): boolean {
   if (!a || !b) return false;
   const fa = foldName(a);
   if (fa && fa === foldName(b)) return true;
-  return kind === "chain" ? sameChainName(a, b) : sameProductName(a, b);
+  // 独立管理の系列（運営主体が異なる）は、読みが近くても寄せない
+  if (kind === "chain" && independentChainKey(a) !== independentChainKey(b)) return false;
+  // ひらがな/カタカナの違い（ふるいち⇔フルイチ）
+  const ka = kanaFold(a);
+  if (ka && ka === kanaFold(b)) return true;
+  if (kind === "chain" && sameChainName(a, b)) return true;
+  if (kind === "product" && sameProductName(a, b)) return true;
+  // かな⇔英字の厳密な読みの一致（ゲオ⇔GEO）。商品は型番・数字の食い違いで別商品になりうるため、系列のみ
+  if (kind === "chain") {
+    const ra = readingKey(a);
+    return !!ra && ra === readingKey(b);
+  }
+  return false;
 }
 
 function matchSingle(kind: MasterKind, text: string, masters: MasterEntry[]): NameMatch[] {
@@ -87,6 +100,11 @@ function similarChain(name: string, masters: MasterEntry[]): CandidateRef[] {
         out.push({ masterId: m.id, masterName: m.name, reason: `名称の一部が共通（「${n}」）` });
         break;
       }
+      // 音が近い（ジラフル⇔GIRAFULL）。確定せず、AIの判定・追加調査に回す候補とする。独立管理の系列は対象外
+      if (independentChainKey(name) === independentChainKey(n) && phoneticSimilarity(name, n) >= PHONETIC_CANDIDATE_MIN) {
+        out.push({ masterId: m.id, masterName: m.name, reason: `音が近い（「${n}」）` });
+        break;
+      }
     }
   }
   return out;
@@ -100,6 +118,11 @@ export function resolveName(kind: MasterKind, rawName: string, allMasters: Maste
 
   // 1) 正式名・別名
   const direct = matchSingle(kind, name, masters);
+  // 正式なマスターを優先する: 同じ名称が、自動収集の仮登録名と正式なマスターの両方に当たるときは、正式な方へ寄せる
+  if (direct.length > 1) {
+    const formal = direct.filter((d) => !masters.find((m) => m.id === d.masterId)?.provisional);
+    if (formal.length === 1) direct.splice(0, direct.length, formal[0]);
+  }
   if (direct.length === 1) return { status: "matched", match: direct[0], note: `登録済みの${kind === "chain" ? "系列" : "商品"}「${direct[0].masterName}」と一致（${direct[0].via === "official" ? "正式名" : `別名「${direct[0].matchedOn}」`}）` };
   if (direct.length > 1) return { status: "ambiguous", matches: direct, note: `同じ名称が複数のマスターに当たります: ${direct.map((d) => d.masterName).join("・")}（寄せません）` };
 

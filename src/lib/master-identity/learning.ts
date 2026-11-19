@@ -19,7 +19,9 @@ export type EvidenceKind =
   /** 公式情報（マスター側の公式ページ・公式の告知）に、両方の名称が同じものとして書かれている */
   | "official_source"
   /** 独立した複数の情報源が、同じものとして扱っている（転載・まとめサイトは数えない） */
-  | "independent_sources";
+  | "independent_sources"
+  /** 読み・音が近い（固定ロジックの検出）うえに、両方の名称が併記された原文を、検索結果で確認できた（系列名の表記揺れ。読みの近さだけ・併記の1件だけでは足りないが、両方が揃えば別名にしてよい） */
+  | "reading_with_source";
 
 export interface Evidence {
   kind: EvidenceKind;
@@ -78,15 +80,16 @@ export function decideAliasLearning(i: { kind: MasterKind; observedName: string;
   if (target) {
     const official = ev.find((e) => e.kind === "official_source");
     const multi = ev.find((e) => e.kind === "independent_sources" && (e.sources ?? 0) >= 2);
-    if (official || multi) {
+    const reading = i.kind === "chain" ? ev.find((e) => e.kind === "reading_with_source") : undefined;
+    if (official || multi || reading) {
       return {
         action: "add_alias",
         masterId: target.masterId,
         alias: name,
         status: "inferred",
         source: i.origin === "human" ? "manual" : i.origin === "collector" ? "collector" : "ai",
-        evidence: evRecord({ basis: official ? "official_source" : "independent_sources" }),
-        reason: official ? "公式情報に同じものとして書かれているため、別名として記録（AI推定として扱う）" : "独立した複数の情報源が同じものとして扱っているため、別名として記録（AI推定として扱う）",
+        evidence: evRecord({ basis: official ? "official_source" : multi ? "independent_sources" : "reading_with_source" }),
+        reason: official ? "公式情報に同じものとして書かれているため、別名として記録（AI推定として扱う）" : multi ? "独立した複数の情報源が同じものとして扱っているため、別名として記録（AI推定として扱う）" : "読み・音が近く、両方の名称が併記された原文も確認できたため、別名として記録（AI推定として扱う）",
       };
     }
     // 根拠が足りない: 確定せず、関連候補として保持（次回以降の照合・追加調査に使う）

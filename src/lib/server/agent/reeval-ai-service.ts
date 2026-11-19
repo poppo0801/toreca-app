@@ -9,6 +9,9 @@ import type { CaseTarget } from "@/lib/agent/case-investigator/ledger";
 import { RealRunGuard, type LedgerState } from "@/lib/agent/collection-planner/real-guard";
 import { resolveControls, type ResolvedControls } from "@/lib/agent/collection-planner/controls";
 import { checkRealApi } from "@/lib/agent/real-gate";
+import { judgeNames, type NameJudgeOutcome, type NameQuery } from "@/lib/agent/name-judge";
+import { DEFAULT_AI_MODEL } from "@/lib/ai-cost";
+import { DEFAULT_LIMITS, type AgentLimits } from "@/lib/agent/core";
 import { judgeRelations, type JudgeOutcome, type RelFacts } from "@/lib/agent/relation-judge";
 import { researchStoreLocation, type ResearchOutcome } from "@/lib/agent/store-location/run";
 import type { StoreTarget } from "@/lib/agent/store-location/verify";
@@ -16,9 +19,10 @@ import type { SearchHit, SearchOutcome, SearchProvider } from "@/lib/agent/store
 import { createCaseWorld, SEARCH_WORST_JPY } from "@/lib/server/agent/case-world";
 import { SafePageFetcher, realGeocode } from "@/lib/server/agent/real-providers";
 import { createInvestigatorBrain } from "@/lib/agent/case-investigator/real-brain";
-import { assessInvestigation, assessRegion, nameObservations, targetOf, type Assessment, type ExistingLottery, type RegionVerdict } from "@/lib/agent/reeval-ai/assess";
+import { nameSearchQueries } from "@/lib/agent/name-judge";
+import { assessForm, assessInvestigation, assessRegion, nameObservations, targetOf, type Assessment, type ExistingLottery, type FormAssessment, type RegionVerdict } from "@/lib/agent/reeval-ai/assess";
 import type { FieldKey } from "@/lib/collector/fields";
-import { resolveMasterAndLearn } from "@/lib/server/master-identity/alias-service";
+import { loadMasterEntries, resolveMasterAndLearn } from "@/lib/server/master-identity/alias-service";
 import { lotteryProtection } from "@/lib/server/master-identity/reeval-service";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -35,6 +39,9 @@ export interface AiDeps {
   investigate(target: CaseTarget): Promise<CaseInvestigationResult>;
   research(store: StoreTarget, existingAddress: string | null): Promise<ResearchOutcome>;
   judge(lots: RelFacts[], pairs: [string, string][]): Promise<JudgeOutcome>;
+  /** 名称の同一性の調査用のWeb検索（Stage 9H-3S-3）。費用は同じ台帳へ。未接続なら名称の調査をしない */
+  webSearch?(query: string): Promise<SearchHit[]>;
+  judgeNames?(items: { query: NameQuery; hits: SearchHit[] }[]): Promise<NameJudgeOutcome>;
   /** 累計の費用（円。検索料金を含む）。呼び出しの前後の差を、項目に記録する */
   spentJpy(): number;
   capJpy: number;
@@ -76,16 +83,43 @@ export function realReevalDeps(o: RealAiOptions): { ok: true; deps: AiDeps; guar
     },
   });
   const raw = o.clientFactory ? o.clientFactory(g.apiKey) : new Anthropic({ apiKey: g.apiKey, maxRetries: 0, timeout: 60_000 });
+  return { ok: true, deps: assembleDeps({ raw, model: g.model, guard, capJpy: o.capJpy, perCaseJpy: o.perCaseJpy ?? 15, limits: g.limits, ...(o.fetcher ? { fetcher: o.fetcher } : {}) }), guard };
+}
+
+/**
+ * 本番の接続（Stage 9H-3S-3）。開発の関門（real-gate）とは別に、明示的な許可（REEVAL_AI=on）と、利用者が指定した費用の上限（バッチごと）を使う。
+ *  - キー: REEVAL_ANTHROPIC_API_KEY → AUTONOMOUS_ANTHROPIC_API_KEY → ANTHROPIC_API_KEY（既存のAI解析・自律型収集と同じ契約。追加契約なし）
+ *  - 上限: 呼び出し側が指定（バッチの残り予算）。環境の上限 REEVAL_AI_MAX_JPY（既定100円）を超えて指定できない。AIは変更できない
+ *  - 費用の記録: 台帳ファイルは使わない（Vercelはファイルに書けない）。呼び出し側が、実行後に一括再評価のバッチへ積み上げる（通常収集の予算とは別枠）
+ */
+export function prodReevalDeps(o: { env: Env; capJpy: number; perCaseJpy?: number; clientFactory?: (apiKey: string) => Pick<Anthropic, "messages">; fetcher?: import("@/lib/agent/store-location/tools").PageFetcher }): { ok: true; deps: AiDeps; guard: RealRunGuard } | { ok: false; reason: string } {
+  const e = o.env;
+  if (e.REEVAL_AI !== "on") return { ok: false, reason: "一括再調査のAI実行が有効になっていません（REEVAL_AI=on が必要）" };
+  const key = (e.REEVAL_ANTHROPIC_API_KEY ?? e.AUTONOMOUS_ANTHROPIC_API_KEY ?? e.ANTHROPIC_API_KEY)?.trim();
+  if (!key) return { ok: false, reason: "AIのAPIキーが設定されていません" };
+  const hardMax = Number(e.REEVAL_AI_MAX_JPY) > 0 ? Number(e.REEVAL_AI_MAX_JPY) : 100;
+  if (!(o.capJpy > 0) || o.capJpy > hardMax) return { ok: false, reason: `費用の上限が不正です（1〜${hardMax}円）` };
+  const perCase = Math.min(o.perCaseJpy ?? 15, o.capJpy);
+  const model = e.REEVAL_MODEL?.trim() || DEFAULT_AI_MODEL;
+  const guard = new RealRunGuard({ capJpy: o.capJpy, perCaseJpy: perCase, model, spentBefore: 0 });
+  const raw = o.clientFactory ? o.clientFactory(key) : new Anthropic({ apiKey: key, maxRetries: 0, timeout: 60_000 });
+  const limits: AgentLimits = { ...DEFAULT_LIMITS, maxCostJpy: perCase, maxMs: 120_000 };
+  return { ok: true, deps: assembleDeps({ raw, model, guard, capJpy: o.capJpy, perCaseJpy: perCase, limits, ...(o.fetcher ? { fetcher: o.fetcher } : {}) }), guard };
+}
+
+function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guard: RealRunGuard; capJpy: number; perCaseJpy: number; limits: AgentLimits; fetcher?: import("@/lib/agent/store-location/tools").PageFetcher }): AiDeps {
+  const { raw, model, guard } = a;
   const wrapped = guard.wrapClient(raw, "agent");
-  const { world } = createCaseWorld({ search: new AnthropicWebSearch(raw, g.model), guard, ...(o.fetcher ? { fetcher: o.fetcher } : {}) });
-  const llm = createInvestigatorBrain(wrapped, g.model);
+  const { world } = createCaseWorld({ search: new AnthropicWebSearch(raw as Anthropic, model), guard, ...(a.fetcher ? { fetcher: a.fetcher } : {}) });
+  const llm = createInvestigatorBrain(wrapped, model);
+  const remaining = () => Math.min(a.perCaseJpy, Math.max(0, a.capJpy - guard.spentJpy));
   const controls = (): ResolvedControls => {
     const d = resolveControls({ runsToday: 0, costTodayJpy: 0, workerDailyAiLimit: 30, aiCallsToday: 0 }, { mode: "dry_run", realApi: true });
     if (!d.ok) throw new Error("調査の上限を決められません");
-    return { ...d.controls, limits: { ...d.controls.limits, maxSteps: 16, maxMs: 150_000, maxCostJpy: Math.min(o.perCaseJpy ?? 15, Math.max(0, o.capJpy - guard.spentJpy)) } };
+    return { ...d.controls, limits: { ...d.controls.limits, maxSteps: 16, maxMs: 150_000, maxCostJpy: remaining() } };
   };
-  // 店舗所在地の調査用の検索（費用は同じ台帳へ）
-  const inner = new AnthropicWebSearch(raw, g.model);
+  // 店舗所在地・名称の調査用の検索（費用は同じ台帳へ）
+  const inner = new AnthropicWebSearch(raw as Anthropic, model);
   const search: SearchProvider = {
     name: inner.name,
     search: async (q: string): Promise<SearchHit[] | SearchOutcome> => {
@@ -96,8 +130,8 @@ export function realReevalDeps(o: RealAiOptions): { ok: true; deps: AiDeps; guar
       return out;
     },
   };
-  const deps: AiDeps = {
-    model: g.model,
+  return {
+    model,
     classify: EMPTY_CLASSIFY_CTX,
     investigate: async (target) => {
       guard.startCase(target.id);
@@ -105,17 +139,24 @@ export function realReevalDeps(o: RealAiOptions): { ok: true; deps: AiDeps; guar
     },
     research: async (store, existing) => {
       guard.startCase(`store:${store.name}`);
-      return researchStoreLocation(store, existing, { llm: new AnthropicAgentLLM(wrapped, g.model), search, fetcher: o.fetcher ?? new SafePageFetcher(), geocode: realGeocode, limits: { ...g.limits, maxCostJpy: Math.min(o.perCaseJpy ?? 15, Math.max(0, o.capJpy - guard.spentJpy)) }, followUps: 1 });
+      return researchStoreLocation(store, existing, { llm: new AnthropicAgentLLM(wrapped, model), search, fetcher: a.fetcher ?? new SafePageFetcher(), geocode: realGeocode, limits: { ...a.limits, maxCostJpy: remaining() }, followUps: 1 });
     },
     judge: async (lots, pairs) => {
       guard.startCase("relation-judge");
-      return judgeRelations(wrapped, g.model, lots, pairs);
+      return judgeRelations(wrapped, model, lots, pairs);
+    },
+    webSearch: async (q) => {
+      const r = await search.search(q);
+      return Array.isArray(r) ? r : r.hits;
+    },
+    judgeNames: async (items) => {
+      guard.startCase("name-judge");
+      return judgeNames(wrapped, model, items);
     },
     spentJpy: () => guard.spentJpy,
-    capJpy: o.capJpy,
+    capJpy: a.capJpy,
     stopped: () => guard.stopped,
   };
-  return { ok: true, deps, guard };
 }
 
 // ------------------------------------------------------------ 単位の処理（DBに触れない）
@@ -164,6 +205,61 @@ export async function researchRegion(deps: AiDeps, store: StoreTarget, existingA
     };
   } catch (e) {
     return { aiState: "failed", verdict: "inconclusive", summary: { error: e instanceof Error ? e.message.slice(0, 160) : "調査に失敗しました" }, costJpy: deps.spentJpy() - before, research: null };
+  }
+}
+
+
+// ------------------------------------------------------------ 応募構造（抽選形態）の判定（Stage 9H-3S-3）
+export interface FormOutcome extends UnitOutcome {
+  result: CaseInvestigationResult | null;
+  form: FormAssessment;
+}
+/** 同じ情報源・同じ商品の店舗別カードについて、AIが情報源から応募構造を調べる。根拠が確認できたときだけ判定を出す（正解を与えない。系列の傾向は参考にしない） */
+export async function judgeFormGroup(deps: AiDeps, l: ExistingLottery, now: Date): Promise<FormOutcome> {
+  const out = await reinvestigateLottery(deps, l, now);
+  const form = out.result ? assessForm(out.result) : ({ form: "unknown", basis: "調査に失敗した", quote: "", url: null, tier: null, viaStructure: false } as FormAssessment);
+  const fetched = out.assessment?.fetched ?? 0;
+  // ページに到達できたが、同じ抽選と確認できなかった（別の抽選・二次情報のみ）ものは「取得できず」ではなく「判断に足りない」
+  const reached = (out.result?.sources ?? []).filter((x) => x.status === "fetched" || x.status === "quarantined" || x.status === "different_lottery").length;
+  // 取得できた情報源で確認できたときだけ。店舗選択式の確認=confirm／店舗別独立の確認=refute（統合しない）／確認できない=inconclusive
+  const verdict: UnitOutcome["verdict"] = fetched === 0 ? "inconclusive" : form.form === "store_select" ? "confirm" : form.form === "store_independent" ? "refute" : "inconclusive";
+  const aiState: UnitOutcome["aiState"] = reached === 0 ? "failed" : fetched === 0 || form.form === "unknown" ? "insufficient" : "investigated";
+  return { ...out, aiState, verdict, form, summary: { ...out.summary, form: form.form, formBasis: form.basis, formQuote: form.quote, formUrl: form.url, formTier: form.tier, viaStructure: form.viaStructure } };
+}
+
+// ------------------------------------------------------------ 名称の同一性（Stage 9H-3S-3）
+export interface NameOutcome extends UnitOutcome {
+  learned: LearnedAlias | null;
+}
+/** 未解決の名称が、候補のマスターと同じ系列・商品かを、AIがWebで調べて判断する。根拠が揃えば別名を自動学習、足りなければ関連候補として保持 */
+export async function resolveNameWithAi(db: Db, householdId: string, deps: AiDeps, q: NameQuery, actor: string | null, o: { /** 観測した名称そのもののマスター（仮登録）。照合の対象から外す（自分自身に一致して「既に登録済み」とならないように） */ excludeMasterId?: string } = {}): Promise<NameOutcome> {
+  const before = deps.spentJpy();
+  if (!deps.webSearch || !deps.judgeNames) return { aiState: "failed", verdict: "inconclusive", summary: { error: "名称の調査が接続されていない" }, costJpy: 0, learned: null };
+  try {
+    const hits: SearchHit[] = [];
+    for (const query of nameSearchQueries(q)) {
+      if (deps.stopped() || deps.capJpy - deps.spentJpy() < 3) break;
+      for (const h of await deps.webSearch(query)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+    }
+    if (hits.length === 0) return { aiState: "failed", verdict: "inconclusive", summary: { note: "検索結果を取得できなかった" }, costJpy: deps.spentJpy() - before, learned: null };
+    const out = await deps.judgeNames([{ query: q, hits }]);
+    const j = out.judgments[0];
+    if (!j) return { aiState: "insufficient", verdict: "inconclusive", summary: { note: "AIが判断しなかった" }, costJpy: deps.spentJpy() - before, learned: null };
+    let learned: LearnedAlias | null = null;
+    if (j.relation === "same") {
+      const masters = o.excludeMasterId ? (await loadMasterEntries(db, householdId, q.kind)).filter((m) => m.id !== o.excludeMasterId) : undefined;
+      const r = await resolveMasterAndLearn(db, householdId, q.kind, q.observed, { origin: "ai", evidence: j.evidence, actor, ...(masters ? { masters } : {}), target: { masterId: q.candidateId, masterName: q.candidateName, reason: "AIが調べた候補" } });
+      learned = { kind: q.kind, name: q.observed, action: r.decision.action, reason: r.decision.reason, persisted: r.persisted };
+    }
+    return {
+      aiState: "investigated",
+      verdict: j.relation === "same" ? "confirm" : j.relation === "different" ? "refute" : "inconclusive",
+      summary: { relation: j.relation, rationale: j.rationale, adjusted: j.adjusted, cites: j.verifiedCites, independentDomains: j.independentDomains, observed: q.observed, candidate: q.candidateName, learned },
+      costJpy: deps.spentJpy() - before,
+      learned,
+    };
+  } catch (e) {
+    return { aiState: "failed", verdict: "inconclusive", summary: { error: e instanceof Error ? e.message.slice(0, 160) : "調査に失敗しました" }, costJpy: deps.spentJpy() - before, learned: null };
   }
 }
 

@@ -167,3 +167,22 @@ export function assessRegion(res: Pick<ResearchResult, "status" | "prefecture" |
     ? { verdict: "in_area", prefecture: res.prefecture, basis: `公式情報で確認した所在地は対象地域内（${res.prefecture}）`, official }
     : { verdict: "out_of_area", prefecture: res.prefecture, basis: `公式情報で確認した所在地は対象地域外（${res.prefecture}。対象: ${targetPrefectures.join("・")}）`, official };
 }
+
+/** AIが調べた応募構造（抽選形態）。情報源の原文・構造から確認できたものだけ。食い違いは不明のまま（推測しない） */
+export interface FormAssessment {
+  form: "store_select" | "store_independent" | "other" | "unknown";
+  basis: string;
+  quote: string;
+  url: string | null;
+  tier: "primary" | "secondary" | null;
+  /** LivePocketなどの本文の構造解析による（AIの報告ではない） */
+  viaStructure: boolean;
+}
+export function assessForm(r: Pick<CaseInvestigationResult, "extras">): FormAssessment {
+  const forms = (r.extras ?? []).filter((x) => x.key === "form" && ["store_select", "store_independent", "other"].includes(x.value));
+  if (forms.length === 0) return { form: "unknown", basis: "情報源から応募構造を確認できなかった", quote: "", url: null, tier: null, viaStructure: false };
+  const values = new Set(forms.map((f) => f.value));
+  if (values.size > 1) return { form: "unknown", basis: "情報源によって応募構造の記載が食い違う（確認が必要。推測しない）", quote: "", url: null, tier: null, viaStructure: false };
+  const best = [...forms].sort((a, b) => Number(b.tier === "primary") - Number(a.tier === "primary"))[0];
+  return { form: best.value as FormAssessment["form"], basis: best.via === "structure" ? "申込ページの構造（店舗の選択欄・受付）から確認" : "情報源の記載から確認", quote: (best.quote ?? "").slice(0, 200), url: best.sourceUrl, tier: best.tier, viaStructure: best.via === "structure" };
+}

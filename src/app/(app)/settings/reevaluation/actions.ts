@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ReevalAction } from "@/lib/master-identity/reeval-plan";
+import { estimateReevalAi, isReevalAiEnabled, listLearnedAliases, revokeLearnedAlias, runReevalAi, type ReevalAiRunResult, type ReevalEstimate } from "@/lib/server/master-identity/reeval-ai-hook";
 import { applyReevalBatch, createReevalPlan, revertReevalBatch } from "@/lib/server/master-identity/reeval-service";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
 import { createClient } from "@/lib/supabase/server";
@@ -36,6 +37,10 @@ export interface BatchView {
   createdAt: string;
   summary: Record<string, unknown>;
   counts: Record<string, { proposed: number; applied: number; skipped: number; failed: number; reverted: number; aiConfirmed: number; aiPending: number; aiRefuted: number; aiUnclear: number }>;
+  /** AIの調査結果（変更前後・根拠・費用）。調べたものだけ */
+  aiResults: { id: string; action: string; aiState: string; verdict: string; status: string; reason: string; detail: string; costJpy: number }[];
+  /** AI再調査の費用（バッチの累計。通常収集の予算とは別枠） */
+  ai: { enabled: boolean; usedJpy: number; capJpy: number | null; investigated: number; total: number };
   proposals: { id: string; action: string; targetType: string; targetId: string; risk: string; reason: string; relatedId: string | null; status: string; error: string | null }[];
 }
 
@@ -43,9 +48,9 @@ export async function loadReevalAction(): Promise<Result<{ batch: BatchView | nu
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
   const db = c.db as Any;
-  const { data: b } = await db.from("master_reeval_batches").select("id,status,created_at,summary").eq("household_id", c.householdId).neq("status", "aborted").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: b } = await db.from("master_reeval_batches").select("id,status,created_at,summary,params").eq("household_id", c.householdId).neq("status", "aborted").order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!b) return { ok: true, batch: null };
-  const { data: items } = await db.from("master_reeval_items").select("id,action,target_type,target_id,risk,proposal,status,error,seq,ai_state,ai_result").eq("batch_id", b.id).order("seq").limit(2000);
+  const { data: items } = await db.from("master_reeval_items").select("id,action,target_type,target_id,risk,proposal,status,error,seq,ai_state,ai_result,ai_cost_jpy").eq("batch_id", b.id).order("seq").limit(2000);
   const counts: BatchView["counts"] = {};
   for (const i of items ?? []) {
     const k = (counts[i.action] ??= { proposed: 0, applied: 0, skipped: 0, failed: 0, reverted: 0, aiConfirmed: 0, aiPending: 0, aiRefuted: 0, aiUnclear: 0 });
@@ -59,11 +64,26 @@ export async function loadReevalAction(): Promise<Result<{ batch: BatchView | nu
       else k.aiUnclear++;
     }
   }
+  const detailOf = (i: Any): string => {
+    const r = (i.ai_result ?? {}) as Any;
+    const p = (i.proposal ?? {}) as Any;
+    if (i.action === "fill_fields") return (p.changes ?? []).map((c: Any) => `${c.field}: ${c.from ?? "空欄"} → ${c.to}`).join(" / ");
+    if (i.action === "consolidate_lotteries") return `${r.form ?? "不明"}（${String(r.formBasis ?? "").slice(0, 80)}）／対象店舗: ${(p.evidence?.stores ?? []).slice(0, 6).join("・")}${r.formQuote ? `／根拠: 「${String(r.formQuote).slice(0, 80)}」` : ""}`;
+    if (r.relation && r.observed) return `「${r.observed}」⇔「${r.candidate}」: ${r.relation}（${String(r.rationale ?? "").slice(0, 80)}${r.learned?.persisted === "alias" ? "／別名を学習" : r.learned?.persisted === "candidate" ? "／関連候補として保持" : ""}）`;
+    if (r.address || r.prefecture) return `所在地: ${r.prefecture ?? "不明"}（${String(r.basis ?? "").slice(0, 80)}）`;
+    return `取得できた情報源 ${r.fetched ?? 0}件${r.deadline ? `／締切: ${r.deadline}` : ""}${Array.isArray(r.unknown) && r.unknown.length ? `／確認できず: ${r.unknown.join("・")}` : ""}`;
+  };
+  const aiResults = (items ?? [])
+    .filter((i: Any) => i.ai_state !== "not_investigated")
+    .slice(0, 80)
+    .map((i: Any) => ({ id: i.id, action: i.action, aiState: i.ai_state, verdict: String(i.ai_result?.verdict ?? ""), status: i.status, reason: String(i.proposal?.reason ?? "").slice(0, 140), detail: detailOf(i).slice(0, 300), costJpy: Number(i.ai_cost_jpy ?? 0) }));
+  const params = (b.params ?? {}) as { costJpy?: number; costCapJpy?: number };
+  const ai = { enabled: isReevalAiEnabled(), usedJpy: Number(params.costJpy ?? 0), capJpy: params.costCapJpy ?? null, investigated: (items ?? []).filter((i: Any) => i.ai_state !== "not_investigated").length, total: (items ?? []).length };
   const proposals = (items ?? [])
     .filter((i: Any) => i.action === "merge_master" || i.action === "review")
     .slice(0, 60)
     .map((i: Any) => ({ id: i.id, action: i.action, targetType: i.target_type, targetId: i.target_id, risk: i.risk, reason: String(i.proposal?.reason ?? ""), relatedId: (i.proposal?.relatedId as string | undefined) ?? null, status: i.status, error: i.error }));
-  return { ok: true, batch: { id: b.id, status: b.status, createdAt: b.created_at, summary: b.summary, counts, proposals } };
+  return { ok: true, batch: { id: b.id, status: b.status, createdAt: b.created_at, summary: b.summary, counts, proposals, aiResults, ai } };
 }
 
 export async function createReevalPlanAction(actor: string | null): Promise<Result<{ items: number }>> {
@@ -74,7 +94,7 @@ export async function createReevalPlanAction(actor: string | null): Promise<Resu
   return r.ok ? { ok: true, items: r.items } : r;
 }
 
-const applySchema = z.object({ batchId: z.uuid(), action: z.enum(["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate", "fill_fields"]), limit: z.number().int().min(1).max(100) });
+const applySchema = z.object({ batchId: z.uuid(), action: z.enum(["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate", "fill_fields", "consolidate_lotteries"]), limit: z.number().int().min(1).max(100) });
 export async function applyReevalAction(batchId: string, action: ReevalAction, limit: number, actor: string | null): Promise<Result<{ applied: number; failed: number; remaining: number }>> {
   const p = applySchema.safeParse({ batchId, action, limit });
   if (!p.success) return { ok: false, error: "不正な指定です" };
@@ -92,4 +112,41 @@ export async function revertReevalAction(batchId: string, actor: string | null):
   const r = await revertReevalBatch(c.db, c.actor, batchId);
   revalidatePath("/settings/reevaluation");
   return r;
+}
+
+// ---- AIによる再調査（Stage 9H-3S-3）。費用の見積もり→上限を指定して実行（区切りながら再開）→結果の確認→適用・元に戻す
+export async function estimateReevalAiAction(batchId: string): Promise<Result<{ estimate: ReevalEstimate; enabled: boolean }>> {
+  if (!z.uuid().safeParse(batchId).success) return { ok: false, error: "不正な指定です" };
+  const c = await ctx();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const { data: own } = await (c.db as Any).from("master_reeval_batches").select("id").eq("id", batchId).eq("household_id", c.householdId).maybeSingle();
+  if (!own) return { ok: false, error: "計画が見つかりません" };
+  const estimate = await estimateReevalAi(c.db, batchId);
+  return estimate ? { ok: true, estimate, enabled: isReevalAiEnabled() } : { ok: false, error: "計画が見つかりません" };
+}
+
+const runSchema = z.object({ batchId: z.uuid(), totalCapJpy: z.number().min(6).max(100), limit: z.number().int().min(1).max(30) });
+export async function runReevalAiAction(batchId: string, totalCapJpy: number, limit: number, actor: string | null): Promise<Result<{ run: Extract<ReevalAiRunResult, { ok: true }> }>> {
+  const p = runSchema.safeParse({ batchId, totalCapJpy, limit });
+  if (!p.success) return { ok: false, error: "不正な指定です" };
+  const c = await ctx(actor);
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const r = await runReevalAi(c.db, c.householdId, c.actor, p.data.batchId, { totalCapJpy: p.data.totalCapJpy, limit: p.data.limit });
+  revalidatePath("/settings/reevaluation");
+  return r.ok ? { ok: true, run: r } : { ok: false, error: r.error };
+}
+
+export async function listLearnedAliasesAction(): Promise<Result<{ aliases: Awaited<ReturnType<typeof listLearnedAliases>> }>> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  return { ok: true, aliases: await listLearnedAliases(c.db, c.householdId) };
+}
+
+export async function revokeAliasAction(kind: "chain" | "product", aliasId: string): Promise<Result<{ revoked: true }>> {
+  if (!z.enum(["chain", "product"]).safeParse(kind).success || !z.uuid().safeParse(aliasId).success) return { ok: false, error: "不正な指定です" };
+  const c = await ctx();
+  if (!c) return { ok: false, error: "ログインが必要です" };
+  const r = await revokeLearnedAlias(c.db, c.householdId, kind, aliasId);
+  revalidatePath("/settings/reevaluation");
+  return r.ok ? { ok: true, revoked: true as const } : r;
 }

@@ -125,20 +125,39 @@ export interface JudgeOutcome {
   judgments: VerifiedRelation[];
   raw: RelJudgment[];
   usage: { inputTokens: number; outputTokens: number };
+  /** 応答が途中で切れた回数（0でなければ、一部の組は判断が得られていない） */
+  truncated?: number;
 }
+
+/** 1回に判断する組の数（出力が多いと、応答が途中で切れて判断が1件も得られなくなるため、少数に分ける） */
+export const JUDGE_BATCH = 4;
 
 export async function judgeRelations(client: Client, model: string, lots: RelFacts[], pairs: [string, string][]): Promise<JudgeOutcome> {
   const by = new Map(lots.map((l) => [l.id, l]));
-  const res = await client.messages.create({
-    model,
-    max_tokens: 2500,
-    system: JUDGE_SYSTEM,
-    tools: [JUDGE_TOOL],
-    tool_choice: { type: "tool", name: JUDGE_TOOL.name },
-    messages: [{ role: "user", content: `次の抽選について、組ごとの関係を判断してください。\n<lotteries>\n${JSON.stringify(lots.map((l) => ({ ...l, urls: l.urls.slice(0, 3) })))}\n</lotteries>\n判断する組: ${JSON.stringify(pairs)}` }],
-  });
-  const block = res.content.find((c) => c.type === "tool_use");
-  const raw = (block && block.type === "tool_use" ? ((block.input as { judgments?: RelJudgment[] }).judgments ?? []) : []).filter((j) => by.has(j.a) && by.has(j.b) && j.a !== j.b);
+  const raw: RelJudgment[] = [];
+  const usage = { inputTokens: 0, outputTokens: 0 };
+  let truncated = 0;
+  for (let i = 0; i < pairs.length; i += JUDGE_BATCH) {
+    const chunk = pairs.slice(i, i + JUDGE_BATCH);
+    const ids = new Set(chunk.flat());
+    const res = await client.messages.create({
+      model,
+      max_tokens: 3000,
+      system: JUDGE_SYSTEM,
+      tools: [JUDGE_TOOL],
+      tool_choice: { type: "tool", name: JUDGE_TOOL.name },
+      messages: [{ role: "user", content: `次の抽選について、組ごとの関係を判断してください。rationale は60字以内、cites は最大3つ。
+<lotteries>
+${JSON.stringify(lots.filter((l) => ids.has(l.id)).map((l) => ({ ...l, urls: l.urls.slice(0, 3) })))}
+</lotteries>
+判断する組: ${JSON.stringify(chunk)}` }],
+    });
+    usage.inputTokens += res.usage?.input_tokens ?? 0;
+    usage.outputTokens += res.usage?.output_tokens ?? 0;
+    if (res.stop_reason === "max_tokens") truncated++; // 応答が途中で切れた（その組は判断なし＝判断できないものとして扱う）
+    const block = res.content.find((c) => c.type === "tool_use");
+    raw.push(...(block && block.type === "tool_use" ? ((block.input as { judgments?: RelJudgment[] }).judgments ?? []) : []).filter((j) => by.has(j.a) && by.has(j.b) && j.a !== j.b));
+  }
   const judgments = raw.map((j) => verifyRelation({ ...j, cites: Array.isArray(j.cites) ? j.cites : [], rationale: String(j.rationale ?? "").slice(0, 400) }, by.get(j.a) as RelFacts, by.get(j.b) as RelFacts));
-  return { judgments, raw, usage: { inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0 } };
+  return { judgments, raw, usage, truncated };
 }

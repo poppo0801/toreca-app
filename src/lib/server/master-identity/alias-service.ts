@@ -53,9 +53,10 @@ export interface ResolveAndLearnResult {
 }
 
 /** 名称を既存マスターへ解決し、根拠が十分なら別名を学習・足りなければ関連候補として保持する */
-export async function resolveMasterAndLearn(db: Db, householdId: string, kind: MasterKind, name: string, o: { origin: LearnOrigin; evidence?: Evidence[]; actor?: string | null; learn?: boolean; masters?: MasterEntry[] }): Promise<ResolveAndLearnResult> {
+export async function resolveMasterAndLearn(db: Db, householdId: string, kind: MasterKind, name: string, o: { origin: LearnOrigin; evidence?: Evidence[]; actor?: string | null; learn?: boolean; masters?: MasterEntry[]; /** AIが調査した対象のマスター（読み・音が離れていて自動の照合では候補にならない表記も、根拠つきで別名にできる） */ target?: { masterId: string; masterName: string; reason: string } }): Promise<ResolveAndLearnResult> {
   const masters = o.masters ?? (await loadMasterEntries(db, householdId, kind));
-  const resolution = resolveName(kind, name, masters);
+  let resolution = resolveName(kind, name, masters);
+  if (o.target && (resolution.status === "none" || resolution.status === "candidate") && masters.some((m) => m.id === o.target?.masterId && !m.archived)) resolution = { status: "candidate", candidates: [{ masterId: o.target.masterId, masterName: o.target.masterName, reason: o.target.reason }], note: `AIが調べた候補: ${o.target.masterName}` };
   const decision = decideAliasLearning({ kind, observedName: name, resolution, evidence: o.evidence, origin: o.origin, masters });
   const matched = resolution.status === "matched" ? resolution.match : null;
   let persisted: ResolveAndLearnResult["persisted"] = null;
@@ -79,6 +80,9 @@ async function insertAlias(db: Db, householdId: string, kind: MasterKind, d: Ext
   // 同じ正規化名: 系列は世帯で一意・商品は商品ごとに一意。他のマスターが持っているときは追加しない
   const { data: ex } = await any(db).from(table).select(`${col}`).eq("household_id", householdId).eq("normalized_alias", norm).limit(2);
   if ((ex ?? []).length > 0) return false;
+  // 利用者が取り消した（却下した）学習は、同じ名称・同じマスターでは繰り返さない
+  const { data: rej } = await any(db).from("master_alias_candidates").select("id").eq("household_id", householdId).eq("kind", kind).eq("normalized_name", norm.slice(0, 160)).eq("candidate_master_id", d.masterId).eq("status", "dismissed").limit(1);
+  if ((rej ?? []).length > 0) return false;
   const { error } = await any(db).from(table).insert({ household_id: householdId, [col]: d.masterId, alias: d.alias.slice(0, 80), normalized_alias: norm, source: d.source, status: d.status, evidence: { ...d.evidence, reason: d.reason }, updated_by_profile_id: actor });
   return !error;
 }

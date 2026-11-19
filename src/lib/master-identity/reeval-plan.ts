@@ -16,7 +16,7 @@ import { findDuplicateCandidates, findDuplicateMasters, type DupCluster } from "
 import { resolveName } from "./resolve";
 import { chainMasters, productMasters, type Snapshot } from "./snapshot";
 
-export type ReevalAction = "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "merge_master" | "review" | "fill_fields";
+export type ReevalAction = "archive_duplicate" | "archive_expired" | "archive_region" | "dismiss_candidate" | "merge_master" | "review" | "fill_fields" | "consolidate_lotteries";
 export interface PlanItem {
   targetType: "lottery" | "candidate" | "chain" | "product";
   targetId: string;
@@ -88,7 +88,7 @@ export function planReevaluation(snap: Snapshot, opts: PlanOptions): Plan {
   for (const c of productClusters) for (const o of c.others) prodKeep.set(o.master.id, c.keep.id);
 
   const items: PlanItem[] = [];
-  const byAction: Plan["summary"]["byAction"] = { archive_duplicate: 0, archive_expired: 0, archive_region: 0, dismiss_candidate: 0, merge_master: 0, review: 0, fill_fields: 0 };
+  const byAction: Plan["summary"]["byAction"] = { archive_duplicate: 0, archive_expired: 0, archive_region: 0, dismiss_candidate: 0, merge_master: 0, review: 0, fill_fields: 0, consolidate_lotteries: 0 };
   const push = (it: PlanItem) => {
     items.push(it);
     byAction[it.action]++;
@@ -157,6 +157,40 @@ export function planReevaluation(snap: Snapshot, opts: PlanOptions): Plan {
     }
   }
 
+  // ---------------- 同じ情報源・同じ商品の店舗別カード（店舗選択式の二重登録の疑い）。AIが情報源で応募構造を確認したものだけ、1件の店舗選択式へ統合する（Stage 9H-3S-3）
+  const handled = new Set(items.filter((i) => i.targetType === "lottery" && i.action.startsWith("archive_")).map((i) => i.targetId));
+  const urlsOf = (l: Row): string[] => ((l.source_urls as unknown[] | null) ?? []).filter((u): u is string => typeof u === "string").map((u) => u.trim().replace(/#.*$/, "").replace(/\/+$/, "")).filter(Boolean);
+  const prodKeyOf = (l: Row) => (itemsOf.get(str(l.id)) ?? []).map((p) => prodKeep.get(p) ?? p).sort().join("+");
+  /** 短縮URL（転送先を取得できない）。同一の情報源の根拠にしない */
+  const SHORT_URL = /^https?:\/\/(t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly|buff\.ly|is\.gd)\//i;
+  const byUrl = new Map<string, Row[]>();
+  for (const l of active) {
+    if (handled.has(str(l.id)) || str(l.store_mode) !== "fixed" || !str(l.store_id) || !prodKeyOf(l)) continue;
+    const us = [...new Set(urlsOf(l))];
+    const base = `${chainKeep.get(str(l.chain_id)) ?? str(l.chain_id)}|${prodKeyOf(l)}`;
+    // 取得できる固有の情報源（短縮URL以外）が無いカード（短縮URLだけ・URLなし）は、同じ系列・同じ商品・同じ締切（日時まで一致）で組にする。AIが検索などで情報源を探して確認する
+    if (us.length === 0 || us.every((u) => SHORT_URL.test(u))) {
+      const dl = str(l.apply_deadline_at) || str(l.apply_deadline_date);
+      if (dl) byUrl.set(`${base}|same-deadline:${dl}`, [...(byUrl.get(`${base}|same-deadline:${dl}`) ?? []), l]);
+      continue;
+    }
+    for (const u of us) {
+      const k = `${base}|${u}`;
+      byUrl.set(k, [...(byUrl.get(k) ?? []), l]);
+    }
+  }
+  const used = new Set<string>();
+  for (const [k, g] of [...byUrl.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    const mem = g.filter((l) => !used.has(str(l.id)));
+    if (new Set(mem.map((l) => str(l.store_id))).size < 2) continue;
+    const free = mem.filter((l) => !prot.get(str(l.id)));
+    if (free.length === 0) continue;
+    const keep = [...free].sort((a, b) => urlsOf(b).length - urlsOf(a).length || str(a.created_at).localeCompare(str(b.created_at)))[0];
+    for (const l of mem) used.add(str(l.id));
+    const stores = mem.map((l) => str(storeOf.get(str(l.store_id))?.name)).filter(Boolean);
+    push({ targetType: "lottery", targetId: str(keep.id), action: "consolidate_lotteries", risk: "medium", proposal: { reason: `同じ情報源・同じ商品の抽選が ${mem.length} 店舗分、別々のカードで登録されています。AIが情報源で応募構造（店舗選択式か店舗別か）を確認できたら、1件にまとめます`, subKind: "form_group", evidence: { url: k.split("|").slice(2).join("|"), memberIds: mem.map((l) => str(l.id)), protectedIds: mem.filter((l) => prot.get(str(l.id))).map((l) => str(l.id)), stores } } });
+  }
+
   // ---------------- 抽選候補（確認待ち）
   const pending = snap.collection_candidates.filter((c) => c.status === "pending");
   const keys = new Set(active.map((l) => dupKey(l)));
@@ -199,6 +233,8 @@ export function planReevaluation(snap: Snapshot, opts: PlanOptions): Plan {
       const r = resolveName("chain", cn, chainEntries);
       nameResolution.chainNames[r.status === "matched" ? "matched" : r.status === "candidate" || r.status === "ambiguous" ? "candidate" : "none"]++;
       if (r.status === "matched" && nameResolution.matchedChainExamples.length < 8) nameResolution.matchedChainExamples.push(`${cn} → ${r.match.masterName}`);
+      // 候補止まりの系列名は、AIが調べて同じ系列か確認する対象にする（根拠が揃えば別名として学習され、次回から自動で寄る）
+      if (r.status === "candidate" && r.candidates[0]) push({ targetType: "candidate", targetId: str(c.id), action: "review", risk: "low", proposal: { reason: `系列名「${cn}」は、登録済みの「${r.candidates[0].masterName}」と近いが同一とは確認できない（${r.candidates[0].reason}）。AIが調べます`, subKind: "name_candidate", evidence: { kind: "chain", observed: cn, candidateMasterId: r.candidates[0].masterId, candidateName: r.candidates[0].masterName } } });
     }
     for (const it of (input?.items ?? []) as Row[]) {
       const p = (it.product ?? {}) as Row;
