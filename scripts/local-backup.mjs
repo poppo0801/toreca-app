@@ -66,7 +66,8 @@ function fail(message) {
   const msg = scrub(message);
   log(`失敗: ${msg}`);
   const prev = readStatus();
-  writeStatus({ ...(prev ?? {}), ok: false, failedAt: new Date().toISOString(), error: msg });
+  // 連続失敗の回数を残す（毎日1回の失敗は見落としやすい。--status・npm run backup:status で確認できる）
+  writeStatus({ ...(prev ?? {}), ok: false, failedAt: new Date().toISOString(), error: msg, consecutiveFailures: (prev?.consecutiveFailures ?? 0) + 1 });
   try {
     writeFileSync(FAILED_FLAG, `${new Date().toISOString()} バックアップに失敗しました。${LOG} を確認してください。\n${msg}\n`);
   } catch {
@@ -85,7 +86,7 @@ if (args.has("--status")) {
   }
   const h = hoursSince(s.lastSuccessAt);
   console.log(`最終成功: ${s.lastSuccessAt}（${h.toFixed(1)}時間前） / ${s.file} / ${s.rows}行`);
-  if (s.ok === false) console.log(`直近の実行は失敗: ${s.error}`);
+  if (s.ok === false) console.log(`直近の実行は失敗: ${s.error}（連続${s.consecutiveFailures ?? 1}回）`);
   process.exit(h > STALE_H || s.ok === false ? 1 : 0);
 }
 
@@ -124,7 +125,7 @@ try {
   const name = /本体: (tcg-[\w-]+\.tcgbak2)/.exec(out)?.[1] ?? "不明";
   const rows = Number(/(\d+)テーブル・(\d+)行/.exec(out)?.[2] ?? 0);
   log(`成功: ${name}（${/(\d+)テーブル/.exec(out)?.[1] ?? "?"}テーブル・${rows}行）`);
-  writeStatus({ ok: true, lastSuccessAt: new Date().toISOString(), file: name, rows });
+  writeStatus({ ok: true, lastSuccessAt: new Date().toISOString(), file: name, rows, consecutiveFailures: 0 });
   if (existsSync(FAILED_FLAG)) rmSync(FAILED_FLAG);
 } catch (e) {
   rmSync(work, { recursive: true, force: true }); // 平文は必ず削除（process.exit は finally を通らないため先に消す）

@@ -46,6 +46,8 @@ node scripts/verify-backup.mjs --dir restored                                  #
 npm run restore:drill -- --backup restored                                     # 使い捨てPostgresへ復元して検証（本番に触れない）
 # 災害時の復元は「復元手順」の restore.mjs（空のDBにのみ）に --backup restored を指定。終わったら restored フォルダは削除
 ```
+- **失敗の検知**: 失敗するとトースト通知・`BACKUP_FAILED.txt`・`last-status.json`（`consecutiveFailures` に連続失敗回数）に残る。1日1回の失敗は見落としやすいため、**本番反映の前などに `npm run backup:status` を確認する**（連続失敗や36時間超の未取得で終了コード1）。
+- **失敗の原因と再発防止（2026-11）**: Supabase CLI 3.x の `db query` は、AIエージェント環境の自動検出があるときだけ JSON を返し、通常の実行（タスクスケジューラ）では表形式を返す。完全バックアップの構成情報クエリが JSON を前提にしていたため、手動（Claude Code 経由）は成功し、定期実行だけが「Unexpected end of JSON input」で11/12 から失敗していた。`--output-format json` を明示し、応答の解析は `scripts/lib/query-output.mjs`（表形式なら原因が分かるエラー）に集約した。
 - **制約**: PCの電源が入っていない間は取得されません（起動後に自動で取り戻します）。PCの故障に備え、`BACKUP_DIR` は別ドライブやクラウド同期フォルダにすることを推奨します。
 - 将来、バックアップ専用の読み取り専用DBロールを使う方式（権限をさらに限定）も検討できますが、DBパスワードの管理が増えるため現時点では採用していません。
 

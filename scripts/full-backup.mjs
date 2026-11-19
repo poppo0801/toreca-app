@@ -22,6 +22,7 @@ import JSZip from "jszip";
 import { createClient } from "@supabase/supabase-js";
 import { decryptBuffer, encryptBuffer } from "./lib/backup-crypto.mjs";
 import { extractCopySql } from "./lib/pg-copy.mjs";
+import { parseQueryRows } from "./lib/query-output.mjs";
 
 import { loadProductionEnv } from "./lib/prod-env.mjs";
 
@@ -111,10 +112,12 @@ try {
   const query = (sql) => {
     const f = join(work, "q.sql");
     writeFileSync(f, sql);
-    const r = npx(["supabase", "db", "query", "--linked", "--read-only", "-f", f]);
+    // 出力形式を明示する。Supabase CLI 3.x は AI エージェント環境（AI_AGENT 等）の自動検出がある場合だけ JSON を返し、
+    // タスクスケジューラ等の通常実行では表形式になって JSON.parse が失敗する（2026-11 の定期バックアップ失敗の原因）。
+    const r = npx(["supabase", "db", "query", "--linked", "--read-only", "--output-format", "json", "-f", f]);
     if (r.status !== 0) throw new Error(`クエリに失敗しました: ${scrub((r.stderr || r.stdout || "").trim().split("\n").slice(-2).join(" / "))}`);
     const o = r.stdout;
-    return JSON.parse(o.slice(o.indexOf("{"), o.lastIndexOf("}") + 1)).rows;
+    return parseQueryRows(o);
   };
   const liveCounts = Object.fromEntries(
     query(
