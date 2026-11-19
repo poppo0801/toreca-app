@@ -13,5 +13,7 @@
 | V07 | 本番反映は計画・利用者承認・検証・切り戻しを伴う | 採用済み | `docs/RELEASE_FLOW.md` |
 | V08 | GitHubのマージ済み設計資料を正本にし、ChatGPTが文書管理、Claude Codeが実装 | 採用済み | `docs/SPEC_GOVERNANCE.md` |
 
+| V09 | AI読み取りの入力を「文書／画像／URL」に統合し、URLの取得方式を自動判定。公式性は別途評価 | 採用済み・未実装 | `requirements.md` §4、`docs/DEVELOPMENT_LOG.md` 2026-11-19 |
+
 ## 変更の記録
 新しい決定は、日付・旧仕様との差・理由・根拠・影響する文書を `docs/DEVELOPMENT_LOG.md` に追記する。ここには索引だけを追加し、機能仕様を重複して記述しない。
