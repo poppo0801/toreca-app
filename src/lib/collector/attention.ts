@@ -8,6 +8,7 @@
  *   系列/商品が特定できない／情報源がない／同一抽選か別抽選か判断できない／系列・店舗・商品の矛盾／締切が不明（抽選として成立するか不明）
  * 不明な情報は不明のまま保持する（推測で埋めない）。
  */
+import { looksLikeMultipleStores } from "@/lib/collector/store-name";
 import { conflictLabels, FIELD_LABEL, type FieldKey, type FieldMap } from "@/lib/collector/fields";
 import type { LotteryStage } from "@/lib/collector/stage";
 import type { LotteryInput } from "@/lib/lottery-input";
@@ -148,6 +149,8 @@ export function decideRegistration(c: RegistrationContext): RegistrationDecision
   // ---- C: 確認待ちに残す条件
   if (c.verdict === "exclude") blockers.push("収集条件の対象外です");
   if (/系列を確実に特定できません/.test(miss)) blockers.push("系列を特定できません");
+  // Stage 9X: 複数の店舗名が1つの店舗名にまとまっていると、店舗ごとに独立した応募・所在地が混ざる。自動登録せず、店舗ごとの抽選として人が確認する
+  if (looksLikeMultipleStores(input.store.name)) blockers.push("複数の店舗名が1つにまとまっています（店舗ごとに別の抽選として確認が必要です）");
   if (/商品.*(確実に判別できません|マスターに未登録)|商品マスターに未登録/.test(miss)) blockers.push(/未登録/.test(miss) ? "商品がマスターに未登録です（商品の確認が必要）" : "対象商品を特定できません");
   if (/情報源URLがありません/.test(miss)) blockers.push("情報源（確認できるURL）がありません");
   if (c.verdictReasons.some((r) => /指定商品か判断できません/.test(r))) blockers.push("商品を判別できず、収集対象の商品か判断できません");

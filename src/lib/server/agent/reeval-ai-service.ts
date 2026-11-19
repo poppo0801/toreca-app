@@ -36,7 +36,9 @@ import type { Db } from "@/lib/server/lottery-service";
 export interface AiDeps {
   model: string;
   classify: ClassifyContext;
-  investigate(target: CaseTarget): Promise<CaseInvestigationResult>;
+  /** o.maxCostJpy: この調査だけの費用の上限（全体の上限・1件の上限を超えない）。blockedHosts: これまでの調査で取得できなかった（ロボット制限・ログイン必須）ホスト */
+  investigate(target: CaseTarget, o?: { maxCostJpy?: number }): Promise<CaseInvestigationResult>;
+  blockedHosts?: Set<string>;
   research(store: StoreTarget, existingAddress: string | null): Promise<ResearchOutcome>;
   judge(lots: RelFacts[], pairs: [string, string][]): Promise<JudgeOutcome>;
   /** 名称の同一性の調査用のWeb検索（Stage 9H-3S-3）。費用は同じ台帳へ。未接続なら名称の調査をしない */
@@ -53,6 +55,8 @@ type Env = Record<string, string | undefined>;
 export interface RealAiOptions {
   env: Env;
   capJpy: number;
+  /** 費用の上限の最大値（既定100円）。検証専用の予算が100円を超える承認を受けたときだけ、評価の仕組み（tests/）が指定する。AIは変更できない */
+  maxCapJpy?: number;
   perCaseJpy?: number;
   ledgerDir: string;
   clientFactory?: (apiKey: string) => Pick<Anthropic, "messages">;
@@ -61,7 +65,8 @@ export interface RealAiOptions {
 
 /** 実AI・実Webの接続（関門を通ったときだけ）。上限は100円以下に固定（今回の検証の承認範囲）。AIは上限を変更できない */
 export function realReevalDeps(o: RealAiOptions): { ok: true; deps: AiDeps; guard: RealRunGuard } | { ok: false; reason: string } {
-  if (!(o.capJpy > 0) || o.capJpy > 100) return { ok: false, reason: "費用の上限が不正です（1〜100円）" };
+  const hardMax = o.maxCapJpy ?? 100;
+  if (!(o.capJpy > 0) || o.capJpy > hardMax) return { ok: false, reason: `費用の上限が不正です（1〜${hardMax}円）` };
   const g = checkRealApi({ env: o.env, confirm: true, runsToday: 0 });
   if (!g.ok) return { ok: false, reason: g.reason };
   const file = join(o.ledgerDir, "ledger.json");
@@ -112,6 +117,7 @@ function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guar
   const wrapped = guard.wrapClient(raw, "agent");
   const { world } = createCaseWorld({ search: new AnthropicWebSearch(raw as Anthropic, model), guard, ...(a.fetcher ? { fetcher: a.fetcher } : {}) });
   const llm = createInvestigatorBrain(wrapped, model);
+  const blocked = new Set<string>();
   const remaining = () => Math.min(a.perCaseJpy, Math.max(0, a.capJpy - guard.spentJpy));
   const controls = (): ResolvedControls => {
     const d = resolveControls({ runsToday: 0, costTodayJpy: 0, workerDailyAiLimit: 30, aiCallsToday: 0 }, { mode: "dry_run", realApi: true });
@@ -133,9 +139,16 @@ function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guar
   return {
     model,
     classify: EMPTY_CLASSIFY_CTX,
-    investigate: async (target) => {
+    blockedHosts: blocked,
+    investigate: async (target, o) => {
       guard.startCase(target.id);
-      return investigateCase({ llm, world, target, controls: controls(), classify: EMPTY_CLASSIFY_CTX });
+      const c = controls();
+      const r = await investigateCase({ llm, world, target, controls: o?.maxCostJpy ? { ...c, limits: { ...c.limits, maxCostJpy: Math.min(c.limits.maxCostJpy, o.maxCostJpy) } } : c, classify: EMPTY_CLASSIFY_CTX });
+      // 取得できなかった情報源のホストを覚える（回避はしない。次の調査の費用の判断に使う）
+      for (const x of r.sources) if (x.status === "failed" && (x.failKind === "robots_blocked" || x.failKind === "login_required")) {
+        try { blocked.add(new URL(x.url).hostname.replace(/^www\./, "")); } catch { /* 不正なURLは無視 */ }
+      }
+      return r;
     },
     research: async (store, existing) => {
       guard.startCase(`store:${store.name}`);
@@ -160,6 +173,9 @@ function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guar
 }
 
 // ------------------------------------------------------------ 単位の処理（DBに触れない）
+/** 登録済みの情報源がすべて取得できない既知のホストだけのときの、1件あたりの調査費用の上限（円） */
+export const BLOCKED_SOURCE_BUDGET_JPY = 3;
+
 export interface UnitOutcome {
   aiState: Assessment["aiState"];
   verdict: "confirm" | "refute" | "inconclusive";
@@ -174,7 +190,11 @@ export async function reinvestigateLottery(deps: AiDeps, l: ExistingLottery, now
   const before = deps.spentJpy();
   let result: CaseInvestigationResult | null = null;
   try {
-    result = await deps.investigate(targetOf(l, (u) => classifyCaseSource(u, deps.classify).kind));
+    // 登録済みの情報源がすべて、これまでの調査で取得できなかったホスト（ロボット制限・ログイン必須）だけなら、解決の見込みが低いため、費用を小さく抑える
+    // （調査自体は行う＝別の情報源を探すかはAIが決める。実測（Stage 9X）: こうした43件で、別の情報源から補えたものは0件・費用は1件 約6.7円）
+    const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+    const onlyBlocked = l.sourceUrls.length > 0 && l.sourceUrls.every((u) => deps.blockedHosts?.has(hostOf(u)));
+    result = await deps.investigate(targetOf(l, (u) => classifyCaseSource(u, deps.classify).kind), onlyBlocked ? { maxCostJpy: BLOCKED_SOURCE_BUDGET_JPY } : undefined);
   } catch (e) {
     return { aiState: "failed", verdict: "inconclusive", summary: { error: e instanceof Error ? e.message.slice(0, 160) : "調査に失敗しました" }, costJpy: deps.spentJpy() - before, result: null };
   }
