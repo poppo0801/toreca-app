@@ -58,7 +58,9 @@ export async function loadReevalAction(): Promise<Result<{ batch: BatchView | nu
     // AIの確認の状態（固定ロジックの暫定判定は、AIが実際の情報源を調べて確認するまで適用しない）
     if (i.status === "proposed") {
       const v = (i.ai_result as { verdict?: string } | null)?.verdict;
-      if (i.ai_state === "not_investigated") k.aiPending++;
+      // マスターの統合: 確認済みの別名・表記揺れの一致（確信度 high）は、AIの調査なしでも適用できる（統合元が仮登録・参照が限定的なものだけ。適用時に再確認）
+      if (i.action === "merge_master" && (i.proposal as { evidence?: { confidence?: string } } | null)?.evidence?.confidence === "high") k.aiConfirmed++;
+      else if (i.ai_state === "not_investigated") k.aiPending++;
       else if (i.ai_state === "investigated" && v === "confirm") k.aiConfirmed++;
       else if (v === "refute") k.aiRefuted++;
       else k.aiUnclear++;
@@ -67,11 +69,13 @@ export async function loadReevalAction(): Promise<Result<{ batch: BatchView | nu
   const detailOf = (i: Any): string => {
     const r = (i.ai_result ?? {}) as Any;
     const p = (i.proposal ?? {}) as Any;
+    const alt = r.alternatives as { blocked?: { host: string }[]; reached?: { host: string; tier: string; status: string }[]; recovered?: number; unresolved?: boolean } | null | undefined;
+    const altText = alt?.blocked?.length ? `／取得できなかった: ${alt.blocked.map((b) => b.host).join("・")} → 代替の情報源 ${alt.reached?.length ?? 0}件に到達（根拠として採用 ${alt.recovered ?? 0}件）${alt.unresolved ? "。確認できず不明のまま" : ""}` : "";
     if (i.action === "fill_fields") return (p.changes ?? []).map((c: Any) => `${c.field}: ${c.from ?? "空欄"} → ${c.to}`).join(" / ");
-    if (i.action === "consolidate_lotteries") return `${r.form ?? "不明"}（${String(r.formBasis ?? "").slice(0, 80)}）／対象店舗: ${(p.evidence?.stores ?? []).slice(0, 6).join("・")}${r.formQuote ? `／根拠: 「${String(r.formQuote).slice(0, 80)}」` : ""}`;
+    if (i.action === "consolidate_lotteries") return `${r.form ?? "不明"}（${String(r.formBasis ?? "").slice(0, 80)}）／対象店舗: ${(p.evidence?.stores ?? []).slice(0, 6).join("・")}${r.formQuote ? `／根拠: 「${String(r.formQuote).slice(0, 80)}」` : ""}${altText}`;
     if (r.relation && r.observed) return `「${r.observed}」⇔「${r.candidate}」: ${r.relation}（${String(r.rationale ?? "").slice(0, 80)}${r.learned?.persisted === "alias" ? "／別名を学習" : r.learned?.persisted === "candidate" ? "／関連候補として保持" : ""}）`;
     if (r.address || r.prefecture) return `所在地: ${r.prefecture ?? "不明"}（${String(r.basis ?? "").slice(0, 80)}）`;
-    return `取得できた情報源 ${r.fetched ?? 0}件${r.deadline ? `／締切: ${r.deadline}` : ""}${Array.isArray(r.unknown) && r.unknown.length ? `／確認できず: ${r.unknown.join("・")}` : ""}`;
+    return `取得できた情報源 ${r.fetched ?? 0}件${r.deadline ? `／締切: ${r.deadline}` : ""}${Array.isArray(r.unknown) && r.unknown.length ? `／確認できず: ${r.unknown.join("・")}` : ""}${altText}`;
   };
   const aiResults = (items ?? [])
     .filter((i: Any) => i.ai_state !== "not_investigated")
@@ -94,7 +98,7 @@ export async function createReevalPlanAction(actor: string | null): Promise<Resu
   return r.ok ? { ok: true, items: r.items } : r;
 }
 
-const applySchema = z.object({ batchId: z.uuid(), action: z.enum(["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate", "fill_fields", "consolidate_lotteries"]), limit: z.number().int().min(1).max(100) });
+const applySchema = z.object({ batchId: z.uuid(), action: z.enum(["archive_duplicate", "archive_expired", "archive_region", "dismiss_candidate", "fill_fields", "consolidate_lotteries", "merge_master"]), limit: z.number().int().min(1).max(100) });
 export async function applyReevalAction(batchId: string, action: ReevalAction, limit: number, actor: string | null): Promise<Result<{ applied: number; failed: number; remaining: number }>> {
   const p = applySchema.safeParse({ batchId, action, limit });
   if (!p.success) return { ok: false, error: "不正な指定です" };
