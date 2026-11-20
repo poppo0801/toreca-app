@@ -1,4 +1,5 @@
 import "server-only";
+import { decideAutonomousOp } from "@/lib/case-model/history-guard";
 import { planReevaluation, type PlanItem, type ReevalAction } from "@/lib/master-identity/reeval-plan";
 import type { Snapshot } from "@/lib/master-identity/snapshot";
 import { excludeLottery, restoreLottery, type Db } from "@/lib/server/lottery-service";
@@ -115,7 +116,23 @@ export async function lotteryProtection(db: Db, id: string): Promise<string | nu
   const count = async (t: string) => ((await any(db).from(t).select("id", { count: "exact", head: true }).eq("lottery_id", id)).count ?? 0) as number;
   if ((await count("applications")) > 0) return "応募・当落の記録あり";
   for (const t of ["limit_exemptions", "skip_rules", "skip_rule_exceptions", "collection_memos", "notification_deliveries", "application_rules", "ai_extraction_feedback"]) if ((await count(t)) > 0) return "通知・ルール・メモなどの参照あり";
+  // Stage 10E: 10Dの共通の履歴保護（DB関数 lottery_history_blockers）も併せて確認する（上の確認に加える。基準を厳しくする方向のみ）。
+  // 関数が無い環境（マイグレーション108未適用の本番など）では、従来の確認だけで動く（挙動を変えない）
+  const extra = await commonProtection(db, id);
+  if (extra) return extra;
   return null;
+}
+
+/** 共通の履歴保護の理由（無ければ null）。関数が使えない・失敗したときは null（従来の確認に委ねる） */
+async function commonProtection(db: Db, id: string): Promise<string | null> {
+  try {
+    const { data, error } = await any(db).rpc("lottery_history_blockers", { p_lottery_id: id });
+    if (error || !Array.isArray(data)) return null;
+    const d = decideAutonomousOp("merge", (data as string[]).filter((c) => c !== "not_found"));
+    return d.allowed ? null : d.reasons[0] ?? "履歴保護の対象";
+  } catch {
+    return null;
+  }
 }
 
 type ItemRow = { id: string; target_type: PlanItem["targetType"]; target_id: string; action: ReevalAction; proposal: PlanItem["proposal"]; status: string };

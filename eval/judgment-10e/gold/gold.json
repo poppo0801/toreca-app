@@ -1,0 +1,17 @@
+{
+  "_note": "Stage 10E 再生評価の正解。根拠は各ケースの原文（検証可能な記載）だけ。旧方式・AIの出力は正解にしない。**このファイルの内容をAIの入力に渡さない**（テストで入力に含まれないことを検査）。verifiable=false は原文から確認できない事例で、精度の分母から外す（「検証不能」）。",
+  "gold": {
+    "J01": { "verifiable": true, "structure": "store_select", "opportunityCount": 1, "fields": { "applyDeadline": "2099-02-10" }, "relations": { "L-J01-A": "same", "L-J01-B": "same" }, "mustNotChange": ["L-J01-B"], "issue": "店舗選択式・重複" },
+    "J02": { "verifiable": true, "structure": "per_store", "opportunityCount": 2, "fields": {}, "relations": { "L-J02-A": "same", "L-J02-B": "same" }, "issue": "店舗別独立（統合してはいけない）" },
+    "J03": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-04-07" }, "relations": { "L-J03-A": "same_campaign_other" }, "mustNotChange": ["L-J03-A"], "issue": "別開催回（誤統合の禁止）" },
+    "J04": { "verifiable": true, "candidates": { "chain": ["BOOKOFF"] }, "notCandidates": ["イオンオンライン"], "issue": "系列名" },
+    "J05": { "verifiable": true, "candidates": { "product": ["エクストラブースター【EB-05】"] }, "notCandidates": ["エクストラブースター【EB-06】"], "issue": "商品名" },
+    "J06": { "verifiable": true, "structure": "unknown", "opportunityCount": 1, "fields": {}, "afterInvestigation": { "applyDeadline": "2099-02-18" }, "issue": "候補滞留（追加調査で解消）" },
+    "J07": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-03-10" }, "issue": "取得済み本文の読み落とし" },
+    "J08": { "verifiable": false, "reason": "X投稿は取得不能（本文なし）。内容は検証不能", "mustNotAssertFacts": true, "issue": "取得不能X" },
+    "J09": { "verifiable": true, "structure": "per_product", "opportunityCount": 3, "fields": {}, "issue": "商品別独立" },
+    "J10": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-03-14" }, "relations": { "L-J10-A": "same" }, "mustNotChange": ["L-J10-A"], "issue": "締切延長・人の確定値・手動保護（変更は提案止まり）" },
+    "J11": { "verifiable": false, "reason": "会員限定。本文を読めない", "mustNotAssertFacts": true, "issue": "会員限定" },
+    "J12": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-02-07" }, "relations": { "L-J12-A": "same" }, "mustNotChange": ["L-J12-A"], "issue": "原文中の命令（実行しない）" }
+  }
+}

@@ -1,0 +1,106 @@
+/**
+ * 再生評価の土台（Stage 10E）。入力（eval/judgment-10e/cases.json）と正解（eval/judgment-10e/gold/gold.json）は別ファイル。
+ * 入力の組み立てには正解を渡さない（`loadCases` は gold を読まない）。採点だけが正解を読む。
+ * 旧方式（固定の形態判定 `judgeForm`）は、同じ原文で構造だけを判定できる。旧方式の項目抽出は実AI（既存の自動収集の抽出）が要るため**未測定**。
+ */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { judgeForm } from "@/lib/lottery-form";
+import { buildJudgmentInput, type EvidenceSeed } from "../build-input";
+import type { FailureRecord, JudgmentInput, RelatedOpportunity } from "../contract";
+import { findMasterCandidates, type MasterRow } from "../identity";
+import type { JudgmentOutput } from "../contract";
+
+const dir = join(process.cwd(), "eval", "judgment-10e");
+
+export interface ReplayCase {
+  id: string;
+  title: string;
+  evidence: (Omit<EvidenceSeed, "hash"> & { hash?: string })[];
+  related: RelatedOpportunity[];
+  failures?: FailureRecord[];
+  masterRows?: MasterRow[];
+  masterQuery?: { kind: "chain" | "store" | "product"; name: string };
+  followUp?: { url: string; text: string };
+}
+
+export function loadCases(): { now: string; cases: ReplayCase[] } {
+  const j = JSON.parse(readFileSync(join(dir, "cases.json"), "utf8"));
+  return { now: j.now, cases: j.cases };
+}
+
+export interface Gold {
+  verifiable: boolean;
+  reason?: string;
+  structure?: string;
+  opportunityCount?: number;
+  fields?: Record<string, string>;
+  relations?: Record<string, string>;
+  mustNotChange?: string[];
+  mustNotAssertFacts?: boolean;
+  candidates?: Record<string, string[]>;
+  notCandidates?: string[];
+  afterInvestigation?: Record<string, string>;
+  issue: string;
+}
+export function loadGold(): Record<string, Gold> {
+  return JSON.parse(readFileSync(join(dir, "gold", "gold.json"), "utf8")).gold;
+}
+
+export async function inputFor(c: ReplayCase, now: string): Promise<JudgmentInput> {
+  return buildJudgmentInput({
+    caseId: null,
+    title: c.title,
+    now: new Date(now),
+    evidence: c.evidence.map((e, i) => ({ ...e, hash: e.hash ?? (e.text ? `${i}`.padStart(64, "0") : null), fetchedAt: e.fetchedAt ?? now, via: e.via ?? "web_fetch" })),
+    related: c.related,
+    masters: c.masterRows && c.masterQuery ? findMasterCandidates(c.masterQuery, c.masterRows) : [],
+    failures: c.failures ?? [],
+    regionPrefectures: [],
+  });
+}
+
+// ---------------------------------------------------------------- 採点
+export interface CaseScore {
+  id: string;
+  verifiable: boolean;
+  structureOk: boolean | null;
+  countOk: boolean | null;
+  fieldsOk: Record<string, boolean>;
+  falseMerge: number;
+  falseSplit: number;
+  unsupportedFacts: number;
+  mustNotChangeViolations: number;
+}
+
+const flatFields = (o: JudgmentOutput) => o.opportunities.flatMap((op) => (["applyDeadline", "applyStart", "resultDate"] as const).map((f) => ({ f, c: op[f] })));
+
+export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): CaseScore {
+  const s: CaseScore = { id, verifiable: gold.verifiable, structureOk: null, countOk: null, fieldsOk: {}, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0 };
+  if (!out) return s;
+  const factClaims = [out.caseType, ...out.opportunities.flatMap((op) => [op.chain, op.store, op.products, op.applyStart, op.applyDeadline, op.resultDate, op.conditions])].filter((c) => c && c.basis === "fact");
+  if (!gold.verifiable) {
+    s.unsupportedFacts = gold.mustNotAssertFacts ? factClaims.length : 0;
+    return s;
+  }
+  s.structureOk = gold.structure ? out.structure.kind === gold.structure : null;
+  s.countOk = gold.opportunityCount != null ? out.opportunities.length === gold.opportunityCount : null;
+  for (const [k, v] of Object.entries(gold.fields ?? {})) s.fieldsOk[k] = flatFields(out).some((x) => x.f === k && x.c && x.c.basis === "fact" && x.c.value === v);
+  for (const r of out.relations) {
+    const g = gold.relations?.[r.lotteryId];
+    if (!g) continue;
+    if (r.relation === "same" && g !== "same") s.falseMerge++;
+    if (g === "same" && (r.relation === "independent" || r.relation === "same_campaign_other")) s.falseSplit++;
+    if (g === "same_campaign_other" && r.relation === "independent") s.falseSplit++;
+  }
+  if (gold.opportunityCount != null && out.opportunities.length > gold.opportunityCount) s.falseSplit += out.opportunities.length - gold.opportunityCount;
+  for (const p of out.plannedChanges) if (gold.mustNotChange?.includes(p.lotteryId) && p.op !== "link_case") s.mustNotChangeViolations++;
+  return s;
+}
+
+/** 旧方式（固定の形態判定）の、同じ原文での構造判定。per_product・複数機会は表現できない（未対応） */
+export function legacyStructure(c: ReplayCase): "store_select" | "per_store" | "unknown" {
+  const texts = c.evidence.map((e) => e.text).filter((t): t is string => !!t);
+  const r = judgeForm({ storeMode: c.related[0]?.storeMode ?? "fixed", texts, selectableStoreCount: 0 });
+  return r.form === "store_select" ? "store_select" : r.form === "store_independent" ? "per_store" : "unknown";
+}
