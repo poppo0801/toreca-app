@@ -20,6 +20,8 @@ import { createCaseWorld, SEARCH_WORST_JPY } from "@/lib/server/agent/case-world
 import { SafePageFetcher, realGeocode } from "@/lib/server/agent/real-providers";
 import { createInvestigatorBrain } from "@/lib/agent/case-investigator/real-brain";
 import { nameSearchQueries } from "@/lib/agent/name-judge";
+import { EvidenceReuseFetcher, type EvidenceFetchStats } from "@/lib/agent/case-investigator/evidence-fetcher";
+import type { StoredEvidence } from "@/lib/collector/evidence";
 import { assessForm, assessInvestigation, assessRegion, nameObservations, targetOf, type Assessment, type ExistingLottery, type FormAssessment, type RegionVerdict } from "@/lib/agent/reeval-ai/assess";
 import type { FieldKey } from "@/lib/collector/fields";
 import { loadMasterEntries, resolveMasterAndLearn } from "@/lib/server/master-identity/alias-service";
@@ -37,7 +39,11 @@ export interface AiDeps {
   model: string;
   classify: ClassifyContext;
   /** o.maxCostJpy: この調査だけの費用の上限（全体の上限・1件の上限を超えない）。blockedHosts: これまでの調査で取得できなかった（ロボット制限・ログイン必須）ホスト */
-  investigate(target: CaseTarget, o?: { maxCostJpy?: number }): Promise<CaseInvestigationResult>;
+  investigate(target: CaseTarget, o?: { maxCostJpy?: number; evidence?: StoredEvidence[] }): Promise<CaseInvestigationResult>;
+  /** Stage 9Z: 取得部品の統計（保存済み原文の再利用・取得制限の再試行抑制・ホスト別の成否）。未接続なら無し */
+  fetchStats?(): EvidenceFetchStats;
+  /** Stage 9Z: 過去の取得失敗の記録（永続）を取得部品へ接続する */
+  attachLedger?(o: { knownBlocked?: (url: string) => boolean; onBlocked?: (url: string, message: string) => void }): void;
   blockedHosts?: Set<string>;
   research(store: StoreTarget, existingAddress: string | null): Promise<ResearchOutcome>;
   judge(lots: RelFacts[], pairs: [string, string][]): Promise<JudgeOutcome>;
@@ -61,6 +67,11 @@ export interface RealAiOptions {
   ledgerDir: string;
   clientFactory?: (apiKey: string) => Pick<Anthropic, "messages">;
   fetcher?: import("@/lib/agent/store-location/tools").PageFetcher;
+  /** Stage 9Z: 過去の取得失敗の記録（永続）から、再取得しない情報源か。取得制限と分かった失敗の記録先 */
+  knownBlocked?: (url: string) => boolean;
+  onBlocked?: (url: string, message: string) => void;
+  /** Stage 9Z: 取得部品の設定（改善前後の比較評価で suppress:false を指定する） */
+  fetcherOptions?: import("@/lib/agent/case-investigator/evidence-fetcher").EvidenceFetcherOptions;
 }
 
 /** 実AI・実Webの接続（関門を通ったときだけ）。上限は100円以下に固定（今回の検証の承認範囲）。AIは上限を変更できない */
@@ -88,7 +99,7 @@ export function realReevalDeps(o: RealAiOptions): { ok: true; deps: AiDeps; guar
     },
   });
   const raw = o.clientFactory ? o.clientFactory(g.apiKey) : new Anthropic({ apiKey: g.apiKey, maxRetries: 0, timeout: 60_000 });
-  return { ok: true, deps: assembleDeps({ raw, model: g.model, guard, capJpy: o.capJpy, perCaseJpy: o.perCaseJpy ?? 15, limits: g.limits, ...(o.fetcher ? { fetcher: o.fetcher } : {}) }), guard };
+  return { ok: true, deps: assembleDeps({ raw, model: g.model, guard, capJpy: o.capJpy, perCaseJpy: o.perCaseJpy ?? 15, limits: g.limits, ...(o.fetcher ? { fetcher: o.fetcher } : {}), ...(o.knownBlocked ? { knownBlocked: o.knownBlocked } : {}), ...(o.onBlocked ? { onBlocked: o.onBlocked } : {}), ...(o.fetcherOptions ? { fetcherOptions: o.fetcherOptions } : {}) }), guard };
 }
 
 /**
@@ -97,7 +108,7 @@ export function realReevalDeps(o: RealAiOptions): { ok: true; deps: AiDeps; guar
  *  - 上限: 呼び出し側が指定（バッチの残り予算）。環境の上限 REEVAL_AI_MAX_JPY（既定100円）を超えて指定できない。AIは変更できない
  *  - 費用の記録: 台帳ファイルは使わない（Vercelはファイルに書けない）。呼び出し側が、実行後に一括再評価のバッチへ積み上げる（通常収集の予算とは別枠）
  */
-export function prodReevalDeps(o: { env: Env; capJpy: number; perCaseJpy?: number; clientFactory?: (apiKey: string) => Pick<Anthropic, "messages">; fetcher?: import("@/lib/agent/store-location/tools").PageFetcher }): { ok: true; deps: AiDeps; guard: RealRunGuard } | { ok: false; reason: string } {
+export function prodReevalDeps(o: { env: Env; capJpy: number; perCaseJpy?: number; clientFactory?: (apiKey: string) => Pick<Anthropic, "messages">; fetcher?: import("@/lib/agent/store-location/tools").PageFetcher; knownBlocked?: (url: string) => boolean; onBlocked?: (url: string, message: string) => void }): { ok: true; deps: AiDeps; guard: RealRunGuard } | { ok: false; reason: string } {
   const e = o.env;
   if (e.REEVAL_AI !== "on") return { ok: false, reason: "一括再調査のAI実行が有効になっていません（REEVAL_AI=on が必要）" };
   const key = (e.REEVAL_ANTHROPIC_API_KEY ?? e.AUTONOMOUS_ANTHROPIC_API_KEY ?? e.ANTHROPIC_API_KEY)?.trim();
@@ -109,13 +120,15 @@ export function prodReevalDeps(o: { env: Env; capJpy: number; perCaseJpy?: numbe
   const guard = new RealRunGuard({ capJpy: o.capJpy, perCaseJpy: perCase, model, spentBefore: 0 });
   const raw = o.clientFactory ? o.clientFactory(key) : new Anthropic({ apiKey: key, maxRetries: 0, timeout: 60_000 });
   const limits: AgentLimits = { ...DEFAULT_LIMITS, maxCostJpy: perCase, maxMs: 120_000 };
-  return { ok: true, deps: assembleDeps({ raw, model, guard, capJpy: o.capJpy, perCaseJpy: perCase, limits, ...(o.fetcher ? { fetcher: o.fetcher } : {}) }), guard };
+  return { ok: true, deps: assembleDeps({ raw, model, guard, capJpy: o.capJpy, perCaseJpy: perCase, limits, ...(o.fetcher ? { fetcher: o.fetcher } : {}), ...(o.knownBlocked ? { knownBlocked: o.knownBlocked } : {}), ...(o.onBlocked ? { onBlocked: o.onBlocked } : {}) }), guard };
 }
 
-function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guard: RealRunGuard; capJpy: number; perCaseJpy: number; limits: AgentLimits; fetcher?: import("@/lib/agent/store-location/tools").PageFetcher }): AiDeps {
+function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guard: RealRunGuard; capJpy: number; perCaseJpy: number; limits: AgentLimits; fetcher?: import("@/lib/agent/store-location/tools").PageFetcher; knownBlocked?: (url: string) => boolean; onBlocked?: (url: string, message: string) => void; fetcherOptions?: import("@/lib/agent/case-investigator/evidence-fetcher").EvidenceFetcherOptions }): AiDeps {
   const { raw, model, guard } = a;
   const wrapped = guard.wrapClient(raw, "agent");
-  const { world } = createCaseWorld({ search: new AnthropicWebSearch(raw as Anthropic, model), guard, ...(a.fetcher ? { fetcher: a.fetcher } : {}) });
+  // Stage 9Z: 取得部品を、保存済み原文の再利用・取得制限の再試行抑制つきの包みにする（取得の実体は従来のまま）
+  const evFetcher = new EvidenceReuseFetcher(a.fetcher ?? new SafePageFetcher(), { ...(a.knownBlocked ? { knownBlocked: a.knownBlocked } : {}), ...(a.onBlocked ? { onBlocked: a.onBlocked } : {}), ...(a.fetcherOptions ?? {}) });
+  const { world } = createCaseWorld({ search: new AnthropicWebSearch(raw as Anthropic, model), guard, fetcher: evFetcher });
   const llm = createInvestigatorBrain(wrapped, model);
   const blocked = new Set<string>();
   const remaining = () => Math.min(a.perCaseJpy, Math.max(0, a.capJpy - guard.spentJpy));
@@ -140,8 +153,11 @@ function assembleDeps(a: { raw: Pick<Anthropic, "messages">; model: string; guar
     model,
     classify: EMPTY_CLASSIFY_CTX,
     blockedHosts: blocked,
+    fetchStats: () => evFetcher.stats,
+    attachLedger: (o) => evFetcher.setOptions(o),
     investigate: async (target, o) => {
       guard.startCase(target.id);
+      evFetcher.setStored(o?.evidence ?? []);
       const c = controls();
       const r = await investigateCase({ llm, world, target, controls: o?.maxCostJpy ? { ...c, limits: { ...c.limits, maxCostJpy: Math.min(c.limits.maxCostJpy, o.maxCostJpy) } } : c, classify: EMPTY_CLASSIFY_CTX });
       // 取得できなかった情報源のホストを覚える（回避はしない。次の調査の費用の判断に使う）
@@ -194,7 +210,10 @@ export async function reinvestigateLottery(deps: AiDeps, l: ExistingLottery, now
     // （調査自体は行う＝別の情報源を探すかはAIが決める。実測（Stage 9X）: こうした43件で、別の情報源から補えたものは0件・費用は1件 約6.7円）
     const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
     const onlyBlocked = l.sourceUrls.length > 0 && l.sourceUrls.every((u) => deps.blockedHosts?.has(hostOf(u)));
-    result = await deps.investigate(targetOf(l, (u) => classifyCaseSource(u, deps.classify).kind), onlyBlocked ? { maxCostJpy: BLOCKED_SOURCE_BUDGET_JPY } : undefined);
+    // 初回収集で保存した原文があれば、取得制限のURLでも原文で検証できるため、費用を絞らない
+    const hasStored = (l.storedEvidence?.length ?? 0) > 0;
+    const opts = { ...(onlyBlocked && !hasStored ? { maxCostJpy: BLOCKED_SOURCE_BUDGET_JPY } : {}), ...(hasStored ? { evidence: l.storedEvidence } : {}) };
+    result = await deps.investigate(targetOf(l, (u) => classifyCaseSource(u, deps.classify).kind), Object.keys(opts).length ? opts : undefined);
   } catch (e) {
     return { aiState: "failed", verdict: "inconclusive", summary: { error: e instanceof Error ? e.message.slice(0, 160) : "調査に失敗しました" }, costJpy: deps.spentJpy() - before, result: null };
   }
