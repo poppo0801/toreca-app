@@ -120,9 +120,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 5I: 応募操作の権限と発表期間
     expect((await loadAppData(u1)).lotteries.find((l) => l.id === range)!.resultEndDate).toBeUndefined();
   });
 
-  it("開始日が不明のときの最終日、開始日より前の最終日は保存できない", async () => {
+  it("開始日が不明のときは終了日だけ保存できる（Stage 9Y）。開始日より前の最終日は保存できない", async () => {
     const noStart = await saveLottery(u1, hid, null, base({ resultEndDate: "2099-02-10" }), profA);
-    expect(noStart.ok).toBe(false);
+    expect(noStart.ok).toBe(true);
     const bad = await saveLottery(u1, hid, null, base({ resultDate: { precision: "date_only", date: "2099-02-07", time: "" }, resultEndDate: "2099-02-01" }), profA);
     expect(bad.ok).toBe(false);
   });

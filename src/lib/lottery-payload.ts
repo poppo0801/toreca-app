@@ -15,8 +15,8 @@ export function lotteryRow(input: z.output<typeof lotteryInputSchema>, actor: st
     apply_start_precision: s.precision, apply_start_date: s.date, apply_start_at: s.at,
     apply_deadline_precision: d.precision, apply_deadline_date: d.date, apply_deadline_at: d.at,
     result_precision: r.precision, result_date: r.date, result_at: r.at,
-    // 発表の最終日。開始が不明なら期間にならないので保存しない
-    result_end_date: r.precision === "unknown" || !input.resultEndDate ? null : input.resultEndDate,
+    // 発表の最終日。開始が不明でも、終了日だけを保存できる（開始日の推定値は保存しない）
+    result_end_date: input.resultEndDate || null,
     procedure_start_precision: ps.precision, procedure_start_date: ps.date, procedure_start_at: ps.at,
     procedure_deadline_precision: p.precision, procedure_deadline_date: p.date, procedure_deadline_at: p.at,
     procedure_split: input.procedureSplit,

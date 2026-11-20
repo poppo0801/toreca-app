@@ -168,7 +168,24 @@ export function deadlineBadge(value: FlexibleDate, now: Date): DeadlineBadge | n
 interface ResultPeriod {
   resultDate: FlexibleDate;
   resultEndDate?: string;
+  /** 発表開始が未登録のとき、発表期間中の判定にだけ使う（応募締切の翌日を内部的な開始日とみなす） */
+  applyDeadline?: FlexibleDate;
 }
+
+/**
+ * 発表開始が未登録で、発表終了日と応募締切日が登録されているときだけ、応募締切日の翌日を「内部的な発表開始日」とする（Stage 9Y）。
+ * 発表期間中かどうかの判定にだけ使う。確定情報ではないので、保存・画面表示・通知の根拠には使わない。応募締切日も不明なら推定しない（null）。
+ */
+export function inferredResultStartDay(l: ResultPeriod): string | null {
+  if (resultStartDay(l) || !l.resultEndDate || !l.applyDeadline) return null;
+  const d = ymdOfFlexible(l.applyDeadline);
+  if (!d) return null;
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+/** 発表開始が未登録で、終了日だけが登録されている */
+export const hasResultEndOnly = (l: ResultPeriod): boolean => !resultStartDay(l) && !!l.resultEndDate;
 
 /** 発表開始の暦日(JST)。不明は null */
 export function resultStartDay(l: ResultPeriod): string | null {
@@ -181,7 +198,7 @@ export function resultStartDay(l: ResultPeriod): string | null {
 /** 発表最終日(JST)。期間指定がなければ開始日（単一日の発表）。不明は null */
 export function resultEndDay(l: ResultPeriod): string | null {
   const s = resultStartDay(l);
-  if (!s) return null;
+  if (!s) return l.resultEndDate || null; // 終了日だけの登録（開始は不明）
   return l.resultEndDate && l.resultEndDate > s ? l.resultEndDate : s;
 }
 
@@ -195,12 +212,19 @@ export function hasResultPeriod(l: ResultPeriod): boolean {
  * 単一の発表日は従来どおり（日時なら時刻を過ぎたら、日付のみなら当日が終わったら）。
  */
 export function isResultFinished(l: ResultPeriod, now: Date): boolean | null {
+  if (hasResultEndOnly(l)) return jstDateString(now) > l.resultEndDate!;
   if (!hasResultPeriod(l)) return isPast(l.resultDate, now);
   return jstDateString(now) > resultEndDay(l)!;
 }
 
 /** 発表期間の途中か（開始済みで最終日を過ぎていない） */
 export function isResultInPeriod(l: ResultPeriod, now: Date): boolean {
+  if (hasResultEndOnly(l)) {
+    // 開始が未登録: 応募締切の翌日（内部の推定）から終了日までを「発表期間中」とみなす。推定できなければ判定しない
+    const inferred = inferredResultStartDay(l);
+    const today = jstDateString(now);
+    return !!inferred && inferred <= l.resultEndDate! && today >= inferred && today <= l.resultEndDate!;
+  }
   if (!hasResultPeriod(l)) return false;
   const today = jstDateString(now);
   const s = l.resultDate.precision === "date_time" ? new Date(l.resultDate.at).getTime() <= now.getTime() : today >= resultStartDay(l)!;
@@ -222,7 +246,7 @@ export function formatMonthDay(ymd: string, now: Date): string {
 /** 発表日の短い表記。単一「11/7」「11/7 12:00」、期間「11/7〜11/10」、不明「—」。今年以外は年つき */
 export function formatResultShort(l: ResultPeriod, now: Date): string {
   const s = resultStartDay(l);
-  if (!s) return "—";
+  if (!s) return l.resultEndDate ? `〜${formatMonthDay(l.resultEndDate, now)}` : "—";
   const v = l.resultDate;
   const time = v.precision === "date_time" ? ` ${formatShort(v).split(" ")[1]}` : "";
   const start = `${formatMonthDay(s, now)}${time}`;
@@ -276,7 +300,7 @@ export function formatPeriodMdW(start: FlexibleDate, end: FlexibleDate, now: Dat
 /** 発表日（期間なら「11/3(火)〜11/5(木)」）。不明は null */
 export function formatResultMdW(l: ResultPeriod, now: Date): string | null {
   const s = resultStartDay(l);
-  if (!s) return null;
+  if (!s) return l.resultEndDate ? `〜${formatMdW(l.resultEndDate, now)}` : null;
   return hasResultPeriod(l) ? `${formatMdW(s, now)}〜${formatMdW(resultEndDay(l)!, now)}` : formatMdW(s, now);
 }
 

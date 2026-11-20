@@ -487,7 +487,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                     </>
                   ),
                 },
-                { key: "result", label: "当選発表", body: lottery.resultDate.precision === "unknown" ? DASH : hasResultPeriod(lottery) ? <>{nb(`${formatPlain(lottery.resultDate)}〜`)}{nb(formatMonthDay(lottery.resultEndDate!, now))}</> : nb(formatPlain(lottery.resultDate)) },
+                { key: "result", label: "当選発表", body: lottery.resultDate.precision === "unknown" ? (lottery.resultEndDate ? nb(`〜${formatMonthDay(lottery.resultEndDate, now)}`) : DASH) : hasResultPeriod(lottery) ? <>{nb(`${formatPlain(lottery.resultDate)}〜`)}{nb(formatMonthDay(lottery.resultEndDate!, now))}</> : nb(formatPlain(lottery.resultDate)) },
                 { key: "procedure", label: lottery.procedureSplit ? "購入期間" : "購入・受取期間", body: periodText(lottery.procedureStart, lottery.procedureDeadline) },
                 ...(lottery.procedureSplit ? [{ key: "receive", label: "受取期間", body: periodText(lottery.receiveStart ?? { precision: "unknown" }, lottery.receiveDeadline ?? { precision: "unknown" }) }] : []),
                 ...(kindOf(lottery) !== "normal"
