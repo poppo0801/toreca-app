@@ -5,7 +5,7 @@
 
 ## 0. 最初に必ず読むもの
 1. このファイル全文。
-2. `docs/AI_AUTONOMY_PRINCIPLES.md`、`docs/AI_REDESIGN_SPEC.md`、`docs/AI_REDESIGN_DECISION_HISTORY.md`。
+2. `docs/AI_AUTONOMY_PRINCIPLES.md`、`docs/AI_REDESIGN_SPEC.md`、`docs/AI_REDESIGN_DECISION_HISTORY.md`、**`docs/AI_REDESIGN_PRESTART_REVIEW.md`（開始前の横断照合・矛盾の是正項目）**。
 3. 既存の `CLAUDE.md`、`docs/SPEC_GOVERNANCE.md`、`docs/CURRENT_SPEC.md`、`docs/DECISION_REGISTER.md`、`docs/ACTIVE_ROADMAP.md`、`docs/PRODUCT_VISION.md`、`docs/UI_UX_GUIDELINES.md`、`docs/RELEASE_FLOW.md`、`docs/DEVELOPMENT_LOG.md`、`docs/SPEC_ALIGNMENT.md` の存在と実内容を確認。
 4. Stage 10A/10B、9X/9Y/9Z等の報告書を必要箇所だけ参照。古いStage文書を現行仕様として無批判に採用しない。
 5. 既存リポジトリ内に `AI_AUTONOMY_PRINCIPLES.md` がすでにある場合は内容を比較し、ユーザー合意事項を失わず統合する。
@@ -23,6 +23,7 @@
 - 既存の設計原則文書がリポジトリに反映済みかを確認する。未反映・矛盾があれば、提供された合意内容と整合させる。
 
 ### B. 正本文書の再構築
+- **開始前レビューの是正表を全項目確認し、対応済み・未対応・判断待ちを報告書に記録する。原本の歴史的記述と最新の正式決定を混同しない。**
 - `docs/AI_REDESIGN_SPEC.md` を正式な**目標仕様**として整備。未実装を実装済みと書かない。
 - `docs/AI_AUTONOMY_PRINCIPLES.md` の理念を保持し、重複・矛盾を整理。理念を削って旧実装優先にしない。
 - `docs/CURRENT_SPEC.md` は現時点で実装・提供中の機能と、将来目標を明確に区別する。現状と将来の混同を防ぐ。
