@@ -112,6 +112,7 @@
 | 11-19 | Stage 9Y: 編集画面の情報源URLを横並び・1行省略（ほかN件で展開）、「AIで情報を補完」に文書・URL入力を追加（既存の `/api/lottery-extract` を再利用）、当選発表は終了日だけでも登録可（応募締切の翌日を内部の開始日とみなすのは「発表期間中」の判定だけ。保存・表示・通知には使わない。マイグレーション107は制約の緩和のみ） | 編集の手間削減・既存情報を自動で上書きしない | `docs/reports/2026-11-19-9y-edit-screen.md` |
 | 11-20 | Stage 9Z: 初回収集で取得した原文を last_good.evidence に保存（AI抽出結果とは別・URL/取得日時/取得方法つき）し、再調査で再利用。取得制限の記録（永続）と接続して再取得を抑制。AI解析成功時に内部記録が落ちる不具合も修正。実AI評価: 取得不能でも根拠つき項目が0→29（基準31）・費用-10%・無駄アクセス-91%・混同0。保存のない過去データは検証件数が増えない（費用のみ-29%） | 確認できた情報の蓄積と再利用 | `docs/reports/2026-11-20-9z-evidence-reuse.md` |
 | 11-20 | 長期基本方針 `docs/AI_AUTONOMY_PRINCIPLES.md` を採用・登録（自律型AIへの移行・継続改善の判断基準。慎重さと大胆さの両立・既存資産の再利用・実測に基づく移行・蓄積と再利用・評価観点）。CLAUDE.md冒頭に必読指示、PRODUCT_VISION・CURRENT_SPEC・SPEC_GOVERNANCE・DECISION_REGISTER（V11）に参照を追加。古いStage記述との衝突は最新のユーザー決定を優先。**文書のみ（アプリ・DB・AI処理は不変）** | 自律型AIへの移行の長期的な判断基準を、毎回の作業で参照される形で正本化 | `docs/reports/2026-11-20-ai-autonomy-principles-registration.md` |
+| 11-20 | Stage 10C（文書のみ）: AI再設計の目標仕様を正本化（`AI_REDESIGN_SPEC.md`）、現行実装との対応表（`AI_REDESIGN_IMPLEMENTATION_MAP.md`）、受入・比較計画、Stage指示書の運用（`docs/implementation/`）、決定V12〜V19、ロードマップ10C〜10H。`CLAUDE.md` を短い運用入口に再構築し、旧版を `docs/archive/` に保存 | 古い長大なStage記述が新設計・現状と矛盾していた（10B）。合意済み設計を誤読されない形で参照可能にする | `docs/reports/2026-11-20-stage10c-design-baseline.md` |
 
 ## 6. DB 構造の重要な変更（マイグレーション94本。主なもの）
 - Stage 1: 世帯・プロフィール・マスター・監査・RLS（複合 FK `(id, household_id)`）。Stage 2〜3: 抽選・応募・購入・スルー規則・応募制限。Stage 3.5: 複数商品・仮登録マスター。

@@ -3,12 +3,13 @@
 更新日: 2026-11-19 / 状態: 運用中（PR #7で採用）
 
 ## 目的と役割
-- ユーザー: 要望と仕様の最終決定。Claude Codeへの実装指示を直接渡す。
+- ユーザー: 要望と仕様の最終決定。**大規模なStageの実装指示は、ChatGPTがGit管理のMarkdown（`docs/implementation/STAGE_XX.md`）としてPRで共有し（正本）、ユーザーがClaude Codeへ短い実行指示を送る**。小規模な修正は従来どおりテキストで直接指示できる。**PRの作成・マージは実行開始を意味しない**（Claude Codeの起動・実行は別途の指示）。運用は `docs/implementation/README.md`。
 - ChatGPT: 要望の整理、既存仕様との整合確認、採用された仕様の文書更新案をGitHubのPRとして作成。コード変更や本番反映は原則担当しない。
 - Claude Code: 承認・反映された仕様を参照し、コード実装・テスト・変更履歴の更新を行う。
 - GitHubの `main` にマージされた設計文書を仕様の正本とする。会話・メモリ・個別Stage報告は参照資料であり、無条件に正本へ昇格させない。
 
 ## 現行仕様の入口
+- `docs/AI_REDESIGN_SPEC.md`: **AI再設計の目標仕様**（ユーザー合意済み・未実装）。現行実装との対応は `docs/AI_REDESIGN_IMPLEMENTATION_MAP.md`、評価は `docs/AI_REDESIGN_ACCEPTANCE_PLAN.md`、Stage指示は `docs/implementation/`。
 - `docs/AI_AUTONOMY_PRINCIPLES.md`: **長期基本方針**（2026-11-20・ユーザー採用）。自律型AIへの移行・継続改善の判断基準。関連作業・設計提案の前に必ず確認する。
 - `docs/CURRENT_SPEC.md`: 参照索引と採用済み方針。
 - `docs/DECISION_REGISTER.md`: 主要決定の索引。
@@ -44,6 +45,8 @@
 - 報告書作成はリリース承認の代替ではない。既存の `docs/RELEASE_FLOW.md` に従う。
 
 ## 衝突した場合の判断
+- **優先順位（再掲・Stage 10C）**: ①ユーザーの最新の明示決定 → ②正本仕様・決定記録（`docs/AI_AUTONOMY_PRINCIPLES.md`・`docs/AI_REDESIGN_SPEC.md`・`docs/DECISION_REGISTER.md`・本書）→ ③ビジョン・過去設計・Stage報告・旧資料 → ④コード（現状把握の根拠。仕様ではない）。**コードの現状を理由に、合意した将来設計を取り消さない**。
+- 文書のみの変更（例: Stage 10C）のPRのマージと、アプリ本番反映を伴うPR（10G以降）を混同しない。本番反映は `docs/RELEASE_FLOW.md`（計画→承認→バックアップ→適用→検証）に従い、10G以降も既存の承認・バックアップ・復元・CIを維持する。
 - **古いStageの記述・個別Stage報告・旧資料（`CLAUDE.md` 内のStage記述、`implementation-plan.md`、`docs/stage*.md` 等）が、`docs/AI_AUTONOMY_PRINCIPLES.md` やユーザーの最新の明示決定と衝突した場合は、最新のユーザー決定を優先する。** 古い記述は履歴として残し（無言で消さない）、現行の仕様・進捗・本番状態の根拠にしない。
 - 既存の実装・暫定ルールを維持すること自体を理由に、方針に沿う変更を止めない。一方、実績のある機能・データ・利用者の判断・応募/購入等の履歴・安全対策は、評価と復元手段なしに失わない（どちらにも偏らない）。
 - 設計・実装案には、方針との整合、既存資産の再利用、機能後退の可能性、費用・安全・保存への影響、検証方法を明示する。
