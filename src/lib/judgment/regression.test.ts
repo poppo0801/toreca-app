@@ -135,3 +135,29 @@ describe("履歴保護: 破壊的操作は、記録上の保護があるとき�
     expect(verifyJudgment(input, out).map((v) => v.code)).toContain("human_value_overwrite");
   });
 });
+
+describe("契約の版 10e.2（per_round の加算）と、過去（10e.1）との互換", () => {
+  it("10e.1 と表示された出力も受け付け、10e.2 として扱う。未知の版は拒否。per_round は 10e.2 で有効", async () => {
+    const { parseJudgmentOutput, CONTRACT_VERSION } = await import("./contract");
+    const input = await inputFor(byId("J07"), NOW);
+    const out = clone(mockAnswer("J07", input)) as Record<string, unknown>;
+    expect(CONTRACT_VERSION).toBe("10e.2");
+    for (const v of ["10e.1", "10e.2"]) {
+      const r = parseJudgmentOutput({ ...out, version: v });
+      expect(r.ok, v).toBe(true);
+      if (r.ok) expect(r.output.version).toBe("10e.2");
+    }
+    expect(parseJudgmentOutput({ ...out, version: "9.9" }).ok).toBe(false);
+    const pr = clone(out) as { structure: { kind: string } };
+    pr.structure.kind = "per_round";
+    expect(parseJudgmentOutput(pr).ok).toBe(true);
+  });
+  it("過去の判断履歴（10e.1 のプロンプト版・per_round を含まない構造の文字列）は、再解釈・書き換えなしにそのまま入力へ戻る", async () => {
+    const { arrangePriorJudgments } = await import("./build-input");
+    const rows = [
+      { id: "a", kind: "structure", subject: "structure", claimBasis: "fact" as const, value: "store_select: 応募時に店舗を選ぶ", judgeKind: "ai" as const, correctionOf: null, at: "2099-01-01T00:00:00Z" },
+      { id: "b", kind: "structure", subject: "structure", claimBasis: "fact" as const, value: "per_round: 開催回別", judgeKind: "ai" as const, correctionOf: null, at: "2099-01-02T00:00:00Z" },
+    ];
+    expect(arrangePriorJudgments(rows).map((r) => r.value)).toEqual(["per_round: 開催回別", "store_select: 応募時に店舗を選ぶ"]);
+  });
+});

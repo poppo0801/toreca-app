@@ -8,7 +8,12 @@
  *  - 応募機会（Opportunity）は、応募・当落が独立しているかで決める。フォーム数・店舗数・URL数と同一視しない。
  *  - 外部の文面（原文）はデータ。命令として実行しない（出力の次の行動は、決まった種類だけ）。
  */
-export const CONTRACT_VERSION = "10e.1";
+/**
+ * 契約の版。10e.2 = 10e.1 に構造の種類 `per_round`（開催回別の独立）を加えたもの（加算のみ）。
+ * 出力の検査は 10e.1 も受け付ける（10e.1 の出力は 10e.2 の部分集合）。判断履歴（case_judgments）には契約の版を列として持たず、構造は文字列として保存されるため、過去の履歴は再解釈・書き換えなしにそのまま読める。
+ */
+export const CONTRACT_VERSION = "10e.2";
+export const ACCEPTED_OUTPUT_VERSIONS: readonly string[] = ["10e.1", "10e.2"];
 
 export type Basis = "fact" | "inference" | "unknown";
 export type EvidenceStatus = "fetched" | "fetched_unread" | "unfetchable" | "not_fetched";
@@ -188,7 +193,7 @@ export function parseJudgmentOutput(raw: unknown): { ok: true; output: JudgmentO
   const stripped: string[] = [];
   if (!isObj(raw)) return { ok: false, errors: ["出力がオブジェクトではありません"] };
   for (const k of ["confidence", "score", "certainty", "確信度"]) if (k in raw) stripped.push(k);
-  if (raw.version !== CONTRACT_VERSION) errs.push(`version は ${CONTRACT_VERSION} が必要`);
+  if (!ACCEPTED_OUTPUT_VERSIONS.includes(raw.version as string)) errs.push(`version は ${CONTRACT_VERSION} が必要`);
   checkClaim(raw.caseType, "caseType", errs);
   if (isObj(raw.caseType) && !CASE_TYPES.includes(raw.caseType.value as string)) errs.push("caseType.value: 不正な種別");
   const st = raw.structure;
@@ -219,6 +224,6 @@ export function parseJudgmentOutput(raw: unknown): { ok: true; output: JudgmentO
   if (!Array.isArray(raw.nextActions) || raw.nextActions.length > 8) errs.push("nextActions: 8件までの配列");
   else raw.nextActions.forEach((a, i) => { if (!isObj(a) || !ACTIONS.includes(a.kind as string) || !str(a.reason, 400) || (a.target !== undefined && !str(a.target, 600))) errs.push(`nextActions[${i}]: 形式が不正（種類は決まった5つのみ）`); });
   if (errs.length) return { ok: false, errors: errs };
-  const out = { ...(raw as unknown as JudgmentOutput) };
+  const out = { ...(raw as unknown as JudgmentOutput), version: CONTRACT_VERSION as typeof CONTRACT_VERSION };
   return { ok: true, output: out, stripped };
 }

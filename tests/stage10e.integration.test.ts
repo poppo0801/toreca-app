@@ -118,6 +118,16 @@ it("マイグレーション108未適用の互換: 実PostgRESTの『関数が�
     }
   });
 
+  it("契約版の互換: 10e.1 時点で保存された判断履歴（prompt_version=10e.1-draft）を、10e.2 の入力の組み立てがそのまま読み出す（書き換えない）", async () => {
+    const cs = (await createCase(u1, { householdId: hid })) as { ok: true; id: string };
+    const rec = (await recordJudgment(u1, { householdId: hid, caseId: cs.id, kind: "structure", subject: "structure", claimBasis: "fact", judgeKind: "ai", value: "store_select: 旧版の判断", promptVersion: "10e.1-draft", modelId: "scripted-test-double" } as never)) as { ok: boolean; id?: string };
+    expect(rec.ok).toBe(true);
+    const inp = await buildJudgmentInput({ caseId: cs.id, title: "t", now: new Date(NOW), evidence: [], related: [], masters: [], failures: [], regionPrefectures: [], history: historyFromDb(u1, hid) });
+    expect(inp.priorJudgments.map((p) => p.value)).toContain("store_select: 旧版の判断");
+    const row = (await u1.from("case_judgments" as never).select("prompt_version,value").eq("case_id", cs.id)).data as { prompt_version: string; value: string }[];
+    expect(row[0].prompt_version).toBe("10e.1-draft"); // 過去の履歴は再解釈・書き換えされない
+  });
+
   it("エンジンの判断追記が保護された抽選に触れない: 検証で不合格の提案（保護された抽選の削除）は履歴に『不採用』として残り、抽選は変わらない", async () => {
     const lot = await mkLottery();
     await mkApplication(u1, hid, chain, lot);
