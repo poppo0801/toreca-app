@@ -1,0 +1,80 @@
+{
+ "at": "2026-11-20T01:03:12.373Z",
+ "before": {
+  "targets": 12,
+  "verifiedTargets": 0,
+  "supportedFields": 0,
+  "confirmedFields": 0,
+  "fills": 0,
+  "conflicts": 0,
+  "confusions": 0,
+  "different_lottery_isolated": 5,
+  "costJpy": 67.61,
+  "costPerTargetJpy": 5.63,
+  "blockedNetworkHits": 22,
+  "reused": 0,
+  "suppressed": 0
+ },
+ "after": {
+  "targets": 12,
+  "verifiedTargets": 12,
+  "supportedFields": 29,
+  "confirmedFields": 2,
+  "fills": 2,
+  "conflicts": 1,
+  "confusions": 0,
+  "different_lottery_isolated": 0,
+  "costJpy": 60.51,
+  "costPerTargetJpy": 5.04,
+  "blockedNetworkHits": 2,
+  "reused": 13,
+  "suppressed": 4
+ },
+ "reference9xLive": {
+  "targets": 12,
+  "verifiedTargets": 12,
+  "supportedFields": 31,
+  "fills": 1,
+  "costJpy": 61.71
+ },
+ "xonly": {
+  "targets": 7,
+  "verifiedTargets": 0,
+  "supportedFields": 0,
+  "confirmedFields": 0,
+  "fills": 0,
+  "conflicts": 0,
+  "confusions": 0,
+  "different_lottery_isolated": 1,
+  "costJpy": 33.2,
+  "costPerTargetJpy": 4.74,
+  "blockedNetworkHits": 0,
+  "reused": 0,
+  "suppressed": 10
+ },
+ "xonlyReference9x": {
+  "targets": 7,
+  "verifiedTargets": 1,
+  "supportedFields": 2,
+  "fills": 0,
+  "costJpy": 46.78
+ },
+ "replay9x": {
+  "targets9x": 83,
+  "blockedAccesses9x": 75,
+  "blockedAccessesWithInRunSuppression": 6,
+  "blockedAccessesWithPersistedLedger": 0,
+  "distinctBlockedHosts": [
+   "oretan.membercard.jp",
+   "pokemon.fukufukutoreka.com",
+   "shoplottery.e-starbox.com",
+   "t.co",
+   "torecolo.jp",
+   "x.com"
+  ]
+ },
+ "reuseRate": {
+  "after": 1,
+  "note": "保存済み原文が使えた対象の割合。過去データ（原文の保存なし）は0%。収集が保存を始めた後に蓄積される"
+ }
+}

@@ -1,3 +1,6 @@
+import type { StoredEvidence } from "@/lib/collector/evidence";
+import { recordHardSource } from "@/lib/server/collector/sources-health";
+import { loadBlockedHosts, loadStoredEvidence } from "@/lib/server/agent/stored-evidence";
 import "server-only";
 import type { NameQuery } from "@/lib/agent/name-judge";
 import type { RelFacts } from "@/lib/agent/relation-judge";
@@ -15,6 +18,8 @@ import { loadMasterEntries } from "@/lib/server/master-identity/alias-service";
 const any = (db: Db) => db as any;
 
 export interface AiRunReport {
+  /** Stage 9Z: 取得部品の統計（保存済み原文の再利用・取得制限の再試行抑制・ホスト別の成否） */
+  fetch?: import("@/lib/agent/case-investigator/evidence-fetcher").EvidenceFetchStats;
   units: number;
   investigated: number;
   insufficient: number;
@@ -75,6 +80,11 @@ export async function runAiReevaluation(db: Db, householdId: string, actor: stri
     a.from("lottery_items").select("lottery_id,product_id").in("lottery_id", ids),
     a.from("chain_aliases").select("chain_id,alias").in("chain_id", chainIds),
   ]);
+  // Stage 9Z: 初回収集で保存した原文（無ければ保存なし）と、過去の取得制限の記録（読み取りのみ）。取得部品へ接続して、再取得の無駄を省く
+  const storedMap = await loadStoredEvidence(db, ids).catch(() => new Map<string, StoredEvidence[]>());
+  const blockedHosts = await loadBlockedHosts(db, householdId, now).catch(() => new Set<string>());
+  const hostKey = (u: string) => { try { return new URL(u).hostname.replace(/^www./, "").toLowerCase(); } catch { return ""; } };
+  deps.attachLedger?.({ knownBlocked: (u) => blockedHosts.has(hostKey(u)), onBlocked: (u, m) => { void recordHardSource(db, householdId, now, { url: u, failKind: "robots" }); void m; } });
   const chainName = new Map(((chains ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]));
   const storeRow = new Map(((stores ?? []) as { id: string; name: string; prefecture: string; chain_id: string; address_optional: string }[]).map((s) => [s.id, s]));
   const liRows = (lis ?? []) as { lottery_id: string; product_id: string }[];
@@ -97,6 +107,7 @@ export async function runAiReevaluation(db: Db, householdId: string, actor: stri
       resultDate: pick(l.result_date, l.result_at),
       sourceUrls: (l.source_urls ?? []).slice(0, 5),
       humanFields,
+      ...(storedMap.get(id)?.length ? { storedEvidence: storedMap.get(id) } : {}),
     };
   };
   const save = async (it: Item, u: { aiState: string; verdict: string; summary: Record<string, unknown>; costJpy: number }) => {
@@ -285,5 +296,7 @@ export async function runAiReevaluation(db: Db, householdId: string, actor: stri
   report.costJpy = Math.round((deps.spentJpy() - startSpent) * 100) / 100;
   // 一括再評価の費用を、バッチに別枠で記録する（通常収集の予算とは別）
   await a.from("master_reeval_batches").update({ params: { ...(batch.params as object), costJpy: Math.round((priorCost + report.costJpy) * 100) / 100, costCapJpy: deps.capJpy + priorCost, lastAiRunAt: new Date().toISOString() } }).eq("id", batchId);
+  const fs9z = deps.fetchStats?.();
+  if (fs9z) report.fetch = fs9z;
   return report;
 }

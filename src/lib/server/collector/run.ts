@@ -1,3 +1,4 @@
+import { buildEvidence, evidenceFromLastGood, type StoredEvidence } from "@/lib/collector/evidence";
 import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -215,6 +216,9 @@ interface QueuedPayload {
     post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; /** 投稿者の固定ID（アカウント名が変わっても同じ店舗として扱うため） */ authorId?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
     /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
     imageStats?: ImageStats;
+    /** Stage 9Z: 解析時に実際に取得できた本文（保存用。AIの抽出結果ではない原文。解析後に last_good.evidence へ保存する） */
+    evidenceText?: string;
+    evidenceVia?: "x_oembed" | "web_fetch";
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
     relevanceBasis?: string;
     /** 利用者のXブックマーク由来（Stage 6I。収集元ではなく、利用者が選んだ投稿） */
@@ -538,11 +542,32 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
         q.imageStats = { found: r.imagesFound, fetched: r.imagesUsed, sent: r.images.length };
         q.xVia = r.via;
         if (r.post) q.post = r.post;
+        else if (r.text) {
+          q.evidenceText = r.text;
+          q.evidenceVia = "x_oembed";
+        }
         if (uni.judgment) return { ...r, text: withCtx(r.text, (r.post as { profile?: XProfile } | undefined)?.profile, r.post?.username, r.post?.quoted) };
       }
       return r;
     };
-    result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: deps.fetchPage, fetchX: deps.fetchOembed, fetchXRich });
+    // 解析で実際に取得できたページの本文を、原文として保存するために控える（取得の挙動は変えない）
+    const rawFetch = deps.fetchPage;
+    const fetchPageCap: typeof deps.fetchPage = rawFetch && (async (u) => {
+      const r = await rawFetch(u);
+      if (r.ok && !q.evidenceText) {
+        try {
+          const t = extractPageText(r.body, r.finalUrl).text;
+          if (t.trim().length >= 8) {
+            q.evidenceText = t;
+            q.evidenceVia = "web_fetch";
+          }
+        } catch {
+          /* 保存用の控えに失敗しても解析は続ける */
+        }
+      }
+      return r;
+    });
+    result = await runExtraction({ kind: q.kind === "x_oembed" ? "x_url" : "url", url: q.url }, { extractor, now: deps.now, fetchPage: fetchPageCap, fetchX: deps.fetchOembed, fetchXRich });
     // 取得が制限された外部ページ（ロボット制限）は回避しない。代わりに、取得できたまとめサイトの一覧の表示（二次情報）から読み取る
     if (!result.ok && result.code === "fetch_failed" && q.kind === "web_page" && ["robots", "js_render"].includes(classifyFailure(result.message).kind) && listText.length >= 25) {
       const alt = await extractFromRequest({ kind: "text", text: listText, sourceUrl: q.url, now: deps.now }, "text", extractor, deps.now, ["取得が制限されたページのため、まとめサイトの一覧の表示（二次情報）から読み取りました"]);
@@ -624,6 +649,20 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
   await db.from("stores").update({ prefecture: pref }).eq("id", data.store_id).eq("prefecture", "").neq("sales_kind", "online_only");
 }
 
+/**
+ * Stage 9Z: 初回収集で取得できた原文（投稿本文・一覧のカード）を、last_good.evidence に保存する（AIの抽出結果とは別。取得日時・取得方法つき）。
+ * 取得できなかった・原文が無い場合は何も足さない（保存済みとして扱わない）。保存に失敗しても収集は止めない。
+ */
+function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null): { evidence?: StoredEvidence } {
+  try {
+    const st = q.imageStats;
+    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
+    return ev ? { evidence: ev } : prior ? { evidence: prior } : {};
+  } catch {
+    return prior ? { evidence: prior } : {};
+  }
+}
+
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
 async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = [], userRules: UserRule[] = []): Promise<Outcome> {
   const { db } = deps;
@@ -632,7 +671,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 実施した取得方法・元の情報源と応募サービスのホスト・最後に取得できた情報（内部ログ。設定画面には出さない）
   const methods = [q.kind === "x_post" ? "X投稿" : q.kind === "x_oembed" ? "X埋め込み" : "直接取得", ...(q.viaList ? ["一覧の表示（二次情報）"] : [])];
   const originHost = hostOf(c.source_url ?? q.url);
-  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null } };
+  // 以前に保存した原文は、今回の取得で原文が得られなくても消さない（再確認・再解析で last_good が上書きされるため）
+  const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
+  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence) } };
   // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
   let acct: Record<string, unknown> = { ...trace };
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
@@ -676,7 +717,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   };
 
   const callCost = await logAi(deps, result, q.url, q.reason ?? "initial").catch(() => 0);
-  if (result.ok || result.code !== "fetch_failed") acct = { ai_calls: (c.ai_calls ?? 0) + 1, cost_jpy: Math.round(((Number(c.cost_jpy) || 0) + callCost) * 10000) / 10000 };
+  if (result.ok || result.code !== "fetch_failed") acct = { ...trace, ai_calls: (c.ai_calls ?? 0) + 1, cost_jpy: Math.round(((Number(c.cost_jpy) || 0) + callCost) * 10000) / 10000 };
   if (!result.ok) {
     if (result.code === "not_lottery" || result.code === "nothing_found") {
       await finish("skipped", { status: "excluded", reasons: ["抽選の告知とは判断できませんでした"], draft: null }, { excluded: 1 });

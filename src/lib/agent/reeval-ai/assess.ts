@@ -28,6 +28,8 @@ export interface ExistingLottery {
   sourceUrls: string[];
   /** 人が確定した項目（調査で上書きしない） */
   humanFields: FieldKey[];
+  /** Stage 9Z: 初回収集で保存した原文（取得できたものだけ。無ければ未設定＝保存なし） */
+  storedEvidence?: import("@/lib/collector/evidence").StoredEvidence[];
 }
 
 /** 補完できる日付項目（既存の列へ安全に反映できるもの） */
