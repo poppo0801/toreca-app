@@ -62,10 +62,12 @@ export interface Summary {
   mustNotChangeViolations: number;
   conditionsCorrect: number;
   conditionsScored: number;
+  relationsCorrect: number;
+  relationsScored: number;
 }
 
 export function summarize(records: CaseRecord[], skipped: number): Summary {
-  const s: Summary = { casesRun: records.length, casesSkippedByBudget: skipped, verifiableCases: 0, unverifiableCases: 0, accepted: 0, partial: 0, unresolved: 0, modelErrors: 0, structureCorrect: 0, structureScored: 0, countCorrect: 0, countScored: 0, fieldCorrect: 0, fieldScored: 0, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0, conditionsCorrect: 0, conditionsScored: 0 };
+  const s: Summary = { casesRun: records.length, casesSkippedByBudget: skipped, verifiableCases: 0, unverifiableCases: 0, accepted: 0, partial: 0, unresolved: 0, modelErrors: 0, structureCorrect: 0, structureScored: 0, countCorrect: 0, countScored: 0, fieldCorrect: 0, fieldScored: 0, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0, conditionsCorrect: 0, conditionsScored: 0, relationsCorrect: 0, relationsScored: 0 };
   for (const r of records) {
     if (r.status === "accepted") s.accepted++;
     else if (r.status === "partial") s.partial++;
@@ -83,6 +85,8 @@ export function summarize(records: CaseRecord[], skipped: number): Summary {
     if (sc.countOk !== null) { s.countScored++; if (sc.countOk) s.countCorrect++; }
     for (const ok of Object.values(sc.fieldsOk)) { s.fieldScored++; if (ok) s.fieldCorrect++; }
     if (sc.conditionsOk !== null) { s.conditionsScored++; if (sc.conditionsOk) s.conditionsCorrect++; }
+    s.relationsScored += sc.relScored ?? 0;
+    s.relationsCorrect += sc.relCorrect ?? 0;
     s.falseMerge += sc.falseMerge;
     s.falseSplit += sc.falseSplit;
     s.unsupportedFacts += sc.unsupportedFacts + sc.storeAsserted;

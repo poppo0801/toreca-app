@@ -26,8 +26,12 @@ export interface ReplayCase {
   regionPrefectures?: string[];
 }
 
-export function loadCases(): { now: string; cases: ReplayCase[] } {
-  const j = JSON.parse(readFileSync(join(dir, "cases.json"), "utf8"));
+/** 評価セット: 既定は旧19件（eval/judgment-10e）。"unseen" は未見の架空ケース（eval/judgment-10e/unseen。正解は先に固定済み） */
+export type EvalSet = "main" | "unseen";
+const setDir = (set: EvalSet) => (set === "unseen" ? join(dir, "unseen") : dir);
+
+export function loadCases(set: EvalSet = "main"): { now: string; cases: ReplayCase[] } {
+  const j = JSON.parse(readFileSync(join(setDir(set), "cases.json"), "utf8"));
   return { now: j.now, cases: j.cases };
 }
 
@@ -47,10 +51,12 @@ export interface Gold {
   conditionsMention?: string[];
   /** 店舗が未確定の事例: 店舗を事実として断定してはならない */
   storeMustNotBeAsserted?: boolean;
+  /** 構造が unknown（保留）であることが正しい事例（種類を断定すると誤り） */
+  structureHold?: boolean;
   issue: string;
 }
-export function loadGold(): Record<string, Gold> {
-  return JSON.parse(readFileSync(join(dir, "gold", "gold.json"), "utf8")).gold;
+export function loadGold(set: EvalSet = "main"): Record<string, Gold> {
+  return JSON.parse(readFileSync(join(setDir(set), "gold", "gold.json"), "utf8")).gold;
 }
 
 export async function inputFor(c: ReplayCase, now: string): Promise<JudgmentInput> {
@@ -79,6 +85,9 @@ export interface CaseScore {
   mustNotChangeViolations: number;
   /** 応募条件に、正解の語がすべて事実として記録されたか（地域の限定・除外など）。対象外は null */
   conditionsOk: boolean | null;
+  /** 既存の抽選との関係: 正解の件数と、一致した件数（unknown・未出力は不一致として数えるが、誤統合・誤分割には数えない） */
+  relScored: number;
+  relCorrect: number;
   /** 店舗未確定の事例で、店舗を事実として断定した件数 */
   storeAsserted: number;
 }
@@ -92,16 +101,20 @@ export function dateMatches(value: string, gold: string): boolean {
 const flatFields = (o: JudgmentOutput) => o.opportunities.flatMap((op) => (["applyDeadline", "applyStart", "resultDate"] as const).map((f) => ({ f, c: op[f] })));
 
 export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): CaseScore {
-  const s: CaseScore = { id, verifiable: gold.verifiable, structureOk: null, countOk: null, fieldsOk: {}, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0, conditionsOk: null, storeAsserted: 0 };
+  const s: CaseScore = { id, verifiable: gold.verifiable, structureOk: null, countOk: null, fieldsOk: {}, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0, conditionsOk: null, relScored: 0, relCorrect: 0, storeAsserted: 0 };
   if (!out) return s;
   const factClaims = [out.caseType, ...out.opportunities.flatMap((op) => [op.chain, op.store, op.products, op.applyStart, op.applyDeadline, op.resultDate, op.conditions])].filter((c) => c && c.basis === "fact");
   if (!gold.verifiable) {
     s.unsupportedFacts = gold.mustNotAssertFacts ? factClaims.length : 0;
     return s;
   }
-  s.structureOk = gold.structure ? out.structure.kind === gold.structure : null;
+  s.structureOk = gold.structureHold ? out.structure.kind === "unknown" : gold.structure ? out.structure.kind === gold.structure : null;
   s.countOk = gold.opportunityCount != null ? out.opportunities.length === gold.opportunityCount : null;
   for (const [k, v] of Object.entries(gold.fields ?? {})) s.fieldsOk[k] = flatFields(out).some((x) => x.f === k && x.c && x.c.basis === "fact" && dateMatches(x.c.value, v));
+  for (const [lid, want] of Object.entries(gold.relations ?? {})) {
+    s.relScored++;
+    if (out.relations.some((r) => r.lotteryId === lid && r.relation === want)) s.relCorrect++;
+  }
   for (const r of out.relations) {
     const g = gold.relations?.[r.lotteryId];
     if (!g) continue;

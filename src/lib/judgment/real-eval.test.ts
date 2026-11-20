@@ -16,9 +16,11 @@ import { CANDIDATE_CAP_PER_CASE_JPY, CANDIDATE_CAP_TOTAL_JPY, checkJudgmentRealR
 
 const env = process.env;
 const ids = (env.JUDGMENT_REAL_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// 評価セット: 既定は旧19件。JUDGMENT_REAL_SET=unseen で未見の架空ケース（K01〜K12。別途承認が必要な追加の実AI評価用。10E精度改善で用意）
+const evalSet = env.JUDGMENT_REAL_SET === "unseen" ? "unseen" : "main";
 const pick = () => {
-  const { now, cases } = loadCases();
-  const gold = loadGold();
+  const { now, cases } = loadCases(evalSet);
+  const gold = loadGold(evalSet);
   return { now, gold, cases: cases.filter((c) => gold[c.id] && (ids.length ? ids.includes(c.id) : true) && !["J04", "J05"].includes(c.id)) };
 };
 const approvedTotal = Number(env.JUDGMENT_APPROVED_TOTAL_JPY);
@@ -66,6 +68,27 @@ describe.skipIf(!env.JUDGMENT_RESCORE_FILES)("再採点（API非接続）", () =
       const rec = JSON.parse(readFileSync(f, "utf8"));
       const cases = rec.cases.map((c: { id: string; output: never }) => ({ ...c, score: gold[c.id] ? scoreCase(c.id, gold[c.id], c.output) : null }));
       console.log(JSON.stringify({ file: f, promptVersion: rec.promptVersion, summary: summarize(cases, rec.summary?.casesSkippedByBudget ?? 0), perCase: cases.map((c: { id: string; status: string; score: Record<string, unknown> | null }) => ({ id: c.id, status: c.status, s: c.score && { str: c.score.structureOk, cnt: c.score.countOk, fields: c.score.fieldsOk, fm: c.score.falseMerge, fs: c.score.falseSplit, cond: c.score.conditionsOk } })) }));
+    }
+  });
+});
+
+// 保存済みの実AI出力を、現在の検証層で再検証する（API非接続・費用なし）。**新しいプロンプトの実AI精度の測定ではない**。検証層が過去の出力のどれを不合格にするかの差分分析
+describe.skipIf(!env.JUDGMENT_REVERIFY_FILES)("再検証（API非接続）", () => {
+  it("保存済みのAI出力を、現在の検証層に通す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { inputFor } = await import("./eval/replay");
+    const { verifyJudgment } = await import("./verify");
+    const { now, cases } = loadCases();
+    for (const f of (env.JUDGMENT_REVERIFY_FILES ?? "").split(",").filter(Boolean)) {
+      const rec = JSON.parse(readFileSync(f, "utf8"));
+      const flagged: Record<string, string[]> = {};
+      for (const c of rec.cases as { id: string; output: never }[]) {
+        const rc = cases.find((x) => x.id === c.id);
+        if (!rc || !c.output) continue;
+        const vs = verifyJudgment(await inputFor(rc, now), c.output);
+        if (vs.length) flagged[c.id] = vs.map((v) => `${v.code}@${v.path}`);
+      }
+      console.log(JSON.stringify({ file: f, promptVersion: rec.promptVersion, flagged }));
     }
   });
 });

@@ -3,7 +3,10 @@
  * （AIが限定回数で再判断する／未確定として保留する）。
  *   1. 根拠: fact の主張には、入力の原文（取得できたもの）に実在する引用が必要。存在しない原文・取得できていない原文への引用は不可
  *   2. 構造の整合: 店舗選択式・構造不明のときに応募機会を複数に増やさない（推測でのカード量産の防止）
- *   3. 関係: 参照する抽選・応募機会のキーが実在する。同一と主張するのに店舗が食い違う場合は理由の説明を求める
+ *   3. 関係: 参照する抽選・応募機会のキーが実在する。同一と主張するのに店舗が食い違う場合は理由の説明を求める。
+ *      同一（same）には根拠の引用が必要。店舗選択式で、選択肢に含まれる店舗の既存抽選を「別の機会」とするなど、出力どうしが矛盾する場合は理由の説明を求める
+ *   2'. 構造と機会の詳細の整合: 複数の独立した権利を示す構造（1送信で複数独立・商品別独立）なのに、機会が1つ（または商品数より少ない）なら、機会を分けるか構造を見直すよう求める。
+ *      **検証層は機会を自動で分割・統合しない**（モデルの誤りを隠さない）。直らなければ構造を未確定にして保留する
  *   4. 履歴保護: 既存の抽選への変更の提案は、10Dの共通の保護判定（decideAutonomousOp）を通す。人が確定した値は上書きできない
  *   5. 次の行動: 取得不能と記録された情報源へ再び行かない・URL形式
  * AIの自己申告の確信度は、契約に無く、検査の対象外（あっても捨てる）。
@@ -15,7 +18,7 @@ import { normName } from "@/lib/norm";
 import type { Citation, Claim, JudgmentInput, JudgmentOutput } from "./contract";
 import { precheckFetchTarget } from "./fetch-safety";
 
-export type ViolationCode = "no_citation" | "citation_missing_evidence" | "citation_unfetched" | "citation_quote_not_found" | "structure_multiplies" | "structure_unsupported" | "relation_unknown_ref" | "relation_store_mismatch" | "protected_change" | "human_value_overwrite" | "action_blocked_source" | "action_bad_url" | "planned_unknown_lottery";
+export type ViolationCode = "no_citation" | "citation_missing_evidence" | "citation_unfetched" | "citation_quote_not_found" | "structure_multiplies" | "structure_unsupported" | "relation_unknown_ref" | "relation_store_mismatch" | "protected_change" | "human_value_overwrite" | "action_blocked_source" | "action_bad_url" | "planned_unknown_lottery" | "structure_incomplete" | "relation_contradicts_structure" | "relation_same_without_evidence";
 
 export interface Violation {
   code: ViolationCode;
@@ -62,6 +65,12 @@ export function verifyJudgment(input: JudgmentInput, o: JudgmentOutput): Violati
   if (n > 1 && (unknownStruct || o.structure.kind === "store_select" || o.structure.kind === "one_form_one")) {
     v.push({ code: "structure_multiplies", path: "opportunities", message: `構造が「${o.structure.kind}」（根拠: ${o.structure.basis}）のとき、応募機会は1件までです（${n}件）。独立して応募・当落が分かれる根拠があるなら、構造をそれに合わせてください。未確定なら1件にまとめ、未解決として残してください` });
   }
+  // 構造が「複数の独立した権利」を示すのに、機会の詳細がそれと整合しない（権利を1つにまとめている）。自動では直さず、理由を返して再判断を求める
+  if (!unknownStruct) {
+    const products = new Set(o.opportunities.flatMap((x) => x.products?.value ?? []).map((p) => normName(p)).filter(Boolean));
+    if (o.structure.kind === "multi_independent_per_submit" && n < 2) v.push({ code: "structure_incomplete", path: "opportunities", message: "構造が「1回の送信で複数の独立した権利」なのに、応募機会が1つです。独立して当落が決まる権利ごとに応募機会を分けてください。分けられる根拠が足りないなら、構造を unknown にして理由を unresolved に書いてください" });
+    else if (o.structure.kind === "per_product" && n < products.size) v.push({ code: "structure_incomplete", path: "opportunities", message: `構造が「商品別独立」なのに、応募機会（${n}件）が商品数（${products.size}件）より少ないです。商品ごとに応募機会を分け、それぞれの products に1つずつ入れてください。分けられないなら構造を unknown にしてください` });
+  }
   if (o.structure.kind === "per_store" && n > 1 && o.opportunities.some((x) => !x.store)) v.push({ code: "structure_unsupported", path: "opportunities", message: "店舗別独立なら、各応募機会の店舗を示してください" });
   if (o.structure.kind === "per_product" && n > 1 && o.opportunities.some((x) => !x.products)) v.push({ code: "structure_unsupported", path: "opportunities", message: "商品別独立なら、各応募機会の商品を示してください" });
 
@@ -78,6 +87,21 @@ export function verifyJudgment(input: JudgmentInput, o: JudgmentOutput): Violati
     if (!keys.has(r.opportunityKey) || !relById.has(r.lotteryId)) { v.push({ code: "relation_unknown_ref", path: p, message: "参照する応募機会または既存の抽選が存在しません" }); return; }
     if (r.basis === "fact" && r.citations.length === 0) v.push({ code: "no_citation", path: p, message: "関係を事実として述べるには引用が必要です" });
     else checkCitations(input, r.citations, `${p}.citations`, v);
+    if (r.relation === "same" && r.citations.length === 0) v.push({ code: "relation_same_without_evidence", path: p, message: "同一（same）と判断するには、同じ応募権であることを示す原文の引用が必要です。根拠が無ければ unknown にしてください" });
+    // 店舗選択式で、選択肢に含まれる店舗（同じ系列）の既存抽選を「別の機会」としている出力は、構造の判断と矛盾する。理由を示すか見直すよう求める（自動では直さない）
+    if (o.structure.kind === "store_select" && o.structure.basis !== "unknown" && (r.relation === "same_campaign_other" || r.relation === "independent")) {
+      const rel0 = relById.get(r.lotteryId)!;
+      const inList = (o.structure.selectableStores ?? []).some((st) => storeKey(st) && storeKey(st) === storeKey(rel0.store));
+      const opChain = o.opportunities.find((x) => x.key === r.opportunityKey)?.chain?.value;
+      const sameChain = !opChain || !rel0.chain || chainCanonicalKey(opChain) === chainCanonicalKey(rel0.chain);
+      // 別の開催回・別商品の既存抽選まで巻き込まないよう、同じ締切・商品が重なる（どちらかが不明なら矛盾とはしない）既存抽選だけを対象にする
+      const opx = o.opportunities.find((x) => x.key === r.opportunityKey);
+      const d1 = opx?.applyDeadline?.value?.slice(0, 10);
+      const sameDeadline = !d1 || !rel0.applyDeadline || d1 === rel0.applyDeadline.slice(0, 10);
+      const ps = new Set((opx?.products?.value ?? []).map((p) => normName(p)));
+      const overlap = ps.size === 0 || rel0.products.length === 0 || rel0.products.some((p) => ps.has(normName(p)));
+      if (inList && sameChain && sameDeadline && overlap) v.push({ code: "relation_contradicts_structure", path: p, message: `構造は店舗選択式で、既存の抽選の店舗（${rel0.store}）は選択肢に含まれています。それを別の応募機会（${r.relation}）としていますが、選択肢の店舗別カードは同じ1つの応募権の可能性があります。別の応募権である根拠を原文から示すか、同一（same）に見直してください` });
+    }
     if (r.relation === "same") {
       const op = o.opportunities.find((x) => x.key === r.opportunityKey)!;
       const rel = relById.get(r.lotteryId)!;
