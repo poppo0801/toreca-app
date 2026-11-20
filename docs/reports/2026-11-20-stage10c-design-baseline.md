@@ -75,3 +75,7 @@
 
 ## 12. 変更範囲の確認
 アプリコード・`supabase/`・`.env*`・`.claude/settings*.json`・定期ジョブ・本番・有料AIの変更なし（`git status` で文書のみを確認）。
+
+## 付記: PR・CI・マージの結果
+- PR #31（`feat/10c-ai-redesign`）: CI（check）合格・Vercel Previewは文書のみで問題なし → mainへマージ（マージコミット b239adf）。
+- 本番反映・アプリ挙動の変更なし（文書のみ）。**マージ済み＝10Cの正本が main に反映された状態**であり、10D以降は未着手。
