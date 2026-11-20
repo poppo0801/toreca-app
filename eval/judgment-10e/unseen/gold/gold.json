@@ -1,0 +1,142 @@
+{
+  "_note": "未見ケースの正解。事後に変更しない（曖昧さがあれば注記を追記し、値は変えない）。structureHold=true は、構造が unknown（保留）であることが正しい事例（構造の種類を断定すると誤り）。",
+  "gold": {
+    "K01": {
+      "verifiable": true,
+      "structure": "store_select",
+      "opportunityCount": 1,
+      "fields": {
+        "applyDeadline": "2099-04-08"
+      },
+      "relations": {
+        "L-K01-A": "same",
+        "L-K01-B": "same"
+      },
+      "mustNotChange": [
+        "L-K01-B"
+      ],
+      "issue": "店舗選択式の店舗別カード＝同じ応募権（同一）"
+    },
+    "K02": {
+      "verifiable": true,
+      "structure": "per_store",
+      "opportunityCount": 2,
+      "fields": {
+        "applyDeadline": "2099-04-08"
+      },
+      "relations": {
+        "L-K02-A": "same"
+      },
+      "issue": "店舗別独立: 既存の北店カードは北店の機会と同一・南店の機会は別"
+    },
+    "K03": {
+      "verifiable": true,
+      "structure": "store_select",
+      "opportunityCount": 1,
+      "fields": {
+        "applyDeadline": "2099-04-08"
+      },
+      "relations": {
+        "L-K03-A": "same_campaign_other"
+      },
+      "issue": "選択肢に含まれない店舗の既存カードは同一としない（境界）"
+    },
+    "K04": {
+      "verifiable": true,
+      "structure": "multi_independent_per_submit",
+      "opportunityCount": 2,
+      "fields": {
+        "applyDeadline": "2099-05-05"
+      },
+      "issue": "1送信で複数の独立した権利（商品2）"
+    },
+    "K05": {
+      "verifiable": true,
+      "structure": "one_form_one",
+      "opportunityCount": 1,
+      "fields": {
+        "applyDeadline": "2099-05-05"
+      },
+      "issue": "2商品から1つを選ぶ＝応募権は1つ（機会を分けない）"
+    },
+    "K06": {
+      "verifiable": true,
+      "structure": "one_form_one",
+      "opportunityCount": 1,
+      "fields": {
+        "applyDeadline": "2099-05-14"
+      },
+      "issue": "セットで1つの当落（機会を分けない）"
+    },
+    "K07": {
+      "verifiable": true,
+      "structure": "per_product",
+      "opportunityCount": 3,
+      "fields": {
+        "applyDeadline": "2099-05-24"
+      },
+      "relations": {
+        "L-K07-A": "same"
+      },
+      "issue": "商品別独立3・既存の1商品カードは該当商品の機会と同一"
+    },
+    "K08": {
+      "verifiable": true,
+      "opportunityCount": 1,
+      "structureHold": true,
+      "fields": {
+        "applyDeadline": "2099-06-05"
+      },
+      "issue": "当落の独立性が不明なら保留（unknown）で機会を増やさない"
+    },
+    "K09": {
+      "verifiable": true,
+      "structure": "per_round",
+      "opportunityCount": 2,
+      "fields": {
+        "applyDeadline": "2099-06-28"
+      },
+      "relations": {
+        "L-K09-A": "same"
+      },
+      "mustNotChange": [
+        "L-K09-A"
+      ],
+      "issue": "2開催回・第1回の既存カード（保護）は同一・変更しない"
+    },
+    "K10": {
+      "verifiable": true,
+      "structure": "store_select",
+      "opportunityCount": 1,
+      "fields": {
+        "applyDeadline": "2099-07-07"
+      },
+      "relations": {
+        "L-K10-A": "same",
+        "L-K10-B": "same_campaign_other"
+      },
+      "issue": "選択肢内（東店）は同一・選択肢外（西店）は同一としない"
+    },
+    "K11": {
+      "verifiable": true,
+      "structure": "one_form_one",
+      "opportunityCount": 1,
+      "fields": {
+        "applyDeadline": "2099-08-05"
+      },
+      "relations": {
+        "L-K11-A": "same_campaign_other"
+      },
+      "mustNotChange": [
+        "L-K11-A"
+      ],
+      "issue": "別の開催回（応募引き継ぎなし）＝別機会"
+    },
+    "K12": {
+      "verifiable": false,
+      "reason": "ページを取得できない。内容・既存抽選との関係は検証不能",
+      "mustNotAssertFacts": true,
+      "issue": "取得不能（断定しない）"
+    }
+  }
+}
