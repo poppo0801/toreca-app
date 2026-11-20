@@ -30,7 +30,7 @@ describe.skipIf(env.JUDGMENT_REAL_PREFLIGHT !== "1")("実行前の確認（API�
     const model = new AnthropicJudgmentModel({ messages: { create: async () => { throw new Error("preflight は API に接続しません"); } } } as never);
     const est = await estimateRun(model, cases, now);
     const gate = checkJudgmentRealRun({ env, confirm: true, approvedTotalJpy: approvedTotal || CANDIDATE_CAP_TOTAL_JPY, approvedPerCaseJpy: approvedPer || CANDIDATE_CAP_PER_CASE_JPY });
-    console.log(JSON.stringify({ model: model.id, cases: cases.map((c) => c.id), gate: gate.ok ? "通過（実行可能）" : `未通過: ${gate.reason}`, candidateCaps: { totalJpy: CANDIDATE_CAP_TOTAL_JPY, perCaseJpy: CANDIDATE_CAP_PER_CASE_JPY }, maxTotalJpy: est.maxTotalJpy, perCase: est.perCase }, null, 2));
+    console.log(JSON.stringify({ model: model.id, cases: cases.map((c) => c.id), gate: gate.ok ? `通過（実行可能・キーの出所: ${gate.keySource}）` : `未通過: ${gate.reason}`, candidateCaps: { totalJpy: CANDIDATE_CAP_TOTAL_JPY, perCaseJpy: CANDIDATE_CAP_PER_CASE_JPY }, maxTotalJpy: est.maxTotalJpy, perCase: est.perCase }, null, 2));
     expect(est.perCase.length).toBe(cases.length);
   });
 });
@@ -41,13 +41,31 @@ describe.skipIf(env.JUDGMENT_REAL_RUN !== "1")("実API評価（有料・承認�
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
     const { now, cases, gold } = pick();
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const model = new AnthropicJudgmentModel(new Anthropic({ apiKey: gate.apiKey }), { model: gate.model });
+    const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
+    // モデルの利用可否の確認（料金のかからないモデル情報の取得）。取得できなければ実行しない（代替モデルへは変更しない）
+    await client.models.retrieve(gate.model);
+    const model = new AnthropicJudgmentModel(client, { model: gate.model });
     const est = await estimateRun(model, cases, now);
     if (est.maxTotalJpy > gate.totalCapJpy) console.warn(`推定最大費用 ${est.maxTotalJpy}円が承認額 ${gate.totalCapJpy}円を超える見込み。承認額で止まります`);
     const rec = await runEvaluation({ model, cases, gold, now, totalCapJpy: gate.totalCapJpy, perCaseCapJpy: gate.perCaseCapJpy });
     const dir = join("eval", "runs", "judgment-10e");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${rec.runId}.json`), JSON.stringify({ ...rec, usage: model.usageLog }, null, 2));
+    writeFileSync(join(dir, `${rec.runId}.json`), JSON.stringify({ ...rec, keySource: gate.keySource, usage: model.usageLog }, null, 2));
     console.log(JSON.stringify({ runId: rec.runId, spentJpy: rec.spentJpy, stoppedByBudget: rec.stoppedByBudget, summary: rec.summary }, null, 2));
   }, 600_000);
+});
+
+// 保存済みの実行記録を、現在の採点基準で再採点する（API・ネットワークに接続しない・費用なし）。採点基準を変えたあとの、実行間の比較用
+describe.skipIf(!env.JUDGMENT_RESCORE_FILES)("再採点（API非接続）", () => {
+  it("保存済みの記録のAI出力を、現在の採点基準で採点し直す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { scoreCase } = await import("./eval/replay");
+    const { summarize } = await import("./eval/real-run");
+    const gold = loadGold();
+    for (const f of (env.JUDGMENT_RESCORE_FILES ?? "").split(",").filter(Boolean)) {
+      const rec = JSON.parse(readFileSync(f, "utf8"));
+      const cases = rec.cases.map((c: { id: string; output: never }) => ({ ...c, score: gold[c.id] ? scoreCase(c.id, gold[c.id], c.output) : null }));
+      console.log(JSON.stringify({ file: f, promptVersion: rec.promptVersion, summary: summarize(cases, rec.summary?.casesSkippedByBudget ?? 0), perCase: cases.map((c: { id: string; status: string; score: Record<string, unknown> | null }) => ({ id: c.id, status: c.status, s: c.score && { str: c.score.structureOk, cnt: c.score.countOk, fields: c.score.fieldsOk, fm: c.score.falseMerge, fs: c.score.falseSplit, cond: c.score.conditionsOk } })) }));
+    }
+  });
 });

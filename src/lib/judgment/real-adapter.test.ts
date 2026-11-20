@@ -137,18 +137,59 @@ describe("AnthropicJudgmentModel（偽のクライアント）", () => {
 });
 
 describe("実AI評価の関門（既定は接続しない）", () => {
-  const ok = { TOREMANE_ENV: "local", JUDGMENT_REAL_EVAL: "allow", JUDGMENT_EVAL_API_KEY: "dev-key" };
-  const g = (env: Record<string, string | undefined>, over: Partial<{ confirm: boolean; total: number; per: number }> = {}) => checkJudgmentRealRun({ env, confirm: over.confirm ?? true, approvedTotalJpy: over.total ?? 60, approvedPerCaseJpy: over.per ?? 5 });
-  it("すべて満たすときだけ通る。何も設定しない既定・本番・許可なし・キーなし・本番キーと同一・確認なし・承認額なし・候補上限超過は拒否", () => {
-    expect(g(ok).ok).toBe(true);
-    for (const env of [{}, { NODE_ENV: "production" }, { ...ok, TOREMANE_ENV: "production" }, { ...ok, JUDGMENT_REAL_EVAL: undefined }, { ...ok, AGENT_REAL_API: "allow", JUDGMENT_REAL_EVAL: undefined }, { ...ok, JUDGMENT_EVAL_API_KEY: "" }, { ...ok, ANTHROPIC_API_KEY: "dev-key" }]) expect(g(env).ok, JSON.stringify(Object.keys(env))).toBe(false);
+  const base = { TOREMANE_ENV: "local", JUDGMENT_REAL_EVAL: "allow" };
+  const ok = { ...base, JUDGMENT_EVAL_API_KEY: "dev-key" };
+  const g = (env: Record<string, string | undefined>, over: Partial<{ confirm: boolean; total: number; per: number }> = {}) => checkJudgmentRealRun({ env, confirm: over.confirm ?? true, approvedTotalJpy: over.total ?? 30, approvedPerCaseJpy: over.per ?? 2 });
+  it("評価専用キーの従来経路: 全条件を満たすときだけ通る。何も設定しない既定・本番・許可なし・キーなし・確認なし・承認額なし・候補上限超過は拒否", () => {
+    const r = g(ok);
+    expect(r.ok && r.keySource).toBe("dedicated");
+    for (const env of [{}, { NODE_ENV: "production" }, { ...ok, TOREMANE_ENV: "production" }, { ...ok, TOREMANE_ENV: undefined }, { ...ok, JUDGMENT_REAL_EVAL: undefined }, { ...ok, AGENT_REAL_API: "allow", JUDGMENT_REAL_EVAL: undefined }, { ...base }, { ...ok, JUDGMENT_EVAL_API_KEY: "" }]) expect(g(env).ok, JSON.stringify(Object.keys(env))).toBe(false);
     expect(g(ok, { confirm: false }).ok).toBe(false);
-    expect(g(ok, { total: 0 }).ok).toBe(false);
-    expect(g(ok, { total: Number.NaN }).ok).toBe(false);
+    for (const t of [0, Number.NaN]) expect(g(ok, { total: t }).ok).toBe(false);
     expect(g(ok, { per: 70, total: 80 }).ok).toBe(false);
     expect(g(ok, { total: CANDIDATE_CAP_TOTAL_JPY + 1 }).ok).toBe(false);
     expect(g(ok, { per: 10 }).ok).toBe(false);
     expect(g(ok, { total: 3, per: 5 }).ok).toBe(false);
+  });
+  it("オプトインなし: 既存キー（ANTHROPIC_API_KEY）だけ・評価専用キーが既存と同一・未設定は、従来どおり拒否", () => {
+    expect(g({ ...base, ANTHROPIC_API_KEY: "existing" }).ok).toBe(false);
+    expect(g({ ...ok, ANTHROPIC_API_KEY: "dev-key" }).ok).toBe(false); // 同一値
+    expect(g({ ...base, JUDGMENT_REUSE_FALLBACK_KEY: "dev" }).ok).toBe(false); // 代用キーもオプトインなしでは使わない
+    expect(g({ ...base, JUDGMENT_REUSE_EXISTING_KEY: "yes", ANTHROPIC_API_KEY: "existing" }).ok).toBe(false); // allow 以外は無効
+  });
+  it("オプトインあり（JUDGMENT_REUSE_EXISTING_KEY=allow）: 既存キーを再利用できる。出所の名前だけを返す", () => {
+    const reuse = { ...base, JUDGMENT_REUSE_EXISTING_KEY: "allow" };
+    const a = g({ ...reuse, ANTHROPIC_API_KEY: "existing" });
+    expect(a.ok && a.keySource).toBe("existing");
+    expect(a.ok && a.apiKey).toBe("existing");
+    const b = g({ ...reuse, JUDGMENT_REUSE_FALLBACK_KEY: "dev-fallback" });
+    expect(b.ok && b.keySource).toBe("existing_dev_fallback");
+    // 既存キーと評価専用キーが同一でも、明示許可があれば受け入れる
+    const c = g({ ...reuse, JUDGMENT_EVAL_API_KEY: "same", ANTHROPIC_API_KEY: "same" });
+    expect(c.ok && c.keySource).toBe("dedicated");
+    // 再利用できるキーが無ければ拒否
+    expect(g(reuse).ok).toBe(false);
+  });
+  it("両方設定されている場合の優先順位: 評価専用キー > ANTHROPIC_API_KEY > 開発用の代用キー", () => {
+    const reuse = { ...base, JUDGMENT_REUSE_EXISTING_KEY: "allow" };
+    const both = g({ ...reuse, JUDGMENT_EVAL_API_KEY: "a", ANTHROPIC_API_KEY: "b", JUDGMENT_REUSE_FALLBACK_KEY: "c" });
+    expect(both.ok && both.apiKey).toBe("a");
+    const two = g({ ...reuse, ANTHROPIC_API_KEY: "b", JUDGMENT_REUSE_FALLBACK_KEY: "c" });
+    expect(two.ok && two.apiKey).toBe("b");
+  });
+  it("オプトインがあっても、開発環境以外（本番・Vercel）・許可なし・確認なし・上限超過・予算超過の承認は拒否", () => {
+    const r = { ...base, JUDGMENT_REUSE_EXISTING_KEY: "allow", ANTHROPIC_API_KEY: "existing" };
+    expect(g(r).ok).toBe(true);
+    for (const env of [{ ...r, TOREMANE_ENV: "production" }, { ...r, TOREMANE_ENV: undefined }, { ...r, VERCEL: "1" }, { ...r, VERCEL_ENV: "production" }, { ...r, NODE_ENV: "production" }, { ...r, JUDGMENT_REAL_EVAL: undefined }]) expect(g(env).ok, JSON.stringify(Object.keys(env))).toBe(false);
+    expect(g(r, { confirm: false }).ok).toBe(false);
+    expect(g(r, { total: 61 }).ok).toBe(false);
+    expect(g(r, { per: 6 }).ok).toBe(false);
+  });
+  it("拒否・通過のどの結果にも、キーの値が理由文として含まれない", () => {
+    for (const env of [{ ...base, ANTHROPIC_API_KEY: "SECRET-VALUE-1" }, { ...ok, JUDGMENT_EVAL_API_KEY: "SECRET-VALUE-2", ANTHROPIC_API_KEY: "SECRET-VALUE-2" }]) {
+      const r = g(env);
+      if (!r.ok) expect(r.reason).not.toContain("SECRET-VALUE");
+    }
   });
 });
 

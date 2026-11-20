@@ -19,6 +19,8 @@ export interface CaseRecord {
   spentJpy: number;
   unknownCost: boolean;
   violationCodes: string[];
+  /** 試行ごとの不合格・形式エラーの理由（誤り分析用。各200字まで・最大12件）。原文・秘密値は含まない */
+  violationMessages: string[];
   dropped: string[];
   score: CaseScore | null;
   /** AIの出力（正解とは別。再現・誤り分析用） */
@@ -127,6 +129,7 @@ export async function runEvaluation(a: RunArgs): Promise<RunRecord> {
       spentJpy: Math.round(st.spentJpy * 10000) / 10000,
       unknownCost: r.unknownCost || st.unknownCostCalls > 0,
       violationCodes: [...new Set(r.violations.map((v) => v.code))],
+      violationMessages: r.log.flatMap((l) => l.violations.map((v) => `#${l.n} ${v.path}: ${v.message}`.slice(0, 200))).slice(0, 12),
       dropped: r.dropped,
       score: g ? scoreCase(c.id, g, r.output) : null,
       output: r.output,

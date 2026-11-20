@@ -69,7 +69,7 @@ export class AnthropicJudgmentModel implements JudgmentModel {
   constructor(private readonly client: Client, private readonly opts: AnthropicJudgmentOptions = {}) {
     this.model = opts.model ?? DEFAULT_AI_MODEL;
     this.id = `anthropic:${this.model}`;
-    this.maxOut = opts.maxOutputTokens ?? 3000;
+    this.maxOut = opts.maxOutputTokens ?? 6000; // 思考のトークンも出力に数える。3000では途切れる事例があった（実AI評価の第1回: 37回中5回）
     this.planMaxOut = opts.planMaxOutputTokens ?? 600;
     this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.effort = opts.effort ?? "medium";

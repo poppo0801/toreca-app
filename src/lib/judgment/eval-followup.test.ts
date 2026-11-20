@@ -100,3 +100,21 @@ describe("追加事例 J13〜J21", () => {
     for (const id of unverifiable) expect(scoreCase(id, gold[id], null).structureOk).toBeNull();
   });
 });
+
+describe("採点: 日付の一致・機会の誤統合", () => {
+  it("日付のみの正解は、時刻つきの値と一致するが、注釈つきの値・別の日付とは一致しない", async () => {
+    const { dateMatches } = await import("./eval/replay");
+    expect(dateMatches("2099-02-10", "2099-02-10")).toBe(true);
+    expect(dateMatches("2099-02-10 23:59", "2099-02-10")).toBe(true);
+    expect(dateMatches("2099-02-10T23:59", "2099-02-10")).toBe(true);
+    expect(dateMatches("2099-02-10（延長後）", "2099-02-10")).toBe(false);
+    expect(dateMatches("2099-02-100", "2099-02-10")).toBe(false);
+    expect(dateMatches("2099-02-11", "2099-02-10")).toBe(false);
+  });
+  it("独立した応募機会を少ない件数にまとめた出力は、機会の誤統合として数える", async () => {
+    const { run } = { run: async (id: string) => { const c = cases.find((x) => x.id === id)!; const input = await inputFor(c, NOW); return mockAnswer(id, input) as never; } };
+    const out = JSON.parse(JSON.stringify(await run("J13")));
+    out.opportunities = out.opportunities.slice(0, 1);
+    expect(scoreCase("J13", gold.J13, out).falseMerge).toBe(2);
+  });
+});

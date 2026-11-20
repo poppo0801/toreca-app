@@ -83,6 +83,12 @@ export interface CaseScore {
   storeAsserted: number;
 }
 
+/** 日付の一致: 正解が日付のみ（YYYY-MM-DD）なら、値が「その日付で始まり、続きが時刻だけ（または無い）」ときに一致。注釈つきの値（例: `2099-03-14（原文上の…）`）は、別の問題（出力形式）として一致にしない */
+export function dateMatches(value: string, gold: string): boolean {
+  const v = value.trim();
+  return v === gold || (v.startsWith(gold) && /^[ T]\d{2}:\d{2}(:\d{2})?$/.test(v.slice(gold.length)));
+}
+
 const flatFields = (o: JudgmentOutput) => o.opportunities.flatMap((op) => (["applyDeadline", "applyStart", "resultDate"] as const).map((f) => ({ f, c: op[f] })));
 
 export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): CaseScore {
@@ -95,7 +101,7 @@ export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): C
   }
   s.structureOk = gold.structure ? out.structure.kind === gold.structure : null;
   s.countOk = gold.opportunityCount != null ? out.opportunities.length === gold.opportunityCount : null;
-  for (const [k, v] of Object.entries(gold.fields ?? {})) s.fieldsOk[k] = flatFields(out).some((x) => x.f === k && x.c && x.c.basis === "fact" && x.c.value === v);
+  for (const [k, v] of Object.entries(gold.fields ?? {})) s.fieldsOk[k] = flatFields(out).some((x) => x.f === k && x.c && x.c.basis === "fact" && dateMatches(x.c.value, v));
   for (const r of out.relations) {
     const g = gold.relations?.[r.lotteryId];
     if (!g) continue;
@@ -104,6 +110,8 @@ export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): C
     if (g === "same_campaign_other" && r.relation === "independent") s.falseSplit++;
   }
   if (gold.opportunityCount != null && out.opportunities.length > gold.opportunityCount) s.falseSplit += out.opportunities.length - gold.opportunityCount;
+  // 独立した応募機会を、より少ない件数にまとめてしまった（機会の誤統合）。関係の判断による誤統合とは別に数える
+  if (gold.opportunityCount != null && out.opportunities.length < gold.opportunityCount) s.falseMerge += gold.opportunityCount - out.opportunities.length;
   if (gold.conditionsMention) {
     const text = out.opportunities.map((op) => (op.conditions && op.conditions.basis === "fact" ? op.conditions.value : "")).join(" ");
     s.conditionsOk = gold.conditionsMention.every((w) => text.includes(w));
