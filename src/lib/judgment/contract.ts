@@ -42,6 +42,8 @@ export interface RelatedOpportunity {
   storeMode: "fixed" | "select_on_apply" | "none" | null;
   /** 履歴保護の理由コード（DB関数 lottery_history_blockers）。空なら記録上の保護なし */
   protectedCodes: string[];
+  /** 保護の確認ができなかった（DB参照の失敗など）。true のときは「保護なし」とみなさず、検証層が自律的な変更を拒否する（安全側） */
+  protectionUnknown?: boolean;
   /** 人が確定した値（項目名→値）。AIは上書きできない */
   humanConfirmed?: Record<string, string>;
 }
@@ -103,7 +105,7 @@ export interface Claim<T = string> {
   citations: Citation[];
 }
 
-export type StructureKind = "one_form_one" | "store_select" | "per_store" | "per_product" | "multi_independent_per_submit" | "unknown";
+export type StructureKind = "one_form_one" | "store_select" | "per_store" | "per_product" | "per_round" | "multi_independent_per_submit" | "unknown";
 export type CaseType = "lottery_announcement" | "result_announcement" | "update" | "not_lottery" | "unknown";
 export type RelationKind = "same" | "independent" | "same_campaign_other" | "unknown";
 export type PlannedOp = "link_case" | "fill_empty" | "change" | "merge" | "delete" | "move_history";
@@ -156,7 +158,7 @@ export interface JudgmentOutput {
 
 // ---------------------------------------------------------------- 形式の検査（意味の判断はしない）
 const BASES = ["fact", "inference", "unknown"];
-const STRUCTS = ["one_form_one", "store_select", "per_store", "per_product", "multi_independent_per_submit", "unknown"];
+const STRUCTS = ["one_form_one", "store_select", "per_store", "per_product", "per_round", "multi_independent_per_submit", "unknown"];
 const CASE_TYPES = ["lottery_announcement", "result_announcement", "update", "not_lottery", "unknown"];
 const RELS = ["same", "independent", "same_campaign_other", "unknown"];
 const OPS = ["link_case", "fill_empty", "change", "merge", "delete", "move_history"];

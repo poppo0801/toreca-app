@@ -12,6 +12,7 @@ import { loadCases, inputFor } from "@/lib/judgment/eval/replay";
 import { ScriptedModel } from "@/lib/judgment/model";
 import { createCase, recordJudgment, searchJudgments } from "@/lib/server/case-foundation";
 import { historyFromDb, sinkToDb } from "@/lib/server/judgment-history";
+import { classifyRpcResult } from "@/lib/case-model/rpc-availability";
 import { lotteryProtection } from "@/lib/server/master-identity/reeval-service";
 import type { Db } from "@/lib/server/lottery-service";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
@@ -86,6 +87,35 @@ describe.skipIf(!dbTestsEnabled)("Stage 10E: 判断履歴の再利用・履歴�
     await u1.from("lottery_exclusions" as never).insert({ household_id: hid, lottery_id: a, reason: "duplicate", duplicate_of_lottery_id: b } as never);
     expect(await lotteryProtection(u1, a)).toBe("利用者が重複候補から除外した記録あり");
     expect(await lotteryProtection(u1, "00000000-0000-0000-0000-000000000000")).toBe("抽選が見つかりません");
+  });
+
+it("マイグレーション108未適用の互換: 実PostgRESTの『関数が無い』応答を不在と判定し、従来の確認だけで動く。権限拒否などは止める（実DBの表で確認）", async () => {
+    // 実PostgRESTが存在しない関数に返す応答を取得し、分類が「不在」になることを確認する（呼び出し先の名前だけ違う）
+    const real = await u1.rpc("lottery_history_blockers_not_deployed" as never, {} as never);
+    expect(real.error).toBeTruthy();
+    expect(classifyRpcResult({ data: real.data, error: real.error as never, status: real.status }, Array.isArray)).toBe("missing_function");
+
+    // 関数だけを「未適用」に見せるラッパー（表の確認は実DB）
+    const wrap = (rpcResult: { data: unknown; error: unknown; status: number }): Db => new Proxy(u1 as object, { get: (t, k) => (k === "rpc" ? async () => rpcResult : (t as Record<PropertyKey, unknown>)[k]) }) as unknown as Db;
+    const missing = wrap({ data: real.data, error: real.error, status: real.status });
+    const plain = await mkLottery();
+    expect(await lotteryProtection(missing, plain)).toBeNull(); // 従来どおり（新しい保護が無い環境）
+    const withApp = await mkLottery();
+    await mkApplication(u1, hid, chain, withApp);
+    expect(await lotteryProtection(missing, withApp)).toBe("応募・当落の記録あり"); // 従来の保護は有効
+    const manualForm = await mkLottery({ lottery_form: "store_select", lottery_form_source: "manual" });
+    expect(await lotteryProtection(missing, manualForm)).toBeNull(); // 108未適用では手動分類の保護は無い（既存の挙動。適用後は止まる）
+    expect(await lotteryProtection(u1, manualForm)).toBe("抽選形態を利用者が手動で分類済み");
+
+    // 権限拒否・接続障害・未知のエラーは、保護なしで続行しない
+    for (const bad of [
+      { data: null, error: { code: "42501", message: "permission denied for function lottery_history_blockers" }, status: 403 },
+      { data: null, error: { message: "fetch failed" }, status: 0 },
+      { data: null, error: { code: "XX000", message: "internal" }, status: 500 },
+    ]) {
+      const why = await lotteryProtection(wrap(bad), plain);
+      expect(why, JSON.stringify(bad)).toContain("保護の状態を確認できません");
+    }
   });
 
   it("エンジンの判断追記が保護された抽選に触れない: 検証で不合格の提案（保護された抽選の削除）は履歴に『不採用』として残り、抽選は変わらない", async () => {

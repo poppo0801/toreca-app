@@ -13,6 +13,7 @@ import { canOverwrite } from "@/lib/case-model/value-priority";
 import { chainCanonicalKey } from "@/lib/chain-normalize";
 import { normName } from "@/lib/norm";
 import type { Citation, Claim, JudgmentInput, JudgmentOutput } from "./contract";
+import { precheckFetchTarget } from "./fetch-safety";
 
 export type ViolationCode = "no_citation" | "citation_missing_evidence" | "citation_unfetched" | "citation_quote_not_found" | "structure_multiplies" | "structure_unsupported" | "relation_unknown_ref" | "relation_store_mismatch" | "protected_change" | "human_value_overwrite" | "action_blocked_source" | "action_bad_url" | "planned_unknown_lottery";
 
@@ -94,7 +95,8 @@ export function verifyJudgment(input: JudgmentInput, o: JudgmentOutput): Violati
     const p = `plannedChanges[${i}]`;
     const rel = relById.get(c.lotteryId);
     if (!rel) { v.push({ code: "planned_unknown_lottery", path: p, message: "提案の対象の抽選が入力に存在しません" }); return; }
-    const d = decideAutonomousOp(c.op, rel.protectedCodes);
+    // 保護の確認ができなかった抽選は、未知の保護理由として扱う（link_case 以外の自律的な変更を拒否）
+    const d = decideAutonomousOp(c.op, rel.protectionUnknown ? [...rel.protectedCodes, "protection_unverified"] : rel.protectedCodes);
     if (!d.allowed) v.push({ code: "protected_change", path: p, message: `この抽選は ${d.reasons.join("、")} のため、自律的な ${c.op} はできません。人の確認に回してください` });
     if (c.field && rel.humanConfirmed && c.field in rel.humanConfirmed && c.value !== undefined && c.value !== rel.humanConfirmed[c.field]) {
       const ow = canOverwrite({ existing: "human_confirmed", incoming: "ai_inference" });
@@ -107,9 +109,8 @@ export function verifyJudgment(input: JudgmentInput, o: JudgmentOutput): Violati
   o.nextActions.forEach((a, i) => {
     if (a.kind !== "fetch_url") return;
     const p = `nextActions[${i}]`;
-    let ok = false;
-    try { ok = /^https?:$/.test(new URL(a.target).protocol); } catch { ok = false; }
-    if (!ok) v.push({ code: "action_bad_url", path: p, message: "取得するURLが不正です（http/https のみ）" });
+    const pre = precheckFetchTarget(a.target);
+    if (!pre.ok) v.push({ code: "action_bad_url", path: p, message: `取得するURLが安全ではありません（${pre.reason}）` });
     else if (blocked.has(a.target)) v.push({ code: "action_blocked_source", path: p, message: "この情報源は取得不能と記録されています。制限の回避はしません。別の情報源を選んでください" });
   });
   return v;

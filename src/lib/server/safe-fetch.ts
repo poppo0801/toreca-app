@@ -143,7 +143,8 @@ export function checkUrl(raw: string, opts: { testOnlyAllowLoopback?: boolean } 
   if (!loopbackOk && url.port && url.port !== defaultPort) {
     return { ok: false, code: "blocked", message: "標準以外のポートのURLは取得できません" };
   }
-  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // 末尾のドット（"localhost." 等の絶対ホスト名）でも内部名の判定を回避できないようにする（接続直前のDNS検査と合わせた二重の防御）
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, "");
   if (!loopbackOk) {
     if (host === "localhost" || BLOCKED_HOST_SUFFIXES.some((s) => host.endsWith(s)) || (!host.includes(".") && net.isIP(host) === 0)) {
       return { ok: false, code: "blocked", message: "このアドレスは取得できません" };

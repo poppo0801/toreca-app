@@ -5,11 +5,12 @@ import { CONTRACT_VERSION, parseJudgmentOutput, type JudgmentInput, type Judgmen
 import { judgeCase } from "./engine";
 import { loadCases, loadGold, inputFor, legacyStructure, scoreCase } from "./eval/replay";
 import { mockAnswer } from "./eval/mock-answers";
+import { SSRF_SAFE_BOUNDARY } from "./fetch-safety";
 import { findMasterCandidates, nameAgreement } from "./identity";
-import { investigate, provisionalReady, questionPriority, resumeIfNewEvidence } from "./investigate";
+import { investigate, provisionalReady, questionPriority, resumeIfNewEvidence, type FetchedPage, type PageFetcher } from "./investigate";
 import { ScriptedModel } from "./model";
 import { dropViolatingClaims, quoteInEvidence, verifyJudgment } from "./verify";
-import type { FetchedPage, PageFetcher } from "@/lib/agent/store-location/tools";
+
 
 const NOW = "2099-01-20T00:00:00.000Z";
 const { cases } = loadCases();
@@ -277,10 +278,10 @@ describe("再生評価（台本のモデル）: 経路・安全の検査。実AI
 });
 
 describe("自律追加調査: 状態機械・停止・予算", () => {
-  const page = (text: string): FetchedPage => ({ ok: true, url: "u", finalUrl: "u", title: "t", text });
+  const page = (text: string): FetchedPage => ({ ok: true, text });
   const fetcher = (map: Record<string, FetchedPage | "throw">): PageFetcher & { calls: string[] } => {
     const calls: string[] = [];
-    return { calls, async fetchPage(u: string) { calls.push(u); const v = map[u]; if (v === "throw" || !v) return { ok: false, message: "取得できません（robots制限）" }; return v; } };
+    return { calls, boundary: SSRF_SAFE_BOUNDARY, async fetchPage(u: string) { calls.push(u); const v = map[u]; if (v === "throw" || !v) return { ok: false, message: "取得できません（robots制限）" }; return v; } };
   };
   const start = async (id: string, model: ScriptedModel, b = pools()) => {
     const input = await inputFor(byId(id), NOW);

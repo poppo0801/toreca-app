@@ -55,7 +55,8 @@ export class BudgetPools {
     if (t.settled) return;
     t.settled = true;
     const s = this.pools[t.pool];
-    if (actualJpy == null || !Number.isFinite(actualJpy)) {
+    // 費用が不明・不正（null・NaN・負の値）のときは、返金（過少計上）せず、予約額を使ったものとして残す
+    if (actualJpy == null || !Number.isFinite(actualJpy) || actualJpy < 0) {
       s.unknownCostCalls += 1;
       return;
     }

@@ -8,6 +8,7 @@
  *  - 通常の収集ジョブには接続しない（10F）。登録を待たせない設計: 呼び出し側は、調査の完了を待たずに暫定登録できる（`provisionalReady`）。
  */
 import { redact } from "@/lib/case-model/redact";
+import { precheckFetchTarget, type FetchBoundary } from "./fetch-safety";
 import { BudgetStop, type BudgetPools } from "./budget";
 import type { EvidenceSeed } from "./build-input";
 import type { JudgmentInput, JudgmentOutput, UnresolvedItem } from "./contract";
@@ -17,6 +18,8 @@ import type { JudgmentModel, PlanAnswer } from "./model";
 /** ページ取得の境界（9Zの EvidenceReuseFetcher／store-location の PageFetcher と構造的に互換。lib/agent を静的に読み込まないため、ここで型だけ定義する） */
 export type FetchedPage = { ok: true; text: string; stored?: boolean } | { ok: false; message: string };
 export interface PageFetcher {
+  /** ネットワーク境界の保証の宣言（必須）。実装は src/lib/server/safe-fetch.ts 相当の保証（DNS解決後の全アドレス検査・リダイレクト再検査・上限）を満たすこと。宣言のない部品は渡せない */
+  readonly boundary: FetchBoundary;
   fetchPage(url: string): Promise<FetchedPage>;
 }
 
@@ -195,6 +198,15 @@ export async function investigate(deps: InvestigationDeps, startInput: JudgmentI
       q.status = "blocked";
       q.reason = "取得不能と記録された情報源（回避しない）";
       log.push(`${q.id}: 取得不能の情報源を実行せず`);
+      continue;
+    }
+    // AIが返したURLは信用しない: 取得の前に事前検査（多層防御。実際の保証はfetcherのネットワーク境界）。危険なURLは取得器を呼ばない
+    const pre = precheckFetchTarget(target);
+    if (!pre.ok) {
+      q.noProgress++;
+      log.push(`${q.id}: 取得先を拒否（${pre.reason}）`);
+      if (q.noProgress >= limits.maxNoProgress) { q.status = "stalled"; q.reason = "安全でない取得先が続いた"; }
+      if (!questions.some((x) => x.status === "open")) return finish("no_progress");
       continue;
     }
     let page: FetchedPage;

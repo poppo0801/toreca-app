@@ -115,6 +115,7 @@
 | 11-20 | Stage 10C（文書のみ）: AI再設計の目標仕様を正本化（`AI_REDESIGN_SPEC.md`）、現行実装との対応表（`AI_REDESIGN_IMPLEMENTATION_MAP.md`）、受入・比較計画、Stage指示書の運用（`docs/implementation/`）、決定V12〜V19、ロードマップ10C〜10H。`CLAUDE.md` を短い運用入口に再構築し、旧版を `docs/archive/` に保存 | 古い長大なStage記述が新設計・現状と矛盾していた（10B）。合意済み設計を誤読されない形で参照可能にする | `docs/reports/2026-11-20-stage10c-design-baseline.md` |
 | 11-20 | Stage 10D: 案件（`cases`）・判断履歴（`case_judgments`）・`case_id` 列・履歴保護層（`lottery_history_blockers`＋`guardAutonomousOp`）・判定エンジン切替（本番では常に旧判定）を追加（マイグレーション108・**開発DBのみ・本番未適用**）。新エンジンは未接続 | 10E以降のAI判断・追加調査の土台。既存IDと履歴を壊さない追加のみの設計（案A） | `docs/reports/2026-11-20-stage10d-case-foundation.md`、`docs/AI_REDESIGN_DATA_FOUNDATION.md` |
 | 11-20 | Stage 10E: 統合AI判断・自律追加調査エンジン（`src/lib/judgment/`。契約・検証層・再判断・予算枠分離・調査の状態機械・候補検索・再生評価）と、判断履歴の入力への再利用、`lotteryProtection` への共通保護の追加（関数が無い環境では従来どおり）。**実AI未接続・本番未反映・通常収集は未接続**。固定意味判定は旧方式にのみ残す | 10Fでの接続・実AI評価の土台。意味判断をAIへ一本化し、固定ロジックは検証・保護・費用に限定 | `docs/reports/2026-11-20-stage10e-unified-judgment.md`、`docs/AI_REDESIGN_10E_ENGINE.md` |
+| 11-20 | Stage 10E レビュー後の追加修正: `lotteryProtection` の共通保護は「関数が存在しない」と明確なときだけ従来へ戻り、権限拒否・接続障害・未知のエラー・参照表の読み取り失敗は適用を止める（フェイルクローズ）。追加調査URLの事前検査と、取得部品のネットワーク境界の宣言（10Fの必須条件）。評価事例J13〜J21。実AIアダプタ・評価専用の関門・予算つき実行部を準備（**実API未実行**）。`safe-fetch` の末尾ドット内部名を拒否 | 反例（未適用の本番・権限障害・SSRF）を安全側に倒し、実AI評価を承認後すぐ実行できる状態にするため | `docs/reports/2026-11-20-stage10e-review-followup.md`、`docs/AI_REDESIGN_10E_ENGINE.md` §8 |
 
 ## 6. DB 構造の重要な変更（マイグレーション94本。主なもの）
 - Stage 1: 世帯・プロフィール・マスター・監査・RLS（複合 FK `(id, household_id)`）。Stage 2〜3: 抽選・応募・購入・スルー規則・応募制限。Stage 3.5: 複数商品・仮登録マスター。

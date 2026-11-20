@@ -22,6 +22,8 @@ export interface ReplayCase {
   masterRows?: MasterRow[];
   masterQuery?: { kind: "chain" | "store" | "product"; name: string };
   followUp?: { url: string; text: string };
+  /** 利用者の対象地域（都道府県）。地域の絞り込みは固定の前処理の責務で、判断の入力として渡すだけ */
+  regionPrefectures?: string[];
 }
 
 export function loadCases(): { now: string; cases: ReplayCase[] } {
@@ -41,6 +43,10 @@ export interface Gold {
   candidates?: Record<string, string[]>;
   notCandidates?: string[];
   afterInvestigation?: Record<string, string>;
+  /** 応募条件（conditions）の事実の主張に含まれるべき語（地域の限定・除外など） */
+  conditionsMention?: string[];
+  /** 店舗が未確定の事例: 店舗を事実として断定してはならない */
+  storeMustNotBeAsserted?: boolean;
   issue: string;
 }
 export function loadGold(): Record<string, Gold> {
@@ -56,7 +62,7 @@ export async function inputFor(c: ReplayCase, now: string): Promise<JudgmentInpu
     related: c.related,
     masters: c.masterRows && c.masterQuery ? findMasterCandidates(c.masterQuery, c.masterRows) : [],
     failures: c.failures ?? [],
-    regionPrefectures: [],
+    regionPrefectures: c.regionPrefectures ?? [],
   });
 }
 
@@ -71,12 +77,16 @@ export interface CaseScore {
   falseSplit: number;
   unsupportedFacts: number;
   mustNotChangeViolations: number;
+  /** 応募条件に、正解の語がすべて事実として記録されたか（地域の限定・除外など）。対象外は null */
+  conditionsOk: boolean | null;
+  /** 店舗未確定の事例で、店舗を事実として断定した件数 */
+  storeAsserted: number;
 }
 
 const flatFields = (o: JudgmentOutput) => o.opportunities.flatMap((op) => (["applyDeadline", "applyStart", "resultDate"] as const).map((f) => ({ f, c: op[f] })));
 
 export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): CaseScore {
-  const s: CaseScore = { id, verifiable: gold.verifiable, structureOk: null, countOk: null, fieldsOk: {}, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0 };
+  const s: CaseScore = { id, verifiable: gold.verifiable, structureOk: null, countOk: null, fieldsOk: {}, falseMerge: 0, falseSplit: 0, unsupportedFacts: 0, mustNotChangeViolations: 0, conditionsOk: null, storeAsserted: 0 };
   if (!out) return s;
   const factClaims = [out.caseType, ...out.opportunities.flatMap((op) => [op.chain, op.store, op.products, op.applyStart, op.applyDeadline, op.resultDate, op.conditions])].filter((c) => c && c.basis === "fact");
   if (!gold.verifiable) {
@@ -94,6 +104,11 @@ export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): C
     if (g === "same_campaign_other" && r.relation === "independent") s.falseSplit++;
   }
   if (gold.opportunityCount != null && out.opportunities.length > gold.opportunityCount) s.falseSplit += out.opportunities.length - gold.opportunityCount;
+  if (gold.conditionsMention) {
+    const text = out.opportunities.map((op) => (op.conditions && op.conditions.basis === "fact" ? op.conditions.value : "")).join(" ");
+    s.conditionsOk = gold.conditionsMention.every((w) => text.includes(w));
+  }
+  if (gold.storeMustNotBeAsserted) s.storeAsserted = out.opportunities.filter((op) => op.store && op.store.basis === "fact").length;
   for (const p of out.plannedChanges) if (gold.mustNotChange?.includes(p.lotteryId) && p.op !== "link_case") s.mustNotChangeViolations++;
   return s;
 }

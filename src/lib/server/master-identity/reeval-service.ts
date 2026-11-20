@@ -1,5 +1,6 @@
 import "server-only";
 import { decideAutonomousOp } from "@/lib/case-model/history-guard";
+import { classifyRpcResult, type RpcErrorLike } from "@/lib/case-model/rpc-availability";
 import { planReevaluation, type PlanItem, type ReevalAction } from "@/lib/master-identity/reeval-plan";
 import type { Snapshot } from "@/lib/master-identity/snapshot";
 import { excludeLottery, restoreLottery, type Db } from "@/lib/server/lottery-service";
@@ -111,28 +112,42 @@ export async function lotteryProtection(db: Db, id: string): Promise<string | nu
   if (l.archived_at) return "すでに非表示です";
   if (l.confirmed_at) return "確認済み";
   if (l.source_kind !== "auto" || l.registration_path !== "auto") return "人が登録・確認した抽選";
-  const { data: m } = await any(db).from("lottery_management").select("is_managed").eq("lottery_id", id).maybeSingle();
-  if (m?.is_managed) return "要チェック（★）";
-  const count = async (t: string) => ((await any(db).from(t).select("id", { count: "exact", head: true }).eq("lottery_id", id)).count ?? 0) as number;
-  if ((await count("applications")) > 0) return "応募・当落の記録あり";
-  for (const t of ["limit_exemptions", "skip_rules", "skip_rule_exceptions", "collection_memos", "notification_deliveries", "application_rules", "ai_extraction_feedback"]) if ((await count(t)) > 0) return "通知・ルール・メモなどの参照あり";
+  // 保護の根拠を読めない（DBエラー・接続障害）ときは「0件」とみなさず、保護の判定不能として止める（安全側）
+  const UNKNOWN = "保護の状態を確認できません（安全のため適用しません）";
+  const mg = await any(db).from("lottery_management").select("is_managed").eq("lottery_id", id).maybeSingle();
+  if (mg.error) return UNKNOWN;
+  if (mg.data?.is_managed) return "要チェック（★）";
+  const count = async (t: string): Promise<number | null> => {
+    const r = await any(db).from(t).select("id", { count: "exact", head: true }).eq("lottery_id", id);
+    return r.error || typeof r.count !== "number" ? null : (r.count as number);
+  };
+  const apps = await count("applications");
+  if (apps === null) return UNKNOWN;
+  if (apps > 0) return "応募・当落の記録あり";
+  for (const t of ["limit_exemptions", "skip_rules", "skip_rule_exceptions", "collection_memos", "notification_deliveries", "application_rules", "ai_extraction_feedback"]) {
+    const c = await count(t);
+    if (c === null) return UNKNOWN;
+    if (c > 0) return "通知・ルール・メモなどの参照あり";
+  }
   // Stage 10E: 10Dの共通の履歴保護（DB関数 lottery_history_blockers）も併せて確認する（上の確認に加える。基準を厳しくする方向のみ）。
-  // 関数が無い環境（マイグレーション108未適用の本番など）では、従来の確認だけで動く（挙動を変えない）
-  const extra = await commonProtection(db, id);
-  if (extra) return extra;
-  return null;
+  // 関数が「存在しない」と明確に判定できる環境（マイグレーション108未適用の本番など）でだけ、従来の確認で動く。
+  // 権限拒否・接続障害・未知のエラーは「判定不能」＝適用しない（保護なしで続行しない）
+  return commonProtection(db, id, UNKNOWN);
 }
 
-/** 共通の履歴保護の理由（無ければ null）。関数が使えない・失敗したときは null（従来の確認に委ねる） */
-async function commonProtection(db: Db, id: string): Promise<string | null> {
+/** 共通の履歴保護の理由（無ければ null）。関数が存在しない環境だけ null（従来の確認に委ねる）。それ以外の失敗は、止める理由を返す */
+export async function commonProtection(db: Db, id: string, unknownReason = "保護の状態を確認できません（安全のため適用しません）"): Promise<string | null> {
+  let r: { data: unknown; error: RpcErrorLike | null; status?: number | null };
   try {
-    const { data, error } = await any(db).rpc("lottery_history_blockers", { p_lottery_id: id });
-    if (error || !Array.isArray(data)) return null;
-    const d = decideAutonomousOp("merge", (data as string[]).filter((c) => c !== "not_found"));
-    return d.allowed ? null : d.reasons[0] ?? "履歴保護の対象";
+    r = await any(db).rpc("lottery_history_blockers", { p_lottery_id: id });
   } catch {
-    return null;
+    return unknownReason;
   }
+  const outcome = classifyRpcResult(r, (d) => Array.isArray(d) && d.every((c) => typeof c === "string"));
+  if (outcome === "missing_function") return null;
+  if (outcome === "indeterminate") return unknownReason;
+  const d = decideAutonomousOp("merge", (r.data as string[]).filter((c) => c !== "not_found"));
+  return d.allowed ? null : d.reasons[0] ?? "履歴保護の対象";
 }
 
 type ItemRow = { id: string; target_type: PlanItem["targetType"]; target_id: string; action: ReevalAction; proposal: PlanItem["proposal"]; status: string };

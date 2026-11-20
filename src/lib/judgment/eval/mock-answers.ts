@@ -123,6 +123,86 @@ export function mockAnswer(caseId: string, input: JudgmentInput): unknown {
         opportunities: [{ key: "O1", label: "新宿店の抽選", store: fact("新宿店", "新宿店"), applyDeadline: fact("2099-02-07", "応募期間 2099-02-03〜2099-02-07") }],
         relations: [{ opportunityKey: "O1", lotteryId: "L-J12-A", relation: "same", basis: "fact", citations: [cite("新宿店")], rationale: "同じ新宿店の抽選" }],
       };
+    case "J13":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "抽選販売"),
+        structure: { kind: "multi_independent_per_submit", basis: "fact", rationale: "1回の送信で3商品に応募され、当落は商品ごとに独立", citations: [cite("当選・落選は商品ごとに独立して判定し")] },
+        opportunities: ["デルタ", "イプシロン", "ゼータ"].map((n, i) => ({
+          key: `O${i + 1}`,
+          label: `商品${n}`,
+          store: fact("渋谷店", "渋谷店"),
+          products: { value: [`商品${n}`], basis: "fact", citations: [cite(`商品${n}`)] },
+          applyDeadline: fact("2099-03-25", "応募期間 2099-03-20〜2099-03-25"),
+        })),
+      };
+    case "J14":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "抽選販売"),
+        structure: { kind: "one_form_one", basis: "fact", rationale: "希望順位つきの1回の応募で、当選は1名1商品のみ（応募機会は1つ）", citations: [cite("当選は1名につき1商品のみ")] },
+        opportunities: [{ key: "O1", label: "新宿店の抽選（3商品から希望順位）", store: fact("新宿店", "新宿店"), applyDeadline: fact("2099-03-26", "応募期間 2099-03-20〜2099-03-26") }],
+      };
+    case "J15":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "抽選販売"),
+        structure: { kind: "per_round", basis: "fact", rationale: "第1弾・第2弾は応募期間・当落が独立（別々に申し込む）", citations: [cite("各弾の当落は独立で")] },
+        opportunities: [
+          { key: "O1", label: "池袋店 第1弾", store: fact("池袋店", "池袋店"), applyDeadline: fact("2099-02-05", "応募 2099-02-01〜2099-02-05") },
+          { key: "O2", label: "池袋店 第2弾", store: fact("池袋店", "池袋店"), applyDeadline: fact("2099-02-19", "応募 2099-02-15〜2099-02-19") },
+        ],
+      };
+    case "J16":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "抽選販売を実施します"),
+        structure: { kind: "one_form_one", basis: "inference", rationale: "対象店舗での抽選（地域の限定あり）", citations: [] },
+        opportunities: [{ key: "O1", label: "サンプル電機 抽選（東京都・神奈川県の店舗のみ）", applyDeadline: fact("2099-03-05", "応募期間 2099-03-01〜2099-03-05"), conditions: fact("対象は東京都・神奈川県の店舗のみ", "対象は東京都・神奈川県の店舗のみです") }],
+      };
+    case "J17":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "オンライン抽選販売"),
+        structure: { kind: "one_form_one", basis: "inference", rationale: "オンラインの抽選（配送地域の除外あり）", citations: [] },
+        opportunities: [{ key: "O1", label: "サンプル電機 オンライン抽選", applyDeadline: fact("2099-03-12", "応募期間 2099-03-08〜2099-03-12"), conditions: fact("北海道・沖縄県および離島への配送は対象外", "北海道・沖縄県および離島への配送は対象外です") }],
+      };
+    case "J18":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "抽選販売"),
+        structure: { kind: "store_select", basis: "fact", rationale: "受取店舗は応募時に選ぶ。対象店舗は未発表のため店舗は未確定", citations: [cite("受取店舗は応募時に選択していただきます")] },
+        opportunities: [{ key: "O1", label: "サンプル電機 抽選（店舗は後日発表）", applyDeadline: fact("2099-03-05", "応募期間 2099-03-01〜2099-03-05") }],
+        unresolved: [{ id: "q1", question: "対象店舗の一覧（後日発表）", importance: "medium" }],
+        nextActions: [{ kind: "wait", reason: "対象店舗は後日発表される" }],
+      };
+    case "J19":
+      return {
+        ...base,
+        caseType: fact("update", "応募締切を"),
+        structure: { kind: "one_form_one", basis: "inference", rationale: "既存の抽選の締切短縮の告知", citations: [] },
+        opportunities: [{ key: "O1", label: "渋谷店の抽選（締切短縮）", store: fact("渋谷店", "渋谷店"), applyDeadline: fact("2099-03-15", "2099-03-20 から 2099-03-15 に短縮") }],
+        relations: [{ opportunityKey: "O1", lotteryId: "L-J19-A", relation: "same", basis: "fact", citations: [cite("渋谷店")], rationale: "同じ抽選の締切短縮" }],
+        nextActions: [{ kind: "ask_human", reason: "登録の締切は人が確定した値で応募記録もあるため、短縮の反映は人の確認に回す" }],
+      };
+    case "J20":
+      return {
+        ...base,
+        caseType: fact("update", "中止いたします"),
+        structure: { kind: "one_form_one", basis: "fact", rationale: "中止された抽選とは別に、期間をあらためた再開催の抽選が1つ", citations: [cite("あらためて 2099-03-10〜2099-03-14 の応募期間で")] },
+        opportunities: [{ key: "O1", label: "新宿店の再開催の抽選", store: fact("新宿店", "新宿店"), applyDeadline: fact("2099-03-14", "2099-03-10〜2099-03-14 の応募期間") }],
+        relations: [{ opportunityKey: "O1", lotteryId: "L-J20-A", relation: "same_campaign_other", basis: "fact", citations: [cite("中止いたします")], rationale: "中止された抽選と、再開催の抽選は別の応募機会（応募は引き継がれない）" }],
+        plannedChanges: [{ lotteryId: "L-J20-A", op: "link_case", reason: "同じ企画の別機会として関連づけのみ" }],
+      };
+    case "J21":
+      return {
+        ...base,
+        caseType: fact("lottery_announcement", "抽選を継続実施します"),
+        structure: { kind: "one_form_one", basis: "fact", rationale: "今回は第3週分の抽選（週ごとに別の応募機会）", citations: [cite("今回は第3週分")] },
+        opportunities: [{ key: "O1", label: "渋谷店 第3週分", store: fact("渋谷店", "渋谷店"), applyDeadline: fact("2099-02-26", "応募 2099-02-20〜2099-02-26") }],
+        relations: [{ opportunityKey: "O1", lotteryId: "L-J21-A", relation: "same_campaign_other", basis: "fact", citations: [cite("第1・2週に落選した方も今回応募できます")], rationale: "前週分とは別の応募機会" }],
+        plannedChanges: [{ lotteryId: "L-J21-A", op: "link_case", reason: "継続企画の別の週として関連づけのみ" }],
+      };
     default:
       throw new Error(`台本なし: ${caseId}`);
   }

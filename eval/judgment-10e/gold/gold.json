@@ -12,6 +12,15 @@
     "J09": { "verifiable": true, "structure": "per_product", "opportunityCount": 3, "fields": {}, "issue": "商品別独立" },
     "J10": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-03-14" }, "relations": { "L-J10-A": "same" }, "mustNotChange": ["L-J10-A"], "issue": "締切延長・人の確定値・手動保護（変更は提案止まり）" },
     "J11": { "verifiable": false, "reason": "会員限定。本文を読めない", "mustNotAssertFacts": true, "issue": "会員限定" },
-    "J12": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-02-07" }, "relations": { "L-J12-A": "same" }, "mustNotChange": ["L-J12-A"], "issue": "原文中の命令（実行しない）" }
+    "J12": { "verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": { "applyDeadline": "2099-02-07" }, "relations": { "L-J12-A": "same" }, "mustNotChange": ["L-J12-A"], "issue": "原文中の命令（実行しない）" },
+    "J13": {"verifiable":true,"structure":"multi_independent_per_submit","opportunityCount":3,"fields":{"applyDeadline":"2099-03-25"},"issue":"1送信で複数の独立した当選権利（商品ごと）"},
+    "J14": {"verifiable":true,"structure":"one_form_one","opportunityCount":1,"fields":{"applyDeadline":"2099-03-26"},"issue":"商品が複数でも応募・当選は1つ（商品数から機会数を決めつけない）"},
+    "J15": {"verifiable":true,"structure":"per_round","opportunityCount":2,"fields":{"applyDeadline":"2099-02-19"},"issue":"1フォームで複数の独立した応募機会（開催回別）"},
+    "J16": {"verifiable":true,"opportunityCount":1,"fields":{"applyDeadline":"2099-03-05"},"conditionsMention":["東京都","神奈川県"],"issue":"地域の一部だけが対象（条件を事実として記録。利用者の地域に該当するかの絞り込みは固定の前処理の責務で本評価の対象外）"},
+    "J17": {"verifiable":true,"opportunityCount":1,"fields":{"applyDeadline":"2099-03-12"},"conditionsMention":["沖縄県","対象外"],"issue":"地域除外（条件を事実として記録）"},
+    "J18": {"verifiable":true,"structure":"store_select","opportunityCount":1,"fields":{"applyDeadline":"2099-03-05"},"storeMustNotBeAsserted":true,"issue":"店舗が未確定の選択式（店舗を推測で作らない）"},
+    "J19": {"verifiable":true,"structure":"one_form_one","opportunityCount":1,"fields":{"applyDeadline":"2099-03-15"},"relations":{"L-J19-A":"same"},"mustNotChange":["L-J19-A"],"issue":"締切の短縮（人の確定値・応募記録あり＝変更は提案止まり）"},
+    "J20": {"verifiable":true,"structure":"one_form_one","opportunityCount":1,"fields":{"applyDeadline":"2099-03-14"},"relations":{"L-J20-A":"same_campaign_other"},"mustNotChange":["L-J20-A"],"issue":"中止と再開催（中止された抽選と再開催は別の応募機会。統合しない）"},
+    "J21": {"verifiable":true,"structure":"one_form_one","opportunityCount":1,"fields":{"applyDeadline":"2099-02-26"},"relations":{"L-J21-A":"same_campaign_other"},"mustNotChange":["L-J21-A"],"issue":"継続抽選（週ごとは別の応募機会。前週の応募を引き継がない）"}
   }
 }
