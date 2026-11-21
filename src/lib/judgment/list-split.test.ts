@@ -2,7 +2,7 @@
 /** 一覧投稿の分割・対象案件への絞り込み・出力途切れ時の再分割（Stage 10I）。架空データのみ。実AI・ネットワークには触れない。 */
 import { describe, expect, it } from "vitest";
 import type { CurrentCase } from "./contract";
-import { chunkGroups, composeText, focusOnCase, judgeChunkWithSplit, splitListPost, type ChunkJudgeResult } from "./list-split";
+import { chunkGroups, composeText, focusOnCase, itemCoverage, judgeChunkWithSplit, splitListPost, type ChunkJudgeResult } from "./list-split";
 
 const HEAD = "🌋架空地方 | 3件 (1/1)";
 const LIST = `${HEAD} 《サンプル店A（架空県）- 2件》 ・架空TCG 拡張パック「テスト弾」 https://t.co/aaa - 4/8(水)23:59〆 ・架空TCG スターターセット https://t.co/bbb - 4/9(木)23:59〆 《サンプル店B（架空県）- 1件》 ・架空TCG 拡張パック「テスト弾」 https://t.co/ccc - 4/8(水)23:59〆 《サンプルチェーンC 各店 (全国各地) - 1件》 ・架空TCG 拡張パック「テスト弾」 https://t.co/ddd - 4/10(金)23:59〆`;
@@ -110,5 +110,24 @@ describe("塊への分割と、出力途切れ時の再分割", () => {
     calls = 0;
     await judgeChunkWithSplit(big.header, big.groups, judge, { maxDepth: 6, calls: { used: 0, max: 99 }, cost: { spent: 0, max: 3 } });
     expect(calls).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("同じ文面の別項目の集約防止（番号つきの塊＋対応の検査）", () => {
+  // 10Iで「7項目→2機会」になった型: 同じ文面・別リンク・別見出しの項目が並ぶ（架空）
+  const dup = splitListPost(`${HEAD} 《サンプルモールS 各店 (全国各地) - 4件》 ・【サンプルモール】架空TCG 拡張パック 抽選販売 https://t.co/a1 - 4/8(水)23:59〆 ・【サンプルモール】架空TCG 拡張パック 抽選販売 https://t.co/a2 - 4/8(水)23:59〆 ・【サンプルモール】架空TCG 拡張パック 抽選販売 https://t.co/a3 - 4/8(水)23:59〆 ・【サンプルモール】架空TCG 拡張パック 抽選販売 https://t.co/a4 - 4/8(水)23:59〆 《サンプル店T - 1件》 ・架空TCG 拡張パック https://t.co/b1 - 4/8(水)23:59〆 《サンプルチェーンU 各店 - 2件》 ・架空TCG 拡張パック BOX購入権 https://t.co/c1 - 4/9(木)23:59〆 ・架空TCG 拡張パック BOX購入権 https://t.co/c2 - 4/9(木)23:59〆`);
+  it("全項目に番号が付き、同じ文面でも項目は別々に数えられる（7項目）", () => {
+    const text = composeText(dup.header, dup.groups, { numbered: true });
+    expect([...text.matchAll(/【項目(\d+)】/g)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(composeText(dup.header, dup.groups)).not.toContain("【項目");
+  });
+  it("項目との対応を検査する: 取りこぼし・複数項目の集約・番号なしを数える", () => {
+    const ok = itemCoverage(Array.from({ length: 7 }, (_, i) => `項目${i + 1} 架空TCG`), 7);
+    expect(ok).toMatchObject({ missing: [], merged: 0, unnumbered: 0, covered: 7 });
+    // 7項目→2機会に集約された型: 4項目と2項目をまとめ、1項目が脱落
+    const bad = itemCoverage(["項目1・2・3・4 サンプルモール", "項目6・7 サンプルチェーンU"], 7);
+    expect(bad.missing).toEqual([5]);
+    expect(bad.merged).toBe(2);
+    expect(itemCoverage(["架空TCG"], 7)).toMatchObject({ unnumbered: 1, covered: 0 });
   });
 });

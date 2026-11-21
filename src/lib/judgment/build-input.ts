@@ -26,6 +26,8 @@ export interface EvidenceSeed {
   reused?: boolean;
   /** 以前の解析（読解）に失敗した原文か。本文は今回あらためて読める（読み落としの再判断） */
   priorReadFailed?: boolean;
+  /** 原文の種類（リンク先の公開ページ本文は、投稿本文と区別して渡す） */
+  kind?: "linked_page";
 }
 
 /** 過去の判断の取得口（読み取りのみ）。DB実装は `historyFromDb`（server/judgment-history） */
@@ -61,6 +63,7 @@ export function toEvidenceItems(seeds: EvidenceSeed[]): EvidenceItem[] {
     hash: s.hash ?? null,
     reused: s.reused,
     ...(s.priorReadFailed ? { priorReadFailed: true } : {}),
+    ...(s.kind ? { kind: s.kind } : {}),
   }));
 }
 
@@ -98,7 +101,25 @@ export async function buildJudgmentInput(a: BuildInputArgs): Promise<JudgmentInp
  * 9Zの保存済み原文（last_good.evidence）を、判断の入力の根拠へ変換する。保存が無い場合は、取得状況だけを渡す（本文を推測で作らない）。
  * parsedOk: 以前の解析（読解）が成功したか。false でも、保存された本文は今回の判断で読める（status は fetched。priorReadFailed で区別する＝取得済み本文の読み落としの再判断）。
  */
+/**
+ * 保存済みの原文＋保存されているリンク先の公開ページ本文（Stage 10J）を、判断の根拠の並びにする。
+ * 先頭が投稿・ページ本文、続くのがリンク先の本文（kind=linked_page。別の出典として区別。最大2件）。リンク先の本文が無ければ seedFromStored と同じ1件。
+ */
+export function seedsFromStored(url: string, stored: StoredEvidence | null, o: { parsedOk?: boolean; hostBlocked?: boolean; attempted?: boolean } = {}): EvidenceSeed[] {
+  const main = seedFromStored(url, stored, o);
+  const linked: EvidenceSeed[] = (stored?.linkedPages ?? []).slice(0, 2).map((l) => ({ url: l.url, fetchedAt: l.fetchedAt, via: "web_fetch", origin: "unknown" as const, text: l.text, hash: null, status: "fetched" as const, reused: true, kind: "linked_page" as const }));
+  return [main, ...linked];
+}
+
 export function seedFromStored(url: string, stored: StoredEvidence | null, o: { parsedOk?: boolean; hostBlocked?: boolean; attempted?: boolean } = {}): EvidenceSeed {
   if (!stored) return { url, via: "unknown", origin: "unknown", text: null, status: classifyEvidence({ hasStoredText: false, hostBlocked: o.hostBlocked, attempted: o.attempted }) };
   return { url: stored.url, fetchedAt: stored.fetchedAt, via: stored.via, origin: stored.origin, text: stored.text, hash: stored.hash, status: "fetched", reused: true, ...(o.parsedOk === false ? { priorReadFailed: true } : {}) };
+}
+
+/**
+ * 登録値が、画像を使った解析で得られた可能性があるか（Stage 10J）。取得済みの画像があった保存原文では true。
+ * 画像そのものは保存されておらず、画像から読んだ内容は原文（text）には入らない。登録値（currentCase）側にだけあり、原文では確認できない。
+ */
+export function imageDerivedFlag(stored: { imageCount?: number; imageStatus?: string } | null | undefined): boolean {
+  return !!stored && (stored.imageCount ?? 0) > 0 && (stored.imageStatus === "fetched" || stored.imageStatus === "partial");
 }

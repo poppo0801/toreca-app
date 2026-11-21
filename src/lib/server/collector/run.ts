@@ -220,6 +220,8 @@ interface QueuedPayload {
     /** Stage 9Z: 解析時に実際に取得できた本文（保存用。AIの抽出結果ではない原文。解析後に last_good.evidence へ保存する） */
     evidenceText?: string;
     evidenceVia?: "x_oembed" | "web_fetch";
+    /** Stage 10J: 解析時に取得できた、投稿内のリンク先の公開ページ本文（保存用。投稿本文とは別の出典として last_good.evidence.linkedPages に保存） */
+    linkedPages?: { url: string; text: string }[];
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
     relevanceBasis?: string;
     /** 利用者のXブックマーク由来（Stage 6I。収集元ではなく、利用者が選んだ投稿） */
@@ -504,6 +506,7 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     // 画像は「見つかった／取得できた／AIへ渡した」を別々に記録する（取得とAI解析を混同しない）
     q.imageStats = rich.stats;
     q.xVia = "api";
+    if (rich.linkedPageText && rich.linkUrl) q.linkedPages = [{ url: rich.linkUrl, text: rich.linkedPageText }];
     // 保存済みの画像URLがすべて取得できない（期限切れ等）ときは、1回だけX APIで投稿を取り直す（予算の範囲内。X APIが使えなければ従来どおり再試行）
     if (rich.stats.found > 0 && rich.stats.fetched === 0 && deps.xClient && !q.refetched) {
       const inner: QueuedPayload["queued"] = { ...q, kind: "x_oembed", post: undefined, refetched: true };
@@ -542,6 +545,7 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
       if (r.ok) {
         q.imageStats = { found: r.imagesFound, fetched: r.imagesUsed, sent: r.images.length };
         q.xVia = r.via;
+        if (r.linkedPages?.length) q.linkedPages = r.linkedPages;
         if (r.post) q.post = r.post;
         else if (r.text) {
           q.evidenceText = r.text;
@@ -657,7 +661,7 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
 function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null): { evidence?: StoredEvidence } {
   try {
     const st = q.imageStats;
-    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
+    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
     return ev ? { evidence: ev } : prior ? { evidence: prior } : {};
   } catch {
     return prior ? { evidence: prior } : {};

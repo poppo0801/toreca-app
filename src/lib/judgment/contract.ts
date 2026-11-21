@@ -33,6 +33,8 @@ export interface EvidenceItem {
   hash: string | null;
   /** 保存済みの原文の再利用か（9Z） */
   reused?: boolean;
+  /** Stage 10J: 原文の種類。linked_page = 投稿内のリンク先の公開ページ本文（投稿本文とは別の出典。引用は、その本文から行う）。無ければ投稿・ページ本文 */
+  kind?: "linked_page";
   /** 以前の解析では読み取れなかった原文（本文は読める。読み落としの再判断） */
   priorReadFailed?: boolean;
 }
@@ -65,6 +67,8 @@ export interface CurrentCase {
   applyDeadline: string | null;
   resultDate: string | null;
   storeMode: "fixed" | "select_on_apply" | "none" | null;
+  /** Stage 10J: 登録値が、画像を使った解析で得られた可能性がある（取得済みの画像があった）。原文（画像は保存していない）では確認できない値を含みうる */
+  fromImages?: boolean;
 }
 
 export interface MasterCandidate {

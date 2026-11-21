@@ -112,8 +112,31 @@ export function focusOnCase(split: SplitList, cur: CurrentCase): Focus {
 }
 
 /** 判断へ渡す本文を組み立てる（共通の見出しを必ず付ける。各項目は原文のまま＝引用検証が通る） */
-export function composeText(header: string, groups: ListGroup[]): string {
-  return [header, ...groups.map((g) => `${g.label} ${g.items.join(" ")}`)].filter(Boolean).join(" ");
+export function composeText(header: string, groups: ListGroup[], opts: { numbered?: boolean } = {}): string {
+  let n = 0;
+  const body = (g: ListGroup): string => g.items.map((it) => (opts.numbered ? `【項目${++n}】 ${it}` : it)).join(" ");
+  return [header, ...groups.map((g) => `${g.label} ${body(g)}`)].filter(Boolean).join(" ");
+}
+
+/**
+ * 番号つきの塊（composeText の numbered）の判断結果を、項目との対応で検査する（Stage 10J。**同じ文面の別項目を1つに集約していないか**の検出）。
+ * labels = 応募機会ごとの label。label に「項目n」が書かれていることを前提に、
+ *  - missing: どの機会にも対応しない項目（取りこぼしの疑い）
+ *  - merged: 複数の項目を1つの機会にまとめた機会の数（集約の疑い。同じ応募ページの複数商品など正当な場合もあるため、疑いとして数える）
+ *  - unnumbered: 項目番号の無い機会の数（対応を確認できない）
+ */
+export function itemCoverage(labels: string[], itemCount: number): { missing: number[]; merged: number; unnumbered: number; covered: number } {
+  const seen = new Set<number>();
+  let merged = 0;
+  let unnumbered = 0;
+  for (const l of labels) {
+    const ns = [...l.matchAll(/項目[ \t]*([0-9]+(?:[・,、][ \t]*[0-9]+)*)/g)].flatMap((m) => m[1].split(/[^0-9]+/).filter(Boolean).map(Number)).filter((n) => n >= 1 && n <= itemCount);
+    if (!ns.length) unnumbered++;
+    if (new Set(ns).size > 1) merged++;
+    ns.forEach((n) => seen.add(n));
+  }
+  const missing = Array.from({ length: itemCount }, (_, i) => i + 1).filter((n) => !seen.has(n));
+  return { missing, merged, unnumbered, covered: seen.size };
 }
 
 /** 一覧を小さな塊に分ける（項目数・文字数で動的に）。1グループが大きければ項目ごとに割り、見出しを各塊に付ける */
@@ -177,10 +200,11 @@ export async function judgeChunkWithSplit(
   judge: (text: string) => Promise<ChunkJudgeResult>,
   limits: { maxDepth: number; calls: { used: number; max: number }; cost: { spent: number; max: number } },
   depth = 0,
+  numbered = false,
 ): Promise<ChunkRun[]> {
   const items = groups.reduce((n, g) => n + g.items.length, 0);
   if (limits.calls.used >= limits.calls.max || limits.cost.spent >= limits.cost.max) return [{ items, ok: false, opportunities: 0, costJpy: 0, attempts: 0, splits: depth }];
-  const r = await judge(composeText(header, groups));
+  const r = await judge(composeText(header, groups, { numbered }));
   limits.calls.used += r.attempts;
   limits.cost.spent += r.costJpy;
   if (r.ok) return [{ items, ok: true, opportunities: r.opportunities, costJpy: r.costJpy, attempts: r.attempts, splits: depth }];
@@ -196,7 +220,7 @@ export async function judgeChunkWithSplit(
     }
     return out;
   };
-  const a = await judgeChunkWithSplit(header, regroup(flat.slice(0, mid)), judge, limits, depth + 1);
-  const b = await judgeChunkWithSplit(header, regroup(flat.slice(mid)), judge, limits, depth + 1);
+  const a = await judgeChunkWithSplit(header, regroup(flat.slice(0, mid)), judge, limits, depth + 1, numbered);
+  const b = await judgeChunkWithSplit(header, regroup(flat.slice(mid)), judge, limits, depth + 1, numbered);
   return [{ items: 0, ok: false, opportunities: 0, costJpy: r.costJpy, attempts: r.attempts, splits: depth }, ...a, ...b];
 }
