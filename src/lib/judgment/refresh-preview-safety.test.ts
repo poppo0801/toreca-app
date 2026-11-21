@@ -28,3 +28,17 @@ describe("10G 差分プレビュー: 書き込みなし・上限・送信前検�
     expect(evidenceExport).not.toMatch(/household|applications|profiles/);
   });
 });
+
+describe("10I 再評価: ゲート・上限・書き込みなし・X/短縮URLの非取得", () => {
+  const i10 = readFileSync("src/lib/judgment/refresh-10i-real.test.ts", "utf8");
+  it("ゲート付きで、DBクライアントを持たず、判断はsinkなし。上限（90回・取得60・連続5失敗・一覧ごとの費用）を持つ", () => {
+    expect(i10).toContain('env.JUDGMENT_10I_RUN !== "1"');
+    expect(i10).toContain("checkJudgmentRealRun(");
+    expect(i10).not.toMatch(/supabase|createClient/);
+    expect(i10).not.toMatch(/sink\s*:/);
+    for (const s of ["MAX_CALLS = 90", "MAX_LIST_COST", "fetches >= 60", "consecFetchFail >= 5", "consec >= 5"]) expect(i10).toContain(s);
+  });
+  it("取得は robots を尊重する既存部品・公開https・X/短縮URL除外・漏洩検出つき。送信前に伏せ字・漏洩検出・公開告知確認を行う", () => {
+    for (const s of ["fetchRespectingRobots(", "precheckFetchTarget(", "isXHost(", 'protocol === "https:"', "detectLeaks(", "isPublicNotice(", "redact("]) expect(i10).toContain(s);
+  });
+});

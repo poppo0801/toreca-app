@@ -21,7 +21,7 @@ describe("入力設計: 対象案件自身の登録は related に混ぜない",
 
 describe("指示文: 保留基準・年の推定・一覧投稿・自己登録", () => {
   it("版が上がり、重要な不確実性を隠さず、自己照合を問わず、一覧を根拠なく1件にも分割にもしない指示がある", () => {
-    expect(JUDGMENT_PROMPT_VERSION).toBe("10h.2");
-    for (const s of ["currentCase", "同じ応募権か」とは問いません", "一覧・まとめ投稿", "安易に1つの応募とみなさず", "根拠なく分割もしない", "未解決事項（unresolved）の基準", "重要な不確実性を隠さない", "推定してよい", "リンクが原文に無いURLを作らない", "アクセス制限を回避しようとしない"]) expect(JUDGMENT_SYSTEM, s).toContain(s);
+    expect(JUDGMENT_PROMPT_VERSION).toBe("10i.1");
+    for (const s of ["currentCase", "同じ応募権か」とは問いません", "一覧・まとめ投稿", "安易に1つの応募とみなさず", "根拠なく分割もしない", "未解決事項（unresolved）の基準", "重要な不確実性を隠さない", "推定してよい", "リンクが原文に無いURLを作らない", "アクセス制限を回避しようとしない", "対象案件への焦点と、一覧の塊", "渡された項目だけ"]) expect(JUDGMENT_SYSTEM, s).toContain(s);
   });
 });

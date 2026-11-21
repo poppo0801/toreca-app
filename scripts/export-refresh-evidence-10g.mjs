@@ -25,7 +25,7 @@ for (let from = 0; ; from += 500) {
   if (error) throw new Error(`取得失敗: ${error.message}`);
   for (const r of data) {
     const e = r.ev;
-    if (e && e.v === 1 && typeof e.text === "string" && e.text.length > 0) out.push({ id: r.id, text: e.text, via: e.via ?? null, origin: e.origin ?? null, url: e.url ?? null, fetchedAt: e.fetchedAt ?? null });
+    if (e && e.v === 1 && typeof e.text === "string" && e.text.length > 0) out.push({ id: r.id, text: e.text, via: e.via ?? null, origin: e.origin ?? null, url: e.url ?? null, fetchedAt: e.fetchedAt ?? null, links: Array.isArray(e.links) ? e.links.slice(0, 5) : [], imageCount: typeof e.imageCount === "number" ? e.imageCount : null, imageStatus: e.imageStatus ?? null, truncated: e.truncated === true });
   }
   if (data.length < 500) break;
 }
