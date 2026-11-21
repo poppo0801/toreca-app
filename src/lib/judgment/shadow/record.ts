@@ -42,6 +42,8 @@ export interface ShadowRecord {
   costJpy: number | null;
   latencyMs: number;
   legacy: LegacySummary;
+  /** 旧方式の値の出どころ: collector_extraction=通常収集のAI抽出（応募単位など）／fixed_form_judge=固定の形態判定（保存済み原文だけから。収集のAI抽出は再実行していない） */
+  legacySource?: "collector_extraction" | "fixed_form_judge";
   /** 入力の同一性の確認用（原文そのものではない）: 根拠の数・原文ハッシュの先頭・渡した既存候補の数 */
   input?: { evidenceCount: number; evidenceHash: string | null; relatedCount: number };
   next: null | {

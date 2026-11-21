@@ -54,7 +54,7 @@ export class ShadowController {
    * 1件のシャドー判断。**例外を投げない**。legacy は要約のコピーを使い、元のオブジェクトに触れない。
    * caseKey は呼び出し側の案件識別子（記録前にハッシュ化される。生のIDは保存しない）。
    */
-  async observe(args: { caseKey: string; input: JudgmentInput; legacy: LegacySummary }): Promise<ShadowOutcome> {
+  async observe(args: { caseKey: string; input: JudgmentInput; legacy: LegacySummary; legacySource?: "collector_extraction" | "fixed_form_judge" }): Promise<ShadowOutcome> {
     try {
       const cfg = (this.deps.config ?? shadowConfig)();
       if (!cfg.enabled) return { ran: false, skipped: cfg.reason === "enabled" ? "disabled" : cfg.reason };
@@ -106,6 +106,7 @@ export class ShadowController {
         costJpy: status === "timeout" || status === "error" ? null : result?.unknownCost ? null : Math.round((this.spentJpy() - spentBefore) * 10000) / 10000,
         latencyMs: Math.max(0, this.now - t),
         legacy,
+        ...(args.legacySource ? { legacySource: args.legacySource } : {}),
         input: { evidenceCount: args.input.evidence.length, evidenceHash: /^[0-9a-f]{8,64}$/.test(args.input.evidence[0]?.hash ?? "") ? (args.input.evidence[0]?.hash as string).slice(0, 12) : null, relatedCount: args.input.related.length },
         next: out
           ? {

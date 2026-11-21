@@ -19,6 +19,12 @@ const ex = (await import("../../../scripts/lib/phase2-extract.mjs")) as {
   readApprovals: (p?: string) => Record<string, { approved: boolean }>;
   checkGates: (a: string, ap: Record<string, { approved: boolean }>) => { ok: boolean; missing: string[] };
   planExtractRun: (o: Record<string, unknown>) => { mode: string; canConnect: boolean; reasons: string[] };
+  buildQueryArgs: (o: { ref: string; file: string }) => string[];
+  assertRefMatch: (o: { expectRef?: string; linkedRef: string | null; productionRefs: string[] }) => boolean;
+  assertRecentBackup: (o: { list: () => { name: string; mtimeMs: number }[]; nowMs: number; maxAgeHours?: number }) => boolean;
+  sanitizeRows: (r: unknown) => Record<string, string | null>[];
+  wrapReadOnly: (s: string) => string;
+  runExtraction: (o: Record<string, unknown>) => Promise<{ mode: string; executed: boolean; reasons: string[]; count?: number; noText?: number; log?: Record<string, unknown>[] }>;
   assertLocalOutputPath: (p: string, g: string) => boolean;
   safeLogRow: (r: Record<string, unknown>, seq: number) => Record<string, unknown>;
   buildDeletionRecord: (f: { name: string; bytes: number }[], at: string) => { count: number; files: { name: string }[] };
@@ -88,13 +94,15 @@ describe("承認ゲート: 未承認では抽出・送信・課金が実行不�
     expect(ex.checkGates("paid_eval_with_gold", { A: { approved: true }, B: { approved: true }, C: { approved: true }, E: { approved: true } }).missing).toEqual(["D"]);
     expect(() => ex.checkGates("unknown_action", {})).toThrow();
   });
-  it("抽出の実行計画: dry-run は接続しない。--execute でも、二重ゲート・承認・バックアップが揃っても、接続コード未実装のため接続しない", () => {
+  it("抽出の実行計画: dry-run は接続しない。--execute は、二重ゲート・承認A・バックアップ申告がすべて揃ったときだけ「接続可」（判定のみで、この関数は接続しない）", () => {
     expect(ex.planExtractRun({}).canConnect).toBe(false);
     const noGate = ex.planExtractRun({ execute: true });
     expect(noGate.reasons.length).toBeGreaterThanOrEqual(3);
     const all = ex.planExtractRun({ execute: true, yesProduction: true, approvals: { A: { approved: true } }, backupDone: true });
-    expect(all.canConnect).toBe(false);
-    expect(all.reasons.join("|")).toContain("未実装");
+    expect(all.canConnect).toBe(true);
+    expect(ex.planExtractRun({ execute: true, yesProduction: true, approvals: {}, backupDone: true }).canConnect).toBe(false);
+    expect(ex.planExtractRun({ execute: true, yesProduction: false, approvals: { A: { approved: true } }, backupDone: true }).canConnect).toBe(false);
+    expect(ex.planExtractRun({ execute: true, yesProduction: true, approvals: { A: { approved: true } }, backupDone: false }).canConnect).toBe(false);
   });
   it("抽出スクリプト: dry-run は SQL とゲート状態を表示して終了0、--execute は終了コード3で止まる（DB接続・環境変数不要）", () => {
     const base = { cwd: process.cwd(), encoding: "utf8" as const, env: { ...process.env, TOREMANE_TARGET: "", NEXT_PUBLIC_SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "" } };
@@ -225,5 +233,71 @@ describe("旧方式との比較（構造のみ＝無課金／項目抽出＝未�
     expect(noLegacy.newBudgetJpy).toBe(50);
     expect(noLegacy.maxCasesWorstCase).toBe(30);
     expect(ex.MAX_ROWS).toBe(30);
+  });
+});
+
+describe("抽出の実行（Stage 10F）: すべての確認が揃うまで接続しない。接続は注入された query だけ", () => {
+  const REF = "abcdefghij0123456789";
+  const NOW = Date.parse("2099-03-01T12:00:00Z");
+  const base = () => {
+    const calls: string[] = [];
+    const written: { p: string; body: string }[] = [];
+    return {
+      calls,
+      written,
+      o: {
+        execute: true, yesProduction: true, approvals: { A: { approved: true } }, backupDone: true,
+        expectRef: REF, linkedRef: REF, productionRefs: [REF], nowMs: NOW, limit: 30, sinceIso: "2026-11-20T01:09:01Z",
+        backupList: () => [{ name: "tcg-full-20990301-110000", mtimeMs: NOW - 3_600_000 }],
+        outPath: "eval/real-data/extract-test.json", gitignoreText: "eval/real-data/\n",
+        query: async (sql: string) => { calls.push(sql); return [{ id: "i1", status: "pending", created_at: "2099-01-01T00:00:00Z", evidence_text: "架空の原文", evidence_fetched_at: "2099-01-01T00:00:00Z", evidence_via: "web_fetch", evidence_origin: "primary", evidence_hash: "abcdef1234567890", evidence_url: "https://x.invalid/a", household_id: "SECRET", draft: "SECRET" }]; },
+        write: (p: string, body: string) => { written.push({ p, body }); },
+      } as Record<string, unknown>,
+    };
+  };
+  it("dry-run は query を呼ばない。ゲートA未承認・二重ゲート欠け・バックアップ未申告は query を呼ばず、理由を返す", async () => {
+    const t = base();
+    expect((await ex.runExtraction({ ...t.o, execute: false })).executed).toBe(false);
+    for (const over of [{ approvals: {} }, { yesProduction: false }, { backupDone: false }]) {
+      const r = await ex.runExtraction({ ...t.o, ...over });
+      expect(r.executed).toBe(false);
+      expect(r.reasons.length).toBeGreaterThan(0);
+    }
+    expect(t.calls).toEqual([]);
+    expect(t.written).toEqual([]);
+  });
+  it("接続先の不一致（--expect-ref なし・本番以外・リンク先と不一致）・古いバックアップ・出力先違反は、query を呼ぶ前に例外", async () => {
+    const t = base();
+    for (const over of [{ expectRef: undefined }, { expectRef: "zzzzzzzzzzzzzzzzzzzz", linkedRef: "zzzzzzzzzzzzzzzzzzzz" }, { linkedRef: "yyyyyyyyyyyyyyyyyyyy" }, { linkedRef: null }, { backupList: () => [] }, { backupList: () => [{ name: "tcg-full-old", mtimeMs: NOW - 30 * 3_600_000 }] }, { outPath: "eval/judgment-10e/x.json" }, { gitignoreText: "node_modules\n" }]) {
+      await expect(ex.runExtraction({ ...t.o, ...over }), JSON.stringify(Object.keys(over))).rejects.toThrow();
+    }
+    expect(t.calls).toEqual([]);
+  });
+  it("すべて揃ったときだけ1回 query を呼び、許可された列だけを保存する（household_id・draft などは捨てる）。ログに原文・URL・IDを出さない", async () => {
+    const t = base();
+    const r = await ex.runExtraction(t.o);
+    expect(r.executed).toBe(true);
+    expect(t.calls.length).toBe(1);
+    expect(ex.assertSafeExtractSql(t.calls[0])).toBe(true);
+    expect(t.written.length).toBe(1);
+    expect(t.written[0].body).not.toContain("SECRET");
+    expect(t.written[0].body).toContain("架空の原文"); // 原文は Git管理外のローカルファイルにだけ保存
+    const log = JSON.stringify(r.log);
+    for (const bad of ["架空の原文", "x.invalid", "i1", "SECRET"]) expect(log).not.toContain(bad);
+  });
+  it("取得結果は30件・原文なし3件に制限し、形式が違えば拒否する。CLIの引数は --remote=<ref> と --read-only を含み、--linked・書き込み系の指定を含まない", () => {
+    const many = Array.from({ length: 50 }, (_, i) => ({ id: String(i), evidence_text: i < 40 ? "t" : null }));
+    const rows = ex.sanitizeRows(many);
+    expect(rows.length).toBe(30);
+    expect(ex.sanitizeRows(Array.from({ length: 10 }, () => ({ evidence_text: null }))).length).toBe(3);
+    expect(() => ex.sanitizeRows({ rows: [] })).toThrow();
+    const a = ex.buildQueryArgs({ ref: REF, file: "tmp/q.sql" });
+    expect(a).toContain(`--remote=${REF}`);
+    expect(a).toContain("--read-only");
+    expect(a.join(" ")).not.toMatch(/--linked|--yes|--local/);
+    expect(() => ex.buildQueryArgs({ ref: "bad", file: "q.sql" })).toThrow();
+    expect(() => ex.buildQueryArgs({ ref: REF, file: "C:\\Users\\x\\AppData\\Local\\Temp\\tcg-p2-abc\\q.sql" })).not.toThrow(); // Windowsの一時パス
+    expect(() => ex.buildQueryArgs({ ref: REF, file: "q.sql; rm" })).toThrow();
+    expect(ex.wrapReadOnly("select 1;")).toBe("begin read only;\nselect 1;\nrollback;\n");
   });
 });

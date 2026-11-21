@@ -108,3 +108,15 @@ export function assertMaySend(gates: { ok: boolean; missing: string[] }, prepare
   if (!prepared.length) throw new Error("送信対象がありません");
   return sendable(prepared);
 }
+
+/**
+ * 新旧比較（シャドー）の外部送信の関門。正解（gold）は要求しない（比較は「疑い」の差分を人が見る運用。正解率の断定にだけ gold が要る）。
+ * ゲート未承認、または1件でも未確認・漏洩・原文なしがあれば全体を送らない。
+ */
+export function assertMaySendShadow(gates: { ok: boolean; missing: string[] }, prepared: Prepared[]): Prepared[] {
+  if (!gates.ok) throw new Error(`承認ゲート ${gates.missing.join("・")} が未承認のため、外部AIへ送信できません`);
+  const notReady = prepared.filter((p) => p.decision !== "ready");
+  if (notReady.length) throw new Error(`送信不可の原文が ${notReady.length} 件あります（人の全件確認・漏洩検出の結果を解消するまで送信しません）`);
+  if (!prepared.length) throw new Error("送信対象がありません");
+  return sendable(prepared);
+}
