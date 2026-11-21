@@ -1,7 +1,7 @@
 // Stage 10E 第2段階（保存済み実原文の評価）の抽出の安全機構。**純関数のみ。DB・ネットワークには接続しない**。
 // 実際の抽出（本番DBの読み取り）は、承認ゲートAの個別承認後に別途実装する（今回は接続コードを含めない）。
 // 層の防御: ①静的なSQL検査（読み取り専用・列ホワイトリスト・最大30件）②承認記録（ローカルファイル）③`--execute` と `--yes-production` の二重ゲート
-//          ④実行時に DB 側でも読み取り専用を強制（`supabase db query --linked --read-only`。既存の full-backup.mjs と同じ方式）
+//          ④実行時に DB 側でも読み取り専用を強制（`supabase db query --remote=<ref> --read-only`。接続先を明示する）
 //          ⑤出力先はローカルの Git 管理外（eval/real-data/）のみ ⑥ログに原文・個人情報を出さない
 import { existsSync, readFileSync } from "node:fs";
 
@@ -164,8 +164,9 @@ export function assertRefMatch({ expectRef, linkedRef, productionRefs }) {
 
 /** 直近のバックアップが新しいことの確認（申告だけでなく、バックアップの実体の更新日時を見る）。list は { name, mtimeMs }[] を返す関数（テストで差し替え） */
 export function assertRecentBackup({ list, nowMs, maxAgeHours = 24 }) {
-  const items = list().filter((x) => /^tcg-full-/.test(x.name));
-  if (!items.length) throw new Error("完全バックアップが見つかりません（npm run backup:full を実行してください）");
+  // 完全バックアップ（tcg-full-*.tcgbak2）。保存時に復号と全ファイルのSHA-256照合を済ませているが、空・極端に小さいファイルは無効として扱う
+  const items = list().filter((x) => /^tcg-full-.*\.tcgbak2$/.test(x.name) && Number(x.size ?? 0) >= 1_000_000);
+  if (!items.length) throw new Error("有効な完全バックアップ（tcg-full-*.tcgbak2・1MB以上）が見つかりません（npm run backup:full を実行してください）");
   const latest = Math.max(...items.map((x) => x.mtimeMs));
   if (nowMs - latest > maxAgeHours * 3_600_000) throw new Error(`直近のバックアップが ${maxAgeHours} 時間より古いです（npm run backup:full を実行してください）`);
   return true;

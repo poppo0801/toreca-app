@@ -4,7 +4,7 @@
  * 未承認・未確認・漏洩・費用超過では、外部（モデル）へ何も渡らないこと、記録が非機微であることを確認する。
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { JudgmentInput } from "./contract";
 import { assertMaySendShadow, prepareForExternal, type StoredRow } from "./eval/phase2";
@@ -105,12 +105,13 @@ describe("実データ新旧比較ランナー: 外部に渡す内容・記録�
 
 describe("評価スクリプト: 未承認では実行できない（実AI・外部送信・課金なし）", () => {
   it("--confirm=yes や承認額がなければ終了コード2。承認記録がなければ（確認付きでも）関門で停止し、終了コードは0以外。承認記録ファイルは作られない", () => {
+    const approvalsBefore = existsSync("eval/real-data/approvals.json") ? readFileSync("eval/real-data/approvals.json", "utf8") : null; // ローカルの承認記録（あれば）をテストが変更しないこと
     const base = { encoding: "utf8" as const, env: { ...process.env, TOREMANE_ENV: "local", JUDGMENT_REAL_EVAL: "allow", NEXT_PUBLIC_SUPABASE_URL: "" } };
     expect(spawnSync("node", ["scripts/eval-judgment-phase2.mjs", "run", "--approved-total-jpy=5", "--approved-per-case-jpy=2"], base).status).toBe(2);
     expect(spawnSync("node", ["scripts/eval-judgment-phase2.mjs", "bogus"], base).status).toBe(2);
     const r = spawnSync("node", ["scripts/eval-judgment-phase2.mjs", "run", "--approved-total-jpy=5", "--approved-per-case-jpy=2", "--confirm=yes"], base);
     expect(r.status).not.toBe(0);
     expect(`${r.stdout}${r.stderr}`).toMatch(/未承認|承認ゲート/);
-    expect(existsSync("eval/real-data/approvals.json")).toBe(false);
+    expect(existsSync("eval/real-data/approvals.json") ? readFileSync("eval/real-data/approvals.json", "utf8") : null).toBe(approvalsBefore);
   }, 120_000);
 });

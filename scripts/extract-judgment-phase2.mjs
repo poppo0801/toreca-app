@@ -5,7 +5,7 @@
 // **承認記録（eval/real-data/approvals.json のゲートA）が無い限り、実行しても接続しない**。出力は eval/real-data/（Git管理外）のみ。ログに原文・URL・IDを出さない。
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { APPROVALS_PATH, MAX_ROWS, NINE_Z_EARLIEST_ISO, assertSafeExtractSql, buildExtractSql, buildQueryArgs, checkGates, readApprovals, runExtraction } from "./lib/phase2-extract.mjs";
 import { parseQueryRows } from "./lib/query-output.mjs";
@@ -45,7 +45,9 @@ const linkedRef = (() => {
   }
 })();
 const gitignoreText = existsSync(".gitignore") ? readFileSync(".gitignore", "utf8") : "";
-const backupList = () => (existsSync("backups") ? readdirSync("backups").map((name) => ({ name, mtimeMs: statSync(join("backups", name)).mtimeMs })) : []);
+// 完全バックアップの保存先（full-backup.mjs と同じ: BACKUP_DIR 既定 %USERPROFILE%TorecaBackups、BACKUP_DIR2 任意。いずれも full/ 配下）
+const backupDirs = [process.env.BACKUP_DIR ?? join(homedir(), "TorecaBackups"), process.env.BACKUP_DIR2].filter(Boolean).map((d) => join(d, "full"));
+const backupList = () => backupDirs.flatMap((d) => (existsSync(d) ? readdirSync(d).map((name) => ({ name, mtimeMs: statSync(join(d, name)).mtimeMs, size: statSync(join(d, name)).size })) : []));
 const outPath = `eval/real-data/extract-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
 
 /** 本番のCLI経路（接続はここだけ。runExtraction の確認がすべて通った後にだけ呼ばれる） */

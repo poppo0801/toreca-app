@@ -105,15 +105,18 @@ describe("承認ゲート: 未承認では抽出・送信・課金が実行不�
     expect(ex.planExtractRun({ execute: true, yesProduction: true, approvals: { A: { approved: true } }, backupDone: false }).canConnect).toBe(false);
   });
   it("抽出スクリプト: dry-run は SQL とゲート状態を表示して終了0、--execute は終了コード3で止まる（DB接続・環境変数不要）", () => {
-    const base = { cwd: process.cwd(), encoding: "utf8" as const, env: { ...process.env, TOREMANE_TARGET: "", NEXT_PUBLIC_SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "" } };
-    const dry = spawnSync("node", ["scripts/extract-judgment-phase2.mjs"], base);
+    // 作業ディレクトリを空の一時フォルダにする（リポジトリにあるローカルの承認記録に左右されない＝承認記録が無い状態の検査）
+    const cwd = mkdtempSync(join(tmpdir(), "p2cwd-"));
+    const base = { cwd, encoding: "utf8" as const, env: { ...process.env, TOREMANE_TARGET: "", NEXT_PUBLIC_SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "" } };
+    const dry = spawnSync("node", [join(process.cwd(), "scripts/extract-judgment-phase2.mjs")], base);
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain("dry-run");
     expect(dry.stdout).toContain("未承認");
-    const exec = spawnSync("node", ["scripts/extract-judgment-phase2.mjs", "--execute", "--yes-production", "--backup-done"], base);
+    const exec = spawnSync("node", [join(process.cwd(), "scripts/extract-judgment-phase2.mjs"), "--execute", "--yes-production", "--backup-done"], base);
     expect(exec.status).toBe(3);
     expect(exec.stderr).toContain("実行できません");
-    expect(existsSync("eval/real-data/approvals.json")).toBe(false); // テストが承認記録を作らない
+    expect(existsSync(join(cwd, "eval/real-data/approvals.json"))).toBe(false); // テストが承認記録を作らない
+    rmSync(cwd, { recursive: true, force: true });
   });
   it("出力先は eval/real-data/ 配下の Git管理外のみ。ログは原文・URL・IDを出さない。削除記録は内容を含まない", () => {
     expect(ex.assertLocalOutputPath("eval/real-data/raw.json", "node_modules\neval/real-data/\n")).toBe(true);
@@ -248,7 +251,7 @@ describe("抽出の実行（Stage 10F）: すべての確認が揃うまで接�
       o: {
         execute: true, yesProduction: true, approvals: { A: { approved: true } }, backupDone: true,
         expectRef: REF, linkedRef: REF, productionRefs: [REF], nowMs: NOW, limit: 30, sinceIso: "2026-11-20T01:09:01Z",
-        backupList: () => [{ name: "tcg-full-20990301-110000", mtimeMs: NOW - 3_600_000 }],
+        backupList: () => [{ name: "tcg-full-20990301-110000.tcgbak2", mtimeMs: NOW - 3_600_000, size: 170_000_000 }],
         outPath: "eval/real-data/extract-test.json", gitignoreText: "eval/real-data/\n",
         query: async (sql: string) => { calls.push(sql); return [{ id: "i1", status: "pending", created_at: "2099-01-01T00:00:00Z", evidence_text: "架空の原文", evidence_fetched_at: "2099-01-01T00:00:00Z", evidence_via: "web_fetch", evidence_origin: "primary", evidence_hash: "abcdef1234567890", evidence_url: "https://x.invalid/a", household_id: "SECRET", draft: "SECRET" }]; },
         write: (p: string, body: string) => { written.push({ p, body }); },
@@ -268,7 +271,7 @@ describe("抽出の実行（Stage 10F）: すべての確認が揃うまで接�
   });
   it("接続先の不一致（--expect-ref なし・本番以外・リンク先と不一致）・古いバックアップ・出力先違反は、query を呼ぶ前に例外", async () => {
     const t = base();
-    for (const over of [{ expectRef: undefined }, { expectRef: "zzzzzzzzzzzzzzzzzzzz", linkedRef: "zzzzzzzzzzzzzzzzzzzz" }, { linkedRef: "yyyyyyyyyyyyyyyyyyyy" }, { linkedRef: null }, { backupList: () => [] }, { backupList: () => [{ name: "tcg-full-old", mtimeMs: NOW - 30 * 3_600_000 }] }, { outPath: "eval/judgment-10e/x.json" }, { gitignoreText: "node_modules\n" }]) {
+    for (const over of [{ expectRef: undefined }, { expectRef: "zzzzzzzzzzzzzzzzzzzz", linkedRef: "zzzzzzzzzzzzzzzzzzzz" }, { linkedRef: "yyyyyyyyyyyyyyyyyyyy" }, { linkedRef: null }, { backupList: () => [] }, { backupList: () => [{ name: "tcg-full-empty.tcgbak2", mtimeMs: NOW - 3_600_000, size: 10 }] }, { backupList: () => [{ name: "tcg-db-20990301.tcgbak2", mtimeMs: NOW - 3_600_000, size: 170_000_000 }] }, { backupList: () => [{ name: "tcg-full-old.tcgbak2", mtimeMs: NOW - 30 * 3_600_000, size: 170_000_000 }] }, { outPath: "eval/judgment-10e/x.json" }, { gitignoreText: "node_modules\n" }]) {
       await expect(ex.runExtraction({ ...t.o, ...over }), JSON.stringify(Object.keys(over))).rejects.toThrow();
     }
     expect(t.calls).toEqual([]);
