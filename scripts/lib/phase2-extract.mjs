@@ -69,7 +69,7 @@ export function assertSafeExtractSql(sql) {
 
 // ---------------------------------------------------------------- 承認記録（ローカル。Git管理外）
 export const GATES = ["A", "B", "C", "D", "E"];
-export const APPROVALS_PATH = `${PHASE2_ROOT}/approvals.json`;
+export const APPROVALS_PATH = process.env.PHASE2_APPROVALS_PATH_FOR_TEST || `${PHASE2_ROOT}/approvals.json`; // テストが実際の承認記録に左右されないための差し替え（承認の判定規則は変えない）
 
 /** 承認記録を読む。無い・壊れている・形式が違うなら、すべて未承認として扱う（安全側） */
 /** 本人の一括確認の対象（30件）と、実際の送信対象が同一かの検証用ハッシュ。行ID＋本文ハッシュを並べて固定する（原文は含まない） */

@@ -96,7 +96,7 @@
 - 追加: `scripts/export-refresh-evidence-10g.mjs`（保存原文の読み取り専用の書き出し）、`scripts/plan-refresh-10g.mjs`（R0・オフライン）、`scripts/refresh-preview-10g.mjs`＋`src/lib/judgment/refresh-preview-real.test.ts`（R1・ゲート付き・書き込みなし・上限つき）、`scripts/analyze-refresh-10g.mjs`（集計）、`refresh-preview-safety.test.ts`（静的な安全検査）。
 - 本番アクセス: 既存のエクスポート `export-masters-9h3s.mjs` と新規の原文エクスポート（ともに SELECT のみ・`npm run prod` 経由）の2回。書き込み・マイグレーションなし。バックアップは当日の完全バックアップ（約3時間前）を確認済みとして新規取得せず（読み取りのみのため）。
 - 承認の扱い: 今回の指示（10G）の範囲で実行。前回のA〜Eの承認記録（Git管理外）は変更していない。
-- テスト: tsc・lint（対象ファイル）OK、静的安全検査3件・`src/lib/judgment` 配下の単体テスト合格。全体テスト・CIは未確認。
+- テスト: tsc・lint（対象ファイル）OK、静的安全検査3件・`src/lib/judgment` 配下の単体テスト（193件）合格。承認記録A〜Eがローカルに揃うと「未承認では実行できない」テストが実行側まで進んでしまうため、承認記録の場所をテストだけ差し替える仕組み（`PHASE2_APPROVALS_PATH_FOR_TEST`。承認の判定規則は不変）に直した。全体テスト・CIは未確認。
 - 未確認: 新方式の正しさ（正解なし）／自己登録の明示で保留が実際に減るか（未検証）／原文なし52件の再取得可否の実測。
 - 後始末: ローカルの書き出し（`backups/refresh-10g/`・`backups/masters-9h3s/`・`eval/real-data/`）は 2026-12-21 までに削除。共用キーの実請求（今回約14円）はConsoleで本人が確認。
 - PR #36・#46 は未マージ。
