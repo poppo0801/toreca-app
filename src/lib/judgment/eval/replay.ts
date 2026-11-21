@@ -26,9 +26,9 @@ export interface ReplayCase {
   regionPrefectures?: string[];
 }
 
-/** 評価セット: 既定は旧19件（eval/judgment-10e）。"unseen" は未見の架空ケース（eval/judgment-10e/unseen。正解は先に固定済み） */
-export type EvalSet = "main" | "unseen";
-const setDir = (set: EvalSet) => (set === "unseen" ? join(dir, "unseen") : dir);
+/** 評価セット: 既定は旧19件（eval/judgment-10e）。"unseen" は10E精度改善時の架空ケースK01〜K12（結果を見て修正したため今後は未見と呼ばない）、"holdout" は安定化で新設した独立ホールドアウトH01〜H06（正解は先に固定済み・実AI評価は未実施） */
+export type EvalSet = "main" | "unseen" | "holdout";
+const setDir = (set: EvalSet) => (set === "main" ? dir : join(dir, set));
 
 export function loadCases(set: EvalSet = "main"): { now: string; cases: ReplayCase[] } {
   const j = JSON.parse(readFileSync(join(setDir(set), "cases.json"), "utf8"));
@@ -115,12 +115,21 @@ export function scoreCase(id: string, gold: Gold, out: JudgmentOutput | null): C
     s.relScored++;
     if (out.relations.some((r) => r.lotteryId === lid && r.relation === want)) s.relCorrect++;
   }
-  for (const r of out.relations) {
-    const g = gold.relations?.[r.lotteryId];
-    if (!g) continue;
-    if (r.relation === "same" && g !== "same") s.falseMerge++;
-    if (g === "same" && (r.relation === "independent" || r.relation === "same_campaign_other")) s.falseSplit++;
-    if (g === "same_campaign_other" && r.relation === "independent") s.falseSplit++;
+  // 関係は「応募機会 × 既存カード」の組み合わせ単位で見る（Stage 10E r3 安定化）。
+  // 既存カード1件に対して複数の応募機会があるとき、同じ権利を表す機会（same）と、別の権利を表す機会（same_campaign_other 等）が同時に成り立つ。
+  //  - 正解が same: same の機会が1つも無いのに別扱い（independent / same_campaign_other）が出たら誤分割。same が別々の機会に2つ以上付いたら、
+  //    1枚のカードを複数の独立した権利と同一視する誤統合（超過分を数える）。same と別回の別扱いが併存するのは、誤分割にしない。
+  //  - 正解が same 以外: same と判断した機会ごとに誤統合。正解が same_campaign_other で independent と判断した機会ごとに誤分割。
+  for (const [lid, g] of Object.entries(gold.relations ?? {})) {
+    const rs = out.relations.filter((r) => r.lotteryId === lid);
+    const sameKeys = new Set(rs.filter((r) => r.relation === "same").map((r) => r.opportunityKey));
+    if (g === "same") {
+      if (sameKeys.size === 0) s.falseSplit += rs.filter((r) => r.relation === "independent" || r.relation === "same_campaign_other").length;
+      else if (sameKeys.size > 1) s.falseMerge += sameKeys.size - 1;
+    } else {
+      s.falseMerge += sameKeys.size;
+      if (g === "same_campaign_other") s.falseSplit += rs.filter((r) => r.relation === "independent").length;
+    }
   }
   if (gold.opportunityCount != null && out.opportunities.length > gold.opportunityCount) s.falseSplit += out.opportunities.length - gold.opportunityCount;
   // 独立した応募機会を、より少ない件数にまとめてしまった（機会の誤統合）。関係の判断による誤統合とは別に数える

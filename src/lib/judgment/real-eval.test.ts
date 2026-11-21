@@ -17,7 +17,8 @@ import { CANDIDATE_CAP_PER_CASE_JPY, CANDIDATE_CAP_TOTAL_JPY, checkJudgmentRealR
 const env = process.env;
 const ids = (env.JUDGMENT_REAL_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 // 評価セット: 既定は旧19件。JUDGMENT_REAL_SET=unseen で未見の架空ケース（K01〜K12。別途承認が必要な追加の実AI評価用。10E精度改善で用意）
-const evalSet = env.JUDGMENT_REAL_SET === "unseen" ? "unseen" : "main";
+// JUDGMENT_REAL_SET=holdout は安定化で新設した独立ホールドアウトH01〜H06（実AI評価は未実施・別途承認が必要）
+const evalSet = env.JUDGMENT_REAL_SET === "unseen" ? "unseen" : env.JUDGMENT_REAL_SET === "holdout" ? "holdout" : "main";
 const pick = () => {
   const { now, cases } = loadCases(evalSet);
   const gold = loadGold(evalSet);
@@ -63,7 +64,7 @@ describe.skipIf(!env.JUDGMENT_RESCORE_FILES)("再採点（API非接続）", () =
     const { readFileSync } = await import("node:fs");
     const { scoreCase } = await import("./eval/replay");
     const { summarize } = await import("./eval/real-run");
-    const gold = loadGold();
+    const gold = loadGold(evalSet);
     for (const f of (env.JUDGMENT_RESCORE_FILES ?? "").split(",").filter(Boolean)) {
       const rec = JSON.parse(readFileSync(f, "utf8"));
       const cases = rec.cases.map((c: { id: string; output: never }) => ({ ...c, score: gold[c.id] ? scoreCase(c.id, gold[c.id], c.output) : null }));

@@ -180,8 +180,15 @@ function checkCitations(x: unknown, path: string, errs: string[]): void {
   });
 }
 
+/** 項目の形式エラーの説明。受け取った型と、正しい形の具体例を返す（自動補正はしない。モデルが自分で直すための情報） */
+function claimShapeMessage(x: unknown, list: boolean): string {
+  const got = Array.isArray(x) ? "配列" : x === null ? "null" : typeof x === "string" ? "文字列" : typeof x === "number" ? "数値" : typeof x === "boolean" ? "真偽値" : typeof x;
+  const value = list ? '["値1","値2"]' : '"値"';
+  return `オブジェクトが必要（受け取った型: ${got}）。{"value": ${value}, "basis": "fact|inference|unknown", "citations": [{"evidenceId":"E1","quote":"原文の語句"}]} の形で、値は value に入れる${list ? "。value は文字列の配列（空なら [] と basis=unknown）" : ""}`;
+}
+
 function checkClaim(x: unknown, path: string, errs: string[], list = false): void {
-  if (!isObj(x)) return void errs.push(`${path}: オブジェクトが必要`);
+  if (!isObj(x)) return void errs.push(`${path}: ${claimShapeMessage(x, list)}`);
   if (!BASES.includes(x.basis as string)) errs.push(`${path}.basis: fact/inference/unknown のいずれか`);
   if (list ? !(Array.isArray(x.value) && x.value.length <= 20 && x.value.every((v) => str(v, 200))) : !str(x.value, 600)) errs.push(`${path}.value: 不正な値`);
   checkCitations(x.citations, `${path}.citations`, errs);
@@ -214,7 +221,11 @@ export function parseJudgmentOutput(raw: unknown): { ok: true; output: JudgmentO
   if (!Array.isArray(raw.relations) || raw.relations.length > 60) errs.push("relations: 60件までの配列");
   else
     raw.relations.forEach((r, i) => {
-      if (!isObj(r) || !str(r.opportunityKey, 20) || !str(r.lotteryId, 60) || !RELS.includes(r.relation as string) || !BASES.includes(r.basis as string) || !str(r.rationale, 600)) errs.push(`relations[${i}]: 形式が不正`);
+      if (!isObj(r)) errs.push(`relations[${i}]: オブジェクトが必要`);
+      else if (!str(r.opportunityKey, 20) || !str(r.lotteryId, 60) || !RELS.includes(r.relation as string) || !BASES.includes(r.basis as string) || !str(r.rationale, 600)) {
+        const bad = [!str(r.opportunityKey, 20) && "opportunityKey", !str(r.lotteryId, 60) && "lotteryId", !RELS.includes(r.relation as string) && "relation（same/independent/same_campaign_other/unknown）", !BASES.includes(r.basis as string) && "basis（fact/inference/unknown）", !str(r.rationale, 600) && "rationale（文字列・600字まで）"].filter(Boolean);
+        errs.push(`relations[${i}]: 形式が不正（不足・不正な項目: ${bad.join("、")}）。opportunityKey・lotteryId・relation・basis・citations・rationale をすべて入れる`);
+      }
       else checkCitations(r.citations, `relations[${i}].citations`, errs);
     });
   if (!Array.isArray(raw.plannedChanges) || raw.plannedChanges.length > 30) errs.push("plannedChanges: 30件までの配列");

@@ -39,7 +39,8 @@ export const JUDGMENT_OUTPUT_SCHEMA = {
           label: { type: "string", maxLength: 200 },
           chain: claim(),
           store: claim(),
-          products: claim({ type: "array", maxItems: 20, items: { type: "string", maxLength: 200 } }),
+          // products は値を直接配列で入れず、{ value: [商品名…], basis, citations } のオブジェクトにする（Stage 10E r3 安定化。形式エラーの主因）
+          products: { ...claim({ type: "array", maxItems: 20, items: { type: "string", maxLength: 200 } }), description: '{"value":["商品名"],"basis":"fact|inference|unknown","citations":[{"evidenceId":"E1","quote":"原文の語句"}]} の形。商品の配列だけを直接入れない' },
           applyStart: claim(),
           applyDeadline: claim(),
           resultDate: claim(),
