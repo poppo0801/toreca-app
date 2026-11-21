@@ -95,3 +95,16 @@ export function prepareForExternal(rows: StoredRow[], reviewedIds: ReadonlySet<s
 
 /** 送信してよい件だけ（ready）。1件でも ready でない原文は送らない */
 export const sendable = (p: Prepared[]): Prepared[] => p.filter((x) => x.decision === "ready");
+
+/**
+ * 外部AIへの送信の最終関門。承認ゲート（A・B・C）が揃い、正解が固定済みで、送信対象がすべて「人の全件確認済み・漏洩なし」でなければ例外。
+ * 1件でも ready でない原文があれば、全体を送らない（一部だけ黙って送らない）。ゲートの判定は `scripts/lib/phase2-extract.mjs` の `checkGates("send_external", …)` の結果を渡す。
+ */
+export function assertMaySend(gates: { ok: boolean; missing: string[] }, prepared: Prepared[], goldFrozen: boolean): Prepared[] {
+  if (!gates.ok) throw new Error(`承認ゲート ${gates.missing.join("・")} が未承認のため、外部AIへ送信できません`);
+  if (!goldFrozen) throw new Error("正解が固定されていないため、外部AIへ送信できません");
+  const notReady = prepared.filter((p) => p.decision !== "ready");
+  if (notReady.length) throw new Error(`送信不可の原文が ${notReady.length} 件あります（人の全件確認・漏洩検出の結果を解消するまで送信しません）`);
+  if (!prepared.length) throw new Error("送信対象がありません");
+  return sendable(prepared);
+}

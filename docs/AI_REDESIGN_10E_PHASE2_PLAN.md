@@ -1,6 +1,13 @@
 # Stage 10E 第2段階（保存済み実原文の評価）実施計画
 
 状態: **計画のみ（未承認・未実行）**。本番DBの読み取り・実原文の取得・外部AIへの送信・追加の有料API呼び出しは、この文書の承認ゲートを通るまで一切行わない。準備部品（`src/lib/judgment/eval/phase2.ts`）は純関数で、**架空データだけ**でテスト済み（`phase2.test.ts`）。
+
+## 承認前準備の追記（2026-11-21・Stage 10E Phase2 Readiness）
+- **承認票**: `docs/AI_REDESIGN_10E_PHASE2_APPROVAL.md`（ゲートA〜Eの選択肢・推奨・未確認事項を1枚に集約）。この計画のゲートは**いずれも未承認**。
+- **9Z導入日の確定**: PR #26 マージ 2026-11-20 10:09:01 +0900（`ef1943a`）、本番反映の記録 10:10 +0900（`1527380`、`docs/reports/2026-11-20-9z-evidence-reuse.md` §6）。実デプロイ完了時刻は履歴から確定できない。抽出は日付でなく `evidence.v = 1` の行で絞る（§2 の「承認時に確定」は、下限 2026-11-20T01:09:01Z で提案）。
+- **準備コード（接続なし・架空データのみ）**: `scripts/lib/phase2-extract.mjs`（静的SQL検査・承認記録・二重ゲート・ログ秘匿・削除記録）、`scripts/extract-judgment-phase2.mjs`（dry-runのみ。接続コード未実装）、`src/lib/judgment/eval/phase2-review.ts`（人の確認だけを正解に・固定のハッシュ）、`phase2-compare.ts`（旧方式との比較・費用見積もり）、`phase2.ts` の `assertMaySend`。
+- **費用の訂正**: §7 の「30件×最大3回×約0.28円」は過小。1回の最悪は約0.55円（最大出力まで）で、1件の最悪は約1.65円（30件で約49.5円）。典型は0.2〜1.0円/件（実測）。総額50円は、予約制御で超えないが、最悪時は後ろの事例が予算停止で未実行になりうる。
+- **gold のコミット禁止**: 実データの正解・原文は Git に入れない。固定はローカルの manifest（原文・正解のハッシュ）で行い、AI実行前に固定されていなければ実行を拒否する（コミットで固定する旧記述は、実データには適用しない）。
 前提: `docs/reports/2026-11-21-stage10e-real-eval-results.md`（第1段階）、`docs/AI_REDESIGN_ACCEPTANCE_PLAN.md`、`CLAUDE.md` §5（本番に作用する入口は `npm run prod -- scripts/<名前>.mjs … --yes-production` のみ・dry-run既定）。
 
 ## 1. 目的と範囲
