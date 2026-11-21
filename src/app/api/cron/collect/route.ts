@@ -14,6 +14,7 @@ import { createXClient } from "@/lib/server/collector/x-client";
 import type { Db } from "@/lib/server/lottery-service";
 import { resolveEffectiveEngine } from "@/lib/collector/engine-setting";
 import { runAutonomousInCron } from "@/lib/server/collector/autonomous-hook";
+import { makeShadowEnqueuer } from "@/lib/server/shadow/queue";
 
 export const dynamic = "force-dynamic";
 // 自律型AI主体の1回（調査100秒＋登録）が収まるよう、既定の60秒から延ばす（Vercel の Fluid Compute では Hobby/Pro とも上限300秒）。
@@ -47,7 +48,7 @@ async function handle(req: NextRequest) {
   let worked = 0;
   let idle = 0;
   for (const t of targets ?? []) {
-    const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient() };
+    const base = { db, householdId: t.household_id, trigger: "cron" as const, now, actor: null, canRegister: false, serviceRegister: true, extractor: getExtractor(), xClient: createXClient(), shadowEnqueue: makeShadowEnqueuer(db, t.household_id) };
     // Xブックマーク由来の未解決は、収集・解析より先に補完を試みる（AI・X APIは呼ばない。保存済みの候補・既存の抽選・公式ページ由来の候補と照合）。
     // 状態の更新で、登録済み・統合済み・受付終了を反映し、受付終了後は再調査を止める
     try {

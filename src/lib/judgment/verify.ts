@@ -18,7 +18,7 @@ import { normName } from "@/lib/norm";
 import type { Citation, Claim, JudgmentInput, JudgmentOutput } from "./contract";
 import { precheckFetchTarget } from "./fetch-safety";
 
-export type ViolationCode = "no_citation" | "citation_missing_evidence" | "citation_unfetched" | "citation_quote_not_found" | "structure_multiplies" | "structure_unsupported" | "relation_unknown_ref" | "relation_store_mismatch" | "protected_change" | "human_value_overwrite" | "action_blocked_source" | "action_bad_url" | "planned_unknown_lottery" | "structure_incomplete" | "relation_contradicts_structure" | "relation_same_without_evidence";
+export type ViolationCode = "no_citation" | "citation_missing_evidence" | "citation_unfetched" | "citation_quote_not_found" | "structure_multiplies" | "structure_unsupported" | "relation_unknown_ref" | "relation_store_mismatch" | "protected_change" | "human_value_overwrite" | "action_blocked_source" | "action_bad_url" | "planned_unknown_lottery" | "structure_incomplete" | "relation_contradicts_structure" | "relation_same_without_evidence" | "citation_image_only";
 
 export interface Violation {
   code: ViolationCode;
@@ -49,6 +49,10 @@ function checkClaim(input: JudgmentInput, claim: Claim<unknown> | undefined, pat
   if (!claim) return;
   if (claim.basis === "fact" && claim.citations.length === 0) { out.push({ code: "no_citation", path, message: "事実（fact）の主張には、原文からの引用が必要です。確認できていないなら inference か unknown にしてください" }); return; }
   checkCitations(input, claim.citations, `${path}.citations`, out);
+  // 画像から読み取った内容（AIの読み取り。原本は保存されておらず照合できない）だけを根拠に、事実（fact）にはできない
+  if (claim.basis === "fact" && claim.citations.length > 0 && claim.citations.every((c) => input.evidence.find((e) => e.id === c.evidenceId)?.kind === "image_reading")) {
+    out.push({ code: "citation_image_only", path, message: "画像から読み取った内容（AIの読み取り）だけを根拠に、事実（fact）にはできません。原文（投稿本文・ページ本文）で確認できないなら inference にしてください" });
+  }
 }
 
 const storeKey = (s: string | null | undefined) => (s ? normName(s).replace(/店$/, "") : "");

@@ -27,7 +27,7 @@ export interface EvidenceSeed {
   /** 以前の解析（読解）に失敗した原文か。本文は今回あらためて読める（読み落としの再判断） */
   priorReadFailed?: boolean;
   /** 原文の種類（リンク先の公開ページ本文は、投稿本文と区別して渡す） */
-  kind?: "linked_page";
+  kind?: "linked_page" | "image_reading";
 }
 
 /** 過去の判断の取得口（読み取りのみ）。DB実装は `historyFromDb`（server/judgment-history） */
@@ -108,7 +108,20 @@ export async function buildJudgmentInput(a: BuildInputArgs): Promise<JudgmentInp
 export function seedsFromStored(url: string, stored: StoredEvidence | null, o: { parsedOk?: boolean; hostBlocked?: boolean; attempted?: boolean } = {}): EvidenceSeed[] {
   const main = seedFromStored(url, stored, o);
   const linked: EvidenceSeed[] = (stored?.linkedPages ?? []).slice(0, 2).map((l) => ({ url: l.url, fetchedAt: l.fetchedAt, via: "web_fetch", origin: "unknown" as const, text: l.text, hash: null, status: "fetched" as const, reused: true, kind: "linked_page" as const }));
-  return [main, ...linked];
+  const reading = imageReadingSeed(stored);
+  return [main, ...linked, ...(reading ? [reading] : [])];
+}
+
+/**
+ * 収集時に既に画像を解析して得た読み取り（`imageReadings`。Stage 10K）を、出典つきの別の根拠にする。画像は再解析しない。
+ * 画像から読み取った内容は**原文ではなくAIの読み取り**で、原本の画像は保存されていないため照合できない（verify: これだけを根拠に fact にできない）。
+ * 保存に読み取りが無ければ null（「無い」として扱う。登録値を画像の原文だと偽らない）。
+ */
+export function imageReadingSeed(stored: StoredEvidence | null | undefined): EvidenceSeed | null {
+  const rs = stored?.imageReadings;
+  if (!rs?.length) return null;
+  const lines = rs.slice(0, 12).map((r) => `[${r.imageIndex ? `画像${r.imageIndex}枚目` : r.source || "画像"}・${r.field}${r.uncertainty ? `・確度${r.uncertainty}` : ""}] ${r.text}`);
+  return { url: stored?.url ?? "", fetchedAt: rs[0].readAt, via: "image_reading", origin: "secondary", text: `【画像からのAI読み取り（原本の画像は保存されていない・照合不可）】 ${lines.join(" ")}`, hash: null, status: "fetched", reused: true, kind: "image_reading" };
 }
 
 export function seedFromStored(url: string, stored: StoredEvidence | null, o: { parsedOk?: boolean; hostBlocked?: boolean; attempted?: boolean } = {}): EvidenceSeed {

@@ -8,29 +8,82 @@
 import { redact } from "@/lib/case-model/redact";
 
 export interface LeakFinding {
-  kind: "email" | "phone" | "postal_address" | "address_like" | "person_name_label" | "long_number" | "card_number" | "url_token" | "api_key" | "sns_handle";
+  kind: LeakKind;
   /** 見つかった箇所の短い抜粋（ログ・報告に原文全体を出さないため先頭数文字だけ） */
   sample: string;
 }
+export type LeakKind = "email" | "phone" | "postal_address" | "address_like" | "person_name_label" | "long_number" | "card_number" | "url_token" | "api_key" | "sns_handle" | "bearer_token" | "session_secret" | "credential_value" | "basic_auth_url" | "filled_personal_value";
 
-const RULES: [LeakFinding["kind"], RegExp][] = [
+/** 厳格な旧規則（Stage 10E〜10J）。比較・監査用に残す（送信判定には使わない）。項目名・住所らしき並び・SNSの名前などで、公開ページを過剰に除外していた */
+const STRICT_RULES: [LeakKind, RegExp][] = [
   ["api_key", /sk-[A-Za-z0-9_-]{8,}|(?:api[_-]?key|token|secret|password)\s*[:=]\s*\S+/gi],
   ["email", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g],
   ["postal_address", /〒\s?\d{3}-?\d{4}/g],
   ["phone", /(?<![\d-])0\d{1,4}-\d{1,4}-\d{3,4}(?![\d-])|(?<!\d)0[789]0\d{8}(?!\d)/g],
   ["card_number", /(?<!\d)(?:\d[ -]?){13,16}(?!\d)/g],
   ["long_number", /(?<![\d-])\d{9,12}(?![\d-])/g],
-  // 都道府県＋市区町村＋番地らしい並び（店舗の所在地も含みうる。除外してよいが、人が確認して判断する）
   ["address_like", /(?:東京都|北海道|(?:京都|大阪)府|[^\s]{2,3}県)[^\s]{1,8}[市区町村][^\s]{0,12}\d+[-−ー]\d+/g],
   ["person_name_label", /(?:お?名前|氏名|ご住所|お届け先|宛名|申込者|応募者名)\s*[:：]\s*\S+/g],
   ["url_token", /https?:\/\/[^\s]*[?&](?:token|key|sig|signature|auth|session|code|id)=[A-Za-z0-9_-]{8,}/gi],
   ["sns_handle", /(?<![A-Za-z0-9_])@[A-Za-z0-9_]{4,15}(?![A-Za-z0-9_.])/g],
 ];
 
+export function detectLeaksStrict(text: string): LeakFinding[] {
+  const out: LeakFinding[] = [];
+  for (const [kind, re] of STRICT_RULES) for (const m of text.matchAll(re)) out.push({ kind, sample: `${m[0].slice(0, 6)}…` });
+  return out;
+}
+
+/**
+ * 送信を止める検出（Stage 10K）。**項目名（氏名・住所・メール・電話などの欄の名前）や、公開ページの定型の記載では除外しない**。止めるのは次の2種類だけ。
+ *  1) 認証・秘密の**実値**: APIキー／Bearer・認証トークン／セッション・Cookieの値／資格情報（パスワードの値）／認証つきURL／トークンつきURL／有効なカード番号（Luhn）
+ *  2) **実際に入力された私的な値**: 項目名のあとに実際の値（メール・電話・郵便番号と住所・氏名らしき値・注文番号などの番号）が続く場合。項目名だけ・空欄・「必須」「例」などの記載は対象外
+ * メール・電話・郵便番号つきの住所の文字列そのものは、保存時の伏せ字（redact）で消える。店舗の公開の住所・SNSのアカウント名・数字の並びは、それだけでは除外しない。
+ * 実秘密に当たるテストデータは、規則を満たす形で実行時に組み立てる（テストに本物の秘密を埋め込まない）。
+ */
+const PLACEHOLDER = /^(必須|任意|入力|ください|例|会員|氏名|お名前|姓|名|カナ|フリガナ|メール|住所|電話|なし|未入力|空欄|ー|-|＊|\*|〇|○|●|■|□|xxx|XXX|sample|サンプル|ここ)/;
+const SECRET_RULES: [LeakKind, RegExp][] = [
+  ["api_key", /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\b(?:api[_-]?key|apikey|secret|client_secret)\s*[:=]\s*["']?[A-Za-z0-9_\-./+]{12,}/gi],
+  ["bearer_token", /\bbearer\s+[A-Za-z0-9._~+/=-]{16,}|\bauthorization\s*[:=]\s*\S{12,}|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/gi],
+  ["session_secret", /\b(?:sessionid|session_id|phpsessid|jsessionid|sid|auth_token|access_token|refresh_token|id_token|csrf_?token|xsrf-token|set-cookie|cookie)\s*[:=]\s*["']?[A-Za-z0-9_\-./+%=]{12,}/gi],
+  ["credential_value", /(?:\bpassword|\bpasswd|パスワード|暗証番号)\s*[:=：]\s*["']?[^\s"'*＊]{6,}/gi],
+  ["basic_auth_url", /https?:\/\/[^/\s:@]+:[^/\s@]+@[^\s]+/gi],
+  ["url_token", /https?:\/\/[^\s]*[?&](?:token|access_token|key|api_key|sig|signature|auth|session|sessionid|code)=[A-Za-z0-9_%\-.]{12,}/gi],
+];
+const FILLED_RULES: [string, RegExp][] = [
+  ["email", /(?:メール(?:アドレス)?|e-?mail)\s*[:：]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gi],
+  ["phone", /(?:電話(?:番号)?|tel|携帯)\s*[:：]\s*0\d{1,4}-?\d{1,4}-?\d{3,4}/gi],
+  ["postal", /(?:郵便番号|ご住所|住所)\s*[:：]\s*(?:〒\s?\d{3}-?\d{4}|(?:東京都|北海道|(?:京都|大阪)府|[^\s]{2,3}県)[^\s]{1,10}[市区町村][^\s]{0,14}\d+)/g],
+  ["number", /(?:注文番号|応募番号|会員番号|予約番号|お客様番号|受付番号|整理番号)\s*[:：]?\s*[A-Za-z0-9-]{6,}/g],
+];
+const NAME_LABEL = /(?:お?名前|氏名|申込者|応募者名)\s*[:：]\s*([^\s]{2,12})/g;
+
+const luhn = (digits: string): boolean => {
+  let sum = 0;
+  let dbl = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = Number(digits[i]);
+    if (dbl) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    dbl = !dbl;
+  }
+  return sum % 10 === 0;
+};
+
 export function detectLeaks(text: string): LeakFinding[] {
   const out: LeakFinding[] = [];
-  for (const [kind, re] of RULES) {
-    for (const m of text.matchAll(re)) out.push({ kind, sample: `${m[0].slice(0, 6)}…` });
+  for (const [kind, re] of SECRET_RULES) for (const m of text.matchAll(re)) out.push({ kind, sample: `${m[0].slice(0, 6)}…` });
+  for (const m of text.matchAll(/(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g)) {
+    const d = m[0].replace(/\D/g, "");
+    if (d.length >= 13 && d.length <= 19 && luhn(d)) out.push({ kind: "card_number", sample: `${m[0].slice(0, 6)}…` });
+  }
+  for (const [, re] of FILLED_RULES) for (const m of text.matchAll(re)) out.push({ kind: "filled_personal_value", sample: `${m[0].slice(0, 6)}…` });
+  for (const m of text.matchAll(NAME_LABEL)) {
+    const v = m[1];
+    if (!PLACEHOLDER.test(v) && /[一-龥ぁ-んァ-ヶー]{2,}/.test(v)) out.push({ kind: "filled_personal_value", sample: `${m[0].slice(0, 6)}…` });
   }
   return out;
 }

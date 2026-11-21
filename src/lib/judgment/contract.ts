@@ -34,7 +34,7 @@ export interface EvidenceItem {
   /** 保存済みの原文の再利用か（9Z） */
   reused?: boolean;
   /** Stage 10J: 原文の種類。linked_page = 投稿内のリンク先の公開ページ本文（投稿本文とは別の出典。引用は、その本文から行う）。無ければ投稿・ページ本文 */
-  kind?: "linked_page";
+  kind?: "linked_page" | "image_reading";
   /** 以前の解析では読み取れなかった原文（本文は読める。読み落としの再判断） */
   priorReadFailed?: boolean;
 }
