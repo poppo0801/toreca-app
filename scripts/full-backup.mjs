@@ -23,6 +23,7 @@ import { createClient } from "@supabase/supabase-js";
 import { decryptBuffer, encryptBuffer } from "./lib/backup-crypto.mjs";
 import { extractCopySql } from "./lib/pg-copy.mjs";
 import { parseQueryRows } from "./lib/query-output.mjs";
+import { checkCountDrift, remoteQueryArgs, verifyQueryTarget } from "./lib/backup-target.mjs";
 
 import { loadProductionEnv } from "./lib/prod-env.mjs";
 
@@ -114,8 +115,12 @@ try {
     writeFileSync(f, sql);
     // 出力形式を明示する。Supabase CLI 3.x は AI エージェント環境（AI_AGENT 等）の自動検出がある場合だけ JSON を返し、
     // タスクスケジューラ等の通常実行では表形式になって JSON.parse が失敗する（2026-11 の定期バックアップ失敗の原因）。
-    const r = npx(["supabase", "db", "query", "--linked", "--read-only", "--output-format", "json", "-f", f]);
+    // 接続先は --remote=<ref> で明示する（CLI 3.x の `db query` は既定でローカルを対象にし、--linked は3.xのヘルプに無い）。
+    // さらに、CLIが表示する接続先（Target: 行）がこの ref であってローカルでないことを毎回確認し、確認できなければ中止する（Stage 10F）。
+    const r = npx(remoteQueryArgs(linked, f));
     if (r.status !== 0) throw new Error(`クエリに失敗しました: ${scrub((r.stderr || r.stdout || "").trim().split("\n").slice(-2).join(" / "))}`);
+    const tv = verifyQueryTarget(`${r.stderr}\n${r.stdout}`, linked);
+    if (!tv.ok) throw new Error(`クエリの接続先を検証できません（${tv.reason}）。バックアップを中止します`);
     const o = r.stdout;
     return parseQueryRows(o);
   };
@@ -128,6 +133,9 @@ try {
   const missing = Object.keys(liveCounts).filter((t) => !(t in dumpCounts));
   if (missing.length > 0) throw new Error(`ダンプに含まれないテーブルがあります: ${missing.join(", ")}`);
   // 取得中にも収集処理が書き込むため、件数は完全一致しない場合がある。差は記録する（復元の検証は dumpCounts と照合する）
+  // ダンプ（--linked）とクエリ（--remote=<ref>）が別のDBを見ていないかの検査: 合計の差が大きければ中止（取得中の収集による少しの差は許容）
+  const dc = checkCountDrift(liveCounts, dumpCounts);
+  if (!dc.ok) throw new Error(`ダンプとクエリの件数が大きく食い違います（差 ${dc.diff} 行・許容 ${dc.limit}）。別のDBを対象にしている疑いがあるため中止します`);
   const drift = Object.fromEntries(Object.keys(liveCounts).filter((t) => liveCounts[t] !== dumpCounts[t]).map((t) => [t, { live: liveCounts[t], dump: dumpCounts[t] }]));
 
   const inv = query(

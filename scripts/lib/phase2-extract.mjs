@@ -1,8 +1,9 @@
 // Stage 10E 第2段階（保存済み実原文の評価）の抽出の安全機構。**純関数のみ。DB・ネットワークには接続しない**。
 // 実際の抽出（本番DBの読み取り）は、承認ゲートAの個別承認後に別途実装する（今回は接続コードを含めない）。
 // 層の防御: ①静的なSQL検査（読み取り専用・列ホワイトリスト・最大30件）②承認記録（ローカルファイル）③`--execute` と `--yes-production` の二重ゲート
-//          ④実行時に DB 側でも読み取り専用を強制（`supabase db query --linked --read-only`。既存の full-backup.mjs と同じ方式）
+//          ④実行時に DB 側でも読み取り専用を強制（`supabase db query --remote=<ref> --read-only`。接続先を明示する）
 //          ⑤出力先はローカルの Git 管理外（eval/real-data/）のみ ⑥ログに原文・個人情報を出さない
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 export const PHASE2_ROOT = "eval/real-data";
@@ -68,9 +69,15 @@ export function assertSafeExtractSql(sql) {
 
 // ---------------------------------------------------------------- 承認記録（ローカル。Git管理外）
 export const GATES = ["A", "B", "C", "D", "E"];
-export const APPROVALS_PATH = `${PHASE2_ROOT}/approvals.json`;
+export const APPROVALS_PATH = process.env.PHASE2_APPROVALS_PATH_FOR_TEST || `${PHASE2_ROOT}/approvals.json`; // テストが実際の承認記録に左右されないための差し替え（承認の判定規則は変えない）
 
 /** 承認記録を読む。無い・壊れている・形式が違うなら、すべて未承認として扱う（安全側） */
+/** 本人の一括確認の対象（30件）と、実際の送信対象が同一かの検証用ハッシュ。行ID＋本文ハッシュを並べて固定する（原文は含まない） */
+export function bulkScopeHash(rows) {
+  const items = rows.map((r) => [r.id, createHash("sha256").update(r.text ?? "").digest("hex")]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  return createHash("sha256").update(JSON.stringify(items)).digest("hex");
+}
+
 export function readApprovals(path = APPROVALS_PATH) {
   try {
     if (!existsSync(path)) return {};
@@ -92,7 +99,9 @@ export const REQUIRED_GATES = {
   extract: ["A"],
   review: ["A", "B"],
   send_external: ["A", "B", "C"],
-  paid_eval: ["A", "B", "C", "D", "E"],
+  // 課金評価（新旧のシャドー比較を含む）: gold（D）は必須にしない。正解率を断定するときだけ別途 D が必要（paid_eval_with_gold）
+  paid_eval: ["A", "B", "C", "E"],
+  paid_eval_with_gold: ["A", "B", "C", "D", "E"],
 };
 
 export function checkGates(action, approvals) {
@@ -104,7 +113,7 @@ export function checkGates(action, approvals) {
 
 /**
  * 抽出の実行可否。dry-run（既定）は常に可（接続せず計画だけ表示）。実行は、`--execute`・`--yes-production`・ゲートA承認・バックアップ済みの申告・対象が本番であること、がすべて必要。
- * 今回の実装は接続コードを持たないため、すべて満たしても「接続コードが未実装」で止まる（承認後に別途実装する）。
+ * この関数は判定だけで接続しない。実際の読み取りは runExtraction が、追加の確認（接続先の照合・直近バックアップ・出力先）を通った後に、注入された query で行う。
  */
 export function planExtractRun({ execute = false, yesProduction = false, approvals = {}, backupDone = false } = {}) {
   if (!execute) return { mode: "dry-run", canConnect: false, reasons: [] };
@@ -113,8 +122,7 @@ export function planExtractRun({ execute = false, yesProduction = false, approva
   const g = checkGates("extract", approvals);
   if (!g.ok) reasons.push(`承認ゲート ${g.missing.join("・")} が未承認です（${APPROVALS_PATH} に承認者・承認日・範囲が必要）`);
   if (!backupDone) reasons.push("実行前の npm run backup:full の完了が確認できません（--backup-done の申告が必要）");
-  reasons.push("本番へ接続するコードは未実装です（ゲートA承認後に別途実装・レビューする）");
-  return { mode: "execute", canConnect: false, reasons };
+  return { mode: "execute", canConnect: reasons.length === 0, reasons };
 }
 
 // ---------------------------------------------------------------- ローカル保存先・ログ
@@ -134,4 +142,78 @@ export function safeLogRow(row, seq) {
 /** 削除記録（原文を含めない。ファイル名・バイト数・件数・日時のみ） */
 export function buildDeletionRecord(files, at) {
   return { deletedAt: at, count: files.length, totalBytes: files.reduce((s, f) => s + (f.bytes || 0), 0), files: files.map((f) => ({ name: String(f.name).split(/[\\/]/).pop(), bytes: f.bytes || 0 })), note: "原文・評価記録のローカル写しを削除した記録（内容は含まない）" };
+}
+
+// ---------------------------------------------------------------- 実行（Stage 10F: 実データ評価の抽出。**承認ゲートA・各種確認が揃わない限り接続しない**）
+/** DB側でも読み取り専用を強制するための包み（ローカル検証用の psql 経路で使う。Supabase CLI の --read-only も同等の読み取り専用トランザクション） */
+export function wrapReadOnly(sql) {
+  const body = String(sql).trim().replace(/;\s*$/, "");
+  return `begin read only;\n${body};\nrollback;\n`;
+}
+
+/**
+ * Supabase CLI（3.x）の引数。**--remote=<プロジェクトref>** で接続先を明示する（既定はローカル。`--linked` は3.xの案内に無いため使わない）。
+ * ref は本番のプロジェクトIDと一致し、かつ呼び出し側が --expect-ref で明示した値と一致しなければ実行しない。
+ */
+export function buildQueryArgs({ ref, file }) {
+  if (!/^[a-z0-9]{20}$/.test(String(ref))) throw new Error("プロジェクトref の形式が不正です");
+  if (!/^[\w./\\:-]+$/.test(String(file))) throw new Error("SQLファイルのパスが不正です");
+  return ["supabase", "db", "query", `--remote=${ref}`, "--read-only", "--output-format", "json", "-f", file];
+}
+
+/** 接続先の照合: 明示した ref（--expect-ref）・リンク先の ref・本番の既知の ref がすべて同じであること。違えば例外（接続しない） */
+export function assertRefMatch({ expectRef, linkedRef, productionRefs }) {
+  if (!expectRef) throw new Error("--expect-ref（本番のプロジェクトID）の指定が必要です");
+  if (!productionRefs.includes(expectRef)) throw new Error("--expect-ref が既知の本番のプロジェクトIDと一致しません");
+  if (!linkedRef || linkedRef !== expectRef) throw new Error("リンク先のプロジェクトIDが --expect-ref と一致しません（接続しません）");
+  return true;
+}
+
+/** 直近のバックアップが新しいことの確認（申告だけでなく、バックアップの実体の更新日時を見る）。list は { name, mtimeMs }[] を返す関数（テストで差し替え） */
+export function assertRecentBackup({ list, nowMs, maxAgeHours = 24 }) {
+  // 完全バックアップ（tcg-full-*.tcgbak2）。保存時に復号と全ファイルのSHA-256照合を済ませているが、空・極端に小さいファイルは無効として扱う
+  const items = list().filter((x) => /^tcg-full-.*\.tcgbak2$/.test(x.name) && Number(x.size ?? 0) >= 1_000_000);
+  if (!items.length) throw new Error("有効な完全バックアップ（tcg-full-*.tcgbak2・1MB以上）が見つかりません（npm run backup:full を実行してください）");
+  const latest = Math.max(...items.map((x) => x.mtimeMs));
+  if (nowMs - latest > maxAgeHours * 3_600_000) throw new Error(`直近のバックアップが ${maxAgeHours} 時間より古いです（npm run backup:full を実行してください）`);
+  return true;
+}
+
+const ROW_KEYS = ALLOWED_SELECT_COLUMNS;
+
+/** 取得した行を、許可された列だけに絞る（想定外の列は捨てる）。件数・原文なしの上限も適用する */
+export function sanitizeRows(rows) {
+  if (!Array.isArray(rows)) throw new Error("取得結果の形式が不正です");
+  const out = [];
+  let noText = 0;
+  for (const r of rows) {
+    const o = {};
+    for (const k of ROW_KEYS) o[k] = typeof r?.[k] === "string" ? r[k] : null;
+    if (!o.evidence_text) {
+      if (noText >= MAX_NO_TEXT) continue;
+      noText++;
+    }
+    out.push(o);
+    if (out.length >= MAX_ROWS) break;
+  }
+  return out;
+}
+
+/**
+ * 抽出の実行。すべての確認（二重ゲート・承認A・直近バックアップ・接続先照合・出力先）を通った場合だけ、注入された query で1回だけ読み取る。
+ * query は SQL文字列を受け取って行の配列を返す関数（本番ではCLI、ローカル検証では docker psql）。**この関数自体はネットワークに接続しない**。
+ * 返す要約には原文・URL・IDを含めない（件数・文字数・ハッシュ先頭のみ）。
+ */
+export async function runExtraction({ execute, yesProduction, approvals, backupDone, expectRef, linkedRef, productionRefs, backupList, nowMs, limit, sinceIso, outPath, gitignoreText, query, write }) {
+  const plan = planExtractRun({ execute, yesProduction, approvals, backupDone });
+  if (plan.mode === "dry-run") return { mode: "dry-run", executed: false, reasons: [] };
+  if (plan.reasons.length) return { mode: "execute", executed: false, reasons: plan.reasons };
+  const sql = buildExtractSql({ limit, sinceIso });
+  assertSafeExtractSql(sql);
+  assertRefMatch({ expectRef, linkedRef, productionRefs });
+  assertRecentBackup({ list: backupList, nowMs });
+  assertLocalOutputPath(outPath, gitignoreText);
+  const rows = sanitizeRows(await query(sql));
+  write(outPath, JSON.stringify({ extractedAt: new Date(nowMs).toISOString(), rows }, null, 2));
+  return { mode: "execute", executed: true, reasons: [], count: rows.length, noText: rows.filter((r) => !r.evidence_text).length, log: rows.map((r, i) => safeLogRow(r, i + 1)) };
 }

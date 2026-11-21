@@ -54,7 +54,7 @@ describe("K07: products の形式エラーを、具体的に差し戻す（自�
     }
   });
   it("プロンプトに products の具体例があり、版が更新されている（r4）", () => {
-    expect(JUDGMENT_PROMPT_VERSION).toBe("10e.2-r4");
+    expect(JUDGMENT_PROMPT_VERSION).toBe("10l.1");
     expect(JUDGMENT_SYSTEM).toContain('"value":["商品名A"]');
     expect(JUDGMENT_SYSTEM).toContain("商品名の配列だけ");
   });

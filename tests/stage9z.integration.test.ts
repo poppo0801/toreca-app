@@ -61,7 +61,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 9Z: 取得した原文の保存と再利
     expect(ev.text).toContain("抽選販売のお知らせ");
     expect(ev.text).not.toContain("secret@example.com");
     expect(ev.fetchedAt).toMatch(/^20/);
-    expect(Object.keys(ev).sort()).toEqual(["fetchedAt", "hash", "imageCount", "imageStatus", "links", "origin", "text", "truncated", "url", "v", "via"]); // 原文の記録のみ（AIの抽出結果の項目は含まない）
+    expect(Object.keys(ev).sort()).toEqual(["fetchedAt", "hash", "imageCount", "imageStatus", "links", "origin", "text", "textSource", "truncated", "url", "v", "via"]); // 原文の記録のみ（AIの抽出結果の項目は含まない）
     expect((row.draft as { input?: unknown }).input).toBeDefined(); // AIの抽出結果は draft に別に保存される
   });
 

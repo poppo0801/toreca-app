@@ -33,6 +33,8 @@ export interface EvidenceItem {
   hash: string | null;
   /** 保存済みの原文の再利用か（9Z） */
   reused?: boolean;
+  /** Stage 10J: 原文の種類。linked_page = 投稿内のリンク先の公開ページ本文（投稿本文とは別の出典。引用は、その本文から行う）。無ければ投稿・ページ本文 */
+  kind?: "linked_page" | "image_reading" | "image_verified";
   /** 以前の解析では読み取れなかった原文（本文は読める。読み落としの再判断） */
   priorReadFailed?: boolean;
 }
@@ -51,6 +53,22 @@ export interface RelatedOpportunity {
   protectionUnknown?: boolean;
   /** 人が確定した値（項目名→値）。AIは上書きできない */
   humanConfirmed?: Record<string, string>;
+}
+
+/**
+ * この判断の対象となる案件**自身**の既存の登録内容（Stage 10H）。別の抽選（related）ではない。識別子・保護情報・世帯情報を含めない。
+ * 目的: 「対象自身の登録と同じか」という自己照合の疑問を生ませず、原文と登録内容の**値の食い違い**だけを見られるようにする。
+ */
+export interface CurrentCase {
+  chain: string | null;
+  store: string | null;
+  products: string[];
+  applyStart: string | null;
+  applyDeadline: string | null;
+  resultDate: string | null;
+  storeMode: "fixed" | "select_on_apply" | "none" | null;
+  /** Stage 10J: 登録値が、画像を使った解析で得られた可能性がある（取得済みの画像があった）。原文（画像は保存していない）では確認できない値を含みうる */
+  fromImages?: boolean;
 }
 
 export interface MasterCandidate {
@@ -87,6 +105,8 @@ export interface JudgmentInput {
   now: string;
   evidence: EvidenceItem[];
   related: RelatedOpportunity[];
+  /** 対象案件自身の既存の登録内容（あれば）。related とは別物 */
+  currentCase?: CurrentCase;
   masters: MasterCandidate[];
   /** 人の修正を先頭に、新しい順（過去のAI判断は正解ではない。参考） */
   priorJudgments: PriorJudgment[];
