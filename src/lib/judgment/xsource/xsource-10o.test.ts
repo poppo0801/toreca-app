@@ -99,18 +99,38 @@ describe("対象条件: 不明の原因別の段階的な解決（出典不明�
 
 describe("判断基準: 自動登録（プレビュー）／欠落つき候補／確認待ち／除外／更新提案", () => {
   const elig = { verdict: "eligible" as const, reasons: [], basis: {} };
-  const dec = (facts: SourceFact[], over: Partial<Parameters<typeof decideOpportunity>[0]> = {}) => decideOpportunity({ cluster: clusterFacts(facts)[0], eligibility: elig, now: NOW, unresolvedDuplicatePairs: 0, ...over });
+  const dec = (facts: SourceFact[], over: Partial<Parameters<typeof decideOpportunity>[0]> = {}) => decideOpportunity({ cluster: clusterFacts(facts)[0], facts, eligibility: elig, now: NOW, unresolvedDuplicatePairs: 0, ...over });
 
-  it("対象・出典確認済み・応募単位が明確・重複なし・公式（応募先）の根拠あり → 自動登録（プレビュー）", () => {
-    expect(dec([full("apply_form")])).toMatchObject({ decision: "auto_register_preview", reasons: ["all_checks_passed", "official_or_form_source"] });
+  it("対象・出典確認済み・応募単位が明確・重複なし → 自動登録（プレビュー）。非公式の単独の情報源でも同じ", () => {
+    expect(dec([full("apply_form")])).toMatchObject({ decision: "auto_register_preview" });
+    expect(dec([full("list_item")])).toMatchObject({ decision: "auto_register_preview", reasons: expect.arrayContaining(["single_independent_source"]) });
   });
-  it("軽微な項目（受付開始・結果発表・応募方法）が欠けていても、対象・同一性・締切が確かなら『欠落を明記した候補』", () => {
-    const d = dec([full("official_site", "s1", { applyStart: null, resultDate: null })]);
-    expect(d.decision).toBe("candidate_with_gaps");
-    expect(d.reasons).toEqual(expect.arrayContaining(["gap_applyStart", "gap_resultDate"]));
+  it("軽微な項目（受付開始・結果発表）が欠けていても自動登録（プレビュー）。応募先・方法が全く不明なら『欠落を明記した候補』", () => {
+    expect(dec([full("list_item", "s1", { applyStart: null, resultDate: null })])).toMatchObject({ decision: "auto_register_preview", reasons: expect.arrayContaining(["minor_gap_applyStart", "minor_gap_resultDate"]) });
+    const d = dec([full("list_item", "s1", { applyUrl: null, method: null })]);
+    expect(d).toMatchObject({ decision: "candidate_with_gaps", reasons: expect.arrayContaining(["gap_apply_destination"]) });
   });
-  it("公式・応募先の根拠が無い単独の告知・一覧は確認待ち（自動登録にしない）。理由に公式性を記録", () => {
-    expect(dec([full("list_item")])).toMatchObject({ decision: "needs_review", reasons: expect.arrayContaining(["official_source_unverified"]) });
+  it("公式性の有無・情報源の種類によって判断は変わらない（公式性を理由にした保留はゼロ）", () => {
+    const kinds: SourceFact["kind"][] = ["official_site", "official_x", "apply_form", "list_item", "aggregator", "unknown", "legacy_extraction"];
+    const base = dec([full("list_item")]);
+    for (const k of kinds) expect(dec([full(k)]).decision).toBe(base.decision);
+    for (const k of kinds) expect(dec([full(k)]).reasons.join()).not.toMatch(/official/);
+  });
+  it("独立性: 同じ元・同じ転載元の複数記事は1つの根拠。独立した別の情報源は2つ", () => {
+    const a = full("list_item", "a");
+    const b = { ...full("aggregator", "b"), repostOf: "a" };
+    const c = { ...full("list_item", "c"), originId: "cand:x" };
+    const d = { ...full("list_item", "d"), originId: "cand:x" };
+    expect(dec([{ ...a, repostOf: "a" }, b]).independentSources).toBe(1);
+    expect(dec([c, d]).independentSources).toBe(1);
+    expect(dec([a, full("official_x", "e")]).independentSources).toBe(2);
+  });
+  it("過去に訂正・誤報と分かった情報源・年や曜日が曖昧な締切・開始が締切より後は確認待ち。通知に使える締切は明示的に確認されたものだけ", () => {
+    expect(dec([full("list_item")], { retractedSources: new Set(["s1"]) }).reasons).toContain("source_previously_corrected");
+    expect(dec([full("list_item", "s1", { applyDeadline: "11/22(月)23:59" })]).reasons).toContain("deadline_year_or_weekday_unresolved");
+    expect(dec([full("list_item", "s1", { applyStart: "2099-11-23 10:00" })]).reasons).toContain("period_reversed");
+    expect(dec([full("list_item")]).notifiable).toBe(true);
+    expect(dec([full("list_item", "s1", { applyDeadline: "11/22 23:59" })]).notifiable).toBe(false); // 年が基準日からの推定のみ（曜日も無い）
   });
   it("確認待ち: 対象条件が不明／同一性が曖昧（重複の疑い・AI照合が不安定）／締切が原文で未確認／応募単位も店舗も不明", () => {
     expect(dec([full("apply_form")], { eligibility: { verdict: "unknown", reasons: ["region_unknown"], basis: {} } })).toMatchObject({ decision: "needs_review", reasons: ["region_unknown"] });

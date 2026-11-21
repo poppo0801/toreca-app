@@ -5,13 +5,14 @@
  */
 import { createHash } from "node:crypto";
 import type { ConditionResult } from "@/lib/judgment/xsource/conditions";
+import type { DecisionResult } from "@/lib/judgment/xsource/decision";
 import type { Cluster, SourceFact } from "@/lib/judgment/xsource/types";
 import type { Db } from "@/lib/server/lottery-service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const table = (db: Db, t: string): any => (db as unknown as { from: (t: string) => unknown }).from(t);
 
-export const OPPORTUNITY_PROMPT_VERSION = "10n.1";
+export const OPPORTUNITY_PROMPT_VERSION = "10p.1";
 
 /** 保存用に整える: 出典は識別子・種類・信頼の根拠だけ（原文・URLは持たない） */
 const slimField = (f: Cluster["fields"][number]) => ({
@@ -26,11 +27,13 @@ const slimField = (f: Cluster["fields"][number]) => ({
 export interface SaveOpportunity {
   cluster: Cluster;
   eligibility?: ConditionResult | null;
+  /** 判断のプレビュー（Stage 10P）。無ければ確認待ちとして保存 */
+  decision?: DecisionResult | null;
 }
 
 export async function saveOpportunities(db: Db, householdId: string, items: SaveOpportunity[]): Promise<number> {
   if (!items.length) return 0;
-  const rows = items.map(({ cluster: c, eligibility }) => ({
+  const rows = items.map(({ cluster: c, eligibility, decision }) => ({
     household_id: householdId,
     cluster_id: c.clusterId,
     members: c.members.slice(0, 50),
@@ -42,6 +45,11 @@ export async function saveOpportunities(db: Db, householdId: string, items: Save
     apply_unit_basis: c.applyUnit.basis,
     eligibility: eligibility?.verdict ?? "unknown",
     eligibility_reasons: (eligibility?.reasons ?? []).slice(0, 8),
+    decision: decision?.decision ?? "needs_review",
+    decision_reasons: (decision?.reasons ?? ["decision_not_evaluated"]).slice(0, 16),
+    notifiable: decision?.notifiable ?? false,
+    deadline_norm: decision?.deadline ? { role: decision.deadline.role, date: decision.deadline.date, time: decision.deadline.time, precision: decision.deadline.precision, yearBasis: decision.deadline.yearBasis, tz: decision.deadline.tz } : null,
+    independent_sources: Math.min(50, Math.max(0, decision?.independentSources ?? 1)),
     prompt_version: OPPORTUNITY_PROMPT_VERSION,
     updated_at: new Date().toISOString(),
   }));

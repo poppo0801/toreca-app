@@ -51,6 +51,8 @@ export interface SourceFact {
   registration?: { id: string; protectedCodes: string[]; protectionUnknown?: boolean; humanConfirmed?: FieldName[] };
   /** この情報源の元になった候補（候補由来の登録・旧方式の抽出が同じ候補から来た場合の同一源の判定）。同じ値の情報源は互いに照合しない */
   originId?: string;
+  /** 転載元の識別（同じ元の転載記事は独立した根拠と数えない）。元が同じ情報源は1つの根拠 */
+  repostOf?: string;
   /** 判断の手掛かりの文脈（見出し・投稿の冒頭など。TCGの種類・地域の判定に使う。保存・表示しない） */
   texts?: string[];
 }

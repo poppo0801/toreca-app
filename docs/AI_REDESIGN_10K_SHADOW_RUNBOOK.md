@@ -60,3 +60,9 @@
 - マイグレーションの追加なし（108〜112 の5本が未適用のまま）。`src/lib/judgment/xsource/` に 公式識別（`official.ts`）・段階的な条件解決（`conditions.ts`）・登録/更新/確認待ち/除外の判断（`decision.ts`）・AI照合の揺れ対策（`adjudication-policy.ts`）・ページ抽出と検証（`ai-10o.ts`）・ブロッキング（`cluster.ts`）を追加。**登録・更新はプレビュー（非実行の提案）のみ**。
 - 確認画面: `node scripts/review-10o-local.mjs`（補完・登録判断）。10M・10Nの画面への導線あり。
 - 実データ評価: `node scripts/xsource-10o.mjs run --confirm=yes`（実AI・有料・上限 90回/¥50/取得60回。`JUDGMENT_10O_REUSE_ITEMS=1` で項目の判断の保存を再利用）。
+
+## 11. Stage 10P の追加（公式性を条件から撤廃・根拠重視の登録判断。ローカル実装済み・本番未適用）
+- **公式性は登録・候補・通知・補完の条件ではない。** 抽選詳細の任意の「公式」バッジ（`src/components/official-badge.tsx`・`xsource/badge.ts`）にだけ使い、確認できなければ非表示。バッジのデータ経路（確認済みの発信者・告知の保存）は未実装＝本番では何も表示されない。
+- マイグレーション **113**（`shadow_opportunities` に判断・通知可否・締切の正規化の列を追加）。未適用は 108〜113 の6本。適用・復旧・ワーカー接続の設計は `docs/AI_REDESIGN_10P_PRODUCTION_READINESS.md`。
+- 応募機会プレビュー `src/lib/server/shadow/opportunity-job.ts`（AIなし・読み取り＋`shadow_opportunities`のみ・冪等・**ワーカー未接続**）。
+- 再評価: `node scripts/xsource-10p.mjs run --confirm=yes`（`xsource-10o-items.json` の保存を再利用し、補完のページ再抽出だけ実AI）。

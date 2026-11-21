@@ -13,12 +13,14 @@ export const hashId = (...parts: (string | number)[]): string => createHash("sha
 
 const unitOf = (u: string | null | undefined): ApplyUnitName => (u === "store_select" || u === "per_store" || u === "per_product" || u === "one_form_one" ? u : "unknown");
 
-export function factFromListItem(a: { candidateId: string; parentKey: string; item: ListItemResult; fetchedAt: string | null; postedAt?: string | null; urls?: string[]; range?: { start: number; end: number } | null; /** 見出し（例: 《店舗名（県）- 1件》）。県名の根拠になる */ groupLabel?: string; /** 項目の原文・投稿の冒頭（TCGの種類の手掛かり。保存しない） */ contextTexts?: string[] }): SourceFact | null {
+export function factFromListItem(a: { candidateId: string; parentKey: string; item: ListItemResult; fetchedAt: string | null; postedAt?: string | null; urls?: string[]; range?: { start: number; end: number } | null; /** 見出し（例: 《店舗名（県）- 1件》）。県名の根拠になる */ groupLabel?: string; /** 項目の原文・投稿の冒頭（TCGの種類の手掛かり。保存しない） */ contextTexts?: string[]; /** この項目の応募先リンクが展開済みで、他の項目と別の応募先と確認できた（linkMap による）。原文に応募単位が書かれていない項目の応募単位を、構造から推定する根拠 */ destinationDistinct?: boolean }): SourceFact | null {
   const it = a.item;
   // 応募機会として確定した項目だけが観測になる（保留・失敗・抽選でない項目は、他の情報源の根拠にしない）
   if (it.status !== "done" || it.verdict !== "independent_lottery") return null;
   const ev = { range: a.range ?? null, quoteVerified: it.quoteVerified, image: null } as const;
   const fields: SourceFact["fields"] = { chain: it.chain, store: it.store, products: it.products, applyDeadline: it.applyDeadline, applyStart: it.applyStart, method: it.method, applyUnit: unitOf(it.unit) };
+  // 応募単位が原文に書かれておらず、店舗が特定でき、応募先が他の項目と別と確認できる場合だけ「店舗ごとに別応募」と推定する（書かれていれば原文を優先。応募先が不明なら unknown のまま）
+  if (fields.applyUnit === "unknown" && it.store && a.destinationDistinct) fields.applyUnit = "per_store";
   // 見出しの県名（告知に書かれた都道府県）。店舗名から別の県が読める場合は judgeRegion が「不明」にする（推測で選ばない）
   const reg = judgeRegion({ storeName: it.store, statedPrefecture: a.groupLabel });
   if (reg.prefecture) fields.prefecture = reg.prefecture;

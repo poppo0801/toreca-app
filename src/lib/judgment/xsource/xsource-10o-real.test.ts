@@ -331,7 +331,7 @@ describe.skipIf(env.JUDGMENT_10O_REAL !== "1")("10O 補完の実証・条件解�
     for (const c of clusters) {
       const el = resolvedByCluster.get(c.clusterId) ?? null;
       const dup = c.members.reduce((n, m) => n + (unresolvedBy.get(m) ?? 0), 0);
-      const d = decideOpportunity({ cluster: c, eligibility: el, now, unresolvedDuplicatePairs: dup, aiUnstable: c.members.some((m) => unstableIds.has(m)), isLottery: true });
+      const d = decideOpportunity({ cluster: c, facts: c.members.map((m) => byId.get(m) as SourceFact), eligibility: el, now, unresolvedDuplicatePairs: dup, aiUnstable: c.members.some((m) => unstableIds.has(m)), isLottery: true });
       decisions.push(d.decision);
       if (c.registrations.length === 0) for (const r of d.reasons) reasonsHist.push(`${d.decision}:${r}`);
       if (c.members.length >= 2 || d.decision === "auto_register_preview" || d.decision === "candidate_with_gaps") review.push({ clusterId: c.clusterId, decision: d.decision, reasons: d.reasons, members: c.members.map((m) => ({ id: m, kind: byId.get(m)?.kind, fields: byId.get(m)?.fields })), fields: c.fields, proposals: c.proposals, contested: c.contested, applyUnit: c.applyUnit, eligibility: el ? { verdict: el.verdict, reasons: el.reasons, stages: el.stages } : null });

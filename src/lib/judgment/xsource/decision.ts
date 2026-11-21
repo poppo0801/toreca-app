@@ -1,56 +1,66 @@
 /**
- * 自動登録・情報更新・確認待ち・除外の判断基準（Stage 10O・純関数）。**プレビューのみ。この関数は何も書き込まない**。
+ * 自動登録・情報更新・確認待ち・除外の判断基準（Stage 10P・純関数）。**プレビューのみ。この関数は何も書き込まない**。
  *
- * 新規（既存の登録に結びつかない応募機会）の4区分:
- *   auto_register_preview = 確実な対象・独立した応募機会・出典（原文）確認済み・重複照合済み。登録の「プレビュー」を作ってよい（実際の登録は本番導入後・別の承認）。
- *   candidate_with_gaps   = 対象・同一性・締切は確かだが、軽微な項目が欠けている（受付開始・結果発表・応募方法など）。欠けている項目を明記した候補。
- *   needs_review          = 応募単位・対象条件・同一性・重要な日時・公式性が曖昧、または矛盾がある。人が確認する。
- *   excluded              = 明確な対象外（地域外・他TCG・除外系列・通販除外）／終了済み。**登録・通知しないが、理由つきの発見記録を残す**（監査可能）。
- * 既存の登録に結びついた応募機会: 登録の更新は**フィールド別の提案**（補完 fill_empty／訂正の確認 ask_human）だけ。保護された登録（応募済み・当選・購入・手動編集・★・通知・スルー等）には変更を提案せず確認のみ。
- * 欠落と矛盾は区別する: 欠落＝どの情報源にも値がない（登録を止めない軽微な項目もある）／矛盾＝情報源どうしで値が食い違う（重要項目なら確認待ち）。
+ * 【公式性は条件ではない（10Pの方針）】公式であること・公式サイトを取得できること・公式SNSとの相互リンク・公式バッジの有無は、登録・候補・通知・補完の**必要条件にしない**。
+ *   公式性を欠くという理由だけで、確認待ち・除外にしない。この関数は official.ts を読まず、情報源の種類（kind）も判断に使わない（テストで固定）。
+ *   判断は、情報の**具体性・整合性・検証可能な根拠・独立性・応募単位・対象条件・重複リスク・期限**で行う。公式／非公式は根拠の一属性で、正確性の保証ではない。
+ *
+ * 新規（既存の登録に結びつかない応募機会）の区分:
+ *   auto_register_preview = 実行可能な最低限の情報（抽選であること・系列と店舗または通販・商品・応募期間の締切・応募先/方法）が原文で確認でき、応募単位が明確で、対象条件に合い、
+ *                           致命的な矛盾・重複の疑い・同一性の曖昧さが無い。**非公式の単独の情報源でも可**。登録の「プレビュー」を作る（実際の登録は本番導入後・別の承認）。
+ *   candidate_with_gaps   = 上のうち、応募先・方法が不明など実行に関わる項目が欠けている（欠けている項目を明記）。
+ *   needs_review          = 対象条件・同一性・重複・応募単位・締切（年・矛盾・役割）が曖昧、または重要項目に矛盾がある、または原文で確認できない。
+ *   excluded              = 明確な対象外（地域外・他TCG・除外系列・通販除外）／終了済み／非抽選。登録・通知しないが、理由つきの発見記録を残す。
+ * 既存の登録に結びついた応募機会: フィールド別の提案（補完／訂正の確認）だけ。保護された登録は確認のみ。
+ * 独立性: 同じ元（同じ候補・同じ転載元）の情報源は1つの根拠として数える。転載の複数記事を独立した根拠と数えない。
  */
 import type { ConditionResult } from "./conditions";
-import { parseDate } from "./normalize";
-import type { Cluster, FieldName } from "./types";
+import { deadlineIsPast, isNotifiableDeadline, normalizeDateTime, validatePeriod, type NormalizedDateTime } from "./datetime";
+import type { Cluster, FieldName, SourceFact } from "./types";
 
 export type Decision = "auto_register_preview" | "candidate_with_gaps" | "needs_review" | "excluded" | "update_proposals";
 
-/** 欠けていても登録を止めない軽微な項目 */
-const MINOR_FIELDS: FieldName[] = ["applyStart", "resultDate", "method", "applyUrl", "prefecture"];
+/** 登録を止めない軽微な項目 */
+const MINOR_FIELDS: FieldName[] = ["applyStart", "resultDate", "prefecture"];
 /** 矛盾していたら人の確認が要る重要な項目 */
 const CRITICAL_FIELDS: FieldName[] = ["chain", "store", "products", "applyDeadline", "applyStart"];
 
 export interface DecisionInput {
   cluster: Cluster;
-  /** 対象条件の判定（地域・TCG・除外系列・通販）。無ければ未判定として確認待ち */
+  /** クラスターの情報源（独立性・応募先・基準日の判定に使う。種類 kind は使わない） */
+  facts: SourceFact[];
   eligibility: ConditionResult | null;
-  /** 判断の基準日（締切の経過判定） */
   now: Date;
-  /** 重複の疑いが未解決の組の数（不明な関係で、系列が同じ・矛盾がないもの）。0でなければ確認待ち */
+  /** 重複の疑いが未解決の組の数。0でなければ確認待ち */
   unresolvedDuplicatePairs: number;
-  /** AIの照合が不安定（複数回で結果が割れた）な組を含むか。含めば自動統合・自動登録しない */
   aiUnstable?: boolean;
-  /** 抽選として確定した（非抽選ではない）か */
   isLottery?: boolean;
+  /** 過去に訂正・誤報と分かった情報源の識別子。含まれていれば確認待ち */
+  retractedSources?: ReadonlySet<string>;
 }
 
 export interface DecisionResult {
   decision: Decision;
-  /** 理由のコード（確認画面・報告用。原文を含まない） */
   reasons: string[];
-  /** 欠けている項目（軽微なもの・重要なもの） */
   gaps: FieldName[];
-  /** 矛盾している項目 */
   conflicts: FieldName[];
+  /** 独立した根拠の数（同じ元・同じ転載元は1つ） */
+  independentSources: number;
+  /** 締切の正規化（無ければ null） */
+  deadline: NormalizedDateTime | null;
+  /** 通知に使ってよい締切か（役割が締切・年が明示/曜日で確認・時刻まで・原文の根拠が確認済み） */
+  notifiable: boolean;
 }
 
-/** 締切が基準日より前（終了済み）か。年が無い表記は基準日の年で、日付だけ過ぎていれば終了とみなす（時刻が無ければその日の終わりまで） */
+/** 独立した根拠の数: 元（originId）または転載元（repostOf）が同じ情報源は1つ */
+export function independentSourceCount(facts: SourceFact[]): number {
+  return new Set(facts.map((f) => f.originId ?? f.repostOf ?? f.sourceId)).size;
+}
+
 export function isExpired(deadline: string | null | undefined, now: Date): boolean {
-  const d = parseDate(deadline);
-  if (!d) return false;
-  const year = d.year ?? now.getFullYear();
-  const end = new Date(Date.UTC(year, d.month - 1, d.day, d.hour ?? 23, d.minute ?? 59) - 9 * 3600_000); // JSTの時刻
-  return end.getTime() < now.getTime();
+  if (!deadline) return false;
+  const n = normalizeDateTime(deadline, { role: "apply_deadline", reference: now });
+  return deadlineIsPast(n, now);
 }
 
 export function decideOpportunity(i: DecisionInput): DecisionResult {
@@ -59,44 +69,55 @@ export function decideOpportunity(i: DecisionInput): DecisionResult {
   const fields = new Map(c.fields.map((f) => [f.field, f]));
   const conflicts = c.fields.filter((f) => f.status === "conflict").map((f) => f.field);
   const gaps = c.fields.filter((f) => f.status === "missing").map((f) => f.field);
-  const out = (decision: Decision, rs: string[]): DecisionResult => ({ decision, reasons: rs, gaps, conflicts });
+  const independent = independentSourceCount(i.facts);
+  const dl = fields.get("applyDeadline");
+  const st = fields.get("applyStart");
+  const ref = new Date(Math.min(...i.facts.map((f) => Date.parse(f.postedAt ?? f.fetchedAt ?? "") || i.now.getTime()), i.now.getTime()));
+  const deadlineRaw = typeof dl?.adopted === "string" ? dl.adopted : null;
+  const deadline = deadlineRaw ? normalizeDateTime(deadlineRaw, { role: "apply_deadline", reference: ref }) : null;
+  const startRaw = typeof st?.adopted === "string" ? st.adopted : null;
+  const start = startRaw ? normalizeDateTime(startRaw, { role: "apply_start", reference: ref }) : null;
+  const deadlineVerified = !!dl?.candidates.some((x) => x.quoteVerified);
+  const notifiable = !!deadline && isNotifiableDeadline(deadline, deadlineVerified);
+  const out = (decision: Decision, rs: string[]): DecisionResult => ({ decision, reasons: rs, gaps, conflicts, independentSources: independent, deadline, notifiable });
 
   if (i.isLottery === false) return out("excluded", ["not_lottery"]);
-  // 既存の登録に結びつく: 更新は提案のみ（保護は resolve が確認のみにしている）。新規登録は作らない
   if (c.registrations.length > 0) {
     const n = c.proposals.length;
     return out("update_proposals", [n ? "has_field_proposals" : "no_changes_needed", ...(c.registrations.length > 1 ? ["possible_duplicate_registration"] : [])]);
   }
-  // 明確な対象外
   if (i.eligibility?.verdict === "ineligible") return out("excluded", i.eligibility.reasons.filter((r) => r !== "tcg_unknown" && r !== "region_unknown"));
-  const dl = fields.get("applyDeadline");
-  const deadline = typeof dl?.adopted === "string" ? dl.adopted : null;
-  if (deadline && isExpired(deadline, i.now)) return out("excluded", ["expired_closed"]);
+  if (deadline && deadlineIsPast(deadline, i.now)) return out("excluded", ["expired_closed"]);
 
-  // ---- 確認待ちの条件（1つでも当てはまれば）
+  // ---- 確認待ち（曖昧さ・矛盾）
   if (!i.eligibility) reasons.push("eligibility_not_evaluated");
   else if (i.eligibility.verdict === "unknown") reasons.push(...(i.eligibility.reasons.length ? i.eligibility.reasons : ["eligibility_unknown"]));
   if (c.contested.length) reasons.push("identity_contested");
   if (i.unresolvedDuplicatePairs > 0) reasons.push("possible_duplicate_unresolved");
   if (i.aiUnstable) reasons.push("ai_adjudication_unstable");
+  if (i.facts.some((f) => i.retractedSources?.has(f.sourceId))) reasons.push("source_previously_corrected");
   for (const f of conflicts) if (CRITICAL_FIELDS.includes(f)) reasons.push(`conflict_${f}`);
-  if (!deadline) reasons.push("deadline_missing_or_conflicting");
-  else if (!dl?.candidates.some((x) => x.quoteVerified)) reasons.push("deadline_not_verified_in_source");
+  if (!deadlineRaw) reasons.push("deadline_missing_or_conflicting");
+  else {
+    if (!deadlineVerified) reasons.push("deadline_not_verified_in_source");
+    if (deadline && (deadline.yearBasis === "ambiguous" || deadline.weekdayMismatch || deadline.precision === "unparsed")) reasons.push("deadline_year_or_weekday_unresolved");
+    if (validatePeriod(start, deadline) === "reversed") reasons.push("period_reversed");
+  }
   const unit = c.applyUnit.value;
   const store = fields.get("store");
   const storeKnown = !!store && store.status !== "missing" && store.status !== "conflict";
-  if (unit === "unknown" && !storeKnown) reasons.push("apply_unit_and_store_unknown");
+  const online = !!i.eligibility && i.eligibility.basis.region === "eligible" && !storeKnown && /通販|オンライン/.test(JSON.stringify(store?.candidates ?? []));
+  if (unit === "unknown") reasons.push(storeKnown || online ? "apply_unit_unknown" : "apply_unit_and_store_unknown");
+  if (!storeKnown && !online && unit !== "unknown") reasons.push("store_unknown");
   if (fields.get("chain")?.status === "missing") reasons.push("chain_missing");
   if (!fields.get("products") || fields.get("products")?.status === "missing") reasons.push("products_missing");
-  // 公式性: 公式（相互リンクで裏付け）または応募先の根拠が1つも無ければ、確認待ち
-  const authoritative = c.fields.some((f) => f.candidates.some((x) => x.kind === "official_site" || x.kind === "official_x" || x.kind === "apply_form"));
-  const verifiedFields = (["chain", "store", "products", "applyDeadline"] as FieldName[]).every((f) => fields.get(f)?.candidates.some((x) => x.quoteVerified) || (f === "store" && !storeKnown));
-  // 公式性が裏付けられていない（公式・応募先のどちらの根拠も無い）なら、自動登録にも「欠落つき候補」にもせず、確認待ち
-  if (!authoritative) reasons.push("official_source_unverified");
+  // 重要項目の原文確認: 系列・商品は、少なくとも1つの情報源で原文の根拠が確認できること（公式かどうかは問わない）
+  for (const f of ["chain", "products"] as FieldName[]) if (!fields.get(f)?.candidates.some((x) => x.quoteVerified)) reasons.push(`field_not_verified_${f}`);
   if (reasons.length) return out("needs_review", [...new Set(reasons)]);
 
+  // ---- 実行可能な最低限の情報は揃っている。応募先・方法が不明なら欠落つき候補
+  const destination = fields.get("applyUrl")?.status !== "missing" || fields.get("method")?.status !== "missing" || i.facts.some((f) => (f.urls ?? []).length > 0);
   const minorGaps = gaps.filter((g) => MINOR_FIELDS.includes(g));
-  if (!verifiedFields) return out("needs_review", ["field_not_verified_in_source"]);
-  if (minorGaps.length || unit === "unknown") return out("candidate_with_gaps", [...minorGaps.map((g) => `gap_${g}`), ...(unit === "unknown" ? ["apply_unit_unknown"] : []), "official_or_form_source"]);
-  return out("auto_register_preview", ["all_checks_passed", "official_or_form_source"]);
+  if (!destination) return out("candidate_with_gaps", ["gap_apply_destination", ...minorGaps.map((g) => `gap_${g}`)]);
+  return out("auto_register_preview", ["minimum_executable_info_verified", independent >= 2 ? "independent_sources_2plus" : "single_independent_source", ...minorGaps.map((g) => `minor_gap_${g}`)]);
 }

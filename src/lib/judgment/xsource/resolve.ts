@@ -110,7 +110,7 @@ function proposalFor(reg: SourceFact, field: FieldName, value: FieldValue, from:
 /** 応募単位: 明示された（原文の根拠・応募先・公式）ものを優先。unknown は「情報なし」であって矛盾ではない。異なる確定値が複数あれば unknown（保留） */
 export function resolveApplyUnit(members: SourceFact[]): ResolveResult["applyUnit"] {
   const vals = members
-    .map((m) => ({ id: m.sourceId, v: (m.fields.applyUnit as ApplyUnitName | null) ?? "unknown", stated: (m.evidence?.applyUnit?.quoteVerified ?? false) || m.kind === "apply_form" || m.kind === "official_site", rel: SOURCE_RELIABILITY[m.kind] }))
+    .map((m) => ({ id: m.sourceId, v: (m.fields.applyUnit as ApplyUnitName | null) ?? "unknown", stated: (m.evidence?.applyUnit?.quoteVerified ?? false) || m.kind === "apply_form", rel: SOURCE_RELIABILITY[m.kind] }))
     .filter((x) => x.v !== "unknown");
   if (!vals.length) return { value: "unknown", basis: "unknown", from: [] };
   const distinct = new Set(vals.map((x) => x.v));
