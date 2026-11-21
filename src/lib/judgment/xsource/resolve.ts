@@ -17,8 +17,8 @@ export function valuesAgree(field: FieldName, a: FieldValue, b: FieldValue): boo
   // 系列・店舗は表記の違い（県名の括弧書き・系列名の接頭辞・末尾の「店」・別名）を吸収して比べる。実データで「〜店（大阪府）」と「〜店」が矛盾にされた
   if (field === "chain") return chainsMatch(a as string, b as string) === "same";
   if (field === "store") {
-    const m = storesMatch(a as string, b as string);
-    return m === "same" || m === "partial";
+    // 「通販」「オンライン」等の汎用の値は店舗名として比べない（unknown は矛盾ではない）。明確に違う店舗だけが矛盾
+    return storesMatch(a as string, b as string) !== "different";
   }
   const n = (v: FieldValue): string => String(Array.isArray(v) ? v.join(",") : (v ?? "")).normalize("NFKC").toLowerCase().replace(/[\s　]+/g, "");
   return n(a) === n(b);

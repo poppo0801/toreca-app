@@ -5,6 +5,7 @@
  *  - 原文・URLの全体は持ち込まない（URLは正規化用に保持するが、保存・表示ではホストのみ）。
  */
 import { createHash } from "node:crypto";
+import { judgeRegion } from "@/lib/collector/region";
 import type { ListItemResult } from "../list-discovery";
 import type { ApplyUnitName, FieldName, SourceFact } from "./types";
 
@@ -12,15 +13,18 @@ export const hashId = (...parts: (string | number)[]): string => createHash("sha
 
 const unitOf = (u: string | null | undefined): ApplyUnitName => (u === "store_select" || u === "per_store" || u === "per_product" || u === "one_form_one" ? u : "unknown");
 
-export function factFromListItem(a: { candidateId: string; parentKey: string; item: ListItemResult; fetchedAt: string | null; postedAt?: string | null; urls?: string[]; range?: { start: number; end: number } | null }): SourceFact | null {
+export function factFromListItem(a: { candidateId: string; parentKey: string; item: ListItemResult; fetchedAt: string | null; postedAt?: string | null; urls?: string[]; range?: { start: number; end: number } | null; /** 見出し（例: 《店舗名（県）- 1件》）。県名の根拠になる */ groupLabel?: string; /** 項目の原文・投稿の冒頭（TCGの種類の手掛かり。保存しない） */ contextTexts?: string[] }): SourceFact | null {
   const it = a.item;
   // 応募機会として確定した項目だけが観測になる（保留・失敗・抽選でない項目は、他の情報源の根拠にしない）
   if (it.status !== "done" || it.verdict !== "independent_lottery") return null;
   const ev = { range: a.range ?? null, quoteVerified: it.quoteVerified, image: null } as const;
   const fields: SourceFact["fields"] = { chain: it.chain, store: it.store, products: it.products, applyDeadline: it.applyDeadline, applyStart: it.applyStart, method: it.method, applyUnit: unitOf(it.unit) };
+  // 見出しの県名（告知に書かれた都道府県）。店舗名から別の県が読める場合は judgeRegion が「不明」にする（推測で選ばない）
+  const reg = judgeRegion({ storeName: it.store, statedPrefecture: a.groupLabel });
+  if (reg.prefecture) fields.prefecture = reg.prefecture;
   const evidence: SourceFact["evidence"] = {};
   for (const k of Object.keys(fields) as FieldName[]) if (fields[k] != null) evidence[k] = ev;
-  return { sourceId: `list:${hashId(a.candidateId, a.parentKey, it.no)}`, kind: "list_item", fetchedAt: a.fetchedAt, postedAt: a.postedAt ?? null, fields, evidence, urls: a.urls, originId: `cand:${a.candidateId}` };
+  return { sourceId: `list:${hashId(a.candidateId, a.parentKey, it.no)}`, kind: "list_item", fetchedAt: a.fetchedAt, postedAt: a.postedAt ?? null, fields, evidence, urls: a.urls, originId: `cand:${a.candidateId}`, texts: [a.groupLabel, ...(a.contextTexts ?? [])].filter((x): x is string => !!x) };
 }
 
 export interface RegistrationLike {

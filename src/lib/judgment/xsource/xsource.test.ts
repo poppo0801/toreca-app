@@ -316,3 +316,22 @@ describe("実データ評価で見つかった不具合の回帰テスト", () =
     expect(again.fetches).toBe(0);
   });
 });
+
+describe("候補の絞り込み（ブロッキング）: 全ペア比較と同じ結果で、系列が不明な情報源を介した誤統合も防ぐ", () => {
+  it("系列で絞った比較は、全ペア比較の『同一・同じ企画の別応募・不明』と完全に一致する（無関係の組だけが省かれる）", async () => {
+    const { pairRelationsAll } = await import("./cluster");
+    const mk = (i: number): SourceFact => fact(`f${String(i).padStart(2, "0")}`, "list_item", { chain: ["サンプル書店", "GEO（ゲオ）", "ゲオ", "別の系列", null][i % 5] as string | null, store: ["梅田店", "難波店", "梅田", null][i % 4], products: PROD, applyDeadline: ["11/22", "11/23"][i % 2] });
+    const facts = Array.from({ length: 24 }, (_, i) => mk(i));
+    const full = pairRelationsAll(facts).filter((p) => p.relation.kind !== "independent");
+    const blocked = pairRelations(facts).filter((p) => p.relation.kind !== "independent");
+    expect(blocked.map((p) => `${p.a}|${p.b}|${p.relation.kind}`)).toEqual(full.map((p) => `${p.a}|${p.b}|${p.relation.kind}`).sort());
+    expect(pairRelations(facts).length).toBeLessThan(pairRelationsAll(facts).length); // 比較の数が減っている
+  });
+  it("系列が違う2つの情報源は、系列が不明な情報源を介しても同じクラスターにならない", () => {
+    const x = fact("x", "list_item", { chain: "サンプル書店", store: "梅田店", products: PROD, applyDeadline: "11/22" });
+    const y = fact("y", "list_item", { chain: "別の系列", store: "梅田店", products: PROD, applyDeadline: "11/22" });
+    const z = fact("z", "list_item", { chain: null, store: "梅田店", products: PROD, applyDeadline: "11/22" });
+    const cs = clusterFacts([x, y, z]);
+    expect(cs.find((c) => c.members.includes("x"))!.members.includes("y")).toBe(false);
+  });
+});
