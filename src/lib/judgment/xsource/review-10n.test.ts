@@ -49,3 +49,18 @@ describe("確認画面（10O: 補完・登録判断）: 本人の操作でのみ
     expect(status).not.toContain("members");
   });
 });
+
+describe("確認画面（10Q: 応募単位の推論）: 本人の操作でのみ記録・外部へ送らない・何も実行しない", () => {
+  const q = readFileSync("scripts/review-10q-local.mjs", "utf8");
+  it("127.0.0.1だけ・トークン・Host検査。外部通信・DBアクセスを持たない。全件選択・AI名義拒否・書き込みは保存処理の1か所。仮説で正解ではないと明記", () => {
+    expect(q).toContain('listen(0, "127.0.0.1"');
+    expect(q).toContain("randomBytes");
+    expect(q).not.toMatch(/https?\.request|fetch\(["'`]https?:|node:https|api\.anthropic|@supabase/);
+    expect(q).toContain("AI_NAME.test(who)");
+    expect(q).toContain("未選択です。保存しません");
+    expect(q.match(/writeFileSync\(/g)?.length).toBe(1);
+    expect(q.indexOf("writeFileSync(")).toBeGreaterThan(q.indexOf('"/save"'));
+    expect(q).toContain("仮説");
+    expect(q).toContain("何も実行されません");
+  });
+});

@@ -1,0 +1,218 @@
+{
+  "schema": "apply-unit-knowledge/1",
+  "note": "応募単位の推論に渡す『参考知識』。固定ルールではない。AIは今回の告知の明示的な根拠を常に優先し、ここにある傾向・例は類推の材料としてだけ使う。編集可能（追記・訂正は corrections に人の名義と理由で残す）。AIが人の確認なしに事例を追加・強化してはならない。",
+  "entries": [
+    {
+      "id": "K-PLATFORM-LP-MULTI",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [
+          "livepocket.jp"
+        ],
+        "chainAliases": [],
+        "systems": [
+          "livepocket"
+        ]
+      },
+      "statement": "LivePocketの応募ページで複数の店舗が選択肢として表示される場合、原則としてその応募機会では1店舗にだけ応募できる（店舗選択式）。",
+      "suggests": {
+        "unit": "store_select",
+        "selectionTiming": "at_apply"
+      },
+      "exceptions": [
+        "同じ商品・同じ期間でも、店舗グループ（A/B/C/Dなど）ごとに1回ずつ応募できる運用がある（K-EVENT-ITOYOKADO-GROUPS）。同じプラットフォームだからと一括りにしない。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "medium",
+      "counterexamples": [
+        "K-EVENT-ITOYOKADO-GROUPS"
+      ],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-EVENT-ITOYOKADO-GROUPS",
+      "kind": "event_example",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [
+          "livepocket.jp"
+        ],
+        "chainAliases": [
+          "イトーヨーカドー",
+          "イトーヨーカ堂",
+          "Ito-Yokado"
+        ],
+        "systems": [
+          "livepocket"
+        ]
+      },
+      "statement": "イトーヨーカドーの抽選では、同じ商品・同じ期間でも、店舗グループ（A/B/C/Dなど）ごとに1回ずつ応募できる例があった。",
+      "suggests": {
+        "unit": "per_store_group",
+        "selectionTiming": "at_apply"
+      },
+      "exceptions": [
+        "グループの表記・数・応募回数は開催ごとに異なりうる。今回の告知にグループの記載が無ければ当てはめない。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "medium",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-SYSTEM-DORASTA-INDEPENDENT",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [
+          "dorasuta.jp"
+        ],
+        "chainAliases": [
+          "ドラスタ",
+          "ドラゴンスター"
+        ],
+        "systems": [
+          "dorasuta"
+        ]
+      },
+      "statement": "ドラスタの抽選システムでは、店舗ごとの独立した応募が多い。",
+      "suggests": {
+        "unit": "per_store",
+        "selectionTiming": "at_apply"
+      },
+      "exceptions": [
+        "通販・全店共通の企画では1応募のことがある。今回の告知の記載を優先する。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "medium",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-SYSTEM-RYU-INDEPENDENT",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [],
+        "chainAliases": [
+          "竜のしっぽ"
+        ],
+        "systems": [
+          "dorasuta"
+        ]
+      },
+      "statement": "竜のしっぽなど、ドラスタと同じ抽選システムを使う系列も、店舗ごとの独立した応募が多い。",
+      "suggests": {
+        "unit": "per_store",
+        "selectionTiming": "at_apply"
+      },
+      "exceptions": [
+        "系列が同じシステムを使っていても、今回の告知で別の方式が示されていればそちらを優先する。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "medium",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-RULE-NO-CROSS-STORE",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [],
+        "chainAliases": [],
+        "systems": []
+      },
+      "statement": "『他店舗へ同時に応募すると落選』など、店舗をまたぐ応募の制限が書かれていれば、その抽選固有の制限を優先する（店舗ごとに独立して応募できるとは扱わない）。制限の記載が無ければ店舗別応募を基本仮説の一つとするが、禁止の記載が見つからないことは、複数店舗へ応募できることの証明ではない。",
+      "suggests": {
+        "unit": "unknown",
+        "selectionTiming": "unknown"
+      },
+      "exceptions": [
+        "記載が無い場合は、店舗別応募を『仮説』として保持し、断定しない。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "medium",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-HEURISTIC-MULTISTORE-PICKUP",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [],
+        "chainAliases": [],
+        "systems": []
+      },
+      "statement": "店舗受取が前提で、複数店舗を持つ系列で、実施店舗が特定されておらず、応募時の店舗指定も明記されていない場合は、店舗選択式を有力な仮説とする。店舗マスターは不完全なので『登録されている店舗が1つ＝単店舗の系列』とは推論しない。公開情報や既存の履歴から多店舗であることを補助的に確認する。",
+      "suggests": {
+        "unit": "store_select",
+        "selectionTiming": "unknown"
+      },
+      "exceptions": [
+        "本当に単店舗の事業者や、告知で店舗が特定されている場合は当てはまらない。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "low",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-CHAIN-YODOBASHI-AFTERWIN",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [],
+        "chainAliases": [
+          "ヨドバシ",
+          "ヨドバシカメラ",
+          "ヨドバシ.com"
+        ],
+        "systems": []
+      },
+      "statement": "ヨドバシのように、当選後に店舗受取か配送かを選べる抽選は、アプリの管理上は店舗選択式として扱ってよい。ただし『応募時に店舗を選ぶ』のではなく『当選後に受取先・配送を選ぶ』ので、応募時に選択必須と表示してはならない。",
+      "suggests": {
+        "unit": "store_select",
+        "selectionTiming": "after_win"
+      },
+      "exceptions": [
+        "応募時に店舗を指定する開催もありうる。今回の告知の記載を優先する。"
+      ],
+      "observedAt": "2026-11-22",
+      "confidence": "medium",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    },
+    {
+      "id": "K-GENERAL-VARIANTS",
+      "kind": "tendency",
+      "source": "ユーザー提供の運用知識",
+      "appliesTo": {
+        "platformHosts": [],
+        "chainAliases": [],
+        "systems": []
+      },
+      "statement": "同一商品・同一期間・同一系列でも、応募の形は多様: 店舗グループ別の独立応募／店舗別の独立応募／全店舗共通の1応募／店舗選択の1応募／商品別のフォーム／複数商品の同時応募／開催回別の応募。『応募できる回数』と『応募時の選択肢』は別に推定する。",
+      "suggests": {
+        "unit": "unknown",
+        "selectionTiming": "unknown"
+      },
+      "exceptions": [],
+      "observedAt": "2026-11-22",
+      "confidence": "low",
+      "counterexamples": [],
+      "expiresAt": "2027-11-22",
+      "editable": true
+    }
+  ],
+  "corrections": []
+}

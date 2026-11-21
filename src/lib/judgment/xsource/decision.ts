@@ -16,9 +16,11 @@
  */
 import type { ConditionResult } from "./conditions";
 import { deadlineIsPast, isNotifiableDeadline, normalizeDateTime, validatePeriod, type NormalizedDateTime } from "./datetime";
+import { unitKnownByInference, type VerifiedUnitInference } from "./apply-unit";
 import type { Cluster, FieldName, SourceFact } from "./types";
 
-export type Decision = "auto_register_preview" | "candidate_with_gaps" | "needs_review" | "excluded" | "update_proposals";
+export type Decision = "auto_register_preview" | "tentative_candidate" | "candidate_with_gaps" | "needs_review" | "excluded" | "update_proposals";
+export type UnitStatus = "explicit" | "inferred_direct" | "provisional" | "unknown";
 
 /** 登録を止めない軽微な項目 */
 const MINOR_FIELDS: FieldName[] = ["applyStart", "resultDate", "prefecture"];
@@ -37,6 +39,8 @@ export interface DecisionInput {
   isLottery?: boolean;
   /** 過去に訂正・誤報と分かった情報源の識別子。含まれていれば確認待ち */
   retractedSources?: ReadonlySet<string>;
+  /** 応募単位のAI推論（機械検証済み。Stage 10Q）。応募単位が原文で確定していないときだけ使う。無ければ従来どおり */
+  unitInference?: VerifiedUnitInference | null;
 }
 
 export interface DecisionResult {
@@ -50,6 +54,10 @@ export interface DecisionResult {
   deadline: NormalizedDateTime | null;
   /** 通知に使ってよい締切か（役割が締切・年が明示/曜日で確認・時刻まで・原文の根拠が確認済み） */
   notifiable: boolean;
+  /** 応募単位の状態: 明示／推論（直接の根拠あり）／暫定（仮説）／不明 */
+  unitStatus: UnitStatus;
+  /** 暫定の応募方式（仮説）。未確定であることを明示して保持する */
+  unitHypothesis: { unit: string; timing: string; alternatives: string[]; confidence: string; displayStoreSelectAtApply: boolean; unknowns: string[]; furtherInvestigation: string[] } | null;
 }
 
 /** 独立した根拠の数: 元（originId）または転載元（repostOf）が同じ情報源は1つ */
@@ -79,7 +87,13 @@ export function decideOpportunity(i: DecisionInput): DecisionResult {
   const start = startRaw ? normalizeDateTime(startRaw, { role: "apply_start", reference: ref }) : null;
   const deadlineVerified = !!dl?.candidates.some((x) => x.quoteVerified);
   const notifiable = !!deadline && isNotifiableDeadline(deadline, deadlineVerified);
-  const out = (decision: Decision, rs: string[]): DecisionResult => ({ decision, reasons: rs, gaps, conflicts, independentSources: independent, deadline, notifiable });
+  const unit = c.applyUnit.value;
+  const inf = i.unitInference ?? null;
+  let unitStatus: UnitStatus = unit !== "unknown" ? "explicit" : "unknown";
+  if (unit === "unknown" && inf && inf.independentUnit !== "unknown") unitStatus = unitKnownByInference(inf) ? "inferred_direct" : "provisional";
+  const effUnit = unit !== "unknown" ? unit : (inf?.independentUnit ?? "unknown");
+  const unitHypothesis = unitStatus === "provisional" && inf ? { unit: inf.independentUnit, timing: inf.selectionTiming, alternatives: inf.alternatives.map((a) => a.unit), confidence: inf.confidence, displayStoreSelectAtApply: inf.displayStoreSelectAtApply, unknowns: inf.unknowns, furtherInvestigation: inf.furtherInvestigation } : null;
+  const out = (decision: Decision, rs: string[]): DecisionResult => ({ decision, reasons: rs, gaps, conflicts, independentSources: independent, deadline, notifiable, unitStatus, unitHypothesis });
 
   if (i.isLottery === false) return out("excluded", ["not_lottery"]);
   if (c.registrations.length > 0) {
@@ -103,21 +117,24 @@ export function decideOpportunity(i: DecisionInput): DecisionResult {
     if (deadline && (deadline.yearBasis === "ambiguous" || deadline.weekdayMismatch || deadline.precision === "unparsed")) reasons.push("deadline_year_or_weekday_unresolved");
     if (validatePeriod(start, deadline) === "reversed") reasons.push("period_reversed");
   }
-  const unit = c.applyUnit.value;
   const store = fields.get("store");
   const storeKnown = !!store && store.status !== "missing" && store.status !== "conflict";
   const online = !!i.eligibility && i.eligibility.basis.region === "eligible" && !storeKnown && /通販|オンライン/.test(JSON.stringify(store?.candidates ?? []));
-  if (unit === "unknown") reasons.push(storeKnown || online ? "apply_unit_unknown" : "apply_unit_and_store_unknown");
-  if (!storeKnown && !online && unit !== "unknown") reasons.push("store_unknown");
+  if (unitStatus === "unknown") reasons.push(storeKnown || online ? "apply_unit_unknown" : "apply_unit_and_store_unknown");
+  // 店舗を選んで応募する形・全店共通の応募では、抽選の対象の店舗が1つに決まらなくてよい
+  const storeless = effUnit === "store_select" || effUnit === "shared_all_stores" || effUnit === "per_store_group";
+  if (!storeKnown && !online && unitStatus !== "unknown" && !storeless) reasons.push("store_unknown");
   if (fields.get("chain")?.status === "missing") reasons.push("chain_missing");
   if (!fields.get("products") || fields.get("products")?.status === "missing") reasons.push("products_missing");
   // 重要項目の原文確認: 系列・商品は、少なくとも1つの情報源で原文の根拠が確認できること（公式かどうかは問わない）
   for (const f of ["chain", "products"] as FieldName[]) if (!fields.get(f)?.candidates.some((x) => x.quoteVerified)) reasons.push(`field_not_verified_${f}`);
-  if (reasons.length) return out("needs_review", [...new Set(reasons)]);
+  if (reasons.length) return out("needs_review", [...new Set([...reasons, ...(unitStatus === "provisional" ? [`unit_provisional_${effUnit}`] : [])])]);
 
   // ---- 実行可能な最低限の情報は揃っている。応募先・方法が不明なら欠落つき候補
   const destination = fields.get("applyUrl")?.status !== "missing" || fields.get("method")?.status !== "missing" || i.facts.some((f) => (f.urls ?? []).length > 0);
   const minorGaps = gaps.filter((g) => MINOR_FIELDS.includes(g));
+  // 応募単位が仮説（類推・未確認）のままなら、自動登録にはしない。未確定の応募方式を明記した暫定候補として保持する
+  if (unitStatus === "provisional" && inf) return out("tentative_candidate", [`unit_hypothesis_${inf.independentUnit}`, `selection_timing_${inf.selectionTiming}`, ...inf.alternatives.map((a) => `alt_${a.unit}`), ...(destination ? [] : ["gap_apply_destination"])]);
   if (!destination) return out("candidate_with_gaps", ["gap_apply_destination", ...minorGaps.map((g) => `gap_${g}`)]);
   return out("auto_register_preview", ["minimum_executable_info_verified", independent >= 2 ? "independent_sources_2plus" : "single_independent_source", ...minorGaps.map((g) => `minor_gap_${g}`)]);
 }

@@ -66,3 +66,8 @@
 - マイグレーション **113**（`shadow_opportunities` に判断・通知可否・締切の正規化の列を追加）。未適用は 108〜113 の6本。適用・復旧・ワーカー接続の設計は `docs/AI_REDESIGN_10P_PRODUCTION_READINESS.md`。
 - 応募機会プレビュー `src/lib/server/shadow/opportunity-job.ts`（AIなし・読み取り＋`shadow_opportunities`のみ・冪等・**ワーカー未接続**）。
 - 再評価: `node scripts/xsource-10p.mjs run --confirm=yes`（`xsource-10o-items.json` の保存を再利用し、補完のページ再抽出だけ実AI）。
+
+## 12. Stage 10Q の追加（応募単位のAI推論・参考知識・暫定候補。ローカル実装済み・本番未適用・未接続）
+- 参考知識は `src/lib/judgment/xsource/knowledge/apply-unit-knowledge.json`（編集可能なデータ。固定ルールではない）。人の訂正は `addCorrection`（人の名義・理由必須）。AIの未確認の判断を事例にしない。
+- 判断に `tentative_candidate`（応募方式が未確定の暫定候補）を追加。自動登録は、応募単位が明示または直接の根拠で確定したものだけ。通知・応募済み管理に暫定の応募方式を断定して出さない。
+- 再評価: `node scripts/xsource-10q.mjs run --confirm=yes`（実AI・有料・上限 90回/¥50）。確認: `node scripts/review-10q-local.mjs`。
