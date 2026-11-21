@@ -1,0 +1,95 @@
+// @vitest-environment node
+/**
+ * 統合AI判断の実AI評価の入口（Stage 10E 追加修正）。**通常のテスト実行では何もしない（スキップ）**。実行は `node scripts/eval-judgment-real.mjs …` から、環境変数で指定されたときだけ。
+ *  - preflight（JUDGMENT_REAL_PREFLIGHT=1）: 関門の状態と推定最大費用を表示。API・ネットワークに接続しない。キーは表示しない。
+ *  - run（JUDGMENT_REAL_RUN=1）: **実API（有料）**。`checkJudgmentRealRun` の全条件（開発環境・評価専用の許可・開発専用キー・承認額・確認）を満たさなければ実行しない。
+ *    第1段階: 架空・匿名化済みの評価事例（eval/judgment-10e）のみ。Web検索なし。実原文・本番DBは使わない（第2段階は別途承認）。
+ * 結果は eval/runs/judgment-10e/<runId>.json（Git管理外）。
+ */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { AnthropicJudgmentModel } from "./anthropic-model";
+import { estimateRun, runEvaluation } from "./eval/real-run";
+import { loadCases, loadGold } from "./eval/replay";
+import { CANDIDATE_CAP_PER_CASE_JPY, CANDIDATE_CAP_TOTAL_JPY, checkJudgmentRealRun } from "./real-gate";
+
+const env = process.env;
+const ids = (env.JUDGMENT_REAL_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// 評価セット: 既定は旧19件。JUDGMENT_REAL_SET=unseen で未見の架空ケース（K01〜K12。別途承認が必要な追加の実AI評価用。10E精度改善で用意）
+// JUDGMENT_REAL_SET=holdout は安定化で新設した独立ホールドアウトH01〜H06（実AI評価は未実施・別途承認が必要）
+const evalSet = env.JUDGMENT_REAL_SET === "unseen" ? "unseen" : env.JUDGMENT_REAL_SET === "holdout" ? "holdout" : "main";
+const pick = () => {
+  const { now, cases } = loadCases(evalSet);
+  const gold = loadGold(evalSet);
+  return { now, gold, cases: cases.filter((c) => gold[c.id] && (ids.length ? ids.includes(c.id) : true) && !["J04", "J05"].includes(c.id)) };
+};
+const approvedTotal = Number(env.JUDGMENT_APPROVED_TOTAL_JPY);
+const approvedPer = Number(env.JUDGMENT_APPROVED_PER_CASE_JPY);
+
+describe.skipIf(env.JUDGMENT_REAL_PREFLIGHT !== "1")("実行前の確認（API非接続）", () => {
+  it("関門の状態と推定最大費用を表示する", async () => {
+    const { now, cases } = pick();
+    const model = new AnthropicJudgmentModel({ messages: { create: async () => { throw new Error("preflight は API に接続しません"); } } } as never);
+    const est = await estimateRun(model, cases, now);
+    const gate = checkJudgmentRealRun({ env, confirm: true, approvedTotalJpy: approvedTotal || CANDIDATE_CAP_TOTAL_JPY, approvedPerCaseJpy: approvedPer || CANDIDATE_CAP_PER_CASE_JPY });
+    console.log(JSON.stringify({ model: model.id, cases: cases.map((c) => c.id), gate: gate.ok ? `通過（実行可能・キーの出所: ${gate.keySource}）` : `未通過: ${gate.reason}`, candidateCaps: { totalJpy: CANDIDATE_CAP_TOTAL_JPY, perCaseJpy: CANDIDATE_CAP_PER_CASE_JPY }, maxTotalJpy: est.maxTotalJpy, perCase: est.perCase }, null, 2));
+    expect(est.perCase.length).toBe(cases.length);
+  });
+});
+
+describe.skipIf(env.JUDGMENT_REAL_RUN !== "1")("実API評価（有料・承認後のみ）", () => {
+  it("第1段階: 架空事例を実AIで判定し、記録を保存する", async () => {
+    const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: approvedTotal, approvedPerCaseJpy: approvedPer });
+    if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
+    const { now, cases, gold } = pick();
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
+    // モデルの利用可否の確認（料金のかからないモデル情報の取得）。取得できなければ実行しない（代替モデルへは変更しない）
+    await client.models.retrieve(gate.model);
+    const model = new AnthropicJudgmentModel(client, { model: gate.model });
+    const est = await estimateRun(model, cases, now);
+    if (est.maxTotalJpy > gate.totalCapJpy) console.warn(`推定最大費用 ${est.maxTotalJpy}円が承認額 ${gate.totalCapJpy}円を超える見込み。承認額で止まります`);
+    const rec = await runEvaluation({ model, cases, gold, now, totalCapJpy: gate.totalCapJpy, perCaseCapJpy: gate.perCaseCapJpy });
+    const dir = join("eval", "runs", "judgment-10e");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${rec.runId}.json`), JSON.stringify({ ...rec, keySource: gate.keySource, usage: model.usageLog }, null, 2));
+    console.log(JSON.stringify({ runId: rec.runId, spentJpy: rec.spentJpy, stoppedByBudget: rec.stoppedByBudget, summary: rec.summary }, null, 2));
+  }, 600_000);
+});
+
+// 保存済みの実行記録を、現在の採点基準で再採点する（API・ネットワークに接続しない・費用なし）。採点基準を変えたあとの、実行間の比較用
+describe.skipIf(!env.JUDGMENT_RESCORE_FILES)("再採点（API非接続）", () => {
+  it("保存済みの記録のAI出力を、現在の採点基準で採点し直す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { scoreCase } = await import("./eval/replay");
+    const { summarize } = await import("./eval/real-run");
+    const gold = loadGold(evalSet);
+    for (const f of (env.JUDGMENT_RESCORE_FILES ?? "").split(",").filter(Boolean)) {
+      const rec = JSON.parse(readFileSync(f, "utf8"));
+      const cases = rec.cases.map((c: { id: string; output: never }) => ({ ...c, score: gold[c.id] ? scoreCase(c.id, gold[c.id], c.output) : null }));
+      console.log(JSON.stringify({ file: f, promptVersion: rec.promptVersion, summary: summarize(cases, rec.summary?.casesSkippedByBudget ?? 0), perCase: cases.map((c: { id: string; status: string; score: Record<string, unknown> | null }) => ({ id: c.id, status: c.status, s: c.score && { str: c.score.structureOk, cnt: c.score.countOk, fields: c.score.fieldsOk, fm: c.score.falseMerge, fs: c.score.falseSplit, cond: c.score.conditionsOk } })) }));
+    }
+  });
+});
+
+// 保存済みの実AI出力を、現在の検証層で再検証する（API非接続・費用なし）。**新しいプロンプトの実AI精度の測定ではない**。検証層が過去の出力のどれを不合格にするかの差分分析
+describe.skipIf(!env.JUDGMENT_REVERIFY_FILES)("再検証（API非接続）", () => {
+  it("保存済みのAI出力を、現在の検証層に通す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { inputFor } = await import("./eval/replay");
+    const { verifyJudgment } = await import("./verify");
+    const { now, cases } = loadCases();
+    for (const f of (env.JUDGMENT_REVERIFY_FILES ?? "").split(",").filter(Boolean)) {
+      const rec = JSON.parse(readFileSync(f, "utf8"));
+      const flagged: Record<string, string[]> = {};
+      for (const c of rec.cases as { id: string; output: never }[]) {
+        const rc = cases.find((x) => x.id === c.id);
+        if (!rc || !c.output) continue;
+        const vs = verifyJudgment(await inputFor(rc, now), c.output);
+        if (vs.length) flagged[c.id] = vs.map((v) => `${v.code}@${v.path}`);
+      }
+      console.log(JSON.stringify({ file: f, promptVersion: rec.promptVersion, flagged }));
+    }
+  });
+});

@@ -1,0 +1,155 @@
+{
+  "_note": "Stage 10E r3 安定化の新しい独立ホールドアウト（H01〜H06・すべて架空）。正解は gold/gold.json に先に固定し、AIの入力に渡さない。実AI評価は未実施。",
+  "now": "2099-01-20T00:00:00.000Z",
+  "cases": [
+    {
+      "id": "H01",
+      "title": "商品ごとに別フォーム・当落も別（3商品）＋既存カードは1商品分",
+      "evidence": [
+        {
+          "url": "https://sample-shop.example.invalid/lottery/h1",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプル書店 中央店 抽選販売。次の3商品は、商品ごとに別々の応募フォームで受け付けます。当落も商品ごとに別です。商品: 試作カード第一弾 / 試作カード第二弾 / 試作カード特装版。応募期間 2099-07-05〜2099-07-12。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-H01-A",
+          "chain": "サンプル書店",
+          "store": "中央店",
+          "products": [
+            "試作カード第二弾"
+          ],
+          "applyDeadline": "2099-07-12",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "H02",
+      "title": "1フォームで2商品に同時応募・当落は商品ごと独立＋既存カードは1商品分",
+      "evidence": [
+        {
+          "url": "https://sample-shop.example.invalid/lottery/h2",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプル書店 オンライン抽選。1つの応募フォームで「試作ボックスX」「試作ボックスY」を同時に応募できます。当落は商品ごとに独立で、当選した商品ごとに購入できます。応募期間 2099-07-14〜2099-07-20。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-H02-A",
+          "chain": "サンプル書店",
+          "store": "オンライン",
+          "products": [
+            "試作ボックスY"
+          ],
+          "applyDeadline": "2099-07-20",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "H03",
+      "title": "商品ごとに当落は独立だが、送信が1回か複数回かは不明",
+      "evidence": [
+        {
+          "url": "https://sample-shop.example.invalid/lottery/h3",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプル書店 西店 抽選販売のお知らせ。「試作パックM」「試作パックN」は、それぞれ別に抽選を行い、当落も別々にお知らせします。応募期間 2099-07-28〜2099-08-03。応募方法は店頭の案内をご確認ください。"
+        }
+      ],
+      "related": []
+    },
+    {
+      "id": "H04",
+      "title": "3開催回・第2回の既存カードは応募記録あり（保護）",
+      "evidence": [
+        {
+          "url": "https://sample-shop.example.invalid/lottery/h4",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプル書店 北店 抽選販売。第1回（応募 2099-09-01〜2099-09-07・当選発表 2099-09-10）、第2回（応募 2099-09-15〜2099-09-21・当選発表 2099-09-24）、第3回（応募 2099-09-24〜2099-09-30・当選発表 2099-10-03）を実施します。各回は別々に応募し、当落も回ごとに独立です。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-H04-A",
+          "chain": "サンプル書店",
+          "store": "北店",
+          "products": [],
+          "applyDeadline": "2099-09-21",
+          "storeMode": "fixed",
+          "protectedCodes": [
+            "applications"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H05",
+      "title": "同じ系列・店舗だが商品が別の既存カード（関係なし）",
+      "evidence": [
+        {
+          "url": "https://sample-shop.example.invalid/lottery/h5",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプル書店 東店 抽選販売。「試作カード外伝」を1回の応募で受け付けます。応募期間 2099-09-29〜2099-10-05。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-H05-A",
+          "chain": "サンプル書店",
+          "store": "東店",
+          "products": [
+            "試作ボードゲーム"
+          ],
+          "applyDeadline": "2099-10-05",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "H06",
+      "title": "店舗選択式＋選択肢内の店舗の既存カード＋別系列の既存カード",
+      "evidence": [
+        {
+          "url": "https://sample-shop.example.invalid/lottery/h6",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプル書店 試作カード新弾 抽選販売。応募フォームで受取店舗を1店舗選択してください（駅前店・郊外店）。応募期間 2099-10-08〜2099-10-15。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-H06-A",
+          "chain": "サンプル書店",
+          "store": "駅前店",
+          "products": [
+            "試作カード新弾"
+          ],
+          "applyDeadline": "2099-10-15",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        },
+        {
+          "lotteryId": "L-H06-B",
+          "chain": "サンプル書店",
+          "store": "駅前店",
+          "products": [
+            "試作カード別弾"
+          ],
+          "applyDeadline": "2099-10-20",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    }
+  ]
+}

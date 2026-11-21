@@ -14,6 +14,13 @@ import { planScheduledCollection } from "@/lib/server/collector/schedule";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
 const NOW = new Date();
+// 締切は実行時点から7日後（日本時間）にする。固定の日付だと、その日の21時を過ぎた後は「締切後」と判定され、テストの前提が崩れる（時刻依存の不安定さの修正）
+const DEADLINE = (() => {
+  const d = new Date(NOW.getTime() + 7 * 86_400_000);
+  const p = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", weekday: "short" }).formatToParts(d);
+  const g = (t: string) => p.find((x) => x.type === t)!.value;
+  return `${g("month")}/${g("day")}(${g("weekday")}) 21:00まで`;
+})();
 const q6a = (n: string) => `https://q6a.example.invalid/${n}`;
 
 describe.skipIf(!dbTestsEnabled)("Stage 6A", () => {
@@ -53,7 +60,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6A", () => {
   // ------------------------------------------------------------ A1: システム実行のAI利用ログ
   it("cron（サービスロール・ログインなし）の解析が、system として利用ログに保存される。実行理由も残る", async () => {
     const key = q6a("robots-1");
-    const card = "テスト商品 テスト玩具 本店 販売価格 ¥7,200 11/20(金) 21:00まで 東京都・店頭受取";
+    const card = `テスト商品 テスト玩具 本店 販売価格 ¥7,200 ${DEADLINE} 東京都・店頭受取`;
     await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: key, source_url: key, title: "【抽選】テスト商品", status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: key, title: "【抽選】テスト商品", context: "テスト玩具 本店", card, fields: { store: "テスト玩具 本店", product: "テスト商品" }, sourceName: "pokeso", attempts: 0, listSeenAt: NOW.toISOString() } } as never });
     const before = (await sys.from("ai_extraction_logs").select("id", { count: "exact", head: true }).eq("household_id", hid)).count ?? 0;
     aiCalls = 0;
@@ -83,7 +90,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 6A", () => {
 
   it("利用ログの保存に失敗したら検出して記録する（日別統計に失敗件数）。費用は日別統計に残るので予算は過少にならない", async () => {
     const key = q6a("logfail-1");
-    await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: key, source_url: key, title: "t", status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: key, title: "【抽選】失敗テスト", context: "テスト玩具 本店 11/20(金) 21:00まで 東京都", card: "失敗テスト商品 テスト玩具 本店 11/20(金) 21:00まで 東京都", sourceName: "pokeso", attempts: 0 } } as never });
+    await sys.from("collection_candidates").insert({ household_id: hid, dedupe_key: key, source_url: key, title: "t", status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: { queued: { kind: "web_page", url: key, title: "【抽選】失敗テスト", context: `テスト玩具 本店 ${DEADLINE} 東京都`, card: `失敗テスト商品 テスト玩具 本店 ${DEADLINE} 東京都`, sourceName: "pokeso", attempts: 0 } } as never });
     // ai_extraction_logs の挿入だけを失敗させる
     const failing = new Proxy(sys as unknown as Record<string, unknown>, {
       get(t, p) {
