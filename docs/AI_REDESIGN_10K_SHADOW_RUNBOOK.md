@@ -76,3 +76,8 @@
 - 参考知識は結論の推奨ではなく**判断観点（ヒント）**。`suggests` は廃止。選択は関連するものだけ少数（観察タグ・ホスト・系列・システム）。AIは採用・反論・無視・再解釈でき、未想定の方式（`other`）も出せる。**無関係なヒントを渡すと結論が動く（実測 7/12）ため、選択が誘導を防ぐ制御**。
 - 応募先ページ: `application-page.ts`（候補URL・失敗分類・観察の抜粋・**ページと項目の店舗対応検査**）。親投稿のリンクは別店舗のページのことがあり、対応しなければ根拠にしない。項目の短縮URL（t.co）は robots で取得不可。
 - 再評価: `node scripts/xsource-10r.mjs run --confirm=yes`（実AI・有料。`JUDGMENT_10R_ONLY_D=1` でページ観察つきの再推論のみ）。確認: `node scripts/review-10q-local.mjs`。人の訂正: `node scripts/knowledge-correct.mjs`。
+
+## 14. Stage 10S の追加（応募先URLの項目単位の対応・人の確認資料。ローカル実装済み・本番未適用・未接続）
+- リンクの出所（`item-links.ts`）とスコープ判定（`link-scope.ts`）: 「リンクがある」と「その応募機会のリンクだと証明できた」を分ける。短縮URLは追跡しない。親投稿共通のリンクは、ページが項目の範囲を示すまで流用しない。
+- 人の確認: `node scripts/review-10s-local.mjs`（実データのみ・追記履歴つき）→ `node scripts/eval-review-10s.mjs`（人の回答だけから集計。回答が無ければ未測定）。AIの判断を正解として記録する経路は無い。
+- 評価: `node scripts/xsource-10s.mjs run --confirm=yes`（実AI・有料・上限 90回/¥50/取得60）。X投稿経由のエンドツーエンドは、開発用のX API鍵が無く未実施。
