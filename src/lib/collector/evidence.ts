@@ -71,6 +71,8 @@ export interface StoredEvidence {
   imageReadings?: ImageReading[];
   /** 元画像への参照（公開の画像URL。最大4件・https）。画像そのものは保存しない */
   imageRefs?: string[];
+  /** Stage 10M（追加の項目）: 本文中の短縮URL（t.co）→展開後のURL の対応（最大30件）。まとめ投稿の項目ごとの応募先の特定に使う */
+  linkMap?: { short: string; url: string }[];
 }
 
 export interface EvidenceSource {
@@ -79,7 +81,7 @@ export interface EvidenceSource {
   /** 一覧のカード全体の文章（二次情報） */
   card?: string;
   context?: string;
-  post?: { text: string; links?: string[]; images?: string[]; username?: string; quoted?: { text: string; links?: string[]; images?: string[] } };
+  post?: { text: string; links?: string[]; linkMap?: { short: string; url: string }[]; images?: string[]; username?: string; quoted?: { text: string; links?: string[]; images?: string[] } };
   /** 収集の解析時に実際に取得できたページ・投稿の本文（直接取得したページの本文など） */
   fetchedText?: string;
   fetchedVia?: EvidenceVia;
@@ -165,6 +167,7 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
   if (joined.length < 8) return null;
   const text = joined.slice(0, MAX_EVIDENCE_CHARS);
   const imageReadings = (src.imageReadings ?? []).slice(0, 12);
+  const linkMap = (src.post?.linkMap ?? []).filter((m) => m && typeof m.short === "string" && typeof m.url === "string" && m.short.startsWith("https://t.co/") && m.url.startsWith("https://")).map((m) => ({ short: m.short.slice(0, 40), url: m.url.slice(0, 300) })).slice(0, 30);
   const imageRefs = (src.imageRefs ?? []).filter((u) => typeof u === "string" && u.startsWith("https://")).map((u) => u.slice(0, 500)).slice(0, 4);
   const linkedPages = (src.linkedPages ?? [])
     .map((l) => ({ url: String(l.url).slice(0, 500), text: clean(String(l.text)).slice(0, MAX_LINKED_PAGE_CHARS), fetchedAt: nowIso }))
@@ -186,6 +189,7 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
     ...(linkedPages.length ? { linkedPages } : {}),
     ...(imageReadings.length ? { imageReadings } : {}),
     ...(imageRefs.length ? { imageRefs } : {}),
+    ...(linkMap.length ? { linkMap } : {}),
   };
 }
 
@@ -195,11 +199,13 @@ export function evidenceFromLastGood(lastGood: unknown): StoredEvidence | null {
   const e = (lastGood as { evidence?: unknown }).evidence as Partial<StoredEvidence> | undefined;
   if (!e || e.v !== EVIDENCE_VERSION || typeof e.url !== "string" || typeof e.text !== "string" || e.text.length < 8 || typeof e.fetchedAt !== "string" || typeof e.hash !== "string") return null;
   const linkedPages = Array.isArray(e.linkedPages) ? e.linkedPages.filter((l) => l && typeof l.url === "string" && typeof l.text === "string").slice(0, 2) : undefined;
-  const { linkedPages: _ignored, imageReadings: _ir, imageRefs: _refs, ...rest } = e as StoredEvidence;
+  const { linkedPages: _ignored, imageReadings: _ir, imageRefs: _refs, linkMap: _lm, ...rest } = e as StoredEvidence;
+  void _lm;
   void _ignored;
   void _ir;
   void _refs;
   const imageReadings = Array.isArray(e.imageReadings) ? e.imageReadings.filter((r) => r && r.kind === "ai_reading" && typeof r.text === "string" && typeof r.field === "string").slice(0, 12) : undefined;
+  const linkMap = Array.isArray(e.linkMap) ? e.linkMap.filter((m) => m && typeof m.short === "string" && typeof m.url === "string").slice(0, 30) : undefined;
   const imageRefs = Array.isArray(e.imageRefs) ? e.imageRefs.filter((u) => typeof u === "string" && u.startsWith("https://")).slice(0, 4) : undefined;
-  return { ...rest, links: Array.isArray(e.links) ? e.links.slice(0, 5) : [], ...(linkedPages?.length ? { linkedPages } : {}), ...(imageReadings?.length ? { imageReadings } : {}), ...(imageRefs?.length ? { imageRefs } : {}) };
+  return { ...rest, links: Array.isArray(e.links) ? e.links.slice(0, 5) : [], ...(linkedPages?.length ? { linkedPages } : {}), ...(imageReadings?.length ? { imageReadings } : {}), ...(imageRefs?.length ? { imageRefs } : {}), ...(linkMap?.length ? { linkMap } : {}) };
 }

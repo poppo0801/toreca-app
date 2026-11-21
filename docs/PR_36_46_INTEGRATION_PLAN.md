@@ -52,3 +52,8 @@
 - [ ] 環境変数に `SHADOW_*` が無いこと（`vercel env ls`）
 - [ ] 費用上限の維持（AI費用の既定上限は変更しない）
 - [ ] 反映後の確認手順（`verify:prod`・収集cronの実行履歴・画面の主要導線）
+
+## 6. 追記（Stage 10M）
+- 本番に影響する追加: `src/lib/collector/x-posts.ts`（投稿のリンク対応表 `linkMap`・長い投稿の entities の読み取り）、`evidence.ts`・`run.ts`（保存原文の追加項目 `linkMap`。互換・jsonb）。いずれも追加のみで、解析・登録・通知の挙動は変えない。
+- マイグレーション: 未適用は **108・109・110・111** の4本（111は一覧の項目状態の表。`shadow_*` のみ。マージでは適用されない）。plan の再計算が必要。
+- ロールバック: 111 は `drop table shadow_list_items` と `shadow_purge` を 110 の定義へ戻す（他の表から参照されない）。

@@ -216,7 +216,7 @@ interface QueuedPayload {
     /** 一覧のカードの構造から読み取れた店舗名・商品名 */
     fields?: { store?: string; product?: string };
     sourceName: string;
-    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; /** 投稿者の固定ID（アカウント名が変わっても同じ店舗として扱うため） */ authorId?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
+    post?: { id: string; text: string; images: string[]; links: string[]; /** Stage 10M: 短縮URL→展開後URL の対応（まとめ投稿の項目ごとの応募先） */ linkMap?: { short: string; url: string }[]; createdAt: string; username?: string; /** 投稿者の固定ID（アカウント名が変わっても同じ店舗として扱うため） */ authorId?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
     /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
     imageStats?: ImageStats;
     /** Stage 9Z: 解析時に実際に取得できた本文（保存用。AIの抽出結果ではない原文。解析後に last_good.evidence へ保存する） */
@@ -1542,7 +1542,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
             continue;
           }
           funnel.passed[j.basis]++;
-          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.authorId ? { authorId: p.authorId } : {}), ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
+          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, ...(p.linkMap?.length ? { linkMap: p.linkMap } : {}), createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.authorId ? { authorId: p.authorId } : {}), ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
           rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: safeSlice(p.text.replace(/\n/g, " "), 80) || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
         }
         const saveRes = await saveCandidateRows(db, rows);

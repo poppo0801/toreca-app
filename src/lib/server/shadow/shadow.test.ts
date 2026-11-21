@@ -106,3 +106,27 @@ describe("Stage 10L: 画像検証の書き込み先・境界・追記専用（�
     expect(sql).toMatch(/grant select on public\.shadow_image_verifications to authenticated/);
   });
 });
+
+describe("Stage 10M: 一覧処理の書き込み先・ハード上限の配線・マイグレーション（静的検査）", () => {
+  it("項目の状態の保存は shadow_list_items のみ。ワーカーは一覧のジョブで実行全体の呼び出し上限（CallBudget）を使い、判断モデルを上限つきで包む", () => {
+    const store = readFileSync("src/lib/server/shadow/list-store.ts", "utf8");
+    const writes = [...store.matchAll(/table\(this\.db, "([a-z_]+)"\)\s*\.(insert|update|upsert|delete)/g)].map((m) => m[1]);
+    expect(new Set(writes)).toEqual(new Set(["shadow_list_items"]));
+    const worker = readFileSync("src/lib/server/shadow/worker.ts", "utf8");
+    expect(worker).toContain("withCallBudget(deps.model, deps.callBudget)");
+    expect(worker).toContain("runListJob(");
+    expect(worker).toContain("run_call_limit");
+    const route = readFileSync("src/app/api/cron/shadow/route.ts", "utf8");
+    for (const s of ["new CallBudget(", "withCallBudgetTranscriber(", "callBudget,", "apiCalls"]) expect(route).toContain(s);
+    expect(readFileSync("src/lib/server/shadow/list-job.ts", "utf8")).not.toMatch(/from\("(lotteries|collection_candidates|applications)"\)/);
+  });
+  it("マイグレーション111は追加のみ。原文・抜粋を保存せず（範囲と検証済みの真偽のみ）、利用者に書き込みを与えない", () => {
+    const sql = readFileSync("supabase/migrations/20261227000111_stage10m_list_items.sql", "utf8").split(/[\r][\n]|[\n]/).filter((l) => !l.trim().startsWith("--")).join(" ");
+    expect(sql).not.toMatch(/alter table public\.(lotteries|collection_candidates|applications|collection_settings|cases)/i);
+    expect(sql).not.toMatch(/drop table|truncate/i);
+    expect(sql).not.toMatch(/\b(quote|excerpt|body|raw_text|source_text)\b\s+text/i);
+    expect(sql).toContain("range_start");
+    expect(sql).toContain("quote_verified boolean");
+    expect(sql).toMatch(/grant select on public\.shadow_list_items to authenticated/);
+  });
+});

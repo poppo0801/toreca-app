@@ -15,11 +15,15 @@ import type { ShadowConfig } from "@/lib/judgment/shadow/config";
 import { ShadowController } from "@/lib/judgment/shadow/controller";
 import type { ShadowRecord, ShadowSink } from "@/lib/judgment/shadow/record";
 import type { Db } from "@/lib/server/lottery-service";
+import { CallBudget, withCallBudget } from "@/lib/judgment/call-budget";
+import type { ListModel } from "@/lib/judgment/list-discovery";
 import { shadowWorkerPermission } from "./allow";
+import { runListJob } from "./list-job";
 import type { ImageReading } from "@/lib/collector/evidence";
 import { imageEvidenceSeeds, summarizeChecks } from "@/lib/judgment/image-verify";
 import { detectLeaks } from "@/lib/judgment/eval/phase2";
 import type { ImageVerification } from "./image-verifier";
+import { parseListItems } from "@/lib/judgment/list-items";
 import { currentCaseFromDraft, focusEvidenceSeeds, legacySummaryFromDraft, prepareShadowEvidence } from "./input";
 
 type Env = Record<string, string | undefined>;
@@ -54,6 +58,12 @@ export interface ShadowWorkerDeps {
   /** この実行に使える時間（ミリ秒）。残りが1件分に満たなければ新しいジョブを始めない */
   timeBudgetMs?: number;
   perJobTimeoutMs?: number;
+  /** Stage 10M: 一覧・まとめ投稿の全項目の判断モデル。未設定なら、一覧は従来の焦点（登録値に近い項目だけ）で処理する */
+  listModel?: ListModel;
+  /** Stage 10M: 実行全体のハードな呼び出し上限（回数・費用）。判断の再試行・再評価・画像の書き起こし・一覧の項目判断をすべて合算して数える。未設定なら制限なし（個別の予算のみ） */
+  callBudget?: CallBudget;
+  /** 一覧1件（親投稿）で使える最大の呼び出し回数（既定12） */
+  maxCallsPerListJob?: number;
   /** Stage 10L: 画像根拠の検証（元画像の独立した書き起こしとの照合）。未設定なら画像読み取りは「照合できていない読み取り」のまま渡す */
   imageVerify?: (a: { householdId: string; candidateId: string; readings: ImageReading[]; refs: string[]; budgetJpy: number }) => Promise<ImageVerification>;
 }
@@ -107,7 +117,9 @@ class CaptureSink implements ShadowSink {
 }
 
 export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWorkerResult> {
-  const { db, model, workerId } = deps;
+  const { db, workerId } = deps;
+  // 判断モデルの全ての呼び出し（再試行・再評価を含む）を、共通のハード上限で数える
+  const model = deps.model && deps.callBudget ? withCallBudget(deps.model, deps.callBudget) : deps.model;
   const now = deps.now ?? ((): Date => new Date());
   const res: ShadowWorkerResult = { stoppedBy: "completed", leased: 0, done: 0, skipped: 0, requeued: 0, failed: 0, spentJpy: 0, byStatus: {}, byReason: {} };
   const bump = (m: Record<string, number>, k: string): void => {
@@ -175,6 +187,46 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
       const prep = prepareShadowEvidence(stored);
       if (!prep.ok) {
         await finish(j, "skipped", prep.reason);
+        continue;
+      }
+
+      // 一覧・まとめ投稿（Stage 10M）: 全項目を処理する（登録値に近い1項目だけに絞らない）。モデルが無ければ従来の焦点
+      if (deps.listModel && stored && parseListItems(stored.text).isList) {
+        if (deps.callBudget && deps.callBudget.remainingCalls <= 0) {
+          await requeue(j, new Date(now().getTime() + 10 * 60_000), "run_call_limit", false);
+          bump(res.byReason, "run_call_limit");
+          continue;
+        }
+        const d0 = now();
+        const [day0, month0] = await Promise.all([rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstDayStart(d0).toISOString() }), rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstMonthStart(d0).toISOString() })]);
+        const left0 = Math.min(st.daily_budget_jpy - Number(day0.data ?? 0), st.monthly_budget_jpy - Number(month0.data ?? 0));
+        if (!(left0 > 0.5)) {
+          await requeue(j, nextJstDay(d0), "budget", false);
+          bump(res.byReason, "budget");
+          continue;
+        }
+        const lr = await runListJob({ db, householdId: j.household_id, candidateId: j.candidate_id, stored, draft: cand.draft, listModel: deps.listModel, budgetJpy: Math.min(left0, st.per_case_cap_jpy * 3), runBudget: deps.callBudget, maxCallsPerJob: deps.maxCallsPerListJob, now });
+        if (!lr) {
+          await finish(j, "skipped", "list_parse");
+          continue;
+        }
+        const cv = lr.coverage;
+        const status = cv.complete ? "accepted" : "partial";
+        const rec = { v: 1, kind: "list_discovery", at: now().toISOString(), promptVersion: deps.listModel.promptVersion, modelId: deps.listModel.id, status, calls: lr.calls, costJpy: Math.round(lr.costJpy * 10000) / 10000, latencyMs: lr.latencyMs, stoppedBy: lr.stoppedBy, reused: lr.reused, processed: lr.processed, list: { total: cv.total, done: cv.done, hold: cv.hold, failed: cv.failed, pending: cv.pending, complete: cv.complete, opportunitiesConfirmed: cv.opportunitiesConfirmed, candidatesOnHold: cv.opportunityCandidatesOnHold, byVerdict: cv.byVerdict, groups: lr.parsed.groups }, legacy: { matchedItems: lr.legacyMatchedItems, itemCount: lr.legacyItemCount } };
+        const insL = await table(db, "shadow_judgments").insert({ household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: deps.listModel.promptVersion, model_id: deps.listModel.id.slice(0, 80), status, attempts: lr.calls, cost_jpy: Math.round(lr.costJpy * 10000) / 10000, latency_ms: lr.latencyMs, structure_new: "list_discovery", structure_legacy: null, opportunity_count: cv.opportunitiesConfirmed, record: rec });
+        if (insL.error) {
+          await requeue(j, new Date(now().getTime() + 10 * 60_000), "record_failed", true);
+          continue;
+        }
+        res.spentJpy += lr.costJpy;
+        bump(res.byStatus, status);
+        if (cv.complete) await finish(j, "done", null);
+        else if (j.attempts >= j.max_attempts) await finish(j, "failed", "list_incomplete");
+        else {
+          // 未処理（上限で停止）・失敗の項目がある: 処理済みの項目は再利用されるので、少し後に続きから再開する。進んだなら罰なし
+          await requeue(j, new Date(now().getTime() + 10 * 60_000), lr.stoppedBy ? `list_stopped_${lr.stoppedBy}` : "list_incomplete", lr.processed === 0);
+          bump(res.byReason, "list_incomplete");
+        }
         continue;
       }
 
