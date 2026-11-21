@@ -4,19 +4,28 @@
  * 比較結果は「疑い」の件数であって正解率ではない（goldなしでは精度を断定できない）。
  */
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
 import type { JudgmentOutput, StructureKind } from "../contract";
 
-export type LegacyStructure = "store_select" | "per_store" | "one_form_one" | "unknown";
+/** 旧方式の応募単位（収集のAI抽出 applyUnit。store_independent は per_store、single は one_form_one に対応）。不明は unknown、取得できなければ null */
+export type LegacyStructure = "store_select" | "per_store" | "per_product" | "one_form_one" | "unknown";
 
-/** 旧方式（正式な経路）の判断の要約。要約だけを受け取り、旧方式の結果そのものには触れない */
+/**
+ * 旧方式（正式な経路）の判断の要約。要約だけを受け取り、旧方式の結果そのものには触れない。
+ * **実際に旧方式が算出した値だけ**を入れる。算出していないものは null（推測・架空の数値を補わない）。
+ */
 export interface LegacySummary {
-  structure: LegacyStructure;
-  /** 旧方式が登録しようとした応募機会の数。不明は null */
+  structure: LegacyStructure | null;
+  /**
+   * 旧方式が1つの候補から登録しようとした「応募機会」の数。旧方式は候補1件＝抽選1件の登録単位で、応募機会という単位を持たないため、
+   * 実値として取れない（常に null）。件数の比較は not_comparable になる。
+   */
   opportunityCount: number | null;
-  /** 旧方式が既存の抽選と重複（同一）と判定した件数。不明は null */
+  /** 旧方式の抽出が読み取った商品（明細）の数。不明は null */
+  itemCount: number | null;
+  /** 旧方式の重複検出が返した既存候補の件数（high+medium）。不明は null */
   duplicateCount: number | null;
+  /** うち、同一の可能性が高い（level=high）件数。新方式の same との比較に使う。不明は null */
+  duplicateHighCount: number | null;
 }
 
 export type ShadowStatus = "accepted" | "partial" | "unresolved" | "budget_stopped" | "model_error" | "timeout" | "error";
@@ -33,6 +42,8 @@ export interface ShadowRecord {
   costJpy: number | null;
   latencyMs: number;
   legacy: LegacySummary;
+  /** 入力の同一性の確認用（原文そのものではない）: 根拠の数・原文ハッシュの先頭・渡した既存候補の数 */
+  input?: { evidenceCount: number; evidenceHash: string | null; relatedCount: number };
   next: null | {
     structure: StructureKind;
     opportunityCount: number;
@@ -58,8 +69,8 @@ export interface ShadowCompare {
   hold: boolean;
 }
 
-/** 旧方式が表現できる構造（それ以外は「表現不能」） */
-const LEGACY_EXPRESSIBLE: StructureKind[] = ["store_select", "per_store", "one_form_one", "unknown"];
+/** 旧方式（収集のAI抽出の応募単位）が表現できる構造。開催回別・1送信複数独立は表現できない（「表現不能」） */
+const LEGACY_EXPRESSIBLE: StructureKind[] = ["store_select", "per_store", "per_product", "one_form_one", "unknown"];
 
 export function compareLegacyNew(legacy: LegacySummary, out: JudgmentOutput | null): ShadowCompare {
   if (!out) return { structure: "not_comparable", count: "not_comparable", suspectedFalseMerge: false, suspectedFalseSplit: false, hold: false };
@@ -67,12 +78,13 @@ export function compareLegacyNew(legacy: LegacySummary, out: JudgmentOutput | nu
   let structure: ShadowCompare["structure"];
   if (kind === "unknown") structure = "new_hold";
   else if (!LEGACY_EXPRESSIBLE.includes(kind)) structure = "legacy_unexpressible";
+  else if (legacy.structure == null) structure = "not_comparable";
   else if (kind === legacy.structure || (kind === "one_form_one" && legacy.structure === "unknown")) structure = "match";
   else structure = "mismatch";
   const n = out.opportunities.length;
   const count: ShadowCompare["count"] = legacy.opportunityCount == null ? "not_comparable" : n === legacy.opportunityCount ? "equal" : n > legacy.opportunityCount ? "new_more" : "new_fewer";
   const same = out.relations.filter((r) => r.relation === "same").length;
-  const dup = legacy.duplicateCount;
+  const dup = legacy.duplicateHighCount;
   const suspectedFalseMerge = count === "new_fewer" || (dup != null && same > dup);
   // 新方式が機会を増やしても、旧方式が表現できない構造（商品別など）に基づくなら、誤分割の疑いにしない
   const suspectedFalseSplit = (count === "new_more" && structure !== "legacy_unexpressible") || (dup != null && same < dup);
@@ -112,21 +124,6 @@ export class MemorySink implements ShadowSink {
   readonly records: ShadowRecord[] = [];
   async write(rec: ShadowRecord): Promise<void> {
     this.records.push(rec);
-  }
-}
-
-/** ローカルのJSON Lines（eval/runs/shadow/ 配下のみ。Git管理外）。DBには書かない */
-export class LocalFileSink implements ShadowSink {
-  private readonly root = resolve(process.cwd(), "eval", "runs", "shadow");
-  private readonly file: string;
-  constructor(name = "shadow.jsonl") {
-    if (!/^[\w.-]+\.jsonl$/.test(name)) throw new Error("ファイル名が不正です");
-    this.file = join(this.root, name);
-    if (!resolve(this.file).startsWith(this.root + sep)) throw new Error("保存先は eval/runs/shadow/ 配下のみです");
-  }
-  async write(rec: ShadowRecord): Promise<void> {
-    mkdirSync(this.root, { recursive: true });
-    appendFileSync(this.file, `${JSON.stringify(rec)}\n`, "utf8");
   }
 }
 

@@ -71,7 +71,8 @@ export class ShadowController {
 
       this.inFlight.add(key);
       this.starts.push(t);
-      const legacy: LegacySummary = { structure: args.legacy.structure, opportunityCount: args.legacy.opportunityCount, duplicateCount: args.legacy.duplicateCount };
+      const l = args.legacy;
+      const legacy: LegacySummary = { structure: l.structure, opportunityCount: l.opportunityCount, itemCount: l.itemCount, duplicateCount: l.duplicateCount, duplicateHighCount: l.duplicateHighCount };
       const spentBefore = this.spentJpy();
       let status: ShadowStatus;
       let result: Awaited<ReturnType<typeof judgeCase>> | null = null;
@@ -105,6 +106,7 @@ export class ShadowController {
         costJpy: status === "timeout" || status === "error" ? null : result?.unknownCost ? null : Math.round((this.spentJpy() - spentBefore) * 10000) / 10000,
         latencyMs: Math.max(0, this.now - t),
         legacy,
+        input: { evidenceCount: args.input.evidence.length, evidenceHash: /^[0-9a-f]{8,64}$/.test(args.input.evidence[0]?.hash ?? "") ? (args.input.evidence[0]?.hash as string).slice(0, 12) : null, relatedCount: args.input.related.length },
         next: out
           ? {
               structure: out.structure.kind,

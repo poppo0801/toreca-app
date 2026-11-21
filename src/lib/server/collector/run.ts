@@ -30,6 +30,7 @@ import { afterCollectedRegistration } from "@/lib/server/collector/grouping-hook
 import { runInvestigation } from "@/lib/server/collector/investigation-hook";
 import { loadHumanKnowledge } from "@/lib/server/collector/human-knowledge-load";
 import { unifiedMode } from "@/lib/case-model/flag";
+import { beginShadow, type LegacyCapture } from "./shadow-hook";
 import { buildAiContext } from "@/lib/case-model/context";
 import { aiInputRecord, type AiInputRecord } from "@/lib/case-model/redact";
 import { caseFromExtraction, caseFromInput } from "@/lib/case-model/from-extraction";
@@ -664,7 +665,7 @@ function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string,
 }
 
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
-async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = [], userRules: UserRule[] = []): Promise<Outcome> {
+async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = [], userRules: UserRule[] = [], shadowCapture?: LegacyCapture): Promise<Outcome> {
   const { db } = deps;
   const nowIso = deps.now.toISOString();
   const clear = { lease_until: null, locked_by: null };
@@ -955,6 +956,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   // 店舗名「オンライン」を補ったあとで重複を判定し直す（buildDraft の時点では店舗が未確定で重複候補が空になり、同じオンライン抽選が二重登録されていた）
   draft.duplicates = findDuplicates(input, data.lotteries, q.url, data, { now: deps.now });
+  // Stage 10F（開発環境のシャドー比較のみ）: 旧方式が算出した値を観測する。値を読むだけで、旧方式の処理・保存・戻り値は変えない（無効時は shadowCapture が無く何もしない）
+  shadowCapture?.set({ applyUnit: result.ok ? (result.extraction.applyUnit ?? null) : null, itemCount: result.ok ? result.extraction.items.length : null, duplicates: draft.duplicates, chainId: input.chain.id });
   if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
     const note = "二次情報（まとめサイトの一覧・公式アカウントの対応づけ）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
@@ -1646,6 +1649,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;
+  // Stage 10F（開発環境のシャドー比較のみ。無効・新方式のモデル未設定なら null で、以降の shadow 呼び出しは何もしない）
+  const shadow = beginShadow();
   const triaged = await triageQueue(deps, ctx.cond);
   out.screened += triaged;
   await bumpStats(db, householdId, now, { excluded: triaged });
@@ -1736,10 +1741,13 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
         await db.from("collection_candidates").update({ job_state: it.c.triage === "auto_retry" ? "retry" : "pending", lease_until: null, locked_by: null, attempts: Math.max(0, (it.c.attempts ?? 1) - 1) }).eq("id", it.c.id);
         continue;
       }
-      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules, userRules).catch(async (): Promise<Outcome> => {
+      const shadowCap = shadow?.newCapture();
+      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules, userRules, shadowCap).catch(async (): Promise<Outcome> => {
         await db.from("collection_candidates").update({ status: "pending", job_state: "retry", last_error: "解析中にエラーが発生しました", next_run_at: new Date(now.getTime() + 15 * 60_000).toISOString(), lease_until: null, locked_by: null }).eq("id", it.c.id);
         return { usedAi: true, registered: false, aiFailed: true };
       });
+      // 旧方式の確定・保存が終わった後に、同じ原文・同じ元データで比較用の判断を始める（待たない。旧方式の結果・保存・戻り値は変えない）
+      if (shadow && shadowCap) shadow.schedule({ candidateId: it.c.id, url: it.c.source_url ?? it.q.url, title: it.q.title, evidence: evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence ?? null, data, capture: shadowCap, now });
       out.processed++;
       if (r.usedAi) out.aiCalls++;
       if (r.aiFailed) batchAiFail++;
@@ -1763,6 +1771,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
     }
     if (aiLeft <= 0) break;
   }
+  // 開発環境のシャドー比較の終了待ち（旧方式の全候補の処理・保存が終わった後。残り時間の範囲で打ち切る。旧方式の結果は変わらない）
+  await shadow?.settle(ctx.timeLeft());
   if (!out.stopReason) await db.from("collection_settings").update({ consecutive_failures: fails }).eq("household_id", householdId);
   const left = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["pending", "retry", "processing"]);
   out.queued = left.count ?? 0;

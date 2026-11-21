@@ -13,14 +13,15 @@ import { inputFor, legacyStructure, loadCases, type ReplayCase } from "../eval/r
 import { ScriptedModel } from "../model";
 import { shadowConfig, type ShadowConfig } from "./config";
 import { ShadowController } from "./controller";
-import { assertSafeRecord, compareLegacyNew, LocalFileSink, MemorySink, summarizeShadow, type LegacySummary } from "./record";
+import { LocalFileSink } from "./file-sink";
+import { assertSafeRecord, compareLegacyNew, MemorySink, summarizeShadow, type LegacySummary } from "./record";
 
 const ON = { TOREMANE_ENV: "local", SHADOW_JUDGMENT: "on" };
 const cfgOn = (over: Partial<ShadowConfig> = {}): ShadowConfig => ({ ...shadowConfig(ON), ...over });
 
 const sets = (["main", "unseen", "holdout"] as const).map((s) => ({ s, ...loadCases(s) }));
 const answerFor = (s: string, c: ReplayCase, input: JudgmentInput): unknown => (s === "main" ? mockAnswer(c.id, input) : s === "unseen" ? mockUnseen(c.id) : mockHoldout(c.id));
-const legacyOf = (c: ReplayCase): LegacySummary => ({ structure: legacyStructure(c), opportunityCount: null, duplicateCount: null });
+const legacyOf = (c: ReplayCase): LegacySummary => ({ structure: legacyStructure(c), opportunityCount: null, itemCount: null, duplicateCount: null, duplicateHighCount: null });
 
 describe("設定: 初期OFF。明示的な条件がすべて揃ったときだけ有効", () => {
   it("既定・未設定・off はすべて無効（シャドーを呼ばない）", () => {
@@ -90,7 +91,7 @@ describe("ローカルシャドー（モックの新方式）: 旧19件・K12件
 });
 
 describe("比較: 旧方式が表現できない構造を不正解と混同しない", () => {
-  const legacy: LegacySummary = { structure: "unknown", opportunityCount: 1, duplicateCount: 0 };
+  const legacy: LegacySummary = { structure: "unknown", opportunityCount: 1, itemCount: 1, duplicateCount: 0, duplicateHighCount: 0 };
   const out = (kind: string, n: number, rel: string[] = []) =>
     ({
       structure: { kind },
@@ -98,15 +99,16 @@ describe("比較: 旧方式が表現できない構造を不正解と混同し�
       relations: rel.map((r) => ({ relation: r })),
       unresolved: [],
     }) as never;
-  it("商品別・開催回別・1送信複数独立は legacy_unexpressible で、機会が増えても誤分割の疑いにしない", () => {
-    const c = compareLegacyNew(legacy, out("per_product", 3));
-    expect(c).toMatchObject({ structure: "legacy_unexpressible", count: "new_more", suspectedFalseSplit: false });
+  it("開催回別・1送信複数独立は legacy_unexpressible で、機会が増えても誤分割の疑いにしない。商品別は旧方式（AI抽出の応募単位）も表現できる", () => {
+    for (const k of ["per_round", "multi_independent_per_submit"]) expect(compareLegacyNew(legacy, out(k, 3)), k).toMatchObject({ structure: "legacy_unexpressible", count: "new_more", suspectedFalseSplit: false });
+    expect(compareLegacyNew({ ...legacy, structure: "per_product" }, out("per_product", 3)).structure).toBe("match");
+    expect(compareLegacyNew({ ...legacy, structure: "single" as never }, out("per_product", 1)).structure).toBe("mismatch");
   });
   it("旧が表現できる構造で新方式が機会を増やせば誤分割の疑い、減らせば誤統合の疑い。同一の件数差も疑いとして出る", () => {
     expect(compareLegacyNew({ ...legacy, structure: "store_select" }, out("per_store", 3))).toMatchObject({ structure: "mismatch", suspectedFalseSplit: true });
     expect(compareLegacyNew({ ...legacy, opportunityCount: 3 }, out("store_select", 1))).toMatchObject({ count: "new_fewer", suspectedFalseMerge: true });
-    expect(compareLegacyNew({ ...legacy, duplicateCount: 0 }, out("one_form_one", 1, ["same"]))).toMatchObject({ suspectedFalseMerge: true });
-    expect(compareLegacyNew({ ...legacy, duplicateCount: 2 }, out("one_form_one", 1, ["same"]))).toMatchObject({ suspectedFalseSplit: true });
+    expect(compareLegacyNew({ ...legacy, duplicateHighCount: 0 }, out("one_form_one", 1, ["same"]))).toMatchObject({ suspectedFalseMerge: true });
+    expect(compareLegacyNew({ ...legacy, duplicateHighCount: 2 }, out("one_form_one", 1, ["same"]))).toMatchObject({ suspectedFalseSplit: true });
   });
   it("新方式の保留は不正解ではなく hold。旧 unknown と新 one_form_one は一致、出力なしは比較不能", () => {
     expect(compareLegacyNew(legacy, out("unknown", 1))).toMatchObject({ structure: "new_hold", hold: true });
@@ -157,12 +159,16 @@ describe("旧方式への影響ゼロ: 副作用なし・失敗してもシャ�
     expect(() => assertSafeRecord({ note: "お名前: 山田太郎 https://x.invalid/a" })).toThrow();
     expect(() => assertSafeRecord({ "お名前": 1 })).toThrow();
   });
-  it("実装は、DB・サーバー・ネットワーク・実AIのモジュールを読み込まない（静的検査）。通常の収集経路（run.ts）はシャドーを呼ばない", () => {
+  it("実装は、DB・サーバー・ネットワーク・実AIのモジュールを読み込まない（静的検査）。通常収集（run.ts）は接続口（shadow-hook）だけを経由し、接続口はDBに書かない", () => {
     for (const f of ["config.ts", "controller.ts", "record.ts"]) {
       const src = readFileSync(`src/lib/judgment/shadow/${f}`, "utf8");
       expect(src, f).not.toMatch(/from "@\/lib\/server|supabase|anthropic|\bfetch\(|from "@\/lib\/ai|collection_candidates|case_judgments/i);
     }
-    expect(readFileSync("src/lib/server/collector/run.ts", "utf8")).not.toContain("judgment/shadow");
+    // 通常収集（run.ts）は、シャドーの実装に直接触れず、接続口（shadow-hook）だけを経由する。接続口もDB・ネットワーク・実AIを読み込まない
+    const run = readFileSync("src/lib/server/collector/run.ts", "utf8");
+    expect(run).not.toContain("judgment/shadow");
+    expect(run.match(/shadow-hook/g)?.length).toBe(1);
+    expect(readFileSync("src/lib/server/collector/shadow-hook.ts", "utf8")).not.toMatch(/supabase|anthropic|\bfetch\(|case_judgments|\.from\(|\.insert\(|\.update\(|\.upsert\(|\.delete\(/i);
   });
   it("ネットワークを使わない（fetch が呼ばれない）", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(() => { throw new Error("network"); });
@@ -234,5 +240,21 @@ describe("保存先: ローカルの eval/runs/shadow/ 配下のみ（DBに書�
   });
   it("eval/runs/ は .gitignore に含まれる（記録をコミットしない）", () => {
     expect(readFileSync(".gitignore", "utf8").split(/\r?\n/)).toContain("eval/runs/");
+  });
+});
+
+describe("接続口（shadow-hook）: 保存先・モデルが無ければ何も実行しない", () => {
+  it("モデル未設定・保存先未設定・設定が無効のとき beginShadow は null（追加処理なし）", async () => {
+    const { beginShadow, setShadowModel } = await import("../../server/collector/shadow-hook");
+    const model = new ScriptedModel(() => ({ raw: {}, costJpy: 0 }));
+    setShadowModel(null);
+    expect(beginShadow()).toBeNull();
+    setShadowModel(model, { config: () => cfgOn() }); // 保存先なし
+    expect(beginShadow()).toBeNull();
+    setShadowModel(model, { sink: new MemorySink(), config: () => shadowConfig({}) }); // OFF
+    expect(beginShadow()).toBeNull();
+    setShadowModel(model, { sink: new MemorySink(), config: () => cfgOn() });
+    expect(beginShadow()).not.toBeNull();
+    setShadowModel(null);
   });
 });

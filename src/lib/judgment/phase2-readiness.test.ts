@@ -78,11 +78,14 @@ describe("承認ゲート: 未承認では抽出・送信・課金が実行不�
     expect(ex.readApprovals(boolOnly)).toEqual({});
     expect(ex.readApprovals(approve(["A"]))).toEqual({ A: { approved: true } });
   });
-  it("行為ごとに必要なゲートが決まっている（抽出=A／送信=A・B・C／課金評価=A〜E）。1つでも欠ければ不可", () => {
+  it("行為ごとに必要なゲートが決まっている（抽出=A／送信=A・B・C／課金評価=A・B・C・E、正解率の断定=A〜E）。1つでも欠ければ不可", () => {
     expect(ex.checkGates("extract", {}).ok).toBe(false);
     expect(ex.checkGates("extract", { A: { approved: true } }).ok).toBe(true);
     expect(ex.checkGates("send_external", { A: { approved: true }, B: { approved: true } }).missing).toEqual(["C"]);
     expect(ex.checkGates("paid_eval", { A: { approved: true }, B: { approved: true }, C: { approved: true }, D: { approved: true } }).missing).toEqual(["E"]);
+    // gold（D）は、新旧のシャドー比較（課金評価）の必須条件にしない。正解率を断定するときだけ必要
+    expect(ex.checkGates("paid_eval", { A: { approved: true }, B: { approved: true }, C: { approved: true }, E: { approved: true } }).ok).toBe(true);
+    expect(ex.checkGates("paid_eval_with_gold", { A: { approved: true }, B: { approved: true }, C: { approved: true }, E: { approved: true } }).missing).toEqual(["D"]);
     expect(() => ex.checkGates("unknown_action", {})).toThrow();
   });
   it("抽出の実行計画: dry-run は接続しない。--execute でも、二重ゲート・承認・バックアップが揃っても、接続コード未実装のため接続しない", () => {

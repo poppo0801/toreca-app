@@ -92,7 +92,9 @@ export const REQUIRED_GATES = {
   extract: ["A"],
   review: ["A", "B"],
   send_external: ["A", "B", "C"],
-  paid_eval: ["A", "B", "C", "D", "E"],
+  // 課金評価（新旧のシャドー比較を含む）: gold（D）は必須にしない。正解率を断定するときだけ別途 D が必要（paid_eval_with_gold）
+  paid_eval: ["A", "B", "C", "E"],
+  paid_eval_with_gold: ["A", "B", "C", "D", "E"],
 };
 
 export function checkGates(action, approvals) {
