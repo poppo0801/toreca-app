@@ -23,7 +23,9 @@ import { LocalFileSink } from "./shadow/file-sink";
 const gatesMod = (await import("../../../scripts/lib/phase2-extract.mjs")) as {
   readApprovals: () => Record<string, { approved: boolean }>;
   checkGates: (a: string, ap: Record<string, { approved: boolean }>) => { ok: boolean; missing: string[] };
+  bulkScopeHash: (rows: { id: string; text: string | null }[]) => string;
 };
+const bulkScopeHash = gatesMod.bulkScopeHash;
 
 const env = process.env;
 const DIR = "eval/real-data";
@@ -31,16 +33,20 @@ const DIR = "eval/real-data";
 function load(): { rows: StoredRow[]; reviewed: Set<string>; reviewer: string | null } {
   const files = existsSync(DIR) ? readdirSync(DIR).filter((f) => /^extract-.*\.json$/.test(f)).sort() : [];
   if (!files.length) throw new Error("抽出ファイル（eval/real-data/extract-*.json）がありません");
-  const ex = JSON.parse(readFileSync(`${DIR}/${files.at(-1)}`, "utf8")) as { rows: { id: string | null; evidence_text: string | null; evidence_fetched_at: string | null }[] };
-  const rows: StoredRow[] = ex.rows.map((r, i) => ({ id: r.id ?? `row-${i}`, stratum: "unlabeled", text: r.evidence_text, fetchedAt: r.evidence_fetched_at }));
+  const ex = JSON.parse(readFileSync(`${DIR}/${files.at(-1)}`, "utf8")) as { rows: { id: string | null; evidence_text: string | null; evidence_fetched_at: string | null; evidence_via?: string | null; evidence_url?: string | null }[] };
+  const rows: StoredRow[] = ex.rows.map((r, i) => ({ id: r.id ?? `row-${i}`, stratum: "unlabeled", text: r.evidence_text, fetchedAt: r.evidence_fetched_at, meta: { via: r.evidence_via ?? null, url: r.evidence_url ?? null } }));
   let reviewed = new Set<string>();
   let reviewer: string | null = null;
   if (existsSync(`${DIR}/reviewed.json`)) {
-    const j = JSON.parse(readFileSync(`${DIR}/reviewed.json`, "utf8")) as { reviewedBy?: string; reviewedAt?: string; ids?: string[] };
+    const j = JSON.parse(readFileSync(`${DIR}/reviewed.json`, "utf8")) as { reviewedBy?: string; reviewedAt?: string; ids?: string[]; mode?: string; scopeHash?: string };
     // 確認者・確認日の記載があり、AI名義でない記録だけを有効とする
     if (j.reviewedBy && !/ai|claude|bot|auto/i.test(j.reviewedBy) && /^\d{4}-\d{2}-\d{2}$/.test(j.reviewedAt ?? "")) {
-      reviewed = new Set(j.ids ?? []);
-      reviewer = j.reviewedBy;
+      // 一括確認（mode=bulk）は、確認した30件と今回の送信対象が同一（内容ハッシュ一致）のときだけ有効。不一致なら本人確認に戻す
+      const sameScope = j.mode !== "bulk" || j.scopeHash === bulkScopeHash(rows);
+      if (sameScope) {
+        reviewed = new Set(j.ids ?? []);
+        reviewer = j.reviewedBy;
+      }
     }
   }
   return { rows, reviewed, reviewer };
@@ -49,7 +55,7 @@ function load(): { rows: StoredRow[]; reviewed: Set<string>; reviewer: string | 
 describe.skipIf(env.JUDGMENT_PHASE2_PREFLIGHT !== "1")("実データ新旧比較: 実行前の確認（API非接続）", () => {
   it("ゲート・全件目視の記録・送信可否の件数・費用の見積もりを表示する（原文・ID・URLは表示しない）", () => {
     const { rows, reviewed, reviewer } = load();
-    const prepared = prepareForExternal(rows, reviewed);
+    const prepared = prepareForExternal(rows, reviewed, { requirePublic: true });
     const byDecision: Record<string, number> = {};
     for (const p of prepared) byDecision[p.decision] = (byDecision[p.decision] ?? 0) + 1;
     const approvals = gatesMod.readApprovals();
@@ -79,7 +85,7 @@ describe.skipIf(env.JUDGMENT_PHASE2_RUN !== "1")("実データ新旧比較: 実A
     const model = new AnthropicJudgmentModel(client, { model: gate.model });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const sink = new LocalFileSink(`phase2-${stamp}.jsonl`);
-    const res = await runPhase2Comparison(rows, { model, sink, gates: g, reviewedIds: reviewed, totalCapJpy: gate.totalCapJpy, perCaseCapJpy: gate.perCaseCapJpy, now: new Date() });
+    const res = await runPhase2Comparison(rows, { model, sink, gates: g, reviewedIds: reviewed, requirePublic: true, totalCapJpy: gate.totalCapJpy, perCaseCapJpy: gate.perCaseCapJpy, now: new Date() });
     writeFileSync(`${DIR}/phase2-summary-${stamp}.json`, JSON.stringify({ prepared: res.prepared, sent: res.sent, skipped: res.skipped, spentJpy: res.spentJpy, summary: res.summary, keySource: gate.keySource, usage: model.usageLog.map((u) => ({ ...u, shape: undefined })), notice: res.notice }, null, 2));
     console.log(JSON.stringify({ sent: res.sent, skipped: res.skipped, spentJpy: res.spentJpy, summary: res.summary }, null, 2));
   }, 1_200_000);

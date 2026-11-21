@@ -22,6 +22,8 @@ export interface Phase2RunDeps {
   gates: { ok: boolean; missing: string[] };
   /** 人が全文を目視して「外部へ送ってよい」とした行の識別子 */
   reviewedIds: ReadonlySet<string>;
+  /** 公開告知であることを既存メタデータで確認できない行を除外する（一括確認モードで必須） */
+  requirePublic?: boolean;
   /** 承認された費用の上限（円）。事前予約で超えない */
   totalCapJpy: number;
   perCaseCapJpy: number;
@@ -60,7 +62,7 @@ const evalConfig = (deps: Phase2RunDeps, n: number): ShadowConfig => ({
 /** 実行。事前確認に1つでも失敗すれば、モデルを1回も呼ばずに例外（外部へ何も送らない） */
 export async function runPhase2Comparison(rows: StoredRow[], deps: Phase2RunDeps): Promise<Phase2RunResult> {
   if (!(deps.totalCapJpy > 0) || !(deps.perCaseCapJpy > 0) || deps.perCaseCapJpy > deps.totalCapJpy) throw new Error("費用の上限（総額・1件）が不正です");
-  const prepared = prepareForExternal(rows, deps.reviewedIds);
+  const prepared = prepareForExternal(rows, deps.reviewedIds, { requirePublic: deps.requirePublic });
   const send = assertMaySendShadow(deps.gates, prepared); // ゲート・全件確認・漏洩検出（ここで例外なら何も送らない）
   const seqOf = new Map<number, string>();
   rows.forEach((r, i) => seqOf.set(i + 1, r.id));

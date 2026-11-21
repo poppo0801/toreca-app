@@ -44,6 +44,25 @@ export interface StoredRow {
   text: string | null;
   /** 取得の日時（新しいもの＝9Z導入後を優先） */
   fetchedAt: string | null;
+  /** 公開告知かの機械確認に使う既存メタデータ（取得方法・情報元URL）。外部へは送らない */
+  meta?: { via: string | null; url: string | null };
+}
+
+const PUBLIC_VIA = new Set(["x_api", "web_fetch", "x_oembed"]);
+/** 公開告知（公開URLから取得した本文）だと、既存メタデータから機械的に確認できるか。判別できなければ false（送らない） */
+export function isPublicNotice(meta: StoredRow["meta"]): boolean {
+  if (!meta || !meta.via || !PUBLIC_VIA.has(meta.via) || !meta.url) return false;
+  let u: URL;
+  try {
+    u = new URL(meta.url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" || u.username || u.password) return false;
+  const h = u.hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || /^[0-9.]+$/.test(h) || h.includes(":") || !h.includes(".")) return false;
+  if (/[?&](?:token|key|sig|signature|auth|session|code|id)=/i.test(u.search)) return false;
+  return true;
 }
 
 /** 層ごとに均等に近く選ぶ（上限 limit。既定30）。決定的（同じ入力なら同じ結果）。原文のない行は、検証不能の層として少数だけ許す */
@@ -69,7 +88,7 @@ export function selectStratified(rows: StoredRow[], limit = 30, maxNoText = 3): 
   return picked;
 }
 
-export type PrepDecision = "ready" | "excluded_leak" | "excluded_no_text" | "needs_human_review";
+export type PrepDecision = "ready" | "excluded_leak" | "excluded_no_text" | "excluded_not_public" | "needs_human_review";
 export interface Prepared {
   /** 外部送信用の連番（元の識別子は含めない） */
   seq: number;
@@ -81,13 +100,14 @@ export interface Prepared {
 }
 
 /** 抽出した行を、伏せ字→漏洩検出→送信可否へ。reviewedIds = 人が全文を目視確認して「送信してよい」とした元の識別子 */
-export function prepareForExternal(rows: StoredRow[], reviewedIds: ReadonlySet<string>): Prepared[] {
+export function prepareForExternal(rows: StoredRow[], reviewedIds: ReadonlySet<string>, opts: { requirePublic?: boolean } = {}): Prepared[] {
   return rows.map((r, i) => {
     const base = { seq: i + 1, stratum: r.stratum };
     if (r.text == null) return { ...base, decision: "excluded_no_text" as const, text: null, findingsAfterRedact: [] };
     const red = redact(r.text);
     const f = detectLeaks(red);
     if (f.length) return { ...base, decision: "excluded_leak" as const, text: null, findingsAfterRedact: [...new Set(f.map((x) => x.kind))] };
+    if (opts.requirePublic && !isPublicNotice(r.meta)) return { ...base, decision: "excluded_not_public" as const, text: null, findingsAfterRedact: [] };
     if (!reviewedIds.has(r.id)) return { ...base, decision: "needs_human_review" as const, text: red, findingsAfterRedact: [] };
     return { ...base, decision: "ready" as const, text: red, findingsAfterRedact: [] };
   });
