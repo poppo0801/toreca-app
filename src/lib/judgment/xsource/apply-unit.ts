@@ -7,9 +7,9 @@
  *  - 応募できる回数と応募時の選択肢を分ける: independentUnit（応募の独立単位）／selectableStores・storeGroups（選択肢）／selectionTiming（応募時か当選後か）。
  *    当選後に受取先を選ぶ型のものは、アプリの管理上は店舗選択式（appManagedUnit=store_select）だが、**応募時の選択必須とは表示しない**（displayStoreSelectAtApply=false）。
  */
-import type { KnowledgeEntry, SelectionTiming, SuggestedUnit } from "./knowledge/knowledge";
+import type { SelectedHint, SelectionTiming, SuggestedUnit } from "./knowledge/knowledge";
 
-export const UNIT_VALUES: SuggestedUnit[] = ["one_form_one", "store_select", "per_store", "per_store_group", "per_product", "shared_all_stores", "per_round", "unknown"];
+export const UNIT_VALUES: SuggestedUnit[] = ["one_form_one", "store_select", "per_store", "per_store_group", "per_product", "shared_all_stores", "per_round", "other", "unknown"];
 export const TIMING_VALUES: SelectionTiming[] = ["at_apply", "after_win", "unknown"];
 export type EvidenceBasis = "direct" | "analogy" | "unconfirmed";
 
@@ -21,7 +21,18 @@ export interface UnitEvidence {
   knowledgeIds: string[];
   note: string;
 }
+export type HintUseKind = "adopted" | "rebutted" | "ignored" | "reinterpreted";
 export interface UnitInference {
+  /** 今回の文脈から観察できた事実（結論ではなく観察。例: 「店舗名が見出しに並ぶ」「応募先は1つのURL」） */
+  observedFacts: string[];
+  /** 渡したヒントの採否（採用・反論・無視・再解釈）と理由。無視・反論は許される（差し戻さない） */
+  hintUse: { id: string; use: HintUseKind; reason: string }[];
+  /** 応募の独立した回数の推定（1人が何回応募できるか。分からなければ null） */
+  independentApplyCount: number | null;
+  /** 未想定の方式（independentUnit=other のときの説明）。既存の型に無理に押し込まない */
+  otherDescription: string;
+  /** 追加調査が必要か（応募ページ等で区別できる見込みがある） */
+  needsInvestigation: boolean;
   independentUnit: SuggestedUnit;
   selectableStores: string[];
   storeGroups: string[];
@@ -29,7 +40,7 @@ export interface UnitInference {
   selectionTiming: SelectionTiming;
   /** 推論された方式（短い説明） */
   method: string;
-  alternatives: { unit: SuggestedUnit; why: string }[];
+  alternatives: { unit: SuggestedUnit; why: string; supporting?: string[]; opposing?: string[]; unknown?: string[] }[];
   evidence: UnitEvidence[];
   /** AIの確信度（自己申告。登録の根拠にはしない） */
   confidence: "high" | "medium" | "low";
@@ -64,7 +75,10 @@ export interface UnitContext {
   storeMasterCompleteness: "unknown";
   /** 過去の関連する実例（同じ系列の既存の登録の応募方式の分布。人が確定したものと、そうでないものを分ける） */
   pastExamples: { id: string; summary: string; humanConfirmed: boolean }[];
-  knowledge: KnowledgeEntry[];
+  /** 選んだ関連ヒント（少数）。選んだ理由・適用の前提の確認状態つき */
+  hints: SelectedHint[];
+  /** 今回観察された事実のタグ（判断ではない） */
+  observedTags: string[];
 }
 
 const flat = (s: string): string => s.normalize("NFKC").replace(/[ \t\r\n　]+/g, "").toLowerCase();
@@ -109,10 +123,10 @@ const TIMING_CUES: Record<string, RegExp> = { after_win: /当選後|ご当選後
 export const unitCueOk = (unit: SuggestedUnit, quote: string): boolean => (UNIT_CUES[unit]?.test(quote.normalize("NFKC")) ?? false);
 
 /** AIの出力の機械検証。直接の根拠の抜粋が文脈に実在しなければ類推へ降格。未知の参考知識IDは除去。直接の根拠が無ければ確信度は high にしない */
-export function verifyUnitInference(raw: UnitInference, ctx: Pick<UnitContext, "texts" | "knowledge" | "pastExamples" | "formObservations" | "restrictionPhrases">): VerifiedUnitInference {
+export function verifyUnitInference(raw: UnitInference, ctx: Pick<UnitContext, "texts" | "hints" | "pastExamples" | "formObservations" | "restrictionPhrases">): VerifiedUnitInference {
   const downgraded: string[] = [];
   const body = flat([...ctx.texts, ...ctx.formObservations, ...ctx.restrictionPhrases].join("\n"));
-  const validIds = new Set([...ctx.knowledge.map((k) => k.id), ...ctx.pastExamples.map((p) => p.id)]);
+  const validIds = new Set([...ctx.hints.map((k) => k.entry.id), ...ctx.pastExamples.map((p) => p.id)]);
   const evidence = raw.evidence.map((e) => {
     let basis = e.basis;
     const q = flat(e.quote);
@@ -143,7 +157,9 @@ export function verifyUnitInference(raw: UnitInference, ctx: Pick<UnitContext, "
   }
   if (!evidence.length) confidence = "low";
   const appManagedUnit: SuggestedUnit = unit;
-  return { ...raw, independentUnit: unit, selectionTiming: timing, evidence, confidence, directEvidence, downgraded: [...new Set(downgraded)], appManagedUnit, displayStoreSelectAtApply: (unit === "store_select" || unit === "per_store_group") && timing === "at_apply" };
+  // ヒントの採否: 渡していないIDの記述は除く。無視・反論は許される（降格・差し戻しの対象にしない）
+  const hintUse = (raw.hintUse ?? []).filter((h) => validIds.has(h.id) && ["adopted", "rebutted", "ignored", "reinterpreted"].includes(h.use));
+  return { ...raw, hintUse, independentUnit: unit, selectionTiming: timing, evidence, confidence, directEvidence, downgraded: [...new Set(downgraded)], appManagedUnit, displayStoreSelectAtApply: (unit === "store_select" || unit === "per_store_group") && timing === "at_apply" };
 }
 
 /** 推論から、決定的な根拠（直接・確信度中以上）で「応募単位が分かっている」と扱ってよいか */

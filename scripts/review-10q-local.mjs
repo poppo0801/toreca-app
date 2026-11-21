@@ -9,7 +9,10 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const DIR = "eval/real-data";
-const SRC = `${DIR}/human-review-10q.json`;
+// Stage 10R: 最終の実データ（ページ対応検査つきの再推論）は -10r-d.json、架空ケース（テスト用途）は -10r.json。無ければ 10Q の形式を読む
+const SRC_D = `${DIR}/human-review-10r-d.json`;
+const SRC_B = `${DIR}/human-review-10r.json`;
+const SRC = existsSync(SRC_D) ? SRC_D : existsSync(SRC_B) ? SRC_B : `${DIR}/human-review-10q.json`;
 const OUT = `${DIR}/human-review-10q-answers.json`;
 const AI_NAME = /(^|[^a-z])(ai|claude|haiku|gpt|llm|bot|auto)([^a-z]|$)/i;
 if (!existsSync(SRC)) {
@@ -17,7 +20,7 @@ if (!existsSync(SRC)) {
   process.exit(1);
 }
 const data = JSON.parse(readFileSync(SRC, "utf8"));
-const battery = data.battery ?? [];
+const battery = (existsSync(SRC_B) ? JSON.parse(readFileSync(SRC_B, "utf8")).battery : data.battery) ?? [];
 const RANK = { tentative_candidate: 0, needs_review: 1, auto_register_preview: 2 };
 const opps = (data.opportunities ?? []).filter((o) => o.inference).sort((a, b) => (RANK[a.after] ?? 9) - (RANK[b.after] ?? 9));
 
@@ -45,7 +48,7 @@ const page = () => `<!doctype html><html lang="ja"><meta charset="utf-8"><meta n
 <h2>A. 参考知識の使い方（架空の対立仮説ケース ${battery.length}件）</h2>
 ${battery.map((b, i) => `<div class="card"><b>A${i + 1}</b> ${esc(b.name)}<div class="meta">望ましい方向（正解ではない）: ${esc(b.expect)}</div><div class="hyp">AIの推論: <b>${esc(UNIT[b.unit] ?? b.unit)}</b>／${esc(TIMING[b.timing] ?? b.timing)}／確信度 ${esc(b.confidence)}／直接の根拠 ${b.direct ? "あり（手掛かり検査済み）" : "なし（類推のみ）"}／代替仮説: ${esc(b.alternatives.map((a) => UNIT[a] ?? a).join("、") || "なし")}／参照した参考知識: ${esc(b.knowledgeIds.join(", ") || "なし")}${b.downgraded.length ? `／機械検証での降格: ${esc(b.downgraded.join(", "))}` : ""}</div><div>${radios("b" + i)}　メモ <input name="bn${i}" size="30"></div></div>`).join("\n")}
 <h2>B. 実データの応募機会（${opps.length}件・暫定を先に）</h2>
-${opps.map((o, i) => `<div class="card"><b>B${i + 1}</b> <span class="meta">10P: ${esc(o.before)} → 10Q: ${esc(o.after)}／応募単位の状態: ${esc(o.unitStatus)}／理由: ${esc((o.reasons ?? []).join(", "))}</span><div class="hyp">仮説: <b>${esc(UNIT[o.inference.independentUnit] ?? o.inference.independentUnit)}</b>／${esc(TIMING[o.inference.selectionTiming] ?? "")}／確信度 ${esc(o.inference.confidence)}<br>方式: ${esc(o.inference.method)}<br>代替: ${esc((o.inference.alternatives ?? []).map((a) => (UNIT[a.unit] ?? a.unit) + "（" + a.why + "）").join(" / ") || "なし")}<br>不明点: ${esc((o.inference.unknowns ?? []).join(" / ") || "なし")}<br>追加調査の候補: ${esc((o.inference.furtherInvestigation ?? []).join(" / ") || "なし")}</div><div>${radios("o" + i)}　メモ <input name="on${i}" size="30"></div></div>`).join("\n")}
+${opps.map((o, i) => `<div class="card"><b>B${i + 1}</b> <span class="meta">10P: ${esc(o.before)} → 10Q: ${esc(o.after)}／応募単位の状態: ${esc(o.unitStatus)}／理由: ${esc((o.reasons ?? []).join(", "))}</span><div class="hyp">仮説: <b>${esc(UNIT[o.inference.independentUnit] ?? o.inference.independentUnit)}</b>／${esc(TIMING[o.inference.selectionTiming] ?? "")}／確信度 ${esc(o.inference.confidence)}<br>方式: ${esc(o.inference.method)}<br>代替: ${esc((o.inference.alternatives ?? []).map((a) => (UNIT[a.unit] ?? a.unit) + "（" + a.why + "）").join(" / ") || "なし")}<br>不明点: ${esc((o.inference.unknowns ?? []).join(" / ") || "なし")}<br>追加調査の候補: ${esc((o.inference.furtherInvestigation ?? []).join(" / ") || "なし")}<br>観察した事実: ${esc((o.inference.observedFacts ?? []).join(" / ") || "なし")}<br>ヒントの採否: ${esc((o.inference.hintUse ?? []).map((h) => h.id + "＝" + h.use + "（" + h.reason + "）").join(" / ") || "なし")}<br>ヒント無しでのAIの結論: ${esc(UNIT[o.inferenceNoHints] ?? o.inferenceNoHints ?? "—")}<br>応募先ページの観察: ${esc((o.pageObservations ?? []).join(" / ") || "なし（取得できない、または別の店舗のページで根拠にしていない）")}<br>告知の原文（抜粋）: ${esc((o.announcement ?? []).join(" / ") || "—")}</div><div>${radios("o" + i)}　メモ <input name="on${i}" size="30"></div></div>`).join("\n")}
 <p>確認者の名前（あなたの名前。AI・自動処理の名義は不可）: <input id="who" size="20"></p>
 <p><button type="submit">確認を記録する</button> <span id="msg"></span></p></form>
 <script>

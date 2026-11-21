@@ -57,7 +57,7 @@ export interface DecisionResult {
   /** 応募単位の状態: 明示／推論（直接の根拠あり）／暫定（仮説）／不明 */
   unitStatus: UnitStatus;
   /** 暫定の応募方式（仮説）。未確定であることを明示して保持する */
-  unitHypothesis: { unit: string; timing: string; alternatives: string[]; confidence: string; displayStoreSelectAtApply: boolean; unknowns: string[]; furtherInvestigation: string[] } | null;
+  unitHypothesis: { unit: string; timing: string; alternatives: string[]; confidence: string; displayStoreSelectAtApply: boolean; unknowns: string[]; furtherInvestigation: string[]; /** 未想定の方式（unit=other）の説明。既存の型に押し込まず、暫定として保持する */ otherDescription: string; hintUse: { id: string; use: string }[] } | null;
 }
 
 /** 独立した根拠の数: 元（originId）または転載元（repostOf）が同じ情報源は1つ */
@@ -92,7 +92,7 @@ export function decideOpportunity(i: DecisionInput): DecisionResult {
   let unitStatus: UnitStatus = unit !== "unknown" ? "explicit" : "unknown";
   if (unit === "unknown" && inf && inf.independentUnit !== "unknown") unitStatus = unitKnownByInference(inf) ? "inferred_direct" : "provisional";
   const effUnit = unit !== "unknown" ? unit : (inf?.independentUnit ?? "unknown");
-  const unitHypothesis = unitStatus === "provisional" && inf ? { unit: inf.independentUnit, timing: inf.selectionTiming, alternatives: inf.alternatives.map((a) => a.unit), confidence: inf.confidence, displayStoreSelectAtApply: inf.displayStoreSelectAtApply, unknowns: inf.unknowns, furtherInvestigation: inf.furtherInvestigation } : null;
+  const unitHypothesis = unitStatus === "provisional" && inf ? { unit: inf.independentUnit, timing: inf.selectionTiming, alternatives: inf.alternatives.map((a) => a.unit), confidence: inf.confidence, displayStoreSelectAtApply: inf.displayStoreSelectAtApply, unknowns: inf.unknowns, furtherInvestigation: inf.furtherInvestigation, otherDescription: inf.otherDescription, hintUse: inf.hintUse.map((h) => ({ id: h.id, use: h.use })) } : null;
   const out = (decision: Decision, rs: string[]): DecisionResult => ({ decision, reasons: rs, gaps, conflicts, independentSources: independent, deadline, notifiable, unitStatus, unitHypothesis });
 
   if (i.isLottery === false) return out("excluded", ["not_lottery"]);

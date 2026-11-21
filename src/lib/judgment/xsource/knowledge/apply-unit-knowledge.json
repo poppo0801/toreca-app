@@ -1,215 +1,132 @@
 {
-  "schema": "apply-unit-knowledge/1",
-  "note": "応募単位の推論に渡す『参考知識』。固定ルールではない。AIは今回の告知の明示的な根拠を常に優先し、ここにある傾向・例は類推の材料としてだけ使う。編集可能（追記・訂正は corrections に人の名義と理由で残す）。AIが人の確認なしに事例を追加・強化してはならない。",
+  "schema": "apply-unit-hints/2",
+  "note": "応募単位の推論のための『判断観点（ヒント）』。結論の推奨・判定ルール・加点ではない。AIは今回の具体的な情報を最優先し、ヒントを採用・反論・無視・再解釈してよい（無視・反論しても差し戻さない）。ヒントと異なる結論・未想定の応募方式も認める。条件が確認できないヒントを事実として扱わない。編集可能。AIが人の確認なしに事例を追加・強化してはならない。",
   "entries": [
     {
       "id": "K-PLATFORM-LP-MULTI",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [
-          "livepocket.jp"
-        ],
-        "chainAliases": [],
-        "systems": [
-          "livepocket"
-        ]
-      },
-      "statement": "LivePocketの応募ページで複数の店舗が選択肢として表示される場合、原則としてその応募機会では1店舗にだけ応募できる（店舗選択式）。",
-      "suggests": {
-        "unit": "store_select",
-        "selectionTiming": "at_apply"
-      },
-      "exceptions": [
-        "同じ商品・同じ期間でも、店舗グループ（A/B/C/Dなど）ごとに1回ずつ応募できる運用がある（K-EVENT-ITOYOKADO-GROUPS）。同じプラットフォームだからと一括りにしない。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "medium",
-      "counterexamples": [
-        "K-EVENT-ITOYOKADO-GROUPS"
-      ],
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": ["livepocket.jp"], "chainAliases": [], "systems": ["livepocket"] },
+      "triggers": { "tags": [] },
+      "perspective": "LivePocketの応募ページに複数の店舗が選択肢として並んでいる場合は、『その応募機会では1店舗にだけ応募できる店舗選択式』を一つの見方として検討する。店舗グループごとに1回ずつ応募できる運用や、選択肢の見た目だけで独立した応募に分かれている可能性も、同じプラットフォームでもありうるので併せて見る。",
+      "considerAlso": ["店舗グループ別の独立応募（K-EVENT-ITOYOKADO-GROUPS）", "店舗別の独立した応募ページ", "全店共通の1応募"],
+      "preconditions": [{ "id": "store_options_visible", "text": "応募ページ等で複数の店舗が選択肢として確認できている", "tag": "store_options_visible" }],
+      "counterexamples": ["K-EVENT-ITOYOKADO-GROUPS"],
+      "falsifiers": ["グループ別・店舗別に独立して応募できるという記載", "選択肢が1店舗だけ", "応募フォームが店舗ごとに別のURL"],
+      "distinguishBy": ["応募ページの選択欄の構造", "グループ表記の有無", "応募回数・制限の記載"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-EVENT-ITOYOKADO-GROUPS",
       "kind": "event_example",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [
-          "livepocket.jp"
-        ],
-        "chainAliases": [
-          "イトーヨーカドー",
-          "イトーヨーカ堂",
-          "Ito-Yokado"
-        ],
-        "systems": [
-          "livepocket"
-        ]
-      },
-      "statement": "イトーヨーカドーの抽選では、同じ商品・同じ期間でも、店舗グループ（A/B/C/Dなど）ごとに1回ずつ応募できる例があった。",
-      "suggests": {
-        "unit": "per_store_group",
-        "selectionTiming": "at_apply"
-      },
-      "exceptions": [
-        "グループの表記・数・応募回数は開催ごとに異なりうる。今回の告知にグループの記載が無ければ当てはめない。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "medium",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": [], "chainAliases": ["イトーヨーカドー", "イトーヨーカ堂", "Ito-Yokado"], "systems": [] },
+      "triggers": { "tags": ["group_phrase"] },
+      "perspective": "過去に、同じ商品・同じ期間でも店舗グループ（A/B/C/Dなど）ごとに1回ずつ応募できた例がある。告知やページにグループの表記があるときに、『グループ別の独立応募』を検討する。グループの数・表記・回数は開催ごとに違いうる。",
+      "considerAlso": ["グループがあっても全体で1回だけ応募できる", "グループ表記が受取店舗の案内にすぎない"],
+      "preconditions": [{ "id": "group_notation_present", "text": "告知・ページにグループの表記がある", "tag": "group_phrase" }],
       "counterexamples": [],
+      "falsifiers": ["グループの表記が無い", "全体で1回までという記載"],
+      "distinguishBy": ["グループごとの応募回数の記載", "グループごとの応募URLや選択欄"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-SYSTEM-DORASTA-INDEPENDENT",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [
-          "dorasuta.jp"
-        ],
-        "chainAliases": [
-          "ドラスタ",
-          "ドラゴンスター"
-        ],
-        "systems": [
-          "dorasuta"
-        ]
-      },
-      "statement": "ドラスタの抽選システムでは、店舗ごとの独立した応募が多い。",
-      "suggests": {
-        "unit": "per_store",
-        "selectionTiming": "at_apply"
-      },
-      "exceptions": [
-        "通販・全店共通の企画では1応募のことがある。今回の告知の記載を優先する。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "medium",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": ["dorasuta.jp"], "chainAliases": ["ドラスタ", "ドラゴンスター"], "systems": ["dorasuta"] },
+      "triggers": { "tags": [] },
+      "perspective": "ドラスタの抽選システムでは、店舗ごとに独立した応募になっていることが多い。店舗別の応募ページ・店舗名つきの告知があるかを確認し、通販や全店共通の企画、店舗を選ぶ形も併せて見る。",
+      "considerAlso": ["通販・全店共通の1応募", "店舗選択式"],
+      "preconditions": [{ "id": "store_specific_announcement", "text": "告知が店舗名つきで、店舗単位の応募先がある", "tag": "store_specific" }],
       "counterexamples": [],
+      "falsifiers": ["店舗を選択する欄がある", "全店共通の応募であるという記載"],
+      "distinguishBy": ["店舗別URLの有無", "応募ページの店舗選択欄"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-SYSTEM-RYU-INDEPENDENT",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [],
-        "chainAliases": [
-          "竜のしっぽ"
-        ],
-        "systems": [
-          "dorasuta"
-        ]
-      },
-      "statement": "竜のしっぽなど、ドラスタと同じ抽選システムを使う系列も、店舗ごとの独立した応募が多い。",
-      "suggests": {
-        "unit": "per_store",
-        "selectionTiming": "at_apply"
-      },
-      "exceptions": [
-        "系列が同じシステムを使っていても、今回の告知で別の方式が示されていればそちらを優先する。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "medium",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": [], "chainAliases": ["竜のしっぽ"], "systems": ["dorasuta"] },
+      "triggers": { "tags": [] },
+      "perspective": "竜のしっぽなど、ドラスタと同じ抽選システムを使う系列も、店舗ごとに独立した応募になっていることが多い。系列が同じシステムを使っていても、今回の告知で別の方式が示されていればそちらを優先して考える。",
+      "considerAlso": ["店舗選択式", "全店共通の1応募"],
+      "preconditions": [{ "id": "same_system_confirmed", "text": "同じ抽選システムを使っていることが今回確認できる", "tag": "system:dorasuta" }],
       "counterexamples": [],
+      "falsifiers": ["別の応募方式を示す記載"],
+      "distinguishBy": ["応募ページの構造", "店舗別URLの有無"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-RULE-NO-CROSS-STORE",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [],
-        "chainAliases": [],
-        "systems": []
-      },
-      "statement": "『他店舗へ同時に応募すると落選』など、店舗をまたぐ応募の制限が書かれていれば、その抽選固有の制限を優先する（店舗ごとに独立して応募できるとは扱わない）。制限の記載が無ければ店舗別応募を基本仮説の一つとするが、禁止の記載が見つからないことは、複数店舗へ応募できることの証明ではない。",
-      "suggests": {
-        "unit": "unknown",
-        "selectionTiming": "unknown"
-      },
-      "exceptions": [
-        "記載が無い場合は、店舗別応募を『仮説』として保持し、断定しない。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "medium",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": [], "chainAliases": [], "systems": [] },
+      "triggers": { "tags": ["cross_store_phrase"] },
+      "perspective": "『他店舗へ同時に応募すると落選』のような、店舗をまたぐ応募の制限が書かれているときは、その抽選固有の制限を優先して考える。制限の記載が無いことは、複数店舗へ応募できることの証明ではない（店舗別応募も仮説の一つにとどめ、断定しない）。",
+      "considerAlso": ["制限は同一店舗内の重複応募についてだけ", "制限は別の企画についての記載"],
+      "preconditions": [{ "id": "cross_store_restriction_present", "text": "店舗をまたぐ応募の制限が告知に書かれている", "tag": "cross_store_phrase" }],
       "counterexamples": [],
+      "falsifiers": ["制限が別の対象（別商品・別企画）についての記載"],
+      "distinguishBy": ["制限文の対象範囲（どの応募・どの店舗に対してか）"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-HEURISTIC-MULTISTORE-PICKUP",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [],
-        "chainAliases": [],
-        "systems": []
-      },
-      "statement": "店舗受取が前提で、複数店舗を持つ系列で、実施店舗が特定されておらず、応募時の店舗指定も明記されていない場合は、店舗選択式を有力な仮説とする。店舗マスターは不完全なので『登録されている店舗が1つ＝単店舗の系列』とは推論しない。公開情報や既存の履歴から多店舗であることを補助的に確認する。",
-      "suggests": {
-        "unit": "store_select",
-        "selectionTiming": "unknown"
-      },
-      "exceptions": [
-        "本当に単店舗の事業者や、告知で店舗が特定されている場合は当てはまらない。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "low",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": [], "chainAliases": [], "systems": [] },
+      "triggers": { "tags": ["pickup_in_store", "store_unspecified"] },
+      "perspective": "店舗受取が前提で、実施店舗が告知で特定されておらず、応募時の店舗指定も書かれていない場合は、店舗を選ぶ形（店舗選択式）の可能性を検討する。ただし全店共通の1応募、店舗ごとの別応募、系列が実際は単店舗である場合もある。店舗マスターに登録された店舗が少なくても、単店舗の系列とは判断しない。",
+      "considerAlso": ["全店共通の1応募", "店舗ごとの別応募", "単店舗の事業者"],
+      "preconditions": [{ "id": "pickup_in_store", "text": "店舗受取が前提である", "tag": "pickup_in_store" }, { "id": "store_unspecified", "text": "実施店舗が告知で特定されていない", "tag": "store_unspecified" }],
       "counterexamples": [],
+      "falsifiers": ["告知で実施店舗が特定されている", "通販・配送のみ", "系列が単店舗であることが確認できる"],
+      "distinguishBy": ["応募ページの店舗欄", "系列の店舗数の公開情報"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-CHAIN-YODOBASHI-AFTERWIN",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [],
-        "chainAliases": [
-          "ヨドバシ",
-          "ヨドバシカメラ",
-          "ヨドバシ.com"
-        ],
-        "systems": []
-      },
-      "statement": "ヨドバシのように、当選後に店舗受取か配送かを選べる抽選は、アプリの管理上は店舗選択式として扱ってよい。ただし『応募時に店舗を選ぶ』のではなく『当選後に受取先・配送を選ぶ』ので、応募時に選択必須と表示してはならない。",
-      "suggests": {
-        "unit": "store_select",
-        "selectionTiming": "after_win"
-      },
-      "exceptions": [
-        "応募時に店舗を指定する開催もありうる。今回の告知の記載を優先する。"
-      ],
-      "observedAt": "2026-11-22",
-      "confidence": "medium",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": [], "chainAliases": ["ヨドバシ", "ヨドバシカメラ", "ヨドバシ.com"], "systems": [] },
+      "triggers": { "tags": ["after_win_phrase"] },
+      "perspective": "当選後に受取先（店頭受取・配送・受取店舗）を選ぶ抽選は、アプリの管理上は店舗選択式として扱ってよい。ただし選ぶのは当選後であり、応募時に店舗の選択が必須とは限らない。応募時に選ぶのか当選後に選ぶのかを区別して確認する。",
+      "considerAlso": ["応募時に店舗を指定する開催", "受取先の選択が無い"],
+      "preconditions": [{ "id": "after_win_selection", "text": "当選後に受取先を選ぶという記載がある", "tag": "after_win_phrase" }],
       "counterexamples": [],
+      "falsifiers": ["応募時に店舗を指定する欄がある"],
+      "distinguishBy": ["応募フォームの項目", "当選後の案内の文言"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     },
     {
       "id": "K-GENERAL-VARIANTS",
       "kind": "tendency",
-      "source": "ユーザー提供の運用知識",
-      "appliesTo": {
-        "platformHosts": [],
-        "chainAliases": [],
-        "systems": []
-      },
-      "statement": "同一商品・同一期間・同一系列でも、応募の形は多様: 店舗グループ別の独立応募／店舗別の独立応募／全店舗共通の1応募／店舗選択の1応募／商品別のフォーム／複数商品の同時応募／開催回別の応募。『応募できる回数』と『応募時の選択肢』は別に推定する。",
-      "suggests": {
-        "unit": "unknown",
-        "selectionTiming": "unknown"
-      },
-      "exceptions": [],
-      "observedAt": "2026-11-22",
-      "confidence": "low",
+      "provenance": { "source": "ユーザー提供の運用知識", "confirmation": "user_provided", "aiGenerated": false },
+      "appliesTo": { "platformHosts": [], "chainAliases": [], "systems": [] },
+      "triggers": { "tags": ["multi_product_phrase", "round_phrase"] },
+      "perspective": "同一商品・同一期間・同一系列でも、応募の形は多様でありうる（店舗グループ別／店舗別／全店共通／店舗選択／商品別フォーム／複数商品の同時応募／開催回別）。応募できる回数と、応募時の選択肢は分けて考える。",
+      "considerAlso": [],
+      "preconditions": [],
       "counterexamples": [],
+      "falsifiers": [],
+      "distinguishBy": ["応募フォームの構造", "商品・開催回の記載"],
+      "updatedAt": "2026-11-22",
       "expiresAt": "2027-11-22",
       "editable": true
     }

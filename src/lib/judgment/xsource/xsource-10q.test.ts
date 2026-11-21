@@ -6,7 +6,7 @@ import { extractRestrictionPhrases, summarizePastExamples, unitKnownByInference,
 import { renderUnitContext, UNIT_SYSTEM } from "./ai-unit";
 import { clusterFacts } from "./cluster";
 import { decideOpportunity } from "./decision";
-import { addCorrection, effectiveEntries, loadKnowledge, selectKnowledge, validateKnowledge } from "./knowledge/knowledge";
+import { addCorrection, effectiveEntries, loadKnowledge, observeTags, selectHints, validateKnowledge } from "./knowledge/knowledge";
 import type { SourceFact } from "./types";
 
 const NOW = new Date("2026-11-22T00:00:00Z");
@@ -14,31 +14,50 @@ const PROD = ["架空TCG 拡張パック「テスト弾」"];
 const ev = { quoteVerified: true, range: null, image: null } as const;
 const elig = { verdict: "eligible" as const, reasons: [], basis: {} };
 const fact = (over: SourceFact["fields"] = {}, extra: Partial<SourceFact> = {}): SourceFact => ({ sourceId: "s1", kind: "list_item", fetchedAt: "2026-11-21T00:00:00Z", fields: { chain: "サンプル書店", store: "梅田店", products: PROD, applyDeadline: "2026-11-23 23:59", applyUnit: "unknown", applyUrl: "https://shop.example.com/lottery/20261123001", ...over }, evidence: { chain: ev, store: ev, products: ev, applyDeadline: ev }, urls: ["https://shop.example.com/lottery/20261123001"], ...extra });
-const inf = (over: Partial<UnitInference> = {}): UnitInference => ({ independentUnit: "unknown", selectableStores: [], storeGroups: [], perProductForm: "unknown", selectionTiming: "unknown", method: "", alternatives: [], evidence: [], confidence: "medium", unknowns: [], furtherInvestigation: [], ...over });
-const baseCtx = (over: Partial<UnitContext> = {}): UnitContext => ({ texts: ["応募する店舗を選択してください（梅田店・難波店）。他店舗への同時応募は無効となります"], chain: "サンプル書店", stores: [], products: PROD, applyUrlHosts: [], formObservations: [], restrictionPhrases: [], storeMasterCompleteness: "unknown", pastExamples: [], knowledge: loadKnowledge().entries, ...over });
+const inf = (over: Partial<UnitInference> = {}): UnitInference => ({ observedFacts: [], hintUse: [], independentApplyCount: null, otherDescription: "", needsInvestigation: false, independentUnit: "unknown", selectableStores: [], storeGroups: [], perProductForm: "unknown", selectionTiming: "unknown", method: "", alternatives: [], evidence: [], confidence: "medium", unknowns: [], furtherInvestigation: [], ...over });
+const baseCtx = (over: Partial<UnitContext> = {}): UnitContext => ({ texts: ["応募する店舗を選択してください（梅田店・難波店）。他店舗への同時応募は無効となります"], chain: "サンプル書店", stores: [], products: PROD, applyUrlHosts: [], formObservations: [], restrictionPhrases: [], storeMasterCompleteness: "unknown", pastExamples: [], hints: [], observedTags: [], ...over });
 const decide = (f: SourceFact, unitInference: ReturnType<typeof verifyUnitInference> | null, o: Partial<Parameters<typeof decideOpportunity>[0]> = {}) => decideOpportunity({ cluster: clusterFacts([f])[0], facts: [f], eligibility: elig, now: NOW, unresolvedDuplicatePairs: 0, unitInference, ...o });
 
-describe("参考知識ストア: データ（編集可能）であり、固定ルールではない", () => {
+describe("ヒントストア: 判断観点のデータであり、結論の推奨・固定ルールではない", () => {
   const store = loadKnowledge();
-  it("メタデータ（出典・適用対象・例外・観測日時・信頼度・反例・有効期限）を持ち、整合している", () => {
+  const ids = (ctx: Parameters<typeof selectHints>[1], now = NOW) => selectHints(store, ctx, now).map((h) => h.entry.id);
+  it("メタデータ（出典・確認状態・適用対象・前提・反例・反証条件・区別する確認・更新日）を持ち、整合している。結論フィールド（suggests）を持たない", () => {
     expect(validateKnowledge(store)).toEqual([]);
-    for (const e of store.entries) expect(e).toMatchObject({ source: "ユーザー提供の運用知識", editable: true });
+    for (const e of store.entries) {
+      expect(e.provenance).toMatchObject({ source: "ユーザー提供の運用知識", confirmation: "user_provided", aiGenerated: false });
+      expect(e.perspective.length).toBeGreaterThan(10);
+      expect("suggests" in e).toBe(false);
+    }
     expect(store.entries.find((e) => e.id === "K-EVENT-ITOYOKADO-GROUPS")?.kind).toBe("event_example");
-    expect(store.entries.find((e) => e.id === "K-PLATFORM-LP-MULTI")?.counterexamples).toContain("K-EVENT-ITOYOKADO-GROUPS"); // LivePocketの傾向に、グループ例外が反例として紐づく
-    expect(store.entries.filter((e) => e.kind === "tendency").length).toBeGreaterThan(3); // 傾向と実例が分かれている
+    expect(store.entries.find((e) => e.id === "K-PLATFORM-LP-MULTI")?.counterexamples).toContain("K-EVENT-ITOYOKADO-GROUPS");
+    expect(validateKnowledge({ ...store, entries: [{ ...store.entries[0], suggests: { unit: "store_select" } } as never] })).toContain("conclusion_field_not_allowed:K-PLATFORM-LP-MULTI");
   });
-  it("選択は適用対象との照合だけ（ホスト・系列の別名・表記揺れ）。一般の知識は常に渡す。期限切れは渡さない", () => {
-    const ids = (ctx: Parameters<typeof selectKnowledge>[1], now = NOW) => selectKnowledge(store, ctx, now).map((e) => e.id);
-    expect(ids({ chain: null, hosts: ["livepocket.jp"] })).toContain("K-PLATFORM-LP-MULTI");
-    expect(ids({ chain: null, hosts: ["www.livepocket.jp"] })).toContain("K-PLATFORM-LP-MULTI");
-    expect(ids({ chain: "イトーヨーカドー 〇〇店", hosts: ["livepocket.jp"] })).toEqual(expect.arrayContaining(["K-PLATFORM-LP-MULTI", "K-EVENT-ITOYOKADO-GROUPS"]));
-    expect(ids({ chain: "ドラゴンスター", hosts: [] })).toContain("K-SYSTEM-DORASTA-INDEPENDENT");
-    expect(ids({ chain: "ヨドバシカメラ", hosts: [] })).toContain("K-CHAIN-YODOBASHI-AFTERWIN");
-    expect(ids({ chain: "無関係な書店", hosts: ["shop.example.com"] })).toEqual(expect.arrayContaining(["K-RULE-NO-CROSS-STORE", "K-HEURISTIC-MULTISTORE-PICKUP", "K-GENERAL-VARIANTS"])); // 一般の知識
-    expect(ids({ chain: "無関係な書店", hosts: ["shop.example.com"] })).not.toContain("K-CHAIN-YODOBASHI-AFTERWIN");
-    expect(ids({ chain: "ヨドバシ", hosts: [] }, new Date("2030-01-01T00:00:00Z"))).toEqual([]); // 期限切れ
+  it("選択は関連するものだけを少数（既定4件以下）。ホスト・系列の別名（表記揺れ）・システム・観察タグが一致したもの。無関係な一般知識は渡さない", () => {
+    expect(ids({ chain: null, hosts: ["livepocket.jp"], tags: [] })).toContain("K-PLATFORM-LP-MULTI");
+    expect(ids({ chain: null, hosts: ["www.livepocket.jp"], tags: [] })).toContain("K-PLATFORM-LP-MULTI");
+    expect(ids({ chain: "イトーヨーカドー 〇〇店", hosts: [], tags: [] })).toContain("K-EVENT-ITOYOKADO-GROUPS");
+    expect(ids({ chain: "ドラゴンスター", hosts: [], tags: [] })).toContain("K-SYSTEM-DORASTA-INDEPENDENT");
+    expect(ids({ chain: "ヨドバシカメラ", hosts: [], tags: ["after_win_phrase"] })).toContain("K-CHAIN-YODOBASHI-AFTERWIN");
+    expect(ids({ chain: "無関係な書店", hosts: ["shop.example.com"], tags: [] })).toEqual([]); // 手掛かりが無ければ何も渡さない
+    expect(ids({ chain: "無関係な書店", hosts: ["shop.example.com"], tags: ["pickup_in_store", "store_unspecified"] })).toEqual(["K-HEURISTIC-MULTISTORE-PICKUP"]);
+    expect(ids({ chain: "無関係な書店", hosts: [], tags: ["cross_store_phrase"] })).toEqual(["K-RULE-NO-CROSS-STORE"]);
+    const many = selectHints(store, { chain: "イトーヨーカドー", hosts: ["livepocket.jp"], tags: ["group_phrase", "cross_store_phrase", "pickup_in_store", "store_unspecified", "after_win_phrase", "multi_product_phrase"] }, NOW);
+    expect(many.length).toBeLessThanOrEqual(4);
+    expect(ids({ chain: "ヨドバシ", hosts: [], tags: ["after_win_phrase"] }, new Date("2030-01-01T00:00:00Z"))).toEqual([]); // 期限切れ
   });
-  it("人の訂正だけが蓄積される: AI名義・理由なし・不明なIDは拒否。無効化・反例・例外の追記が反映される。AIの判断を事例にするAPIは無い", () => {
+  it("適用の前提は『確認できた(met)』か『不明(unknown)』だけ。観察されていない前提を事実扱いしない。選んだ理由を記録する", () => {
+    const h = selectHints(store, { chain: null, hosts: ["livepocket.jp"], tags: ["host:livepocket.jp"] }, NOW)[0];
+    expect(h.entry.id).toBe("K-PLATFORM-LP-MULTI");
+    expect(h.preconditions).toEqual([{ id: "store_options_visible", text: expect.any(String), status: "unknown" }]);
+    expect(h.reasons).toEqual(["応募先のホストが適用対象"]);
+    const h2 = selectHints(store, { chain: null, hosts: ["livepocket.jp"], tags: ["store_options_visible"] }, NOW)[0];
+    expect(h2.preconditions[0].status).toBe("met");
+  });
+  it("観察タグは文面・構造の観察であり結論ではない（店舗受取・他店舗の記載・当選後・グループ・店舗未特定・店舗選択肢）", () => {
+    expect(observeTags({ texts: ["店頭受取のみ。他店舗への同時応募は無効。当選後に受取店舗を選択。グループAとグループB"], stores: [], hosts: ["www.livepocket.jp"], storeOptionCount: 3 })).toEqual(expect.arrayContaining(["pickup_in_store", "cross_store_phrase", "after_win_phrase", "group_phrase", "store_unspecified", "store_options_visible", "host:livepocket.jp"]));
+    expect(observeTags({ texts: ["抽選販売のお知らせ"], stores: ["梅田店"], hosts: [] })).toEqual(["store_specific"]);
+  });
+  it("人の訂正だけが蓄積される: AI名義・理由なし・不明なIDは拒否。無効化・反例・反証条件の追記が反映される（絶対ルールにはしない）", () => {
     const base = { knowledgeId: "K-PLATFORM-LP-MULTI", reason: "実際は店舗ごとに応募できた", at: "2026-11-22", action: "invalidate" as const, detail: "" };
     expect(addCorrection(store, { ...base, by: "AI" })).toEqual({ ok: false, reason: "reviewer_must_be_human" });
     expect(addCorrection(store, { ...base, by: "claude-auto" }).ok).toBe(false);
@@ -46,12 +65,9 @@ describe("参考知識ストア: データ（編集可能）であり、固定�
     expect(addCorrection(store, { ...base, by: "山田", knowledgeId: "K-NONE" })).toEqual({ ok: false, reason: "unknown_knowledge_id" });
     const ok = addCorrection(store, { ...base, by: "山田" });
     expect(ok.ok).toBe(true);
-    if (ok.ok) {
-      expect(effectiveEntries(ok.store, NOW).some((e) => e.id === "K-PLATFORM-LP-MULTI")).toBe(false);
-      const ex = addCorrection(store, { ...base, by: "山田", action: "add_exception", detail: "グループ制の開催あり" });
-      if (ex.ok) expect(effectiveEntries(ex.store, NOW).find((e) => e.id === "K-PLATFORM-LP-MULTI")?.exceptions).toContain("グループ制の開催あり");
-    }
-    expect(Object.keys({ addCorrection, effectiveEntries, loadKnowledge, selectKnowledge, validateKnowledge })).not.toContain("learnFromAi");
+    if (ok.ok) expect(effectiveEntries(ok.store, NOW).some((e) => e.id === "K-PLATFORM-LP-MULTI")).toBe(false);
+    const ex = addCorrection(store, { ...base, by: "山田", action: "add_exception", detail: "グループ制の開催あり" });
+    if (ex.ok) expect(effectiveEntries(ex.store, NOW).find((e) => e.id === "K-PLATFORM-LP-MULTI")?.falsifiers).toContain("（人の訂正）グループ制の開催あり");
   });
   it("コードに系列名・プラットフォーム名の絶対判定を埋め込まない（静的検査）", () => {
     for (const f of ["apply-unit.ts", "ai-unit.ts", "decision.ts", "knowledge/knowledge.ts"]) {
@@ -82,9 +98,10 @@ describe("AI出力の機械検証: 直接の根拠の実在・参照IDの妥当�
     expect(verifyUnitInference(inf({ independentUnit: "per_store", selectionTiming: "at_apply", evidence: [{ quote: "各店舗ごとに抽選を行います", basis: "direct", knowledgeIds: [], note: "" }] }), ctx3)).toMatchObject({ directEvidence: true, selectionTiming: "at_apply" });
   });
   it("渡していない参考知識IDは除去。根拠が無ければ確信度は low。未定義の単位は unknown", () => {
-    const v = verifyUnitInference(inf({ independentUnit: "per_store", evidence: [{ quote: "", basis: "analogy", knowledgeIds: ["K-SYSTEM-DORASTA-INDEPENDENT", "K-INVENTED"], note: "" }] }), ctx);
+    const v = verifyUnitInference(inf({ independentUnit: "per_store", evidence: [{ quote: "", basis: "analogy", knowledgeIds: ["K-SYSTEM-DORASTA-INDEPENDENT", "K-INVENTED"], note: "" }], hintUse: [{ id: "K-SYSTEM-DORASTA-INDEPENDENT", use: "ignored", reason: "今回は無関係" }, { id: "K-INVENTED", use: "adopted", reason: "" }] }), baseCtx({ hints: selectHints(loadKnowledge(), { chain: "ドラゴンスター", hosts: [], tags: [] }, NOW) }));
     expect(v.evidence[0].knowledgeIds).toEqual(["K-SYSTEM-DORASTA-INDEPENDENT"]);
     expect(v.downgraded).toContain("unknown_knowledge_id_removed");
+    expect(v.hintUse.map((h) => h.id)).toEqual(["K-SYSTEM-DORASTA-INDEPENDENT"]); // 無視は許される（残る・降格されない）
     expect(verifyUnitInference(inf({ independentUnit: "per_store", confidence: "high" }), ctx).confidence).toBe("low");
     expect(verifyUnitInference(inf({ independentUnit: "nonsense" as never }), ctx)).toMatchObject({ independentUnit: "unknown" });
   });
@@ -103,8 +120,8 @@ describe("AI出力の機械検証: 直接の根拠の実在・参照IDの妥当�
     expect(text).toContain("店舗マスターの網羅性】不明");
     expect(text).toContain("人の確認なし");
     expect(text).not.toMatch(/応募履歴|当選履歴|購入履歴|メール|電話|住所/);
-    expect(UNIT_SYSTEM).toContain("今回の告知の明示的な記載が最優先");
-    expect(UNIT_SYSTEM).toContain("禁じる記載が見つからない");
+    expect(UNIT_SYSTEM).toContain("今回の具体的な情報が、過去の傾向・ヒントより常に優先");
+    expect(UNIT_SYSTEM).toContain("禁止の記載が見つからない");
   });
 });
 

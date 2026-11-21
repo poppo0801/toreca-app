@@ -71,3 +71,8 @@
 - 参考知識は `src/lib/judgment/xsource/knowledge/apply-unit-knowledge.json`（編集可能なデータ。固定ルールではない）。人の訂正は `addCorrection`（人の名義・理由必須）。AIの未確認の判断を事例にしない。
 - 判断に `tentative_candidate`（応募方式が未確定の暫定候補）を追加。自動登録は、応募単位が明示または直接の根拠で確定したものだけ。通知・応募済み管理に暫定の応募方式を断定して出さない。
 - 再評価: `node scripts/xsource-10q.mjs run --confirm=yes`（実AI・有料・上限 90回/¥50）。確認: `node scripts/review-10q-local.mjs`。
+
+## 13. Stage 10R の追加（ヒントの自由度・応募先ページの実取得。ローカル実装済み・本番未適用・未接続）
+- 参考知識は結論の推奨ではなく**判断観点（ヒント）**。`suggests` は廃止。選択は関連するものだけ少数（観察タグ・ホスト・系列・システム）。AIは採用・反論・無視・再解釈でき、未想定の方式（`other`）も出せる。**無関係なヒントを渡すと結論が動く（実測 7/12）ため、選択が誘導を防ぐ制御**。
+- 応募先ページ: `application-page.ts`（候補URL・失敗分類・観察の抜粋・**ページと項目の店舗対応検査**）。親投稿のリンクは別店舗のページのことがあり、対応しなければ根拠にしない。項目の短縮URL（t.co）は robots で取得不可。
+- 再評価: `node scripts/xsource-10r.mjs run --confirm=yes`（実AI・有料。`JUDGMENT_10R_ONLY_D=1` でページ観察つきの再推論のみ）。確認: `node scripts/review-10q-local.mjs`。人の訂正: `node scripts/knowledge-correct.mjs`。

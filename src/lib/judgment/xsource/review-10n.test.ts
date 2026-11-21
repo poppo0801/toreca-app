@@ -64,3 +64,15 @@ describe("確認画面（10Q: 応募単位の推論）: 本人の操作でのみ
     expect(q).toContain("何も実行されません");
   });
 });
+
+describe("人の訂正の取り込み（10R）: 人の名義・理由が必須。AI名義は拒否。データファイルへの追記のみ", () => {
+  const k = readFileSync("scripts/knowledge-correct.mjs", "utf8");
+  it("AI名義の拒否・理由必須・既知のID・書き込みは1か所・外部通信なし", () => {
+    expect(k).toContain("AI_NAME.test(by)");
+    expect(k).toContain("!reason");
+    expect(k).toContain("知識IDが見つかりません");
+    expect(k.match(/writeFileSync\(/g)?.length).toBe(1);
+    expect(k).not.toMatch(/https?\.request|fetch\(|node:https|api\.anthropic|@supabase/);
+    expect(k).toContain("絶対ルールにはなりません");
+  });
+});
