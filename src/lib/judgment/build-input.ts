@@ -27,7 +27,7 @@ export interface EvidenceSeed {
   /** 以前の解析（読解）に失敗した原文か。本文は今回あらためて読める（読み落としの再判断） */
   priorReadFailed?: boolean;
   /** 原文の種類（リンク先の公開ページ本文は、投稿本文と区別して渡す） */
-  kind?: "linked_page" | "image_reading";
+  kind?: "linked_page" | "image_reading" | "image_verified";
 }
 
 /** 過去の判断の取得口（読み取りのみ）。DB実装は `historyFromDb`（server/judgment-history） */

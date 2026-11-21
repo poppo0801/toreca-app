@@ -86,3 +86,23 @@ describe("入力の組み立て・日時", () => {
     expect(r.ok && r.seeds.every((s) => s.url.startsWith("https://evidence.invalid/"))).toBe(true);
   });
 });
+
+describe("Stage 10L: 画像検証の書き込み先・境界・追記専用（静的検査）", () => {
+  const ver = readFileSync("src/lib/server/shadow/image-verifier.ts", "utf8");
+  it("画像検証が書き込む表は shadow_image_verifications のみ。画像そのもの・取得元URLは保存しない。取得・書き起こしは注入（直接ネットワークを使わない）", () => {
+    const writes = [...ver.matchAll(/table\(deps\.db, "([a-z_]+)"\)\s*\.(insert|update|upsert|delete)/g)].map((m) => m[1]);
+    expect(new Set(writes)).toEqual(new Set(["shadow_image_verifications"]));
+    expect(ver).not.toMatch(/\bfetch\(|safeFetch|https?\.request/);
+    expect(ver).not.toMatch(/image_ref|image_url|base64:\s*img\.base64[^)]*insert/);
+    expect(ver).toContain("image_hash");
+  });
+  it("ルートは画像の取得に既存の部品（fetchXImage）だけを使う。マイグレーション110は追加のみ・利用者に書き込みを与えない・追記専用", () => {
+    expect(readFileSync("src/app/api/cron/shadow/route.ts", "utf8")).toContain("fetchXImage");
+    const sql = readFileSync("supabase/migrations/20261227000110_stage10l_image_verification.sql", "utf8").split(/[\r][\n]|[\n]/).filter((l) => !l.trim().startsWith("--")).join(" ");
+    expect(sql).not.toMatch(/alter table public\.(lotteries|collection_candidates|applications|collection_settings|cases)/i);
+    expect(sql).not.toMatch(/drop table|truncate/i);
+    expect(sql).toContain("shadow_image_verifications_append_only");
+    expect(sql).toContain("revoke update on public.shadow_image_verifications from service_role");
+    expect(sql).toMatch(/grant select on public\.shadow_image_verifications to authenticated/);
+  });
+});

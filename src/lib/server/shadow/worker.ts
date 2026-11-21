@@ -16,6 +16,10 @@ import { ShadowController } from "@/lib/judgment/shadow/controller";
 import type { ShadowRecord, ShadowSink } from "@/lib/judgment/shadow/record";
 import type { Db } from "@/lib/server/lottery-service";
 import { shadowWorkerPermission } from "./allow";
+import type { ImageReading } from "@/lib/collector/evidence";
+import { imageEvidenceSeeds, summarizeChecks } from "@/lib/judgment/image-verify";
+import { detectLeaks } from "@/lib/judgment/eval/phase2";
+import type { ImageVerification } from "./image-verifier";
 import { currentCaseFromDraft, focusEvidenceSeeds, legacySummaryFromDraft, prepareShadowEvidence } from "./input";
 
 type Env = Record<string, string | undefined>;
@@ -50,6 +54,8 @@ export interface ShadowWorkerDeps {
   /** この実行に使える時間（ミリ秒）。残りが1件分に満たなければ新しいジョブを始めない */
   timeBudgetMs?: number;
   perJobTimeoutMs?: number;
+  /** Stage 10L: 画像根拠の検証（元画像の独立した書き起こしとの照合）。未設定なら画像読み取りは「照合できていない読み取り」のまま渡す */
+  imageVerify?: (a: { householdId: string; candidateId: string; readings: ImageReading[]; refs: string[]; budgetJpy: number }) => Promise<ImageVerification>;
 }
 
 export interface ShadowWorkerResult {
@@ -178,23 +184,40 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
         await finish(j, "skipped", foc.reason);
         continue;
       }
-      const input = await buildJudgmentInput({ caseId: null, title: "", now: now(), evidence: foc.seeds, related: [], currentCase: current, masters: [], failures: [], regionPrefectures: [] });
-
-      // 予算（日次・月次・1件）。事前予約: 見込み費用が残額を超えるなら呼ばない
+      // 予算（日次・月次・1件）。事前予約: 見込み費用が残額を超えるなら呼ばない。画像の検証の費用も、この予算（判断と合計）の中で使う
       const d = now();
       const [day, month] = await Promise.all([rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstDayStart(d).toISOString() }), rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstMonthStart(d).toISOString() })]);
       const dayLeft = st.daily_budget_jpy - Number(day.data ?? 0);
       const monthLeft = st.monthly_budget_jpy - Number(month.data ?? 0);
-      const remaining = Math.min(dayLeft, monthLeft);
-      const reserve = Math.min(model.maxCostJpy(input), st.per_case_cap_jpy);
-      if (!(remaining >= reserve) || remaining <= 0) {
+      let remaining = Math.min(dayLeft, monthLeft);
+      let caseCap = st.per_case_cap_jpy;
+
+      // 画像根拠の検証（Stage 10L）: 収集時の読み取りがあり、元画像への参照がある場合だけ。照合できた行だけが fact の根拠になる
+      let seeds = foc.seeds;
+      if (stored?.imageReadings?.length) {
+        let ver: ImageVerification | null = null;
+        if (deps.imageVerify && stored.imageRefs?.length && remaining > 0) {
+          ver = await deps.imageVerify({ householdId: j.household_id, candidateId: j.candidate_id, readings: stored.imageReadings, refs: stored.imageRefs, budgetJpy: Math.min(remaining, caseCap / 2) }).catch(() => null);
+        }
+        const checks = ver?.checks ?? stored.imageReadings.map((r) => ({ field: r.field, imageIndex: r.imageIndex, status: "no_image" as const }));
+        const imgSeeds = imageEvidenceSeeds(stored.imageReadings, checks, "https://evidence.invalid/img", stored.fetchedAt).filter((x) => !x.text || detectLeaks(x.text).length === 0);
+        seeds = [...seeds.filter((x) => x.kind !== "image_reading"), ...imgSeeds].map((x, n) => ({ ...x, url: `https://evidence.invalid/${n + 1}` }));
+        if (ver) {
+          remaining -= ver.costJpy;
+          caseCap = Math.max(0, caseCap - ver.costJpy);
+          for (const [k, v] of Object.entries(summarizeChecks(checks))) if (v) bump(res.byReason, `image_${k}`);
+        }
+      }
+      const input = await buildJudgmentInput({ caseId: null, title: "", now: now(), evidence: seeds, related: [], currentCase: current, masters: [], failures: [], regionPrefectures: [] });
+      const reserve = Math.min(model.maxCostJpy(input), caseCap);
+      if (!(remaining >= reserve) || remaining <= 0 || caseCap <= 0) {
         await requeue(j, monthLeft < reserve ? nextJstMonth(d) : nextJstDay(d), "budget", false);
         bump(res.byReason, "budget");
         continue;
       }
 
       const sink = new CaptureSink();
-      const config = (): ShadowConfig => ({ enabled: true, reason: "enabled", mode: "mock", maxPerWindow: 1000, windowMs: H, timeoutMs: jobTimeout, budgetCapJpy: Math.min(remaining, st.per_case_cap_jpy), perCaseCapJpy: st.per_case_cap_jpy, maxConcurrent: 1 });
+      const config = (): ShadowConfig => ({ enabled: true, reason: "enabled", mode: "mock", maxPerWindow: 1000, windowMs: H, timeoutMs: jobTimeout, budgetCapJpy: Math.min(remaining, caseCap), perCaseCapJpy: caseCap, maxConcurrent: 1 });
       const ctl = new ShadowController({ model, sink, config, now: () => Date.now() });
       const out = await ctl.observe({ caseKey: `${j.candidate_id}:${j.evidence_hash}`, input, legacy: legacySummaryFromDraft(cand.draft), legacySource: "collector_extraction" });
       const rec = out.record ?? sink.last;
