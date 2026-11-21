@@ -53,6 +53,20 @@ export interface RelatedOpportunity {
   humanConfirmed?: Record<string, string>;
 }
 
+/**
+ * この判断の対象となる案件**自身**の既存の登録内容（Stage 10H）。別の抽選（related）ではない。識別子・保護情報・世帯情報を含めない。
+ * 目的: 「対象自身の登録と同じか」という自己照合の疑問を生ませず、原文と登録内容の**値の食い違い**だけを見られるようにする。
+ */
+export interface CurrentCase {
+  chain: string | null;
+  store: string | null;
+  products: string[];
+  applyStart: string | null;
+  applyDeadline: string | null;
+  resultDate: string | null;
+  storeMode: "fixed" | "select_on_apply" | "none" | null;
+}
+
 export interface MasterCandidate {
   kind: "chain" | "store" | "product";
   /** マスターの正式名 */
@@ -87,6 +101,8 @@ export interface JudgmentInput {
   now: string;
   evidence: EvidenceItem[];
   related: RelatedOpportunity[];
+  /** 対象案件自身の既存の登録内容（あれば）。related とは別物 */
+  currentCase?: CurrentCase;
   masters: MasterCandidate[];
   /** 人の修正を先頭に、新しい順（過去のAI判断は正解ではない。参考） */
   priorJudgments: PriorJudgment[];

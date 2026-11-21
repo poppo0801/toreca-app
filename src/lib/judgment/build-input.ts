@@ -8,7 +8,7 @@
 import { classifyEvidence } from "@/lib/case-model/evidence-status";
 import { redact } from "@/lib/case-model/redact";
 import type { StoredEvidence } from "@/lib/collector/evidence";
-import { CONTRACT_VERSION, type EvidenceItem, type EvidenceStatus, type FailureRecord, type JudgmentInput, type MasterCandidate, type PriorJudgment, type RelatedOpportunity } from "./contract";
+import { CONTRACT_VERSION, type CurrentCase, type EvidenceItem, type EvidenceStatus, type FailureRecord, type JudgmentInput, type MasterCandidate, type PriorJudgment, type RelatedOpportunity } from "./contract";
 
 export const MAX_EVIDENCE_TEXT = 3500;
 export const MAX_RELATED = 8;
@@ -39,6 +39,8 @@ export interface BuildInputArgs {
   now: Date;
   evidence: EvidenceSeed[];
   related: RelatedOpportunity[];
+  /** 対象案件自身の既存の登録内容（別の抽選として渡さない） */
+  currentCase?: CurrentCase;
   masters: MasterCandidate[];
   failures: FailureRecord[];
   regionPrefectures: string[];
@@ -83,6 +85,7 @@ export async function buildJudgmentInput(a: BuildInputArgs): Promise<JudgmentInp
     now: a.now.toISOString(),
     evidence,
     related,
+    ...(a.currentCase ? { currentCase: { ...a.currentCase, products: a.currentCase.products.slice(0, 10) } } : {}),
     masters: a.masters.slice(0, 20),
     priorJudgments: arrangePriorJudgments(prior),
     failures: a.failures.slice(0, 20),
