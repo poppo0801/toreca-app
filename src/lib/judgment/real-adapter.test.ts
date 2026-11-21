@@ -232,3 +232,15 @@ describe("評価の実行部（台本のモデルで経路を検証。実AIで�
     expect(e.maxTotalJpy).toBeLessThan(CANDIDATE_CAP_TOTAL_JPY);
   });
 });
+
+describe("shapeOf（形式エラー分析用の構造記録）", () => {
+  it("項目名と型だけを返し、値（原文・秘密）を含めない", async () => {
+    const { shapeOf } = await import("./anthropic-model");
+    const sh = shapeOf({ opportunities: [{ key: "O1", products: ["秘密の商品名"], applyDeadline: { value: "2099-01-01", basis: "fact", citations: [] } }], note: null });
+    const text = JSON.stringify(sh);
+    expect(text).not.toContain("秘密の商品名");
+    expect(text).not.toContain("2099-01-01");
+    expect(text).toContain('"products":{"array":1,"items":["string"]}');
+    expect(text).toContain('"basis":"string"');
+  });
+});

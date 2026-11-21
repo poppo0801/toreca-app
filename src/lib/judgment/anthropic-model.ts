@@ -40,6 +40,16 @@ export interface UsageRecord {
   stopReason: string | null;
   ok: boolean;
   note?: string;
+  /** 提出された出力の構造だけ（項目名と型。値・原文は含めない）。形式エラーの原因分析用（Stage 10E r4） */
+  shape?: unknown;
+}
+
+/** 値を含めず、項目名と型だけの構造（深さ・件数に上限）。配列は件数と、各要素の型の集約（先頭3件まで） */
+export function shapeOf(v: unknown, depth = 0): unknown {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return depth >= 5 ? "array" : { array: v.length, items: v.slice(0, 3).map((x) => shapeOf(x, depth + 1)) };
+  if (typeof v === "object") return depth >= 5 ? "object" : Object.fromEntries(Object.entries(v as Record<string, unknown>).slice(0, 40).map(([k, x]) => [k.slice(0, 40), shapeOf(x, depth + 1)]));
+  return typeof v;
 }
 
 export interface AnthropicJudgmentOptions {
@@ -129,6 +139,7 @@ export class AnthropicJudgmentModel implements JudgmentModel {
     const rec: UsageRecord = { kind, model: this.model, promptVersion: this.promptVersion, inputTokens: inT, outputTokens: outT, costJpy, latencyMs: this.now() - t0, stopReason: res.stop_reason ?? null, ok: !!use && res.stop_reason !== "max_tokens" };
     if (!use) rec.note = "no_tool_call";
     else if (res.stop_reason === "max_tokens") rec.note = "truncated";
+    if (use) rec.shape = shapeOf(use.input);
     this.usageLog.push(rec);
     // 提出が無い・出力が上限で途切れた: 費用は発生しているので、費用つきで「不正な出力」を返す（形式エラー→エンジンが理由を返して再判断）
     if (!use) return { raw: { error: "no_tool_call", stopReason: res.stop_reason ?? null }, costJpy };
