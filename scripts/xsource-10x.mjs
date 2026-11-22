@@ -30,6 +30,12 @@ if (!(total > 0) || !(per > 0)) {
   console.error("承認された総額と1件あたりの上限（円）を明示してください（既定値はありません）");
   process.exit(2);
 }
+// 1件の上限は、調査1回＋判断1回の予約（各¥0.6＝¥1.2）より大きくないと、調査が一度も始まらない（Stage 10X 再試験で発生）。B2は検索の予約（¥3）も必要
+const MIN_PER_CASE = target === "B2" ? 4.5 : 1.5;
+if (per < MIN_PER_CASE) {
+  console.error(`1件あたりの上限が小さすぎます（${target} は ${MIN_PER_CASE} 円以上。予約額より小さいと調査が始まりません）`);
+  process.exit(2);
+}
 if (confirm !== `APPROVE ${target} ${total}JPY`) {
   console.error(`確認文が一致しません（期待: "APPROVE ${target} ${total}JPY"）。承認された金額で、実行のたびに指定してください`);
   process.exit(2);
