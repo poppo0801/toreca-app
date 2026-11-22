@@ -124,9 +124,28 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   expect(nums).toEqual([...nums].sort((x, y) => x - y)); // 価格の安い順
   await page.waitForTimeout(500);
   await page.screenshot({ path: "test-results/ui-audit-market-list-price-sort-390.png" });
-  await page.getByTestId("market-sort").click();
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("価格の安い順 ↑"); // 見出しの右に現在の並び順
+  const order = async () => (await page.getByTestId("market-card-name-text").allTextContents()).map((t) => t.trim());
+  await page.getByTestId("market-sort").click(); // 状態優先
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("状態優先 ↑");
+  await page.getByTestId("market-sort").click(); // 五十音順（ポケモンの読み仮名。ex に影響されない。ポケモンでないカードは末尾）
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("五十音順 ↑");
+  expect(await order()).toEqual(["オドリドリex", "ピカチュウ", "ブルンゲルex", "ミロカロス", "リザードンex", "ハイパーボール"]);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: "test-results/ui-audit-market-list-kana-390.png" });
+  await page.getByTestId("market-sort").click(); // 図鑑No順（全国図鑑番号の昇順）
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("図鑑No順 ↑");
+  expect(await order()).toEqual(["リザードンex", "ピカチュウ", "ミロカロス", "ブルンゲルex", "オドリドリex", "ハイパーボール"]); // 6, 25, 350, 593, 741, なし
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: "test-results/ui-audit-market-list-dex-390.png" });
+  // カード番号（細い枠）と図鑑No（画像の元）は別: ピカチュウの行
+  const pika = page.getByTestId("market-card").filter({ hasText: "ピカチュウ" });
+  await expect(pika.getByTestId("row-number")).toHaveText("025/165");
+  await expect(pika.getByTestId("market-card-summary")).toHaveAttribute("data-dex", "25");
+  await expect(pika).not.toContainText("件");
   await page.getByTestId("market-sort").click(); // 新着順へ戻す
   await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "new");
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("新着順 ↓");
   await page.getByTestId("market-show-bought").click();
   await expect(page.getByTestId("market-show-bought")).toHaveAttribute("aria-pressed", "true");
   await page.getByTestId("market-show-bought").click();

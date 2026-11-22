@@ -315,9 +315,11 @@ export function matchCard<T extends CardIdentity>(existing: readonly T[], input:
 // 相場調査メモ: カード一覧の並び替え（カード詳細内の価格記録の並び替え＝sortPrices とは別の機能）
 // ---------------------------------------------------------------------------------------------
 /** new=登録の新しい順（既定）／price=最安価格の安い順／condition=最安価格の記録の状態が良い順（A+→C。同ランクは安値順）。価格の記録が無いカードは最後 */
-export type MarketSort = "new" | "price" | "condition";
-export const MARKET_SORT_LABEL: Record<MarketSort, string> = { new: "新着順", price: "価格の安い順", condition: "状態優先" };
-export const MARKET_SORT_ORDER: MarketSort[] = ["new", "price", "condition"];
+export type MarketSort = "new" | "price" | "condition" | "kana" | "dex";
+export const MARKET_SORT_LABEL: Record<MarketSort, string> = { new: "新着順", price: "価格の安い順", condition: "状態優先", kana: "五十音順", dex: "図鑑No順" };
+export const MARKET_SORT_ORDER: MarketSort[] = ["new", "price", "condition", "kana", "dex"];
+/** 見出しの右に出す現在の並び順（向き付き。↑=昇順・安い順・良い順／↓=新しい順） */
+export const marketSortHeading = (m: MarketSort): string => `${MARKET_SORT_LABEL[m]} ${m === "new" ? "↓" : "↑"}`;
 
 /** カードの「最安価格の記録」: 30日以内の記録のうち最も安いもの（同額は状態の良い方）。無ければ null（参考価格のみ・記録なし） */
 export function cheapestRecord<T extends PriceLike>(prices: readonly T[], today: string): T | null {
@@ -325,10 +327,26 @@ export function cheapestRecord<T extends PriceLike>(prices: readonly T[], today:
   return sortPrices(prices.filter((p) => ids.has(p.id)), "price")[0] ?? null;
 }
 
-export function sortMarketCards<C extends { id: string; createdAt: string }>(cards: readonly C[], prices: readonly (PriceLike & { cardId: string })[], mode: MarketSort, today: string): C[] {
+/** カード名から特定したポケモン（全国図鑑番号・読み仮名）。特定できないカード（トレーナーズ・複数のポケモン・曖昧）は null */
+export type DexOf<C> = (card: C) => { no: number; reading: string } | null;
+const READING = new Intl.Collator("ja");
+
+export function sortMarketCards<C extends { id: string; createdAt: string; name?: string; setName?: string; cardNumber?: string }>(cards: readonly C[], prices: readonly (PriceLike & { cardId: string })[], mode: MarketSort, today: string, dexOf?: DexOf<C>): C[] {
   const best = new Map<string, PriceLike | null>();
   for (const c of cards) best.set(c.id, cheapestRecord(prices.filter((p) => p.cardId === c.id), today));
   const byNew = (a: C, b: C) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+  if (mode === "kana" || mode === "dex") {
+    // 五十音順=ポケモンの読み仮名／図鑑No順=全国図鑑番号の昇順。特定できないカードは末尾（新着順）。同じポケモンの複数カードは、カード名→セット→カード番号→ID で安定して並べる
+    const d = new Map(cards.map((c) => [c.id, dexOf ? dexOf(c) : null]));
+    const stable = (a: C, b: C) => (a.name ?? "").localeCompare(b.name ?? "", "ja") || (a.setName ?? "").localeCompare(b.setName ?? "", "ja") || (a.cardNumber ?? "").localeCompare(b.cardNumber ?? "", "ja", { numeric: true }) || a.id.localeCompare(b.id);
+    return [...cards].sort((a, b) => {
+      const x = d.get(a.id);
+      const y = d.get(b.id);
+      if (!x || !y) return x ? -1 : y ? 1 : byNew(a, b);
+      const k = mode === "kana" ? READING.compare(x.reading, y.reading) || x.no - y.no : x.no - y.no;
+      return k || stable(a, b);
+    });
+  }
   return [...cards].sort((a, b) => {
     if (mode === "new") return byNew(a, b);
     const x = best.get(a.id);

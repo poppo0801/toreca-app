@@ -11,7 +11,7 @@ import { addPricesSequentially, jstToday, PriceForm, usePriceCandidates } from "
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { matchPokemonByCardName } from "@/lib/zukan/pokemon-match";
+import { matchPokemonByCardName, pokemonMaster } from "@/lib/zukan/pokemon-match";
 import type { MarketCard } from "@/lib/zukan/rows";
 import { cheapestRecord, completeSetFromNumber, DEFAULT_RARITY, MARKET_SORT_LABEL, MARKET_SORT_ORDER, numberOptions, setOptions, sortMarketCards, type KnownCard, type MarketSort, type PriceInput } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
@@ -345,18 +345,28 @@ function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; 
   const top = cheapestRecord(prices, today);
   const swipe = useSwipeLeft(onAddPrice);
   const dex = matchPokemonByCardName(card.name);
-  const meta = cardLabel(card) || "セット・番号は未入力";
   return (
     <li data-testid="market-card" {...swipe}>
       <button type="button" onClick={onOpen} className="flex w-full items-center gap-2 rounded-xl border bg-card px-2 py-1.5 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
         {dex && <DexImage no={dex.no} name={dex.name} className="size-9" />}
-        <span className="min-w-0 flex-1" data-testid="market-card-summary">
-          <span className="flex flex-wrap items-baseline gap-x-1.5">
-            <span className="text-sm font-bold" data-testid="market-card-name-text">
+        <span className="min-w-0 flex-1" data-testid="market-card-summary" data-dex={dex?.no ?? ""}>
+          <span className="flex items-baseline gap-x-1.5">
+            <span className="shrink-0 text-sm font-bold" data-testid="market-card-name-text">
               {card.name}
             </span>
-            <span className="text-[11px] text-muted-foreground" data-testid="market-card-meta">
-              {meta}
+            {/* 表示順: カード名 → レアリティ（太字）→ 収録セット → カード番号（細い線の角丸四角・細い文字）。区切りの「・」は使わない。図鑑No（画像の元）とカード番号は別の情報 */}
+            <span className="contents" data-testid="market-card-meta">
+              {card.rarity && (
+                <b className="shrink-0 text-[11px] font-bold text-foreground" data-testid="row-rarity">
+                  {card.rarity}
+                </b>
+              )}
+              {card.setName && <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={card.setName} data-testid="row-set">{card.setName}</span>}
+              {card.cardNumber && (
+                <span className="shrink-0 rounded-md border border-muted-foreground/40 px-1 text-[10px] font-light leading-4 tabular-nums" data-testid="row-number">
+                  {card.cardNumber}
+                </span>
+              )}
             </span>
             {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
           </span>
@@ -364,7 +374,7 @@ function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; 
             <span className="mt-0.5 flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="market-card-store">
               {top ? <RankBadge rank={top.condition} className="mt-px" /> : null}
               <span className="min-w-0 break-words">
-                {top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}・${prices.length}件` : `30日を超えた記録のみ・${prices.length}件`}
+                {top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}` : "30日を超えた記録のみ"}
               </span>
             </span>
           )}
@@ -382,7 +392,7 @@ function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; 
 }
 
 /** 相場調査メモ（Stage Collection-1）。ポケモンカード全般の店舗価格の記録・比較。現在のプロフィール単位。151図鑑の価格調査とは別の記録 */
-export function MarketMemoView() {
+export function MarketMemoView({ onSortChange }: { onSortChange?: (m: MarketSort) => void } = {}) {
   const { profile, now } = useApp();
   const profileId = profile.id;
   const today = jstToday(now);
@@ -414,7 +424,11 @@ export function MarketMemoView() {
     const boughtCards = new Set(data.purchases.map((b) => b.cardId));
     const k = q.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
     const shown = data.cards.filter((c) => (showBought || !boughtCards.has(c.id)) && (!k || `${c.name}${c.setName}${c.cardNumber}${c.rarity}`.normalize("NFKC").replace(/\s+/g, "").toLowerCase().includes(k)));
-    return sortMarketCards(shown, data.prices, sort, today);
+    return sortMarketCards(shown, data.prices, sort, today, (c) => {
+      const p = matchPokemonByCardName(c.name);
+      const mst = p ? pokemonMaster(p.no) : null;
+      return mst ? { no: mst.no, reading: mst.reading } : null;
+    });
   }, [data, q, showBought, sort, today]);
   const hiddenBought = data ? data.cards.filter((c) => data.purchases.some((b) => b.cardId === c.id)).length : 0;
   const card = data?.cards.find((c) => c.id === (open ?? quick));
@@ -434,7 +448,11 @@ export function MarketMemoView() {
         <Button
           variant="outline"
           className="h-10 w-14 shrink-0 flex-col gap-0 px-1 text-[10px] leading-tight"
-          onClick={() => setSort((v) => MARKET_SORT_ORDER[(MARKET_SORT_ORDER.indexOf(v) + 1) % MARKET_SORT_ORDER.length])}
+          onClick={() => {
+            const next = MARKET_SORT_ORDER[(MARKET_SORT_ORDER.indexOf(sort) + 1) % MARKET_SORT_ORDER.length];
+            setSort(next);
+            onSortChange?.(next);
+          }}
           aria-label={`並び順: ${MARKET_SORT_LABEL[sort]}（押すと次の並び順）`}
           data-testid="market-sort"
           data-sort={sort}
