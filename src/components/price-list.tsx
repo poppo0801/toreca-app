@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { RankBadge } from "@/components/rank-badge";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cheapestIds, isReferencePrice, sortPrices, storeHistory, type PriceSort } from "@/lib/zukan/zukan";
 
@@ -72,8 +73,8 @@ export function PriceList({ rows, today, boughtIds, onBuy, onEdit, onDelete }: {
                 aria-label={`${r.condition} ${r.chainName} ${r.storeName} ${r.surveyedOn} ${yen(r.priceYen)}の詳細を開く`}
                 className={cn("grid min-h-12 w-full grid-cols-[2.25rem_minmax(0,1fr)_auto_auto] items-center gap-x-2 rounded-lg border px-2 py-1 text-left", isBest && "border-l-4 border-l-success", ref && "opacity-70")}
               >
-                <span className="rounded border px-1 text-center text-xs font-bold" data-testid="price-rank-label">
-                  {r.condition}
+                <span data-testid="price-rank-label" className="flex justify-center">
+                  <RankBadge rank={r.condition} />
                 </span>
                 <span className="min-w-0 text-xs leading-tight" data-testid="price-store">
                   {r.chainName && <span className="block truncate text-[10px] text-muted-foreground">{r.chainName}</span>}
@@ -105,7 +106,7 @@ function PriceDetail({ row, rows, today, bought, best, onClose, onBuy, onEdit, o
       <SheetContent data-testid="price-detail" aria-describedby="price-detail-desc">
         <div className="px-4 pb-2">
           <SheetTitle className="flex flex-wrap items-baseline gap-x-2">
-            <span className="rounded border px-1.5 text-sm">{row.condition}</span>
+            <RankBadge rank={row.condition} className="h-5 text-xs" />
             <span className="tabular-nums">{yen(row.priceYen)}</span>
           </SheetTitle>
           <SheetDescription id="price-detail-desc" className="text-xs">

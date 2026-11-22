@@ -310,3 +310,31 @@ export function matchCard<T extends CardIdentity>(existing: readonly T[], input:
   if (sameName.length > 0) return { kind: "ambiguous", candidates: sameName };
   return { kind: "new" };
 }
+
+// ---------------------------------------------------------------------------------------------
+// 相場調査メモ: カード一覧の並び替え（カード詳細内の価格記録の並び替え＝sortPrices とは別の機能）
+// ---------------------------------------------------------------------------------------------
+/** new=登録の新しい順（既定）／price=最安価格の安い順／condition=最安価格の記録の状態が良い順（A+→C。同ランクは安値順）。価格の記録が無いカードは最後 */
+export type MarketSort = "new" | "price" | "condition";
+export const MARKET_SORT_LABEL: Record<MarketSort, string> = { new: "新着順", price: "価格の安い順", condition: "状態優先" };
+export const MARKET_SORT_ORDER: MarketSort[] = ["new", "price", "condition"];
+
+/** カードの「最安価格の記録」: 30日以内の記録のうち最も安いもの（同額は状態の良い方）。無ければ null（参考価格のみ・記録なし） */
+export function cheapestRecord<T extends PriceLike>(prices: readonly T[], today: string): T | null {
+  const ids = cheapestIds(prices, today);
+  return sortPrices(prices.filter((p) => ids.has(p.id)), "price")[0] ?? null;
+}
+
+export function sortMarketCards<C extends { id: string; createdAt: string }>(cards: readonly C[], prices: readonly (PriceLike & { cardId: string })[], mode: MarketSort, today: string): C[] {
+  const best = new Map<string, PriceLike | null>();
+  for (const c of cards) best.set(c.id, cheapestRecord(prices.filter((p) => p.cardId === c.id), today));
+  const byNew = (a: C, b: C) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+  return [...cards].sort((a, b) => {
+    if (mode === "new") return byNew(a, b);
+    const x = best.get(a.id);
+    const y = best.get(b.id);
+    if (!x || !y) return x ? -1 : y ? 1 : byNew(a, b); // 価格の記録が無いカードは最後
+    const d = mode === "price" ? x.priceYen - y.priceYen || rankOrder(x.condition) - rankOrder(y.condition) : rankOrder(x.condition) - rankOrder(y.condition) || x.priceYen - y.priceYen;
+    return d || byNew(a, b);
+  });
+}

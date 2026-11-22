@@ -83,7 +83,9 @@ test("購入記録: BOXは開封した時点で記録（購入単価の金額・
   const total = page.getByTestId("product-total-row").filter({ hasText: "7K正式名称BOX" });
   await expect(total.getByTestId("total-qty")).toHaveText("20パック");
   await page.screenshot({ path: "test-results/ui-audit-purchases-390.png" });
-  await expect(total.getByTestId("total-sub")).toHaveCount(0); // 補足ラベルは一覧に出さない（内訳は行をタップした詳細で確認）
+  await expect(total.getByTestId("total-sub")).toHaveText("1BOX ｜ 7,200円"); // 「総額」「開封」のラベルだけを省き、BOX数・金額は一覧に残す
+  await expect(total).not.toContainText("総額");
+  await expect(total).not.toContainText("開封");  // 詳細でも確認できる
   await total.click();
   await expect(page.getByTestId("detail-amount")).toHaveText("7,200円");
   await page.keyboard.press("Escape");

@@ -115,6 +115,21 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   await expect(img("ハイパーボール")).toHaveCount(0);
   await expect(page.getByTestId("market-card-store").filter({ hasText: "新宿西口本店（ポケモンカード専門館）" })).toHaveCount(1);
   await expect(page.getByTestId("market-export")).toHaveCount(0);
+  await expect(page.getByTestId("market-card-plus")).toHaveCount(0); // 行の「＋」は無い
+  // 並び替え・購入済み切替の操作
+  await page.getByTestId("market-sort").click();
+  await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "price");
+  const prices = await page.getByTestId("market-card-best").allTextContents();
+  const nums = prices.map((t) => Number(t.replace(/[^d]/g, "")));
+  expect(nums).toEqual([...nums].sort((x, y) => x - y)); // 価格の安い順
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: "test-results/ui-audit-market-list-price-sort-390.png" });
+  await page.getByTestId("market-sort").click();
+  await page.getByTestId("market-sort").click(); // 新着順へ戻す
+  await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "new");
+  await page.getByTestId("market-show-bought").click();
+  await expect(page.getByTestId("market-show-bought")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("market-show-bought").click();
   // 画像が実際に読み込まれ、表示されている（HTTP応答・ピクセルサイズ）
   const loaded = await page.getByTestId("market-card").filter({ hasText: "ミロカロス" }).getByTestId("dex-image").evaluate((el: HTMLImageElement) => ({ ok: el.complete && el.naturalWidth > 0, w: el.naturalWidth, src: el.getAttribute("src") }));
   expect(loaded.ok).toBe(true);

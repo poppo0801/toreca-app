@@ -85,7 +85,10 @@ describe("Stage 7K: 購入記録ページ（開封とシングルカード）", 
     await toAll();
     const row = (name: string) => qa("product-total-row").find((r) => r.querySelector('[data-testid="total-name"]')!.textContent === name)!;
     expect(row("30th CELEBRATION").querySelector('[data-testid="total-qty"]')!.textContent).toBe("20パック");
-    expect(row("30th CELEBRATION").querySelector('[data-testid="total-sub"]')).toBeNull(); // 補足ラベルは一覧に出さない
+    // 説明ラベル（「総額」「開封」）だけを省き、数値（BOX数・金額）は一覧に残す
+    expect(row("30th CELEBRATION").querySelector('[data-testid="total-sub"]')!.textContent).toBe("1BOX ｜ 7,200円");
+    expect(row("30th CELEBRATION").textContent).not.toMatch(/総額|開封/);
+    expect(row("単品パック商品").querySelector('[data-testid="total-sub"]')!.textContent).toMatch(/^2パック ｜ \d[\d,]*円$/);
     // 金額・開封の内訳は、行をタップした詳細で確認できる
     await click(row("30th CELEBRATION"));
     expect(q("detail-amount")!.textContent).toBe("7,200円");

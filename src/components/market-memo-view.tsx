@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Plus, Search } from "lucide-react";
+import { ArrowUpDown, Loader2, Plus, Search, ShoppingBag } from "lucide-react";
+import { RankBadge } from "@/components/rank-badge";
 import { addMarketPriceAction, buyMarketFromPriceAction, createMarketCardAction, deleteMarketCardAction, deleteMarketPriceAction, loadMarketAction, updateMarketCardAction, updateMarketPriceAction, type MarketData } from "@/app/(app)/market-memo/actions";
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -12,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { matchPokemonByCardName } from "@/lib/zukan/pokemon-match";
 import type { MarketCard } from "@/lib/zukan/rows";
-import { cheapestIds, completeSetFromNumber, DEFAULT_RARITY, numberOptions, setOptions, sortPrices, type KnownCard, type PriceInput } from "@/lib/zukan/zukan";
+import { cheapestRecord, completeSetFromNumber, DEFAULT_RARITY, MARKET_SORT_LABEL, MARKET_SORT_ORDER, numberOptions, setOptions, sortMarketCards, type KnownCard, type MarketSort, type PriceInput } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
 
 const yen = (v: number) => `${v.toLocaleString("ja-JP")}円`;
@@ -332,49 +333,50 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose }: { ca
 }
 
 /**
- * カード一覧の1行（相場調査メモ）。情報設計（390px幅）:
- *   1行目: カード名（左）…最安価格（右端）／2行目: 収録セット・番号・レア／3行目: 最安の「系列 店舗・状態・記録件数」（長い店名は**省略せず最大2行**で折り返す）
- *   画像: カード名から全ポケモン（全国図鑑No.1〜）を特定できたときだけ左に表示（常に通常の不透明度）。特定できない・曖昧なときは画像なし。
- *   操作は右の「＋」のみ（購入・編集・削除などはカード詳細）。
+ * カード一覧の1行（相場調査メモ）。画像・テキスト・価格を**横方向**に並べ、縦方向の中央で揃える（高さを抑える）:
+ *   [左] ポケモン画像（カード名から特定できたときだけ。常に不透明）
+ *   [中央] 1行目: カード名（太字）＋セット・番号・レア（小さめ）／ 2行目: 状態バッジ（四角い色分け）＋最安価格の系列 店舗＋記録件数（長い店名は省略せず必要最小限だけ折り返す）
+ *   [右] 最安価格（大きく・右端揃え・折り返さない）
+ *   カード全体のタップで詳細を開く。価格の追加は詳細から（および左スワイプ）。行に「＋」ボタンは置かない。
  */
 function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; data: MarketData; today: string; onOpen: () => void; onAddPrice: () => void }) {
   const prices = data.prices.filter((p) => p.cardId === card.id);
   const purchased = data.purchases.some((b) => b.cardId === card.id);
-  const best = cheapestIds(prices, today);
-  const top = sortPrices(prices.filter((p) => best.has(p.id)), "price")[0];
+  const top = cheapestRecord(prices, today);
   const swipe = useSwipeLeft(onAddPrice);
   const dex = matchPokemonByCardName(card.name);
+  const meta = cardLabel(card) || "セット・番号は未入力";
   return (
-    <li className="flex items-start gap-1.5 rounded-xl border bg-card py-1.5 pl-2 pr-1.5" data-testid="market-card" {...swipe}>
-      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-2 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
-        {dex && <DexImage no={dex.no} name={dex.name} className="mt-0.5 size-9" />}
+    <li data-testid="market-card" {...swipe}>
+      <button type="button" onClick={onOpen} className="flex w-full items-center gap-2 rounded-xl border bg-card px-2 py-1.5 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
+        {dex && <DexImage no={dex.no} name={dex.name} className="size-9" />}
         <span className="min-w-0 flex-1" data-testid="market-card-summary">
-          <span className="flex items-baseline justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-sm font-bold" data-testid="market-card-name-text">
-                {card.name}
-              </span>
-              {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className="text-sm font-bold" data-testid="market-card-name-text">
+              {card.name}
             </span>
-            {top ? (
-              <b className="shrink-0 whitespace-nowrap text-sm tabular-nums text-success" data-testid="market-card-best">
-                {yen(top.priceYen)}
-              </b>
-            ) : (
-              <span className="shrink-0 text-[11px] text-muted-foreground">{prices.length > 0 ? "参考のみ" : "価格なし"}</span>
-            )}
+            <span className="text-[11px] text-muted-foreground" data-testid="market-card-meta">
+              {meta}
+            </span>
+            {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
           </span>
-          <span className="block truncate text-[11px] text-muted-foreground">{cardLabel(card) || "セット・番号は未入力"}</span>
-          {(top || prices.length > 0) && (
-            <span className="line-clamp-2 break-words text-[11px] leading-snug text-muted-foreground" data-testid="market-card-store">
-              {top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}・${top.condition}・${prices.length}件` : `30日を超えた記録のみ・${prices.length}件`}
+          {prices.length > 0 && (
+            <span className="mt-0.5 flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="market-card-store">
+              {top ? <RankBadge rank={top.condition} className="mt-px" /> : null}
+              <span className="min-w-0 break-words">
+                {top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}・${prices.length}件` : `30日を超えた記録のみ・${prices.length}件`}
+              </span>
             </span>
           )}
         </span>
+        {top ? (
+          <b className="shrink-0 whitespace-nowrap text-right text-lg font-bold tabular-nums text-success" data-testid="market-card-best">
+            {yen(top.priceYen)}
+          </b>
+        ) : (
+          <span className="shrink-0 text-right text-xs text-muted-foreground">{prices.length > 0 ? "参考のみ" : "価格なし"}</span>
+        )}
       </button>
-      <Button variant="outline" size="icon" className="size-10 shrink-0" onClick={onAddPrice} aria-label={`${card.name}に価格を記録`} data-testid="market-card-plus">
-        <Plus className="size-5" aria-hidden="true" />
-      </Button>
     </li>
   );
 }
@@ -388,6 +390,7 @@ export function MarketMemoView() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [showBought, setShowBought] = useState(false);
+  const [sort, setSort] = useState<MarketSort>("new");
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [quick, setQuick] = useState<string | null>(null);
@@ -410,8 +413,9 @@ export function MarketMemoView() {
     if (!data) return [];
     const boughtCards = new Set(data.purchases.map((b) => b.cardId));
     const k = q.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-    return data.cards.filter((c) => (showBought || !boughtCards.has(c.id)) && (!k || `${c.name}${c.setName}${c.cardNumber}${c.rarity}`.normalize("NFKC").replace(/\s+/g, "").toLowerCase().includes(k)));
-  }, [data, q, showBought]);
+    const shown = data.cards.filter((c) => (showBought || !boughtCards.has(c.id)) && (!k || `${c.name}${c.setName}${c.cardNumber}${c.rarity}`.normalize("NFKC").replace(/\s+/g, "").toLowerCase().includes(k)));
+    return sortMarketCards(shown, data.prices, sort, today);
+  }, [data, q, showBought, sort, today]);
   const hiddenBought = data ? data.cards.filter((c) => data.purchases.some((b) => b.cardId === c.id)).length : 0;
   const card = data?.cards.find((c) => c.id === (open ?? quick));
   if (error && !data)
@@ -427,16 +431,33 @@ export function MarketMemoView() {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="カード名・セット・番号" aria-label="カードを検索" className="h-10 w-full rounded-md border bg-input pl-8 pr-2 text-sm" data-testid="market-search" />
         </div>
+        <Button
+          variant="outline"
+          className="h-10 w-14 shrink-0 flex-col gap-0 px-1 text-[10px] leading-tight"
+          onClick={() => setSort((v) => MARKET_SORT_ORDER[(MARKET_SORT_ORDER.indexOf(v) + 1) % MARKET_SORT_ORDER.length])}
+          aria-label={`並び順: ${MARKET_SORT_LABEL[sort]}（押すと次の並び順）`}
+          data-testid="market-sort"
+          data-sort={sort}
+        >
+          <ArrowUpDown className="size-3.5" aria-hidden="true" />
+          <span className="max-w-full truncate">{MARKET_SORT_LABEL[sort]}</span>
+        </Button>
+        <Button
+          variant={showBought ? "default" : "outline"}
+          size="icon"
+          className="relative size-10 shrink-0"
+          onClick={() => setShowBought((v) => !v)}
+          aria-pressed={showBought}
+          aria-label={showBought ? "購入済みのカードを表示中（押すと非表示）" : "購入済みのカードを非表示中（押すと表示）"}
+          data-testid="market-show-bought"
+        >
+          <ShoppingBag className="size-4" aria-hidden="true" />
+          {hiddenBought > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-info px-1 text-[10px] font-bold leading-4 text-white">{hiddenBought}</span>}
+        </Button>
         <Button className="size-10 shrink-0 p-0" onClick={() => setAdding(true)} aria-label="カードと価格を記録" data-testid="market-add">
           <Plus className="size-5" aria-hidden="true" />
         </Button>
       </div>
-      {hiddenBought > 0 && (
-        <label className="flex min-h-8 items-center gap-1.5 text-xs text-muted-foreground">
-          <input type="checkbox" checked={showBought} onChange={(e) => setShowBought(e.target.checked)} className="size-4" data-testid="market-show-bought" />
-          購入済みのカードも表示（{hiddenBought}件）
-        </label>
-      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
