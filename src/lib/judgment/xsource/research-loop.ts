@@ -29,15 +29,26 @@ export interface ResearchLimits {
   /** AI1回あたりの費用の予約（円）。費用が不明でも、この額を計上する */
   agentReserveJpy: number;
   judgeReserveJpy: number;
+  /** 検索の回数の上限（検索が使えるときだけ。0なら検索しない） */
+  maxSearches: number;
+  /** 検索1回あたりの費用の予約（円。検索料金＋結果を読むトークンの概算。費用が不明でもこの額を計上する） */
+  searchReserveJpy: number;
 }
-export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = { maxTurns: 6, maxFetches: 6, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 3, judgeReserveJpy: 3 };
+export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = { maxTurns: 6, maxFetches: 6, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 3, judgeReserveJpy: 3, maxSearches: 2, searchReserveJpy: 3 };
 
 export type FetchFailure = "blocked" | "robots" | "not_public" | "login_required" | "failed" | "timeout";
 export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string } | { ok: false; reason: FetchFailure };
 /** AIが使えるツール（読み取り専用）。公開ページの取得だけ。SSRF・robots・レート制限・サイズ・時間は実装側（既存の安全な取得）が担う */
+export interface SearchHitLite {
+  title: string;
+  url: string;
+  snippet: string;
+}
 export interface ResearchTools {
   fetchPage(url: string): Promise<FetchOutcome>;
   now(): Date;
+  /** （任意・読み取り専用）公開Webの検索。結果は**候補のURLと抜粋（データ）**で、証拠ではない（取得してページ構造・対応の検査を通して初めて証拠になる）。無い環境では検索できない */
+  search?(query: string): Promise<{ ok: true; hits: SearchHitLite[]; costJpy: number | null } | { ok: false; reason: string }>;
 }
 
 export interface Evidence {
@@ -76,7 +87,7 @@ export interface AgentUnknown {
   /** 追加調査が必要／不要と考える理由（被害・重要性・見込み・締切・費用の観点）。機械的な点数ではない */
   rationale: string;
 }
-export type NextAction = { kind: "fetch"; url: string; why: string } | { kind: "stop"; reason: "sufficient" | "no_progress" | "unreachable" | "other"; why: string };
+export type NextAction = { kind: "fetch"; url: string; why: string } | { kind: "search"; query: string; why: string } | { kind: "stop"; reason: "sufficient" | "no_progress" | "unreachable" | "other"; why: string };
 export interface AgentView {
   id: string;
   kind: Evidence["kind"];
@@ -93,7 +104,11 @@ export interface AgentTurnInput {
   caseId: string;
   evidence: AgentView[];
   history: { url: string; outcome: string; progress: boolean }[];
-  remaining: { turns: number; fetches: number; costJpy: number; elapsedMs: number };
+  remaining: { turns: number; fetches: number; costJpy: number; elapsedMs: number; searches?: number };
+  /** これまでの検索の結果（候補のURL・抜粋。データであって証拠ではない） */
+  searchResults?: { query: string; title: string; url: string; snippet: string }[];
+  /** 検索が使えるか（使えないときに search を選んでも実行されない） */
+  searchAvailable?: boolean;
   /** 検証に失敗した理由（限定的な再評価のときだけ） */
   verificationIssues?: string[];
 }
@@ -158,6 +173,8 @@ export interface ResearchResult {
   history: FetchRecord[];
   trace: TraceStep[];
   budget: ReturnType<CallBudget["summary"]>;
+  /** 実行した検索と、その結果（候補のURL。証拠ではない）。発見評価（B2）で「検索で見つけたURLか」を確認するのに使う */
+  searches: { query: string; title: string; url: string; snippet: string }[];
 }
 export interface FieldProposal {
   field: string;
@@ -256,7 +273,10 @@ export async function runResearch(args: {
   let end: EndReason | null = null;
   let turn = 0;
   const elapsed = (): number => args.tools.now().getTime() - t0;
-  const remaining = (): AgentTurnInput["remaining"] => ({ turns: L.maxTurns - turn, fetches: L.maxFetches - fetches, costJpy: args.budget.remainingJpy, elapsedMs: L.maxElapsedMs - elapsed() });
+  const searchLog: { query: string; title: string; url: string; snippet: string }[] = [];
+  const queries = new Set<string>();
+  let searches = 0;
+  const remaining = (): AgentTurnInput["remaining"] => ({ turns: L.maxTurns - turn, fetches: L.maxFetches - fetches, costJpy: args.budget.remainingJpy, elapsedMs: L.maxElapsedMs - elapsed(), searches: Math.max(0, L.maxSearches - searches) });
 
   // 判断用の予算を先に確保して、調査で使い切らない
   while (end === null) {
@@ -268,12 +288,49 @@ export async function runResearch(args: {
     turn++;
     const s = args.budget.start("research_turn", L.agentReserveJpy);
     if (!s.ok) { end = s.reason === "calls" ? "limit_calls" : "limit_cost"; break; }
-    const out = await args.agent({ caseId: args.caseId, evidence: evidence.map(toAgentView), history: history.map((h) => ({ url: h.key, outcome: h.outcome, progress: h.progress })), remaining: remaining() });
+    let out: AgentTurnOutput | null = null;
+    try {
+      out = await args.agent({ caseId: args.caseId, evidence: evidence.map(toAgentView), history: history.map((h) => ({ url: h.key, outcome: h.outcome, progress: h.progress })), remaining: remaining(), searchResults: searchLog.slice(-12), searchAvailable: !!args.tools.search && L.maxSearches > 0 });
+    } catch {
+      out = null; // 呼び出しが例外で終わっても、予約額を計上して（0円にしない）予約を解放し、停止する
+    }
     s.finish(out?.costJpy ?? null);
     if (!out) { trace.push({ turn, kind: "agent", detail: "agent_failed" }); end = "agent_failed"; break; }
     lastTurn = out;
-    trace.push({ turn, kind: "agent", detail: out.next.kind === "stop" ? `stop:${out.next.reason}` : `fetch:${out.next.url}` });
+    trace.push({ turn, kind: "agent", detail: out.next.kind === "stop" ? `stop:${out.next.reason}` : out.next.kind === "search" ? "search" : `fetch:${out.next.url}` });
     if (out.next.kind === "stop") { end = out.next.reason === "sufficient" ? "sufficient" : out.next.reason === "unreachable" ? "unreachable" : out.next.reason === "no_progress" ? "no_progress" : "agent_stopped"; break; }
+
+    if (out.next.kind === "search") {
+      // 検索（読み取り専用・上限つき）。同じ検索語の再実行・上限超過・ツール無しは実行せず進展なしとして数える。検索語は個人情報を除いて渡す（redact は呼び出し側のツールが担う）
+      const q = out.next.query.trim().slice(0, 120);
+      if (!args.tools.search || searches >= L.maxSearches || !q || queries.has(norm(q))) {
+        trace.push({ turn, kind: "fetch", detail: !args.tools.search ? "search_unavailable" : searches >= L.maxSearches ? "search_limit" : "search_duplicate" });
+        noProgress++;
+      } else {
+        const ss = args.budget.start("search", L.searchReserveJpy);
+        if (!ss.ok) { end = ss.reason === "calls" ? "limit_calls" : "limit_cost"; break; }
+        searches++;
+        queries.add(norm(q));
+        let r: Awaited<ReturnType<NonNullable<ResearchTools["search"]>>> = { ok: false, reason: "failed" };
+        try {
+          r = await args.tools.search(q);
+        } catch {
+          r = { ok: false, reason: "failed" };
+        }
+        ss.finish(r.ok ? r.costJpy : null);
+        if (r.ok) {
+          for (const h of r.hits.slice(0, 8)) searchLog.push({ query: q, title: h.title.slice(0, 120), url: h.url.slice(0, 300), snippet: h.snippet.slice(0, 200) });
+          trace.push({ turn, kind: "fetch", detail: `search_ok:${r.hits.length}` });
+          if (r.hits.length) noProgress = 0;
+          else noProgress++;
+        } else {
+          trace.push({ turn, kind: "fetch", detail: `search_failed:${r.reason}` });
+          noProgress++;
+        }
+      }
+      if (noProgress >= L.maxNoProgressTurns) { end = "no_progress"; break; }
+      continue;
+    }
 
     const url = out.next.url;
     const cu = canonUrl(url);
@@ -322,7 +379,11 @@ export async function runResearch(args: {
   for (let rev = 0; rev <= L.maxRevisions; rev++) {
     const js = args.budget.start("registration_judge", L.judgeReserveJpy);
     if (!js.ok) { held = { reasons: [`budget_${js.reason}`] }; trace.push({ turn, kind: "judge", detail: `no_budget:${js.reason}` }); break; }
-    output = await args.judge({ caseId: args.caseId, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: issues });
+    try {
+      output = await args.judge({ caseId: args.caseId, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: issues });
+    } catch {
+      output = null; // 例外でも予約額を計上して解放し、実行不可として扱う
+    }
     js.finish(output?.costJpy ?? null);
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
@@ -335,7 +396,7 @@ export async function runResearch(args: {
   }
   const decision = output ? output.decision : "none";
   const monitoring: ResearchResult["monitoring"] = output ? { state: output.monitor.continue ? "active" : "ended", why: output.monitor.why, reopenOn: output.monitor.continue ? ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] : ["user_correction"] } : { state: "active", why: "登録判断が得られなかったため、監視は継続", reopenOn: ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] };
-  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary() };
+  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog };
 }
 
 // ------------------------------------------------------------------ 再開（調査終了後の必要な部分だけの再評価）

@@ -16,7 +16,7 @@ export const RESEARCH_SYSTEM = `あなたは、トレーディングカードの
 考え方:
 1. 渡された証拠（告知の原文、取得した公開ページの構造化した観察と抜粋）から、**観察した事実**（原文に根拠がある）、**推論**、**不明**を分けて書く。根拠には、証拠のIDと原文の引用（8文字以上）を付ける。
 2. 重要な不明点があるとき、追加で調べる価値があるかを自分で判断する。判断の観点は「誤った場合の被害（応募漏れ・重複登録・誤通知・地域の誤り）」「その不明点の重要性」「調べて分かる見込み」「締切までの時間」「費用」。点数の計算ではなく、理由を文章で書く。
-3. 調べるなら、次に取得する公開ページのURLを1つ選ぶ（元の告知に書かれたリンク、同じ販売元の関連告知など。固定の順序は無い）。親投稿のリンクを別店舗の応募先として流用しない。ページ自身の受付枠と「同じ販売元のイベント」は別の情報で、関連イベントの表示だけで応募可否を確定しない。
+3. 調べるなら、次に取得する公開ページのURLを1つ選ぶ（元の告知に書かれたリンク、同じ販売元の関連告知など。固定の順序は無い）。応募先のURLが与えられていないときは、検索が使える場合に限り、検索語を1つ選んで検索してよい（next.kind=search。検索結果は**候補のURLと抜粋＝データ**で、証拠ではない。候補を取得して、ページ構造と項目との対応を確認して初めて根拠になる。検索語に個人情報を入れない。使えないときは選ばない）。親投稿のリンクを別店舗の応募先として流用しない。ページ自身の受付枠と「同じ販売元のイベント」は別の情報で、関連イベントの表示だけで応募可否を確定しない。
 4. 十分な根拠がある、進展しない、取得できない、費用に見合わない、のいずれかなら、調査を終える（stop）。終えるときも理由を書く。
 5. 同じURLの再取得、転載ページの巡回、取得できなかったホストへの反復アクセスはしない（履歴を見る）。
 6. 反対の仮説があるときは counterHypotheses に書く。情報が無いことは否定の根拠ではない。
@@ -40,7 +40,7 @@ const TURN_SCHEMA = {
     inferred: { type: "array", maxItems: 8, items: CLAIM },
     unknown: { type: "array", maxItems: 6, items: { type: "object", properties: { what: { type: "string", maxLength: 160 }, importance: { type: "string", enum: ["low", "medium", "high"] }, harmIfWrong: { type: "array", maxItems: 4, items: { type: "string", maxLength: 60 } }, expectedInfoGain: { type: "string", enum: ["none", "low", "medium", "high"] }, rationale: { type: "string", maxLength: 300 } }, required: ["what", "importance", "harmIfWrong", "expectedInfoGain", "rationale"] } },
     counterHypotheses: { type: "array", maxItems: 4, items: { type: "string", maxLength: 200 } },
-    next: { type: "object", properties: { kind: { type: "string", enum: ["fetch", "stop"] }, url: { type: "string", maxLength: 500 }, reason: { type: "string", enum: ["sufficient", "no_progress", "unreachable", "other"] }, why: { type: "string", maxLength: 300 } }, required: ["kind", "why"] },
+    next: { type: "object", properties: { kind: { type: "string", enum: ["fetch", "search", "stop"] }, url: { type: "string", maxLength: 500 }, query: { type: "string", maxLength: 120 }, reason: { type: "string", enum: ["sufficient", "no_progress", "unreachable", "other"] }, why: { type: "string", maxLength: 300 } }, required: ["kind", "why"] },
   },
   required: ["observed", "unknown", "next"],
 };
@@ -62,7 +62,7 @@ const claims = (x: unknown): Claim[] => (Array.isArray(x) ? (x as Claim[]).filte
 export function renderTurnInput(i: AgentTurnInput): string {
   const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""} 取得:${e.fetchedAt}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}`).join("\n\n");
   const hist = i.history.map((h) => `- ${h.url}: ${h.outcome}${h.progress ? "（新しい情報あり）" : ""}`).join("\n") || "なし";
-  return redact([`案件ID: ${i.caseId}`, ev, `【取得の履歴】\n${hist}`, `【残り】ターン${i.remaining.turns}・取得${i.remaining.fetches}・費用${i.remaining.costJpy.toFixed(1)}円・時間${Math.round(i.remaining.elapsedMs / 1000)}秒`].join("\n\n"));
+  return redact([`案件ID: ${i.caseId}`, ev, `【取得の履歴】\n${hist}`, `【検索】${i.searchAvailable ? `使える（残り${i.remaining.searches ?? 0}回）` : "使えない"}${i.searchResults?.length ? "\n検索結果（候補。証拠ではない）:\n" + i.searchResults.map((r) => `- [${r.query}] ${r.title} ${r.url} ${r.snippet}`).join("\n") : ""}`, `【残り】ターン${i.remaining.turns}・取得${i.remaining.fetches}・費用${i.remaining.costJpy.toFixed(1)}円・時間${Math.round(i.remaining.elapsedMs / 1000)}秒`].join("\n\n"));
 }
 export function renderJudgeInput(i: JudgeInput): string {
   const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""}${e.scope ? ` scope:${e.scope.origin}/${e.scope.verdict}${e.scope.refutes.length ? "(" + e.scope.refutes.join(",") + ")" : ""}` : ""}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}`).join("\n\n");
@@ -90,9 +90,9 @@ export function makeAnthropicResearchAgent(client: ClientLike, opts: { model?: s
     }
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === TURN_TOOL);
-    const a = use?.input as { observed?: unknown; inferred?: unknown; unknown?: unknown; counterHypotheses?: unknown; next?: { kind?: string; url?: string; reason?: string; why?: string } } | undefined;
-    if (!a?.next || (a.next.kind !== "fetch" && a.next.kind !== "stop")) return null;
-    const next: AgentTurnOutput["next"] = a.next.kind === "fetch" && typeof a.next.url === "string" ? { kind: "fetch", url: a.next.url, why: asString(a.next.why, 300) } : { kind: "stop", reason: (["sufficient", "no_progress", "unreachable"].includes(String(a.next.reason)) ? a.next.reason : "other") as "sufficient" | "no_progress" | "unreachable" | "other", why: asString(a.next.why, 300) };
+    const a = use?.input as { observed?: unknown; inferred?: unknown; unknown?: unknown; counterHypotheses?: unknown; next?: { kind?: string; url?: string; query?: string; reason?: string; why?: string } } | undefined;
+    if (!a?.next || (a.next.kind !== "fetch" && a.next.kind !== "stop" && a.next.kind !== "search")) return null;
+    const next: AgentTurnOutput["next"] = a.next.kind === "search" && typeof a.next.query === "string" && a.next.query.trim() ? { kind: "search", query: asString(a.next.query, 120), why: asString(a.next.why, 300) } : a.next.kind === "fetch" && typeof a.next.url === "string" ? { kind: "fetch", url: a.next.url, why: asString(a.next.why, 300) } : { kind: "stop", reason: (["sufficient", "no_progress", "unreachable"].includes(String(a.next.reason)) ? a.next.reason : "other") as "sufficient" | "no_progress" | "unreachable" | "other", why: asString(a.next.why, 300) };
     const unknown = (Array.isArray(a.unknown) ? (a.unknown as AgentTurnOutput["unknown"]) : []).filter((u) => u && typeof u.what === "string").map((u) => ({ what: asString(u.what, 160), importance: (u.importance === "high" || u.importance === "medium" ? u.importance : "low") as "low" | "medium" | "high", harmIfWrong: Array.isArray(u.harmIfWrong) ? u.harmIfWrong.map((h) => asString(h, 60)) : [], expectedInfoGain: (["none", "low", "medium", "high"].includes(String(u.expectedInfoGain)) ? u.expectedInfoGain : "none") as AgentTurnOutput["unknown"][number]["expectedInfoGain"], rationale: asString(u.rationale, 300) }));
     return { observed: claims(a.observed), inferred: claims(a.inferred), unknown, counterHypotheses: (Array.isArray(a.counterHypotheses) ? (a.counterHypotheses as unknown[]) : []).map((s) => asString(s, 200)), next, costJpy: cost };
   };

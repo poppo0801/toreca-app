@@ -213,3 +213,64 @@ describe("再開の判断（調査終了後に必要な部分だけ。際限な�
     expect(planReopen({ trigger: "deadline_approaching", urls: ["https://example.test/b"], state: base, now: NOW })).toMatchObject({ allowed: true, refetch: ["https://example.test/b"] });
   });
 });
+
+describe("検索（読み取り専用・上限つき・候補はデータ）と、呼び出しの例外時の費用・予約", () => {
+  const searchTools = (hits: { title: string; url: string; snippet: string }[], cost: number | null = 2): ResearchTools & { log: string[]; queries: string[] } => {
+    const t = tools({ "https://shop.example/found": ok(lp("【店舗A】商品X 抽選")) }) as ResearchTools & { log: string[]; queries: string[] };
+    t.queries = [];
+    t.search = async (q) => (t.queries.push(q), { ok: true, hits, costJpy: cost });
+    return t;
+  };
+  it("AIが検索を選ぶと、結果（候補のURL・抜粋）が次のAI入力に渡る。候補は証拠ではなく、取得して初めて証拠になる。検索の費用は予算に計上される", async () => {
+    const t = searchTools([{ title: "店舗A 抽選", url: "https://shop.example/found", snippet: "応募受付" }]);
+    const inputs: unknown[] = [];
+    let n = 0;
+    const agent: ResearchAgent = async (i) => {
+      inputs.push(i);
+      n++;
+      return n === 1 ? turn({ kind: "search", query: "店舗A 拡張パック 抽選", why: "応募URLが無い" }) : n === 2 ? turn({ kind: "fetch", url: "https://shop.example/found", why: "候補を確認" }) : turn({ kind: "stop", reason: "sufficient", why: "" });
+    };
+    const r = await runResearch({ caseId: "c1", seed, agent, judge: judgeOf(), tools: t, budget: budget() });
+    expect(t.queries).toEqual(["店舗A 拡張パック 抽選"]);
+    expect((inputs[1] as { searchResults: { url: string }[] }).searchResults[0].url).toBe("https://shop.example/found");
+    expect((inputs[0] as { searchAvailable: boolean }).searchAvailable).toBe(true);
+    expect(r.evidence.filter((e) => e.kind === "page")).toHaveLength(1); // 検索結果そのものは証拠にならない（取得したページだけ）
+    expect(r.budget.byKind.search).toMatchObject({ calls: 1, costJpy: 2 });
+    expect(r.trace.map((x) => x.detail)).toContain("search_ok:1");
+    expect(r.trace.some((x) => x.detail.startsWith("ok:"))).toBe(true);
+  });
+  it("検索ツールが無い環境で search を選んでも実行されない（進展なし）。同じ検索語の再実行・上限超過も実行しない", async () => {
+    const none = tools({});
+    const r1 = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "search", query: "x", why: "" })]), judge: judgeOf(), tools: none, budget: budget(), limits: { maxNoProgressTurns: 2 } });
+    expect(r1.trace.some((s) => s.detail === "search_unavailable")).toBe(true);
+    expect(r1.investigation.reason).toBe("no_progress");
+    const t = searchTools([]);
+    const r2 = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "search", query: "同じ語", why: "" })]), judge: judgeOf(), tools: t, budget: budget(), limits: { maxSearches: 5, maxNoProgressTurns: 9, maxTurns: 4 } });
+    expect(t.queries).toEqual(["同じ語"]); // 同じ検索語は1回だけ
+    const t3 = searchTools([]);
+    let k = 0;
+    const r3 = await runResearch({ caseId: "c1", seed, agent: (async () => turn({ kind: "search", query: `語${k++}`, why: "" })) as ResearchAgent, judge: judgeOf(), tools: t3, budget: budget(), limits: { maxSearches: 2, maxNoProgressTurns: 9, maxTurns: 5 } });
+    expect(t3.queries).toHaveLength(2); // 回数の上限
+    expect(r3.trace.some((s) => s.detail === "search_limit")).toBe(true);
+    void r2;
+  });
+  it("検索の費用が不明（null）でも予約額で計上する。費用の上限に達したら検索せず終了する", async () => {
+    const t = searchTools([], null);
+    const b = new CallBudget({ maxCalls: 30, maxCostJpy: 100 });
+    const r = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "search", query: "語", why: "" }), turn({ kind: "stop", reason: "sufficient", why: "" })]), judge: judgeOf(), tools: t, budget: b });
+    expect(r.budget.byKind.search.costJpy).toBe(3); // searchReserveJpy
+    const tight = new CallBudget({ maxCalls: 30, maxCostJpy: 8 }); // agent3+judge3 を確保すると検索の3円は入らない
+    const r2 = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "search", query: "語", why: "" })]), judge: judgeOf(), tools: searchTools([]), budget: tight, limits: { maxNoProgressTurns: 9 } });
+    expect(r2.budget.costJpy).toBeLessThanOrEqual(8);
+    expect(["limit_cost", "limit_calls"]).toContain(r2.investigation.reason);
+    expect(r2.registration.decision).not.toBe("none"); // 判断用の予算は残っていた
+  });
+  it("AI・判断・検索の呼び出しが例外で終わっても、予約額を計上して解放し、停止して判断へ進む（予約が漏れない・0円にならない・ループしない）", async () => {
+    const b = new CallBudget({ maxCalls: 30, maxCostJpy: 100 });
+    const r = await runResearch({ caseId: "c1", seed, agent: (async () => { throw new Error("network"); }) as ResearchAgent, judge: (async () => { throw new Error("boom"); }) as RegistrationJudge, tools: tools({}), budget: b });
+    expect(r.investigation.reason).toBe("agent_failed");
+    expect(r.registration).toMatchObject({ decision: "none", verified: false, held: { reasons: ["judge_failed"] } });
+    expect(r.budget.costJpy).toBe(6); // agent 3 + judge 3（不明は予約額で計上）
+    expect(b.remainingJpy).toBe(94); // 予約が残っていない（解放済み）
+  });
+});

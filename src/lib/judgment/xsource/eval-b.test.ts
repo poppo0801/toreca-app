@@ -46,18 +46,35 @@ describe("B2（AI自律発見）: 応募URLを与えない。B1の成功とは�
     expect(buildB2Seed(plan)).not.toMatch(/https?:|t\.co|リンクの出所/);
     expect(plan.seedText).toContain("https://shop.example/a"); // 入力既知（A/B1）の種
   });
-  it("AIが応募先に到達・対応付けできた項目だけ success。別の店舗のページに着いた項目は wrongPage（成功にしない）", async () => {
-    const turn = (url: string | null): AgentTurnOutput => ({ observed: [], inferred: [], unknown: [], counterHypotheses: [], next: url ? { kind: "fetch", url, why: "" } : { kind: "stop", reason: "sufficient", why: "" }, costJpy: 1 });
-    const done = new Set<string>();
-    const agent: ResearchAgent = async (i) => {
-      const k = i.caseId;
-      if (done.has(k)) return turn(null);
-      done.add(k);
-      return turn(k.endsWith("#1") ? "https://shop.example/a" : "https://shop.example/a"); // 項目2（渋谷）でも新宿のページへ（誤り）
+  const turn = (next: AgentTurnOutput["next"]): AgentTurnOutput => ({ observed: [], inferred: [], unknown: [], counterHypotheses: [], next, costJpy: 1 });
+  const judge: RegistrationJudge = async () => ({ decision: "tentative", fields: {}, rationale: "", unresolvedImpact: "minor", monitor: { continue: true, why: "" }, costJpy: 1 }) as JudgeOutput;
+  const run = (agent: ResearchAgent, e: BExample) => evaluateB2({ examples: [e], agent, judge, budget: new CallBudget({ maxCalls: 80, maxCostJpy: 200 }), now: new Date("2026-11-22T00:00:00Z") });
+  /** 項目ごとに、まず検索語で検索し、次に結果の先頭を取得するエージェント（検索を使う場合） */
+  const searcher = (queryOf: (caseId: string) => string): ResearchAgent => {
+    const stage = new Map<string, number>();
+    return async (i) => {
+      const n = stage.get(i.caseId) ?? 0;
+      stage.set(i.caseId, n + 1);
+      if (n === 0) return turn({ kind: "search", query: queryOf(i.caseId), why: "応募先が与えられていない" });
+      if (n === 1 && i.searchResults?.length) return turn({ kind: "fetch", url: i.searchResults[0].url, why: "候補を確認" });
+      return turn({ kind: "stop", reason: "sufficient", why: "" });
     };
-    const judge: RegistrationJudge = async () => ({ decision: "tentative", fields: {}, rationale: "", unresolvedImpact: "minor", monitor: { continue: true, why: "" }, costJpy: 1 }) as JudgeOutput;
-    const r = await evaluateB2({ examples: [ex(undefined)], agent, judge, budget: new CallBudget({ maxCalls: 50, maxCostJpy: 100 }), now: new Date("2026-11-22T00:00:00Z") });
-    expect(r).toMatchObject({ items: 2, attempted: 2, reachedPage: 2, success: 1, wrongPage: 1, noGold: 0 });
+  };
+  it("検索で見つけたURLから gold の店舗のページに到達した項目だけ success。別の店舗のページに着いた項目は wrongPage（成功にしない）", async () => {
+    const e = ex(undefined);
+    e.searchIndex = [{ keywords: ["新宿本店"], hits: [{ title: "新宿本店 抽選", url: "https://shop.example/a", snippet: "" }] }, { keywords: ["渋谷西口店"], hits: [{ title: "渋谷 抽選", url: "https://shop.example/b", snippet: "" }] }]; // 渋谷の検索結果が実は新宿のページ
+    const r = await run(searcher((id) => (id.endsWith("#1") ? "新宿本店 拡張パック 抽選" : "渋谷西口店 拡張パック 抽選")), e);
+    expect(r).toMatchObject({ items: 2, attempted: 2, reachedPage: 2, success: 1, wrongPage: 1, reachedWithoutSearch: 0, noGold: 0 });
+  });
+  it("検索を使わず、AIが（知っている/推測した）URLを直接取得して正しいページに着いても、発見の成功とは数えない（URLを知っているだけで成功にしない）", async () => {
+    const direct: ResearchAgent = async (i) => (i.history.length ? turn({ kind: "stop", reason: "sufficient", why: "" }) : turn({ kind: "fetch", url: i.caseId.endsWith("#1") ? "https://shop.example/a" : "https://shop.example/c", why: "知っているURL" }));
+    const r = await run(direct, ex(undefined));
+    expect(r).toMatchObject({ success: 0, reachedWithoutSearch: 2, wrongPage: 0 });
+  });
+  it("検索ツールが無い評価（searchIndex も実検索も無い）では、検索を選んでも実行されず、発見は成功しない", async () => {
+    const r = await run(searcher(() => "x"), ex(undefined));
+    expect(r.success).toBe(0);
+    expect(r.reachedPage).toBe(0);
   });
 });
 
