@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import { CallBudget } from "../call-budget";
 import { canonUrl } from "./normalize";
-import { pageText } from "./html-text";
+import { pageTextChecked } from "./html-text";
 import { parseApplyPage, structureToObservations, type ApplyPageStructure } from "./page-structure";
 
 // ------------------------------------------------------------------ 型
@@ -65,6 +65,8 @@ export interface Evidence {
   independent: boolean;
   /** リンクの出所と、ページと項目の対応の検査結果（10S link-scope。無根拠の一括流用の防止）。X起点の接続で設定する。未設定=対応の検査なし */
   scope?: EvidenceScope;
+  /** 本文の取り出しで、構造として認識できた語（題名・受付枠・項目の値）が本文から欠けた（Stage 10Y）。あれば、このページを根拠にした観察は保留にする */
+  textLoss?: string[];
 }
 export interface EvidenceScope {
   /** 例: item_entity / parent_shared / parent_card / discovered */
@@ -198,16 +200,17 @@ export function seedEvidence(id: string, text: string, now: Date, url: string | 
 function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: true }>, now: Date): Evidence {
   const structure = parseApplyPage(o.html);
   // 本文は、取得側の粗いテキストではなくHTMLから作り直す（スクリプト・head・エンティティの除去）。AIの見る抜粋と、引用の検証が同じ本文になる
-  const cleaned = o.html ? pageText(o.html) : "";
-  const text = cleaned.length >= 20 ? cleaned : o.text;
-  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true };
+  const required = structure ? [structure.title ?? "", ...structure.slots.flatMap((s) => [s.title, ...s.details.map((d) => d.value)])] : [];
+  const checked = o.html ? pageTextChecked(o.html, required) : null;
+  const text = checked && checked.text.length >= 20 ? checked.text : o.text;
+  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
 }
 
 /** AIに渡す原文の抜粋の長さ（本文に整形したあと。実評価で、本文が見えず観察の要約を引用した失敗の是正） */
 export const EXCERPT_CHARS = 2500;
 
 export function toAgentView(e: Evidence): AgentView {
-  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: e.structure ? structureToObservations(e.structure) : [], excerpt: e.text.slice(0, EXCERPT_CHARS) };
+  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: [...(e.textLoss?.length ? ["【注意】本文の取り出しで、構造として認識できた語が本文から欠けている（本文だけでは確認できない項目がある）"] : []), ...(e.structure ? structureToObservations(e.structure) : [])], excerpt: e.text.slice(0, EXCERPT_CHARS) };
 }
 
 /** 同じ内容（転載・同一ページの別URL）は独立した裏付けと数えない */
@@ -268,6 +271,7 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
       if (!ev) issues.push(`evidence_missing:${name}`);
       else if (!f.quote || !norm(ev.text).includes(norm(f.quote)) || norm(f.quote).length < 3) issues.push(`quote_not_found:${name}`);
+      else if (ev.textLoss?.length) issues.push(`page_text_loss:${name}`); // 本文の取り出しで構造上の語が欠けたページを根拠にしない（保留。基準は緩めない）
       else if (ev.scope?.verdict === "mismatch") issues.push(`scope_mismatch:${name}`); // 別の店舗・商品・系列・開催回のページを根拠にしない
       else if (ev.scope?.verdict === "unknown" && ev.scope.origin.startsWith("parent")) issues.push(`shared_link_scope_unverified:${name}`); // 親投稿共通のリンクを、対応が確認されないまま根拠にしない
     }

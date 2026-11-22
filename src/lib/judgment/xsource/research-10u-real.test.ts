@@ -13,7 +13,9 @@ import { CallBudget, CaseBudget } from "../call-budget";
 import { summarizeFinal } from "./final-states";
 import { pageText } from "./html-text";
 import { parseApplyPage } from "./page-structure";
-import { checkJudgmentRealRun } from "../real-gate";
+import { CANDIDATE_CAP_PER_CASE_JPY, checkJudgmentRealRun } from "../real-gate";
+import { preflightRun } from "./cost-preflight";
+import { OUTPUT_MAX_TOKENS } from "./research-ai";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent } from "./research-ai";
 import { runResearch, seedEvidence, type ResearchTools } from "./research-loop";
 
@@ -24,6 +26,8 @@ describe.skipIf(env.JUDGMENT_10U_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "A"
   it("応募URL既知: 保存済みページの再生で、追加調査→終了→登録判断を通し、観測だけを書き出す", async () => {
     const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) });
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
+    const pf = preflightRun({ model: gate.model, totalJpy: gate.totalCapJpy, perCaseJpy: gate.perCaseCapJpy, cases: 12, limits: { maxTurns: 4, maxSearches: 0, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, searchReserveJpy: 3 }, maxInputTokens: 12_000, maxOutputTokens: OUTPUT_MAX_TOKENS, gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
+    if (!pf.ok) throw new Error(`実行しません（費用の事前検査）: ${pf.errors.join(", ")}`);
     const index = JSON.parse(readFileSync(`${DIR}/index.json`, "utf8")) as { n: number; url: string; ok: boolean }[];
     const pages = new Map(index.filter((x) => x.ok).map((x) => [x.url, readFileSync(`${DIR}/lp-${x.n}.html`, "utf8")]));
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
@@ -48,10 +52,10 @@ describe.skipIf(env.JUDGMENT_10U_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "A"
       const old = parseApplyPage(pages.get(x.url)!);
       const text = pageText(pages.get(x.url)!);
       const nf = (s: string) => s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
-      const fields = Object.entries(r.registration.output?.fields ?? {}).map(([k, f]) => ({ field: k, basis: f.basis, valueInText: f.value ? nf(text).includes(nf(f.value)) : null }));
+      const fields = Object.entries(r.registration.output?.fields ?? {}).map(([k, f]) => ({ field: k, basis: f.basis, value: f.value, quote: f.quote ? f.quote.slice(0, 160) : null, valueInText: f.value ? nf(text).includes(nf(f.value)) : null }));
       out.push({ id: `lp-${x.n}`, end: r.investigation.reason, turns: r.investigation.turns, decision: r.registration.decision, verified: r.registration.verified, held: r.registration.held?.reasons ?? null, monitoring: r.monitoring.state, fetches: r.history.map((h) => h.outcome), caseCostJpy: Math.round((budget.costJpy - before) * 10000) / 10000, trace: r.trace.map((t) => t.kind + ":" + t.detail.split("https://").join("(url)https://").split(/\(url\)https:\/\/\S+/).join("(url)")), quoteAudit: r.quoteAudit, fields, oldMethod: { slots: old?.slots.length ?? null, related: old?.relatedEvents.length ?? null } });
     }
-    writeFileSync("eval/real-data/xsource-10u-real.json", JSON.stringify({ condition: "A_url_known（応募URLを種に含める。発見力の評価ではない）", note: "観測のみ（人の正解が無いため精度ではない）", budget: budget.summary(), final: summarizeFinal(out as unknown as { id: string; decision: string; verified: boolean; held: string[] | null }[]), diagnostics, cases: out }, null, 1));
+    writeFileSync("eval/real-data/xsource-10u-real.json", JSON.stringify({ condition: "A_url_known（応募URLを種に含める。発見力の評価ではない）", note: "観測のみ（人の正解が無いため精度ではない）", budget: budget.summary(), preflight: pf, final: summarizeFinal(out as unknown as { id: string; decision: string; verified: boolean; held: string[] | null }[]), diagnostics, cases: out }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);

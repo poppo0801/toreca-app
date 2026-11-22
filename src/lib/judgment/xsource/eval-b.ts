@@ -90,7 +90,8 @@ export function buildB2Seed(plan: ItemPlan): string {
 export interface B2CaseRow {
   id: string;
   gold: boolean;
-  searches: { hitCount: number; hitHosts: string[] }[];
+  /** 検索ごとの結果。hits は後で無課金で再生するための資産（ローカル限定・Git管理外の出力にだけ書く。検索結果の題名とURL） */
+  searches: { query: string; hitCount: number; hitHosts: string[]; hits: { title: string; url: string }[] }[];
   fetched: { host: string; outcome: string }[];
   end: string;
   decision: string;
@@ -108,6 +109,8 @@ export interface B2CaseRow {
 export interface B2Result {
   /** 事例ごとの記録（失敗層の分類用） */
   rows?: B2CaseRow[];
+  /** 取得モード（保存HTMLの再生か、実ページの安全な取得か） */
+  fetchMode?: B2FetchMode;
   items: number;
   /** AIがページの取得を試みた */
   attempted: number;
@@ -125,15 +128,17 @@ export interface B2Result {
 }
 
 /** B2: 応募URLを与えず、AIが自律的に応募先へ到達・対応付けできるかを測る。gold のある項目だけ成功/失敗を数える */
-export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent; judge: RegistrationJudge; budget: CallBudget; limits?: Partial<ResearchLimits>; now: Date; /** 1件あたりの費用の上限（円）。指定すると、全体の上限とは別に1件ごとに止める */ perCaseCapJpy?: number; /** 事例の開始時（失敗の記録を事例に紐づける用） */ onCase?: (id: string) => void; /** 実際の検索ツール（承認後の実評価で注入）。無ければ例の searchIndex（mock）。どちらも無ければ検索できない */ search?: ResearchTools["search"] }): Promise<B2Result> {
-  const out: B2Result = { rows: [], items: 0, attempted: 0, reachedPage: 0, success: 0, reachedWithoutSearch: 0, wrongPage: 0, turns: 0, noGold: 0 };
+export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent; judge: RegistrationJudge; budget: CallBudget; limits?: Partial<ResearchLimits>; now: Date; /** 1件あたりの費用の上限（円）。指定すると、全体の上限とは別に1件ごとに止める */ perCaseCapJpy?: number; /** 事例の開始時（失敗の記録を事例に紐づける用） */ onCase?: (id: string) => void; /** 取得モード（既定は保存HTMLの再生。live_public は開発限定の実ページ取得で liveFetch が必要） */ fetchMode?: B2FetchMode; liveFetch?: (u: string) => Promise<FetchOutcome>; /** 実際の検索ツール（承認後の実評価で注入）。無ければ例の searchIndex（mock）。どちらも無ければ検索できない */ search?: ResearchTools["search"] }): Promise<B2Result> {
+  const out: B2Result = { fetchMode: a.fetchMode ?? "replay_saved", rows: [], items: 0, attempted: 0, reachedPage: 0, success: 0, reachedWithoutSearch: 0, wrongPage: 0, turns: 0, noGold: 0 };
   for (const ex of a.examples) {
     const { items } = planXPost(ex.post);
     const search: ResearchTools["search"] | undefined = a.search ?? (ex.searchIndex ? async (q) => ({ ok: true, hits: ex.searchIndex!.filter((s) => s.keywords.every((k) => q.includes(k))).flatMap((s) => s.hits), costJpy: 2 }) : undefined);
     // 保存済みページの照会は、URLの表記ゆれ（末尾の/・追跡パラメータ）を正規化して一致させる（検索が返した表記が保存時と違うだけで取得不能にしない）
     const pageKey = new Map(Object.keys(ex.pages).map((u) => [canonUrl(u).key, u]));
     const stored = (u: string): string | undefined => (ex.pages[u] !== undefined ? u : pageKey.get(canonUrl(u).key));
-    const tools: ResearchTools = { now: () => a.now, ...(search ? { search } : {}), fetchPage: async (u): Promise<FetchOutcome> => { const k = stored(u); return k ? { ok: true, finalUrl: k, html: ex.pages[k], text: pageText(ex.pages[k]) } : { ok: false, reason: "not_public" }; } };
+    if ((a.fetchMode ?? "replay_saved") === "live_public" && !a.liveFetch) throw new Error("live_public には liveFetch が必要です");
+    const live = (a.fetchMode ?? "replay_saved") === "live_public" ? a.liveFetch : undefined;
+    const tools: ResearchTools = { now: () => a.now, ...(search ? { search } : {}), fetchPage: live ? live : async (u): Promise<FetchOutcome> => { const k = stored(u); return k ? { ok: true, finalUrl: k, html: ex.pages[k], text: pageText(ex.pages[k]) } : { ok: false, reason: "not_public" }; } };
     for (const plan of items) {
       out.items++;
       const gold = ex.gold?.find((g) => g.itemNo === plan.itemNo);
@@ -146,7 +151,7 @@ export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent
       if (r.history.length) out.attempted++;
       const pages = r.evidence.filter((e) => e.kind === "page");
       if (pages.length) out.reachedPage++;
-      const row: B2CaseRow = { id: `${ex.id}#${plan.itemNo}`, gold: !!gold, searches: [...new Set(r.searches.map((x) => x.query))].map((q) => { const hs = r.searches.filter((x) => x.query === q); return { hitCount: hs.length, hitHosts: [...new Set(hs.map((h) => canonUrl(h.url).host))].slice(0, 6) }; }), fetched: r.history.map((h) => ({ host: h.host, outcome: h.outcome })), end: r.investigation.reason, decision: r.registration.decision, held: r.registration.held?.reasons ?? null, trace: r.trace.map((t) => `${t.kind}:${t.detail.replace(/https?:\/\/\S+/g, (u) => canonUrl(u).host)}`), goldPageInHits: null, goldPageFetched: null, quoteAudit: r.quoteAudit, result: pages.length ? "wrongPage" : "noPage" };
+      const row: B2CaseRow = { id: `${ex.id}#${plan.itemNo}`, gold: !!gold, searches: [...new Set(r.searches.map((x) => x.query))].map((q) => { const hs = r.searches.filter((x) => x.query === q); return { query: q, hitCount: hs.length, hits: hs.map((h) => ({ title: h.title.slice(0, 120), url: h.url })), hitHosts: [...new Set(hs.map((h) => canonUrl(h.url).host))].slice(0, 6) }; }), fetched: r.history.map((h) => ({ host: h.host, outcome: h.outcome })), end: r.investigation.reason, decision: r.registration.decision, held: r.registration.held?.reasons ?? null, trace: r.trace.map((t) => `${t.kind}:${t.detail.replace(/https?:\/\/\S+/g, (u) => canonUrl(u).host)}`), goldPageInHits: null, goldPageFetched: null, quoteAudit: r.quoteAudit, result: pages.length ? "wrongPage" : "noPage" };
       out.rows!.push(row);
       if (!gold) {
         out.noGold++;
@@ -158,7 +163,9 @@ export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent
       row.goldPageInHits = goldKeys.some((k) => found.has(k));
       const gp = pages.find((p) => p.url && goldKeys.includes(canonUrl(p.url).key));
       row.goldPageFetched = { fetched: !!gp, scope: gp?.scope ? `${gp.scope.origin}/${gp.scope.verdict}` : null };
-      const rightPage = (p: (typeof pages)[number]) => !!(p.url && ex.pages[p.url] && pageMentions(ex.pages[p.url], gold.store) && p.scope?.verdict !== "mismatch");
+      // 保存モード: 保存ページ自身が正解の店舗を名指ししていること。実ページモード: 取得したページ（または保存ページとURLが一致するもの）の題名・受付枠が正解の店舗を名指しし、対応の検査が mismatch でないこと
+      const headMentions = (p: (typeof pages)[number]) => { const k = norm(gold.store).replace(/店$/, ""); return k.length >= 2 && norm([p.structure?.title ?? "", ...(p.structure?.slots.map((x) => x.title) ?? [])].join(" ")).includes(k); };
+      const rightPage = (p: (typeof pages)[number]) => !!(p.url && p.scope?.verdict !== "mismatch" && (live ? headMentions(p) || goldKeys.includes(canonUrl(p.url).key) : ex.pages[p.url] && pageMentions(ex.pages[p.url], gold.store)));
       if (pages.some((p) => rightPage(p) && found.has(canonUrl(p.url ?? "").key))) {
         out.success++;
         row.result = "success";
@@ -169,4 +176,76 @@ export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent
     }
   }
   return out;
+}
+
+// ------------------------------------------------------------------ Stage 10Y: 実世界の公開ページの扱い（取得モードを明示する）
+/**
+ * B2の取得モード（混ぜない）:
+ *  - `replay_saved`（厳密な旧基準）: 保存済みHTMLだけを再生。保存に無いURLは取得不能（能力の失敗ではなく**評価の制約**）。
+ *  - `live_public`（開発限定）: 実際の公開ページを、既存の安全な取得（robots・SSRF・間隔・サイズ・時間）で取得する。**取得の経路が裏付けられたときだけ**同じページと数える（URLの正規化一致、
+ *    または取得したページの題名・受付枠が正解の店舗を名指ししていること）。
+ */
+export type B2FetchMode = "replay_saved" | "live_public";
+
+/** 保存ページに対する、実ページ（現在の公開状態）の分類。**終了イベントの404やロボット制限は、モデル能力の失敗として数えない** */
+export type CandidateClass = "current_page_matches" | "ended_event_page" | "gone_404" | "blocked_robots" | "blocked_auth" | "transient_network" | "page_changed" | "denied_or_other";
+
+export interface CandidateRow {
+  id: string;
+  candidate: "saved_url（候補として与えた。検索による発見ではない）";
+  host: string;
+  class: CandidateClass;
+  endedPage: boolean | null;
+  storeMentioned: boolean | null;
+  sameTitleAsSaved: boolean | null;
+  slots: number | null;
+  scope: string | null;
+}
+
+/** AIも検索も使わない（無課金）。保存済みの応募ページのURLを「候補」として与え、実際の公開ページを安全に取得して、現行か・終了か・取得できないかを分類する */
+export async function replayCandidatesLive(a: { examples: BExample[]; fetchPage: (u: string) => Promise<FetchOutcome>; lastLog: () => { outcome: string; endedPage?: boolean } | undefined }): Promise<{ rows: CandidateRow[]; counts: Record<CandidateClass, number> }> {
+  const rows: CandidateRow[] = [];
+  for (const ex of a.examples) {
+    const { items } = planXPost(ex.post);
+    for (const plan of items) {
+      const gold = ex.gold?.find((g) => g.itemNo === plan.itemNo);
+      for (const [url, savedHtml] of Object.entries(ex.pages)) {
+        const host = canonUrl(url).host;
+        const r = await a.fetchPage(url);
+        const rec = a.lastLog();
+        const saved = parseApplyPage(savedHtml);
+        let cls: CandidateClass = "denied_or_other";
+        let row: Omit<CandidateRow, "class"> = { id: `${ex.id}#${plan.itemNo}`, candidate: "saved_url（候補として与えた。検索による発見ではない）", host, endedPage: null, storeMentioned: null, sameTitleAsSaved: null, slots: null, scope: null };
+        if (r.ok) {
+          const live = parseApplyPage(r.html);
+          const scoper = makeScoper({ ...plan, links: [] }, items, storeFromGroupLabel);
+          const sc = scoper(r.finalUrl, { text: r.text, structure: live });
+          const mentioned = gold ? pageMentions(r.html, gold.store) : null;
+          const sameTitle = norm(live.title ?? "") === norm(saved.title ?? "") && !!live.title;
+          row = { ...row, endedPage: rec?.endedPage ?? null, storeMentioned: mentioned, sameTitleAsSaved: sameTitle, slots: live.slots.length, scope: `${sc.origin}/${sc.verdict}` };
+          cls = rec?.endedPage ? "ended_event_page" : sameTitle || mentioned ? "current_page_matches" : "page_changed";
+        } else if (rec?.outcome === "ended_http") cls = (rec as { status?: number }).status === 404 || (rec as { status?: number }).status === 410 ? "gone_404" : "denied_or_other";
+        else if (rec?.outcome === "robots") cls = "blocked_robots";
+        else if (rec?.outcome === "auth_required" || rec?.outcome === "login_page") cls = "blocked_auth";
+        else if (rec?.outcome === "timeout" || rec?.outcome === "network") cls = "transient_network";
+        rows.push({ ...row, class: cls });
+      }
+    }
+  }
+  const counts = { current_page_matches: 0, ended_event_page: 0, gone_404: 0, blocked_robots: 0, blocked_auth: 0, transient_network: 0, page_changed: 0, denied_or_other: 0 } as Record<CandidateClass, number>;
+  for (const r of rows) counts[r.class]++;
+  return { rows, counts };
+}
+
+/** B2 の失敗した層の分類（事例ごと）。終了イベント・取得制限は能力の失敗に数えない */
+export type B2Layer = "success" | "no_search_used" | "search_missed_gold_page" | "model_did_not_select_gold_page" | "fetch_blocked_or_ended" | "reached_without_search" | "wrong_page" | "no_gold";
+export function classifyB2Layer(row: B2CaseRow): B2Layer {
+  if (row.result === "success") return "success";
+  if (row.result === "noGold") return "no_gold";
+  if (row.result === "reachedWithoutSearch") return "reached_without_search";
+  if (row.result === "wrongPage") return "wrong_page";
+  if (!row.searches.length) return "no_search_used";
+  if (row.goldPageInHits === false) return row.fetched.some((f) => f.outcome !== "ok") ? "fetch_blocked_or_ended" : "search_missed_gold_page";
+  if (row.goldPageInHits === true && !row.goldPageFetched?.fetched) return row.fetched.some((f) => f.outcome !== "ok") ? "fetch_blocked_or_ended" : "model_did_not_select_gold_page";
+  return "no_search_used";
 }

@@ -5,11 +5,11 @@
  */
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", yen: "¥", hellip: "…", laquo: "«", raquo: "»" };
 
-export function pageText(html: string): string {
+export function pageText(html: string, o: { keepChrome?: boolean } = {}): string {
   return html
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<(head|header|nav|footer|aside)\b[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(o.keepChrome ? /<head\b[\s\S]*?<\/head\s*>/gi : /<(head|header|nav|footer|aside)\b[\s\S]*?<\/\1\s*>/gi, " ")
     .replace(/<\/(p|div|li|tr|h[1-6]|section|article|dt|dd|table|ul|ol)\s*>|<br\s*\/?>/gi, "\n")
     .replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, " ")
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
@@ -22,4 +22,25 @@ export function pageText(html: string): string {
     .replace(/[ \t 　]+/g, " ")
     .replace(/\s*\n\s*/g, "\n")
     .trim();
+}
+
+const keyOf = (x: string): string => x.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
+
+/**
+ * 本文の取り出しで、構造として認識できた語（題名・受付枠の名称・「項目: 値」の値）が本文から消えていないかを確認する（本文欠落の見える化）。
+ * 既定の整形（メニュー・フッター等を除く）で欠けたら、除かない整形で再度取り出し、欠落の少ない方を使う。それでも欠けるものは `loss` に返す（呼び出し側は保留にする）。
+ * 検証の基準は緩めない（引用の実在は、この本文に対して確認する）。
+ */
+export function pageTextChecked(html: string, required: string[]): { text: string; variant: "trimmed" | "full"; loss: string[] } {
+  const need = [...new Set(required.map((r) => r.trim()).filter((r) => keyOf(r).length >= 3))].slice(0, 40);
+  const missing = (t: string): string[] => {
+    const k = keyOf(t);
+    return need.filter((r) => !k.includes(keyOf(r)));
+  };
+  const a = pageText(html);
+  const ma = missing(a);
+  if (ma.length === 0) return { text: a, variant: "trimmed", loss: [] };
+  const b = pageText(html, { keepChrome: true });
+  const mb = missing(b);
+  return mb.length < ma.length ? { text: b, variant: "full", loss: mb } : { text: a, variant: "trimmed", loss: ma };
 }

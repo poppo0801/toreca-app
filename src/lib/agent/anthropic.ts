@@ -127,7 +127,7 @@ export function toApiMessages(messages: AgentMessage[]): Anthropic.MessageParam[
  */
 export class AnthropicWebSearch implements SearchProvider {
   readonly name = "anthropic-web-search";
-  constructor(private readonly client: Client, private readonly model: string, private readonly opts: { allowedDomains?: string[]; blockedDomains?: string[] } = {}) {}
+  constructor(private readonly client: Client, private readonly model: string, private readonly opts: { allowedDomains?: string[]; blockedDomains?: string[]; /** 1回の検索で送るメッセージ数の上限（既定3＝pause_turn の継続を最大2回）。費用の最悪値を抑えるときに 1 にする */ maxMessages?: number } = {}) {}
   async search(query: string): Promise<SearchOutcome> {
     const tool: Anthropic.WebSearchTool20250305 = { type: "web_search_20250305", name: "web_search", max_uses: 1 };
     if (this.opts.allowedDomains?.length) tool.allowed_domains = this.opts.allowedDomains;
@@ -136,7 +136,7 @@ export class AnthropicWebSearch implements SearchProvider {
     let hits: SearchHit[] = [];
     let cost = 0;
     // pause_turn（長い検索の中断）のときは、応答をそのまま送り返して続ける（最大2回まで）
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < Math.max(1, this.opts.maxMessages ?? 3); i++) {
       let res: Anthropic.Message;
       try {
         res = await this.client.messages.create({ model: this.model, max_tokens: 800, messages, tools: [tool], output_config: { effort: "low" } });

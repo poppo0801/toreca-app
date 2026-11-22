@@ -22,6 +22,7 @@ const target = arg("target");
 const total = Number(arg("approved-total-jpy"));
 const per = Number(arg("approved-per-case-jpy"));
 const confirm = arg("confirm");
+const fetchMode = arg("fetch"); // B2のみ: --fetch=live は、実際の公開ページを既存の安全な取得（robots・SSRF・間隔・上限）で取得する（開発限定）。既定は保存HTMLの再生
 if (!TARGETS[target]) {
   console.error("--target は A / B2 / C のいずれか");
   process.exit(2);
@@ -46,6 +47,6 @@ try {
   /* 関門が止める */
 }
 const key = process.env.AGENT_ANTHROPIC_API_KEY;
-const env = { ...process.env, TOREMANE_ENV: "local", [TARGETS[target].flag]: "1", JUDGMENT_10X_TARGET: target, JUDGMENT_REAL_EVAL: "allow", JUDGMENT_REAL_CONFIRM: "yes", JUDGMENT_APPROVED_TOTAL_JPY: String(total), JUDGMENT_APPROVED_PER_CASE_JPY: String(per), JUDGMENT_REUSE_EXISTING_KEY: "allow", ...(key ? { JUDGMENT_REUSE_FALLBACK_KEY: key } : {}) };
+const env = { ...process.env, TOREMANE_ENV: "local", [TARGETS[target].flag]: "1", JUDGMENT_10X_TARGET: target, JUDGMENT_REAL_EVAL: "allow", JUDGMENT_REAL_CONFIRM: "yes", JUDGMENT_APPROVED_TOTAL_JPY: String(total), JUDGMENT_APPROVED_PER_CASE_JPY: String(per), JUDGMENT_REUSE_EXISTING_KEY: "allow", ...(target === "B2" && fetchMode === "live" ? { JUDGMENT_LIVE_FETCH: "allow", JUDGMENT_B2_FETCH: "live_public" } : {}), ...(key ? { JUDGMENT_REUSE_FALLBACK_KEY: key } : {}) };
 const r = spawnSync("npx", ["vitest", "run", "--silent=false", TARGETS[target].file], { stdio: "inherit", shell: true, env });
 process.exit(r.status ?? 1);
