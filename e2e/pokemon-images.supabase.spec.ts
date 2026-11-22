@@ -3,10 +3,10 @@ import { expect, test } from "@playwright/test";
 
 /**
  * ポケモン画像の認証つき配信（非公開バケット pokemon-images。ローカルSupabase・架空の小さな画像）。
- *   事前: docs/sql/pokemon_images_bucket.sql をローカルDBに適用
+ *   事前: node scripts/setup-pokemon-images-bucket.mjs --execute でローカルDBに非公開バケットを作成（Storageポリシーは作らない）
  *   E2E_SPEC=pokemon-images.supabase.spec.ts npm run test:e2e:supabase
  *  - 未ログイン: 401（画像を返さない）。ログイン後: 自世帯の画像だけ 200・Cache-Control private・webp。無い番号は404、不正な番号は400
- *  - Storage RLS: 他世帯のフォルダ・匿名は読めない。バケットは非公開（公開URLで取得できない）
+ *  - 利用者向けのStorageポリシーは無い: ログイン済みの利用者が直接読もうとしても（自世帯・他世帯とも）拒否。匿名・公開URLも不可。配信は /api/pokemon-image だけ
  */
 const email = process.env.E2E_EMAIL!;
 const password = process.env.E2E_PASSWORD!;
@@ -53,11 +53,11 @@ test("ポケモン画像: 認証・世帯の分離・キャッシュ・入力検
   expect((await page.request.get("/api/pokemon-image/12345")).status()).toBe(400);
   expect((await page.request.get("/api/pokemon-image/..%2F25")).status()).not.toBe(200); // パス推測
 
-  // Storage RLS: 利用者のセッションで他世帯のフォルダは読めない（自世帯は読める）。匿名・公開URLは不可
+  // Storage へ直接: 利用者のセッションでは自世帯・他世帯とも読めない（ポリシー無し）。匿名・公開URLも不可
   const anonClient = createClient(url, (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)!, { auth: { persistSession: false } });
   const signed = await anonClient.auth.signInWithPassword({ email, password });
   expect(signed.error).toBeNull();
-  expect((await anonClient.storage.from("pokemon-images").download(`${hid}/official/0025.webp`)).error).toBeNull();
+  expect((await anonClient.storage.from("pokemon-images").download(`${hid}/official/0025.webp`)).error).not.toBeNull(); // 直接は読めない（画像は配信ルート経由のみ）
   expect((await anonClient.storage.from("pokemon-images").download(`${other}/official/0025.webp`)).error).not.toBeNull();
   const noauth = createClient(url, (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)!, { auth: { persistSession: false } });
   expect((await noauth.storage.from("pokemon-images").download(`${hid}/official/0025.webp`)).error).not.toBeNull();

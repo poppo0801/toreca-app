@@ -68,13 +68,15 @@ describe("ポケモン画像: Gitに載せず、Supabase Storage の非公開バ
     const route = readFileSync("src/app/api/pokemon-image/[no]/route.ts", "utf8");
     expect(route).toContain("auth.getUser()");
     expect(route).toContain('storage.from("pokemon-images")');
+    expect(route).toContain('from("households").select("id")'); // 世帯は利用者自身の権限（RLS）で取得
     expect(route).toContain("/^\\d{1,4}$/");
     expect(route).toContain("private, max-age");
-    expect(route).not.toMatch(/service_role|SERVICE_ROLE|createAdminClient/);
-    const sql = readFileSync("docs/sql/pokemon_images_bucket.sql", "utf8");
-    expect(sql).toContain("'pokemon-images', 'pokemon-images', false"); // public=false
-    expect(sql).toContain("is_household_member"); // 世帯のメンバーだけ
-    expect(existsSync("supabase/migrations/pokemon_images_bucket.sql")).toBe(false); // 自動適用されない
+    expect(route.indexOf("auth.getUser()")).toBeLessThan(route.indexOf("SUPABASE_SERVICE_ROLE_KEY")); // 認証の確認の後でだけ service role を使う
+    expect(route).not.toMatch(/NEXT_PUBLIC_[A-Z_]*SERVICE|console\.(log|error)/); // 秘密をクライアント・ログへ出さない
+    const setup = readFileSync("scripts/setup-pokemon-images-bucket.mjs", "utf8");
+    expect(setup).toContain("public: false"); // 非公開バケット
+    expect(setup).not.toMatch(/create policy|storage\.objects/i); // 利用者向けのStorageポリシーは作らない
+    expect(setup).toContain("--execute"); // 既定は dry-run
   });
 });
 
