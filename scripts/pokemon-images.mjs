@@ -1,7 +1,7 @@
 // ポケモン公式絵 → 配信用WebP → Supabase Storage（非公開バケット pokemon-images）。
 //   node scripts/pokemon-images.mjs manifest "<PNGフォルダ>"                 … 整理だけ（書き込みなし）。件数・欠番・曖昧を表示し、manifest を eval/real-data/ に保存（Git管理外）
 //   node scripts/pokemon-images.mjs upload "<PNGフォルダ>" --yes-upload      … 変換して Storage へ保存（既定は dry-run。接続先がローカルのときだけ。本番は下記）
-// **画像の利用権限（ライセンス）の確認が済むまで、本番へはアップロードしない。** 本番へ置くときは、必ず `npm run prod -- scripts/pokemon-images.mjs upload … --yes-production --yes-upload` の入口を使う。
+// **画像の利用権限（ライセンス）の確認が済むまで、本番へはアップロードしない。** 本番へ置くときは、必ず `npm run prod -- scripts/pokemon-images.mjs upload … --yes-production --yes-upload --rights-confirmed` の入口を使う。
 // 画像ファイルはGitに含めない（.gitignore）。保存先: `<世帯ID>/official/0001.webp`（世帯のフォルダ単位のStorage RLSで、世帯のメンバーだけが読める）。
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -34,8 +34,9 @@ if (!url || !key) {
   process.exit(2);
 }
 const isLocal = /^http:\/\/(127\.0\.0\.1|localhost)/.test(url);
-if (!isLocal && !process.argv.includes("--yes-production")) {
-  console.error("接続先が本番です。画像の利用権限の確認が済むまでアップロードしません（`npm run prod -- … --yes-production` の入口でのみ）");
+if (!isLocal && !process.argv.includes("--rights-confirmed")) {
+  // 本番へは、利用者が画像の利用について確認・了承した旨の明示（--rights-confirmed）が無ければ置かない（`npm run prod -- … --yes-production` の入口経由のみ）
+  console.error("接続先が本番です。画像の利用権限を利用者が確認・了承した場合のみ --rights-confirmed を付けて実行してください");
   process.exit(3);
 }
 if (!process.argv.includes("--yes-upload")) {
