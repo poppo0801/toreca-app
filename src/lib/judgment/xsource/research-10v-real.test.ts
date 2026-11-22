@@ -1,18 +1,21 @@
 // @vitest-environment node
 /**
- * Stage 10V: 実AI評価の条件別の準備（**有料・未実行**。ゲートは JUDGMENT_10V_REAL=1 と費用の承認。承認が無ければ実行しない）。条件を分けて、名称・入力・比較対象を一致させる:
- *  - B（発見・対応付け）: X投稿から応募先を**発見・関連付ける**。入力は保存済みの投稿＋項目ごとの展開結果（linkMap）。**保存データにlinkMapが無い**（実測: 項目382件中、項目自身のリンク0・短縮未展開298・URLなし84）ため、
- *      実データでは評価できない（開発用X APIキーでの収集か、人が展開結果を検証した例が必要）。無い間は実行せず「実例不足」と記録する。
- *  - C（登録判断）: 10Sで**人が回答した実例**（正解は人の回答のみ。判断不能・未回答は分母外）。入力は保存済みの原文のみ（応募ページは取得できない＝取得欠落として別計上）。AIに正解を渡さない。
- *  A（応募URL既知）は research-10u-real.test.ts（10V-A）。
- * 上限（承認時に再確認）: AI 90回・¥50・1対象¥3・対象12。本番・DB・外部サイトには接続しない。出力は eval/real-data/（Git管理外）。結果は観測であり、旧方式・過去のAI出力を正解にしない。
+ * Stage 10V/10W: 実AI評価の条件別ハーネス（**有料部分は未実行**。ゲートは JUDGMENT_10V_REAL=1 と費用の承認）。条件を分けて、名称・入力・比較対象を一致させる:
+ *  - A（応募URL既知）: research-10u-real.test.ts（10V-A）。
+ *  - B1（展開・項目スコープ）: **AIを使わない・無料**。`eval/real-data/xsource-10w-linkmap-examples.json`（Git管理外。項目別の展開結果と独立した正解つきの例）があれば実行し、無ければ**評価不能（skipped）**。
+ *  - B2（AI自律発見）: 同じ例ファイルを使い、**応募URLを与えず**AIが応募先に到達・対応付けできるかを測る（有料・承認後）。B1の成功をB2の成功と数えない。
+ *  - C（登録判断）: 10Sの人の回答のうち、**独立した正解（gold）が確定した例だけ**で採点する（scripts/lib/gold-c.mjs）。gold が最小数に満たない間は正答率を出さない。
+ * 上限（承認時に再確認）: AI 90回・¥50・1対象¥3・対象12。本番・DB・外部サイトには接続しない。出力は eval/real-data/（Git管理外）。旧方式・過去のAI出力を正解にしない。
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { CallBudget } from "../call-budget";
 import { checkJudgmentRealRun } from "../real-gate";
 // @ts-expect-error plain JS module
+import { classifyGold, scoreAgainstGold } from "../../../../scripts/lib/gold-c.mjs";
+// @ts-expect-error plain JS module
 import { currentOf } from "../../../../scripts/lib/groundtruth.mjs";
+import { evaluateB1, evaluateB2, type BExample } from "./eval-b";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent } from "./research-ai";
 import { runResearch, seedEvidence, type ResearchTools } from "./research-loop";
 
@@ -20,17 +23,40 @@ vi.mock("server-only", () => ({}));
 const env = process.env;
 const REVIEW = "eval/real-data/human-review-10s.json";
 const ANSWERS = "eval/real-data/human-review-10s-answers.json";
+const EXAMPLES = "eval/real-data/xsource-10w-linkmap-examples.json";
+const realGate = () => checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) });
+const examples = (): BExample[] => (JSON.parse(readFileSync(EXAMPLES, "utf8")) as { examples: BExample[] }).examples;
 
-describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(REVIEW) || !existsSync(ANSWERS))("10V-C 人の確認が済んだ実例での登録判断（実AI・有料）", () => {
-  it("応募単位の判断を、人の回答（正しい/誤り）だけと比べる。判断不能・未回答は分母に入れない。取得欠落は別計上", async () => {
-    const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) });
+describe.skipIf(!existsSync(EXAMPLES))("10W-B1 展開・項目スコープ（無料・AIなし）", () => {
+  it("項目別の展開結果と独立した正解がある例で、URLの取り出し・ページの対応の検査を採点する", () => {
+    const r = evaluateB1(examples());
+    writeFileSync("eval/real-data/xsource-10w-b1.json", JSON.stringify({ condition: "B1_expanded_links_given（展開結果を入力として与える。AIの発見力ではない）", ...r }, null, 1));
+    expect(r.items).toBeGreaterThan(0);
+  });
+});
+
+describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(EXAMPLES))("10W-B2 AI自律発見（実AI・有料・承認後）", () => {
+  it("応募URLを与えず、AIが応募先に到達・対応付けできるか（gold のある項目だけ成功/失敗を数える）", async () => {
+    const gate = realGate();
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
-    const cases = (JSON.parse(readFileSync(REVIEW, "utf8")) as { cases: { id: string; real: boolean; sourceText: string[] }[] }).cases.filter((c) => c.real && c.id.startsWith("r10:"));
-    const store = JSON.parse(readFileSync(ANSWERS, "utf8"));
-    const decided = cases.filter((c) => {
-      const a = currentOf(store, c.id);
-      return a && (a.verdict === "correct" || a.verdict === "wrong");
-    });
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
+    await client.models.retrieve(gate.model);
+    const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
+    const r = await evaluateB2({ examples: examples().slice(0, 12), agent: makeAnthropicResearchAgent(client, { model: gate.model }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model }), budget, limits: { maxTurns: 3, maxFetches: 2 }, now: new Date() });
+    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。検索ツールは無く、AIが提案したURLの取得の範囲）", ...r, budget: budget.summary() }, null, 1));
+    expect(budget.calls).toBeLessThanOrEqual(90);
+    expect(budget.costJpy).toBeLessThanOrEqual(50.01);
+  }, 1_800_000);
+});
+
+describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(REVIEW) || !existsSync(ANSWERS))("10W-C 独立した正解（gold）での登録判断（実AI・有料・承認後）", () => {
+  it("gold の事例だけを採点する。gold が最小数に満たなければ正答率は出さない。取得欠落は別計上", async () => {
+    const gate = realGate();
+    if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
+    const cases = (JSON.parse(readFileSync(REVIEW, "utf8")) as { cases: { id: string; real: boolean; aiUnit?: string; sourceText: string[] }[] }).cases;
+    const gold = classifyGold(cases, JSON.parse(readFileSync(ANSWERS, "utf8")), currentOf);
+    const targets = cases.filter((c) => gold.rows.some((r: { id: string; category: string }) => r.id === c.id && r.category === "gold"));
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
@@ -39,22 +65,15 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(REVIEW) || !existsS
     const judge = makeAnthropicRegistrationJudge(client, { model: gate.model });
     let tick = Date.now();
     const tools: ResearchTools = { now: () => new Date((tick += 500)), fetchPage: async () => ({ ok: false, reason: "not_public" }) }; // 保存データには応募ページが無い（取得欠落）
-    const out: Record<string, unknown>[] = [];
-    for (const c of decided.slice(0, 12)) {
-      // 種は原文のみ（人の回答・旧方式の結果・AIの過去の回答は渡さない）。応募単位は項目名 apply_unit で出力させる
+    const results: { id: string; aiUnit: string | null; aiUnitBasis: string | null; decision: string; end: string }[] = [];
+    for (const c of targets.slice(0, 12)) {
+      // 種は原文のみ（人の回答・正解・旧方式の結果・過去のAIの回答は渡さない）。応募単位は項目名 apply_unit で出力させる
       const r = await runResearch({ caseId: c.id, seed: seedEvidence("s1", `${c.sourceText.join("\n")}\n（出力項目: apply_unit=応募単位）`, new Date()), agent, judge, tools, budget, limits: { maxTurns: 3, maxFetches: 2 } });
       const unit = r.registration.output?.fields.apply_unit;
-      out.push({ case: c.id, human: currentOf(store, c.id)?.verdict, humanUnit: currentOf(store, c.id)?.correctUnit ?? null, end: r.investigation.reason, decision: r.registration.decision, verified: r.registration.verified, aiUnit: unit?.value ?? null, aiUnitBasis: unit?.basis ?? null, fetchAttempts: r.history.length });
+      results.push({ id: c.id, aiUnit: unit?.value ?? null, aiUnitBasis: unit?.basis ?? null, decision: r.registration.decision, end: r.investigation.reason });
     }
-    writeFileSync("eval/real-data/xsource-10v-c.json", JSON.stringify({ condition: "C_human_reviewed（応募ページ取得不可=取得欠落を含む）", note: "人の回答だけと比較する。標本が小さく一般化しない", budget: budget.summary(), cases: out }, null, 1));
+    writeFileSync("eval/real-data/xsource-10w-c.json", JSON.stringify({ condition: "C_gold_only（独立した正解がある事例だけ。応募ページ取得不可=取得欠落を含む）", goldCounts: gold.counts, score: scoreAgainstGold(gold, results), results, budget: budget.summary() }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);
-});
-
-describe("10V-B 発見・対応付けの実評価は、保存データに項目別の展開結果（linkMap）が無い間は行わない", () => {
-  it("実行条件を明示: JUDGMENT_10V_REAL でも、linkMap のある検証済みの例が無ければ実施しない（実例不足）", () => {
-    const hasLinkMapExamples = existsSync("eval/real-data/xsource-10v-linkmap-examples.json");
-    expect(hasLinkMapExamples).toBe(false); // 現状は不在（実X API・検証済みの展開結果が無い）。出現したときは評価を設計し直す
-  });
 });
