@@ -72,11 +72,41 @@ export function zukanStats(cards: readonly ZukanCard[]): ZukanStats {
 }
 
 export type ZukanFilter = "all" | "collected" | "uncollected";
-/** 一覧の行（番号順）。収集済みの絞り込み */
-export function zukanRows(cards: readonly ZukanCard[], filter: ZukanFilter): { no: number; name: string; collected: boolean; cardCount: number }[] {
+/** 並び順: no=図鑑番号順／kana=五十音順（名称の読み。同じ読みは図鑑番号順） */
+export type ZukanSort = "no" | "kana";
+/**
+ * 一覧の状態。優先順位は **入手済み > 相場登録済み > 対象レア未収録 > 未登録**。
+ *  - owned: カードを1枚以上所有
+ *  - market: 未入手で、そのポケモンの価格調査（相場）の記録がある
+ *  - rare_missing: 未入手・相場なしで、利用者が手動で付けた「対象レア未収録」フラグがある（カード化されていない等を推測して自動付与しない。いつでも解除できる）
+ *  - unregistered: 上のいずれでもない
+ */
+export type DexStatus = "owned" | "market" | "rare_missing" | "unregistered";
+export const DEX_STATUS_LABEL: Record<DexStatus, string> = { owned: "入手済み", market: "相場登録済み", rare_missing: "対象レア未収録", unregistered: "未登録" };
+
+export function dexStatus(a: { owned: boolean; hasPrice: boolean; rareMissing: boolean }): DexStatus {
+  return a.owned ? "owned" : a.hasPrice ? "market" : a.rareMissing ? "rare_missing" : "unregistered";
+}
+
+export interface ZukanRow {
+  no: number;
+  name: string;
+  collected: boolean;
+  cardCount: number;
+  status: DexStatus;
+}
+const KANA = new Intl.Collator("ja");
+/** 一覧の行。収集済みの絞り込みと並び順。価格調査の記録・手動フラグは任意（無ければ未登録として扱う） */
+export function zukanRows(cards: readonly ZukanCard[], filter: ZukanFilter, opts: { prices?: readonly { dexNo: number }[]; rareMissing?: ReadonlySet<number>; sort?: ZukanSort } = {}): ZukanRow[] {
   const owned = new Map<number, number>();
   for (const c of cards) owned.set(c.dexNo, (owned.get(c.dexNo) ?? 0) + c.quantity);
-  return POKEMON_151.map((p) => ({ no: p.no, name: p.name, collected: (owned.get(p.no) ?? 0) >= 1, cardCount: owned.get(p.no) ?? 0 })).filter((r) => (filter === "all" ? true : filter === "collected" ? r.collected : !r.collected));
+  const priced = new Set((opts.prices ?? []).map((p) => p.dexNo));
+  const rows = POKEMON_151.map((p) => {
+    const cardCount = owned.get(p.no) ?? 0;
+    const collected = cardCount >= 1;
+    return { no: p.no, name: p.name, collected, cardCount, status: dexStatus({ owned: collected, hasPrice: priced.has(p.no), rareMissing: opts.rareMissing?.has(p.no) ?? false }) };
+  }).filter((r) => (filter === "all" ? true : filter === "collected" ? r.collected : !r.collected));
+  return opts.sort === "kana" ? rows.sort((a, b) => KANA.compare(a.name, b.name) || a.no - b.no) : rows;
 }
 
 /** 購入金額の入力（空欄は null。カンマ・円記号は許す。"0" は 0 円）。不正は "invalid" */
@@ -125,7 +155,7 @@ export type ZukanCardInput = z.input<typeof zukanCardInputSchema>;
 /** 価格調査の記録の入力（151図鑑専用・相場調査メモ共通の項目） */
 export const priceInputSchema = z.object({
   storeName: z.string().trim().min(1, "店舗を入力してください").max(80, "店舗は80文字以内で入力してください"),
-  chainName: text("系列", 80),
+  chainName: z.string().trim().min(1, "系列を入力してください").max(80, "系列は80文字以内で入力してください"),
   surveyedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "調査日の形式が正しくありません"),
   condition: z.enum(RANKS, { error: "状態ランクを選んでください" }),
   priceYen: z.number({ error: "販売価格を入力してください" }).int("販売価格は整数で入力してください").min(0, "販売価格は0円以上").max(100_000_000, "販売価格が大きすぎます"),
@@ -194,6 +224,52 @@ export function recentStores(records: readonly { storeName: string; surveyedOn: 
   return out;
 }
 
+/** 過去の「系列＋店舗」の組み合わせ */
+export interface StorePair {
+  chainName: string;
+  storeName: string;
+}
+/** 過去に入力した「系列＋店舗」の組み合わせ（新しい順・重複なし・系列も店舗も空でないものだけ・最大 limit）。ワンタップで両方を入力する候補 */
+export function recentPairs(records: readonly { chainName: string; storeName: string; surveyedOn: string }[], limit = 6): StorePair[] {
+  const seen = new Set<string>();
+  const out: StorePair[] = [];
+  for (const r of [...records].sort((a, b) => b.surveyedOn.localeCompare(a.surveyedOn))) {
+    if (!r.chainName.trim() || !r.storeName.trim()) continue;
+    const k = `${normStore(r.chainName)}|${normStore(r.storeName)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ chainName: r.chainName, storeName: r.storeName });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** カードの識別情報の既知の組（過去に入力したカード・価格の記録から） */
+export interface KnownCard {
+  setName: string;
+  cardNumber: string;
+  rarity: string;
+}
+/** レアリティの初期値（新しいカードの入力。利用者の確定要望） */
+export const DEFAULT_RARITY = "AR";
+/** 収録セットの候補（既知のカードのセット名。重複なし） */
+export const setOptions = (known: readonly KnownCard[]): string[] => [...new Set(known.map((k) => k.setName.trim()).filter(Boolean))];
+/** 選んだセットのカード番号の候補（既知のもの。セットが空なら全て） */
+export function numberOptions(known: readonly KnownCard[], setName: string): string[] {
+  const k = normStore(setName);
+  return [...new Set(known.filter((c) => !k || normStore(c.setName) === k).map((c) => c.cardNumber.trim()).filter(Boolean))];
+}
+/**
+ * 収録セットとカード番号の相互補完: カード番号が入力され、その番号を持つ既知のカードの**セットが1種類だけ**のとき、そのセット名を返す（複数あるなら補完しない＝誤った補完をしない）。
+ * セットが入力済みの場合は呼び出し側で上書きしない。該当なしは null。
+ */
+export function completeSetFromNumber(known: readonly KnownCard[], cardNumber: string): string | null {
+  const n = normStore(cardNumber);
+  if (!n) return null;
+  const sets = [...new Set(known.filter((c) => normStore(c.cardNumber) === n && c.setName.trim()).map((c) => c.setName.trim()))];
+  return sets.length === 1 ? sets[0] : null;
+}
+
 /** 過去に最もよく使った状態ランク（候補の先頭にする）。履歴が無ければ null */
 export function commonRank(records: readonly { condition: string }[]): Rank | null {
   const n = new Map<string, number>();
@@ -233,4 +309,50 @@ export function matchCard<T extends CardIdentity>(existing: readonly T[], input:
   const sameName = existing.filter((c) => nk(c.name) === nk(input.name) && !(hasKey && nk(c.setName) !== "" && nk(c.cardNumber) !== "" && (nk(c.setName) !== nk(input.setName) || nk(c.cardNumber) !== nk(input.cardNumber))));
   if (sameName.length > 0) return { kind: "ambiguous", candidates: sameName };
   return { kind: "new" };
+}
+
+// ---------------------------------------------------------------------------------------------
+// 相場調査メモ: カード一覧の並び替え（カード詳細内の価格記録の並び替え＝sortPrices とは別の機能）
+// ---------------------------------------------------------------------------------------------
+/** new=登録の新しい順（既定）／price=最安価格の安い順／condition=最安価格の記録の状態が良い順（A+→C。同ランクは安値順）。価格の記録が無いカードは最後 */
+export type MarketSort = "new" | "price" | "condition" | "kana" | "dex";
+export const MARKET_SORT_LABEL: Record<MarketSort, string> = { new: "新着順", price: "価格の安い順", condition: "状態優先", kana: "五十音順", dex: "図鑑No順" };
+export const MARKET_SORT_ORDER: MarketSort[] = ["new", "price", "condition", "kana", "dex"];
+/** 見出しの右に出す現在の並び順（向き付き。↑=昇順・安い順・良い順／↓=新しい順） */
+export const marketSortHeading = (m: MarketSort): string => `${MARKET_SORT_LABEL[m]} ${m === "new" ? "↓" : "↑"}`;
+
+/** カードの「最安価格の記録」: 30日以内の記録のうち最も安いもの（同額は状態の良い方）。無ければ null（参考価格のみ・記録なし） */
+export function cheapestRecord<T extends PriceLike>(prices: readonly T[], today: string): T | null {
+  const ids = cheapestIds(prices, today);
+  return sortPrices(prices.filter((p) => ids.has(p.id)), "price")[0] ?? null;
+}
+
+/** カード名から特定したポケモン（全国図鑑番号・読み仮名）。特定できないカード（トレーナーズ・複数のポケモン・曖昧）は null */
+export type DexOf<C> = (card: C) => { no: number; reading: string } | null;
+const READING = new Intl.Collator("ja");
+
+export function sortMarketCards<C extends { id: string; createdAt: string; name?: string; setName?: string; cardNumber?: string }>(cards: readonly C[], prices: readonly (PriceLike & { cardId: string })[], mode: MarketSort, today: string, dexOf?: DexOf<C>): C[] {
+  const best = new Map<string, PriceLike | null>();
+  for (const c of cards) best.set(c.id, cheapestRecord(prices.filter((p) => p.cardId === c.id), today));
+  const byNew = (a: C, b: C) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+  if (mode === "kana" || mode === "dex") {
+    // 五十音順=ポケモンの読み仮名／図鑑No順=全国図鑑番号の昇順。特定できないカードは末尾（新着順）。同じポケモンの複数カードは、カード名→セット→カード番号→ID で安定して並べる
+    const d = new Map(cards.map((c) => [c.id, dexOf ? dexOf(c) : null]));
+    const stable = (a: C, b: C) => (a.name ?? "").localeCompare(b.name ?? "", "ja") || (a.setName ?? "").localeCompare(b.setName ?? "", "ja") || (a.cardNumber ?? "").localeCompare(b.cardNumber ?? "", "ja", { numeric: true }) || a.id.localeCompare(b.id);
+    return [...cards].sort((a, b) => {
+      const x = d.get(a.id);
+      const y = d.get(b.id);
+      if (!x || !y) return x ? -1 : y ? 1 : byNew(a, b);
+      const k = mode === "kana" ? READING.compare(x.reading, y.reading) || x.no - y.no : x.no - y.no;
+      return k || stable(a, b);
+    });
+  }
+  return [...cards].sort((a, b) => {
+    if (mode === "new") return byNew(a, b);
+    const x = best.get(a.id);
+    const y = best.get(b.id);
+    if (!x || !y) return x ? -1 : y ? 1 : byNew(a, b); // 価格の記録が無いカードは最後
+    const d = mode === "price" ? x.priceYen - y.priceYen || rankOrder(x.condition) - rankOrder(y.condition) : rankOrder(x.condition) - rankOrder(y.condition) || x.priceYen - y.priceYen;
+    return d || byNew(a, b);
+  });
 }

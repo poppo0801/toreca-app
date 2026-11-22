@@ -85,7 +85,16 @@ describe("Stage 7K: 購入記録ページ（開封とシングルカード）", 
     await toAll();
     const row = (name: string) => qa("product-total-row").find((r) => r.querySelector('[data-testid="total-name"]')!.textContent === name)!;
     expect(row("30th CELEBRATION").querySelector('[data-testid="total-qty"]')!.textContent).toBe("20パック");
-    expect(row("30th CELEBRATION").querySelector('[data-testid="total-sub"]')!.textContent).toBe("開封1BOX ｜ 総額 7,200円");
+    // 説明ラベル（「総額」「開封」）だけを省き、数値（BOX数・金額）は一覧に残す
+    expect(row("30th CELEBRATION").querySelector('[data-testid="total-sub"]')!.textContent).toBe("1BOX ｜ 7,200円");
+    expect(row("30th CELEBRATION").textContent).not.toMatch(/総額|開封/);
+    expect(row("単品パック商品").querySelector('[data-testid="total-sub"]')!.textContent).toMatch(/^2パック ｜ \d[\d,]*円$/);
+    // 金額・開封の内訳は、行をタップした詳細で確認できる
+    await click(row("30th CELEBRATION"));
+    expect(q("detail-amount")!.textContent).toBe("7,200円");
+    expect(q("total-detail")!.textContent).toContain("開封したBOX");
+    expect(q("total-detail")!.textContent).toContain("1BOX");
+    expect(q("detail-qty")!.textContent).toBe("20パック");
     expect(row("単品パック商品").querySelector('[data-testid="total-qty"]')!.textContent).toBe("2パック");
     expect(row("ピカチュウ SAR").querySelector('[data-testid="total-qty"]')!.textContent).toBe("2枚");
     expect(qa("total-name").map((n) => n.textContent)).not.toContain("30th"); // 略称は使わない（正式名称のみ）
@@ -109,42 +118,14 @@ describe("Stage 7K: 購入記録ページ（開封とシングルカード）", 
     expect(single.querySelector('[data-testid="purchase-qty"]')!.textContent).toBe("2枚");
   });
 
-  it("開封状態が不明な購入が一覧に出る。「開封済みにする」で購入明細に関連づけて登録（商品・単位は固定、金額は購入金額を按分）。収支の支出は作らない", async () => {
+  it("「開封状態が未確認」の表示・フローは無い。開封状態が不明な購入は開封累計に含めず、購入記録も変えない", async () => {
     setup();
-    expect(q("unconfirmed")!.textContent).toContain("1件"); // 単品パックの残り3パック（5のうち2は確認済み）
-    q("unconfirmed")!.setAttribute("open", "");
-    const row = qa("unconfirmed-row")[0];
-    expect(row.textContent).toContain("単品パック商品");
-    expect(row.textContent).toContain("3パック");
-    await click(row.querySelector('[data-testid="unconfirmed-open"]'));
-    const form = q("opening-form")!;
-    expect(form.querySelector('[data-testid="opening-product"]')!.textContent).toBe("単品パック商品");
-    expect((form.querySelector('[aria-label="開封の数量"]') as HTMLInputElement).value).toBe("3");
-    expect((form.querySelector('[aria-label="開封の単位"]') as HTMLSelectElement).disabled).toBe(true);
-    expect((form.querySelector('[aria-label="開封分の購入金額"]') as HTMLInputElement).value).toBe("450"); // 750円×3/5
-    await click(q("opening-save"));
-    await flush();
-    expect(saveOpening).toHaveBeenCalledTimes(1);
-    const [input, actor, opId] = saveOpening.mock.calls[0] as [Record<string, unknown>, string, string | null];
-    expect(input).toMatchObject({ productId: "p-pack", quantity: 3, unit: "pack", amountYen: 450, purchaseItemId: "i-pack" });
-    expect(actor).toBe(data.profiles[0].id);
-    expect(typeof opId).toBe("string");
-    expect(q("opening-form")).toBeNull();
-  });
-
-  it("未確認の数量を超える数量は保存できない", async () => {
-    setup();
-    q("unconfirmed")!.setAttribute("open", "");
-    await click(qa("unconfirmed-open")[0]);
-    const input = q("opening-form")!.querySelector('[aria-label="開封の数量"]') as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    await act(async () => {
-      setter.call(input, "9");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await click(q("opening-save"));
-    expect(q("opening-error")!.textContent).toContain("超えています");
-    expect(saveOpening).not.toHaveBeenCalled();
+    expect(q("unconfirmed")).toBeNull();
+    expect(document.body.textContent).not.toContain("開封状態が未確認");
+    expect(document.body.textContent).not.toContain("開封済みにする");
+    await toAll();
+    expect(qa("total-name").map((n) => n.textContent)).not.toContain("単品パック商品 未確認"); // 確認済みの2パックだけが数えられる
+    expect(q("product-totals")!.textContent).toContain("2パック");
   });
 
   it("開封の記録を取り消すと確認のうえ非表示になる（購入の記録は変わらない）", async () => {

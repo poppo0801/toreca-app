@@ -12,7 +12,7 @@ import { PurchaseThumb } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
 import { jstDateString } from "@/lib/datetime";
 import { periodLabel, shiftPeriod, type Period, type PeriodKind } from "@/lib/purchase-records";
-import { buildUsageRecords, classifyPurchases, filterUsage, usageStats, usageTotals, type UnconfirmedPurchase, type UsageKind, type UsageRecord, type UsageTotal } from "@/lib/usage-records";
+import { buildUsageRecords, filterUsage, orderTotalsForDisplay, usageStats, usageTotals, type UsageKind, type UsageRecord, type UsageTotal } from "@/lib/usage-records";
 import { cn } from "@/lib/utils";
 import type { OpeningRecord } from "@/types/domain";
 
@@ -33,15 +33,18 @@ function dayLabel(date: string | null): string {
 const chip = "h-9 min-w-0 shrink rounded-full border bg-input px-3 text-xs";
 
 /** 金額の表示。未設定は0円とせず「金額未設定」 */
-const amountText = (r: { amount: number; amountUnknown: number }): string => (r.amountUnknown > 0 && r.amount === 0 ? "金額未設定" : r.amountUnknown > 0 ? `総額 ${yen(r.amount)}（未設定${r.amountUnknown}件）` : `総額 ${yen(r.amount)}`);
+const amountText = (r: { amount: number; amountUnknown: number }): string => (r.amountUnknown > 0 && r.amount === 0 ? "金額未設定" : r.amountUnknown > 0 ? `${yen(r.amount)}（未設定${r.amountUnknown}件）` : yen(r.amount));
 
-/** 商品別累計の1行の表示内容。数量を主役にし、金額は補足にする（例: 20パック／開封1BOX｜総額7,200円） */
+/**
+ * 商品別累計の1行の表示内容。数量を主役（右）にし、補足の数値（中央・商品名の下）を出す。**説明ラベル（「総額」「開封」）だけを省き、数値（BOX数・パック数・金額）は残す**
+ * 例: 右=20パック／補足=1BOX｜7,200円（以前は「開封1BOX｜総額 7,200円」）。
+ */
 export function totalDisplay(r: UsageTotal): { qty: string; sub: string } {
   const amount = amountText(r);
   if (r.single) return { qty: `${r.singleQty}枚`, sub: amount };
   const parts: string[] = [];
-  if (r.boxes > 0) parts.push(`開封${r.boxes}BOX`);
-  if (r.directPacks > 0) parts.push(r.boxes > 0 ? `単品${r.directPacks}パック` : `開封${r.directPacks}パック`);
+  if (r.boxes > 0) parts.push(`${r.boxes}BOX`);
+  if (r.directPacks > 0) parts.push(r.boxes > 0 ? `単品${r.directPacks}パック` : `${r.directPacks}パック`);
   if (r.sets > 0) parts.push(`${r.sets}個`);
   parts.push(amount);
   if (r.boxes + r.packs > 0) {
@@ -77,13 +80,19 @@ export function PurchasesView() {
   const [add, setAdd] = useState<null | "choose" | "opening" | "single">(null);
   const [editSingle, setEditSingle] = useState<string | null>(null);
   const [editOpening, setEditOpening] = useState<OpeningRecord | null>(null);
-  const [confirmItem, setConfirmItem] = useState<UnconfirmedPurchase | null>(null);
+  const [detail, setDetail] = useState<UsageTotal | null>(null);
 
   const all = useMemo(() => buildUsageRecords(data), [data]);
   const records = useMemo(() => filterUsage(all, { period, productId, storeId, kind, profileId }), [all, period, productId, storeId, kind, profileId]);
   const stats = useMemo(() => usageStats(records), [records]);
-  const totals = useMemo(() => usageTotals(records), [records]);
-  const classification = useMemo(() => classifyPurchases(data), [data]);
+  const totals = useMemo(
+    () =>
+      orderTotalsForDisplay(usageTotals(records), (t) => {
+        const p = t.productId ? data.products.find((x) => x.id === t.productId) : undefined;
+        return { releaseDate: p?.releaseDate ?? null, other: t.single || p?.productKind === "other" };
+      }),
+    [records, data.products],
+  );
 
   const boughtProducts = useMemo(() => {
     const ids = new Set(all.map((r) => r.productId).filter(Boolean) as string[]);
@@ -282,21 +291,24 @@ export function PurchasesView() {
             const product = r.productId ? data.products.find((x) => x.id === r.productId) : undefined;
             const d = totalDisplay(r);
             return (
-              <li key={r.productId ?? r.label} className="flex items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2 shadow-card" data-testid="product-total-row">
-                <span className="flex h-14 w-11 shrink-0 items-center justify-center">
-                  <PurchaseThumb product={product} category={r.single ? "single_card" : r.category} heightClass="h-14" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 break-words text-[13px] font-medium leading-snug" data-testid="total-name">
-                    {r.label}
+              <li key={r.productId ?? r.label}>
+                {/* 一覧は商品名・画像・数量だけ。金額・開封の内訳は、タップで開く詳細に出す */}
+                <button type="button" onClick={() => setDetail(r)} aria-label={`${r.label}の内訳を見る`} className="flex min-h-14 w-full items-center gap-2 rounded-xl border bg-card px-2 py-1 text-left shadow-card hover:bg-muted" data-testid="product-total-row">
+                  <span className="flex h-11 w-9 shrink-0 items-center justify-center">
+                    <PurchaseThumb product={product} category={r.single ? "single_card" : r.category} heightClass="h-11" />
                   </span>
-                  <span className="block truncate text-[11px] text-muted-foreground" data-testid="total-sub">
-                    {d.sub}
+                  <span className="min-w-0 flex-1">
+                    <span className="line-clamp-2 break-words text-[13px] font-medium leading-snug" data-testid="total-name">
+                      {r.label}
+                    </span>
+                    <span className="block truncate text-[11px] tabular-nums text-muted-foreground" data-testid="total-sub">
+                      {d.sub}
+                    </span>
                   </span>
-                </span>
-                <span className="w-20 shrink-0 text-right text-base font-bold tabular-nums" data-testid="total-qty">
-                  {d.qty}
-                </span>
+                  <span className="w-20 shrink-0 text-right text-base font-bold tabular-nums" data-testid="total-qty">
+                    {d.qty}
+                  </span>
+                </button>
               </li>
             );
           })}
@@ -305,44 +317,48 @@ export function PurchasesView() {
       )}
       {tab === "history" && records.length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">この条件の記録はありません。</p>}
 
-      {/* 開封状態が不明な購入（既存の購入記録）。勝手に開封済みとは扱わない。確認すると開封実績に加わる（収支の支出は増えない） */}
-      {persistent && (classification.unknown.length > 0 || classification.boxUnregistered > 0) && (
-        <details className="rounded-xl border bg-card px-3 py-2 text-sm" data-testid="unconfirmed">
-          <summary className="min-h-8 cursor-pointer font-medium">開封状態が未確認：{classification.unknown.length + classification.boxUnregistered}件</summary>
-          <p className="mt-1 text-[11px] text-muted-foreground">購入しただけでは、開封したとは数えません。開封済みとして記録したものだけが開封累計に入ります（収支の支出は増えません）。</p>
-          <ul className="mt-2 space-y-1.5">
-            {classification.unknown.map((u) => (
-              <li key={u.itemId} className="flex items-center gap-2 text-xs" data-testid="unconfirmed-row">
-                <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 break-words font-medium">{u.label}</span>
-                  <span className="text-muted-foreground">
-                    {u.remaining}
-                    {u.unit === "pack" ? "パック" : u.unit === "set" ? "セット" : "個"}（購入 {dayLabel(u.date)}）
-                  </span>
-                </span>
-                <Button size="sm" variant="outline" onClick={() => setConfirmItem(u)} data-testid="unconfirmed-open">
-                  開封済みにする
-                </Button>
-              </li>
-            ))}
-            {classification.boxUnregisteredItems.map((b) => (
-              <li key={b.productId ?? b.label} data-testid="unconfirmed-box">
-                {b.productId ? (
-                  <Link href={`/collection?tab=box&open=${b.productId}`} className="flex min-h-9 items-center justify-between gap-2 text-xs" data-testid="unconfirmed-box-link">
-                    <span className="min-w-0 flex-1 truncate font-medium">{b.label}</span>
-                    <span className="shrink-0 tabular-nums">{b.quantity}BOX</span>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  </Link>
-                ) : (
-                  <span className="flex min-h-9 items-center justify-between gap-2 text-xs">
-                    <span className="min-w-0 flex-1 truncate font-medium">{b.label}</span>
-                    <span className="shrink-0 tabular-nums">{b.quantity}BOX</span>
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
+      {/* 商品別累計の内訳（金額・開封の内訳。一覧からは省いた補足） */}
+      {detail && (
+        <Dialog open onOpenChange={(v) => !v && setDetail(null)}>
+          <DialogContent data-testid="total-detail">
+            <DialogTitle className="break-words text-base">{detail.label}</DialogTitle>
+            <DialogDescription className="sr-only">この商品の開封数・金額の内訳</DialogDescription>
+            <dl className="mt-2 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">数量</dt>
+                <dd className="font-semibold tabular-nums" data-testid="detail-qty">
+                  {totalDisplay(detail).qty}
+                </dd>
+              </div>
+              {detail.boxes > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">開封したBOX</dt>
+                  <dd className="tabular-nums">{detail.boxes}BOX</dd>
+                </div>
+              )}
+              {detail.directPacks > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">{detail.boxes > 0 ? "単品パック" : "開封したパック"}</dt>
+                  <dd className="tabular-nums">{detail.directPacks}パック</dd>
+                </div>
+              )}
+              {detail.sets > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">セット・個</dt>
+                  <dd className="tabular-nums">{detail.sets}個</dd>
+                </div>
+              )}
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">総額</dt>
+                <dd className="font-semibold tabular-nums" data-testid="detail-amount">
+                  {detail.amountUnknown > 0 && detail.amount === 0 ? "金額未設定" : yen(detail.amount)}
+                </dd>
+              </div>
+              {detail.amountUnknown > 0 && detail.amount > 0 && <p className="text-xs text-muted-foreground">金額未設定が{detail.amountUnknown}件あります（総額には含まれていません。0円とは扱いません）。</p>}
+              {detail.boxes > 0 && detail.packEquivalent === null && <p className="text-xs text-muted-foreground">入数が未設定のBOXがあるため、パックには換算していません。</p>}
+            </dl>
+          </DialogContent>
+        </Dialog>
       )}
 
       {add === "choose" && (
@@ -364,7 +380,6 @@ export function PurchasesView() {
       )}
       {add === "opening" && <OpeningDialog mode={{ kind: "new" }} onClose={() => setAdd(null)} />}
       {add === "single" && <ExpenseDialog open onOpenChange={(v) => !v && setAdd(null)} purchase={null} />}
-      {confirmItem && <OpeningDialog key={confirmItem.itemId} mode={{ kind: "confirm", item: confirmItem }} onClose={() => setConfirmItem(null)} />}
       {editOpening && <OpeningDialog key={editOpening.id} mode={{ kind: "edit", record: editOpening }} onClose={() => setEditOpening(null)} />}
       {editSingle && <ExpenseDialog key={editSingle} open onOpenChange={(v) => !v && setEditSingle(null)} purchase={data.purchases.find((p) => p.id === editSingle) ?? null} />}
     </div>

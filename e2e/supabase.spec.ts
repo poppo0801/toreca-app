@@ -847,7 +847,11 @@ test("購入記録: 開封した商品・購入したシングルカードの記
   await page.getByRole("tab", { name: "商品別の累計" }).click();
   const total = page.getByTestId("product-total-row").filter({ hasText: "E2E購入商品" });
   await expect(total.getByTestId("total-qty")).toHaveText("2パック");
-  await expect(total.getByTestId("total-sub")).toContainText("800円");
+  await expect(total.getByTestId("total-sub")).toContainText("800円"); // 金額は一覧に残る（「総額」のラベルは無い）
+  await expect(total).not.toContainText("総額");
+  await total.click();
+  await expect(page.getByTestId("detail-amount")).toContainText("800円"); // 詳細でも確認
+  await page.keyboard.press("Escape");
   // 収支の支出は増えていない（二重計上なし）
   await page.goto("/finance");
   await expect(page.getByTestId("ledger-row").filter({ hasText: "E2E購入商品" })).toHaveCount(1);
@@ -866,7 +870,7 @@ test("購入記録: 開封した商品・購入したシングルカードの記
   await page.getByTestId("opening-cancel").click();
   await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E購入商品" })).toHaveCount(0);
 
-  // 収支から単品パックの支出を登録 → 開封状態が不明な購入に出る（勝手に開封済みにしない）→ 開封済みにすると実績に加わる
+  // 収支から単品パックの支出を登録 → 購入しただけでは開封累計に出ない（勝手に開封済みにしない）
   await page.goto("/finance");
   await page.getByRole("button", { name: "＋支出" }).click();
   const exp = page.getByRole("dialog");
@@ -880,23 +884,8 @@ test("購入記録: 開封した商品・購入したシングルカードの記
   await page.goto("/purchases");
   await page.getByTestId("tab-history").click();
   await expect(page.getByTestId("purchase-row").filter({ hasText: "E2E収支起点商品" })).toHaveCount(0);
-  const unconf = page.getByTestId("unconfirmed");
-  await unconf.locator("summary").click();
-  const urow = page.getByTestId("unconfirmed-row").filter({ hasText: "E2E収支起点商品" });
-  await expect(urow).toContainText("3パック");
-  await urow.getByTestId("unconfirmed-open").click();
-  const conf = page.getByTestId("opening-form");
-  await expect(conf.getByLabel("開封分の購入金額")).toHaveValue("1200");
-  await conf.getByLabel("開封の数量").fill("1");
-  await expect(conf.getByLabel("開封分の購入金額")).toHaveValue("400"); // 数量に応じて按分
-  await conf.getByTestId("opening-save").click();
-  await expect(conf).toHaveCount(0);
-  const done = page.getByTestId("purchase-row").filter({ hasText: "E2E収支起点商品" });
-  await expect(done).toHaveCount(1);
-  await expect(done).toContainText("1パック");
-  await expect(done).toContainText("400円"); // 1200円×1/3
-  await page.getByTestId("unconfirmed").locator("summary").click().catch(() => undefined);
-  await expect(page.getByTestId("unconfirmed-row").filter({ hasText: "E2E収支起点商品" })).toContainText("2パック"); // 残りは未確認のまま
+  // 「開封状態が未確認」の表示・フローは無い。購入しただけでは開封累計に入らない（開封は「＋記録」の開封・使用開始の記録で行う）
+  await expect(page.getByTestId("unconfirmed")).toHaveCount(0);
   // 収支は変わらない
   await page.goto("/finance");
   await expect(page.getByTestId("sum-expense")).toHaveText(`${(expenseBefore + 1200).toLocaleString("ja-JP")}円`);

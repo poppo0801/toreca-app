@@ -155,6 +155,8 @@ export interface Product {
   /** 公式番号か独自コードか */
   codeKind?: "official" | "custom" | null;
   archived?: boolean;
+  /** 発売日（YYYY-MM-DD）。未設定は null。購入記録の商品別累計の並び（発売日の新しい順）に使う */
+  releaseDate?: string | null;
 }
 
 export type ProductImageKind = "box" | "pack" | "unit";

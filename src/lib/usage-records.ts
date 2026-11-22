@@ -275,6 +275,22 @@ export function usageTotals(records: UsageRecord[]): UsageTotal[] {
   return rows.sort((a, b) => qty(b) - qty(a) || a.label.localeCompare(b.label, "ja"));
 }
 
+/**
+ * 商品別累計の表示順: **発売日の新しい順**。発売日が未設定の通常商品は、日付のある商品の後ろ。シングルカード・オリパなどの「その他」商品は最後。
+ * 同じ日付・同じ区分の中は、入力の順（数量の多い順）を保ち（安定）、さらに名称・商品IDで決める（入力順が変わっても同じ並び）。
+ */
+export function orderTotalsForDisplay<T extends UsageTotal>(totals: readonly T[], info: (t: UsageTotal) => { releaseDate: string | null; other: boolean }): T[] {
+  const rank = (t: T): { g: number; d: string } => {
+    const i = info(t);
+    return i.other ? { g: 2, d: "" } : i.releaseDate ? { g: 0, d: i.releaseDate } : { g: 1, d: "" };
+  };
+  return [...totals].sort((a, b) => {
+    const x = rank(a);
+    const y = rank(b);
+    return x.g - y.g || y.d.localeCompare(x.d) || a.label.localeCompare(b.label, "ja") || (a.productId ?? "").localeCompare(b.productId ?? "");
+  });
+}
+
 // ---------------------------------------------------------------- 既存の購入履歴の分類（開封済み／未開封／開封状態が不明）
 export interface UnconfirmedPurchase {
   purchaseId: string;
