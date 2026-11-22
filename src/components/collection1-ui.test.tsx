@@ -323,6 +323,55 @@ describe("相場調査メモの画面", () => {
     await type(q("price-yen") as HTMLInputElement, yenText);
   };
 
+  it("相場調査メモの一覧: 全ポケモン（151以外を含む）の画像を、カード名から特定できたときだけ出す（常に不透明）。トレーナーズ等・特定できない名前は画像なし", async () => {
+    mdata = {
+      cards: [mcard({ id: "a", name: "ミロカロス", setName: "S1", cardNumber: "1" }), mcard({ id: "b", name: "ブルンゲルex", setName: "S1", cardNumber: "2" }), mcard({ id: "c", name: "ハイパーボール", setName: "S1", cardNumber: "3" }), mcard({ id: "d", name: "ピカチュウ&ゼクロムGX", setName: "S1", cardNumber: "4" })],
+      prices: [],
+      purchases: [],
+    };
+    await mount(createElement(MarketMemoView));
+    const byName = (n: string) => qa("market-card").find((r) => r.textContent!.includes(n))!;
+    expect(byName("ミロカロス").querySelector('[data-testid="dex-image"]')!.getAttribute("src")).toBe("/api/pokemon-image/350?v=2"); // 151以外
+    expect(byName("ブルンゲルex").querySelector('[data-testid="dex-image"]')!.getAttribute("src")).toBe("/api/pokemon-image/593?v=2");
+    expect(byName("ブルンゲルex").querySelector('[data-testid="dex-image"]')!.getAttribute("data-dim")).toBe("false");
+    expect(byName("ハイパーボール").querySelector('[data-testid="dex-image"]')).toBeNull();
+    expect(byName("ピカチュウ&ゼクロムGX").querySelector('[data-testid="dex-image"]')).toBeNull(); // 複数のポケモン=曖昧
+  });
+
+  it("相場調査メモのヘッダー: JSONダウンロードのボタンは無く、検索と右上の＋だけ", async () => {
+    mdata = { cards: [mcard()], prices: [], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    expect(q("market-export")).toBeNull();
+    expect(document.body.querySelector('[aria-label*="エクスポート"]')).toBeNull();
+    expect(q("market-search")).not.toBeNull();
+    expect(q("market-add")).not.toBeNull();
+  });
+
+  it("相場調査メモの一覧: 長い店名を途中で切らず（文字列は完全に出力し、最大2行で折り返す）、最安価格は右端。1行目=カード名＋価格、2行目=セット・番号・レア、3行目=系列 店舗・状態・件数", async () => {
+    const longStore = "トレカキャピタル東京都新宿区西新宿本店（ポケモンカード専門館）";
+    mdata = { cards: [mcard()], prices: [mprice({ storeName: longStore, chainName: "トレカキャピタル", condition: "A+", priceYen: 1500 })], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    const store = q("market-card-store")!;
+    expect(store.textContent).toContain(longStore); // 省略（…）なし
+    expect(store.textContent).toBe(`${longStore}・A+・1件`); // 店名に系列名が含まれるときは、系列名を重ねて出さない
+
+    expect(store.className).toContain("line-clamp-2"); // 長い場合は最大2行で折り返す（1行で途中切れにしない）
+    expect(store.className).not.toContain("truncate");
+    const best = q("market-card-best")!;
+    expect(best.textContent).toBe("1,500円");
+    const text = [...q("market-card-summary")!.querySelectorAll("*")];
+    // 並び: カード名 → 価格 → セット/番号/レア → 店舗
+    const idx = (el: Element) => text.indexOf(el);
+    expect(idx(q("market-card-name-text")!)).toBeLessThan(idx(best));
+    expect(idx(best)).toBeLessThan(idx(store));
+  });
+
+  it("相場調査メモの一覧: 店名に系列名が含まれないときは「系列 店舗」の順で出す", async () => {
+    mdata = { cards: [mcard()], prices: [mprice({ storeName: "渋谷店", chainName: "別系列" })], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    expect(q("market-card-store")!.textContent).toBe("別系列 渋谷店・A・1件");
+  });
+
   it("状態違いの価格を同じ系列・店舗・調査日でまとめて登録できる。同じ状態の重複・入力不足は保存前に止める", async () => {
     mdata = { cards: [mcard()], prices: [], purchases: [] };
     await mount(createElement(MarketMemoView));

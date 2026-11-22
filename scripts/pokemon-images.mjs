@@ -53,10 +53,21 @@ if (!hh || hh.length !== 1) {
   process.exit(4);
 }
 const hid = hh[0].id;
+// --only-missing: 既にバケットにあるキーは触らず、足りないものだけを置く（差し替え・全件再変換を避ける）
+let existing = new Set();
+if (process.argv.includes("--only-missing")) {
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await db.storage.from("pokemon-images").list(`${hid}/official`, { limit: 1000, offset });
+    if (error) throw error;
+    for (const o of data) existing.add(`official/${o.name}`);
+    if (data.length < 1000) break;
+  }
+}
 let ok = 0;
 let bytes = 0;
 const failed = [];
 for (const e of entries) {
+  if (existing.has(e.key)) continue;
   try {
     // 元ファイルが空（ダウンロード失敗で0バイト）のものは、変換せず原因を明示して報告する（再取得が必要）
     if (statSync(join(dir, e.file)).size === 0) throw new Error("元ファイルが0バイト（ダウンロード失敗。再取得が必要）");
