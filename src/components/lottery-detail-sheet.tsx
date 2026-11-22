@@ -12,6 +12,8 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { StatusIcon, statusLabelWithReason } from "@/components/status-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { OfficialBadge } from "@/components/official-badge";
+import type { OfficialBadgeData } from "@/lib/judgment/xsource/badge";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { deadlineBadge, formatMonthDay, formatPlain, hasResultPeriod, isResultFinished } from "@/lib/datetime";
 import { ApplyStatusRow, DeadlineBadgeView, MyApplyButton } from "@/components/apply-status";
@@ -304,7 +306,7 @@ function StoreMissingNotice({ lottery }: { lottery: Lottery }) {
  * 抽選の詳細（下から開くパネル）。重要な順に、商品 → 日時（2カラム）→ 方法 → URL → 条件・制限 → ユーザー別 → 備考・操作。
  * 閉じると一覧に戻り、スクロール位置は呼び出し側で維持する。
  */
-export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: Lottery; open: boolean; onOpenChange: (v: boolean) => void }) {
+export function LotteryDetailSheet({ lottery, open, onOpenChange, officialBadge }: { lottery: Lottery; open: boolean; onOpenChange: (v: boolean) => void; /** 任意の「公式」バッジ（Stage 10P）。未指定・未確認なら何も表示しない */ officialBadge?: OfficialBadgeData | null }) {
   const { data, now, profile, actions, persistent, reload } = useApp();
   const viewScope = useViewScope();
   // BOX販売形態の目安（個別の抽選で確定していればそれを、なければ系列の目安）。実際の受取状態とは別
@@ -392,6 +394,7 @@ export function LotteryDetailSheet({ lottery, open, onOpenChange }: { lottery: L
                     応募時に店舗選択
                   </span>
                 )}
+                <OfficialBadge badge={officialBadge} />
               </SheetTitle>
               <SheetDescription id="lottery-detail-desc">抽選の詳細</SheetDescription>
             </div>

@@ -1,4 +1,4 @@
-import { buildEvidence, evidenceFromLastGood, type StoredEvidence } from "@/lib/collector/evidence";
+import { buildEvidence, evidenceFromLastGood, imageReadingsFromExtraction, type StoredEvidence } from "@/lib/collector/evidence";
 import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -30,6 +30,7 @@ import { afterCollectedRegistration } from "@/lib/server/collector/grouping-hook
 import { runInvestigation } from "@/lib/server/collector/investigation-hook";
 import { loadHumanKnowledge } from "@/lib/server/collector/human-knowledge-load";
 import { unifiedMode } from "@/lib/case-model/flag";
+import { beginShadow, type LegacyCapture } from "./shadow-hook";
 import { buildAiContext } from "@/lib/case-model/context";
 import { aiInputRecord, type AiInputRecord } from "@/lib/case-model/redact";
 import { caseFromExtraction, caseFromInput } from "@/lib/case-model/from-extraction";
@@ -114,6 +115,8 @@ const MAX_ATTEMPTS = QUEUE_MAX_ATTEMPTS;
 const AI_CONCURRENCY = 4;
 
 export interface CollectDeps {
+  /** Stage 10K: 新AIシャドーのキューへの投入口（既定は未設定＝何もしない）。AIは呼ばず・待たない。旧方式の確定・保存の後に、保存した原文のハッシュだけを渡す */
+  shadowEnqueue?: (candidateId: string, evidenceHash: string) => Promise<boolean>;
   /** 商品マスター由来の関連語（Stage 9B。X投稿の関連判定用。未設定なら初回に読み込む） */
   knownTerms?: string[];
   db: Db;
@@ -213,12 +216,14 @@ interface QueuedPayload {
     /** 一覧のカードの構造から読み取れた店舗名・商品名 */
     fields?: { store?: string; product?: string };
     sourceName: string;
-    post?: { id: string; text: string; images: string[]; links: string[]; createdAt: string; username?: string; /** 投稿者の固定ID（アカウント名が変わっても同じ店舗として扱うため） */ authorId?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
+    post?: { id: string; text: string; images: string[]; links: string[]; /** Stage 10M: 短縮URL→展開後URL の対応（まとめ投稿の項目ごとの応募先） */ linkMap?: { short: string; url: string }[]; createdAt: string; username?: string; /** 投稿者の固定ID（アカウント名が変わっても同じ店舗として扱うため） */ authorId?: string; profile?: XProfile; quoted?: QuotedPost; replyToId?: string };
     /** 画像の扱い（見つかった／取得できた／AIへ渡した）。解析時に記録する */
     imageStats?: ImageStats;
     /** Stage 9Z: 解析時に実際に取得できた本文（保存用。AIの抽出結果ではない原文。解析後に last_good.evidence へ保存する） */
     evidenceText?: string;
     evidenceVia?: "x_oembed" | "web_fetch";
+    /** Stage 10J: 解析時に取得できた、投稿内のリンク先の公開ページ本文（保存用。投稿本文とは別の出典として last_good.evidence.linkedPages に保存） */
+    linkedPages?: { url: string; text: string }[];
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
     relevanceBasis?: string;
     /** 利用者のXブックマーク由来（Stage 6I。収集元ではなく、利用者が選んだ投稿） */
@@ -503,6 +508,7 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     // 画像は「見つかった／取得できた／AIへ渡した」を別々に記録する（取得とAI解析を混同しない）
     q.imageStats = rich.stats;
     q.xVia = "api";
+    if (rich.linkedPageText && rich.linkUrl) q.linkedPages = [{ url: rich.linkUrl, text: rich.linkedPageText }];
     // 保存済みの画像URLがすべて取得できない（期限切れ等）ときは、1回だけX APIで投稿を取り直す（予算の範囲内。X APIが使えなければ従来どおり再試行）
     if (rich.stats.found > 0 && rich.stats.fetched === 0 && deps.xClient && !q.refetched) {
       const inner: QueuedPayload["queued"] = { ...q, kind: "x_oembed", post: undefined, refetched: true };
@@ -541,6 +547,7 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
       if (r.ok) {
         q.imageStats = { found: r.imagesFound, fetched: r.imagesUsed, sent: r.images.length };
         q.xVia = r.via;
+        if (r.linkedPages?.length) q.linkedPages = r.linkedPages;
         if (r.post) q.post = r.post;
         else if (r.text) {
           q.evidenceText = r.text;
@@ -653,18 +660,25 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
  * Stage 9Z: 初回収集で取得できた原文（投稿本文・一覧のカード）を、last_good.evidence に保存する（AIの抽出結果とは別。取得日時・取得方法つき）。
  * 取得できなかった・原文が無い場合は何も足さない（保存済みとして扱わない）。保存に失敗しても収集は止めない。
  */
-function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null): { evidence?: StoredEvidence } {
+function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { evidence?: StoredEvidence } {
   try {
     const st = q.imageStats;
-    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
+    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
     return ev ? { evidence: ev } : prior ? { evidence: prior } : {};
   } catch {
     return prior ? { evidence: prior } : {};
   }
 }
 
+/** Stage 10K: 収集時の解析（AI）が画像から読み取った根拠と、元画像への参照（公開URL）。画像は保存しない・再解析しない。画像の読み取りが無ければ何も足さない */
+function imageEvidence(q: QueuedPayload["queued"], nowIso: string, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { imageReadings?: ReturnType<typeof imageReadingsFromExtraction>; imageRefs?: string[] } {
+  const imageReadings = imageReadingsFromExtraction(extraction, nowIso);
+  const refs = [...(q.post?.images ?? []), ...(q.post?.quoted?.images ?? [])].filter((u) => typeof u === "string" && u.startsWith("https://"));
+  return { ...(imageReadings.length ? { imageReadings } : {}), ...(imageReadings.length && refs.length ? { imageRefs: refs.slice(0, 4) } : {}) };
+}
+
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
-async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = [], userRules: UserRule[] = []): Promise<Outcome> {
+async function processCandidate(deps: CollectDeps, data: AppData, cond: CollectionConditions, autoRegister: boolean, c: CandidateRow, q: QueuedPayload["queued"], result: ExtractResult, rules: ExclusionRule[] = [], userRules: UserRule[] = [], shadowCapture?: LegacyCapture): Promise<Outcome> {
   const { db } = deps;
   const nowIso = deps.now.toISOString();
   const clear = { lease_until: null, locked_by: null };
@@ -673,7 +687,7 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const originHost = hostOf(c.source_url ?? q.url);
   // 以前に保存した原文は、今回の取得で原文が得られなくても消さない（再確認・再解析で last_good が上書きされるため）
   const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
-  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence) } };
+  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence, result.ok ? result.extraction : undefined) } };
   // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
   let acct: Record<string, unknown> = { ...trace };
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
@@ -955,6 +969,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   // 店舗名「オンライン」を補ったあとで重複を判定し直す（buildDraft の時点では店舗が未確定で重複候補が空になり、同じオンライン抽選が二重登録されていた）
   draft.duplicates = findDuplicates(input, data.lotteries, q.url, data, { now: deps.now });
+  // Stage 10F（開発環境のシャドー比較のみ）: 旧方式が算出した値を観測する。値を読むだけで、旧方式の処理・保存・戻り値は変えない（無効時は shadowCapture が無く何もしない）
+  shadowCapture?.set({ applyUnit: result.ok ? (result.extraction.applyUnit ?? null) : null, itemCount: result.ok ? result.extraction.items.length : null, duplicates: draft.duplicates, chainId: input.chain.id });
   if (q.viaList) secondary.push("全項目（取得制限のため、まとめサイトの一覧の表示から読み取り）");
   if (secondary.length > 0) {
     const note = "二次情報（まとめサイトの一覧・公式アカウントの対応づけ）から補った項目: " + secondary.join("・") + "。公式の告知で確認してください";
@@ -1526,7 +1542,7 @@ export async function runCollection(deps: CollectDeps): Promise<CollectOutcome> 
             continue;
           }
           funnel.passed[j.basis]++;
-          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.authorId ? { authorId: p.authorId } : {}), ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
+          const payload: QueuedPayload = { queued: { kind: "x_post", url: p.url, title: safeSlice(p.text, 80), context: "", sourceName: s.name, attempts: 0, listSeenAt: now.toISOString(), post: { id: p.id, text: p.text, images: p.images, links: p.links, ...(p.linkMap?.length ? { linkMap: p.linkMap } : {}), createdAt: p.createdAt, username: p.username ?? s.x_username ?? "", ...(p.authorId ? { authorId: p.authorId } : {}), ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) }, relevanceBasis: j.basis } };
           rows.push({ household_id: householdId, source_id: s.id, dedupe_key: `x:${p.id}`, source_url: p.url, x_post_id: p.id, title: safeSlice(p.text.replace(/\n/g, " "), 80) || p.url, status: "pending", job_state: "pending", reasons: ["解析待ち"], draft: payload, last_checked_at: now.toISOString(), discovered_run_id: runId });
         }
         const saveRes = await saveCandidateRows(db, rows);
@@ -1646,6 +1662,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;
+  // Stage 10F（開発環境のシャドー比較のみ。無効・新方式のモデル未設定なら null で、以降の shadow 呼び出しは何もしない）
+  const shadow = beginShadow();
   const triaged = await triageQueue(deps, ctx.cond);
   out.screened += triaged;
   await bumpStats(db, householdId, now, { excluded: triaged });
@@ -1736,10 +1754,22 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
         await db.from("collection_candidates").update({ job_state: it.c.triage === "auto_retry" ? "retry" : "pending", lease_until: null, locked_by: null, attempts: Math.max(0, (it.c.attempts ?? 1) - 1) }).eq("id", it.c.id);
         continue;
       }
-      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules, userRules).catch(async (): Promise<Outcome> => {
+      const shadowCap = shadow?.newCapture();
+      const r = await processCandidate(deps, data, ctx.cond, ctx.settings.auto_register, it.c, it.q, results[i], rules, userRules, shadowCap).catch(async (): Promise<Outcome> => {
         await db.from("collection_candidates").update({ status: "pending", job_state: "retry", last_error: "解析中にエラーが発生しました", next_run_at: new Date(now.getTime() + 15 * 60_000).toISOString(), lease_until: null, locked_by: null }).eq("id", it.c.id);
         return { usedAi: true, registered: false, aiFailed: true };
       });
+      // 旧方式の確定・保存が終わった後に、同じ原文・同じ元データで比較用の判断を始める（待たない。旧方式の結果・保存・戻り値は変えない）
+      if (shadow && shadowCap) shadow.schedule({ candidateId: it.c.id, url: it.c.source_url ?? it.q.url, title: it.q.title, evidence: evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence ?? null, data, capture: shadowCap, now });
+      // 新AIシャドーのキューへの投入（Stage 10K。既定OFF）。1回のDB呼び出しだけで、AIは呼ばない。失敗しても旧方式は変わらない
+      if (deps.shadowEnqueue) {
+        try {
+          const evH = evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence?.hash;
+          if (evH) await Promise.race([deps.shadowEnqueue(it.c.id, evH), new Promise<void>((res) => setTimeout(res, 1500))]); // 1.5秒を超えて待たない（投入口が止まっても収集を遅らせない）
+        } catch {
+          /* 投入の失敗は無視する */
+        }
+      }
       out.processed++;
       if (r.usedAi) out.aiCalls++;
       if (r.aiFailed) batchAiFail++;
@@ -1763,6 +1793,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
     }
     if (aiLeft <= 0) break;
   }
+  // 開発環境のシャドー比較の終了待ち（旧方式の全候補の処理・保存が終わった後。残り時間の範囲で打ち切る。旧方式の結果は変わらない）
+  await shadow?.settle(ctx.timeLeft());
   if (!out.stopReason) await db.from("collection_settings").update({ consecutive_failures: fails }).eq("household_id", householdId);
   const left = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["pending", "retry", "processing"]);
   out.queued = left.count ?? 0;
