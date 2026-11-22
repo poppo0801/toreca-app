@@ -24,6 +24,7 @@ export const RESEARCH_SYSTEM = `あなたは、トレーディングカードの
 
 export const JUDGE_SYSTEM = `あなたは、調査が終わった時点の証拠だけを見て、抽選を**登録するか（register）／暫定候補にするか（tentative）／除外するか（exclude）**を判断する担当です。調査を続けるかどうかの判断とは別です。
 - 全ての項目が揃うことは本登録の条件ではありません。「応募の機会が実在する根拠」「利用者が正しく応募できるか」「誤って登録した場合の被害」「不明点が判断に影響するか」を総合して判断する。軽微な不明点で過剰に保留せず、根拠が足りないまま早く本登録もしない。
+- **引用（quote）は、証拠の「原文の抜粋」から一字一句そのまま写す**。「観察」の行（構造化した要約）や自分の言い換えは引用元にできない。原文に無い語句を引用に混ぜない。原文からそのまま写せないときは observed にせず inferred／unknown にする。
 - 各項目（店舗・商品・期間・応募単位・発表日など）は、basis を observed（原文から確認。証拠IDと引用が必要）／inferred（推論。確定値として扱わない）／unknown（不明。値は null）で区別する。根拠の無い推測を確定として書かない。
 - 証拠に scope（リンクの出所と、ページと項目の対応の検査結果）があるとき、verdict が mismatch（別の店舗・商品・系列・開催回のページ）の証拠を、この項目の根拠にしない。unknown（親投稿共通のリンクで対応が未確認）の証拠も、対応を確認できるまで根拠にしない。
 - 独立した応募機会と表示カードを混同しない。店舗別の応募を統合して機会を消さない／店舗選択式を店舗ごとに分けて重複応募を促さない。転載は独立した裏付けではない。
@@ -76,7 +77,14 @@ export const researchTurnReserveJpy = (model: string = DEFAULT_AI_MODEL, rate = 
   return p ? ((7_500 * p.input + 1_800 * p.output) / 1_000_000) * rate : Number.POSITIVE_INFINITY;
 };
 
-export function makeAnthropicResearchAgent(client: ClientLike, opts: { model?: string; rate?: number } = {}): ResearchAgent {
+/** 失敗の理由（原文・鍵を含まない短い分類）。実評価で「通信の失敗」か「出力の形式不備」かを区別するために記録する */
+export type AiDiagnostic = { role: "agent" | "judge"; reason: string };
+const apiReason = (e: unknown): string => {
+  const x = e as { status?: number; name?: string };
+  return `api_error:${typeof x?.status === "number" ? x.status : String(x?.name ?? "unknown").slice(0, 40)}`;
+};
+
+export function makeAnthropicResearchAgent(client: ClientLike, opts: { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void } = {}): ResearchAgent {
   const model = opts.model ?? DEFAULT_AI_MODEL;
   return async (input) => {
     let res: Anthropic.Message;
@@ -85,20 +93,24 @@ export function makeAnthropicResearchAgent(client: ClientLike, opts: { model?: s
         { model, max_tokens: 1800, system: RESEARCH_SYSTEM, messages: [{ role: "user", content: `${renderTurnInput(input)}\n\n調査の結果を提出してください。` }], output_config: { effort: "low" }, tools: [{ name: TURN_TOOL, description: "調査の整理と次の行動を提出する", input_schema: TURN_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: TURN_TOOL } },
         { timeout: 60_000, maxRetries: 0 },
       );
-    } catch {
+    } catch (e) {
+      opts.onDiagnostic?.({ role: "agent", reason: apiReason(e) });
       return null;
     }
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === TURN_TOOL);
     const a = use?.input as { observed?: unknown; inferred?: unknown; unknown?: unknown; counterHypotheses?: unknown; next?: { kind?: string; url?: string; query?: string; reason?: string; why?: string } } | undefined;
-    if (!a?.next || (a.next.kind !== "fetch" && a.next.kind !== "stop" && a.next.kind !== "search")) return null;
+    if (!a?.next || (a.next.kind !== "fetch" && a.next.kind !== "stop" && a.next.kind !== "search")) {
+      opts.onDiagnostic?.({ role: "agent", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? "invalid_next" : "no_tool_use"}` });
+      return null;
+    }
     const next: AgentTurnOutput["next"] = a.next.kind === "search" && typeof a.next.query === "string" && a.next.query.trim() ? { kind: "search", query: asString(a.next.query, 120), why: asString(a.next.why, 300) } : a.next.kind === "fetch" && typeof a.next.url === "string" ? { kind: "fetch", url: a.next.url, why: asString(a.next.why, 300) } : { kind: "stop", reason: (["sufficient", "no_progress", "unreachable"].includes(String(a.next.reason)) ? a.next.reason : "other") as "sufficient" | "no_progress" | "unreachable" | "other", why: asString(a.next.why, 300) };
     const unknown = (Array.isArray(a.unknown) ? (a.unknown as AgentTurnOutput["unknown"]) : []).filter((u) => u && typeof u.what === "string").map((u) => ({ what: asString(u.what, 160), importance: (u.importance === "high" || u.importance === "medium" ? u.importance : "low") as "low" | "medium" | "high", harmIfWrong: Array.isArray(u.harmIfWrong) ? u.harmIfWrong.map((h) => asString(h, 60)) : [], expectedInfoGain: (["none", "low", "medium", "high"].includes(String(u.expectedInfoGain)) ? u.expectedInfoGain : "none") as AgentTurnOutput["unknown"][number]["expectedInfoGain"], rationale: asString(u.rationale, 300) }));
     return { observed: claims(a.observed), inferred: claims(a.inferred), unknown, counterHypotheses: (Array.isArray(a.counterHypotheses) ? (a.counterHypotheses as unknown[]) : []).map((s) => asString(s, 200)), next, costJpy: cost };
   };
 }
 
-export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model?: string; rate?: number } = {}): RegistrationJudge {
+export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void } = {}): RegistrationJudge {
   const model = opts.model ?? DEFAULT_AI_MODEL;
   return async (input) => {
     let res: Anthropic.Message;
@@ -107,13 +119,17 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
         { model, max_tokens: 1800, system: JUDGE_SYSTEM, messages: [{ role: "user", content: `${renderJudgeInput(input)}\n\n登録判断を提出してください。` }], output_config: { effort: "low" }, tools: [{ name: JUDGE_TOOL, description: "登録判断を提出する", input_schema: JUDGE_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: JUDGE_TOOL } },
         { timeout: 60_000, maxRetries: 0 },
       );
-    } catch {
+    } catch (e) {
+      opts.onDiagnostic?.({ role: "judge", reason: apiReason(e) });
       return null;
     }
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === JUDGE_TOOL);
     const a = use?.input as { decision?: string; fields?: Record<string, { value?: string | null; basis?: string; evidenceId?: string; quote?: string }>; rationale?: string; unresolvedImpact?: string; monitor?: { continue?: boolean; why?: string } } | undefined;
-    if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || !a.fields || typeof a.fields !== "object") return null;
+    if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || !a.fields || typeof a.fields !== "object") {
+      opts.onDiagnostic?.({ role: "judge", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? "invalid_fields" : "no_tool_use"}` });
+      return null;
+    }
     const fields: Record<string, RegisteredField> = {};
     for (const [k, f] of Object.entries(a.fields)) {
       if (!f || (f.basis !== "observed" && f.basis !== "inferred" && f.basis !== "unknown")) continue;

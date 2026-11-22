@@ -39,6 +39,19 @@ describe("調査のAI（アダプタ）", () => {
   });
 });
 
+describe("失敗の理由の記録（Stage 10X）", () => {
+  it("通信の失敗と出力の形式不備を区別して記録する（原文・鍵は含まない）。引用は原文からそのまま写す指示を持つ", async () => {
+    const seen: { role: string; reason: string }[] = [];
+    const onDiagnostic = (d: { role: string; reason: string }) => seen.push(d);
+    const http = { messages: { create: vi.fn(async () => { throw Object.assign(new Error("secret-ish message"), { status: 429 }); }) } } as never;
+    expect(await makeAnthropicResearchAgent(http, { onDiagnostic })(turnInput)).toBeNull();
+    expect(await makeAnthropicRegistrationJudge(http, { onDiagnostic })({ caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient", protectedFields: {} })).toBeNull();
+    expect(await makeAnthropicResearchAgent(fake({ nope: 1 }).client, { onDiagnostic })(turnInput)).toBeNull();
+    expect(seen.map((d) => d.reason)).toEqual(["api_error:429", "api_error:429", expect.stringMatching(/^bad_output:/)]);
+    expect(JSON.stringify(seen)).not.toContain("secret-ish");
+    expect(JUDGE_SYSTEM).toContain("一字一句そのまま");
+  });
+});
 describe("登録判断のAI（アダプタ）", () => {
   const ji = { caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient" as const, protectedFields: { store: "店舗A" } };
   it("ツールは提出だけ。判断・項目ごとの根拠の種類（observed/inferred/unknown）・監視の継続を解釈する", async () => {

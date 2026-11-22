@@ -7,6 +7,7 @@
  */
 import type { CallBudget } from "../call-budget";
 import { parseApplyPage } from "./page-structure";
+import { canonUrl } from "./normalize";
 import { makeScoper, planXPost, storeFromGroupLabel, type ItemPlan, type StoredXPost } from "./x-origin";
 import { runResearch, seedEvidence, type FetchOutcome, type RegistrationJudge, type ResearchAgent, type ResearchLimits, type ResearchTools, type SearchHitLite } from "./research-loop";
 
@@ -83,7 +84,21 @@ export function buildB2Seed(plan: ItemPlan): string {
   return `【この項目の原文】${text}\n【応募先のURL】この項目には与えられていない。公開情報から探す必要がある`;
 }
 
+/** 事例ごとの記録（原文・URLは含めず、ホスト名と件数だけ） */
+export interface B2CaseRow {
+  id: string;
+  gold: boolean;
+  searches: { hitCount: number; hitHosts: string[] }[];
+  fetched: { host: string; outcome: string }[];
+  end: string;
+  decision: string;
+  held: string[] | null;
+  result: "success" | "reachedWithoutSearch" | "wrongPage" | "noPage" | "noGold";
+}
+
 export interface B2Result {
+  /** 事例ごとの記録（失敗層の分類用） */
+  rows?: B2CaseRow[];
   items: number;
   /** AIがページの取得を試みた */
   attempted: number;
@@ -102,11 +117,14 @@ export interface B2Result {
 
 /** B2: 応募URLを与えず、AIが自律的に応募先へ到達・対応付けできるかを測る。gold のある項目だけ成功/失敗を数える */
 export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent; judge: RegistrationJudge; budget: CallBudget; limits?: Partial<ResearchLimits>; now: Date; /** 実際の検索ツール（承認後の実評価で注入）。無ければ例の searchIndex（mock）。どちらも無ければ検索できない */ search?: ResearchTools["search"] }): Promise<B2Result> {
-  const out: B2Result = { items: 0, attempted: 0, reachedPage: 0, success: 0, reachedWithoutSearch: 0, wrongPage: 0, turns: 0, noGold: 0 };
+  const out: B2Result = { rows: [], items: 0, attempted: 0, reachedPage: 0, success: 0, reachedWithoutSearch: 0, wrongPage: 0, turns: 0, noGold: 0 };
   for (const ex of a.examples) {
     const { items } = planXPost(ex.post);
     const search: ResearchTools["search"] | undefined = a.search ?? (ex.searchIndex ? async (q) => ({ ok: true, hits: ex.searchIndex!.filter((s) => s.keywords.every((k) => q.includes(k))).flatMap((s) => s.hits), costJpy: 2 }) : undefined);
-    const tools: ResearchTools = { now: () => a.now, ...(search ? { search } : {}), fetchPage: async (u): Promise<FetchOutcome> => (ex.pages[u] ? { ok: true, finalUrl: u, html: ex.pages[u], text: ex.pages[u].replace(/<[^>]+>/g, " ") } : { ok: false, reason: "not_public" }) };
+    // 保存済みページの照会は、URLの表記ゆれ（末尾の/・追跡パラメータ）を正規化して一致させる（検索が返した表記が保存時と違うだけで取得不能にしない）
+    const pageKey = new Map(Object.keys(ex.pages).map((u) => [canonUrl(u).key, u]));
+    const stored = (u: string): string | undefined => (ex.pages[u] !== undefined ? u : pageKey.get(canonUrl(u).key));
+    const tools: ResearchTools = { now: () => a.now, ...(search ? { search } : {}), fetchPage: async (u): Promise<FetchOutcome> => { const k = stored(u); return k ? { ok: true, finalUrl: k, html: ex.pages[k], text: ex.pages[k].replace(/<[^>]+>/g, " ") } : { ok: false, reason: "not_public" }; } };
     for (const plan of items) {
       out.items++;
       const gold = ex.gold?.find((g) => g.itemNo === plan.itemNo);
@@ -117,15 +135,22 @@ export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent
       if (r.history.length) out.attempted++;
       const pages = r.evidence.filter((e) => e.kind === "page");
       if (pages.length) out.reachedPage++;
+      const row: B2CaseRow = { id: `${ex.id}#${plan.itemNo}`, gold: !!gold, searches: [...new Set(r.searches.map((x) => x.query))].map((q) => { const hs = r.searches.filter((x) => x.query === q); return { hitCount: hs.length, hitHosts: [...new Set(hs.map((h) => canonUrl(h.url).host))].slice(0, 6) }; }), fetched: r.history.map((h) => ({ host: h.host, outcome: h.outcome })), end: r.investigation.reason, decision: r.registration.decision, held: r.registration.held?.reasons ?? null, result: pages.length ? "wrongPage" : "noPage" };
+      out.rows!.push(row);
       if (!gold) {
         out.noGold++;
+        row.result = "noGold";
         continue;
       }
-      const found = new Set(r.searches.map((s) => s.url));
+      const found = new Set(r.searches.map((s) => canonUrl(s.url).key));
       const rightPage = (p: (typeof pages)[number]) => !!(p.url && ex.pages[p.url] && pageMentions(ex.pages[p.url], gold.store) && p.scope?.verdict !== "mismatch");
-      if (pages.some((p) => rightPage(p) && found.has(p.url ?? ""))) out.success++;
-      else if (pages.some(rightPage)) out.reachedWithoutSearch++;
-      else if (pages.length) out.wrongPage++;
+      if (pages.some((p) => rightPage(p) && found.has(canonUrl(p.url ?? "").key))) {
+        out.success++;
+        row.result = "success";
+      } else if (pages.some(rightPage)) {
+        out.reachedWithoutSearch++;
+        row.result = "reachedWithoutSearch";
+      } else if (pages.length) out.wrongPage++;
     }
   }
   return out;

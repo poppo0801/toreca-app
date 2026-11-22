@@ -27,18 +27,19 @@ describe.skipIf(env.JUDGMENT_10U_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "A"
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
     const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
-    const agent = makeAnthropicResearchAgent(client, { model: gate.model });
-    const judge = makeAnthropicRegistrationJudge(client, { model: gate.model });
+    const diagnostics: { role: string; reason: string }[] = [];
+    const agent = makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) });
+    const judge = makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) });
     let tick = Date.now();
     const tools: ResearchTools = { now: () => new Date((tick += 500)), fetchPage: async (u) => (pages.has(u) ? { ok: true, finalUrl: u, html: pages.get(u)!, text: pages.get(u)!.replace(/<[^>]+>/g, " ") } : { ok: false, reason: "not_public" }) };
     const out: Record<string, unknown>[] = [];
     for (const x of index.filter((i) => i.ok).slice(0, 12)) {
       // 種（告知）は、ページのタイトルと**応募ページのURL**（条件A: URL既知。URLの発見は評価しない）
       const title = (pages.get(x.url)!.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
-      const r = await runResearch({ caseId: `lp-${x.n}`, seed: seedEvidence("s1", `告知: ${title}\n応募ページ: ${x.url}`, new Date()), agent, judge, tools, budget, limits: { maxTurns: 4, maxFetches: 3 } });
+      const r = await runResearch({ caseId: `lp-${x.n}`, seed: seedEvidence("s1", `告知: ${title}\n応募ページ: ${x.url}`, new Date()), agent, judge, tools, budget, limits: { maxTurns: 4, maxFetches: 3, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 } });
       out.push({ case: `lp-${x.n}`, end: r.investigation.reason, turns: r.investigation.turns, decision: r.registration.decision, verified: r.registration.verified, held: r.registration.held, monitoring: r.monitoring.state, fetches: r.history.map((h) => h.outcome) });
     }
-    writeFileSync("eval/real-data/xsource-10u-real.json", JSON.stringify({ condition: "A_url_known（応募URLを種に含める。発見力の評価ではない）", note: "観測のみ（人の正解が無いため精度ではない）", budget: budget.summary(), cases: out }, null, 1));
+    writeFileSync("eval/real-data/xsource-10u-real.json", JSON.stringify({ condition: "A_url_known（応募URLを種に含める。発見力の評価ではない）", note: "観測のみ（人の正解が無いため精度ではない）", budget: budget.summary(), diagnostics, cases: out }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);
