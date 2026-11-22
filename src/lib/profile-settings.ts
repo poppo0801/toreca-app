@@ -48,6 +48,8 @@ export interface ProfileSettings {
   swipeMode?: SwipeMode;
   /** 抽選カードの日付表示（未設定=Aタイプ） */
   dateLayout?: DateLayout;
+  /** 151図鑑で、利用者が手動で付けた「対象レア未収録」の図鑑番号（1〜151）。表示の好みではなくデータなので、設定のコピー対象にしない */
+  zukanRareMissing?: number[];
 }
 
 export type ProfileSettingKey = keyof ProfileSettings;
@@ -65,6 +67,8 @@ export const COPY_ITEMS: { key: ProfileSettingKey; label: string; hint: string }
   { key: "collection", label: "コレクションの表示（列数・画像/テキスト・演出）", hint: "お気に入りの順位は含みません" },
 ];
 export const SETTING_KEYS: ProfileSettingKey[] = COPY_ITEMS.map((c) => c.key);
+/** 保存できる項目（コピー対象に加え、コピーしない個別データ） */
+export const SAVEABLE_KEYS: ProfileSettingKey[] = [...SETTING_KEYS, "zukanRareMissing"];
 
 /**
  * 下部メニュー・メニュー画面・長押しショートカットに出せる機能の一覧（Stage UI-1）。
@@ -145,6 +149,7 @@ export function normalizeProfileSettings(raw: unknown): ProfileSettings {
   if (r.collection && typeof r.collection === "object") out.collection = normalizeCollectionPrefs(r.collection);
   if (r.swipeMode === "card" || r.swipeMode === "tab") out.swipeMode = r.swipeMode;
   if (r.dateLayout === "a" || r.dateLayout === "b") out.dateLayout = r.dateLayout;
+  if (Array.isArray(r.zukanRareMissing)) out.zukanRareMissing = [...new Set(r.zukanRareMissing.filter((x): x is number => Number.isInteger(x) && x >= 1 && x <= 151))].sort((a, b) => a - b);
   if (r.theme === "light" || r.theme === "dark" || r.theme === "system") out.theme = r.theme;
   return out;
 }

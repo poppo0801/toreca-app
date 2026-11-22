@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { normalizeProfileSettings, SETTING_KEYS, type ProfileSettingKey, type ProfileSettings } from "@/lib/profile-settings";
+import { normalizeProfileSettings, SAVEABLE_KEYS, SETTING_KEYS, type ProfileSettingKey, type ProfileSettings } from "@/lib/profile-settings";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -30,7 +30,7 @@ export async function saveProfileSettings(profileId: string, patch: Partial<Reco
   const { data: hh } = await supabase.from("households").select("id").maybeSingle();
   if (!hh) return fail("世帯が見つかりません");
 
-  const keys = Object.keys(patch).filter((k): k is ProfileSettingKey => (SETTING_KEYS as string[]).includes(k));
+  const keys = Object.keys(patch).filter((k): k is ProfileSettingKey => (SAVEABLE_KEYS as string[]).includes(k));
   if (keys.length === 0) return fail("変更する項目がありません");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 新しい表は生成型に無い場合がある
   const db = supabase as any;

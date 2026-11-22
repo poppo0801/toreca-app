@@ -36,3 +36,9 @@ e2e/ai-live-output
 # Stage 8D-1: 評価基盤のシステム出力（正解とは分離。Git管理外）
 eval/runs/
 eval/lottery-grouping-real/pool.json
+
+# ポケモン公式絵（権利のある素材。Gitに含めない。Supabase Storage の非公開バケットにのみ置く）
+private-assets/
+/pokemon-image*/
+*.webp.local
+eval/real-data/

@@ -31,7 +31,7 @@ const nextConfig: NextConfig = {
         ],
       },
       // APIの応答はキャッシュさせない（商品画像の配信だけは、内容ハッシュ入りURLで長期キャッシュさせるため除く。認証は配信側で行う）
-      { source: "/api/:path((?!product-image/).*)", headers: [{ key: "Cache-Control", value: "no-store" }] },
+      { source: "/api/:path((?!product-image/|pokemon-image/).*)", headers: [{ key: "Cache-Control", value: "no-store" }] },
     ];
   },
 };

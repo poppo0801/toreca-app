@@ -32,4 +32,13 @@ export const DEX_TOTAL = 151;
 
 /** 表示用の図鑑番号（No.001） */
 export const dexLabel = (no: number): string => `No.${String(no).padStart(3, "0")}`;
+/**
+ * カード名に含まれる151のポケモン名（最も長く一致するもの。「レアコイル」は「コイル」ではなく「レアコイル」）。画像表示用の手掛かりで、記録は変更しない。
+ * 該当が無ければ null（画像は出さない）。
+ */
+const BY_LENGTH = [...POKEMON_151].sort((a, b) => b.name.length - a.name.length);
+export function dexOfCardName(cardName: string): Pokemon151 | null {
+  const n = cardName.normalize("NFKC");
+  return BY_LENGTH.find((p) => n.includes(p.name.normalize("NFKC"))) ?? null;
+}
 export const pokemonOf = (no: number): Pokemon151 | undefined => (Number.isInteger(no) && no >= 1 && no <= DEX_TOTAL ? POKEMON_151[no - 1] : undefined);
