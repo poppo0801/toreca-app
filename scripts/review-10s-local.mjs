@@ -11,8 +11,14 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { appendAnswers, currentOf, TIMINGS, UNITS } from "./lib/groundtruth.mjs";
 
 const DIR = "eval/real-data";
-const SRC = `${DIR}/human-review-10s.json`;
-const OUT = `${DIR}/human-review-10s-answers.json`;
+// 既定は 10S の資料。`--set=10t` で 10T の資料（応募ページのURL・構造化した取得結果つき）を開く
+const SET = (process.argv.find((a) => a.startsWith("--set=")) ?? "--set=10s").slice(6);
+if (!/^10[st]$/.test(SET)) {
+  console.error("--set は 10s か 10t");
+  process.exit(2);
+}
+const SRC = `${DIR}/human-review-${SET}.json`;
+const OUT = `${DIR}/human-review-${SET}-answers.json`;
 if (!existsSync(SRC)) {
   console.error("確認用のデータがありません（先に 10S の実データ評価の実行が必要）");
   process.exit(1);
@@ -46,7 +52,7 @@ ${cases
   .map((c, i) => {
     const cur = currentOf(s, c.id);
     return `<div class="card${c.real ? "" : " fict"}"><b>#${i + 1}</b> <span class="meta">${c.real ? "実データ" : "架空（テスト用・正解確認に含めない）"}・${esc(c.category)}・AIの判断区分: ${esc(c.aiDecision ?? "—")}${cur ? `・回答済み（${esc(cur.verdict)}・${esc(cur.by)}）` : ""}</span>
-<div class="src"><b>原文・応募ページの抜粋</b>\n${esc((c.sourceText ?? []).join("\n") || "—")}</div>
+${c.url ? `<div class="meta"><b>応募ページのURL</b>（ブラウザで開いて見比べてください）: <a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.url)}</a></div>` : ""}<div class="src"><b>原文・応募ページの抜粋</b>\n${esc((c.sourceText ?? []).join("\n") || "—")}</div>
 <div class="meta">リンクの出所: ${esc(ORIGIN[c.linkOrigin] ?? c.linkOrigin ?? "なし")}／ページと項目の対応: ${esc(SCOPE[c.scope?.verdict] ?? "—")}${c.scope ? `（支持: ${esc((c.scope.supports ?? []).join(", ") || "なし")}／反証: ${esc((c.scope.refutes ?? []).join(", ") || "なし")}／不明: ${esc((c.scope.unknowns ?? []).join(", ") || "なし")}）` : ""}／取得: ${esc(c.fetchOutcome ?? "—")}</div>
 <div class="hyp">AIの仮説: <b>${esc(UNIT[c.aiUnit] ?? c.aiUnit)}</b>／選択のタイミング: ${esc(TIMING[c.aiTiming] ?? c.aiTiming)}／確信度 ${esc(c.confidence)}／直接の根拠 ${c.directEvidence ? "あり" : "なし"}<br>方式の説明: ${esc(c.method ?? "")}<br>代替案: ${esc((c.alternatives ?? []).map((a) => (UNIT[a.unit] ?? a.unit) + "（" + a.why + "）").join(" / ") || "なし")}<br>観察した事実: ${esc((c.observedFacts ?? []).join(" / ") || "なし")}<br>根拠: ${esc((c.evidence ?? []).map((e) => e.basis + "：" + (e.quote || e.note)).join(" / ") || "なし")}<br>不明点: ${esc((c.unknowns ?? []).join(" / ") || "なし")}</div>
 <div><label><input type="radio" name="v${i}" value="correct"${cur?.verdict === "correct" ? " checked" : ""}> 正しい</label><label><input type="radio" name="v${i}" value="wrong"${cur?.verdict === "wrong" ? " checked" : ""}> 誤り（正しい方式を指定）</label><label><input type="radio" name="v${i}" value="undecidable"${cur?.verdict === "undecidable" ? " checked" : ""}> 判断不能</label>
