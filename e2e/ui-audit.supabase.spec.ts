@@ -10,6 +10,8 @@ import { expect, test, type Page } from "@playwright/test";
 const email = process.env.E2E_EMAIL!;
 const password = process.env.E2E_PASSWORD!;
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
+/** 画像を置く番号（151内外・形態別ファイルの番号を含む） */
+const IMAGE_NOS = [1, 4, 6, 7, 25, 150, 173, 305, 350, 520, 530, 593, 595, 702, 703, 741, 774];
 const IMG_DIR = process.env.POKEMON_IMAGE_DIR ?? "C:/Users/toppo/Downloads/pokemon-image/Official";
 
 async function login(page: Page) {
@@ -35,9 +37,11 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   // 画像（あれば少数）
   if (existsSync(IMG_DIR)) {
     const sharp = (await import("sharp")).default;
-    const names: Record<number, string> = { 1: "フシギダネ", 4: "ヒトカゲ", 6: "リザードン", 7: "ゼニガメ", 25: "ピカチュウ", 150: "ミュウツー" };
-    for (const [no, name] of Object.entries(names)) {
-      const file = `${IMG_DIR}/【公式絵No.${String(no).padStart(4, "0")}】${name}.png`;
+    const manifest = existsSync("eval/real-data/pokemon-images-manifest.json") ? (JSON.parse(readFileSync("eval/real-data/pokemon-images-manifest.json", "utf8")).entries as { no: number; file: string }[]) : [];
+    for (const no of IMAGE_NOS) {
+      const entry = manifest.find((e) => e.no === no);
+      if (!entry) continue;
+      const file = `${IMG_DIR}/${entry.file}`;
       if (!existsSync(file)) continue;
       const buf = await sharp(readFileSync(file)).resize(160, 160, { fit: "inside" }).webp({ quality: 78 }).toBuffer();
       await a.storage.from("pokemon-images").upload(`${hid}/official/${String(no).padStart(4, "0")}.webp`, buf, { contentType: "image/webp", upsert: true });
@@ -53,6 +57,16 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   const mc = await a.from("market_cards").insert({ household_id: hid, profile_id: pid, name: "リザードンex", set_name: "スカーレットex", card_number: "006/078", rarity: "AR" } as never).select("id").single();
   const mc2 = await a.from("market_cards").insert({ household_id: hid, profile_id: pid, name: "ピカチュウ", set_name: "151", card_number: "025/165", rarity: "AR" } as never).select("id").single();
   const day = new Date().toISOString().slice(0, 10);
+  const extra = [
+    { name: "オドリドリex", store: "トレカキャピタル 新宿西口本店（ポケモンカード専門館）", chain: "トレカキャピタル", cond: "A", yen: 2480 },
+    { name: "ミロカロス", store: "カードラボ 秋葉原店", chain: "カードラボ", cond: "A+", yen: 980 },
+    { name: "ブルンゲルex", store: "ドラゴンスター 渋谷スクランブル交差点前店", chain: "ドラゴンスター", cond: "B+", yen: 1500 },
+    { name: "ハイパーボール", store: "短い店", chain: "系列", cond: "A", yen: 100 },
+  ];
+  for (const [i, c] of extra.entries()) {
+    const r = await a.from("market_cards").insert({ household_id: hid, profile_id: pid, name: c.name, set_name: "テストセット", card_number: `${100 + i}/200`, rarity: "AR" } as never).select("id").single();
+    await a.from("market_prices").insert({ household_id: hid, profile_id: pid, card_id: r.data!.id, store_name: c.store, chain_name: c.chain, surveyed_on: day, condition: c.cond, price_yen: c.yen, memo: "" } as never);
+  }
   await a.from("market_prices").insert([
     { household_id: hid, profile_id: pid, card_id: mc.data!.id, store_name: "新宿店", chain_name: "テスト系列", surveyed_on: day, condition: "A+", price_yen: 1500, memo: "備考の例" },
     { household_id: hid, profile_id: pid, card_id: mc.data!.id, store_name: "渋谷店", chain_name: "別の系列", surveyed_on: "2026-01-05", condition: "A", price_yen: 1200, memo: "" },
@@ -92,7 +106,19 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
 
   // 相場調査メモ
   await page.goto("/market-memo");
-  await expect(page.getByTestId("market-card")).toHaveCount(2);
+  await expect(page.getByTestId("market-card")).toHaveCount(6);
+  // 画像の有無（151以外を含む）と、長い店名が省略されないこと
+  const img = (name: string) => page.getByTestId("market-card").filter({ hasText: name }).getByTestId("dex-image");
+  await expect(img("ミロカロス")).toHaveCount(1);
+  await expect(img("オドリドリex")).toHaveCount(1);
+  await expect(img("ブルンゲルex")).toHaveCount(1);
+  await expect(img("ハイパーボール")).toHaveCount(0);
+  await expect(page.getByTestId("market-card-store").filter({ hasText: "新宿西口本店（ポケモンカード専門館）" })).toHaveCount(1);
+  await expect(page.getByTestId("market-export")).toHaveCount(0);
+  // 画像が実際に読み込まれ、表示されている（HTTP応答・ピクセルサイズ）
+  const loaded = await page.getByTestId("market-card").filter({ hasText: "ミロカロス" }).getByTestId("dex-image").evaluate((el: HTMLImageElement) => ({ ok: el.complete && el.naturalWidth > 0, w: el.naturalWidth, src: el.getAttribute("src") }));
+  expect(loaded.ok).toBe(true);
+  console.log("AUDIT market image loaded:", JSON.stringify(loaded));
   await page.waitForTimeout(500);
   await page.waitForTimeout(900);
   await page.screenshot({ path: "test-results/ui-audit-market-list-390.png" });
@@ -118,5 +144,5 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 
   // 後片付け
-  await a.storage.from("pokemon-images").remove(["1", "4", "6", "7", "25", "150"].map((n) => `${hid}/official/${n.padStart(4, "0")}.webp`));
+  await a.storage.from("pokemon-images").remove(IMAGE_NOS.map((n) => `${hid}/official/${String(n).padStart(4, "0")}.webp`));
 });

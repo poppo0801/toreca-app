@@ -48,9 +48,10 @@ describe("ポケモン画像: Gitに載せず、Supabase Storage の非公開バ
     const by = Object.fromEntries(entries.map((e: { no: number }) => [e.no, e]));
     expect(by[3]).toMatchObject({ key: "official/0003.webp", name: "フシギバナ", ambiguous: false }); // メガ・括弧付きは採用しない
     expect(by[152]).toMatchObject({ name: "チコリータ", ambiguous: false });
-    expect(by[153]).toBeUndefined(); // 括弧付きしか無い番号は画像なし（プレースホルダー）
+    expect(by[153]).toMatchObject({ name: "ベイリーフ（フォルム違い）", formFallback: true }); // 通常版が無い番号は、形態別ファイルの先頭を代表にする（報告に残す）
+    expect(by[152].formFallback).toBe(false);
     expect(by[200]).toMatchObject({ name: "ムウマ", ambiguous: true });
-    expect(stats).toMatchObject({ files: 11, parsed: 10, unparsed: ["bad.png"], numbers: 6, selected: 5, ambiguous: 1, maxNo: 200 });
+    expect(stats).toMatchObject({ files: 11, parsed: 10, unparsed: ["bad.png"], numbers: 6, selected: 6, ambiguous: 1, formFallback: 1, maxNo: 200 });
     expect(stats.gapNumbers).toContain(154);
     expect(entries.every((e: { key: string }) => /^official\/\d{4}\.webp$/.test(e.key))).toBe(true);
   });
