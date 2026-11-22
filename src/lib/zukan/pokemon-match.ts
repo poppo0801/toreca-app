@@ -14,6 +14,20 @@ const SUFFIX = /(?:\s*(?:ex|EX|GX|VMAX|VSTAR|V-UNION|V|ＶＭＡＸ|☆|◇|δ|\
 /** 先頭に許可する接頭（形態・地方・輝き等）。「〇〇の」（トレーナーのポケモン）は別規則で許可 */
 const PREFIXES = ["メガ", "ゲンシ", "アローラ", "ガラル", "ヒスイ", "パルデア", "キョダイ", "かがやく", "ひかる", "ダーク", "ライト", "わるい", "テラスタル", "オリジナル"];
 
+/**
+ * 全国図鑑マスター（番号・正式名称・読み仮名）。ポケモンの公式名称は**カタカナ**なので、読み仮名は正式名称から作る（♀♂などの記号を除く）。
+ * 五十音順の基準はこの読み仮名（カード名の「ex」等には影響されない）。番号は全国図鑑No（カードの収録番号とは別の情報）。
+ */
+export interface PokemonMaster {
+  no: number;
+  name: string;
+  reading: string;
+}
+export function pokemonMaster(no: number): PokemonMaster | null {
+  const name = ALL_POKEMON_NAMES[no - 1];
+  return name ? { no, name, reading: name.normalize("NFKC").replace(/[♀♂]/g, "") } : null;
+}
+
 export interface MatchedPokemon {
   no: number;
   name: string;
