@@ -1,0 +1,148 @@
+/**
+ * 登録案の保存・読み出し（Stage 10Z）。書き込みはサービス権限（システム）だけ。**lotteries・applications・購入・通知には一切書かない**。
+ *  - 冪等: 同じ応募機会候補（proposal_key）で入力（input_hash）が同じなら何もしない。入力が変わったときだけ新しい版を追加し、古い版に superseded_at を付ける（行は消さない）。
+ *  - 人のレビューは proposal_key に紐づくため、再評価で版が変わっても残る。AIはレビューを上書き・削除できない（権限もない）。
+ */
+import type { ProposalRecord } from "@/lib/judgment/xsource/proposal";
+import type { Db } from "@/lib/server/lottery-service";
+
+type Rows = { data: unknown; error: { message?: string } | null };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const t = (db: Db, name: string): any => (db as unknown as { from: (n: string) => unknown }).from(name);
+
+export interface SaveSummary {
+  inserted: number;
+  unchanged: number;
+  superseded: number;
+  failed: number;
+}
+
+const rowOf = (householdId: string, r: ProposalRecord, version: number) => ({
+  household_id: householdId,
+  candidate_id: r.candidateId,
+  proposal_key: r.proposalKey,
+  version,
+  input_hash: r.inputHash,
+  post_id: r.postId,
+  item_no: r.itemNo,
+  item_label: r.itemLabel,
+  url_status: r.urlStatus,
+  source_urls: r.sourceUrls,
+  link_hosts: r.linkHosts,
+  decision: r.decision,
+  verified: r.verified,
+  held_reasons: r.heldReasons,
+  end_reason: r.endReason,
+  fields: r.fields,
+  apply_unit: r.applyUnit,
+  apply_unit_basis: r.applyUnitBasis,
+  unknowns: r.unknowns,
+  pages: r.pages,
+  possibly_same: r.possiblySame,
+  mode: r.mode,
+  model_id: r.modelId,
+  prompt_version: r.promptVersion,
+  cost_jpy: r.costJpy,
+  turns: r.turns,
+  stop_reason: r.stopReason,
+  fetched_at: r.fetchedAt,
+});
+
+export async function saveProposals(db: Db, householdId: string, records: ProposalRecord[]): Promise<SaveSummary> {
+  const s: SaveSummary = { inserted: 0, unchanged: 0, superseded: 0, failed: 0 };
+  for (const r of records) {
+    try {
+      const cur = (await t(db, "registration_proposals").select("id,version,input_hash").eq("household_id", householdId).eq("proposal_key", r.proposalKey).is("superseded_at", null).maybeSingle()) as Rows;
+      if (cur.error) {
+        s.failed++;
+        continue;
+      }
+      const c = cur.data as { id: string; version: number; input_hash: string } | null;
+      if (c && c.input_hash === r.inputHash) {
+        s.unchanged++;
+        continue;
+      }
+      if (c) {
+        const up = (await t(db, "registration_proposals").update({ superseded_at: new Date().toISOString() }).eq("id", c.id)) as Rows;
+        if (up.error) {
+          s.failed++;
+          continue;
+        }
+        s.superseded++;
+      }
+      const ins = (await t(db, "registration_proposals").insert(rowOf(householdId, r, (c?.version ?? 0) + 1))) as Rows;
+      if (ins.error) {
+        // 追加に失敗したら、古い版の superseded_at を戻す（現行の版が無くならないように）
+        if (c) await t(db, "registration_proposals").update({ superseded_at: null }).eq("id", c.id);
+        s.failed++;
+        continue;
+      }
+      s.inserted++;
+    } catch {
+      s.failed++;
+    }
+  }
+  return s;
+}
+
+export interface StoredProposal {
+  id: string;
+  candidate_id: string;
+  proposal_key: string;
+  version: number;
+  item_no: number;
+  item_label: string;
+  url_status: string;
+  source_urls: string[];
+  link_hosts: { host: string; origin: string }[];
+  decision: string;
+  verified: boolean;
+  held_reasons: string[];
+  end_reason: string | null;
+  fields: Record<string, { value: string | null; basis: string; quote: string | null; evidence: string | null; support: string }>;
+  apply_unit: string;
+  apply_unit_basis: string;
+  unknowns: { what: string; why: string }[];
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean }[];
+  possibly_same: string[];
+  mode: string;
+  model_id: string | null;
+  cost_jpy: number | null;
+  turns: number | null;
+  stop_reason: string | null;
+  judged_at: string;
+}
+export interface StoredReview {
+  id: string;
+  proposal_key: string;
+  proposal_id: string;
+  decision: "hold" | "approve_with_edits" | "reject";
+  edits: Record<string, string>;
+  note: string;
+  created_at: string;
+}
+export interface ProposalView extends StoredProposal {
+  /** この登録案（現行の版）への最新のレビュー。無ければ null */
+  review: StoredReview | null;
+  /** レビューした版が現行の版と違う（再評価で内容が変わった）。人のレビューは残るが、再確認が必要 */
+  reviewOutdated: boolean;
+}
+
+const COLS = "id,candidate_id,proposal_key,version,item_no,item_label,url_status,source_urls,link_hosts,decision,verified,held_reasons,end_reason,fields,apply_unit,apply_unit_basis,unknowns,pages,possibly_same,mode,model_id,cost_jpy,turns,stop_reason,judged_at";
+
+/** 候補ごとの現行の登録案と最新のレビュー（RLS: 世帯の構成員だけが読める。利用者のセッションのクライアントでも呼べる） */
+export async function loadProposals(db: Db, candidateIds: string[]): Promise<Record<string, ProposalView[]>> {
+  if (!candidateIds.length) return {};
+  const p = (await t(db, "registration_proposals").select(COLS).in("candidate_id", candidateIds).is("superseded_at", null).order("item_no", { ascending: true })) as Rows;
+  const list = ((p.data as StoredProposal[] | null) ?? []).filter(Boolean);
+  if (!list.length) return {};
+  const rv = (await t(db, "registration_proposal_reviews").select("id,proposal_key,proposal_id,decision,edits,note,created_at").in("proposal_key", list.map((x) => x.proposal_key)).order("created_at", { ascending: false })) as Rows;
+  const latest = new Map<string, StoredReview>();
+  for (const r of ((rv.data as StoredReview[] | null) ?? [])) if (!latest.has(r.proposal_key)) latest.set(r.proposal_key, r);
+  const out: Record<string, ProposalView[]> = {};
+  for (const x of list) {
+    const review = latest.get(x.proposal_key) ?? null;
+    (out[x.candidate_id] ??= []).push({ ...x, review, reviewOutdated: !!review && review.proposal_id !== x.id });
+  }
+  return out;
+}

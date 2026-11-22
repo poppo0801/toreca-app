@@ -104,7 +104,7 @@ if (mig.status !== 0) {
   writeFileSync(`${OUT}/result-from${from}.json`, JSON.stringify({ at: new Date().toISOString(), from, failed: true, check }, null, 2));
   process.exit(1);
 }
-ok("適用済みの最新が 113", psql("select max(version) from supabase_migrations.schema_migrations") === all.at(-1).slice(0, 14));
+ok("適用済みの最新が最後の移行（114）", psql("select max(version) from supabase_migrations.schema_migrations") === all.at(-1).slice(0, 14));
 
 // ⑥ 検証
 const post = snapAll();
@@ -122,12 +122,13 @@ ok("既存の行が変更・削除されていない（移行前の列で比べ�
 console.log("移行が追加した行（データ移行）:", JSON.stringify(added));
 const addedCols = Object.fromEntries(tables.map((t) => [t, colsOf(t).filter((c) => !preCols[t].includes(c))]).filter(([, c]) => c.length));
 console.log("移行が既存表へ追加した列:", JSON.stringify(addedCols));
-const newTables = psql("select string_agg(table_name, ',' order by table_name) from information_schema.tables where table_schema='public' and table_name ~ '^(cases|case_judgments|shadow_)'");
+const newTables = psql("select string_agg(table_name, ',' order by table_name) from information_schema.tables where table_schema='public' and table_name ~ '^(cases|case_judgments|shadow_|registration_proposal)'");
 ok("新しい表が作られた（cases・case_judgments・shadow_*）", /cases/.test(newTables) && /shadow_jobs/.test(newTables) && /shadow_opportunities/.test(newTables), newTables);
-const noRls = psql("select string_agg(c.relname, ',') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and (c.relname ~ '^(cases|case_judgments|shadow_)') and not c.relrowsecurity");
+const noRls = psql("select string_agg(c.relname, ',') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and (c.relname ~ '^(cases|case_judgments|shadow_|registration_proposal)') and not c.relrowsecurity");
 ok("新しい表すべてで RLS が有効", noRls === "" || noRls === null, noRls || "");
-ok("anon に新しい表の権限がない", psql("select count(*) from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name ~ '^(cases|case_judgments|shadow_)'") === "0");
+ok("anon に新しい表の権限がない", psql("select count(*) from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name ~ '^(cases|case_judgments|shadow_|registration_proposal)'") === "0");
 ok("authenticated は shadow_* に SELECT のみ（書き込み権限なし）", psql("select count(*) from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name ~ '^shadow_' and privilege_type <> 'SELECT'") === "0");
+ok("registration_proposals は authenticated に SELECT のみ・reviews は SELECT と INSERT のみ（更新・削除なし）", psql("select count(*) from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and ((table_name='registration_proposals' and privilege_type<>'SELECT') or (table_name='registration_proposal_reviews' and privilege_type not in ('SELECT','INSERT')))") === "0");
 ok("case_judgments は authenticated に更新・削除の権限がない（追記専用）", psql("select count(*) from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name='case_judgments' and privilege_type in ('UPDATE','DELETE')") === "0");
 ok("既存の行の case_id はすべて NULL（lotteries・collection_candidates）", psql("select (select count(*) from public.lotteries where case_id is not null) + (select count(*) from public.collection_candidates where case_id is not null)") === "0");
 ok("judgment_engine は既存の設定すべて legacy（既定）", psql("select count(*) from public.collection_settings where judgment_engine <> 'legacy'") === "0");

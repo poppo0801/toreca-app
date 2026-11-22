@@ -1,0 +1,141 @@
+import { createClient } from "@supabase/supabase-js";
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * Stage 10Z: 新AIの登録案プレビュー（収集候補 → 新AI（費用ゼロのモック）→ 登録案 → 人のレビュー）の画面確認。実Supabaseのテスト世帯・架空データ。AI・外部サイト・有料APIは使わない。
+ *   PROPOSAL_PREVIEW=on E2E_SPEC=proposal-preview.supabase.spec.ts npm run test:e2e:supabase
+ * フラグ無し（既定）のときは「登録案の表示が出ない」ことだけを確認する。承認しても lotteries・応募・購入・通知が作られないことをDBで確認する。
+ */
+const email = process.env.E2E_EMAIL!;
+const password = process.env.E2E_PASSWORD!;
+const on = process.env.PROPOSAL_PREVIEW === "on";
+const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
+
+async function login(page: Page) {
+  await page.goto("/login");
+  await page.getByLabel("メールアドレス").fill(email);
+  await page.getByLabel("パスワード").fill(password);
+  await page.getByRole("button", { name: "ログイン" }).click();
+  await expect(page).toHaveURL(/\/lotteries$/);
+}
+
+const LIST = "【抽選まとめ】 《新宿本店（東京）- 1件》 ・ポケモンカード 拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111 《渋谷西口店（東京）- 1件》 ・ポケモンカード 拡張パック 抽選 11/30(月)23:59 https://t.co/bbb222";
+const evidence = {
+  v: 1,
+  url: "https://e2e10z.example.invalid/post/1",
+  fetchedAt: new Date().toISOString(),
+  via: "x_api",
+  origin: "primary",
+  text: LIST,
+  truncated: false,
+  links: ["https://shared.example.invalid/all"],
+  imageCount: 0,
+  imageStatus: "none",
+  hash: "e".repeat(64),
+  linkMap: [
+    { short: "https://t.co/aaa111", url: "https://shop-a.example.invalid/e/1" },
+    { short: "https://t.co/bbb222", url: "https://shop-b.example.invalid/e/2" },
+  ],
+  linkedPages: [
+    { url: "https://shop-a.example.invalid/e/1", text: "【新宿本店】拡張パック 抽選受付\n受付期間 11月30日まで", fetchedAt: new Date().toISOString() },
+    { url: "https://shop-b.example.invalid/e/2", text: "【渋谷西口店】拡張パック 抽選受付\n受付期間 11月30日まで", fetchedAt: new Date().toISOString() },
+  ],
+};
+
+async function seed() {
+  const a = admin();
+  const { data: list } = await a.auth.admin.listUsers({ perPage: 200 });
+  const user = list!.users.find((u) => u.email === email)!;
+  const { data: hm } = await a.from("household_members").select("household_id").eq("user_id", user.id).limit(1).maybeSingle();
+  const hid = hm!.household_id as string;
+  await a.from("collection_settings").upsert({ household_id: hid, auto_register: false, worker_enabled: false }, { onConflict: "household_id" });
+  // 抽選候補の画面は管理者プロフィールだけ。既存の候補ページのE2E（stage7ghi）と同じ形の草稿を使う
+  const { data: profs } = await a.from("profiles").select("id").eq("household_id", hid).eq("active", true).order("sort_order");
+  await a.from("profiles").update({ is_admin: true }).eq("id", profs![0].id);
+  const EMPTY = { precision: "unknown", date: "", time: "" };
+  const input = { chain: { id: null, name: "テスト系列" }, store: { id: null, name: "新宿本店", prefecture: "" }, campaignId: null, newCampaign: null, items: [{ product: { id: null, name: "拡張パック" }, quantity: 1, unit: "box" }], multiMode: "single", applyStart: { precision: "date_only", date: "2026-11-01", time: "" }, applyDeadline: { precision: "date_only", date: "2099-01-20", time: "" }, resultDate: EMPTY, procedureStart: EMPTY, procedureDeadline: EMPTY, receiveMethod: "store", applyMethod: "web", requirementTags: [], conditionsText: "", verificationText: "", announcementMethod: "", announcementUrl: "", sourceUrls: [], eventState: "open", limitBasis: "account", limitMaxCount: 1, memo: "", applications: [] };
+  const draft = { input, flags: {}, summary: { chain: "none", store: "none", items: [{ name: "x", kind: "none", matchedName: null }] }, warnings: [], modePending: false, verdict: "review", ready: false, notices: [] };
+  const { data, error } = await a.from("collection_candidates").insert({ household_id: hid, dedupe_key: evidence.url, source_url: evidence.url, x_post_id: "910000001", title: "E2E10Z 抽選まとめ", status: "pending", job_state: "review", kind: "new", reasons: ["要確認"], last_good: { evidence } as never, draft: draft as never } as never).select("id").single();
+  expect(error).toBeNull();
+  return { a, hid, candidateId: data!.id as string };
+}
+const counts = async (a: ReturnType<typeof admin>, hid: string) => {
+  const c = async (t: string) => ((await a.from(t).select("*", { count: "exact", head: true }).eq("household_id", hid)).count ?? 0) as number;
+  return { lotteries: await c("lotteries"), applications: await c("applications"), purchases: await c("purchases"), notifications: await c("notification_deliveries") };
+};
+
+test("フラグ無し（既定）: 候補の詳細に新AIの登録案は出ない", async ({ page }) => {
+  test.skip(on, "フラグ有りの実行では別のテストで確認する");
+  test.setTimeout(120_000);
+  await login(page);
+  const { candidateId } = await seed();
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  await expect(page.getByTestId("candidate-detail")).toBeVisible();
+  await expect(page.getByTestId("proposal-preview")).toHaveCount(0);
+  void candidateId;
+});
+
+test("収集候補 → 登録案を作る（モック・費用0）→ 保留／修正して承認／却下。承認しても抽選・応募・購入・通知は作られない（390px）", async ({ page }) => {
+  test.skip(!on, "PROPOSAL_PREVIEW=on の実行だけ");
+  test.setTimeout(240_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const { a, hid, candidateId } = await seed();
+  const before = await counts(a, hid);
+  const candBefore = (await a.from("collection_candidates").select("status,job_state,draft,lottery_id").eq("id", candidateId).single()).data;
+
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  const detail = page.getByTestId("candidate-detail");
+  await expect(detail).toBeVisible();
+  const panel = detail.getByTestId("proposal-preview");
+  await expect(panel).toBeVisible();
+  await panel.locator("summary").click();
+  await expect(panel.getByTestId("proposal-empty")).toBeVisible();
+  await expect(panel.getByText("承認は記録だけで、抽選は登録されません")).toBeVisible();
+
+  // 登録案を作る（収集時に保存された原文・linkMap・linkedPages が入力。モック・費用0）
+  await panel.getByTestId("proposal-generate").click();
+  await expect(panel.getByTestId("proposal-card")).toHaveCount(2);
+  await expect(panel.getByTestId("proposal-gen-msg")).toContainText("作成 2");
+  const first = panel.getByTestId("proposal-card").nth(0);
+  const second = panel.getByTestId("proposal-card").nth(1);
+  await expect(first.getByTestId("proposal-mode")).toHaveText("モック（実AIではない）");
+  await expect(first.getByTestId("proposal-fields")).toContainText("店舗: 新宿本店 [観察]");
+  await expect(second.getByTestId("proposal-fields")).toContainText("店舗: 渋谷西口店 [観察]"); // 別店舗のページを取り違えない
+  await expect(first.getByTestId("proposal-fields")).toContainText("応募単位: 不明");
+  await expect(first.getByTestId("proposal-unknowns")).toBeVisible(); // 未確認事項が残る
+  await page.screenshot({ path: "test-results/10z-proposal-preview-390.png" });
+  const w = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(w).toBeLessThanOrEqual(1); // 横スクロールなし
+
+  // 再生成しても増えない（冪等）
+  await panel.getByTestId("proposal-generate").click();
+  await expect(panel.getByTestId("proposal-gen-msg")).toContainText("変更なし 2");
+  await expect(panel.getByTestId("proposal-card")).toHaveCount(2);
+
+  // 保留 → 修正して承認 → 却下
+  await first.getByTestId("proposal-hold").click();
+  await expect(first.getByTestId("proposal-review-state")).toHaveText("保留");
+  await second.getByTestId("proposal-edit-open").click();
+  await second.getByTestId("proposal-edit-store").fill("渋谷西口店（本館）");
+  await second.getByTestId("proposal-edit-apply_unit").selectOption("per_store");
+  await second.getByTestId("proposal-note").fill("店舗ページで確認");
+  await second.getByTestId("proposal-approve").click();
+  await expect(second.getByTestId("proposal-review-state")).toContainText("修正して承認（レビュー記録）");
+  await expect(second.getByTestId("proposal-edit").first()).toContainText("渋谷西口店（本館）");
+  await first.getByTestId("proposal-reject").click();
+  await expect(first.getByTestId("proposal-review-state")).toHaveText("却下");
+
+  // DB: レビューは追記で3件・AIの値は不変・既存の記録は不変
+  const reviews = (await a.from("registration_proposal_reviews").select("decision,edits,note").eq("household_id", hid).order("created_at")).data!;
+  expect(reviews.map((r) => r.decision)).toEqual(["hold", "approve_with_edits", "reject"]);
+  expect(reviews[1].edits).toMatchObject({ store: "渋谷西口店（本館）", apply_unit: "per_store" });
+  const props = (await a.from("registration_proposals").select("item_no,fields,apply_unit,version").eq("candidate_id", candidateId).order("item_no")).data!;
+  expect(props.map((p) => [p.item_no, p.version, p.apply_unit])).toEqual([[1, 1, "unknown"], [2, 1, "unknown"]]); // 人の修正でAIの値は書き換わらない
+  expect((props[1].fields as { store: { value: string } }).store.value).toBe("渋谷西口店");
+  expect(await counts(a, hid)).toEqual(before); // 承認しても、抽選・応募・購入・通知は作られない
+  expect((await a.from("collection_candidates").select("status,job_state,draft,lottery_id").eq("id", candidateId).single()).data).toEqual(candBefore); // 候補の状態も不変（登録は従来の「確認・登録」で行う）
+  await page.screenshot({ path: "test-results/10z-proposal-reviewed-390.png" });
+});

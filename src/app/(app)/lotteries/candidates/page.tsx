@@ -5,6 +5,8 @@ import { closedReviewIds } from "@/lib/server/collector/closed-ids";
 import { NOT_INTERNAL_TEASER } from "@/lib/collector/teaser-filter";
 import { conditionsFromRow } from "@/lib/server/collector/run";
 import { loadAppData } from "@/lib/server/lottery-service";
+import { proposalPreviewEnabled } from "@/lib/server/proposals/flag";
+import { loadProposals } from "@/lib/server/proposals/store";
 import { isSupabaseMode } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -34,5 +36,8 @@ export default async function CandidatesPage() {
   const candidates = (rev.data ?? [])
     .filter((c) => !closed.has(c.id))
     .map((c) => ({ ...c, assess: appData && cond ? assessRow({ draft: c.draft, due_at: c.due_at, source_url: c.source_url, memo_id: (c as { memo_id?: string | null }).memo_id }, appData, now, important, cond) : null }));
-  return <CandidatesView candidates={candidates as unknown as CandidateView[]} />;
+  // 新AIの登録案（プレビュー）。開発専用・既定OFF（ローカル環境かつ PROPOSAL_PREVIEW=on のときだけ読む。本番では常に無効）
+  const preview = proposalPreviewEnabled();
+  const proposals = preview ? await loadProposals(db as never, candidates.map((c) => c.id)).catch(() => ({})) : undefined;
+  return <CandidatesView candidates={candidates as unknown as CandidateView[]} proposals={proposals} proposalPreview={preview} />;
 }
