@@ -82,7 +82,10 @@ test("購入記録: BOXは開封した時点で記録（購入単価の金額・
   await expect(page.getByTestId("stat-amount")).toContainText("¥7,200");
   const total = page.getByTestId("product-total-row").filter({ hasText: "7K正式名称BOX" });
   await expect(total.getByTestId("total-qty")).toHaveText("20パック");
-  await expect(total.getByTestId("total-sub")).toHaveText("開封1BOX ｜ 総額 7,200円");
+  await expect(total.getByTestId("total-sub")).toHaveCount(0); // 補足ラベルは一覧に出さない（内訳は行をタップした詳細で確認）
+  await total.click();
+  await expect(page.getByTestId("detail-amount")).toHaveText("7,200円");
+  await page.keyboard.press("Escape");
   await expect(total.getByTestId("total-name")).toContainText("7K正式名称BOX 30th CELEBRATION"); // 正式名称
   await page.getByTestId("tab-history").click();
   const row = page.getByTestId("purchase-row").filter({ hasText: "7K正式名称BOX" });

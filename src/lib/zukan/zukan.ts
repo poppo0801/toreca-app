@@ -72,11 +72,41 @@ export function zukanStats(cards: readonly ZukanCard[]): ZukanStats {
 }
 
 export type ZukanFilter = "all" | "collected" | "uncollected";
-/** 一覧の行（番号順）。収集済みの絞り込み */
-export function zukanRows(cards: readonly ZukanCard[], filter: ZukanFilter): { no: number; name: string; collected: boolean; cardCount: number }[] {
+/** 並び順: no=図鑑番号順／kana=五十音順（名称の読み。同じ読みは図鑑番号順） */
+export type ZukanSort = "no" | "kana";
+/**
+ * 一覧の状態。優先順位は **入手済み > 相場登録済み > 対象レア未収録 > 未登録**。
+ *  - owned: カードを1枚以上所有
+ *  - market: 未入手で、そのポケモンの価格調査（相場）の記録がある
+ *  - rare_missing: 未入手・相場なしで、利用者が手動で付けた「対象レア未収録」フラグがある（カード化されていない等を推測して自動付与しない。いつでも解除できる）
+ *  - unregistered: 上のいずれでもない
+ */
+export type DexStatus = "owned" | "market" | "rare_missing" | "unregistered";
+export const DEX_STATUS_LABEL: Record<DexStatus, string> = { owned: "入手済み", market: "相場登録済み", rare_missing: "対象レア未収録", unregistered: "未登録" };
+
+export function dexStatus(a: { owned: boolean; hasPrice: boolean; rareMissing: boolean }): DexStatus {
+  return a.owned ? "owned" : a.hasPrice ? "market" : a.rareMissing ? "rare_missing" : "unregistered";
+}
+
+export interface ZukanRow {
+  no: number;
+  name: string;
+  collected: boolean;
+  cardCount: number;
+  status: DexStatus;
+}
+const KANA = new Intl.Collator("ja");
+/** 一覧の行。収集済みの絞り込みと並び順。価格調査の記録・手動フラグは任意（無ければ未登録として扱う） */
+export function zukanRows(cards: readonly ZukanCard[], filter: ZukanFilter, opts: { prices?: readonly { dexNo: number }[]; rareMissing?: ReadonlySet<number>; sort?: ZukanSort } = {}): ZukanRow[] {
   const owned = new Map<number, number>();
   for (const c of cards) owned.set(c.dexNo, (owned.get(c.dexNo) ?? 0) + c.quantity);
-  return POKEMON_151.map((p) => ({ no: p.no, name: p.name, collected: (owned.get(p.no) ?? 0) >= 1, cardCount: owned.get(p.no) ?? 0 })).filter((r) => (filter === "all" ? true : filter === "collected" ? r.collected : !r.collected));
+  const priced = new Set((opts.prices ?? []).map((p) => p.dexNo));
+  const rows = POKEMON_151.map((p) => {
+    const cardCount = owned.get(p.no) ?? 0;
+    const collected = cardCount >= 1;
+    return { no: p.no, name: p.name, collected, cardCount, status: dexStatus({ owned: collected, hasPrice: priced.has(p.no), rareMissing: opts.rareMissing?.has(p.no) ?? false }) };
+  }).filter((r) => (filter === "all" ? true : filter === "collected" ? r.collected : !r.collected));
+  return opts.sort === "kana" ? rows.sort((a, b) => KANA.compare(a.name, b.name) || a.no - b.no) : rows;
 }
 
 /** 購入金額の入力（空欄は null。カンマ・円記号は許す。"0" は 0 円）。不正は "invalid" */

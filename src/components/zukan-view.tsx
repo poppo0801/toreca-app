@@ -1,18 +1,31 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Download, Loader2, Plus } from "lucide-react";
-import { buyZukanFromPriceAction, addZukanPriceAction, deleteZukanCardAction, deleteZukanPriceAction, exportZukanAction, loadZukanAction, saveZukanCardAction, updateZukanPriceAction, type ZukanData } from "@/app/(app)/zukan/actions";
+import { ArrowDownAZ, ArrowDown01, Check, ChevronDown, Loader2, Plus } from "lucide-react";
+import { buyZukanFromPriceAction, addZukanPriceAction, deleteZukanCardAction, deleteZukanPriceAction, loadZukanAction, saveZukanCardAction, updateZukanPriceAction, type ZukanData } from "@/app/(app)/zukan/actions";
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { jstToday, PriceForm } from "@/components/price-form";
+import { DexImage } from "@/components/dex-image";
+import { addPricesSequentially, jstToday, PriceForm } from "@/components/price-form";
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { dexLabel, pokemonOf } from "@/lib/zukan/pokemon151";
 import type { ZukanPriceRecord } from "@/lib/zukan/rows";
-import { ACQUIRE_LABEL, commonRank, parseAmount, RANKS, recentStores, resolveAcquire, zukanRows, zukanStats, type AcquireMethod, type ZukanCard, type ZukanFilter } from "@/lib/zukan/zukan";
+import { ACQUIRE_LABEL, commonRank, DEX_STATUS_LABEL, dexStatus, parseAmount, RANKS, recentStores, resolveAcquire, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
+
+/**
+ * 状態の見た目（文字バッジは使わない。背景色＋枠線の形で区別し、色だけに頼らない）:
+ *  入手済み=白地・緑の実線枠／相場登録済み=青みの薄地・青の実線枠／対象レア未収録=紫みの薄地・紫の破線枠／未登録=薄いグレー・枠なし。
+ *  未入手の3状態は画像を半透明（35%）にする。
+ */
+const STATUS_STYLE: Record<DexStatus, string> = {
+  owned: "border-success/60 bg-white text-foreground dark:bg-card",
+  market: "border-sky-500/60 bg-sky-100 text-muted-foreground dark:bg-sky-950/60",
+  rare_missing: "border-dashed border-violet-500/70 bg-violet-100 text-muted-foreground dark:bg-violet-950/50",
+  unregistered: "border-transparent bg-muted text-muted-foreground",
+};
 
 const yen = (v: number) => `${v.toLocaleString("ja-JP")}円`;
 
@@ -173,7 +186,8 @@ function CardInfoFields({ v, onChange }: { v: CardInfo; onChange: (v: CardInfo) 
 }
 
 /** ポケモン1匹の詳細（収集カード・価格調査） */
-function PokemonSheet({ no, data, profileId, today, reload, onClose }: { no: number; data: ZukanData; profileId: string; today: string; reload: () => Promise<void>; onClose: () => void }) {
+function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rareMissing, onToggleRare }: { no: number; data: ZukanData; profileId: string; today: string; reload: () => Promise<void>; onClose: () => void; status: DexStatus; rareMissing: boolean; onToggleRare: () => Promise<string | null> }) {
+  const [flagError, setFlagError] = useState<string | null>(null);
   const p = pokemonOf(no)!;
   const cards = data.cards.filter((c) => c.dexNo === no);
   const prices = data.prices.filter((r) => r.dexNo === no);
@@ -212,15 +226,38 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose }: { no: num
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent data-testid="zukan-sheet" aria-describedby="zukan-desc">
-        <div className="px-4 pb-2">
-          <SheetTitle>
-            {dexLabel(no)} {p.name}
-          </SheetTitle>
+        <div className="flex items-center gap-3 px-4 pb-2">
+          <DexImage no={no} name={p.name} className="size-16" />
+          <div className="min-w-0">
+            <SheetTitle>
+              {dexLabel(no)} {p.name}
+            </SheetTitle>
+            <p className="text-xs text-muted-foreground" data-testid="zukan-status-text">
+              状態: {DEX_STATUS_LABEL[status]}
+              {status === "owned" ? "（カードを登録済み）" : status === "market" ? "（価格調査の記録あり）" : status === "rare_missing" ? "（手動で設定）" : ""}
+            </p>
+          </div>
           <SheetDescription id="zukan-desc" className="sr-only">
             {p.name}のカードの登録と価格調査
           </SheetDescription>
         </div>
         <SheetBody className="space-y-4 border-t pt-3">
+          {status !== "owned" && (
+            <section aria-label="対象レア未収録" className="rounded-lg border px-2.5 py-2 text-xs">
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={rareMissing} onChange={async () => setFlagError(await onToggleRare())} className="mt-0.5 size-4" data-testid="rare-missing-toggle" />
+                <span>
+                  <span className="text-[13px] font-medium">対象レア未収録</span>
+                  <span className="block text-muted-foreground">対象のレアカードがまだ手元にない／収録されていないと判断したときに、手動で付けます（自動では付きません。いつでも解除できます）。入手済み・相場登録済みの状態が優先されます。</span>
+                </span>
+              </label>
+              {flagError && (
+                <p role="alert" className="mt-1 text-danger">
+                  {flagError}
+                </p>
+              )}
+            </section>
+          )}
           <section aria-label="収集カード" className="space-y-1.5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold">収集カード（{cards.reduce((a, c) => a + c.quantity, 0)}枚）</h3>
@@ -275,6 +312,13 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose }: { no: num
                   today={today}
                   submitLabel={pricing.rec ? "更新する" : "記録する"}
                   onCancel={() => setPricing(null)}
+                  onSubmitBatch={async (items) => {
+                    const res = await addPricesSequentially(items, (v) => addZukanPriceAction(profileId, no, { cardName: info.cardName || p.name, setName: info.setName, cardNumber: info.cardNumber, rarity: info.rarity }, v));
+                    await reload();
+                    if (res.error) return res.error;
+                    setPricing(null);
+                    return null;
+                  }}
                   onSubmit={async (v) => {
                     const r = pricing.rec ? await updateZukanPriceAction(profileId, pricing.rec.id, v) : await addZukanPriceAction(profileId, no, { cardName: info.cardName || p.name, setName: info.setName, cardNumber: info.cardNumber, rarity: info.rarity }, v);
                     if (!r.ok) return r.error;
@@ -342,12 +386,14 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose }: { no: num
 
 /** 151図鑑（Stage Collection-1）。全国図鑑No.001〜151の一覧・収集状況・カード登録・価格調査。現在のプロフィール単位 */
 export function ZukanView() {
-  const { profile, now } = useApp();
+  const { profile, now, settings, saveSettings } = useApp();
   const profileId = profile.id;
   const today = jstToday(now);
   const [data, setData] = useState<ZukanData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ZukanFilter>("all");
+  const [sort, setSort] = useState<ZukanSort>("no");
+  const rareMissing = useMemo(() => new Set(settings.zukanRareMissing ?? []), [settings.zukanRareMissing]);
   const [open, setOpen] = useState<number | null>(null);
   const [detail, setDetail] = useState(false);
 
@@ -365,15 +411,14 @@ export function ZukanView() {
   }, [reload]);
 
   const stats = useMemo(() => (data ? zukanStats(data.cards) : null), [data]);
-  const rows = useMemo(() => (data ? zukanRows(data.cards, filter) : []), [data, filter]);
-  const exportJson = async () => {
-    const r = await exportZukanAction(profileId);
-    if (!r.ok) return setError(r.error);
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([r.json], { type: "application/json" }));
-    a.download = `zukan-${today}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const rows = useMemo(() => (data ? zukanRows(data.cards, filter, { prices: data.prices, rareMissing, sort }) : []), [data, filter, rareMissing, sort]);
+  /** 対象レア未収録フラグの切替（プロフィール設定に保存。失敗時はエラーを返す） */
+  const toggleRare = async (no: number): Promise<string | null> => {
+    const next = new Set(rareMissing);
+    if (next.has(no)) next.delete(no);
+    else next.add(no);
+    const r = await saveSettings({ zukanRareMissing: [...next].sort((a, b) => a - b) });
+    return r.ok ? null : r.error;
   };
 
   if (error && !data)
@@ -430,8 +475,8 @@ export function ZukanView() {
             </button>
           ))}
         </div>
-        <Button variant="outline" size="icon" className="size-10 shrink-0" onClick={() => void exportJson()} aria-label="図鑑データをエクスポート（JSON）" data-testid="zukan-export">
-          <Download className="size-4" aria-hidden="true" />
+        <Button variant="outline" size="icon" className="size-10 shrink-0" onClick={() => setSort((v) => (v === "no" ? "kana" : "no"))} aria-label={sort === "no" ? "並び順: 図鑑番号順（押すと五十音順）" : "並び順: 五十音順（押すと図鑑番号順）"} data-testid="zukan-sort" data-sort={sort}>
+          {sort === "no" ? <ArrowDown01 className="size-4" aria-hidden="true" /> : <ArrowDownAZ className="size-4" aria-hidden="true" />}
         </Button>
       </div>
       {error && (
@@ -454,19 +499,35 @@ export function ZukanView() {
                 data-testid="zukan-item"
                 data-no={r.no}
                 data-collected={r.collected ? "true" : "false"}
-                aria-label={`${dexLabel(r.no)} ${r.name} ${r.collected ? "収集済み" : "未収集"}`}
-                className={cn("flex min-h-12 w-full items-center gap-1.5 rounded-lg border px-2 text-left text-sm active:opacity-80", r.collected ? "border-success/50 bg-success/15" : "bg-card text-muted-foreground")}
+                data-status={r.status}
+                aria-label={`${dexLabel(r.no)} ${r.name} ${DEX_STATUS_LABEL[r.status]}`}
+                className={cn("flex min-h-14 w-full items-center gap-1.5 rounded-lg border-2 px-1.5 py-1 text-left text-sm active:opacity-80", STATUS_STYLE[r.status])}
               >
-                <span className="w-9 shrink-0 text-[11px] tabular-nums text-muted-foreground">{String(r.no).padStart(3, "0")}</span>
-                <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
-                {r.collected && <Check className="size-4 shrink-0 text-success" strokeWidth={3} aria-hidden="true" />}
+                <DexImage no={r.no} name={r.name} className="size-11" dim={!r.collected} />
+                <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span className="text-[10px] tabular-nums text-muted-foreground">{String(r.no).padStart(3, "0")}</span>
+                  <span className={cn("truncate text-[13px] font-medium", r.collected && "text-foreground")}>{r.name}</span>
+                </span>
+                {r.collected && <Check className="size-5 shrink-0 text-success" strokeWidth={3} aria-hidden="true" />}
               </button>
             </li>
           ))}
           {rows.length === 0 && <li className="col-span-full py-6 text-center text-sm text-muted-foreground">該当するポケモンがいません。</li>}
         </ul>
       )}
-      {open !== null && data && <PokemonSheet no={open} data={data} profileId={profileId} today={today} reload={reload} onClose={() => setOpen(null)} />}
+      {open !== null && data && (
+        <PokemonSheet
+          no={open}
+          data={data}
+          profileId={profileId}
+          today={today}
+          reload={reload}
+          onClose={() => setOpen(null)}
+          status={dexStatus({ owned: data.cards.some((c) => c.dexNo === open && c.quantity >= 1), hasPrice: data.prices.some((p) => p.dexNo === open), rareMissing: rareMissing.has(open) })}
+          rareMissing={rareMissing.has(open)}
+          onToggleRare={() => toggleRare(open)}
+        />
+      )}
     </div>
   );
 }

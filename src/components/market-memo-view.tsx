@@ -5,10 +5,12 @@ import { Download, Loader2, Plus, Search } from "lucide-react";
 import { addMarketPriceAction, buyMarketFromPriceAction, createMarketCardAction, deleteMarketCardAction, deleteMarketPriceAction, exportMarketAction, loadMarketAction, updateMarketCardAction, updateMarketPriceAction, type MarketData } from "@/app/(app)/market-memo/actions";
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { jstToday, PriceForm } from "@/components/price-form";
+import { DexImage } from "@/components/dex-image";
+import { addPricesSequentially, jstToday, PriceForm } from "@/components/price-form";
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { dexOfCardName } from "@/lib/zukan/pokemon151";
 import type { MarketCard } from "@/lib/zukan/rows";
 import { cheapestIds, commonRank, recentStores, sortPrices, type PriceInput } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
@@ -167,12 +169,18 @@ function CardSheet({ card, data, profileId, today, stores, rank, reload, onClose
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent data-testid="market-sheet" aria-describedby="market-desc">
-        <div className="px-4 pb-2">
-          <SheetTitle>{card.name}</SheetTitle>
-          <SheetDescription id="market-desc" className="text-xs">
-            {cardLabel(card) || "セット・番号は未入力"}
-            {card.note ? ` ・ ${card.note}` : ""}
-          </SheetDescription>
+        <div className="flex items-center gap-2.5 px-4 pb-2">
+          {(() => {
+            const dex = dexOfCardName(card.name);
+            return dex ? <DexImage no={dex.no} name={dex.name} className="size-14" /> : null;
+          })()}
+          <div className="min-w-0">
+            <SheetTitle>{card.name}</SheetTitle>
+            <SheetDescription id="market-desc" className="text-xs">
+              {cardLabel(card) || "セット・番号は未入力"}
+              {card.note ? ` ・ ${card.note}` : ""}
+            </SheetDescription>
+          </div>
         </div>
         <SheetBody className="space-y-3 border-t pt-3">
           {error && (
@@ -222,6 +230,13 @@ function CardSheet({ card, data, profileId, today, stores, rank, reload, onClose
               submitLabel={pricing.rec ? "更新する" : "記録する"}
               onCancel={() => setPricing(null)}
               onSubmit={submitPrice}
+              onSubmitBatch={async (items) => {
+                const res = await addPricesSequentially(items, (v) => addMarketPriceAction(profileId, card.id, v));
+                await reload();
+                if (res.error) return res.error;
+                setPricing(null);
+                return null;
+              }}
             />
           )}
           <PriceList rows={prices} today={today} boughtIds={bought} onBuy={setBuy} onEdit={(r) => setPricing({ rec: r })} onDelete={setDelPrice} />
@@ -285,23 +300,31 @@ function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; 
   const best = cheapestIds(prices, today);
   const top = sortPrices(prices.filter((p) => best.has(p.id)), "price")[0];
   const swipe = useSwipeLeft(onAddPrice);
+  // 画像: カード名に151のポケモン名が含まれるときだけ（記録は変更しない）。入手状態によらず常に通常の不透明度
+  const dex = dexOfCardName(card.name);
   return (
-    <li className="flex items-center gap-1.5 rounded-xl border bg-card py-1.5 pl-3 pr-1.5" data-testid="market-card" {...swipe}>
-      <button type="button" onClick={onOpen} className="min-w-0 flex-1 py-1 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
-        <span className="flex items-center gap-1.5">
-          <span className="min-w-0 truncate text-sm font-bold">{card.name}</span>
-          {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
+    <li className="flex items-center gap-1.5 rounded-xl border bg-card py-1 pl-2 pr-1" data-testid="market-card" {...swipe}>
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
+        {dex && <DexImage no={dex.no} name={dex.name} className="size-10" />}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="min-w-0 truncate text-sm font-bold">{card.name}</span>
+            {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
+          </span>
+          <span className="block truncate text-[11px] text-muted-foreground">{cardLabel(card) || "セット・番号は未入力"}</span>
         </span>
-        <span className="block truncate text-[11px] text-muted-foreground">{cardLabel(card) || "セット・番号は未入力"}</span>
-        <span className="block truncate text-xs" data-testid="market-card-summary">
+        <span className="shrink-0 text-right text-xs" data-testid="market-card-summary">
           {top ? (
             <>
-              最安 <b className="tabular-nums text-success">{yen(top.priceYen)}</b>（{top.storeName}・{top.condition}） ・ 記録{prices.length}件
+              <b className="block text-sm tabular-nums text-success">{yen(top.priceYen)}</b>
+              <span className="block max-w-24 truncate text-[10px] text-muted-foreground">
+                {top.storeName}・{top.condition}・{prices.length}件
+              </span>
             </>
           ) : prices.length > 0 ? (
-            <span className="text-muted-foreground">参考価格のみ（30日を超えた記録）・記録{prices.length}件</span>
+            <span className="text-muted-foreground">参考価格のみ・{prices.length}件</span>
           ) : (
-            <span className="text-muted-foreground">価格の記録なし</span>
+            <span className="text-muted-foreground">価格なし</span>
           )}
         </span>
       </button>
@@ -435,6 +458,13 @@ export function MarketMemoView() {
                 defaultRank={rank}
                 today={today}
                 onCancel={() => setQuick(null)}
+                onSubmitBatch={async (items) => {
+                  const res = await addPricesSequentially(items, (v) => addMarketPriceAction(profileId, card.id, v));
+                  await reload();
+                  if (res.error) return res.error;
+                  setQuick(null);
+                  return null;
+                }}
                 onSubmit={async (v) => {
                   const r = await addMarketPriceAction(profileId, card.id, v);
                   if (!r.ok) return r.error;
