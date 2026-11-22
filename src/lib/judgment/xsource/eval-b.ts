@@ -8,7 +8,7 @@
 import type { CallBudget } from "../call-budget";
 import { parseApplyPage } from "./page-structure";
 import { makeScoper, planXPost, storeFromGroupLabel, type ItemPlan, type StoredXPost } from "./x-origin";
-import { runResearch, seedEvidence, type FetchOutcome, type RegistrationJudge, type ResearchAgent, type ResearchLimits, type ResearchTools } from "./research-loop";
+import { runResearch, seedEvidence, type FetchOutcome, type RegistrationJudge, type ResearchAgent, type ResearchLimits, type ResearchTools, type SearchHitLite } from "./research-loop";
 
 export interface BExample {
   id: string;
@@ -17,6 +17,8 @@ export interface BExample {
   pages: Record<string, string>;
   /** 独立した正解（採点側だけが持つ）: 項目番号 → 正しい店舗名。出典（人が確認した原文・公開ページ）を記録する */
   gold?: { itemNo: number; store: string; source: string }[];
+  /** （mock用）検索の再生元: 検索語にすべてのキーワードが含まれるとき hits を返す。実評価では実際の検索ツールを注入する */
+  searchIndex?: { keywords: string[]; hits: SearchHitLite[] }[];
 }
 
 const norm = (s: string): string => s.normalize("NFKC").toLowerCase().replace(/[\s　]/g, "");
@@ -87,8 +89,10 @@ export interface B2Result {
   attempted: number;
   /** 取得できたページ */
   reachedPage: number;
-  /** gold の店舗のページに到達し、対応の検査が mismatch でない（成功） */
+  /** gold の店舗のページに**検索で見つけたURLから**到達し、対応の検査が mismatch でない（成功＝発見）。検索を使わずURLを知っていて取得できただけの項目は成功に数えない */
   success: number;
+  /** gold の店舗のページに到達したが、検索で見つけたURLではない（URLを知っていた/推測した。発見成功とは数えない） */
+  reachedWithoutSearch: number;
   /** 別の店舗などのページに到達した（対応の検査で mismatch。誤対応の提案を防げた） */
   wrongPage: number;
   /** 費用・調査の観測 */
@@ -97,11 +101,12 @@ export interface B2Result {
 }
 
 /** B2: 応募URLを与えず、AIが自律的に応募先へ到達・対応付けできるかを測る。gold のある項目だけ成功/失敗を数える */
-export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent; judge: RegistrationJudge; budget: CallBudget; limits?: Partial<ResearchLimits>; now: Date }): Promise<B2Result> {
-  const out: B2Result = { items: 0, attempted: 0, reachedPage: 0, success: 0, wrongPage: 0, turns: 0, noGold: 0 };
+export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent; judge: RegistrationJudge; budget: CallBudget; limits?: Partial<ResearchLimits>; now: Date; /** 実際の検索ツール（承認後の実評価で注入）。無ければ例の searchIndex（mock）。どちらも無ければ検索できない */ search?: ResearchTools["search"] }): Promise<B2Result> {
+  const out: B2Result = { items: 0, attempted: 0, reachedPage: 0, success: 0, reachedWithoutSearch: 0, wrongPage: 0, turns: 0, noGold: 0 };
   for (const ex of a.examples) {
     const { items } = planXPost(ex.post);
-    const tools: ResearchTools = { now: () => a.now, fetchPage: async (u): Promise<FetchOutcome> => (ex.pages[u] ? { ok: true, finalUrl: u, html: ex.pages[u], text: ex.pages[u].replace(/<[^>]+>/g, " ") } : { ok: false, reason: "not_public" }) };
+    const search: ResearchTools["search"] | undefined = a.search ?? (ex.searchIndex ? async (q) => ({ ok: true, hits: ex.searchIndex!.filter((s) => s.keywords.every((k) => q.includes(k))).flatMap((s) => s.hits), costJpy: 2 }) : undefined);
+    const tools: ResearchTools = { now: () => a.now, ...(search ? { search } : {}), fetchPage: async (u): Promise<FetchOutcome> => (ex.pages[u] ? { ok: true, finalUrl: u, html: ex.pages[u], text: ex.pages[u].replace(/<[^>]+>/g, " ") } : { ok: false, reason: "not_public" }) };
     for (const plan of items) {
       out.items++;
       const gold = ex.gold?.find((g) => g.itemNo === plan.itemNo);
@@ -116,8 +121,10 @@ export async function evaluateB2(a: { examples: BExample[]; agent: ResearchAgent
         out.noGold++;
         continue;
       }
-      const hit = pages.some((p) => p.url && ex.pages[p.url] && pageMentions(ex.pages[p.url], gold.store) && p.scope?.verdict !== "mismatch");
-      if (hit) out.success++;
+      const found = new Set(r.searches.map((s) => s.url));
+      const rightPage = (p: (typeof pages)[number]) => !!(p.url && ex.pages[p.url] && pageMentions(ex.pages[p.url], gold.store) && p.scope?.verdict !== "mismatch");
+      if (pages.some((p) => rightPage(p) && found.has(p.url ?? ""))) out.success++;
+      else if (pages.some(rightPage)) out.reachedWithoutSearch++;
       else if (pages.length) out.wrongPage++;
     }
   }

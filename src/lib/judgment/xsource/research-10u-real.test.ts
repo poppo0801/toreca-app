@@ -17,7 +17,7 @@ import { runResearch, seedEvidence, type ResearchTools } from "./research-loop";
 vi.mock("server-only", () => ({}));
 const env = process.env;
 const DIR = "eval/real-data/10t-html";
-describe.skipIf(env.JUDGMENT_10U_REAL !== "1" || !existsSync(`${DIR}/index.json`))("10V-A 応募URL既知のページ構造・判断（実AI・有料）", () => {
+describe.skipIf(env.JUDGMENT_10U_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "A" || !existsSync(`${DIR}/index.json`))("10V-A 応募URL既知のページ構造・判断（実AI・有料）", () => {
   it("応募URL既知: 保存済みページの再生で、追加調査→終了→登録判断を通し、観測だけを書き出す", async () => {
     const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) });
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);

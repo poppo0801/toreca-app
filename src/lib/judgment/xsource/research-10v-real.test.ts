@@ -16,7 +16,9 @@ import { classifyGold, scoreAgainstGold } from "../../../../scripts/lib/gold-c.m
 // @ts-expect-error plain JS module
 import { currentOf } from "../../../../scripts/lib/groundtruth.mjs";
 import { evaluateB1, evaluateB2, type BExample } from "./eval-b";
+import { AnthropicWebSearch } from "@/lib/agent/anthropic";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent } from "./research-ai";
+import { makeSearchTool } from "./research-search";
 import { runResearch, seedEvidence, type ResearchTools } from "./research-loop";
 
 vi.mock("server-only", () => ({}));
@@ -24,8 +26,10 @@ const env = process.env;
 const REVIEW = "eval/real-data/human-review-10s.json";
 const ANSWERS = "eval/real-data/human-review-10s-answers.json";
 const EXAMPLES = "eval/real-data/xsource-10w-linkmap-examples.json";
+/** B2（AI自律発見）の例: 保存済みの実在の公開ページから作った、応募URLを持たない項目（scripts/build-b2-examples.mjs。合成の原文・正解はページ自身の店舗） */
+const B2_EXAMPLES = "eval/real-data/xsource-10x-b2-examples.json";
 const realGate = () => checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) });
-const examples = (): BExample[] => (JSON.parse(readFileSync(EXAMPLES, "utf8")) as { examples: BExample[] }).examples;
+const examples = (file = EXAMPLES): BExample[] => (JSON.parse(readFileSync(file, "utf8")) as { examples: BExample[] }).examples;
 
 describe.skipIf(!existsSync(EXAMPLES))("10W-B1 展開・項目スコープ（無料・AIなし）", () => {
   it("項目別の展開結果と独立した正解がある例で、URLの取り出し・ページの対応の検査を採点する", () => {
@@ -35,7 +39,7 @@ describe.skipIf(!existsSync(EXAMPLES))("10W-B1 展開・項目スコープ（無
   });
 });
 
-describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(EXAMPLES))("10W-B2 AI自律発見（実AI・有料・承認後）", () => {
+describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "B2" || !existsSync(B2_EXAMPLES))("10W-B2 AI自律発見（実AI・有料・承認後）", () => {
   it("応募URLを与えず、AIが応募先に到達・対応付けできるか（gold のある項目だけ成功/失敗を数える）", async () => {
     const gate = realGate();
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
@@ -43,14 +47,14 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(EXAMPLES))("10W-B2 
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
     const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
-    const r = await evaluateB2({ examples: examples().slice(0, 12), agent: makeAnthropicResearchAgent(client, { model: gate.model }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model }), budget, limits: { maxTurns: 3, maxFetches: 2 }, now: new Date() });
-    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。検索ツールは無く、AIが提案したURLの取得の範囲）", ...r, budget: budget.summary() }, null, 1));
+    const r = await evaluateB2({ examples: examples(B2_EXAMPLES).slice(0, 4), agent: makeAnthropicResearchAgent(client, { model: gate.model }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model }), budget, limits: { maxTurns: 4, maxFetches: 2, maxSearches: 1, searchReserveJpy: 5 }, now: new Date(), search: makeSearchTool(new AnthropicWebSearch(client as never, gate.model)) });
+    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。既存の検索部品＝Anthropic web_search を読み取り専用で接続。成功は『検索で見つけたURL』からの到達のみ）", ...r, budget: budget.summary() }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);
 });
 
-describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || !existsSync(REVIEW) || !existsSync(ANSWERS))("10W-C 独立した正解（gold）での登録判断（実AI・有料・承認後）", () => {
+describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "C" || !existsSync(REVIEW) || !existsSync(ANSWERS))("10W-C 独立した正解（gold）での登録判断（実AI・有料・承認後）", () => {
   it("gold の事例だけを採点する。gold が最小数に満たなければ正答率は出さない。取得欠落は別計上", async () => {
     const gate = realGate();
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
