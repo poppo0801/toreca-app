@@ -33,15 +33,18 @@ function dayLabel(date: string | null): string {
 const chip = "h-9 min-w-0 shrink rounded-full border bg-input px-3 text-xs";
 
 /** 金額の表示。未設定は0円とせず「金額未設定」 */
-const amountText = (r: { amount: number; amountUnknown: number }): string => (r.amountUnknown > 0 && r.amount === 0 ? "金額未設定" : r.amountUnknown > 0 ? `総額 ${yen(r.amount)}（未設定${r.amountUnknown}件）` : `総額 ${yen(r.amount)}`);
+const amountText = (r: { amount: number; amountUnknown: number }): string => (r.amountUnknown > 0 && r.amount === 0 ? "金額未設定" : r.amountUnknown > 0 ? `${yen(r.amount)}（未設定${r.amountUnknown}件）` : yen(r.amount));
 
-/** 商品別累計の1行の表示内容。数量を主役にし、金額は補足にする（例: 20パック／開封1BOX｜総額7,200円） */
+/**
+ * 商品別累計の1行の表示内容。数量を主役（右）にし、補足の数値（中央・商品名の下）を出す。**説明ラベル（「総額」「開封」）だけを省き、数値（BOX数・パック数・金額）は残す**
+ * 例: 右=20パック／補足=1BOX｜7,200円（以前は「開封1BOX｜総額 7,200円」）。
+ */
 export function totalDisplay(r: UsageTotal): { qty: string; sub: string } {
   const amount = amountText(r);
   if (r.single) return { qty: `${r.singleQty}枚`, sub: amount };
   const parts: string[] = [];
-  if (r.boxes > 0) parts.push(`開封${r.boxes}BOX`);
-  if (r.directPacks > 0) parts.push(r.boxes > 0 ? `単品${r.directPacks}パック` : `開封${r.directPacks}パック`);
+  if (r.boxes > 0) parts.push(`${r.boxes}BOX`);
+  if (r.directPacks > 0) parts.push(r.boxes > 0 ? `単品${r.directPacks}パック` : `${r.directPacks}パック`);
   if (r.sets > 0) parts.push(`${r.sets}個`);
   parts.push(amount);
   if (r.boxes + r.packs > 0) {
@@ -290,12 +293,17 @@ export function PurchasesView() {
             return (
               <li key={r.productId ?? r.label}>
                 {/* 一覧は商品名・画像・数量だけ。金額・開封の内訳は、タップで開く詳細に出す */}
-                <button type="button" onClick={() => setDetail(r)} aria-label={`${r.label}の内訳を見る`} className="flex min-h-[4.25rem] w-full items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2 text-left shadow-card hover:bg-muted" data-testid="product-total-row">
-                  <span className="flex h-14 w-11 shrink-0 items-center justify-center">
-                    <PurchaseThumb product={product} category={r.single ? "single_card" : r.category} heightClass="h-14" />
+                <button type="button" onClick={() => setDetail(r)} aria-label={`${r.label}の内訳を見る`} className="flex min-h-14 w-full items-center gap-2 rounded-xl border bg-card px-2 py-1 text-left shadow-card hover:bg-muted" data-testid="product-total-row">
+                  <span className="flex h-11 w-9 shrink-0 items-center justify-center">
+                    <PurchaseThumb product={product} category={r.single ? "single_card" : r.category} heightClass="h-11" />
                   </span>
-                  <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] font-medium leading-snug" data-testid="total-name">
-                    {r.label}
+                  <span className="min-w-0 flex-1">
+                    <span className="line-clamp-2 break-words text-[13px] font-medium leading-snug" data-testid="total-name">
+                      {r.label}
+                    </span>
+                    <span className="block truncate text-[11px] tabular-nums text-muted-foreground" data-testid="total-sub">
+                      {d.sub}
+                    </span>
                   </span>
                   <span className="w-20 shrink-0 text-right text-base font-bold tabular-nums" data-testid="total-qty">
                     {d.qty}

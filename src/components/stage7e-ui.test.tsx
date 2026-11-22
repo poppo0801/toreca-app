@@ -98,7 +98,8 @@ describe("Stage 7E: 購入記録ページ", () => {
     expect(rows).toHaveLength(1); // 30th CELEBRATION（未開封BOX）・スタートデッキセット（開封状態が不明）は含まれない
     expect(rows[0].querySelector('[data-testid="total-name"]')!.textContent).toBe("シングルカード");
     expect(rows[0].querySelector('[data-testid="total-qty"]')!.textContent).toBe("6枚");
-    expect(rows[0].querySelector('[data-testid="total-sub"]')).toBeNull(); // 補足ラベルは一覧に出さない
+    expect(rows[0].querySelector('[data-testid="total-sub"]')!.textContent).toBe("6,260円"); // 「総額」のラベルは省き、金額は残す
+    expect(rows[0].textContent).not.toMatch(/総額|開封/);
     await act(async () => (rows[0] as HTMLElement).click());
     expect(q("detail-amount")!.textContent).toBe("6,260円"); // 内訳は詳細で確認できる
     expect(document.body.textContent).not.toContain("構成商品には数量だけを参考として加えます");

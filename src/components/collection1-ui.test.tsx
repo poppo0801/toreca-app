@@ -292,14 +292,35 @@ describe("相場調査メモの画面", () => {
   const mcard = (o: Record<string, unknown> = {}) => ({ id: "m1", profileId: PID, name: "リザードンex", setName: "スカーレットex", cardNumber: "006/078", rarity: "SR", note: "", createdAt: "2026-11-01T00:00:00Z", ...o }) as MarketData["cards"][number];
   const mprice = (o: Record<string, unknown> = {}) => ({ id: "mp1", profileId: PID, cardId: "m1", storeName: "A店", chainName: "", surveyedOn: "2026-11-10", condition: "A", priceYen: 1000, note: "", createdAt: "2026-11-10T00:00:00Z", ...o }) as MarketData["prices"][number];
 
-  it("カード一覧に最安値と＋ボタン。購入済みのカードは既定で非表示（チェックで表示）。検索できる", async () => {
+  /** 左スワイプ（タッチ）。一覧の価格追加の操作 */
+  const swipeLeft = async (el: Element) => {
+    const touch = (type: string, x: number, y: number) => {
+      const e = new Event(type, { bubbles: true }) as Event & { touches: unknown[]; changedTouches: unknown[] };
+      e.touches = type === "touchend" ? [] : [{ clientX: x, clientY: y }];
+      e.changedTouches = [{ clientX: x, clientY: y }];
+      return e;
+    };
+    await act(async () => void el.dispatchEvent(touch("touchstart", 300, 100)));
+    await act(async () => void el.dispatchEvent(touch("touchend", 180, 105)));
+    await flush();
+  };
+
+  it("カード一覧: 各行に「＋」は無く、行全体のタップで詳細が開く。購入済みのカードは既定で非表示（ボタンで切替）。検索できる。並び替えボタンがある", async () => {
     mdata = { cards: [mcard(), mcard({ id: "m2", name: "ピカチュウ", setName: "151", cardNumber: "025/165" }), mcard({ id: "m3", name: "買った札", setName: "x", cardNumber: "1" })], prices: [mprice(), mprice({ id: "mp2", cardId: "m1", storeName: "B店", priceYen: 800 }), mprice({ id: "mp3", cardId: "m3" })], purchases: [{ id: "b1", cardId: "m3", priceId: "mp3", purchasedOn: "2026-11-11", storeName: "A店", priceYen: 1000, condition: "A" }] };
     await mount(createElement(MarketMemoView));
     expect(qa("market-card")).toHaveLength(2);
-    expect(qa("market-card")[0].querySelector('[data-testid="market-card-summary"]')!.textContent).toContain("800円");
+    expect(qa("market-card")[0].querySelector('[data-testid="market-card-best"]')!.textContent).toBe("800円"); // 最安価格は右端
     expect(qa("market-card")[0].querySelector('[data-testid="market-card-summary"]')!.textContent).toContain("B店");
-    expect(qa("market-card-plus")).toHaveLength(2);
+    expect(qa("market-card-plus")).toHaveLength(0); // 行の「＋」は削除
+    expect(q("market-add")).not.toBeNull(); // 右上の＋（新規カード登録）は維持
+    expect(q("market-sort")).not.toBeNull();
+    expect(q("market-show-bought")!.getAttribute("aria-pressed")).toBe("false");
+    await click(qa("market-card-open")[0]); // 行全体のタップで詳細
+    expect(q("market-sheet")).not.toBeNull();
+    await act(async () => void document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await flush();
     await click(q("market-show-bought"));
+    expect(q("market-show-bought")!.getAttribute("aria-pressed")).toBe("true");
     expect(qa("market-card")).toHaveLength(3);
     await type(q("market-search") as HTMLInputElement, "ピカ");
     expect(qa("market-card")).toHaveLength(1);
@@ -353,29 +374,33 @@ describe("相場調査メモの画面", () => {
     await mount(createElement(MarketMemoView));
     const store = q("market-card-store")!;
     expect(store.textContent).toContain(longStore); // 省略（…）なし
-    expect(store.textContent).toBe(`${longStore}・A+・1件`); // 店名に系列名が含まれるときは、系列名を重ねて出さない
-
-    expect(store.className).toContain("line-clamp-2"); // 長い場合は最大2行で折り返す（1行で途中切れにしない）
-    expect(store.className).not.toContain("truncate");
+    expect(store.textContent).toBe(`A+${longStore}・1件`); // 状態バッジ＋店名（店名に系列名が含まれるときは、系列名を重ねて出さない）＋件数
+    expect(store.className).not.toMatch(/truncate|line-clamp/); // 途中で切らない（必要な分だけ折り返す）
+    expect(store.querySelector('[data-testid="rank-badge"]')!.getAttribute("data-rank")).toBe("A+"); // 四角い色分けバッジ
     const best = q("market-card-best")!;
     expect(best.textContent).toBe("1,500円");
+    // 横方向の配置: [画像] [カード名・セット/番号/レア・状態バッジ+店舗+件数] [最安価格（右端）]。縦方向の中央揃え
+    const btn = q("market-card-open")!;
+    expect(btn.className).toContain("items-center");
+    expect(btn.lastElementChild).toBe(best);
+    expect(best.className).toMatch(/whitespace-nowrap/); // 桁数で折り返さない
+    expect(best.className).toContain("text-lg"); // カード名（text-sm）より大きい
     const text = [...q("market-card-summary")!.querySelectorAll("*")];
-    // 並び: カード名 → 価格 → セット/番号/レア → 店舗
     const idx = (el: Element) => text.indexOf(el);
-    expect(idx(q("market-card-name-text")!)).toBeLessThan(idx(best));
-    expect(idx(best)).toBeLessThan(idx(store));
+    expect(idx(q("market-card-name-text")!)).toBeLessThan(idx(q("market-card-meta")!));
+    expect(idx(q("market-card-meta")!)).toBeLessThan(idx(store));
   });
 
   it("相場調査メモの一覧: 店名に系列名が含まれないときは「系列 店舗」の順で出す", async () => {
     mdata = { cards: [mcard()], prices: [mprice({ storeName: "渋谷店", chainName: "別系列" })], purchases: [] };
     await mount(createElement(MarketMemoView));
-    expect(q("market-card-store")!.textContent).toBe("別系列 渋谷店・A・1件");
+    expect(q("market-card-store")!.textContent).toBe("A別系列 渋谷店・1件");
   });
 
   it("状態違いの価格を同じ系列・店舗・調査日でまとめて登録できる。同じ状態の重複・入力不足は保存前に止める", async () => {
     mdata = { cards: [mcard()], prices: [], purchases: [] };
     await mount(createElement(MarketMemoView));
-    await click(q("market-card-plus"));
+    await swipeLeft(q("market-card")!);
     await fillPrice("系列B", "B店", "1200"); // 状態は A が初期選択
     await click(q("price-extra-add"));
     const row = q("price-extra-row")!;
@@ -389,7 +414,7 @@ describe("相場調査メモの画面", () => {
     ]);
     // 重複する状態
     addMPrice.mockClear();
-    await click(q("market-card-plus"));
+    await swipeLeft(q("market-card")!);
     await fillPrice("系列B", "B店", "1200");
     await click(q("price-extra-add"));
     await type(q("price-extra-row")!.querySelector("select") as HTMLSelectElement, "A");
@@ -487,10 +512,10 @@ describe("相場調査メモの画面", () => {
     expect(addMPrice).toHaveBeenCalledWith(PID, "m1", expect.objectContaining({ storeName: "X店", chainName: "系列X", priceYen: 500 }));
   });
 
-  it("一覧の「＋」から価格だけを素早く追加（カード名は出さない）。左スワイプでも同じ操作ができる", async () => {
+  it("左スワイプで価格だけを素早く追加（カード名は出さない）。詳細の「価格を記録」からも追加できる", async () => {
     mdata = { cards: [mcard()], prices: [], purchases: [] };
     await mount(createElement(MarketMemoView));
-    await click(q("market-card-plus"));
+    await swipeLeft(q("market-card")!);
     expect(q("market-quick-sheet")).not.toBeNull();
     expect(q("market-card-name")).toBeNull();
     await fillPrice("系列Y", "Y店", "700");
@@ -498,18 +523,52 @@ describe("相場調査メモの画面", () => {
     await click(q("price-submit"));
     expect(addMPrice).toHaveBeenCalledWith(PID, "m1", expect.objectContaining({ storeName: "Y店", chainName: "系列Y", condition: "B+", priceYen: 700 }));
     expect(q("market-quick-sheet")).toBeNull();
-    // 左スワイプ
-    const row = q("market-card")!;
-    const touch = (type: string, x: number, y: number) => {
-      const e = new Event(type, { bubbles: true }) as Event & { touches: unknown[]; changedTouches: unknown[] };
-      e.touches = type === "touchend" ? [] : [{ clientX: x, clientY: y }];
-      e.changedTouches = [{ clientX: x, clientY: y }];
-      return e;
+    // 詳細から
+    addMPrice.mockClear();
+    await click(q("market-card-open"));
+    await click(q("market-price-add"));
+    await fillPrice("系列Z", "Z店", "650");
+    await click(q("price-submit"));
+    expect(addMPrice).toHaveBeenCalledWith(PID, "m1", expect.objectContaining({ storeName: "Z店", priceYen: 650 }));
+  });
+
+  it("カード一覧の並び替え（詳細内の価格の並び替えとは別）: 新着順 → 価格の安い順 → 状態優先。価格の記録が無いカードは最後。購入済みの表示切替は常に使える", async () => {
+    mdata = {
+      cards: [mcard({ id: "n1", name: "新しい", setName: "s", cardNumber: "1", createdAt: "2026-11-15T00:00:00Z" }), mcard({ id: "n2", name: "安い", setName: "s", cardNumber: "2", createdAt: "2026-11-10T00:00:00Z" }), mcard({ id: "n3", name: "状態良", setName: "s", cardNumber: "3", createdAt: "2026-11-05T00:00:00Z" }), mcard({ id: "n4", name: "記録なし", setName: "s", cardNumber: "4", createdAt: "2026-11-16T00:00:00Z" })],
+      prices: [mprice({ id: "p1", cardId: "n1", condition: "B", priceYen: 900 }), mprice({ id: "p2", cardId: "n2", condition: "B", priceYen: 300 }), mprice({ id: "p3", cardId: "n3", condition: "A+", priceYen: 1500 })],
+      purchases: [],
     };
-    await act(async () => void row.dispatchEvent(touch("touchstart", 300, 100)));
-    await act(async () => void row.dispatchEvent(touch("touchend", 180, 105)));
-    await flush();
-    expect(q("market-quick-sheet")).not.toBeNull();
+    await mount(createElement(MarketMemoView));
+    const names = () => qa("market-card-name-text").map((e) => e.textContent);
+    expect(q("market-sort")!.getAttribute("data-sort")).toBe("new");
+    expect(names()).toEqual(["記録なし", "新しい", "安い", "状態良"]); // 新着順（登録の新しい順）
+    await click(q("market-sort"));
+    expect(q("market-sort")!.getAttribute("data-sort")).toBe("price");
+    expect(names()).toEqual(["安い", "新しい", "状態良", "記録なし"]); // 最安価格の安い順・記録なしは最後
+    await click(q("market-sort"));
+    expect(q("market-sort")!.getAttribute("data-sort")).toBe("condition");
+    expect(names()).toEqual(["状態良", "安い", "新しい", "記録なし"]); // 最安記録の状態が良い順（A+→B）。同ランクは安値順
+    expect(q("market-show-bought")).not.toBeNull(); // 購入済みが無くても切替ボタンは常にある
+  });
+
+  it("状態ランクは四角い色分けバッジ（A+/A/B+/B/C で色が異なる）。カード一覧は最安記録の状態を表示", async () => {
+    mdata = { cards: [mcard()], prices: [mprice({ condition: "B+", priceYen: 700 })], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    const b = q("market-card-store")!.querySelector('[data-testid="rank-badge"]') as HTMLElement;
+    expect(b.textContent).toBe("B+");
+    const { RankBadge } = await import("@/components/rank-badge");
+    const classes = ["A+", "A", "B+", "B", "C"].map((r) => {
+      const d = document.createElement("div");
+      document.body.appendChild(d);
+      const root2 = createRoot(d);
+      act(() => root2.render(createElement(RankBadge, { rank: r })));
+      const c = d.firstElementChild!.className;
+      act(() => root2.unmount());
+      d.remove();
+      return c;
+    });
+    expect(new Set(classes).size).toBe(5); // ランクごとに色が違う
+    expect(classes.every((c) => /rounded-\[3px\] border/.test(c))).toBe(true); // 四角い枠
   });
 
   it("カード詳細（相場調査メモ）: 価格一覧は要点だけ（状態→系列・店舗→調査日→金額）。操作・推移・備考は価格をタップした詳細に。状態優先／価格順、30日超は参考価格、同じ店舗の推移、購入は確認のあと1回だけ・購入済みは押せない", async () => {

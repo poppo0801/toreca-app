@@ -847,8 +847,10 @@ test("購入記録: 開封した商品・購入したシングルカードの記
   await page.getByRole("tab", { name: "商品別の累計" }).click();
   const total = page.getByTestId("product-total-row").filter({ hasText: "E2E購入商品" });
   await expect(total.getByTestId("total-qty")).toHaveText("2パック");
+  await expect(total.getByTestId("total-sub")).toContainText("800円"); // 金額は一覧に残る（「総額」のラベルは無い）
+  await expect(total).not.toContainText("総額");
   await total.click();
-  await expect(page.getByTestId("detail-amount")).toContainText("800円"); // 金額の内訳は詳細で確認
+  await expect(page.getByTestId("detail-amount")).toContainText("800円"); // 詳細でも確認
   await page.keyboard.press("Escape");
   // 収支の支出は増えていない（二重計上なし）
   await page.goto("/finance");

@@ -115,7 +115,7 @@ test("相場調査メモ: 登録・比較・購入・購入済みの非表示。
   await expect(page.getByTestId("price-row").first()).toHaveAttribute("data-bought", "true");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("market-card")).toHaveCount(0);
-  await page.getByTestId("market-show-bought").check();
+  await page.getByTestId("market-show-bought").click();
   await expect(page.getByTestId("market-card")).toHaveCount(1);
 
   // メニュー画面に両機能
