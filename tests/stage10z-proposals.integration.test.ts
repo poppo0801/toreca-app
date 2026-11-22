@@ -162,7 +162,7 @@ describe.skipIf(!dbTestsEnabled)("Stage 10Z: 収集候補 → 新AI → 登録�
     }
     expect(await rowsOf(cand.id)).toHaveLength(0);
     expect(await recordReview({ db: u1, householdId: hidA, proposalId: "00000000-0000-0000-0000-000000000000", decision: "hold", env: {} })).toEqual({ ok: false, reason: "disabled" });
-    expect(await gen(cand, { ...mockDeps(), mode: "real" })).toEqual({ ok: false, reason: "disabled" }); // 実AIはこの入口では生成しない
+    expect(await gen(cand, { ...mockDeps(), mode: "real" })).toEqual({ ok: false, reason: "real_not_permitted" }); // 実AIは、承認済みの関門を通った評価入口の許可証が無ければ生成しない（Phase 2）
   });
 
   it("⑥URLなし・短縮URL未展開・親の共通リンクだけ・取得不能・調査AIの例外でも、項目は候補に保持され、未確認事項が残る（応募単位は unknown）", async () => {

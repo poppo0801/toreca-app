@@ -11,7 +11,7 @@ import { LotteryFormDialog } from "@/components/lottery-form";
 import { discardCandidateResumeFor } from "@/lib/lottery-resume";
 import { PageHeading } from "@/components/page-heading";
 import { ProductThumb } from "@/components/product-image";
-import { ProposalPreview } from "@/components/proposal-preview";
+import { ProposalPreview, ProposalSummaryLine } from "@/components/proposal-preview";
 import type { ProposalView } from "@/lib/server/proposals/store";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -213,6 +213,7 @@ function CandidatesInner({ candidates, proposals, proposalPreview }: { candidate
         </p>
       )}
 
+      {proposalPreview && proposals && Object.keys(proposals).length > 0 && <ProposalSummaryLine proposals={proposals} />}
       <ul className="space-y-2" data-testid="candidate-list">
         {visible.map((c) => {
           const f = candidateFacts(c);

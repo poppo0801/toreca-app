@@ -181,3 +181,57 @@ describe("登録案の集計（引用の実在と値の導出を別に数える�
     expect(m.support.not_found).toBeGreaterThan(0);
   });
 });
+
+describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server action・cron・収集は実AIを動かせない", () => {
+  const walk2 = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = `${d}/${n}`; return statSync(p).isDirectory() ? walk2(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
+  const nonTest = walk2("src").filter((f) => !/\.test\.tsx?$/.test(f)).map((f) => f.split("\\").join("/"));
+  const importers = (re: RegExp, self: string[]): string[] => nonTest.filter((f) => !self.includes(f) && re.test(readFileSync(f, "utf8")));
+  it("許可証の発行（issueRealRunTicket）を使えるのは real-run.ts だけ。実AIの評価入口（real-run）・擬似クライアント・本番プレビューの判定は、非テストのコードから読み込まれない", () => {
+    expect(importers(/issueRealRunTicket/, ["src/lib/server/proposals/real-gate.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
+    expect(importers(/proposals\/real-run|\.\/real-run/, ["src/lib/server/proposals/real-run.ts"])).toEqual([]);
+    expect(importers(/xsource\/scripted-client|\.\/scripted-client/, ["src/lib/judgment/xsource/scripted-client.ts"])).toEqual([]);
+    expect(importers(/proposals\/prod-gate|\.\/prod-gate/, ["src/lib/server/proposals/prod-gate.ts"])).toEqual([]);
+  });
+  it("画面・server action・収集の接続口・候補の画面は、real-run・real-gate・AIクライアントを読み込まない（環境変数や画面操作だけで有料AIが動かない）", () => {
+    for (const f of ["src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/app/(app)/lotteries/candidates/page.tsx", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/collector/run.ts"]) {
+      const s = readFileSync(f, "utf8");
+      expect(s, f).not.toMatch(/real-run|real-gate|issueRealRunTicket|@anthropic-ai\/sdk|new Anthropic\(|AnthropicWebSearch|makeAnthropic/);
+    }
+  });
+  it("実AIのクライアントを作る・キーを読むのは評価入口（*.real.test.ts）だけ。登録案・収集・hook のコードはキーを扱わない", () => {
+    const sdk = nonTest.filter((f) => /@anthropic-ai\/sdk/.test(readFileSync(f, "utf8")) && f.startsWith("src/lib/server/proposals/"));
+    expect(sdk).toEqual([]);
+    for (const f of ["src/lib/server/proposals/real-run.ts", "src/lib/server/proposals/real-gate.ts", "src/lib/server/proposals/generate.ts", "src/lib/server/proposals/eval-candidates.ts"]) expect(readFileSync(f, "utf8"), f).not.toMatch(/process\.env\.(ANTHROPIC|AGENT_ANTHROPIC|JUDGMENT_EVAL)_API_KEY|apiKey:/);
+  });
+  it("実AIの評価入口は、事前検査の後でないとクライアントを作らず、ローカルDB以外に接続せず、承認なしでは起動しない", () => {
+    const t = readFileSync("src/lib/server/proposals/proposal-real.real.test.ts", "utf8");
+    expect(t).toContain("checkJudgmentRealRun(");
+    expect(t.indexOf("checkJudgmentRealRun(")).toBeLessThan(t.indexOf("new Anthropic("));
+    expect(t).toContain("ローカルのSupabase以外には接続しません");
+    const r = readFileSync("src/lib/server/proposals/real-run.ts", "utf8");
+    expect(r.indexOf("preflightRun(")).toBeLessThan(r.indexOf("generateProposalsForCandidate("));
+    const s = readFileSync("scripts/proposal-real.mjs", "utf8");
+    expect(s).toContain("既定値はありません");
+    expect(s).toContain("APPROVE P ${total}JPY");
+    expect(s).toContain("MIN_PER_CASE");
+  });
+});
+
+describe("実AIの評価入力（保存済みの公開投稿・公開ページ → 収集と同じ構造の候補）", () => {
+  it("r10s は短縮URL未展開のまま（URLなしで調べさせる）・lp は項目自身のリンクと保存ページを持つ。架空は対象外。goldや人の回答を含めない", async () => {
+    const { buildEvalCandidates, estimateRunCost } = await import("./eval-candidates");
+    const { planXPost } = await import("@/lib/judgment/xsource/x-origin");
+    const html = `<html><body><h1 class="heading01">【テスト店】拡張パック 抽選</h1><h2>受付・チケット情報</h2><section class="event-detail-ticket-card"><h4 class="event-detail-ticket-card__title">拡張パック 1BOX</h4><p class="event-detail-ticket-card__text">受付</p></section></body></html>`;
+    const c = buildEvalCandidates({ review: [{ id: "r1", real: true, sourceText: ["・拡張パック抽選 https://t.co/abc123 11/30(月)23:59〆"] }, { id: "r2", real: false, sourceText: ["架空"] }], lp: [{ n: 1, url: "https://shop.example.invalid/e/1", html }], now: "2026-11-22T00:00:00.000Z" });
+    expect(c.map((x) => [x.kind, x.ref])).toEqual([["r10s", "r1"], ["lp", "1"]]);
+    const plan = (x: (typeof c)[number]) => planXPost(postFromCandidate({ id: "i", last_good: { evidence: x.evidence } })!).items;
+    expect(plan(c[0]).map((i) => i.status)).toEqual(["short_unexpanded"]);
+    expect(plan(c[1]).map((i) => i.status)).toEqual(["url_from_item"]);
+    expect(c[1].evidence.linkedPages?.[0].url).toBe("https://shop.example.invalid/e/1");
+    expect(JSON.stringify(c)).not.toMatch(/gold|correctUnit|verdict|aiUnit/);
+    const e = estimateRunCost({ itemsWithUrl: 12, itemsWithoutUrl: 3, search: true, maxReservedPerItemJpy: 6.1 });
+    expect(e.expectedJpy).toBeGreaterThan(10);
+    expect(e.reservedWorstJpy).toBe(91.5);
+    expect(estimateRunCost({ itemsWithUrl: 0, itemsWithoutUrl: 3, search: false, maxReservedPerItemJpy: 3.6 }).expectedJpy).toBeLessThan(e.expectedJpy);
+  });
+});

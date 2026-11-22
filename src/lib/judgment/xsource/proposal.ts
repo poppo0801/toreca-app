@@ -41,7 +41,8 @@ export interface ProposalRecord {
   applyUnit: ApplyUnit;
   applyUnitBasis: "observed" | "inferred" | "unknown";
   unknowns: { what: string; why: string }[];
-  pages: { host: string; scope: string | null; slots: number; textLoss: boolean }[];
+  /** viaSearch: そのページのURLが、AIの検索結果に含まれていた（検索で見つけた候補を取得した）。URLが最初から与えられたものと区別する（B2の自律発見の観測用） */
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch: boolean }[];
   possiblySame: string[];
   mode: ProposalMode;
   modelId: string | null;
@@ -59,9 +60,11 @@ const nf = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").t
 export const proposalKey = (candidateId: string, postId: string | null, itemNo: number): string => sha(`${candidateId}|${postId ?? ""}|${itemNo}`).slice(0, 24);
 
 /** 入力（項目の原文・リンクの出所・取得したページの内容）のハッシュ。同じなら再評価しても新しい版を作らない */
-export function inputHash(plan: ItemPlan, evidence: readonly Evidence[]): string {
+export function inputHash(plan: ItemPlan, evidence: readonly Evidence[], protectedValues?: Record<string, string>): string {
   const pages = evidence.filter((e) => e.kind === "page").map((e) => e.contentHash).sort();
-  return sha(`${plan.seedText}|${pages.join(",")}`).slice(0, 16);
+  // 人が確定した値（レビューの修正）も入力の一部: 修正が変わったら再評価の結果が変わりうるため、新しい版にする（古い版・レビューは残る）
+  const prot = protectedValues ? Object.entries(protectedValues).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(";") : "";
+  return sha(`${plan.seedText}|${pages.join(",")}|${prot}`).slice(0, 16);
 }
 
 /** 値が引用・本文から導けるかの機械的な分類（正しさの判定ではない）。日付・数字は書式の違い（11/27・11月27日・2026年11月27日）を吸収して照合する */
@@ -114,6 +117,8 @@ export function toProposalRecords(a: {
   mode: ProposalMode;
   modelId: string | null;
   fetchedAt: string | null;
+  /** 人が確定した値（項目ごと）。入力のハッシュに含める */
+  protectedFor?: (itemNo: number) => Record<string, string> | undefined;
 }): ProposalRecord[] {
   const recs: ProposalRecord[] = a.run.results.map(({ plan, result }) => {
     const out = result.registration.output;
@@ -132,11 +137,12 @@ export function toProposalRecords(a: {
     for (const [k, f] of Object.entries(fields)) if (f.basis === "unknown") unknowns.push({ what: k, why: "AIが不明と判断（根拠なし）" });
     for (const h of result.registration.held?.reasons ?? []) unknowns.push({ what: "検証", why: h.slice(0, 80) });
     if (!out) unknowns.push({ what: "AIの判断", why: "判断が得られなかった（調査は保持）" });
-    const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length }));
+    const searched = new Set(result.searches.map((s) => canonUrl(s.url).key));
+    const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length, viaSearch: !!e.url && searched.has(canonUrl(e.url).key) }));
     return {
       candidateId: a.candidateId,
       proposalKey: proposalKey(a.candidateId, a.post.postId, plan.itemNo),
-      inputHash: inputHash(plan, result.evidence),
+      inputHash: inputHash(plan, result.evidence, a.protectedFor?.(plan.itemNo)),
       postId: a.post.postId.slice(0, 40),
       itemNo: plan.itemNo,
       itemLabel: plan.groupLabel.slice(0, 120),

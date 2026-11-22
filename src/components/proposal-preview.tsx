@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { generateProposalsAction, reviewProposalAction } from "@/app/(app)/lotteries/candidates/proposal-actions";
 import { Button } from "@/components/ui/button";
+import { diffProposal, summarizeProposals } from "@/lib/judgment/xsource/proposal-summary";
 import type { ProposalView } from "@/lib/server/proposals/store";
 
 /**
@@ -13,6 +14,7 @@ import type { ProposalView } from "@/lib/server/proposals/store";
  */
 const BASIS: Record<string, string> = { observed: "観察", inferred: "推論", unknown: "不明" };
 const MODE: Record<string, string> = { mock: "モック（実AIではない）", replay: "再生", real: "実AI" };
+const MODE_HINT: Record<string, string> = { real: "実AIが作成した登録案です（正しさは未検証。人が確認してください）" };
 const URL_STATUS: Record<string, string> = { url_from_item: "項目自身のリンク", short_unexpanded: "短縮URL未展開", shared_only_unverified: "共通リンクのみ（未確認）", url_missing: "URLなし" };
 const REVIEW: Record<string, string> = { hold: "保留", approve_with_edits: "修正して承認（レビュー記録）", reject: "却下" };
 const KEY_FIELDS = ["store", "product", "deadline", "apply_unit"] as const;
@@ -79,6 +81,26 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
         </p>
       )}
       {p.possibly_same.length > 0 && <p className="text-warn">同じ応募機会の可能性がある別の登録案が {p.possibly_same.length} 件あります（統合はしていません）</p>}
+      {p.reviewOutdated && p.reviewedVersion && (
+        <div className="rounded border border-warn p-1.5 text-warn" data-testid="proposal-diff">
+          <p className="font-medium">再評価で変わった点（前回レビューは v{p.reviewedVersion.version}・現行は v{p.version}）</p>
+          {(() => {
+            const d = diffProposal(p.reviewedVersion, p);
+            return d.length ? (
+              <ul className="list-disc pl-4">
+                {d.map((x) => (
+                  <li key={x.field}>
+                    {FIELD_LABEL[x.field] ?? x.field}: {x.field === "apply_unit" ? UNIT_LABEL[x.before] ?? x.before : x.before} → {x.field === "apply_unit" ? UNIT_LABEL[x.after] ?? x.after : x.after}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>主要な項目の値は同じです（根拠・未確認事項が変わった可能性があります）。</p>
+            );
+          })()}
+        </div>
+      )}
+      {MODE_HINT[p.mode] && <p className="text-[10px] text-muted-foreground">{MODE_HINT[p.mode]}{p.model_id ? `（${p.model_id}）` : ""}</p>}
       <p className="text-[10px] text-muted-foreground">
         {p.pages.map((g) => g.host).join("・") || "ページ未取得"}／費用 {p.cost_jpy ?? 0}円／{p.stop_reason ?? "—"}
       </p>
@@ -168,5 +190,16 @@ export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
         </div>
       </div>
     </details>
+  );
+}
+
+/** 新AIの登録案の集計（候補一覧の上に1行）。レビュー・修正・費用・解決率。人の修正は「AIの値と食い違った記録」で、モデルの学習ではない */
+export function ProposalSummaryLine({ proposals }: { proposals: Record<string, ProposalView[]> }) {
+  const all = Object.values(proposals).flat();
+  const s = summarizeProposals(all.map((p) => ({ candidate_id: p.candidate_id, mode: p.mode, cost_jpy: p.cost_jpy, review: p.review, reviewOutdated: p.reviewOutdated })));
+  return (
+    <p className="rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground" data-testid="proposal-summary">
+      新AIの登録案（開発用）: {s.candidates}候補・{s.proposals}件／レビュー済 {s.reviewed}件（修正あり {s.withHumanEdits}・却下 {s.reject}・保留 {s.hold}）／解決率 {s.resolutionRate === null ? "—" : Math.round(s.resolutionRate * 100) + "%"}／費用 {s.costJpy}円
+    </p>
   );
 }
