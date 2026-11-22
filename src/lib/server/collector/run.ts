@@ -31,6 +31,7 @@ import { runInvestigation } from "@/lib/server/collector/investigation-hook";
 import { loadHumanKnowledge } from "@/lib/server/collector/human-knowledge-load";
 import { unifiedMode } from "@/lib/case-model/flag";
 import { beginShadow, type LegacyCapture } from "./shadow-hook";
+import { proposalAfterCandidate } from "./proposal-hook";
 import { buildAiContext } from "@/lib/case-model/context";
 import { aiInputRecord, type AiInputRecord } from "@/lib/case-model/redact";
 import { caseFromExtraction, caseFromInput } from "@/lib/case-model/from-extraction";
@@ -1770,6 +1771,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
           /* 投入の失敗は無視する */
         }
       }
+      // 新AIの登録案プレビューの自動生成（Stage 10Z。ローカル開発かつ PROPOSAL_PREVIEW=on・PROPOSAL_AUTO=on のときだけ。既定OFF。失敗・遅延しても収集は変わらない）
+      await proposalAfterCandidate({ db, householdId, candidateId: it.c.id });
       out.processed++;
       if (r.usedAi) out.aiCalls++;
       if (r.aiFailed) batchAiFail++;
