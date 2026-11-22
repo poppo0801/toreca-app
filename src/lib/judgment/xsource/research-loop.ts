@@ -51,6 +51,14 @@ export interface Evidence {
   structure: ApplyPageStructure | null;
   /** このページが対象の抽選そのものを指すか（親投稿のURLを別項目へ流用しない）。判断はAI・検証は引用の実在とスコープ確認 */
   independent: boolean;
+  /** リンクの出所と、ページと項目の対応の検査結果（10S link-scope。無根拠の一括流用の防止）。X起点の接続で設定する。未設定=対応の検査なし */
+  scope?: EvidenceScope;
+}
+export interface EvidenceScope {
+  /** 例: item_entity / parent_shared / parent_card / discovered */
+  origin: string;
+  verdict: "confirmed" | "candidate" | "mismatch" | "unknown";
+  refutes: string[];
 }
 
 export interface Claim {
@@ -75,6 +83,8 @@ export interface AgentView {
   url: string | null;
   fetchedAt: string;
   independent: boolean;
+  /** リンクの出所と対応の検査結果（あれば）。mismatch・unknown の証拠を根拠に確定しない */
+  scope?: EvidenceScope;
   /** 構造化した観察（受付枠・関連イベント・フォーム設問・欠落）と原文の抜粋 */
   observations: string[];
   excerpt: string;
@@ -171,7 +181,7 @@ function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: tru
 }
 
 export function toAgentView(e: Evidence): AgentView {
-  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, observations: e.structure ? structureToObservations(e.structure) : [], excerpt: e.text.slice(0, 1500) };
+  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: e.structure ? structureToObservations(e.structure) : [], excerpt: e.text.slice(0, 1500) };
 }
 
 /** 同じ内容（転載・同一ページの別URL）は独立した裏付けと数えない */
@@ -200,6 +210,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
       if (!ev) issues.push(`evidence_missing:${name}`);
       else if (!f.quote || !norm(ev.text).includes(norm(f.quote)) || norm(f.quote).length < 3) issues.push(`quote_not_found:${name}`);
+      else if (ev.scope?.verdict === "mismatch") issues.push(`scope_mismatch:${name}`); // 別の店舗・商品・系列・開催回のページを根拠にしない
+      else if (ev.scope?.verdict === "unknown" && ev.scope.origin.startsWith("parent")) issues.push(`shared_link_scope_unverified:${name}`); // 親投稿共通のリンクを、対応が確認されないまま根拠にしない
     }
     const prot = i.protectedFields[name];
     if (prot !== undefined && f.value !== null && norm(prot) !== norm(f.value)) {
@@ -227,6 +239,8 @@ export async function runResearch(args: {
   /** 以前の取得履歴（再開時。同じURL・同じ内容の無益な再取得を避ける） */
   history?: FetchRecord[];
   evidence?: Evidence[];
+  /** 取得したページの出所・対応の検査（X起点の接続で、項目ごとのリンクの出所と10Sの link-scope を使う）。未指定なら検査なし */
+  scoper?: (url: string, page: Evidence) => EvidenceScope | undefined;
 }): Promise<ResearchResult> {
   const L: ResearchLimits = { ...DEFAULT_RESEARCH_LIMITS, ...args.limits };
   const t0 = args.tools.now().getTime();
@@ -286,7 +300,10 @@ export async function runResearch(args: {
           trace.push({ turn, kind: "fetch", detail: `duplicate_content:${cu.host}` });
           noProgress++;
         } else {
-          evidence.push(pageEvidence(evidence.length, url, r, args.tools.now()));
+          const pe = pageEvidence(evidence.length, url, r, args.tools.now());
+          const sc = args.scoper?.(url, pe);
+          if (sc) pe.scope = sc;
+          evidence.push(pe);
           history.push({ key, host: cu.host, outcome: "ok", contentHash: hash, at, progress: true });
           trace.push({ turn, kind: "fetch", detail: `ok:${cu.host}` });
           noProgress = 0;

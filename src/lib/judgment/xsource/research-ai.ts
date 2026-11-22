@@ -25,6 +25,7 @@ export const RESEARCH_SYSTEM = `あなたは、トレーディングカードの
 export const JUDGE_SYSTEM = `あなたは、調査が終わった時点の証拠だけを見て、抽選を**登録するか（register）／暫定候補にするか（tentative）／除外するか（exclude）**を判断する担当です。調査を続けるかどうかの判断とは別です。
 - 全ての項目が揃うことは本登録の条件ではありません。「応募の機会が実在する根拠」「利用者が正しく応募できるか」「誤って登録した場合の被害」「不明点が判断に影響するか」を総合して判断する。軽微な不明点で過剰に保留せず、根拠が足りないまま早く本登録もしない。
 - 各項目（店舗・商品・期間・応募単位・発表日など）は、basis を observed（原文から確認。証拠IDと引用が必要）／inferred（推論。確定値として扱わない）／unknown（不明。値は null）で区別する。根拠の無い推測を確定として書かない。
+- 証拠に scope（リンクの出所と、ページと項目の対応の検査結果）があるとき、verdict が mismatch（別の店舗・商品・系列・開催回のページ）の証拠を、この項目の根拠にしない。unknown（親投稿共通のリンクで対応が未確認）の証拠も、対応を確認できるまで根拠にしない。
 - 独立した応募機会と表示カードを混同しない。店舗別の応募を統合して機会を消さない／店舗選択式を店舗ごとに分けて重複応募を促さない。転載は独立した裏付けではない。
 - 人が確定した値（protectedFields）は変更しません。矛盾があれば、その旨を rationale に書く（変更はしない）。
 - 更新の監視を続けるか（monitor）も、価値・応募期間・費用から判断し理由を書く。
@@ -64,7 +65,7 @@ export function renderTurnInput(i: AgentTurnInput): string {
   return redact([`案件ID: ${i.caseId}`, ev, `【取得の履歴】\n${hist}`, `【残り】ターン${i.remaining.turns}・取得${i.remaining.fetches}・費用${i.remaining.costJpy.toFixed(1)}円・時間${Math.round(i.remaining.elapsedMs / 1000)}秒`].join("\n\n"));
 }
 export function renderJudgeInput(i: JudgeInput): string {
-  const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}`).join("\n\n");
+  const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""}${e.scope ? ` scope:${e.scope.origin}/${e.scope.verdict}${e.scope.refutes.length ? "(" + e.scope.refutes.join(",") + ")" : ""}` : ""}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}`).join("\n\n");
   const prot = Object.entries(i.protectedFields).map(([k, v]) => `- ${k}: ${v}`).join("\n") || "なし";
   const last = i.lastTurn ? `最後の調査の整理: 不明点 ${i.lastTurn.unknown.map((u) => `${u.what}（重要度${u.importance}）`).join(" / ") || "なし"}／反対の仮説 ${i.lastTurn.counterHypotheses.join(" / ") || "なし"}` : "調査なし";
   return redact([`案件ID: ${i.caseId}`, `調査の終了理由: ${i.investigationEnd}`, ev, last, `【人が確定した値（変更しない）】\n${prot}`, i.verificationIssues?.length ? `【前回の検証の指摘（この点だけ直す）】${i.verificationIssues.join(", ")}` : ""].filter(Boolean).join("\n\n"));
