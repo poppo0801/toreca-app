@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { CallBudget } from "../call-budget";
 import { canonUrl } from "./normalize";
+import { pageText } from "./html-text";
 import { parseApplyPage, structureToObservations, type ApplyPageStructure } from "./page-structure";
 
 // ------------------------------------------------------------------ 型
@@ -167,6 +168,8 @@ export interface TraceStep {
 
 export interface ResearchResult {
   investigation: { state: "ended"; reason: EndReason; turns: number };
+  /** 登録判断の各ラウンド（最初の判断→限定的な再評価）の引用の分類。最終状態は registration（重複なし） */
+  quoteAudit: { round: number; rows: QuoteAuditRow[] }[];
   registration: { decision: JudgeOutput["decision"] | "none"; output: JudgeOutput | null; verified: boolean; held: { reasons: string[] } | null; proposals: FieldProposal[] };
   monitoring: { state: "active" | "ended"; why: string; reopenOn: ReopenTrigger[] };
   evidence: Evidence[];
@@ -194,11 +197,17 @@ export function seedEvidence(id: string, text: string, now: Date, url: string | 
 
 function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: true }>, now: Date): Evidence {
   const structure = parseApplyPage(o.html);
-  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(o.text), text: o.text, structure, independent: true };
+  // 本文は、取得側の粗いテキストではなくHTMLから作り直す（スクリプト・head・エンティティの除去）。AIの見る抜粋と、引用の検証が同じ本文になる
+  const cleaned = o.html ? pageText(o.html) : "";
+  const text = cleaned.length >= 20 ? cleaned : o.text;
+  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true };
 }
 
+/** AIに渡す原文の抜粋の長さ（本文に整形したあと。実評価で、本文が見えず観察の要約を引用した失敗の是正） */
+export const EXCERPT_CHARS = 2500;
+
 export function toAgentView(e: Evidence): AgentView {
-  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: e.structure ? structureToObservations(e.structure) : [], excerpt: e.text.slice(0, 1500) };
+  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: e.structure ? structureToObservations(e.structure) : [], excerpt: e.text.slice(0, EXCERPT_CHARS) };
 }
 
 /** 同じ内容（転載・同一ページの別URL）は独立した裏付けと数えない */
@@ -207,6 +216,38 @@ export function independentEvidenceCount(evidence: readonly Evidence[]): number 
 }
 
 // ------------------------------------------------------------------ 検証層（AIの意味判断は変えない）
+export type QuoteAuditKind = "ok" | "no_evidence" | "no_quote" | "too_short" | "in_observations_only" | "partial_overlap" | "not_found";
+export interface QuoteAuditRow {
+  field: string;
+  kind: QuoteAuditKind;
+  quoteChars: number;
+  /** 引用が、AIに見せた抜粋（先頭 EXCERPT_CHARS）の範囲にあるか。範囲外にあれば「見えていない原文からの引用」 */
+  inExcerpt: boolean | null;
+}
+/** observed 項目ごとの引用の実在を分類する（検証の合否は変えない。原因の追跡用。原文は記録しない） */
+export function auditQuotes(output: JudgeOutput, evidence: readonly Evidence[]): QuoteAuditRow[] {
+  const byId = new Map(evidence.map((e) => [e.id, e]));
+  const rows: QuoteAuditRow[] = [];
+  for (const [field, f] of Object.entries(output.fields)) {
+    if (f.basis !== "observed") continue;
+    const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
+    const q = f.quote ? norm(f.quote) : "";
+    const base = { field, quoteChars: q.length };
+    if (!ev) { rows.push({ ...base, kind: "no_evidence", inExcerpt: null }); continue; }
+    if (!q) { rows.push({ ...base, kind: "no_quote", inExcerpt: null }); continue; }
+    if (q.length < 3) { rows.push({ ...base, kind: "too_short", inExcerpt: null }); continue; }
+    const text = norm(ev.text);
+    if (text.includes(q)) { rows.push({ ...base, kind: "ok", inExcerpt: norm(ev.text.slice(0, EXCERPT_CHARS)).includes(q) }); continue; }
+    const obs = norm(toAgentView(ev).observations.join(" "));
+    if (obs.includes(q)) { rows.push({ ...base, kind: "in_observations_only", inExcerpt: false }); continue; }
+    const grams = new Set<string>();
+    for (let i = 0; i + 4 <= q.length; i++) grams.add(q.slice(i, i + 4));
+    const hit = [...grams].filter((g) => text.includes(g)).length;
+    rows.push({ ...base, kind: grams.size && hit / grams.size >= 0.6 ? "partial_overlap" : "not_found", inExcerpt: false });
+  }
+  return rows;
+}
+
 export interface VerifyInput {
   output: JudgeOutput;
   evidence: readonly Evidence[];
@@ -376,6 +417,7 @@ export async function runResearch(args: {
   let held: { reasons: string[] } | null = null;
   let proposals: FieldProposal[] = [];
   let issues: string[] | undefined;
+  const quoteAudit: ResearchResult["quoteAudit"] = [];
   for (let rev = 0; rev <= L.maxRevisions; rev++) {
     const js = args.budget.start("registration_judge", L.judgeReserveJpy);
     if (!js.ok) { held = { reasons: [`budget_${js.reason}`] }; trace.push({ turn, kind: "judge", detail: `no_budget:${js.reason}` }); break; }
@@ -387,6 +429,7 @@ export async function runResearch(args: {
     js.finish(output?.costJpy ?? null);
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
+    quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
     const v = verifyRegistration({ output, evidence, protectedFields });
     proposals = v.proposals;
     if (v.issues.length === 0) { verified = true; held = null; break; }
@@ -396,7 +439,7 @@ export async function runResearch(args: {
   }
   const decision = output ? output.decision : "none";
   const monitoring: ResearchResult["monitoring"] = output ? { state: output.monitor.continue ? "active" : "ended", why: output.monitor.why, reopenOn: output.monitor.continue ? ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] : ["user_correction"] } : { state: "active", why: "登録判断が得られなかったため、監視は継続", reopenOn: ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] };
-  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog };
+  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog };
 }
 
 // ------------------------------------------------------------------ 再開（調査終了後の必要な部分だけの再評価）

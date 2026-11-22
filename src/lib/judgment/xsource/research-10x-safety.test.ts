@@ -25,6 +25,10 @@ describe("実AI評価の関門（承認が無ければ実APIに接続しない�
 
 describe("実行コマンドは承認を迂回できない", () => {
   const runner = readFileSync("scripts/xsource-10x.mjs", "utf8");
+  it("1件あたりの上限が、調査＋判断の予約額より小さいと実行しない（調査が一度も始まらない設定を防ぐ）", () => {
+    expect(runner).toContain("MIN_PER_CASE");
+    expect(runner).toMatch(/per < MIN_PER_CASE/);
+  });
   it("承認の金額・確認文に既定値が無く、確認文が承認額と一致しなければ実行しない。1回に1つの target だけ", () => {
     expect(runner).toContain("既定値はありません");
     expect(runner).toContain("APPROVE ${target} ${total}JPY");
@@ -62,6 +66,6 @@ describe("検索ツール（開発限定・読み取り専用）", () => {
     }
     expect(await makeSearchTool(provider(hits, 1.7))("店 抽選")).toMatchObject({ costJpy: 1.7 });
     const bad = { name: "x", search: vi.fn(async () => { throw new Error("net"); }) };
-    expect(await makeSearchTool(bad)("店 抽選")).toEqual({ ok: false, reason: "search_failed" });
+    expect(await makeSearchTool(bad)("店 抽選")).toEqual({ ok: false, reason: "search_failed:Error" });
   });
 });

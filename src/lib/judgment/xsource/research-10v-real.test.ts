@@ -9,7 +9,8 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { CallBudget } from "../call-budget";
+import { CallBudget, CaseBudget } from "../call-budget";
+import { summarizeFinal } from "./final-states";
 import { checkJudgmentRealRun } from "../real-gate";
 // @ts-expect-error plain JS module
 import { classifyGold, scoreAgainstGold } from "../../../../scripts/lib/gold-c.mjs";
@@ -47,9 +48,10 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "B2
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
     const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
-    const diagnostics: { role: string; reason: string }[] = [];
-    const r = await evaluateB2({ examples: examples(B2_EXAMPLES).slice(0, 4), agent: makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) }), budget, limits: { maxTurns: 4, maxFetches: 2, maxSearches: 1, searchReserveJpy: 5, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 }, now: new Date(), search: makeSearchTool(new AnthropicWebSearch(client as never, gate.model)) });
-    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。既存の検索部品＝Anthropic web_search を読み取り専用で接続。成功は『検索で見つけたURL』からの到達のみ）", ...r, diagnostics, budget: budget.summary() }, null, 1));
+    let current = "";
+    const diagnostics: { caseId: string; role: string; reason: string }[] = [];
+    const r = await evaluateB2({ examples: examples(B2_EXAMPLES).slice(0, 4), perCaseCapJpy: gate.perCaseCapJpy, onCase: (id) => (current = id), agent: makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) }), budget, limits: { maxTurns: 4, maxFetches: 2, maxSearches: 1, searchReserveJpy: 3, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 }, now: new Date(), search: makeSearchTool(new AnthropicWebSearch(client as never, gate.model)) });
+    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。既存の検索部品＝Anthropic web_search を読み取り専用で接続。成功は『検索で見つけたURL』からの到達のみ）", ...r, final: summarizeFinal((r.rows ?? []).map((x) => ({ id: x.id, decision: x.decision, verified: x.held === null && x.decision !== "none", held: x.held }))), diagnostics, budget: budget.summary() }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);
@@ -66,19 +68,23 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "C"
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
     const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
-    const diagnostics: { role: string; reason: string }[] = [];
-    const agent = makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) });
-    const judge = makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) });
+    let current = "";
+    const diagnostics: { caseId: string; role: string; reason: string }[] = [];
+    const agent = makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) });
+    const judge = makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) });
     let tick = Date.now();
     const tools: ResearchTools = { now: () => new Date((tick += 500)), fetchPage: async () => ({ ok: false, reason: "not_public" }) }; // 保存データには応募ページが無い（取得欠落）
-    const results: { id: string; aiUnit: string | null; aiUnitBasis: string | null; decision: string; end: string; held: string[] | null; verified: boolean }[] = [];
+    const results: { id: string; aiUnit: string | null; aiUnitBasis: string | null; decision: string; end: string; held: string[] | null; verified: boolean; turns: number; caseCostJpy: number; quoteAudit: unknown }[] = [];
     for (const c of targets.slice(0, 12)) {
       // 種は原文のみ（人の回答・正解・旧方式の結果・過去のAIの回答は渡さない）。応募単位は項目名 apply_unit で出力させる
-      const r = await runResearch({ caseId: c.id, seed: seedEvidence("s1", `${c.sourceText.join("\n")}\n（出力項目: apply_unit=応募単位）`, new Date()), agent, judge, tools, budget, limits: { maxTurns: 3, maxFetches: 2, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 } });
+      current = c.id;
+      const caseBudget = new CaseBudget(budget, gate.perCaseCapJpy); // 1件あたりの上限
+      const before = budget.costJpy;
+      const r = await runResearch({ caseId: c.id, seed: seedEvidence("s1", `${c.sourceText.join("\n")}\n（出力項目: apply_unit=応募単位）`, new Date()), agent, judge, tools, budget: caseBudget, limits: { maxTurns: 3, maxFetches: 2, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 } });
       const unit = r.registration.output?.fields.apply_unit;
-      results.push({ id: c.id, aiUnit: unit?.value ?? null, aiUnitBasis: unit?.basis ?? null, decision: r.registration.decision, end: r.investigation.reason, held: r.registration.held?.reasons ?? null, verified: r.registration.verified });
+      results.push({ id: c.id, aiUnit: unit?.value ?? null, aiUnitBasis: unit?.basis ?? null, decision: r.registration.decision, end: r.investigation.reason, held: r.registration.held?.reasons ?? null, verified: r.registration.verified, turns: r.investigation.turns, caseCostJpy: Math.round((budget.costJpy - before) * 10000) / 10000, quoteAudit: r.quoteAudit });
     }
-    writeFileSync("eval/real-data/xsource-10w-c.json", JSON.stringify({ condition: "C_gold_only（独立した正解がある事例だけ。応募ページ取得不可=取得欠落を含む）", goldCounts: gold.counts, score: scoreAgainstGold(gold, results), results, diagnostics, budget: budget.summary() }, null, 1));
+    writeFileSync("eval/real-data/xsource-10w-c.json", JSON.stringify({ condition: "C_gold_only（独立した正解がある事例だけ。応募ページ取得不可=取得欠落を含む）", goldCounts: gold.counts, score: scoreAgainstGold(gold, results), results, final: summarizeFinal(results), diagnostics, budget: budget.summary() }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);
