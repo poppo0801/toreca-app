@@ -58,6 +58,9 @@ export function scoreAgainstGold(gold, results) {
   let overHold = 0;
   let unsupportedAssertion = 0;
   let missing = 0;
+  let misMerge = 0; // 誤統合（AIは1応募と見たが、正解は独立した応募）
+  let misSplit = 0; // 誤分割（AIは別々と見たが、正解は1応募）
+  const merged = (u) => ["store_select", "shared_all_stores", "one_form_one"].includes(u);
   for (const r of results) {
     const t = g.get(r.id);
     if (!t) continue; // gold でない事例は採点しない
@@ -67,9 +70,13 @@ export function scoreAgainstGold(gold, results) {
       continue;
     }
     if (r.aiUnit === t.unit) match++;
-    else mismatch++;
+    else {
+      mismatch++;
+      if (merged(r.aiUnit) && !merged(t.unit)) misMerge++;
+      if (!merged(r.aiUnit) && merged(t.unit)) misSplit++;
+    }
     if (r.aiUnitBasis !== "observed" && r.decision === "register") unsupportedAssertion++; // 根拠（観察）が無いのに本登録
   }
   const n = match + mismatch;
-  return { scored: g.size, match, mismatch, overHold, unsupportedAssertion, missing, rate: gold.rateAllowed && n ? match / n : null, note: gold.rateAllowed ? "" : `gold が ${gold.goldCount} 件（最小 ${gold.minForRate} 件に満たない）ため、正答率は出さない` };
+  return { scored: g.size, match, mismatch, misMerge, misSplit, overHold, unsupportedAssertion, missing, rate: gold.rateAllowed && n ? match / n : null, note: gold.rateAllowed ? "" : `gold が ${gold.goldCount} 件（最小 ${gold.minForRate} 件に満たない）ため、正答率は出さない` };
 }

@@ -11,13 +11,16 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { CallBudget, CaseBudget } from "../call-budget";
 import { summarizeFinal } from "./final-states";
-import { checkJudgmentRealRun } from "../real-gate";
+import { CANDIDATE_CAP_PER_CASE_JPY, checkJudgmentRealRun } from "../real-gate";
+import { preflightRun, worstCaseCallJpy } from "./cost-preflight";
+import { OUTPUT_MAX_TOKENS } from "./research-ai";
 // @ts-expect-error plain JS module
 import { classifyGold, scoreAgainstGold } from "../../../../scripts/lib/gold-c.mjs";
 // @ts-expect-error plain JS module
 import { currentOf } from "../../../../scripts/lib/groundtruth.mjs";
-import { evaluateB1, evaluateB2, type BExample } from "./eval-b";
-import { AnthropicWebSearch } from "@/lib/agent/anthropic";
+import { classifyB2Layer, evaluateB1, evaluateB2, type BExample } from "./eval-b";
+import { AnthropicWebSearch, WEB_SEARCH_JPY } from "@/lib/agent/anthropic";
+import { liveFetchAllowed, makeLivePublicFetch } from "./live-fetch";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent } from "./research-ai";
 import { makeSearchTool } from "./research-search";
 import { runResearch, seedEvidence, type ResearchTools } from "./research-loop";
@@ -29,6 +32,8 @@ const ANSWERS = "eval/real-data/human-review-10s-answers.json";
 const EXAMPLES = "eval/real-data/xsource-10w-linkmap-examples.json";
 /** B2（AI自律発見）の例: 保存済みの実在の公開ページから作った、応募URLを持たない項目（scripts/build-b2-examples.mjs。合成の原文・正解はページ自身の店舗） */
 const B2_EXAMPLES = "eval/real-data/xsource-10x-b2-examples.json";
+/** 検索1回（メッセージ1通に限定）の最悪費用: 検索料金＋結果を読む入力20,000トークン・出力800トークン */
+const SEARCH_WORST_JPY = WEB_SEARCH_JPY + worstCaseCallJpy("claude-haiku-5-5", 20_000, 800);
 const realGate = () => checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) });
 const examples = (file = EXAMPLES): BExample[] => (JSON.parse(readFileSync(file, "utf8")) as { examples: BExample[] }).examples;
 
@@ -44,14 +49,20 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "B2
   it("応募URLを与えず、AIが応募先に到達・対応付けできるか（gold のある項目だけ成功/失敗を数える）", async () => {
     const gate = realGate();
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
+    const pf = preflightRun({ model: gate.model, totalJpy: gate.totalCapJpy, perCaseJpy: gate.perCaseCapJpy, cases: 4, limits: { maxTurns: 4, maxSearches: 1, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, searchReserveJpy: 2.5 }, maxInputTokens: 12_000, maxOutputTokens: OUTPUT_MAX_TOKENS, gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY, searchWorstJpy: SEARCH_WORST_JPY });
+    if (!pf.ok) throw new Error(`実行しません（費用の事前検査）: ${pf.errors.join(", ")}`);
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
     const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
     let current = "";
+    // 取得モード: 既定は保存HTMLの再生。JUDGMENT_B2_FETCH=live_public かつ JUDGMENT_LIVE_FETCH=allow のときだけ、実際の公開ページを既存の安全な取得で取得する（開発限定）
+    const liveWanted = env.JUDGMENT_B2_FETCH === "live_public";
+    if (liveWanted && !liveFetchAllowed(env).ok) throw new Error("実行しません: 実ページの取得が許可されていません（JUDGMENT_LIVE_FETCH=allow が必要）");
+    const live = liveWanted ? makeLivePublicFetch({ env, maxFetches: 12 }) : null;
     const diagnostics: { caseId: string; role: string; reason: string }[] = [];
-    const r = await evaluateB2({ examples: examples(B2_EXAMPLES).slice(0, 4), perCaseCapJpy: gate.perCaseCapJpy, onCase: (id) => (current = id), agent: makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) }), budget, limits: { maxTurns: 4, maxFetches: 2, maxSearches: 1, searchReserveJpy: 3, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 }, now: new Date(), search: makeSearchTool(new AnthropicWebSearch(client as never, gate.model)) });
-    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。既存の検索部品＝Anthropic web_search を読み取り専用で接続。成功は『検索で見つけたURL』からの到達のみ）", ...r, final: summarizeFinal((r.rows ?? []).map((x) => ({ id: x.id, decision: x.decision, verified: x.held === null && x.decision !== "none", held: x.held }))), diagnostics, budget: budget.summary() }, null, 1));
+    const r = await evaluateB2({ ...(live ? { fetchMode: "live_public" as const, liveFetch: live.fetchPage } : {}), examples: examples(B2_EXAMPLES).slice(0, 4), perCaseCapJpy: gate.perCaseCapJpy, onCase: (id) => (current = id), agent: makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) }), judge: makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) }), budget, limits: { maxTurns: 4, maxFetches: 2, maxSearches: 1, searchReserveJpy: 2.5, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 }, now: new Date(), search: makeSearchTool(new AnthropicWebSearch(client as never, gate.model, { maxMessages: 1 })) });
+    writeFileSync("eval/real-data/xsource-10w-b2.json", JSON.stringify({ condition: "B2_url_not_given（応募URLを与えない。既存の検索部品＝Anthropic web_search を読み取り専用で接続。成功は『検索で見つけたURL』からの到達のみ）", ...r, preflight: pf, layers: (r.rows ?? []).map((x) => ({ id: x.id, layer: classifyB2Layer(x) })), liveFetchLog: live?.log ?? null, final: summarizeFinal((r.rows ?? []).map((x) => ({ id: x.id, decision: x.decision, verified: x.held === null && x.decision !== "none", held: x.held }))), diagnostics, budget: budget.summary() }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);
@@ -61,6 +72,8 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "C"
   it("gold の事例だけを採点する。gold が最小数に満たなければ正答率は出さない。取得欠落は別計上", async () => {
     const gate = realGate();
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
+    const pf = preflightRun({ model: gate.model, totalJpy: gate.totalCapJpy, perCaseJpy: gate.perCaseCapJpy, cases: Math.max(1, 3), limits: { maxTurns: 3, maxSearches: 0, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, searchReserveJpy: 3 }, maxInputTokens: 12_000, maxOutputTokens: OUTPUT_MAX_TOKENS, gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
+    if (!pf.ok) throw new Error(`実行しません（費用の事前検査）: ${pf.errors.join(", ")}`);
     const cases = (JSON.parse(readFileSync(REVIEW, "utf8")) as { cases: { id: string; real: boolean; aiUnit?: string; sourceText: string[] }[] }).cases;
     const gold = classifyGold(cases, JSON.parse(readFileSync(ANSWERS, "utf8")), currentOf);
     const targets = cases.filter((c) => gold.rows.some((r: { id: string; category: string }) => r.id === c.id && r.category === "gold"));
@@ -84,7 +97,7 @@ describe.skipIf(env.JUDGMENT_10V_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "C"
       const unit = r.registration.output?.fields.apply_unit;
       results.push({ id: c.id, aiUnit: unit?.value ?? null, aiUnitBasis: unit?.basis ?? null, decision: r.registration.decision, end: r.investigation.reason, held: r.registration.held?.reasons ?? null, verified: r.registration.verified, turns: r.investigation.turns, caseCostJpy: Math.round((budget.costJpy - before) * 10000) / 10000, quoteAudit: r.quoteAudit });
     }
-    writeFileSync("eval/real-data/xsource-10w-c.json", JSON.stringify({ condition: "C_gold_only（独立した正解がある事例だけ。応募ページ取得不可=取得欠落を含む）", goldCounts: gold.counts, score: scoreAgainstGold(gold, results), results, final: summarizeFinal(results), diagnostics, budget: budget.summary() }, null, 1));
+    writeFileSync("eval/real-data/xsource-10w-c.json", JSON.stringify({ condition: "C_gold_only（独立した正解がある事例だけ。応募ページ取得不可=取得欠落を含む）", goldCounts: gold.counts, score: scoreAgainstGold(gold, results), results, preflight: pf, final: summarizeFinal(results), diagnostics, budget: budget.summary() }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);

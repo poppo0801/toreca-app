@@ -14,6 +14,8 @@ export class CallBudget {
   costJpy = 0;
   readonly byKind: Record<string, { calls: number; costJpy: number }> = {};
   private reserved = 0;
+  /** 実費が予約額を超えた呼び出し（Stage 10Y）。超えた分も実費で計上し、残りが無ければ以降の呼び出しは開始しない。承認額を超えうる幅の確認に使う */
+  readonly overruns: { kind: string; reservedJpy: number; actualJpy: number }[] = [];
   constructor(readonly opts: { maxCalls: number; maxCostJpy: number }) {}
 
   get remainingCalls(): number {
@@ -44,13 +46,14 @@ export class CallBudget {
         done = true;
         this.reserved = Math.max(0, this.reserved - reserveJpy);
         const spent = actualJpy ?? reserveJpy; // 費用が不明な呼び出しは、予約額で計上する（0円にしない）
+        if (spent > reserveJpy + 1e-9) this.overruns.push({ kind, reservedJpy: reserveJpy, actualJpy: spent });
         this.costJpy += spent;
         k.costJpy += spent;
       },
     };
   }
-  summary(): { calls: number; costJpy: number; maxCalls: number; maxCostJpy: number; byKind: Record<string, { calls: number; costJpy: number }> } {
-    return { calls: this.calls, costJpy: Math.round(this.costJpy * 10000) / 10000, maxCalls: this.opts.maxCalls, maxCostJpy: this.opts.maxCostJpy, byKind: this.byKind };
+  summary(): { calls: number; costJpy: number; maxCalls: number; maxCostJpy: number; byKind: Record<string, { calls: number; costJpy: number }>; overruns?: { kind: string; reservedJpy: number; actualJpy: number }[] } {
+    return { calls: this.calls, costJpy: Math.round(this.costJpy * 10000) / 10000, maxCalls: this.opts.maxCalls, maxCostJpy: this.opts.maxCostJpy, byKind: this.byKind, ...(this.overruns.length ? { overruns: this.overruns } : {}) };
   }
 }
 
@@ -90,14 +93,16 @@ export class CaseBudget extends CallBudget {
         if (done) return;
         done = true;
         this.caseReserved = Math.max(0, this.caseReserved - reserveJpy);
-        this.caseSpent += actualJpy ?? reserveJpy;
+        const spent = actualJpy ?? reserveJpy;
+        this.caseSpent += spent;
+        if (spent > reserveJpy + 1e-9) this.overruns.push({ kind, reservedJpy: reserveJpy, actualJpy: spent });
         s.finish(actualJpy);
       },
     };
   }
   override summary(): ReturnType<CallBudget["summary"]> {
     const p = this.parent.summary();
-    return { ...p, costJpy: Math.round(this.caseSpent * 10000) / 10000, maxCostJpy: this.capJpy };
+    return { ...p, costJpy: Math.round(this.caseSpent * 10000) / 10000, maxCostJpy: this.capJpy, ...(this.overruns.length ? { overruns: this.overruns } : {}) };
   }
 }
 
