@@ -235,3 +235,54 @@ describe("実AIの評価入力（保存済みの公開投稿・公開ページ �
     expect(estimateRunCost({ itemsWithUrl: 0, itemsWithoutUrl: 3, search: false, maxReservedPerItemJpy: 3.6 }).expectedJpy).toBeLessThan(e.expectedJpy);
   });
 });
+
+describe("P2 の結果を受けた無課金の修正（値の導出の近さ・列挙値・検索の促し・判断出力の許容）", () => {
+  it("言い換え・括弧・空白の違いは near_match（数字は完全一致が条件）。数字が違えば not_found。列挙値は語の一致で確認しない", () => {
+    const text = "ポケモンカードゲーム MEGA 拡張パック「ハドウシーカー」 1BOX 6,000円(税込)";
+    expect(valueSupport("ポケモンカードゲーム MEGA拡張パック『ハドウシーカー』(1BOX, 6,000円税込)", "ポケモンカードゲーム MEGA 拡張パック", text)).toBe("near_match");
+    expect(valueSupport("ポケモンカードゲーム MEGA拡張パック『ハドウシーカー』(1BOX, 5,000円税込)", "ポケモンカードゲーム MEGA 拡張パック", text)).toBe("not_found"); // 金額が違う
+    expect(valueSupport("全く別の長い商品名の文字列です", "ポケモンカードゲーム", text)).toBe("not_found");
+    expect(valueSupport("短い値", "x", text)).toBe("not_found"); // 8文字未満は近さを使わない
+  });
+  it("応募単位の列挙値（observed）は support=enum_value（人が確認）。引用の実在とは別", async () => {
+    const { toProposalRecords } = await import("@/lib/judgment/xsource/proposal");
+    const post = { postId: "p", text: "《A店（東京）- 1件》 ・拡張パック", links: [], recordedAt: null };
+    const plan = { itemNo: 1, groupLabel: "《A店》", itemText: "x", links: [], scopedUrls: [], status: "url_missing", seedText: "s", linkEvidence: [] } as never;
+    const result = { investigation: { reason: "sufficient", turns: 1 }, registration: { decision: "tentative", verified: true, held: null, output: { fields: { apply_unit: { value: "per_store", basis: "observed", evidenceId: "s1", quote: "各店舗につき1回" } }, decision: "tentative" } }, evidence: [{ id: "s1", kind: "seed", text: "各店舗につき1回", contentHash: "h" }], searches: [], budget: { costJpy: 0 } } as never;
+    const r = toProposalRecords({ candidateId: "c", post, run: { results: [{ plan, result }] }, mode: "real", modelId: "m", fetchedAt: null });
+    expect(r[0].fields.apply_unit).toMatchObject({ support: "enum_value", basis: "observed" });
+    expect(r[0].applyUnit).toBe("per_store");
+  });
+  it("URLなし・短縮URL未展開の項目の入力に『検索が使えるなら探してよい』が入り、調査AIの指示は『到達不能ではない』と明記する", async () => {
+    const { planXPost } = await import("@/lib/judgment/xsource/x-origin");
+    const { RESEARCH_SYSTEM } = await import("@/lib/judgment/xsource/research-ai");
+    const p = planXPost({ postId: "p", text: "・拡張パック抽選 https://t.co/abc123 11/30", links: [], recordedAt: null });
+    expect(p.items[0].seedText).toContain("検索が使えるなら");
+    expect(planXPost({ postId: "p", text: "・拡張パック抽選 11/30", links: [], recordedAt: null }).items[0].seedText).toContain("検索が使えるなら");
+    expect(RESEARCH_SYSTEM).toContain("「到達不能」ではない");
+  });
+  it("登録判断の出力で fields が省略されても、判断は採用し（主張なし）、診断に記録する。判断の種類が不正なら不備のまま", async () => {
+    const { makeAnthropicRegistrationJudge } = await import("@/lib/judgment/xsource/research-ai");
+    const mk = (input: unknown) => ({ messages: { create: vi.fn(async () => ({ stop_reason: "tool_use", content: [{ type: "tool_use", name: "submit_registration_judgment", input }], usage: { input_tokens: 1000, output_tokens: 100 } })) } }) as never;
+    const seen: string[] = [];
+    const ji = { caseId: "c", evidence: [], lastTurn: null, investigationEnd: "unreachable" as const, protectedFields: {} };
+    const ok = await makeAnthropicRegistrationJudge(mk({ decision: "tentative", rationale: "証拠なし", unresolvedImpact: "material", monitor: { continue: true, why: "" } }), { onDiagnostic: (d) => seen.push(d.reason) })(ji);
+    expect(ok).toMatchObject({ decision: "tentative", fields: {} });
+    expect(seen).toEqual(["fields_defaulted"]);
+    const bad = await makeAnthropicRegistrationJudge(mk({ decision: "maybe", fields: {} }), { onDiagnostic: (d) => seen.push(d.reason) })(ji);
+    expect(bad).toBeNull();
+    expect(seen.at(-1)).toMatch(/^bad_output:/);
+  });
+});
+
+describe("根拠のない除外は検証の指摘にする（P2: 取得できないまま exclude とした事例）", () => {
+  it("観察（検証済みの引用つき）の項目が1つも無い exclude は exclude_without_evidence。観察があれば指摘しない。結論は書き換えない", async () => {
+    const { verifyRegistration } = await import("@/lib/judgment/xsource/research-loop");
+    const ev = [{ id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "【A店】拡張パック 抽選 11/30まで", structure: null, independent: true }] as never;
+    const out = (fields: Record<string, unknown>, decision = "exclude") => ({ decision, fields, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
+    expect(verifyRegistration({ output: out({ product: { value: null, basis: "unknown" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_without_evidence"]);
+    expect(verifyRegistration({ output: out({}), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_without_evidence"]);
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
+    expect(verifyRegistration({ output: out({}, "tentative"), evidence: ev, protectedFields: {} }).issues).toEqual([]); // 暫定は対象外
+  });
+});

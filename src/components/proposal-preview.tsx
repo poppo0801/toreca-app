@@ -25,7 +25,7 @@ function SupportMark({ support, basis }: { support: string; basis: string }) {
   if (basis !== "observed" || support === "literal_in_quote" || support === "no_value") return null;
   return (
     <span className="ml-1 text-warn" data-testid="proposal-support-warn">
-      {support === "not_found" ? "⚠値が根拠から確認できない" : support === "literal_in_text" ? "△引用には無く本文にある" : "△書式を変換して一致"}
+      {support === "not_found" ? "⚠値が根拠から確認できない" : support === "literal_in_text" ? "△引用には無く本文にある" : support === "near_match" ? "△言い換えの可能性（語が近い）" : support === "enum_value" ? "△選択肢の値（人が確認）" : "△書式を変換して一致"}
     </span>
   );
 }

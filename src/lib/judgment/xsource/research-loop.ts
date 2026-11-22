@@ -284,6 +284,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     if (prot !== undefined) continue; // 同じ値: 変更なし
     proposals.push({ field: name, action: "set", value: f.value, basis: f.basis });
   }
+  // 根拠のない「除外」は、応募の機会を失わせる被害が大きい。観察（引用つきで検証済み）の項目が1つも無いのに exclude としたものは、保留（検証の指摘）にする。AIの結論は書き換えない（再評価でAIが直す／人が確認する）
+  if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
   return { issues, proposals };
 }
 

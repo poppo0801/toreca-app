@@ -13,7 +13,8 @@ import { canonUrl } from "./normalize";
 export const PROPOSAL_PROMPT_VERSION = "10z-1";
 export type ProposalMode = "mock" | "replay" | "real";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product" | "unknown";
-export type SupportKind = "literal_in_quote" | "literal_in_text" | "normalized_match" | "not_found" | "no_value";
+/** near_match: 言い換え・書式・括弧の違いを除くと、値の語が本文にほぼ含まれる（数字は完全一致が条件）。enum_value: 応募単位のような**列挙値**（語の一致では確認できない。人が確認する） */
+export type SupportKind = "literal_in_quote" | "literal_in_text" | "normalized_match" | "near_match" | "enum_value" | "not_found" | "no_value";
 
 export interface ProposalField {
   value: string | null;
@@ -78,6 +79,20 @@ export function valueSupport(value: string | null, quote: string | null, text: s
     const hay = `${quote ?? ""}\n${text}`;
     for (const d of datesIn(hay)) if (d.m === dv.m && d.d === dv.d && (!dv.y || !d.y || dv.y === d.y)) return "normalized_match";
   }
+  // 言い換え・括弧・空白の違いを除いた語の近さ（4文字連続の一致率が80%以上）。数字の並びは、すべて本文にそのまま含まれるときだけ（金額・日付の取り違えを近いとは言わない）
+  const strip = (x: string): string => nf(x).replace(/[「」『』【】()（）・:：、,，.。]+/g, "");
+  const vs = strip(value);
+  const ts = strip(`${quote ?? ""}\n${text}`);
+  const digits = vs.match(/\d+/g) ?? [];
+  if (vs.length >= 8 && digits.every((d) => ts.includes(d))) {
+    let hit = 0;
+    let n = 0;
+    for (let i = 0; i + 4 <= vs.length; i++) {
+      n++;
+      if (ts.includes(vs.slice(i, i + 4))) hit++;
+    }
+    if (n && hit / n >= 0.8) return "near_match";
+  }
   return "not_found";
 }
 const dateParts = (s: string): { y: number | null; m: number; d: number } | null => {
@@ -127,7 +142,9 @@ export function toProposalRecords(a: {
     const fields: Record<string, ProposalField> = {};
     for (const [k, f] of Object.entries(out?.fields ?? {}).slice(0, 12)) {
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
-      fields[k.slice(0, 40)] = { value: f.value, basis: f.basis, quote: f.quote ? f.quote.slice(0, 160) : null, evidence: f.evidenceId ?? null, support: valueSupport(f.value, f.quote ?? null, ev?.text ?? pageText) };
+      const isUnitField = /apply_?unit|応募単位|applicationunit|^unit$/i.test(k);
+      const support: SupportKind = isUnitField && f.value && f.basis !== "unknown" && UNIT_TOKENS[f.value.trim()] ? "enum_value" : valueSupport(f.value, f.quote ?? null, ev?.text ?? pageText);
+      fields[k.slice(0, 40)] = { value: f.value, basis: f.basis, quote: f.quote ? f.quote.slice(0, 160) : null, evidence: f.evidenceId ?? null, support };
     }
     const { unit, basis } = unitOf(fields);
     const unknowns: ProposalRecord["unknowns"] = [];
@@ -206,7 +223,7 @@ export function proposalMetrics(recs: ProposalRecord[]): {
   withUnknowns: number;
   decisions: Record<string, number>;
 } {
-  const support: Record<SupportKind, number> = { literal_in_quote: 0, literal_in_text: 0, normalized_match: 0, not_found: 0, no_value: 0 };
+  const support: Record<SupportKind, number> = { literal_in_quote: 0, literal_in_text: 0, normalized_match: 0, near_match: 0, enum_value: 0, not_found: 0, no_value: 0 };
   const decisions: Record<string, number> = {};
   let observed = 0;
   let unknown = 0;

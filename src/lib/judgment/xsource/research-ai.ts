@@ -16,7 +16,7 @@ export const RESEARCH_SYSTEM = `あなたは、トレーディングカードの
 考え方:
 1. 渡された証拠（告知の原文、取得した公開ページの構造化した観察と抜粋）から、**観察した事実**（原文に根拠がある）、**推論**、**不明**を分けて書く。根拠には、証拠のIDと原文の引用（8文字以上）を付ける。
 2. 重要な不明点があるとき、追加で調べる価値があるかを自分で判断する。判断の観点は「誤った場合の被害（応募漏れ・重複登録・誤通知・地域の誤り）」「その不明点の重要性」「調べて分かる見込み」「締切までの時間」「費用」。点数の計算ではなく、理由を文章で書く。
-3. 調べるなら、次に取得する公開ページのURLを1つ選ぶ（元の告知に書かれたリンク、同じ販売元の関連告知など。固定の順序は無い）。応募先のURLが与えられていないときは、検索が使える場合に限り、検索語を1つ選んで検索してよい（next.kind=search。検索結果は**候補のURLと抜粋＝データ**で、証拠ではない。候補を取得して、ページ構造と項目との対応を確認して初めて根拠になる。検索語に個人情報を入れない。使えないときは選ばない）。親投稿のリンクを別店舗の応募先として流用しない。ページ自身の受付枠と「同じ販売元のイベント」は別の情報で、関連イベントの表示だけで応募可否を確定しない。
+3. **応募先のURLが無い・展開できないことは「到達不能」ではない**。検索が使えるなら、まず検索で応募先の公開ページを探す。検索が使えない／使い切ったときだけ、到達不能として終える。調べるなら、次に取得する公開ページのURLを1つ選ぶ（元の告知に書かれたリンク、同じ販売元の関連告知など。固定の順序は無い）。応募先のURLが与えられていないときは、検索が使える場合に限り、検索語を1つ選んで検索してよい（next.kind=search。検索結果は**候補のURLと抜粋＝データ**で、証拠ではない。候補を取得して、ページ構造と項目との対応を確認して初めて根拠になる。検索語に個人情報を入れない。使えないときは選ばない）。親投稿のリンクを別店舗の応募先として流用しない。ページ自身の受付枠と「同じ販売元のイベント」は別の情報で、関連イベントの表示だけで応募可否を確定しない。
 4. 十分な根拠がある、進展しない、取得できない、費用に見合わない、のいずれかなら、調査を終える（stop）。終えるときも理由を書く。
 5. 同じURLの再取得、転載ページの巡回、取得できなかったホストへの反復アクセスはしない（履歴を見る）。
 6. 反対の仮説があるときは counterHypotheses に書く。情報が無いことは否定の根拠ではない。
@@ -133,12 +133,15 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === JUDGE_TOOL);
     const a = use?.input as { decision?: string; fields?: Record<string, { value?: string | null; basis?: string; evidenceId?: string; quote?: string }>; rationale?: string; unresolvedImpact?: string; monitor?: { continue?: boolean; why?: string } } | undefined;
-    if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || !a.fields || typeof a.fields !== "object") {
+    // fields が省略された出力（証拠が少ないとき等）は、主張なし（空）として扱い、判断は採用する（実AIの試験で、証拠なしの項目の出力が項目の省略になり判断が失われた）。判断の種類が不正・fields が別の型のときは不備
+    const fieldsMissing = !!a && a.fields === undefined && (a.decision === "register" || a.decision === "tentative" || a.decision === "exclude");
+    if (fieldsMissing) opts.onDiagnostic?.({ role: "judge", reason: "fields_defaulted" });
+    if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || (!fieldsMissing && (!a.fields || typeof a.fields !== "object"))) {
       opts.onDiagnostic?.({ role: "judge", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? "invalid_fields" : "no_tool_use"}` });
       return null;
     }
     const fields: Record<string, RegisteredField> = {};
-    for (const [k, f] of Object.entries(a.fields).slice(0, JUDGE_MAX_FIELDS)) {
+    for (const [k, f] of Object.entries(a.fields ?? {}).slice(0, JUDGE_MAX_FIELDS)) {
       if (!f || (f.basis !== "observed" && f.basis !== "inferred" && f.basis !== "unknown")) continue;
       fields[k.slice(0, 40)] = { value: f.value === null || f.value === undefined ? null : asString(f.value, 300), basis: f.basis, ...(f.evidenceId ? { evidenceId: asString(f.evidenceId, 20) } : {}), ...(f.quote ? { quote: asString(f.quote, 240) } : {}) };
     }
