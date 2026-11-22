@@ -41,7 +41,12 @@ vi.mock("@/app/(app)/market-memo/actions", () => ({
   buyMarketFromPriceAction: (...a: unknown[]) => buyM(...a),
   exportMarketAction: vi.fn(async () => ({ ok: true, json: "{}" })),
 }));
-vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: PID, label: "A" }, now: NOW }) }));
+let appSettings: { zukanRareMissing?: number[] } = {};
+const saveSettingsMock = vi.fn(async (p: Record<string, unknown>) => {
+  appSettings = { ...appSettings, ...p };
+  return { ok: true as const };
+});
+vi.mock("@/components/app-provider", () => ({ useApp: () => ({ profile: { id: PID, label: "A" }, now: NOW, settings: appSettings, saveSettings: (p: Record<string, unknown>) => saveSettingsMock(p) }) }));
 
 import { MarketMemoView } from "@/components/market-memo-view";
 import { ZukanView } from "@/components/zukan-view";
@@ -98,8 +103,12 @@ describe("151図鑑の画面", () => {
     expect(q("zukan-uncollected")!.textContent).toBe("未収集 149");
     const pika = q("zukan-list")!.querySelector('[data-no="25"]')!;
     expect(pika.getAttribute("data-collected")).toBe("true");
-    expect(pika.className).toContain("bg-success");
+    expect(pika.getAttribute("data-status")).toBe("owned");
+    expect(pika.className).toContain("bg-white"); // 入手済みは白ベース
     expect(pika.querySelector("svg")).not.toBeNull(); // チェックマーク
+    expect(pika.querySelector('[data-testid="dex-image"]')!.getAttribute("data-dim")).toBe("false"); // 通常の色
+    expect(q("zukan-list")!.querySelector('[data-no="1"] [data-testid="dex-image"]')!.getAttribute("data-dim")).toBe("true"); // 未入手は半透明
+    expect(pika.textContent).not.toContain("入手済み"); // 文字バッジは出さない
     expect(q("zukan-list")!.querySelector('[data-no="1"]')!.getAttribute("data-collected")).toBe("false");
     await click(q("zukan-summary-toggle"));
     expect(q("zukan-cards")!.textContent).toBe("4枚");
@@ -108,6 +117,45 @@ describe("151図鑑の画面", () => {
     expect(qa("zukan-item").map((e) => e.getAttribute("data-no"))).toEqual(["6", "25"]);
     await click([...document.body.querySelectorAll('[data-testid="zukan-filter"] button')][2]); // 未収集
     expect(qa("zukan-item")).toHaveLength(149);
+  });
+
+  it("エクスポートのボタンは無く、並び替え（図鑑番号順⇔五十音順）がある。五十音順は名称の読み順", async () => {
+    await mount(createElement(ZukanView));
+    expect(q("zukan-export")).toBeNull();
+    expect(q("zukan-sort")!.getAttribute("data-sort")).toBe("no");
+    await click(q("zukan-sort"));
+    expect(q("zukan-sort")!.getAttribute("data-sort")).toBe("kana");
+    const names = qa("zukan-item").map((e) => e.getAttribute("data-no"));
+    expect(names).toHaveLength(151);
+    expect(qa("zukan-item")[0].textContent).toContain("ア"); // 先頭はア行の名前
+    expect(names).not.toEqual([...names].sort((x, y) => Number(x) - Number(y))); // 番号順とは異なる並び
+  });
+
+  it("状態は 入手済み > 相場登録済み > 対象レア未収録 > 未登録。相場の記録のあるポケモンは相場登録済み、手動フラグは相場なしのときだけ対象レア未収録。詳細で状態と解除ができる", async () => {
+    zdata = { cards: [zc({ dexNo: 25 })], prices: [{ id: "p1", profileId: PID, dexNo: 6, cardName: "リザードン", setName: "", cardNumber: "", rarity: "", storeName: "店", chainName: "", surveyedOn: "2026-11-10", condition: "A", priceYen: 1000, note: "", createdAt: "2026-11-10T00:00:00Z" }] };
+    appSettings = { zukanRareMissing: [6, 150, 1] }; // 6 は相場あり（相場が優先）／150・1 は未入手
+    await mount(createElement(ZukanView));
+    const st = (no: number) => q("zukan-list")!.querySelector(`[data-no="${no}"]`)!.getAttribute("data-status");
+    expect(st(25)).toBe("owned");
+    expect(st(6)).toBe("market");
+    expect(st(1)).toBe("rare_missing");
+    expect(st(150)).toBe("rare_missing");
+    expect(st(2)).toBe("unregistered");
+    // 詳細: 状態の表示。フラグを外すと未登録に戻る（保存される）
+    await click(q("zukan-list")!.querySelector('[data-no="1"]'));
+    expect(q("zukan-status-text")!.textContent).toContain("対象レア未収録");
+    expect((q("rare-missing-toggle") as HTMLInputElement).checked).toBe(true);
+    await click(q("rare-missing-toggle"));
+    expect(saveSettingsMock).toHaveBeenCalledWith({ zukanRareMissing: [6, 150] });
+  });
+
+  it("入手済みの詳細には「対象レア未収録」の切替を出さない（入手済みが優先）", async () => {
+    zdata = { cards: [zc({ dexNo: 25 })], prices: [] };
+    appSettings = {};
+    await mount(createElement(ZukanView));
+    await click(q("zukan-list")!.querySelector('[data-no="25"]'));
+    expect(q("rare-missing-toggle")).toBeNull();
+    expect(q("zukan-status-text")!.textContent).toContain("入手済み");
   });
 
   it("カード登録: 金額が空欄ならパック開封（金額は null＝0円ではない）、「0」は単品購入の0円。方法と金額が矛盾するときは保存せずエラー", async () => {
@@ -193,6 +241,49 @@ describe("相場調査メモの画面", () => {
     expect(qa("market-card")).toHaveLength(3);
     await type(q("market-search") as HTMLInputElement, "ピカ");
     expect(qa("market-card")).toHaveLength(1);
+  });
+
+  it("カード名に151のポケモン名があれば画像を出す。入手状態に関係なく常に通常の不透明度（図鑑の未入手の半透明を適用しない）。該当なしは画像なし", async () => {
+    mdata = { cards: [mcard(), mcard({ id: "m2", name: "博士のサポート", setName: "x", cardNumber: "9" })], prices: [], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    const rows = qa("market-card");
+    const img = rows[0].querySelector('[data-testid="dex-image"]') as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("/api/zukan-image/6?v=1"); // リザードンex → No.6
+    expect(img.getAttribute("data-dim")).toBe("false");
+    expect(img.className).not.toContain("opacity-35");
+    expect(rows[1].querySelector('[data-testid="dex-image"]')).toBeNull();
+  });
+
+  it("状態違いの価格を同じ店舗・調査日でまとめて登録できる。同じ状態の重複・入力不足は保存前に止める", async () => {
+    mdata = { cards: [mcard()], prices: [], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    await click(q("market-card-plus"));
+    await type(q("price-store") as HTMLInputElement, "B店");
+    await click(q("price-rank")!.querySelectorAll("button")[1]); // A
+    await type(q("price-yen") as HTMLInputElement, "1200");
+    await click(q("price-extra-add"));
+    const row = q("price-extra-row")!;
+    await type(row.querySelector("select") as HTMLSelectElement, "B");
+    await type(row.querySelector("input") as HTMLInputElement, "900");
+    await click(q("price-submit"));
+    expect(addMPrice).toHaveBeenCalledTimes(2);
+    expect(addMPrice.mock.calls.map((c) => (c[2] as { condition: string; priceYen: number; storeName: string }))).toMatchObject([
+      { condition: "A", priceYen: 1200, storeName: "B店" },
+      { condition: "B", priceYen: 900, storeName: "B店" },
+    ]);
+    // 重複する状態
+    addMPrice.mockClear();
+    mdata = { cards: [mcard()], prices: [], purchases: [] };
+    await click(q("market-card-plus"));
+    await type(q("price-store") as HTMLInputElement, "B店");
+    await click(q("price-rank")!.querySelectorAll("button")[1]);
+    await type(q("price-yen") as HTMLInputElement, "1200");
+    await click(q("price-extra-add"));
+    await type(q("price-extra-row")!.querySelector("select") as HTMLSelectElement, "A");
+    await type(q("price-extra-row")!.querySelector("input") as HTMLInputElement, "1000");
+    await click(q("price-submit"));
+    expect(addMPrice).not.toHaveBeenCalled();
+    expect(q("price-error")!.textContent).toContain("重複");
   });
 
   it("カードと価格の登録: カード→価格の順に保存。店舗の候補（過去の入力）をタップで再入力でき、状態ランクは5つのボタン。調査日は今日が初期値。自動フォーカスしない", async () => {

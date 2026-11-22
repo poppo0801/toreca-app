@@ -517,6 +517,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       legacyAliases: aliases.filter((a) => a.product_id === p.id && ((a as unknown as { source?: string }).source ?? "legacy") === "legacy").map((a) => a.alias),
       code: p.product_code ?? "",
       packsPerBox: p.packs_per_box,
+      releaseDate: (p as unknown as { release_date?: string | null }).release_date ?? null,
       provisional: p.is_provisional,
       listPriceBox: p.list_price_box,
       listPricePack: p.list_price_pack,
