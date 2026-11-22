@@ -12,6 +12,7 @@ import { parseListItems, type ListItem } from "../list-items";
 import type { CallBudget } from "../call-budget";
 import { judgeLinkScope, type ItemLink } from "./link-scope";
 import { buildItemLinks, itemScopedUrls, sameUrlCounts } from "./item-links";
+import { buildLinkEvidence, deriveLinkMap, type LinkEvidenceRecord } from "./link-evidence";
 import { canonUrl } from "./normalize";
 import { runResearch, seedEvidence, type EvidenceScope, type FetchOutcome, type RegistrationJudge, type ResearchAgent, type ResearchLimits, type ResearchResult, type ResearchTools } from "./research-loop";
 
@@ -36,6 +37,8 @@ export interface ItemPlan {
   status: ItemUrlStatus;
   /** AIへ渡す種（原文＋リンクの出所の明示）。別店舗へ流用していないことが読める */
   seedText: string;
+  /** この項目の応募先URLの根拠（展開方式・本文中の位置・項目の範囲・未展開の理由）。URLなしの項目も1件残る */
+  linkEvidence: LinkEvidenceRecord[];
 }
 
 const STATUS_LINE: Record<ItemUrlStatus, string> = {
@@ -51,7 +54,10 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
   const items: ListItem[] = parsed.isList
     ? parsed.items
     : [{ no: 1, groupNo: 1, groupLabel: "", text: post.text, start: 0, end: post.text.length, links: post.text.match(/https:\/\/t\.co\/[A-Za-z0-9]+/g) ?? [], deadlineHint: null }];
-  const linkMap = buildItemLinks({ items, linkMap: post.linkMap, parentLinks: post.links, recordedAt: post.recordedAt });
+  // 展開結果: 保存された linkMap（X APIのentity）を第一候補。無いときは、一意に決まる対応だけを復元する（推測で埋めない）
+  const derived = deriveLinkMap(post);
+  const linkMap = buildItemLinks({ items, linkMap: derived.linkMap.length ? derived.linkMap : undefined, parentLinks: post.links, recordedAt: post.recordedAt });
+  const evidence = buildLinkEvidence(post, items, derived.methods, derived.linkMap);
   const plans = items.map((it): ItemPlan => {
     const links = linkMap.get(it.no) ?? [];
     const scoped = itemScopedUrls(links);
@@ -61,7 +67,7 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
       const host = canonUrl(l.url).host;
       lines.push(l.origin === "item_entity" ? `- この項目自身のリンク: ${l.url}` : l.origin === "item_text_short_unexpanded" ? `- 短縮URL（未展開・追跡しない）: ${host}` : `- 親投稿に共通のリンク（対応未確認）: ${l.url}`);
     }
-    return { itemNo: it.no, groupLabel: it.groupLabel, itemText: it.text, links, scopedUrls: scoped, status, seedText: lines.join("\n") };
+    return { itemNo: it.no, groupLabel: it.groupLabel, itemText: it.text, links, scopedUrls: scoped, status, seedText: lines.join("\n"), linkEvidence: evidence.filter((e) => e.itemNo === it.no) };
   });
   return { isList: parsed.isList, header: parsed.header, items: plans };
 }
@@ -100,7 +106,10 @@ export function makeScoper(plan: ItemPlan, siblings: ItemPlan[], storeOf: (group
     const head = [page.structure?.title ?? "", ...(page.structure?.slots.map((s) => s.title) ?? [])].join("\n");
     const v = judgeLinkScope({ link: { origin: origin === "discovered" ? "item_entity" : origin }, item: { chain: null, store: storeOf(plan.groupLabel), products: [] }, page: { head, lines: page.text.split(/\n+/).slice(0, 60) }, otherStores, otherProducts: [], sameUrlItems: counts.get(key) ?? 1 });
     // AI自身が見つけたURL（discovered）は、項目への割り当てが無い。店舗・商品の反証が無ければ candidate、あれば mismatch
-    return { origin, verdict: origin === "discovered" && v.verdict === "confirmed" ? "candidate" : v.verdict, refutes: v.refutes };
+    // 既存の保存情報から復元した対応（stored_unique_pair）は、X APIの展開結果ではないため、ページが項目の店舗を名指ししていない限り candidate 止まり（確定にしない）
+    const method = plan.linkEvidence.find((e) => e.expandedUrl && canonUrl(e.expandedUrl).key === key)?.method;
+    const weak = method === "stored_unique_pair" && v.verdict === "confirmed" && !v.supports.includes("page_names_item_store");
+    return { origin, verdict: origin === "discovered" && v.verdict === "confirmed" ? "candidate" : weak ? "candidate" : v.verdict, refutes: v.refutes };
   };
 }
 
