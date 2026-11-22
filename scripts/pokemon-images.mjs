@@ -3,7 +3,7 @@
 //   node scripts/pokemon-images.mjs upload "<PNGフォルダ>" --yes-upload      … 変換して Storage へ保存（既定は dry-run。接続先がローカルのときだけ。本番は下記）
 // **画像の利用権限（ライセンス）の確認が済むまで、本番へはアップロードしない。** 本番へ置くときは、必ず `npm run prod -- scripts/pokemon-images.mjs upload … --yes-production --yes-upload` の入口を使う。
 // 画像ファイルはGitに含めない（.gitignore）。保存先: `<世帯ID>/official/0001.webp`（世帯のフォルダ単位のStorage RLSで、世帯のメンバーだけが読める）。
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { buildManifest } from "./lib/pokemon-images.mjs";
@@ -15,9 +15,10 @@ if (!["manifest", "upload"].includes(cmd) || !dir) {
 }
 const NAMES = readFileSync("src/lib/zukan/pokemon151.ts", "utf8").match(/"[^"]+"/g)?.map((s) => s.slice(1, -1)).slice(0, 151) ?? [];
 const { entries, stats } = buildManifest(readdirSync(dir), NAMES);
+const emptyFiles = entries.filter((e) => statSync(join(dir, e.file)).size === 0).map((e) => e.no);
 mkdirSync("eval/real-data", { recursive: true });
 writeFileSync("eval/real-data/pokemon-images-manifest.json", JSON.stringify({ stats, entries }, null, 1));
-console.log(JSON.stringify({ ...stats, unparsed: stats.unparsed.length, gapNumbers: stats.gapNumbers.length, ambiguousNumbers: entries.filter((e) => e.ambiguous).length }));
+console.log(JSON.stringify({ ...stats, unparsed: stats.unparsed.length, gapNumbers: stats.gapNumbers.length, ambiguousNumbers: entries.filter((e) => e.ambiguous).length, emptyFiles }));
 if (cmd === "manifest") process.exit(0);
 
 // ---- upload
@@ -56,6 +57,8 @@ let bytes = 0;
 const failed = [];
 for (const e of entries) {
   try {
+    // 元ファイルが空（ダウンロード失敗で0バイト）のものは、変換せず原因を明示して報告する（再取得が必要）
+    if (statSync(join(dir, e.file)).size === 0) throw new Error("元ファイルが0バイト（ダウンロード失敗。再取得が必要）");
     const buf = await sharp(join(dir, e.file)).resize(192, 192, { fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
     const { error } = await db.storage.from("pokemon-images").upload(`${hid}/${e.key}`, buf, { contentType: "image/webp", upsert: true });
     if (error) throw error;
