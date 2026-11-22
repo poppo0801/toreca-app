@@ -37,6 +37,7 @@ e2e/ai-live-output
 eval/runs/
 eval/lottery-grouping-real/pool.json
 
+# Stage 10E 第2段階の実データ評価用（Git管理外。実原文・評価記録を置く）
 # ポケモン公式絵（権利のある素材。Gitに含めない。Supabase Storage の非公開バケットにのみ置く）
 private-assets/
 /pokemon-image*/

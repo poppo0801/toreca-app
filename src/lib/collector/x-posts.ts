@@ -17,6 +17,8 @@ export interface XPost {
   images: string[];
   /** 投稿内の外部リンク（短縮URLは展開後） */
   links: string[];
+  /** Stage 10M: 短縮URL（本文中の t.co）→ 展開後のURL の対応（最大30件）。まとめ投稿の項目ごとの応募先を結び付けるため。長い投稿（note_tweet）の分も含む */
+  linkMap?: { short: string; url: string }[];
   /** 引用・返信などの参照（投稿ID） */
   refs: { type: string; id: string }[];
   /** 投稿者のアカウント名（取得できたとき） */
@@ -47,10 +49,10 @@ export interface QuotedPost {
 interface RawTweet {
   id?: unknown;
   text?: unknown;
-  note_tweet?: { text?: unknown };
+  note_tweet?: { text?: unknown; entities?: { urls?: { url?: unknown; expanded_url?: unknown; unwound_url?: unknown; display_url?: unknown }[] } };
   created_at?: unknown;
   author_id?: unknown;
-  entities?: { urls?: { expanded_url?: unknown; unwound_url?: unknown; display_url?: unknown }[] };
+  entities?: { urls?: { url?: unknown; expanded_url?: unknown; unwound_url?: unknown; display_url?: unknown }[] };
   attachments?: { media_keys?: unknown };
   referenced_tweets?: { type?: unknown; id?: unknown }[];
 }
@@ -85,9 +87,24 @@ export function parseXPosts(json: unknown, username: string): XPost[] {
       return m?.type === "photo" && /^https:\/\/pbs\.twimg\.com\//.test(url) ? [url] : [];
     });
   };
+  // 長い投稿（note_tweet）のリンクは note_tweet.entities にある（本文の entities は途中までのことがある）
+  const urlEntities = (t: RawTweet) => [...(t.entities?.urls ?? []), ...(t.note_tweet?.entities?.urls ?? [])];
+  const linkMapOf = (t: RawTweet): { short: string; url: string }[] => {
+    const seen = new Set<string>();
+    const out: { short: string; url: string }[] = [];
+    for (const u of urlEntities(t)) {
+      const short = str(u.url);
+      const url = str(u.unwound_url) || str(u.expanded_url);
+      if (!short.startsWith("https://t.co/") || !url.startsWith("https://") || seen.has(short)) continue;
+      seen.add(short);
+      out.push({ short: short.slice(0, 40), url: url.slice(0, 300) });
+      if (out.length >= 30) break;
+    }
+    return out;
+  };
   const linksOf = (t: RawTweet): string[] => [
     ...new Set(
-      (t.entities?.urls ?? [])
+      urlEntities(t)
         .map((u) => str(u.unwound_url) || str(u.expanded_url))
         // 画像・投稿自身へのリンク(twitter.com/.../photo/1 など)は外部リンクではない
         .filter((u) => /^https:\/\//.test(u) && !/^https:\/\/(x|twitter)\.com\/[^/]+\/status\/\d+\/(photo|video)\//.test(u)),
@@ -115,6 +132,7 @@ export function parseXPosts(json: unknown, username: string): XPost[] {
       ...(profiles.has(str(t.author_id)) ? { profile: profiles.get(str(t.author_id)) } : {}),
       images: imagesOf(t),
       links: linksOf(t),
+      ...(linkMapOf(t).length ? { linkMap: linkMapOf(t) } : {}),
       refs: (t.referenced_tweets ?? []).flatMap((r) => (typeof r.type === "string" && /^\d{1,25}$/.test(str(r.id)) ? [{ type: r.type, id: str(r.id) }] : [])),
       ...(quoted ? { quoted } : {}),
     });

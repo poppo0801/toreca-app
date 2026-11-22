@@ -1,0 +1,291 @@
+{
+  "_note": "Stage 10E 精度改善の未見の架空ケース（K01〜K12）。J01/J13の改善に合わせて作ったものではなく、類似・逆パターン・境界を含む。正解は gold/gold.json に**モデル入力・採点器の作成より先に固定**し、AIの入力に渡さない。原文・既存の抽選のみ。",
+  "now": "2099-01-20T00:00:00.000Z",
+  "cases": [
+    {
+      "id": "K01",
+      "title": "店舗選択式＋既存の店舗別カード（J01に類似・別の系列/商品）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k1",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 新作カードゲーム「ダミーの章」スターターセット 抽選販売。応募フォームで受取店舗を1店舗選択してください（北店・南店・東店）。応募期間 2099-04-01 10:00〜2099-04-08 23:59。当選発表 2099-04-12。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K01-A",
+          "chain": "サンプルゲーム",
+          "store": "北店",
+          "products": [
+            "ダミーの章スターターセット"
+          ],
+          "applyDeadline": "2099-04-08",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        },
+        {
+          "lotteryId": "L-K01-B",
+          "chain": "サンプルゲーム",
+          "store": "南店",
+          "products": [
+            "ダミーの章スターターセット"
+          ],
+          "applyDeadline": "2099-04-08",
+          "storeMode": "fixed",
+          "protectedCodes": [
+            "applications"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "K02",
+      "title": "店舗別独立＋既存カード1件（逆パターン: 店舗ごとに当落が別）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k2",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 北店・南店で「ダミーの章」スターターセットの抽選販売を行います。応募は店舗ごとの専用フォームから。当落も店舗ごとに別々で、両店に応募できます。応募期間 2099-04-01〜2099-04-08。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K02-A",
+          "chain": "サンプルゲーム",
+          "store": "北店",
+          "products": [
+            "ダミーの章スターターセット"
+          ],
+          "applyDeadline": "2099-04-08",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "K03",
+      "title": "店舗選択式だが、既存カードの店舗は選択肢に含まれない（境界）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k3",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 抽選販売「ダミーの章」スターターセット。受取店舗は応募時に選択（北店・南店）。応募期間 2099-04-01〜2099-04-08。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K03-A",
+          "chain": "サンプルゲーム",
+          "store": "西店",
+          "products": [
+            "ダミーの章スターターセット"
+          ],
+          "applyDeadline": "2099-04-08",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "K04",
+      "title": "1送信で2商品に応募・当落は商品ごとに独立（J13に類似・商品2・店舗なし）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k4",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム オンライン抽選。1つのフォームで「ダミー拡張A」「ダミー拡張B」を同時に申し込めます（1回の送信で両方に応募）。当落は商品ごとに独立して決まり、それぞれに購入権が付与されます。応募期間 2099-05-01〜2099-05-05。"
+        }
+      ],
+      "related": []
+    },
+    {
+      "id": "K05",
+      "title": "2商品から1つを選んで応募（逆パターン: 当選権は1つ）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k5",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム オンライン抽選。「ダミー拡張A」「ダミー拡張B」のうち、希望する1商品を選んで応募してください（応募は1人1回。当選すれば選んだ商品を購入できます）。応募期間 2099-05-01〜2099-05-05。"
+        }
+      ],
+      "related": []
+    },
+    {
+      "id": "K06",
+      "title": "3商品セットで1つの当落（逆パターン: 一括で当選・落選）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k6",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 抽選販売。「ダミー拡張A」「ダミー拡張B」「ダミー拡張C」の3点セットとして販売します。応募は1回で、当選するとセット3点すべてを購入できます（個別の当落はありません）。応募期間 2099-05-10〜2099-05-14。"
+        }
+      ],
+      "related": []
+    },
+    {
+      "id": "K07",
+      "title": "商品別に別フォーム・既存カードは1商品分のみ（per_product＋既存関係）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k7",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 北店 抽選販売。次の3商品は、商品ごとに別の応募フォームです。応募・当落は商品ごとに独立しています。商品: ダミー拡張A / ダミー拡張B / ダミー拡張C。応募期間 2099-05-20〜2099-05-24。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K07-A",
+          "chain": "サンプルゲーム",
+          "store": "北店",
+          "products": [
+            "ダミー拡張B"
+          ],
+          "applyDeadline": "2099-05-24",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "K08",
+      "title": "一括応募だが当落の独立性が原文に無い（境界: 保留すべき）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k8",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 抽選販売のお知らせ。「ダミー拡張A」「ダミー拡張B」をお申し込みいただけます。詳細は申込みフォームをご確認ください。応募期間 2099-06-01〜2099-06-05。"
+        }
+      ],
+      "related": []
+    },
+    {
+      "id": "K09",
+      "title": "同一ページに2つの開催回・第1回の既存カードは応募記録あり（保護）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k9",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 北店 抽選販売。第1回（応募 2099-06-10〜2099-06-14・当選発表 2099-06-17）と第2回（応募 2099-06-24〜2099-06-28・当選発表 2099-07-01）を実施します。各回は別々に応募し、当落も回ごとに独立です。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K09-A",
+          "chain": "サンプルゲーム",
+          "store": "北店",
+          "products": [],
+          "applyDeadline": "2099-06-14",
+          "storeMode": "fixed",
+          "protectedCodes": [
+            "applications"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "K10",
+      "title": "店舗選択式＋既存カード2件（1件は選択肢に含まれる・1件は含まれない）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k10",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 抽選販売「ダミーの章」ボックス。応募時に受取店舗を選択（北店・南店・東店）。応募期間 2099-07-01〜2099-07-07。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K10-A",
+          "chain": "サンプルゲーム",
+          "store": "東店",
+          "products": [
+            "ダミーの章ボックス"
+          ],
+          "applyDeadline": "2099-07-07",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        },
+        {
+          "lotteryId": "L-K10-B",
+          "chain": "サンプルゲーム",
+          "store": "西店",
+          "products": [
+            "ダミーの章ボックス"
+          ],
+          "applyDeadline": "2099-07-07",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ]
+    },
+    {
+      "id": "K11",
+      "title": "同じ店舗・商品だが開催回が違う既存カード（告知は新しい回）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k11",
+          "status": "fetched",
+          "origin": "primary",
+          "text": "サンプルゲーム 北店 「ダミーの章」ボックス 第2回抽選販売。応募期間 2099-08-01〜2099-08-05。前回（第1回）とは別の抽選で、応募は引き継がれません。"
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K11-A",
+          "chain": "サンプルゲーム",
+          "store": "北店",
+          "products": [
+            "ダミーの章ボックス"
+          ],
+          "applyDeadline": "2099-07-05",
+          "storeMode": "fixed",
+          "protectedCodes": [
+            "applications"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "K12",
+      "title": "取得不能なページ＋既存カード（断定しない）",
+      "evidence": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k12",
+          "status": "unfetchable",
+          "origin": "unknown",
+          "text": null
+        }
+      ],
+      "related": [
+        {
+          "lotteryId": "L-K12-A",
+          "chain": "サンプルゲーム",
+          "store": "北店",
+          "products": [
+            "ダミーの章ボックス"
+          ],
+          "applyDeadline": "2099-08-10",
+          "storeMode": "fixed",
+          "protectedCodes": []
+        }
+      ],
+      "failures": [
+        {
+          "url": "https://sample-game.example.invalid/lottery/k12",
+          "kind": "unfetchable",
+          "at": "2099-01-19T00:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

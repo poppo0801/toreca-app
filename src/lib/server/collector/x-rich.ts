@@ -31,6 +31,8 @@ export interface XRichOk {
   imagesFound: number;
   imagesUsed: number;
   linkedPage: boolean;
+  /** 取得できたリンク先の公開ページ本文（保存用。投稿本文とは別の出典として保存される） */
+  linkedPages?: { url: string; text: string }[];
   /** none=画像なし / not_fetched=画像あり・未取得（本文のみ） / partial=一部のみ取得 / fetched=すべて取得 */
   imageStatus: "none" | "not_fetched" | "partial" | "fetched";
   /** APIで取得した投稿（再解析で再取得しないために保持する）。公開oEmbedのときは無い */
@@ -57,9 +59,10 @@ export interface ImageStats {
 export async function enrichXPost(
   post: { text: string; links: string[]; images: string[]; quoted?: { username: string; text: string; images: string[]; links: string[] } },
   deps: EnrichDeps,
-): Promise<{ text: string; images: ImageInput[]; linkedPage: boolean; imagesUsed: number; linkUrl?: string; stats: ImageStats; quotedUsed: boolean }> {
+): Promise<{ text: string; images: ImageInput[]; linkedPage: boolean; /** 取得できたリンク先の本文（保存用。解析に渡した分の先頭） */ linkedPageText?: string; imagesUsed: number; linkUrl?: string; stats: ImageStats; quotedUsed: boolean }> {
   let text = post.text;
   let linkedPage = false;
+  let linkedPageText: string | undefined;
   const q = post.quoted;
   if (q && q.text.trim()) text += `\n\n【引用元の投稿${q.username ? `（@${q.username}）` : ""}】\n${q.text}`;
   // リンク先（抽選案内）があれば、アクセスできる範囲で本文を統合する（1件まで。robots.txt・SSRF対策つき）。自分の投稿のリンクを優先し、なければ引用元のリンク
@@ -71,6 +74,7 @@ export async function enrichXPost(
       if (t2.text.length >= 30) {
         text += `\n\n【リンク先の案内（${ext}）】\n${t2.text.slice(0, 6000)}`;
         linkedPage = true;
+        linkedPageText = t2.text.slice(0, 6000);
       }
     }
   }
@@ -85,7 +89,7 @@ export async function enrichXPost(
     const split = await splitTallImages(images);
     if (split.ok) used = split.images.slice(0, MAX_IMAGES);
   }
-  return { text: text.slice(0, 20_000), images: used, linkedPage, imagesUsed: images.length, linkUrl: ext, stats: { found: urls.length, fetched: images.length, sent: used.length }, quotedUsed: !!(q && (q.text.trim() || q.images.length)) };
+  return { text: text.slice(0, 20_000), images: used, linkedPage, ...(linkedPageText ? { linkedPageText } : {}), imagesUsed: images.length, linkUrl: ext, stats: { found: urls.length, fetched: images.length, sent: used.length }, quotedUsed: !!(q && (q.text.trim() || q.images.length)) };
 }
 
 const jstMonthStart = (now: Date) => new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(now)}-01T00:00:00+09:00`).toISOString();
@@ -143,7 +147,7 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
         if (imageStatus === "not_fetched") notices.push(`画像未取得: 添付画像${rich.stats.found}枚を取得できませんでした（本文のみで解析します）`);
         else if (imageStatus === "partial") notices.push(`添付画像${rich.stats.found}枚のうち${rich.imagesUsed}枚を取得できました`);
         if (rich.linkUrl && !rich.linkedPage) notices.push("リンク先の本文は取得できませんでした（本文と画像のみで解析します）");
-        return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: rich.stats.found, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage, imageStatus, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? parsed.user, ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) } };
+        return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: rich.stats.found, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage, ...(rich.linkedPageText && rich.linkUrl ? { linkedPages: [{ url: rich.linkUrl, text: rich.linkedPageText }] } : {}), imageStatus, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? parsed.user, ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) } };
       }
       notices.push(`X APIで取得できませんでした（${r.message}）。本文のみを取得します`);
     } else notices.push(gate.reason);
@@ -158,7 +162,7 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
     const links = [...(x.text.split("【投稿内のリンク】")[1] ?? "").matchAll(/https:\/\/\S+/g)].map((m) => m[0]);
     const withLink = links.length > 0 ? await enrichXPost({ text: x.text, links, images: [] }, o.enrich ?? {}) : null;
     if (withLink && !withLink.linkedPage) notices.push("リンク先の本文は取得できませんでした");
-    return { ok: true, text: withLink?.text ?? x.text, author: x.author, postedOn: x.postedOn, images: [], via: "oembed", notices, imagesFound: 0, imagesUsed: 0, linkedPage: Boolean(withLink?.linkedPage), imageStatus: hasPic ? "not_fetched" : "none" };
+    return { ok: true, text: withLink?.text ?? x.text, author: x.author, postedOn: x.postedOn, images: [], via: "oembed", notices, imagesFound: 0, imagesUsed: 0, linkedPage: Boolean(withLink?.linkedPage), ...(withLink?.linkedPageText && withLink.linkUrl ? { linkedPages: [{ url: withLink.linkUrl, text: withLink.linkedPageText }] } : {}), imageStatus: hasPic ? "not_fetched" : "none" };
   };
 }
 

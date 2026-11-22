@@ -30,5 +30,7 @@
 
 | V20 | **案A（`lotteries`をOpportunityとして維持＋`cases`・`case_judgments`・`case_id`列の追加のみ）を、開発実装として採用**。履歴保護層・判定エンジン切替（本番では常に旧判定）・正規化の現状固定を実装 | 開発環境で実装・検証済み（Stage 10D・2026-11-20）。**本番DB未適用・新エンジン未接続**。案Aを本番へ適用する判断は承認事項 | `docs/AI_REDESIGN_DATA_FOUNDATION.md`、`docs/reports/2026-11-20-stage10d-case-foundation.md` |
 
+| V21 | **統合AI判断・自律追加調査エンジンを独立した開発物として実装**（`src/lib/judgment/`）。意味判断はAI、検証層は根拠の実在・整合・履歴保護・費用だけを検査し結論を作らない。固定正規化は候補検索の補助に降格。旧固定意味判定（`judgeForm`等）は新経路の後段に残さない（旧方式にのみ残り、10Fで置換・10Hで撤去）。予算は新規発見／判断／追加調査で枠を分離 | 開発環境で実装・検証済み（Stage 10E・2026-11-20。**台本のモデルによる経路の検証のみ。実AI未接続・精度未測定・本番未反映**） | `docs/AI_REDESIGN_10E_ENGINE.md`、`docs/reports/2026-11-20-stage10e-unified-judgment.md` |
+
 ## 変更の記録
 新しい決定は、日付・旧仕様との差・理由・根拠・影響する文書を `docs/DEVELOPMENT_LOG.md` に追記する。ここには索引だけを追加し、機能仕様を重複して記述しない。

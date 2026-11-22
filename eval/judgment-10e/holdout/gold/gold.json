@@ -1,0 +1,11 @@
+{
+  "_note": "Stage 10E r3 安定化: 新しい独立ホールドアウト（H01〜H06）の正解。**入力（cases.json）・採点器・プロンプトの作成より先に固定**し、AIに渡さない。K群は結果を見て修正したため、今後『未見』とは呼ばない。実AIでの評価は未実施（承認後）。",
+  "gold": {
+    "H01": {"verifiable": true, "structure": "per_product", "opportunityCount": 3, "fields": {"applyDeadline": "2099-07-12"}, "relations": {"L-H01-A": "same"}, "issue": "商品ごとに別フォーム・当落も別（3商品）。既存カードは1商品分のみで、該当商品の機会と同一"},
+    "H02": {"verifiable": true, "structure": "multi_independent_per_submit", "opportunityCount": 2, "fields": {"applyDeadline": "2099-07-20"}, "relations": {"L-H02-A": "same"}, "issue": "1つのフォームで2商品に同時応募・当落は商品ごと独立。既存カードは1商品分で、該当商品の機会と同一"},
+    "H03": {"verifiable": true, "structure": "per_product", "opportunityCount": 2, "fields": {"applyDeadline": "2099-08-03"}, "issue": "当落は商品ごとに独立と読めるが、送信が1回か複数かは書かれていない（送信単位不明→ per_product＋推論）。機会は商品ごとに分ける"},
+    "H04": {"verifiable": true, "structure": "per_round", "opportunityCount": 3, "fields": {"applyDeadline": "2099-09-30"}, "relations": {"L-H04-A": "same"}, "mustNotChange": ["L-H04-A"], "issue": "3開催回・第2回の既存カード（保護）は第2回の機会と同一。ほかの回とは別の権利で、変更しない"},
+    "H05": {"verifiable": true, "structure": "one_form_one", "opportunityCount": 1, "fields": {"applyDeadline": "2099-10-05"}, "relations": {"L-H05-A": "independent"}, "issue": "同じ系列・店舗でも商品が別の既存カードは、関係のない別の抽選（同一にしない）"},
+    "H06": {"verifiable": true, "structure": "store_select", "opportunityCount": 1, "fields": {"applyDeadline": "2099-10-15"}, "relations": {"L-H06-A": "same", "L-H06-B": "independent"}, "issue": "店舗選択式の選択肢にある店舗の既存カードは同一、同じ系列でも商品・応募期間が別の既存カードは別の抽選（注記を評価前に訂正: 入力は同系列・別商品・別締切。関係の正解 independent は不変）"}
+  }
+}
