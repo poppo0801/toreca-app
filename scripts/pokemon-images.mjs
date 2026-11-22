@@ -60,7 +60,7 @@ for (const e of entries) {
   try {
     // 元ファイルが空（ダウンロード失敗で0バイト）のものは、変換せず原因を明示して報告する（再取得が必要）
     if (statSync(join(dir, e.file)).size === 0) throw new Error("元ファイルが0バイト（ダウンロード失敗。再取得が必要）");
-    const buf = await sharp(join(dir, e.file)).resize(192, 192, { fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+    const buf = await sharp(join(dir, e.file)).resize(160, 160, { fit: "inside", withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
     const { error } = await db.storage.from("pokemon-images").upload(`${hid}/${e.key}`, buf, { contentType: "image/webp", upsert: true });
     if (error) throw error;
     ok++;

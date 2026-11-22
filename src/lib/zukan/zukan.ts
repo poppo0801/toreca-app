@@ -155,7 +155,7 @@ export type ZukanCardInput = z.input<typeof zukanCardInputSchema>;
 /** 価格調査の記録の入力（151図鑑専用・相場調査メモ共通の項目） */
 export const priceInputSchema = z.object({
   storeName: z.string().trim().min(1, "店舗を入力してください").max(80, "店舗は80文字以内で入力してください"),
-  chainName: text("系列", 80),
+  chainName: z.string().trim().min(1, "系列を入力してください").max(80, "系列は80文字以内で入力してください"),
   surveyedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "調査日の形式が正しくありません"),
   condition: z.enum(RANKS, { error: "状態ランクを選んでください" }),
   priceYen: z.number({ error: "販売価格を入力してください" }).int("販売価格は整数で入力してください").min(0, "販売価格は0円以上").max(100_000_000, "販売価格が大きすぎます"),
@@ -222,6 +222,52 @@ export function recentStores(records: readonly { storeName: string; surveyedOn: 
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** 過去の「系列＋店舗」の組み合わせ */
+export interface StorePair {
+  chainName: string;
+  storeName: string;
+}
+/** 過去に入力した「系列＋店舗」の組み合わせ（新しい順・重複なし・系列も店舗も空でないものだけ・最大 limit）。ワンタップで両方を入力する候補 */
+export function recentPairs(records: readonly { chainName: string; storeName: string; surveyedOn: string }[], limit = 6): StorePair[] {
+  const seen = new Set<string>();
+  const out: StorePair[] = [];
+  for (const r of [...records].sort((a, b) => b.surveyedOn.localeCompare(a.surveyedOn))) {
+    if (!r.chainName.trim() || !r.storeName.trim()) continue;
+    const k = `${normStore(r.chainName)}|${normStore(r.storeName)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ chainName: r.chainName, storeName: r.storeName });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** カードの識別情報の既知の組（過去に入力したカード・価格の記録から） */
+export interface KnownCard {
+  setName: string;
+  cardNumber: string;
+  rarity: string;
+}
+/** レアリティの初期値（新しいカードの入力。利用者の確定要望） */
+export const DEFAULT_RARITY = "AR";
+/** 収録セットの候補（既知のカードのセット名。重複なし） */
+export const setOptions = (known: readonly KnownCard[]): string[] => [...new Set(known.map((k) => k.setName.trim()).filter(Boolean))];
+/** 選んだセットのカード番号の候補（既知のもの。セットが空なら全て） */
+export function numberOptions(known: readonly KnownCard[], setName: string): string[] {
+  const k = normStore(setName);
+  return [...new Set(known.filter((c) => !k || normStore(c.setName) === k).map((c) => c.cardNumber.trim()).filter(Boolean))];
+}
+/**
+ * 収録セットとカード番号の相互補完: カード番号が入力され、その番号を持つ既知のカードの**セットが1種類だけ**のとき、そのセット名を返す（複数あるなら補完しない＝誤った補完をしない）。
+ * セットが入力済みの場合は呼び出し側で上書きしない。該当なしは null。
+ */
+export function completeSetFromNumber(known: readonly KnownCard[], cardNumber: string): string | null {
+  const n = normStore(cardNumber);
+  if (!n) return null;
+  const sets = [...new Set(known.filter((c) => normStore(c.cardNumber) === n && c.setName.trim()).map((c) => c.setName.trim()))];
+  return sets.length === 1 ? sets[0] : null;
 }
 
 /** 過去に最もよく使った状態ランク（候補の先頭にする）。履歴が無ければ null */

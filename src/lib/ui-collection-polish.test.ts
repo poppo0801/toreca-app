@@ -66,12 +66,12 @@ describe("ポケモン画像: Gitに載せず、Supabase Storage の非公開バ
   });
   it("配信ルートは非公開バケットだけから、ログイン中の利用者の権限（Storage RLS）で取得。service role は使わず、キャッシュは private。番号は厳密に検査", () => {
     const route = readFileSync("src/app/api/pokemon-image/[no]/route.ts", "utf8");
-    expect(route).toContain("auth.getUser()");
+    expect(route).toContain("auth.getClaims()");
     expect(route).toContain('storage.from("pokemon-images")');
     expect(route).toContain('from("households").select("id")'); // 世帯は利用者自身の権限（RLS）で取得
     expect(route).toContain("/^\\d{1,4}$/");
-    expect(route).toContain("private, max-age");
-    expect(route.indexOf("auth.getUser()")).toBeLessThan(route.indexOf("SUPABASE_SERVICE_ROLE_KEY")); // 認証の確認の後でだけ service role を使う
+    expect(route).toContain("private, max-age=2592000, immutable");
+    expect(route.indexOf("auth.getClaims()")).toBeLessThan(route.indexOf("SUPABASE_SERVICE_ROLE_KEY")); // 認証の確認の後でだけ service role を使う
     expect(route).not.toMatch(/NEXT_PUBLIC_[A-Z_]*SERVICE|console\.(log|error)/); // 秘密をクライアント・ログへ出さない
     const setup = readFileSync("scripts/setup-pokemon-images-bucket.mjs", "utf8");
     expect(setup).toContain("public: false"); // 非公開バケット

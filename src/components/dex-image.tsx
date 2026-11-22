@@ -17,12 +17,10 @@ export function DexImage({ no, name, className, dim }: { no: number; name: strin
   const [failed, setFailed] = useState(false);
   if (failed || !IMAGES_ON)
     return (
-      <span className={cn("flex shrink-0 items-center justify-center rounded-md bg-muted text-[10px] tabular-nums text-muted-foreground", className)} aria-hidden="true" data-testid="dex-placeholder">
-        {String(no).padStart(3, "0")}
-      </span>
+      <span className={cn("shrink-0 rounded-md bg-muted-foreground/10", className)} aria-hidden="true" data-testid="dex-placeholder" data-no={no} />
     );
   return (
     // eslint-disable-next-line @next/next/no-img-element -- 認証つきの配信ルート。サイズは事前変換済み（192px）
-    <img src={`/api/pokemon-image/${no}`} alt="" width={96} height={96} loading="lazy" decoding="async" onError={() => setFailed(true)} className={cn("shrink-0 object-contain", dim && DIM_OPACITY_CLASS, className)} data-testid="dex-image" data-dim={dim ? "true" : "false"} data-name={name} />
+    <img src={`/api/pokemon-image/${no}?v=2`} alt="" width={96} height={96} loading="lazy" decoding="async" onError={() => setFailed(true)} className={cn("shrink-0 object-contain", dim && DIM_OPACITY_CLASS, className)} data-testid="dex-image" data-dim={dim ? "true" : "false"} data-name={name} />
   );
 }
