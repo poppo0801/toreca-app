@@ -32,8 +32,9 @@ export function makeSearchTool(provider: SearchProviderLike): NonNullable<Resear
         hits: hits.filter((h) => typeof h.url === "string" && /^https:\/\//.test(h.url)).slice(0, 8).map((h) => ({ title: String(h.title ?? "").slice(0, 120), url: h.url.slice(0, 300), snippet: redact(String(h.snippet ?? "")).slice(0, 200) })),
         costJpy: cost,
       };
-    } catch {
-      return { ok: false, reason: "search_failed" };
+    } catch (e) {
+      const x = e as { status?: number; name?: string };
+      return { ok: false, reason: `search_failed:${typeof x?.status === "number" ? x.status : String(x?.name ?? "unknown").slice(0, 40)}` }; // 失敗の型だけ（メッセージは記録しない）
     }
   };
 }

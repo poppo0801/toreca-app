@@ -9,7 +9,10 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { CallBudget } from "../call-budget";
+import { CallBudget, CaseBudget } from "../call-budget";
+import { summarizeFinal } from "./final-states";
+import { pageText } from "./html-text";
+import { parseApplyPage } from "./page-structure";
 import { checkJudgmentRealRun } from "../real-gate";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent } from "./research-ai";
 import { runResearch, seedEvidence, type ResearchTools } from "./research-loop";
@@ -27,19 +30,28 @@ describe.skipIf(env.JUDGMENT_10U_REAL !== "1" || env.JUDGMENT_10X_TARGET !== "A"
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model);
     const budget = new CallBudget({ maxCalls: 90, maxCostJpy: Math.min(50, gate.totalCapJpy) });
-    const diagnostics: { role: string; reason: string }[] = [];
-    const agent = makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) });
-    const judge = makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push(d) });
+    let current = "";
+    const diagnostics: { caseId: string; role: string; reason: string }[] = [];
+    const agent = makeAnthropicResearchAgent(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) });
+    const judge = makeAnthropicRegistrationJudge(client, { model: gate.model, onDiagnostic: (d) => diagnostics.push({ caseId: current, ...d }) });
     let tick = Date.now();
-    const tools: ResearchTools = { now: () => new Date((tick += 500)), fetchPage: async (u) => (pages.has(u) ? { ok: true, finalUrl: u, html: pages.get(u)!, text: pages.get(u)!.replace(/<[^>]+>/g, " ") } : { ok: false, reason: "not_public" }) };
+    const tools: ResearchTools = { now: () => new Date((tick += 500)), fetchPage: async (u) => (pages.has(u) ? { ok: true, finalUrl: u, html: pages.get(u)!, text: pageText(pages.get(u)!) } : { ok: false, reason: "not_public" }) };
     const out: Record<string, unknown>[] = [];
     for (const x of index.filter((i) => i.ok).slice(0, 12)) {
       // 種（告知）は、ページのタイトルと**応募ページのURL**（条件A: URL既知。URLの発見は評価しない）
       const title = (pages.get(x.url)!.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
-      const r = await runResearch({ caseId: `lp-${x.n}`, seed: seedEvidence("s1", `告知: ${title}\n応募ページ: ${x.url}`, new Date()), agent, judge, tools, budget, limits: { maxTurns: 4, maxFetches: 3, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 } });
-      out.push({ case: `lp-${x.n}`, end: r.investigation.reason, turns: r.investigation.turns, decision: r.registration.decision, verified: r.registration.verified, held: r.registration.held, monitoring: r.monitoring.state, fetches: r.history.map((h) => h.outcome) });
+      current = `lp-${x.n}`;
+      const caseBudget = new CaseBudget(budget, gate.perCaseCapJpy); // 1件あたりの上限（全体の上限と両方を守る）
+      const before = budget.costJpy;
+      const r = await runResearch({ caseId: `lp-${x.n}`, seed: seedEvidence("s1", `告知: ${title}\n応募ページ: ${x.url}`, new Date()), agent, judge, tools, budget: caseBudget, limits: { maxTurns: 4, maxFetches: 3, agentReserveJpy: 0.6, judgeReserveJpy: 0.6 } });
+      // 旧方式（決定論のページ構造解析）の読み取りと、AIの項目値が本文に実在するか（精度ではなく、根拠が本文にあるかの機械的な確認）
+      const old = parseApplyPage(pages.get(x.url)!);
+      const text = pageText(pages.get(x.url)!);
+      const nf = (s: string) => s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
+      const fields = Object.entries(r.registration.output?.fields ?? {}).map(([k, f]) => ({ field: k, basis: f.basis, valueInText: f.value ? nf(text).includes(nf(f.value)) : null }));
+      out.push({ id: `lp-${x.n}`, end: r.investigation.reason, turns: r.investigation.turns, decision: r.registration.decision, verified: r.registration.verified, held: r.registration.held?.reasons ?? null, monitoring: r.monitoring.state, fetches: r.history.map((h) => h.outcome), caseCostJpy: Math.round((budget.costJpy - before) * 10000) / 10000, trace: r.trace.map((t) => t.kind + ":" + t.detail.split("https://").join("(url)https://").split(/\(url\)https:\/\/\S+/).join("(url)")), quoteAudit: r.quoteAudit, fields, oldMethod: { slots: old?.slots.length ?? null, related: old?.relatedEvents.length ?? null } });
     }
-    writeFileSync("eval/real-data/xsource-10u-real.json", JSON.stringify({ condition: "A_url_known（応募URLを種に含める。発見力の評価ではない）", note: "観測のみ（人の正解が無いため精度ではない）", budget: budget.summary(), diagnostics, cases: out }, null, 1));
+    writeFileSync("eval/real-data/xsource-10u-real.json", JSON.stringify({ condition: "A_url_known（応募URLを種に含める。発見力の評価ではない）", note: "観測のみ（人の正解が無いため精度ではない）", budget: budget.summary(), final: summarizeFinal(out as unknown as { id: string; decision: string; verified: boolean; held: string[] | null }[]), diagnostics, cases: out }, null, 1));
     expect(budget.calls).toBeLessThanOrEqual(90);
     expect(budget.costJpy).toBeLessThanOrEqual(50.01);
   }, 1_800_000);

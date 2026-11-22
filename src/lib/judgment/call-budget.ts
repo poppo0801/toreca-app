@@ -54,6 +54,53 @@ export class CallBudget {
   }
 }
 
+/**
+ * 1件（1案件）あたりの費用のハード上限（Stage 10X）。親の CallBudget（全体の上限）を共有し、その案件の費用が上限を超える呼び出しは開始しない。
+ * 親の回数・費用の計上はそのまま親に積まれる（全体の上限と1件の上限のどちらかに達したら止まる）。
+ */
+export class CaseBudget extends CallBudget {
+  private caseSpent = 0;
+  private caseReserved = 0;
+  constructor(private readonly parent: CallBudget, private readonly capJpy: number) {
+    super({ maxCalls: parent.opts.maxCalls, maxCostJpy: parent.opts.maxCostJpy });
+  }
+  get caseCostJpy(): number {
+    return this.caseSpent;
+  }
+  override get remainingCalls(): number {
+    return this.parent.remainingCalls;
+  }
+  override get remainingJpy(): number {
+    return Math.max(0, Math.min(this.parent.remainingJpy, this.capJpy - this.caseSpent - this.caseReserved));
+  }
+  override check(reserveJpy = 0): { ok: true } | { ok: false; reason: Exclude<StopReason, null> } {
+    if (reserveJpy > this.capJpy - this.caseSpent - this.caseReserved + 1e-9) return { ok: false, reason: "cost" };
+    return this.parent.check(reserveJpy);
+  }
+  override start(kind: CallKind, reserveJpy = 0): { ok: true; finish: (actualJpy: number | null) => void } | { ok: false; reason: Exclude<StopReason, null> } {
+    const c = this.check(reserveJpy);
+    if (!c.ok) return c;
+    const s = this.parent.start(kind, reserveJpy);
+    if (!s.ok) return s;
+    this.caseReserved += reserveJpy;
+    let done = false;
+    return {
+      ok: true,
+      finish: (actualJpy) => {
+        if (done) return;
+        done = true;
+        this.caseReserved = Math.max(0, this.caseReserved - reserveJpy);
+        this.caseSpent += actualJpy ?? reserveJpy;
+        s.finish(actualJpy);
+      },
+    };
+  }
+  override summary(): ReturnType<CallBudget["summary"]> {
+    const p = this.parent.summary();
+    return { ...p, costJpy: Math.round(this.caseSpent * 10000) / 10000, maxCostJpy: this.capJpy };
+  }
+}
+
 export class CallLimitError extends Error {
   constructor(readonly reason: "calls" | "cost") {
     super(`call_limit:${reason}`);

@@ -62,6 +62,6 @@ describe("検索ツール（開発限定・読み取り専用）", () => {
     }
     expect(await makeSearchTool(provider(hits, 1.7))("店 抽選")).toMatchObject({ costJpy: 1.7 });
     const bad = { name: "x", search: vi.fn(async () => { throw new Error("net"); }) };
-    expect(await makeSearchTool(bad)("店 抽選")).toEqual({ ok: false, reason: "search_failed" });
+    expect(await makeSearchTool(bad)("店 抽選")).toEqual({ ok: false, reason: "search_failed:Error" });
   });
 });
