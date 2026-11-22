@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEX_TOTAL, dexLabel, POKEMON_151, pokemonOf } from "./pokemon151";
-import { cheapestIds, collectedSet, commonRank, daysSince, isReferencePrice, matchCard, parseAmount, priceInputSchema, recentStores, resolveAcquire, sortPrices, storeHistory, zukanCardInputSchema, zukanRows, zukanStats, type PriceLike, type ZukanCard } from "./zukan";
+import { completeSetFromNumber, DEFAULT_RARITY, numberOptions, recentPairs, setOptions, cheapestIds, collectedSet, commonRank, daysSince, isReferencePrice, matchCard, parseAmount, priceInputSchema, recentStores, resolveAcquire, sortPrices, storeHistory, zukanCardInputSchema, zukanRows, zukanStats, type PriceLike, type ZukanCard } from "./zukan";
 
 const card = (o: Partial<ZukanCard> = {}): ZukanCard => ({ id: "c" + Math.random(), profileId: "p1", dexNo: 25, cardName: "ピカチュウ", setName: "", cardNumber: "", rarity: "", quantity: 1, acquiredOn: null, acquireMethod: "pack_opening", purchaseAmountYen: null, storeName: "", condition: "", memo: "", priceRecordId: null, ...o });
 
@@ -77,12 +77,14 @@ describe("購入金額: 未入力と0円の区別・入手方法との整合", (
     expect(zukanCardInputSchema.safeParse({ ...base, acquireMethod: "pack_opening", condition: "S" }).success).toBe(false);
     expect(zukanCardInputSchema.safeParse({ ...base, quantity: 0, acquireMethod: "pack_opening" }).success).toBe(false);
   });
-  it("価格記録の入力検証: 状態ランクは5段階・価格は0円以上の整数・店舗必須", () => {
-    const ok = { storeName: "店A", surveyedOn: "2026-11-10", condition: "A+", priceYen: 1200 };
+  it("価格記録の入力検証: 状態ランクは5段階・価格は0円以上の整数・系列と店舗は必須", () => {
+    const ok = { storeName: "店A", chainName: "系列A", surveyedOn: "2026-11-10", condition: "A+", priceYen: 1200 };
     expect(priceInputSchema.safeParse(ok).success).toBe(true);
     expect(priceInputSchema.safeParse({ ...ok, condition: "D" }).success).toBe(false);
     expect(priceInputSchema.safeParse({ ...ok, priceYen: -1 }).success).toBe(false);
     expect(priceInputSchema.safeParse({ ...ok, storeName: "" }).success).toBe(false);
+    expect(priceInputSchema.safeParse({ ...ok, chainName: "" }).success).toBe(false); // 系列も必須
+    expect(priceInputSchema.safeParse({ ...ok, chainName: "   " }).success).toBe(false);
     expect(priceInputSchema.safeParse({ ...ok, priceYen: 0 }).success).toBe(true);
   });
 });
@@ -143,5 +145,31 @@ describe("相場調査メモ: カードの同一性（カード名だけでは�
     expect(matchCard(ex, { name: "リザードン", setName: "151", cardNumber: "006/165", rarity: "SR" }).kind).toBe("new");
     expect(matchCard(ex, { name: "フシギダネ", setName: "151", cardNumber: "001/165", rarity: "C" }).kind).toBe("new");
     expect(matchCard([], { name: "x", setName: "", cardNumber: "", rarity: "" }).kind).toBe("new");
+  });
+});
+
+describe("価格入力の候補・補完（系列＋店舗の組み合わせ、セットと番号の相互補完）", () => {
+  it("過去の系列＋店舗の組み合わせは新しい順・重複なし（表記ゆれは同じ扱い）。系列または店舗が空の記録は候補にしない", () => {
+    const r = (chainName: string, storeName: string, surveyedOn: string) => ({ chainName, storeName, surveyedOn });
+    const out = recentPairs([r("甲", "A店", "2026-11-01"), r("乙", "B店", "2026-11-05"), r(" 甲 ", "Ａ店", "2026-11-09"), r("", "C店", "2026-11-10"), r("丙", "", "2026-11-11")]);
+    expect(out).toEqual([{ chainName: " 甲 ", storeName: "Ａ店" }, { chainName: "乙", storeName: "B店" }]);
+    expect(recentPairs(Array.from({ length: 20 }, (_, i) => r("系列" + i, "店", "2026-11-" + String(i + 1).padStart(2, "0"))), 6)).toHaveLength(6);
+  });
+  it("番号→セットの補完は、その番号を持つ既知のセットが1種類のときだけ。複数・該当なしは補完しない", () => {
+    const known = [
+      { setName: "セットX", cardNumber: "099/100", rarity: "AR" },
+      { setName: "セットX", cardNumber: "099/100", rarity: "SAR" },
+      { setName: "セットA", cardNumber: "006/078", rarity: "SR" },
+      { setName: "セットB", cardNumber: "006/078", rarity: "SR" },
+    ];
+    expect(completeSetFromNumber(known, "099/100")).toBe("セットX");
+    expect(completeSetFromNumber(known, "０９９/１００")).toBe("セットX"); // 全角でも同じ
+    expect(completeSetFromNumber(known, "006/078")).toBeNull();
+    expect(completeSetFromNumber(known, "999/999")).toBeNull();
+    expect(completeSetFromNumber(known, "")).toBeNull();
+    expect(setOptions(known)).toEqual(["セットX", "セットA", "セットB"]);
+    expect(numberOptions(known, "セットA")).toEqual(["006/078"]);
+    expect(numberOptions(known, "")).toEqual(["099/100", "006/078"]);
+    expect(DEFAULT_RARITY).toBe("AR");
   });
 });

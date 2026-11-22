@@ -45,17 +45,25 @@ test("151図鑑: 登録・集計・価格調査・購入（二重購入なし）
 
   // 価格調査 → この価格で購入（単品購入として登録され、金額の合計に加わる。二重購入はできない）
   await page.getByTestId("price-add").click();
+  await page.getByTestId("price-chain").fill("テスト系列");
   await page.getByTestId("price-store").fill("テスト店");
-  await page.getByTestId("price-rank").getByRole("radio", { name: "A", exact: true }).click();
-  await page.getByTestId("price-yen").fill("1500");
+  await page.getByTestId("price-yen").fill("1500"); // 状態は A が初期選択
+  await page.screenshot({ path: "test-results/c1-price-form-390.png" });
   await page.getByTestId("price-submit").click();
   await expect(page.getByTestId("price-row")).toHaveCount(1);
+  await expect(page.getByTestId("price-buy")).toHaveCount(0); // 一覧には購入・編集・削除が無い
+  await page.getByTestId("price-row").click(); // 価格ブロックをタップ → 詳細
+  await expect(page.getByTestId("price-detail")).toBeVisible();
+  await page.screenshot({ path: "test-results/c1-price-detail-390.png" });
   await page.getByTestId("price-buy").click();
   await page.getByTestId("buy-ok").click();
   await expect(page.getByTestId("zukan-card")).toHaveCount(3);
+  await expect(page.getByTestId("price-row")).toHaveCount(1); // 購入後も価格の記録は残る
+  await expect(page.getByTestId("price-row")).toHaveAttribute("data-bought", "true");
+  await page.getByTestId("price-row").click();
   await expect(page.getByTestId("price-buy")).toHaveText("購入済み");
   await expect(page.getByTestId("price-buy")).toBeDisabled();
-  await expect(page.getByTestId("price-row")).toHaveCount(1); // 購入後も価格の記録は残る
+  await page.keyboard.press("Escape");
   expect(await noOverflow(page)).toBe(true);
   await page.screenshot({ path: "test-results/c1-zukan-detail-390.png" });
   await page.keyboard.press("Escape");
@@ -78,6 +86,7 @@ test("相場調査メモ: 登録・比較・購入・購入済みの非表示。
   await page.getByTestId("market-card-name").fill("テストカードex");
   await page.getByTestId("market-card-set").fill("テスト弾");
   await page.getByTestId("market-card-number").fill("001/100");
+  await page.getByTestId("price-chain").fill("系列A");
   await page.getByTestId("price-store").fill("店A");
   await page.getByTestId("price-rank").getByRole("radio", { name: "B", exact: true }).click();
   await page.getByTestId("price-yen").fill("800");
@@ -88,6 +97,7 @@ test("相場調査メモ: 登録・比較・購入・購入済みの非表示。
   await page.getByTestId("market-card-name").fill("テストカードex");
   await page.getByTestId("market-card-set").fill("テスト弾");
   await page.getByTestId("market-card-number").fill("001/100");
+  await page.getByTestId("price-chain").fill("系列B");
   await page.getByTestId("price-store").fill("店B");
   await page.getByTestId("price-rank").getByRole("radio", { name: "A+", exact: true }).click();
   await page.getByTestId("price-yen").fill("1500");
@@ -99,9 +109,10 @@ test("相場調査メモ: 登録・比較・購入・購入済みの非表示。
   expect(await noOverflow(page)).toBe(true);
   await page.screenshot({ path: "test-results/c1-market-390.png" });
   // 購入 → 購入済み（一覧から非表示・履歴は残る・二重購入不可）
-  await page.getByTestId("price-buy").first().click();
+  await page.getByTestId("price-row").first().click(); // 詳細から購入
+  await page.getByTestId("price-buy").click();
   await page.getByTestId("buy-ok").click();
-  await expect(page.getByTestId("price-buy").first()).toHaveText("購入済み");
+  await expect(page.getByTestId("price-row").first()).toHaveAttribute("data-bought", "true");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("market-card")).toHaveCount(0);
   await page.getByTestId("market-show-bought").check();

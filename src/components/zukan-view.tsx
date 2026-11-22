@@ -6,13 +6,13 @@ import { buyZukanFromPriceAction, addZukanPriceAction, deleteZukanCardAction, de
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DexImage } from "@/components/dex-image";
-import { addPricesSequentially, jstToday, PriceForm } from "@/components/price-form";
+import { addPricesSequentially, jstToday, PriceForm, usePriceCandidates } from "@/components/price-form";
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { dexLabel, pokemonOf } from "@/lib/zukan/pokemon151";
 import type { ZukanPriceRecord } from "@/lib/zukan/rows";
-import { ACQUIRE_LABEL, commonRank, DEX_STATUS_LABEL, dexStatus, parseAmount, RANKS, recentStores, resolveAcquire, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
+import { ACQUIRE_LABEL, completeSetFromNumber, DEFAULT_RARITY, DEX_STATUS_LABEL, dexStatus, numberOptions, parseAmount, RANKS, resolveAcquire, setOptions, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type KnownCard, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +20,14 @@ import { cn } from "@/lib/utils";
  *  入手済み=白地・緑の実線枠／相場登録済み=青みの薄地・青の実線枠／対象レア未収録=紫みの薄地・紫の破線枠／未登録=薄いグレー・枠なし。
  *  未入手の3状態は画像を半透明（35%）にする。
  */
+/** 詳細ヘッダーの状態バッジ（短い色分け1個。一覧のカードには文字バッジを出さない） */
+const BADGE_STYLE: Record<DexStatus, string> = {
+  owned: "bg-success text-white",
+  market: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
+  rare_missing: "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200",
+  unregistered: "bg-muted text-muted-foreground",
+};
+
 const STATUS_STYLE: Record<DexStatus, string> = {
   owned: "border-success/60 bg-white text-foreground dark:bg-card",
   market: "border-sky-500/60 bg-sky-100 text-muted-foreground dark:bg-sky-950/60",
@@ -157,28 +165,48 @@ interface CardInfo {
   rarity: string;
 }
 
-/** 価格調査の対象カードの情報（カード名・収録セット・カード番号・レアリティ） */
-function CardInfoFields({ v, onChange }: { v: CardInfo; onChange: (v: CardInfo) => void }) {
-  const set = (k: keyof CardInfo, val: string) => onChange({ ...v, [k]: val });
-  const field = "mt-0.5 h-10 w-full rounded-md border bg-input px-2.5 text-sm";
+const FIELD = "mt-0.5 h-10 w-full rounded-md border bg-input px-2.5 text-sm";
+
+/** カード名（価格フォームの最上部。図鑑のポケモン名が初期値） */
+function CardNameField({ v, onChange }: { v: CardInfo; onChange: (v: CardInfo) => void }) {
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-lg border p-2" data-testid="price-card-info">
-      <label className="col-span-2 block text-sm">
-        <span className="text-[13px] font-medium">カード名</span>
-        <input value={v.cardName} onChange={(e) => set("cardName", e.target.value)} className={field} maxLength={80} autoComplete="off" />
-      </label>
+    <label className="block text-sm" data-testid="price-card-info">
+      <span className="text-[13px] font-medium">カード名</span>
+      <input value={v.cardName} onChange={(e) => onChange({ ...v, cardName: e.target.value })} className={FIELD} maxLength={80} autoComplete="off" data-testid="price-card-name" />
+    </label>
+  );
+}
+
+/** 収録セット・番号・レア（任意。必須項目の下）。セットと番号は相互補完（番号→セットは、その番号のセットが1種類だけのとき）。レアの初期値は AR */
+function CardDetailFields({ v, onChange, known }: { v: CardInfo; onChange: (v: CardInfo) => void; known: KnownCard[] }) {
+  const onNumber = (val: string) => {
+    const guess = !v.setName.trim() ? completeSetFromNumber(known, val) : null;
+    onChange({ ...v, cardNumber: val, ...(guess ? { setName: guess } : {}) });
+  };
+  return (
+    <div className="grid grid-cols-2 gap-2">
       <label className="block text-sm">
-        <span className="text-[13px] font-medium">収録セット</span>
-        <input value={v.setName} onChange={(e) => set("setName", e.target.value)} className={field} maxLength={120} autoComplete="off" />
+        <span className="text-[13px] font-medium">収録セット（任意）</span>
+        <input value={v.setName} onChange={(e) => onChange({ ...v, setName: e.target.value })} list="zukan-set-options" className={FIELD} maxLength={120} autoComplete="off" data-testid="price-card-set" />
+        <datalist id="zukan-set-options">
+          {setOptions(known).map((x) => (
+            <option key={x} value={x} />
+          ))}
+        </datalist>
       </label>
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-sm">
           <span className="text-[13px] font-medium">番号</span>
-          <input value={v.cardNumber} onChange={(e) => set("cardNumber", e.target.value)} className={field} maxLength={20} autoComplete="off" />
+          <input value={v.cardNumber} onChange={(e) => onNumber(e.target.value)} list="zukan-number-options" className={FIELD} maxLength={20} autoComplete="off" data-testid="price-card-number" />
+          <datalist id="zukan-number-options">
+            {numberOptions(known, v.setName).map((x) => (
+              <option key={x} value={x} />
+            ))}
+          </datalist>
         </label>
         <label className="block text-sm">
           <span className="text-[13px] font-medium">レア</span>
-          <input value={v.rarity} onChange={(e) => set("rarity", e.target.value)} className={field} maxLength={10} autoComplete="off" />
+          <input value={v.rarity} onChange={(e) => onChange({ ...v, rarity: e.target.value })} className={FIELD} maxLength={10} autoComplete="off" data-testid="price-card-rarity" />
         </label>
       </div>
     </div>
@@ -197,9 +225,9 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
   const [delPrice, setDelPrice] = useState<PriceRow | null>(null);
   const [buy, setBuy] = useState<PriceRow | null>(null);
   const bought = new Set(cards.map((c) => c.priceRecordId).filter((x): x is string => !!x));
-  const stores = useMemo(() => recentStores(data.prices), [data.prices]);
-  const rank = useMemo(() => commonRank(data.prices), [data.prices]);
-  const [info, setInfo] = useState<CardInfo>({ cardName: p.name, setName: "", cardNumber: "", rarity: "" });
+  const cand = usePriceCandidates(data.prices);
+  const known = useMemo<KnownCard[]>(() => [...data.prices, ...data.cards].map((x) => ({ setName: x.setName, cardNumber: x.cardNumber, rarity: x.rarity })), [data.prices, data.cards]);
+  const [info, setInfo] = useState<CardInfo>({ cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY });
 
   const saveCard = async (f: CardForm): Promise<string | null> => {
     const amount = parseAmount(f.amount);
@@ -227,15 +255,14 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent data-testid="zukan-sheet" aria-describedby="zukan-desc">
         <div className="flex items-center gap-3 px-4 pb-2">
-          <DexImage no={no} name={p.name} className="size-16" />
+          <DexImage no={no} name={p.name} className="size-14" />
           <div className="min-w-0">
             <SheetTitle>
               {dexLabel(no)} {p.name}
             </SheetTitle>
-            <p className="text-xs text-muted-foreground" data-testid="zukan-status-text">
-              状態: {DEX_STATUS_LABEL[status]}
-              {status === "owned" ? "（カードを登録済み）" : status === "market" ? "（価格調査の記録あり）" : status === "rare_missing" ? "（手動で設定）" : ""}
-            </p>
+            <span className={cn("mt-0.5 inline-block rounded px-1.5 py-0.5 text-[11px] font-bold", BADGE_STYLE[status])} data-testid="zukan-status-badge" data-status={status}>
+              {DEX_STATUS_LABEL[status]}
+            </span>
           </div>
           <SheetDescription id="zukan-desc" className="sr-only">
             {p.name}のカードの登録と価格調査
@@ -244,12 +271,9 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
         <SheetBody className="space-y-4 border-t pt-3">
           {status !== "owned" && (
             <section aria-label="対象レア未収録" className="rounded-lg border px-2.5 py-2 text-xs">
-              <label className="flex items-start gap-2">
-                <input type="checkbox" checked={rareMissing} onChange={async () => setFlagError(await onToggleRare())} className="mt-0.5 size-4" data-testid="rare-missing-toggle" />
-                <span>
-                  <span className="text-[13px] font-medium">対象レア未収録</span>
-                  <span className="block text-muted-foreground">対象のレアカードがまだ手元にない／収録されていないと判断したときに、手動で付けます（自動では付きません。いつでも解除できます）。入手済み・相場登録済みの状態が優先されます。</span>
-                </span>
+              <label className="flex min-h-8 items-center gap-2">
+                <input type="checkbox" checked={rareMissing} onChange={async () => setFlagError(await onToggleRare())} className="size-4" data-testid="rare-missing-toggle" />
+                <span className="text-[13px] font-medium">対象レア未収録</span>
               </label>
               {flagError && (
                 <p role="alert" className="mt-1 text-danger">
@@ -304,12 +328,12 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
             </div>
             {pricing && (
               <div className="space-y-1.5">
-                {!pricing.rec && <CardInfoFields v={info} onChange={setInfo} />}
                 <PriceForm
                   initial={pricing.rec ? { storeName: pricing.rec.storeName, chainName: pricing.rec.chainName, surveyedOn: pricing.rec.surveyedOn, condition: pricing.rec.condition as never, price: String(pricing.rec.priceYen), note: pricing.rec.note } : undefined}
-                  stores={stores}
-                  defaultRank={rank}
+                  {...cand}
                   today={today}
+                  top={pricing.rec ? undefined : <CardNameField v={info} onChange={setInfo} />}
+                  optional={pricing.rec ? undefined : <CardDetailFields v={info} onChange={setInfo} known={known} />}
                   submitLabel={pricing.rec ? "更新する" : "記録する"}
                   onCancel={() => setPricing(null)}
                   onSubmitBatch={async (items) => {
@@ -503,7 +527,7 @@ export function ZukanView() {
                 aria-label={`${dexLabel(r.no)} ${r.name} ${DEX_STATUS_LABEL[r.status]}`}
                 className={cn("flex min-h-14 w-full items-center gap-1.5 rounded-lg border-2 px-1.5 py-1 text-left text-sm active:opacity-80", STATUS_STYLE[r.status])}
               >
-                <DexImage no={r.no} name={r.name} className="size-11" dim={!r.collected} />
+                <DexImage no={r.no} name={r.name} className="size-10" dim={!r.collected} />
                 <span className="flex min-w-0 flex-1 flex-col leading-tight">
                   <span className="text-[10px] tabular-nums text-muted-foreground">{String(r.no).padStart(3, "0")}</span>
                   <span className={cn("truncate text-[13px] font-medium", r.collected && "text-foreground")}>{r.name}</span>
