@@ -68,11 +68,12 @@ const RISKY = [
 ];
 // 人が内容を確認済みの検出（誤検知）。ファイルの内容のハッシュに固定するため、ファイルが少しでも変われば無効になり、再び要確認になる
 const REVIEWED = {
-  "20261218000100_stage8f4.sql": { sha: "34ceea061732", labels: ["delete"], reason: "新規の空の表 lottery_source_snapshots の保持期間切れを消す関数の本文（既存の表・データには触れない）" },
+  "20261218000100_stage8f4.sql": { sha: "55ff66c12dfe", labels: ["delete"], reason: "新規の空の表 lottery_source_snapshots の保持期間切れを消す関数の本文（既存の表・データには触れない）" },
 };
 const review = pending.map((f) => {
   const sql = readFileSync(join("supabase/migrations", f), "utf8").replace(/--.*$/gm, "");
-  const sha = createHash("sha256").update(readFileSync(join("supabase/migrations", f))).digest("hex").slice(0, 12);
+  // 内容のハッシュは改行コードを正規化して求める（Windowsの作業コピーは CRLF、リポジトリ・CI は LF。環境で変わると REVIEWED の固定が無効になる／誤一致する）
+  const sha = createHash("sha256").update(readFileSync(join("supabase/migrations", f), "utf8").replace(/\r\n/g, "\n")).digest("hex").slice(0, 12);
   const found = RISKY.filter(([re]) => re.test(sql)).map(([, label]) => label);
   const ok = REVIEWED[f]?.sha === sha ? REVIEWED[f] : null;
   const risky = found.filter((l) => !ok?.labels.includes(l));

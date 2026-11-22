@@ -62,6 +62,7 @@ begin
   return new;
 end;
 $$;
+revoke all on function public.registration_proposals_guard() from public, anon, authenticated;
 create trigger registration_proposals_guard before update on public.registration_proposals for each row execute function public.registration_proposals_guard();
 
 create table public.registration_proposal_reviews (
@@ -85,6 +86,7 @@ begin
   raise exception 'registration_proposal_reviews は追記専用です（更新できません）';
 end;
 $$;
+revoke all on function public.registration_proposal_reviews_no_update() from public, anon, authenticated;
 create trigger registration_proposal_reviews_append_only before update on public.registration_proposal_reviews for each row execute function public.registration_proposal_reviews_no_update();
 
 -- ---------------------------------------------------------------- RLS・権限

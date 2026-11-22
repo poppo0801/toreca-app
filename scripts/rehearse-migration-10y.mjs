@@ -91,6 +91,12 @@ const pre = snapAll();
 const rows = Object.values(pre).reduce((n, v) => n + v.length, 0);
 ok("移行前の指紋を採取（全表・行ごと）", tables.length > 30 && rows > 50, `${tables.length}表・${rows}行`);
 
+// 108 が差し替える関数の移行前の定義（差分の確認用）と、移行前の関数の権限
+const fnDef = (name) => psql(`select pg_get_functiondef(p.oid) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = '${name}' limit 1`);
+const purgeBefore = fnDef("purge_test_households");
+const purgeAclBefore = psql("select coalesce(string_agg(distinct (a).grantee::regrole::text || ':' || (a).privilege_type, ',' order by (a).grantee::regrole::text || ':' || (a).privilege_type), '') from (select aclexplode(proacl) as a from pg_proc where proname = 'purge_test_households' and pronamespace = 'public'::regnamespace) x");
+const households0 = psql("select count(*) from public.households");
+
 // ④ 移行前のダンプ（ロールバック演習の復元元）
 const size1 = dump(`${OUT}/pre-migration-from${from}.dump`);
 ok("移行前の状態の退避（ロールバック演習用）", size1 > 10_000);
@@ -143,6 +149,39 @@ ok("shadow_judgments は追記専用（UPDATE をトリガが拒否）", (() => 
   psqlTry(`delete from public.shadow_judgments where id='${id}'`);
   return !upd.ok && /append|追記|更新/.test(upd.err);
 })());
+// ---- 関数の影響の確認（108〜114。delete 警告の根拠）
+const purgeAfter = fnDef("purge_test_households");
+const lines = (t) => t.split(String.fromCharCode(10)).map((l) => l.trim()).filter(Boolean);
+const beforeSet = new Set(lines(purgeBefore));
+const afterSet = new Set(lines(purgeAfter));
+const onlyAfter = [...afterSet].filter((l) => !beforeSet.has(l));
+const onlyBefore = [...beforeSet].filter((l) => !afterSet.has(l));
+console.log("purge_test_households の差分: 追加=" + JSON.stringify(onlyAfter) + " 削除=" + JSON.stringify(onlyBefore));
+ok("108: purge_test_households の差分は『case_judgments の削除1行（とコメント）』だけ（削除対象の表は他に増えず、順序・条件は不変）", onlyBefore.length === 0 && onlyAfter.filter((l) => !l.startsWith("--")).length === 1 && onlyAfter.some((l) => l === "delete from public.case_judgments where household_id = r.hid;"));
+const purgeAclAfter = psql("select coalesce(string_agg(distinct (a).grantee::regrole::text || ':' || (a).privilege_type, ',' order by (a).grantee::regrole::text || ':' || (a).privilege_type), '') from (select aclexplode(proacl) as a from pg_proc where proname = 'purge_test_households' and pronamespace = 'public'::regnamespace) x");
+ok("108: purge_test_households の実行権限が移行前後で不変（service_role のみ。anon・authenticated・PUBLIC なし）", purgeAclBefore === purgeAclAfter && !/anon|authenticated|PUBLIC|=X/.test(purgeAclAfter), purgeAclAfter);
+const purgeRows = psql("select count(*) from public.purge_test_households()");
+ok("108: purge_test_households() は、テスト用でない世帯を削除しない（実行して世帯数が不変。本番のメール＝rls-test-*@example.invalid 以外）", purgeRows === "0" && psql("select count(*) from public.households") === households0, "削除 " + purgeRows + " 世帯");
+const newFns = psql("select p.proname || '|' || p.prorettype::regtype || '|' || p.prosecdef || '|' || coalesce(array_to_string(p.proconfig, ','), '') || '|' || coalesce((select string_agg(distinct (a).grantee::regrole::text, ',') from (select aclexplode(p.proacl) as a) y), 'owner-only') from pg_proc p where p.pronamespace = 'public'::regnamespace and (p.proname ~ '^(shadow_|lottery_history_blockers|registration_proposal)') order by 1").split(String.fromCharCode(10)).filter(Boolean);
+console.log("108〜114 の関数（名前|security definer|設定|実行権限）:", JSON.stringify(newFns));
+const callable = newFns.filter((l) => l.split("|")[1] !== "trigger");
+const triggerFns = newFns.filter((l) => l.split("|")[1] === "trigger");
+ok("108〜114 の通常の関数（RPCで呼べるもの）は、anon・PUBLIC に実行権限がない", callable.length >= 7 && callable.every((l) => !/(^|,)(anon|-)(,|$)/.test(l.split("|")[4])), callable.map((l) => l.split("|")[0]).join(","));
+console.log("トリガ関数（return type = trigger。直接呼べない。実行権限の剥奪は多層防御）:", triggerFns.map((l) => l.split("|")[0] + "=" + l.split("|")[4]).join(" / "));
+ok("114 のトリガ関数は PUBLIC・anon・authenticated の実行権限も剥奪済み（多層防御）", triggerFns.filter((l) => l.startsWith("registration_proposal")).every((l) => !/(^|,)(anon|authenticated|-)(,|$)/.test(l.split("|")[4])));
+ok("108〜114 の security definer の関数は search_path が固定（空）", newFns.filter((l) => l.split("|")[2] === "true").every((l) => /search_path=/.test(l.split("|")[3])));
+ok("shadow_purge() は、サービス権限以外では実行を拒否する（関数内のガード＋実行権限の剥奪）", (() => {
+  const r = psqlTry("begin; select set_config('request.jwt.claims', '{\"role\":\"authenticated\"}', true); select public.shadow_purge(); commit;");
+  return !r.ok && /サービス権限のみ/.test(r.err);
+})());
+ok("shadow_purge() は、設定が無ければ何も削除しない（保持期限は shadow_settings が決める。新表のみが対象）", (() => {
+  const before = psql("select (select count(*) from public.shadow_judgments) + (select count(*) from public.shadow_jobs) + (select count(*) from public.lotteries)");
+  const r = psqlTry("begin; select set_config('request.jwt.claims', '{\"role\":\"service_role\"}', true); select public.shadow_purge(); commit;");
+  return r.ok && psql("select (select count(*) from public.shadow_judgments) + (select count(*) from public.shadow_jobs) + (select count(*) from public.lotteries)") === before;
+})());
+const shadowPurge = psql("select pg_get_functiondef(p.oid) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'shadow_purge'");
+const deleteTargets = [...shadowPurge.matchAll(/delete from public\.([a-z_]+)/g)].map((m) => m[1]).sort();
+ok("shadow_purge() の削除対象は shadow_* の新表だけ（既存の業務データの表を含まない）", deleteTargets.length >= 5 && deleteTargets.every((t) => t.startsWith("shadow_")), deleteTargets.join(","));
 // 旧アプリの呼び出し（新しい列・表を知らない挿入・更新）が、移行後の構造でも動く（機能OFFで戻せる＝旧コードが新構造と両立）
 const legacy = psqlTry("update public.lotteries set memo = memo where id = (select id from public.lotteries limit 1); update public.collection_settings set collection_engine = collection_engine;");
 ok("旧アプリの更新（新しい列を知らない）が移行後も動く", legacy.ok, legacy.err.slice(0, 80));
@@ -162,7 +201,7 @@ if (restoredOk) {
 spawnSync("docker", ["exec", DB, "psql", "-U", "postgres", "-c", "drop database if exists rehearse_restore"], { encoding: "utf8" });
 
 console.log(check.every((c) => c.cond) ? "\n✅ リハーサル合格" : `\n❌ 不合格: ${check.filter((c) => !c.cond).map((c) => c.name).join(" / ")}`);
-writeFileSync(`${OUT}/result-from${from}.json`, JSON.stringify({ at: new Date().toISOString(), from, applied: after.map(num), tables: tables.length, rows, addedRows: added, addedColumns: addedCols, checks: check }, null, 2));
+writeFileSync(`${OUT}/result-from${from}.json`, JSON.stringify({ at: new Date().toISOString(), from, applied: after.map(num), purgeDiff: { added: onlyAfter, removed: onlyBefore }, functions: newFns, tables: tables.length, rows, addedRows: added, addedColumns: addedCols, checks: check }, null, 2));
 // ⑧ 開発用DBを最新の状態＋シードへ戻す
 put(all);
 if (sb(["db", "reset", "--local"]).status === 0) sh("node", ["scripts/dev-db.mjs", "seed"], { stdio: "ignore" });
