@@ -68,11 +68,17 @@ const RISKY = [
 ];
 // 人が内容を確認済みの検出（誤検知）。ファイルの内容のハッシュに固定するため、ファイルが少しでも変われば無効になり、再び要確認になる
 const REVIEWED = {
-  "20261218000100_stage8f4.sql": { sha: "34ceea061732", labels: ["delete"], reason: "新規の空の表 lottery_source_snapshots の保持期間切れを消す関数の本文（既存の表・データには触れない）" },
+  "20261218000100_stage8f4.sql": { sha: "55ff66c12dfe", labels: ["delete"], reason: "新規の空の表 lottery_source_snapshots の保持期間切れを消す関数の本文（既存の表・データには触れない）" },
+  "20261226000108_stage10d_case_foundation.sql": { sha: "f8eb5634cddd", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: purge_test_households（case_judgments ほかを削除）" },
+  "20261227000109_stage10k_shadow_queue.sql": { sha: "03566db4b2ca", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },
+  "20261227000110_stage10l_image_verification.sql": { sha: "13deb0a00489", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },
+  "20261227000111_stage10m_list_items.sql": { sha: "af975618923f", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },
+  "20261227000112_stage10n_shadow_opportunities.sql": { sha: "2f8a77972a44", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },
 };
 const review = pending.map((f) => {
   const sql = readFileSync(join("supabase/migrations", f), "utf8").replace(/--.*$/gm, "");
-  const sha = createHash("sha256").update(readFileSync(join("supabase/migrations", f))).digest("hex").slice(0, 12);
+  // 内容のハッシュは改行コードを正規化して求める（Windowsの作業コピーは CRLF、リポジトリ・CI は LF。環境で変わると REVIEWED の固定が無効になる／誤一致する）
+  const sha = createHash("sha256").update(readFileSync(join("supabase/migrations", f), "utf8").replace(/\r\n/g, "\n")).digest("hex").slice(0, 12);
   const found = RISKY.filter(([re]) => re.test(sql)).map(([, label]) => label);
   const ok = REVIEWED[f]?.sha === sha ? REVIEWED[f] : null;
   const risky = found.filter((l) => !ok?.labels.includes(l));
