@@ -53,10 +53,12 @@ const goldIds = (): Set<string> => {
   const gold = classifyGold(cases, JSON.parse(readFileSync(ANSWERS, "utf8")), currentOf);
   return new Set((gold.rows as { id: string; category: string }[]).filter((r) => r.category === "gold").map((r) => r.id));
 };
-/** 対象の選択: gold（独立 gold のある事例）／lp（URL既知のLivePocket）／r10s（URLなしの投稿。検索で調べる）／all。+ で組み合わせる（例: gold+lp） */
+/** 対象の選択: gold（独立 gold のある事例）／lp（URL既知のLivePocket）／r10s（URLなしの投稿。検索で調べる）／all／lp:4,5（LPの番号指定）。+ で組み合わせる（例: gold+lp:4,5,7）。`+` と `,` の区切りは `+` が先 */
 const selected = (kind: "r10s" | "lp", ref: string, sel: string, gold: Set<string>): boolean => {
   const parts = sel.split("+");
-  return parts.includes("all") || (kind === "lp" && parts.includes("lp")) || (kind === "r10s" && (parts.includes("r10s") || (parts.includes("gold") && gold.has(ref))));
+  // lp:4,5,7（LP の番号を指定）／r10s:r10:1,r10:2（10S のケースIDを指定）
+  const listed = parts.some((p) => p.startsWith(kind + ":") && p.slice(kind.length + 1).split(",").includes(ref));
+  return listed || parts.includes("all") || (kind === "lp" && parts.includes("lp")) || (kind === "r10s" && (parts.includes("r10s") || (parts.includes("gold") && gold.has(ref))));
 };
 const SEARCH_WORST = WEB_SEARCH_JPY + worstCaseCallJpy("claude-haiku-5-5", 20_000, 800); // 検索1回（メッセージ1通に限定）の最悪費用
 

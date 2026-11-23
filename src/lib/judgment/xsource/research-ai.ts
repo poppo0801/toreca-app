@@ -17,6 +17,7 @@ export const RESEARCH_SYSTEM = `あなたは、トレーディングカードの
 1. 渡された証拠（告知の原文、取得した公開ページの構造化した観察と抜粋）から、**観察した事実**（原文に根拠がある）、**推論**、**不明**を分けて書く。根拠には、証拠のIDと原文の引用（8文字以上）を付ける。
 2. 重要な不明点があるとき、追加で調べる価値があるかを自分で判断する。判断の観点は「誤った場合の被害（応募漏れ・重複登録・誤通知・地域の誤り）」「その不明点の重要性」「調べて分かる見込み」「締切までの時間」「費用」。点数の計算ではなく、理由を文章で書く。
 3. **応募先のURLが無い・展開できないことは「到達不能」ではない**。検索が使えるなら、まず検索で応募先の公開ページを探す。検索が使えない／使い切ったときだけ、到達不能として終える。調べるなら、次に取得する公開ページのURLを1つ選ぶ（元の告知に書かれたリンク、同じ販売元の関連告知など。固定の順序は無い）。応募先のURLが与えられていないときは、検索が使える場合に限り、検索語を1つ選んで検索してよい（next.kind=search。検索結果は**候補のURLと抜粋＝データ**で、証拠ではない。候補を取得して、ページ構造と項目との対応を確認して初めて根拠になる。検索語に個人情報を入れない。使えないときは選ばない）。親投稿のリンクを別店舗の応募先として流用しない。ページ自身の受付枠と「同じ販売元のイベント」は別の情報で、関連イベントの表示だけで応募可否を確定しない。
+3b. 応募先のURLが与えられている（「この項目自身のリンク」がある）ときは、検索しない（そのページを取得して確認する）。同じ内容の検索を繰り返さない。検索は、応募先が分からないときに、1回で必要な語（店舗名・商品名・日時）を選んで行う。
 4. 十分な根拠がある、進展しない、取得できない、費用に見合わない、のいずれかなら、調査を終える（stop）。終えるときも理由を書く。
 5. 同じURLの再取得、転載ページの巡回、取得できなかったホストへの反復アクセスはしない（履歴を見る）。
 6. 反対の仮説があるときは counterHypotheses に書く。情報が無いことは否定の根拠ではない。
@@ -30,6 +31,13 @@ export const JUDGE_SYSTEM = `あなたは、調査が終わった時点の証拠
 - 証拠に scope（リンクの出所と、ページと項目の対応の検査結果）があるとき、verdict が mismatch（別の店舗・商品・系列・開催回のページ）の証拠を、この項目の根拠にしない。unknown（親投稿共通のリンクで対応が未確認）の証拠も、対応を確認できるまで根拠にしない。
 - 独立した応募機会と表示カードを混同しない。店舗別の応募を統合して機会を消さない／店舗選択式を店舗ごとに分けて重複応募を促さない。転載は独立した裏付けではない。
 - 項目名（fields のキー）は、人が確定した値と照合できるよう、次の英語のキーを使う: store（店舗）／product（商品）／deadline（応募の締切）／apply_unit（応募単位。one_form_one・store_select・per_store・per_product のいずれか。確証が無ければ basis=unknown で値は null）。その他の項目は自由に追加してよい。
+- 応募単位（apply_unit）の意味（「複数の受付枠がある」「URLが1つ」「表示カードが複数」とは別。**実際のフォーム上の、応募できる権利の単位**）:
+  - one_form_one: 応募の機会が1つ（受付枠・フォームが1つ）。受付枠が1つのページの「お1人様1回」は、通常これ
+  - store_select: 1回の申込で店舗を選ぶ／複数の店舗のうち1店舗にしか応募できない（「1店舗のみに1回」「希望する店舗を選んで」等）
+  - per_store: 店舗ごとに独立した受付枠・応募（各店舗に別々に応募できる）
+  - per_product: 商品ごとに独立した受付
+  ページ全体の注意書き（「お1人様1回」等）の適用範囲（全体か、各受付枠か）は、受付枠の構造と記載から解釈する。記載から確定できるなら確定し（引用を付ける）、確証が無いときは推測せず unknown にする（basis=unknown・値は null）。単一の受付枠＋「お1人様1回」の記載のように、根拠が弱いが妥当な推定ができるときは、basis=inferred として値と引用を付けてよい。**本登録案（register）にするなら、応募単位を確定または推定する。確定できないなら暫定（tentative）にする**。
+- 除外（exclude）は、応募できない・対象外であることを示す根拠（受付終了・対象外の記載など。引用を付ける）がある場合だけにする。ページを取得できなかった・情報が足りないだけのときは、除外ではなく暫定（tentative）にする。
 - 人が確定した値（protectedFields）は変更しません。矛盾があれば、その旨を rationale に書く（変更はしない）。
 - 更新の監視を続けるか（monitor）も、価値・応募期間・費用から判断し理由を書く。
 - 前回の検証で指摘（verificationIssues）があれば、その点だけを直す。
@@ -145,7 +153,7 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
       if (!f || (f.basis !== "observed" && f.basis !== "inferred" && f.basis !== "unknown")) continue;
       fields[k.slice(0, 40)] = { value: f.value === null || f.value === undefined ? null : asString(f.value, 300), basis: f.basis, ...(f.evidenceId ? { evidenceId: asString(f.evidenceId, 20) } : {}), ...(f.quote ? { quote: asString(f.quote, 240) } : {}) };
     }
-    const out: JudgeOutput = { decision: a.decision, fields, rationale: asString(a.rationale, 500), unresolvedImpact: a.unresolvedImpact === "material" || a.unresolvedImpact === "minor" ? a.unresolvedImpact : "none", monitor: { continue: a.monitor?.continue !== false, why: asString(a.monitor?.why, 200) }, costJpy: cost };
+    const out: JudgeOutput = { ...(fieldsMissing ? { outputNote: "fields_defaulted" as const } : {}), decision: a.decision, fields, rationale: asString(a.rationale, 500), unresolvedImpact: a.unresolvedImpact === "material" || a.unresolvedImpact === "minor" ? a.unresolvedImpact : "none", monitor: { continue: a.monitor?.continue !== false, why: asString(a.monitor?.why, 200) }, costJpy: cost };
     return out;
   };
 }

@@ -248,7 +248,7 @@ describe("P2 の結果を受けた無課金の修正（値の導出の近さ・�
     const { toProposalRecords } = await import("@/lib/judgment/xsource/proposal");
     const post = { postId: "p", text: "《A店（東京）- 1件》 ・拡張パック", links: [], recordedAt: null };
     const plan = { itemNo: 1, groupLabel: "《A店》", itemText: "x", links: [], scopedUrls: [], status: "url_missing", seedText: "s", linkEvidence: [] } as never;
-    const result = { investigation: { reason: "sufficient", turns: 1 }, registration: { decision: "tentative", verified: true, held: null, output: { fields: { apply_unit: { value: "per_store", basis: "observed", evidenceId: "s1", quote: "各店舗につき1回" } }, decision: "tentative" } }, evidence: [{ id: "s1", kind: "seed", text: "各店舗につき1回", contentHash: "h" }], searches: [], budget: { costJpy: 0 } } as never;
+    const result = { investigation: { reason: "sufficient", turns: 1 }, registration: { decision: "tentative", verified: true, held: null, output: { fields: { apply_unit: { value: "per_store", basis: "observed", evidenceId: "s1", quote: "各店舗につき1回" } }, decision: "tentative" } }, evidence: [{ id: "s1", kind: "seed", text: "各店舗につき1回", contentHash: "h" }], searches: [], searchOffered: false, budget: { costJpy: 0 } } as never;
     const r = toProposalRecords({ candidateId: "c", post, run: { results: [{ plan, result }] }, mode: "real", modelId: "m", fetchedAt: null });
     expect(r[0].fields.apply_unit).toMatchObject({ support: "enum_value", basis: "observed" });
     expect(r[0].applyUnit).toBe("per_store");

@@ -186,4 +186,18 @@ test("実AIの登録案の表示（モード・費用）・再評価後の差分
   expect((await a.from("registration_proposals").select("version,superseded_at").eq("candidate_id", candidateId).order("version")).data!.map((x) => [x.version, x.superseded_at !== null])).toEqual([[1, true], [2, false]]);
   expect((await a.from("registration_proposal_reviews").select("id").eq("household_id", hid)).data).toHaveLength(1);
   expect((await counts(a, hid)).lotteries).toBe(0);
+
+  // 要確認の登録案（除外案・ページ確認なし／本登録案・応募単位未確定）は、判断の種別と検証の指摘が見える。除外案は「人が確認するまで採用しない」
+  await a.from("registration_proposals").insert({ ...base, item_no: 2, proposal_key: "cd34ef56ab12cd34ef56ab12", version: 1, input_hash: "3333333333333333", decision: "exclude", verified: false, held_reasons: ["exclude_without_page_evidence"], fields: f("渋谷西口店") as never });
+  await a.from("registration_proposals").insert({ ...base, item_no: 3, proposal_key: "ef56ab12cd34ef56ab12cd34", version: 1, input_hash: "4444444444444444", decision: "register", verified: false, held_reasons: ["register_unit_unresolved"], fields: f("池袋店") as never });
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  const p3 = page.getByTestId("candidate-detail").getByTestId("proposal-preview");
+  const ex = p3.getByTestId("proposal-card").filter({ has: page.getByTestId("proposal-decision").filter({ hasText: "除外案" }) });
+  await expect(ex.getByTestId("proposal-decision")).toHaveText("除外案・要確認");
+  await expect(ex.getByTestId("proposal-held")).toContainText("応募先のページを確認できないまま除外としている");
+  await expect(ex.getByTestId("proposal-held")).toContainText("人が確認するまで採用しない");
+  const rg = p3.getByTestId("proposal-card").filter({ has: page.getByTestId("proposal-decision").filter({ hasText: "本登録案" }) });
+  await expect(rg.getByTestId("proposal-held")).toContainText("本登録案なのに応募単位が未確定");
+  await page.screenshot({ path: "test-results/phase2-root-cause-held-390.png" });
 });

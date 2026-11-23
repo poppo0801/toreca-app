@@ -12,6 +12,12 @@ export interface ScriptedOptions {
   failAll?: number;
   /** 登録判断の出力を不備にする（tool_use が無い） */
   badJudge?: boolean;
+  /** 登録判断の decision を、判断の呼び出し順に指定（例: ["register", "tentative"]＝1回目は本登録案・再評価で暫定）。無ければ tentative */
+  judgeDecisions?: string[];
+  /** 登録判断の fields を省略する（P2 で起きた出力） */
+  omitFields?: boolean;
+  /** 登録判断の応募単位の値（basis=inferred）。無ければ unknown */
+  judgeUnit?: string;
   /** 調査AIが最初に選ぶ行動を上書き（既定: 項目自身のリンクがあれば取得、なければ停止） */
   agentPlan?: (excerpt: string, history: number) => { kind: "fetch"; url: string } | { kind: "search"; query: string } | { kind: "stop" };
 }
@@ -21,6 +27,7 @@ type Req = { tools?: { name: string }[]; messages?: { content: unknown }[] };
 export function scriptedAnthropic(opts: ScriptedOptions = {}): { client: { messages: { create: (req: Req, o?: unknown) => Promise<unknown> } }; calls: { kind: string; n: number }[] } {
   const calls: { kind: string; n: number }[] = [];
   let n = 0;
+  let judgeCalls = 0;
   const usage = opts.usage ?? { input_tokens: 3000, output_tokens: 500 };
   const text = (req: Req): string => String((req.messages?.[0] as { content?: unknown } | undefined)?.content ?? "");
   const create = async (req: Req): Promise<unknown> => {
@@ -38,6 +45,9 @@ export function scriptedAnthropic(opts: ScriptedOptions = {}): { client: { messa
       return { stop_reason: "tool_use", content: [{ type: "tool_use", id: `tu${n}`, name, input: { observed: [], inferred: [], unknown: [], counterHypotheses: [], next } }], usage };
     }
     if (name === "submit_registration_judgment") {
+      judgeCalls++;
+      const decision = opts.judgeDecisions?.[Math.min(judgeCalls, opts.judgeDecisions.length) - 1] ?? "tentative";
+      if (opts.omitFields) return { stop_reason: "tool_use", content: [{ type: "tool_use", id: `tu${n}`, name, input: { decision, rationale: "台本（fields省略）", unresolvedImpact: "material", monitor: { continue: true, why: "台本" } } }], usage };
       if (opts.badJudge) return { stop_reason: "end_turn", content: [{ type: "text", text: "出力不備" }], usage };
       // 取得したページの先頭の行（【店舗】商品）から項目を作る。引用は原文の抜粋にそのまま存在する文字列だけ
       const line = /【証拠 (p\d+)】[^\n]*\n観察: [^\n]*\n原文の抜粋: ([^\n]*)/.exec(t);
@@ -48,11 +58,11 @@ export function scriptedAnthropic(opts: ScriptedOptions = {}): { client: { messa
         store: id && store ? { value: store, basis: "observed", evidenceId: id, quote: `【${store}】` } : { value: null, basis: "unknown" },
         product: id && first.length >= 8 ? { value: first.replace(/^【[^】]*】/, "").slice(0, 80), basis: "observed", evidenceId: id, quote: first.slice(0, 120) } : { value: null, basis: "unknown" },
         deadline: { value: null, basis: "unknown" },
-        apply_unit: { value: null, basis: "unknown" },
+        apply_unit: opts.judgeUnit ? { value: opts.judgeUnit, basis: "inferred" } : { value: null, basis: "unknown" },
       };
       // 人が確定した値が渡されているときは、その値をそのまま使う（変更しない）
       for (const m of t.matchAll(/^- ([a-z_]+): (.+)$/gm)) fields[m[1]] = { value: m[2], basis: "inferred" };
-      return { stop_reason: "tool_use", content: [{ type: "tool_use", id: `tu${n}`, name, input: { decision: "tentative", fields, rationale: "台本", unresolvedImpact: "minor", monitor: { continue: true, why: "台本" } } }], usage };
+      return { stop_reason: "tool_use", content: [{ type: "tool_use", id: `tu${n}`, name, input: { decision, fields, rationale: "台本", unresolvedImpact: "minor", monitor: { continue: true, why: "台本" } } }], usage };
     }
     return { stop_reason: "end_turn", content: [], usage };
   };

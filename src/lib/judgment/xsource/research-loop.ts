@@ -149,6 +149,8 @@ export interface JudgeOutput {
   /** 更新の監視を続けるか（調査終了・登録可否とは独立） */
   monitor: { continue: boolean; why: string };
   costJpy: number | null;
+  /** 出力の扱いの注記（Phase 2）。fields_defaulted: fields が省略され、主張なし（空）として扱った＝「判断成功」と区別して数える */
+  outputNote?: "fields_defaulted";
 }
 export type RegistrationJudge = (input: JudgeInput) => Promise<JudgeOutput | null>;
 
@@ -180,6 +182,8 @@ export interface ResearchResult {
   budget: ReturnType<CallBudget["summary"]>;
   /** 実行した検索と、その結果（候補のURL。証拠ではない）。発見評価（B2）で「検索で見つけたURLか」を確認するのに使う */
   searches: { query: string; title: string; url: string; snippet: string }[];
+  /** 調査AIに検索が提示されたか（検索ツールがあり、上限が1以上）。P2 の不具合（検索ツールの消失）を、入力ログなしで確認できるようにする */
+  searchOffered: boolean;
 }
 export interface FieldProposal {
   field: string;
@@ -255,6 +259,8 @@ export interface VerifyInput {
   output: JudgeOutput;
   evidence: readonly Evidence[];
   protectedFields: Record<string, string>;
+  /** true のとき、応募単位が未確定（unknown・値なし）のまま register（本登録案）とした出力を検証の指摘にする（登録案の経路。保留を増やすためではなく、未確定のままの本登録案を人の確認に回すため） */
+  registerRequiresUnit?: boolean;
 }
 /** 根拠の実在・不明値の扱い・人が確定した値の保護。問題の理由（AIへ返す文）を返す。結論は書き換えない */
 export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[] } {
@@ -284,8 +290,15 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     if (prot !== undefined) continue; // 同じ値: 変更なし
     proposals.push({ field: name, action: "set", value: f.value, basis: f.basis });
   }
+  // 本登録案なのに応募単位が未確定: 重複応募・応募漏れの被害が大きいため、検証の指摘にする（AIは根拠があれば確定、無ければ暫定にできる。結論は書き換えない）
+  if (i.registerRequiresUnit && i.output.decision === "register") {
+    const u = Object.entries(i.output.fields).find(([k]) => /apply_?unit|応募単位|applicationunit|^unit$/i.test(k))?.[1];
+    if (!u || u.basis === "unknown" || u.value === null || u.value.trim() === "") issues.push("register_unit_unresolved");
+  }
   // 根拠のない「除外」は、応募の機会を失わせる被害が大きい。観察（引用つきで検証済み）の項目が1つも無いのに exclude としたものは、保留（検証の指摘）にする。AIの結論は書き換えない（再評価でAIが直す／人が確認する）
   if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
+  // 取得したページ（応募先の公開ページ）の証拠が無いまま「除外」とするのは、取得できなかっただけの可能性があり、応募の機会を失わせる。人の確認に回す（投稿の原文だけで除外が妥当な場合も、人が確認する側に倒す）。AIの結論は書き換えない
+  if (i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page")) issues.push("exclude_without_page_evidence");
   return { issues, proposals };
 }
 
@@ -300,6 +313,8 @@ export async function runResearch(args: {
   limits?: Partial<ResearchLimits>;
   /** 人が確定した項目（AIが自律的に変更しない） */
   protectedFields?: Record<string, string>;
+  /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
+  registerRequiresUnit?: boolean;
   /** 以前の取得履歴（再開時。同じURL・同じ内容の無益な再取得を避ける） */
   history?: FetchRecord[];
   evidence?: Evidence[];
@@ -325,6 +340,8 @@ export async function runResearch(args: {
   let searches = 0;
   const remaining = (): AgentTurnInput["remaining"] => ({ turns: L.maxTurns - turn, fetches: L.maxFetches - fetches, costJpy: args.budget.remainingJpy, elapsedMs: L.maxElapsedMs - elapsed(), searches: Math.max(0, L.maxSearches - searches) });
 
+  // 調査AIに検索が提示されたか（Phase 2: P2 で検索ツールが消えていたことを、入力ログなしでは確認できなかったため、事実として記録する）
+  const searchOffered = !!args.tools.search && L.maxSearches > 0;
   // 判断用の予算を先に確保して、調査で使い切らない
   while (end === null) {
     if (turn >= L.maxTurns) { end = "limit_turns"; break; }
@@ -436,7 +453,7 @@ export async function runResearch(args: {
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
     quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
-    const v = verifyRegistration({ output, evidence, protectedFields });
+    const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit });
     proposals = v.proposals;
     if (v.issues.length === 0) { verified = true; held = null; break; }
     trace.push({ turn, kind: "verify", detail: v.issues.join(",") });
@@ -445,7 +462,7 @@ export async function runResearch(args: {
   }
   const decision = output ? output.decision : "none";
   const monitoring: ResearchResult["monitoring"] = output ? { state: output.monitor.continue ? "active" : "ended", why: output.monitor.why, reopenOn: output.monitor.continue ? ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] : ["user_correction"] } : { state: "active", why: "登録判断が得られなかったため、監視は継続", reopenOn: ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] };
-  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog };
+  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog, searchOffered };
 }
 
 // ------------------------------------------------------------------ 再開（調査終了後の必要な部分だけの再評価）

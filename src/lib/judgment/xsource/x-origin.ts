@@ -72,12 +72,20 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
   return { isList: parsed.isList, header: parsed.header, items: plans };
 }
 
-/** 同じ投稿内で、同じURLを重複して取得しない（キャッシュ）。ヒット数を数える */
-export function cachedTools(tools: ResearchTools): ResearchTools & { hits: number; fetched: string[] } {
+/**
+ * 同じ投稿内で、同じURLを重複して取得しない／同じ検索語を重複して実行しない（キャッシュ）。ヒット数を数える。
+ * **検索ツール（search）も引き継ぐ**（Phase 2 P2 の不具合: 以前は fetchPage と now しか返さず、注入した検索ツールが消えていた。調査AIには「検索は使えない」と通知され、URLなしの3件で検索が0回だった）。
+ * 検索の上限・予算の予約・重複の禁止・結果の安全化（makeSearchTool）は調査ループとツール側が担う。ここは「同じ投稿内の同じ検索語」を有料検索で2回実行しないためのキャッシュだけ（2回目は費用0）。
+ */
+export function cachedTools(tools: ResearchTools): ResearchTools & { hits: number; fetched: string[]; searchHits: number; searched: string[] } {
   const cache = new Map<string, Promise<FetchOutcome>>();
+  const searchCache = new Map<string, ReturnType<NonNullable<ResearchTools["search"]>>>();
+  const nq = (q: string): string => q.normalize("NFKC").toLowerCase().replace(/[\s　]+/g, "");
   const wrapped = {
     hits: 0,
     fetched: [] as string[],
+    searchHits: 0,
+    searched: [] as string[],
     now: () => tools.now(),
     fetchPage: (url: string): Promise<FetchOutcome> => {
       const k = canonUrl(url).key;
@@ -91,6 +99,22 @@ export function cachedTools(tools: ResearchTools): ResearchTools & { hits: numbe
       cache.set(k, p);
       return p;
     },
+    ...(tools.search
+      ? {
+          search: (query: string) => {
+            const k = nq(query);
+            const hit = searchCache.get(k);
+            if (hit) {
+              wrapped.searchHits++;
+              return hit.then((r) => (r.ok ? { ...r, costJpy: 0 } : r)); // 同じ検索語の2回目は実行しない（費用0）
+            }
+            wrapped.searched.push(query);
+            const p = tools.search!(query);
+            searchCache.set(k, p);
+            return p;
+          },
+        }
+      : {}),
   };
   return wrapped;
 }
@@ -149,6 +173,8 @@ export async function runXPostReplay(a: {
   protectedFor?: (itemNo: number) => Record<string, string> | undefined;
   /** 項目ごとの予算（1件上限）。未指定なら budget をそのまま使う */
   budgetFor?: (itemNo: number) => CallBudget;
+  /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
+  registerRequiresUnit?: boolean;
 }): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean }> {
   const { items } = planXPost(a.post);
   const tools = cachedTools(a.tools);
@@ -160,7 +186,7 @@ export async function runXPostReplay(a: {
       break;
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo), registerRequiresUnit: a.registerRequiresUnit, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({
