@@ -26,6 +26,7 @@ const rowOf = (householdId: string, r: ProposalRecord, version: number) => ({
   post_id: r.postId,
   item_no: r.itemNo,
   item_label: r.itemLabel,
+  item_fingerprint: r.itemFingerprint,
   url_status: r.urlStatus,
   source_urls: r.sourceUrls,
   link_hosts: r.linkHosts,

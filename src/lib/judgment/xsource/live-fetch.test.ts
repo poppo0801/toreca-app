@@ -33,6 +33,14 @@ describe("取得と失敗の区別", () => {
     expect(r.ok && r.text).toContain("店舗A 抽選");
     expect(f.log[0]).toMatchObject({ outcome: "ok", endedPage: true });
   });
+  it("【再現・回帰】取得サイズの上限で本文が切れたときは、切れた事実を notice で返す（成功として黙って渡さない）。切れていなければ notice は無い", async () => {
+    const cut = mk(async () => ({ ...page("<html><body><h1>店舗A 抽選</h1></body></html>"), truncated: true }));
+    const r = await cut.fetchPage("https://shop.example/e/1");
+    expect(r.ok && r.notice).toContain("後半は確認できない");
+    const whole = mk(async () => page("<html><body><h1>店舗A 抽選</h1></body></html>"));
+    const w = await whole.fetchPage("https://shop.example/e/1");
+    expect(w.ok && w.notice).toBeUndefined();
+  });
   it("404/410=終了イベント（能力の失敗と分ける）・403=アクセス制限（迂回しない）・robots・タイムアウト・通信を区別", async () => {
     const codes: SafeFetchResult[] = [
       { ok: false, code: "http_error", status: 404, message: "" },

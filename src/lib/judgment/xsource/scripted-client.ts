@@ -19,7 +19,7 @@ export interface ScriptedOptions {
   /** 登録判断の応募単位の値（basis=inferred）。無ければ unknown */
   judgeUnit?: string;
   /** 調査AIが最初に選ぶ行動を上書き（既定: 項目自身のリンクがあれば取得、なければ停止） */
-  agentPlan?: (excerpt: string, history: number) => { kind: "fetch"; url: string } | { kind: "search"; query: string } | { kind: "stop" };
+  agentPlan?: (excerpt: string, history: number) => { kind: "fetch"; url: string } | { kind: "search"; query: string } | { kind: "read"; evidenceId: string; from: number; chars: number } | { kind: "stop" };
 }
 
 type Req = { tools?: { name: string }[]; messages?: { content: unknown }[] };
@@ -41,7 +41,7 @@ export function scriptedAnthropic(opts: ScriptedOptions = {}): { client: { messa
       const own = /この項目自身のリンク: (https:\/\/\S+)/.exec(t)?.[1];
       const history = (t.match(/: ok(?:（新しい情報あり）)?$/gm) ?? []).length;
       const plan = opts.agentPlan ? opts.agentPlan(t, history) : own && history === 0 ? ({ kind: "fetch", url: own } as const) : ({ kind: "stop" } as const);
-      const next = plan.kind === "fetch" ? { kind: "fetch", url: plan.url, why: "台本" } : plan.kind === "search" ? { kind: "search", query: plan.query, why: "台本" } : { kind: "stop", reason: history ? "sufficient" : "no_progress", why: "台本" };
+      const next = plan.kind === "fetch" ? { kind: "fetch", url: plan.url, why: "台本" } : plan.kind === "search" ? { kind: "search", query: plan.query, why: "台本" } : plan.kind === "read" ? { kind: "read", evidenceId: plan.evidenceId, from: plan.from, chars: plan.chars, why: "台本" } : { kind: "stop", reason: history ? "sufficient" : "no_progress", why: "台本" };
       return { stop_reason: "tool_use", content: [{ type: "tool_use", id: `tu${n}`, name, input: { observed: [], inferred: [], unknown: [], counterHypotheses: [], next } }], usage };
     }
     if (name === "submit_registration_judgment") {

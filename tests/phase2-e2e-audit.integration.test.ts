@@ -103,7 +103,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 E2E監査: 項目の対応・人の修
     expect(r.map((x) => (x.source_urls as string[])[0])).toEqual([A_URL, B_URL]);
   });
 
-  it("②人の修正は、レビューした項目にだけ適用される。再収集で項目の並びが入れ替わっても別の店舗へ移らない（同じ並びなら従来どおり適用）", async () => {
+  it("②人の修正は、レビューした項目にだけ適用される。再収集で項目の並びが入れ替わっても修正は同じ項目に付いて移り、別の店舗へは移らない（同じ並びなら従来どおり適用）", async () => {
     const c = await addCandidate(AB, [{ url: A_URL, text: pageA() }, { url: B_URL, text: pageB() }]);
     await run(c);
     const v1 = (await rows(c.id, true)).find((x) => x.item_no === 2)!;
@@ -119,14 +119,13 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 E2E監査: 項目の対応・人の修
     const swapped = await reevidence(c, BA, [{ url: A_URL, text: pageA() }, { url: B_URL, text: pageB("条件変更") }]);
     await run(swapped);
     const after = await rows(c.id, true);
-    const stores = after.map((x) => (x.fields as Record<string, { value: string }>).store.value);
-    expect(stores).not.toContain("渋谷西口店（東館）"); // 渋谷の項目は番号が変わったため、人の修正は適用されない（人の再確認に回る。他店へも移らない）
+    // 人の修正は項目に付いて移る（項目の識別子で照合）。渋谷の項目は番号が1に変わっても渋谷への修正を持ち、新宿の項目には移らない
+    expect(after.find((x) => x.item_no === 1)!.fields).toMatchObject({ store: { value: "渋谷西口店（東館）" } });
     expect(after.find((x) => x.item_no === 2)!.fields).toMatchObject({ store: { value: "新宿本店" } });
-    expect(after.find((x) => x.item_no === 1)!.fields).toMatchObject({ store: { value: "渋谷西口店" } });
   });
 
   it("③長文ページ: 抜粋より後ろ（約4,000字目）にある応募条件の文が、調査・判断の入力に位置つきで届く。同じ候補の同時実行でも現行の登録案は重複しない", async () => {
-    const filler = "◆開催概要と注意事項。".repeat(330); // 約3,600字
+    const filler = "◆開催概要と注意事項。".repeat(1800); // 約3,600字
     const long = `【新宿本店】拡張パック 抽選受付 受付期間 11月30日まで ${filler} 抽選を希望する店舗を選んで応募してください。お1人様1回までです。`;
     const item = "《新宿本店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111";
     const full = (u: string): Promise<FetchOutcome> => Promise.resolve({ ok: true, finalUrl: u, html: `<html><body><p>${long}</p></body></html>`, text: long });
@@ -139,7 +138,17 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 E2E監査: 項目の対応・人の修
     const judge = sent.find((x) => x.tools[0] === "submit_registration_judgment")!;
     expect(judge.text).toContain("抜粋より後ろの応募条件の記載");
     expect(judge.text).toContain("抽選を希望する店舗を選んで");
-    expect(judge.text).toMatch(/（\d{4}字目〜）/);
+    expect(judge.text).toMatch(/（\d{4,6}字目〜）/);
+    // 取得した全文は保存される（収集時の3,000字ではなく全文）。取得を許さない再処理でも、保存した全文から同じ条件が届く
+    const docs = ((await admin.from("evidence_documents").select("text_chars,truncated,url_key").eq("candidate_id", c.id)).data ?? []) as { text_chars: number; truncated: boolean }[];
+    expect(docs.length).toBeGreaterThanOrEqual(1);
+    expect(docs.some((d) => d.text_chars > 19_000 && !d.truncated)).toBe(true);
+    const again = await run(c);
+    const j2 = again.sent.find((x) => x.tools[0] === "submit_registration_judgment")!;
+    expect(j2.text).toContain("抽選を希望する店舗を選んで");
+    expect(j2.text).not.toContain("切り詰められており");
+    const stats = ((await admin.from("evidence_coverage_stats").select("host,view_mode,source_chars,truncated").eq("household_id", hid).eq("view_mode", "indexed")).data ?? []) as { host: string; source_chars: number }[];
+    expect(stats.some((x) => x.host === "shop-a.example.invalid" && x.source_chars > 19_000)).toBe(true); // 原文・URLを含まない計測
     // (b) 取得できない: 切り詰められた保存本文を使い、「後半は確認できない」と明示する（無いのではなく確認できない）
     const c1 = await addCandidate(item, [{ url: A_URL, text: long }]);
     const { sent: sent1 } = await run(c1);

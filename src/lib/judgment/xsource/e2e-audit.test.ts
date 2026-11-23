@@ -26,9 +26,9 @@ const fetchOwn: ResearchAgent = async (i) => {
 const tentative = (extra: Partial<JudgeOutput> = {}): Awaited<ReturnType<RegistrationJudge>> => ({ decision: "tentative", fields: {}, rationale: "", unresolvedImpact: "minor", monitor: { continue: true, why: "" }, costJpy: 0.1, ...extra });
 
 describe("監査①: 長文ページの後半にある応募条件の記載（lp/4 の再現）", () => {
-  const filler = "◆開催概要と注意事項。".repeat(330);
+  const filler = "◆開催概要と注意事項。".repeat(1800);
   const long = `【新宿本店】拡張パック 抽選受付\n${filler}\n抽選を希望する店舗を選んで応募してください。\nお1人様1回までです。`;
-  it("【再現・回帰】約3,600字目の文は、先頭抜粋の外にあり（従来はAIの入力から消えていた）、窓として位置つきで届く", () => {
+  it("【再現・回帰】約20,000字目の文は、先頭抜粋の外にあり（従来はAIの入力から消えていた）、窓として位置つきで届く", () => {
     const at = long.indexOf("抽選を希望する店舗を選んで");
     expect(at).toBeGreaterThan(EXCERPT_CHARS);
     const ev = { id: "p1", kind: "page", url: "https://x.invalid/", fetchedAt: "t", contentHash: "h", text: long, structure: null, independent: true } as Evidence;
@@ -147,5 +147,64 @@ describe("監査④⑤: 共通URL・取得失敗・重複取得・予算なし",
     const r2 = await runXPostReplay({ post: q, agent: async () => (called++, out({ kind: "stop", reason: "sufficient", why: "" })), judge: async () => (called++, tentative()), tools, budget: none, limits, now: NOW });
     expect(called).toBe(0);
     expect(r2.results.every((x) => x.result.registration.decision !== "register")).toBe(true);
+  });
+});
+
+describe("証拠の網羅性: 全文提示・目次・原文の参照（read）・提示範囲の明示", () => {
+  const filler = "◆開催概要と注意事項。".repeat(1800); // 約19,800字
+  const hidden = "当日は本人確認書類の提示が必要です。代理人の来店はご遠慮ください。";
+  const lp = `【新宿本店】拡張パック 抽選受付\n${filler.slice(0, 9000)}\n${hidden}\n${filler.slice(9000)}`;
+  const at = lp.indexOf(hidden);
+  const mkEv = (text: string): Evidence => ({ id: "p1", kind: "page", url: "https://x.invalid/", fetchedAt: "t", contentHash: "h", text, structure: null, independent: true });
+  it("12,000字以内のページは全文がそのまま届く（全文確認済みと明示。位置・語に依存しない）", () => {
+    const text = `【新宿本店】${"あ".repeat(5000)}末尾の条件: 重複応募は無効`;
+    const v = toAgentView(mkEv(text));
+    expect(v.excerpt).toBe(text);
+    expect(v.coverage).toContain("全文確認済み");
+    expect(v.outline).toBeUndefined();
+    expect(renderJudgeInput({ caseId: "c", investigationEnd: "sufficient", evidence: [v], lastTurn: null, protectedFields: {} } as JudgeInput)).toContain("末尾の条件: 重複応募は無効");
+  });
+  it("長文は、先頭抜粋＋目次＋提示範囲の説明（未確認の字数）つきで届く。キーワードに無い文は未確認として扱われる", () => {
+    const v = toAgentView(mkEv(lp));
+    expect(v.chars).toBe(lp.length);
+    expect(v.outline!.length).toBeGreaterThan(5);
+    expect(v.coverage).toContain("未確認");
+    expect(JSON.stringify(v)).not.toContain(hidden); // 語（本人確認・複数応募…）は目印に無いため、先頭・窓には出ない＝read でしか届かない
+  });
+  const reader = (from: number, chars = 600): ResearchAgent => async (i) => {
+    const p = i.evidence.find((e) => e.kind === "page");
+    if (!p) return out({ kind: "fetch", url: "https://shop-a.example.invalid/e/1", why: "" });
+    if (i.history.length === 1 && !p.readSegments?.length) return out({ kind: "read", evidenceId: p.id, from, chars, why: "目次の位置を読む" });
+    return out({ kind: "stop", reason: "sufficient", why: "" });
+  };
+  const tools: ResearchTools = { now: () => NOW, fetchPage: async (u): Promise<FetchOutcome> => ({ ok: true, finalUrl: u, html: `<html><body><p>${lp.replace(/\n/g, "</p><p>")}</p></body></html>`, text: lp }) };
+  const p1 = post("《新宿本店（東京）- 1件》 ・拡張パック 抽選 https://t.co/aaa111", [{ short: "https://t.co/aaa111", url: "https://shop-a.example.invalid/e/1" }]);
+  it("【通し】AIが read で任意の範囲を読み、その原文が判断AIにも届き、そこからの引用は検証を通る。調査のターン数は消費しない", async () => {
+    const seen: JudgeInput[] = [];
+    const judge: RegistrationJudge = async (i) => {
+      seen.push(i);
+      const pg = i.evidence.find((e) => e.kind === "page")!;
+      return tentative({ fields: { apply_unit: { value: "one_form_one", basis: "observed", evidenceId: pg.id, quote: "代理人の来店はご遠慮ください" } } });
+    };
+    const r = await runXPostReplay({ post: p1, agent: reader(at - 50), judge, tools, budget: budget(), limits: { ...limits, maxTurns: 2, maxReads: 3, maxReadChars: 5000 }, now: NOW });
+    const res = r.results[0].result;
+    expect(res.trace.some((t) => t.detail.startsWith("read_ok:p1"))).toBe(true);
+    const seg = seen[0].evidence.find((e) => e.kind === "page")!.readSegments!;
+    expect(seg[0].text).toContain(hidden);
+    expect(res.registration.held?.reasons ?? []).not.toContain("quote_not_found");
+    expect(res.quoteAudit[0].rows[0]).toMatchObject({ kind: "ok", inExcerpt: true }); // 参照した範囲＝AIに見せた範囲
+  });
+  it("参照の上限: 範囲外・未知の証拠・回数/字数の上限は実行されず、進展なしとして終わる（無限に読まない）。参照しない場合、引用は『AIに見せていない範囲』と記録される", async () => {
+    const calls: string[] = [];
+    const greedy: ResearchAgent = async (i) => (calls.push("t"), out({ kind: "read", evidenceId: i.evidence.find((e) => e.kind === "page") ? "p1" : "zz", from: calls.length > 3 ? 10 ** 9 : 3000 * calls.length, chars: 3000, why: "" }));
+    const r = await runXPostReplay({ post: p1, agent: greedy, judge: async () => tentative(), tools, budget: budget(), limits: { ...limits, maxReads: 2, maxReadChars: 4000 }, now: NOW });
+    const details = r.results[0].result.trace.map((t) => t.detail);
+    expect(details.filter((d) => d.startsWith("read_ok")).length).toBeLessThanOrEqual(2);
+    expect(r.results[0].result.evidence.find((e) => e.id === "p1")?.reads?.reduce((t, x) => t + x.to - x.from, 0) ?? 0).toBeLessThanOrEqual(4000);
+    expect(calls.length).toBeLessThan(12);
+    // 判断AIが全文の外から引用した場合の記録（読んでいない範囲）
+    const noRead: RegistrationJudge = async (i) => tentative({ fields: { apply_unit: { value: "x", basis: "observed", evidenceId: i.evidence.find((e) => e.kind === "page")!.id, quote: "代理人の来店はご遠慮ください" } } });
+    const r2 = await runXPostReplay({ post: p1, agent: fetchOwn, judge: noRead, tools, budget: budget(), limits, now: NOW });
+    expect(r2.results[0].result.quoteAudit[0].rows[0]).toMatchObject({ kind: "ok", inExcerpt: false });
   });
 });
