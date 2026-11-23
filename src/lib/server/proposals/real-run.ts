@@ -43,6 +43,8 @@ export interface RealRunSummary {
   diagnostics: Record<string, number>;
   /** 判断の内訳（項目単位）: ok=判断あり／defaulted=項目が省略された出力（主張なし。成功と数えない）／failed=判断が得られなかった */
   judgments: { ok: number; defaulted: number; failed: number };
+  /** 取得した全文・取得網羅性の計測の保存（失敗は握り潰さず件数で残す。登録案の保存とは独立） */
+  storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number } };
   /** 検索の提示と実行（項目単位）: 提示されなかった項目・提示されたが実行しなかった項目・実行した項目。P2 の「検索0回」を、配線の不備と区別して観測する */
   search: { notOffered: number; offeredNotUsed: number; used: number };
   rows: { candidate: string; status: "done" | "failed" | "skipped"; proposals: number; costJpy: number; reason?: string }[];
@@ -99,7 +101,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       /* 監査ログの失敗で実行を壊さない（ただし握りつぶすのは記録側の失敗だけ） */
     }
   };
-  const base: RealRunSummary = { stopReason: "completed", candidates: o.candidates.length, processed: 0, proposals: 0, inserted: 0, costJpy: 0, overruns: 0, preflight: null, diagnostics: {}, judgments: { ok: 0, defaulted: 0, failed: 0 }, search: { notOffered: 0, offeredNotUsed: 0, used: 0 }, rows: [] };
+  const base: RealRunSummary = { stopReason: "completed", candidates: o.candidates.length, processed: 0, proposals: 0, inserted: 0, costJpy: 0, overruns: 0, preflight: null, diagnostics: {}, judgments: { ok: 0, defaulted: 0, failed: 0 }, search: { notOffered: 0, offeredNotUsed: 0, used: 0 }, storage: { documents: { saved: 0, existing: 0, failed: 0 }, stats: { saved: 0, failed: 0 } }, rows: [] };
   const stop = (reason: StopReason): RealRunSummary => {
     emit({ kind: "run_stop", reason, processed: base.processed, costJpy: base.costJpy });
     return { ...base, stopReason: reason };
@@ -114,8 +116,8 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
   const releaseLock = o.lockPath ? acquireRunLock(o.lockPath) : () => undefined;
   if (!releaseLock) return stop("locked");
   try {
-    const limits: ResearchLimits = { maxTurns: 4, maxFetches: 3, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxSearches: o.search ? 1 : 0, searchReserveJpy: o.search?.reserveJpy ?? 2.5, ...o.limits };
-    const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 12_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
+    const limits: ResearchLimits = { maxTurns: 4, maxFetches: 3, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxSearches: o.search ? 1 : 0, searchReserveJpy: o.search?.reserveJpy ?? 2.5, maxReads: 8, maxReadChars: 24_000, ...o.limits };
+    const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
     base.preflight = pf;
     emit({ kind: "preflight", ok: pf.ok, errors: pf.errors, warnings: pf.warnings, minPerCaseJpy: pf.minPerCaseJpy, maxReservedPerCaseJpy: pf.maxReservedPerCaseJpy, reservationCoversWorstCase: pf.reservationCoversWorstCase });
     if (!pf.ok) return stop("preflight_failed"); // 1回もAIを呼ばない
@@ -166,6 +168,9 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
           else base.search.offeredNotUsed++;
         }
         base.inserted += r.save.inserted;
+        for (const k of ["saved", "existing", "failed"] as const) base.storage.documents[k] += r.storage.documents[k];
+        base.storage.stats.saved += r.storage.stats.saved;
+        base.storage.stats.failed += r.storage.stats.failed;
         base.costJpy = Math.round(budget.costJpy * 10_000) / 10_000;
         base.rows.push({ candidate: short(c.id), status: "done", proposals: r.records.length, costJpy: r.costJpy });
         emit({ kind: "candidate_done", candidate: short(c.id), proposals: r.records.length, inserted: r.save.inserted, costJpy: r.costJpy, stopped: r.stopped, diagnostics: diagsThisCandidate });

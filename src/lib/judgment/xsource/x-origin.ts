@@ -24,6 +24,8 @@ export interface StoredXPost {
   links: string[];
   linkMap?: { short: string; url: string }[];
   recordedAt: string | null;
+  /** 収集時の文脈の注記（本文の切り詰め・画像から読み取った情報など）。全項目の観察として渡す（引用の根拠にはしない） */
+  notes?: string[];
 }
 
 export type ItemUrlStatus = "url_from_item" | "short_unexpanded" | "shared_only_unverified" | "url_missing";
@@ -39,6 +41,8 @@ export interface ItemPlan {
   seedText: string;
   /** この項目の応募先URLの根拠（展開方式・本文中の位置・項目の範囲・未展開の理由）。URLなしの項目も1件残る */
   linkEvidence: LinkEvidenceRecord[];
+  /** 投稿全体の注記（StoredXPost.notes）。調査・判断の入力に観察として届く */
+  notes: string[];
 }
 
 const STATUS_LINE: Record<ItemUrlStatus, string> = {
@@ -67,7 +71,7 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
       const host = canonUrl(l.url).host;
       lines.push(l.origin === "item_entity" ? `- この項目自身のリンク: ${l.url}` : l.origin === "item_text_short_unexpanded" ? `- 短縮URL（未展開・追跡しない）: ${host}` : `- 親投稿に共通のリンク（対応未確認）: ${l.url}`);
     }
-    return { itemNo: it.no, groupLabel: it.groupLabel, itemText: it.text, links, scopedUrls: scoped, status, seedText: lines.join("\n"), linkEvidence: evidence.filter((e) => e.itemNo === it.no) };
+    return { itemNo: it.no, groupLabel: it.groupLabel, itemText: it.text, links, scopedUrls: scoped, status, seedText: lines.join("\n"), linkEvidence: evidence.filter((e) => e.itemNo === it.no), notes: post.notes ?? [] };
   });
   return { isList: parsed.isList, header: parsed.header, items: plans };
 }
@@ -186,7 +190,7 @@ export async function runXPostReplay(a: {
       break;
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({

@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import type { ItemPlan, StoredXPost } from "./x-origin";
-import type { Evidence, ResearchResult } from "./research-loop";
+import { FULL_VIEW_CHARS, shownRanges, type Evidence, type ResearchResult } from "./research-loop";
 import { canonUrl } from "./normalize";
 
 export const PROPOSAL_PROMPT_VERSION = "10z-1";
@@ -31,6 +31,8 @@ export interface ProposalRecord {
   postId: string | null;
   itemNo: number;
   itemLabel: string;
+  /** 項目の本文・見出しから作る識別子（人の修正を別の項目へ移さないための照合）。番号・URLの短縮形に依存しない */
+  itemFingerprint: string;
   urlStatus: ItemPlan["status"];
   sourceUrls: string[];
   linkHosts: { host: string; origin: string }[];
@@ -57,6 +59,15 @@ export interface ProposalRecord {
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 const nf = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
+/**
+ * 項目の識別子。項目番号は、再収集・本文の並び替えで別の項目を指すことがあるため、項目の本文（見出し＋原文。URL・空白・記号の揺れを除く）から作る。
+ * 同じ見出しの下で本文まで同じ項目は区別できない（その場合は同じ識別子＝同じ内容の項目として扱う）。
+ */
+export function itemFingerprint(plan: Pick<ItemPlan, "groupLabel" | "itemText">): string {
+  const body = `${plan.groupLabel}|${plan.itemText}`.normalize("NFKC").replace(/https?:\/\/\S+/g, "").replace(/[\s\u3000・、。,.\-ー_*＊※]+/g, "").toLowerCase();
+  return sha(body).slice(0, 16);
+}
+
 /** 応募機会候補の安定した識別（候補ID・投稿ID・項目番号）。再評価・再取得でも変わらない */
 export const proposalKey = (candidateId: string, postId: string | null, itemNo: number): string => sha(`${candidateId}|${postId ?? ""}|${itemNo}`).slice(0, 24);
 
@@ -65,7 +76,7 @@ export function inputHash(plan: ItemPlan, evidence: readonly Evidence[], protect
   const pages = evidence.filter((e) => e.kind === "page").map((e) => e.contentHash).sort();
   // 人が確定した値（レビューの修正）も入力の一部: 修正が変わったら再評価の結果が変わりうるため、新しい版にする（古い版・レビューは残る）
   const prot = protectedValues ? Object.entries(protectedValues).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(";") : "";
-  return sha(`${plan.seedText}|${pages.join(",")}|${prot}`).slice(0, 16);
+  return sha(`${plan.seedText}|${(plan.notes ?? []).join("¦")}|${pages.join(",")}|${prot}`).slice(0, 16);
 }
 
 /** 値が引用・本文から導けるかの機械的な分類（正しさの判定ではない）。日付・数字は書式の違い（11/27・11月27日・2026年11月27日）を吸収して照合する */
@@ -136,6 +147,8 @@ export function toProposalRecords(a: {
   fetchedAt: string | null;
   /** 人が確定した値（項目ごと）。入力のハッシュに含める */
   protectedFor?: (itemNo: number, plan: ItemPlan) => Record<string, string> | undefined;
+  /** 以前の人の修正があるが、項目が変わった（識別子が一致しない）ため適用しなかった項目。未確認事項として残す */
+  correctionSkipped?: (itemNo: number, plan: ItemPlan) => boolean;
 }): ProposalRecord[] {
   const recs: ProposalRecord[] = a.run.results.map(({ plan, result }) => {
     const out = result.registration.output;
@@ -158,6 +171,18 @@ export function toProposalRecords(a: {
     if (plan.status === "shared_only_unverified") unknowns.push({ what: "応募先URL", why: "親投稿共通のリンクだけで、この項目への対応が未確認" });
     for (const [k, f] of Object.entries(fields)) if (f.basis === "unknown") unknowns.push({ what: k, why: "AIが不明と判断（根拠なし）" });
     for (const h of result.registration.held?.reasons ?? []) unknowns.push({ what: "検証", why: h.slice(0, 80) });
+    const cov: ProposalRecord["unknowns"] = [];
+    if (a.correctionSkipped?.(plan.itemNo, plan)) cov.push({ what: "人の修正", why: "以前の人の修正は、項目が変わったため適用していない（再確認が必要）" });
+    // 収集時の文脈（本文の切り詰め・画像の未確認）は、未確認事項として必ず残す
+    for (const n of plan.notes ?? []) if (n.startsWith("この投稿の本文は") || n.startsWith("投稿に画像があるが")) cov.push({ what: n.startsWith("この投稿") ? "投稿の欠落" : "画像の内容", why: n.slice(0, 80) });
+    for (const e of result.evidence) {
+      if (e.kind !== "page") continue;
+      if (e.notice) cov.push({ what: "ページの一部", why: e.notice.slice(0, 80) });
+      if (e.text.length > FULL_VIEW_CHARS) {
+        const shown = shownRanges(e).reduce((t, r) => t + (r.to - r.from), 0);
+        if (shown < e.text.length) cov.push({ what: "ページの未確認範囲", why: `本文${e.text.length}字のうち${e.text.length - shown}字はAIに提示・参照されていない（記載が無いとは限らない）` });
+      }
+    }
     if (!out) unknowns.push({ what: "AIの判断", why: "判断が得られなかった（調査は保持）" });
     else if (out.outputNote === "fields_defaulted") unknowns.push({ what: "AIの判断", why: "項目の出力が省略された（主張なしとして扱った。判断の成功とは数えない）" });
     const searched = new Set(result.searches.map((s) => canonUrl(s.url).key));
@@ -169,6 +194,7 @@ export function toProposalRecords(a: {
       postId: a.post.postId.slice(0, 40),
       itemNo: plan.itemNo,
       itemLabel: plan.groupLabel.slice(0, 120),
+      itemFingerprint: itemFingerprint(plan),
       urlStatus: plan.status,
       sourceUrls: plan.scopedUrls.slice(0, 5),
       linkHosts: plan.links.slice(0, 12).map((l) => ({ host: hostOfUrl(l.url), origin: l.origin })),
@@ -179,7 +205,7 @@ export function toProposalRecords(a: {
       fields,
       applyUnit: unit,
       applyUnitBasis: basis,
-      unknowns: unknowns.slice(0, 12),
+      unknowns: [...cov, ...unknowns].slice(0, 12), // 切断・未確認範囲・人の修正の未適用は、他より先に残す（情報なしと区別する）
       pages: pages.slice(0, 8),
       possiblySame: [],
       mode: a.mode,
