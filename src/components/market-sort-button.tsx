@@ -24,7 +24,44 @@ export function MarketSortButton({ sort, onChange, className }: { sort: MarketSo
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   };
-  useEffect(() => clear, []);
+  // iOS Safari: 長押し中は、ページ内の文字が範囲選択される標準動作を止める（押している間と、メニューを開いた直後だけ。通常のスクロール・選択は妨げない）
+  const noSelect = useRef<((e: Event) => void) | null>(null);
+  const guard = () => {
+    if (noSelect.current) return;
+    const h = (e: Event) => e.preventDefault();
+    noSelect.current = h;
+    document.addEventListener("selectstart", h, true);
+  };
+  const release = () => {
+    if (!noSelect.current) return;
+    document.removeEventListener("selectstart", noSelect.current, true);
+    noSelect.current = null;
+  };
+  const clearSelection = () => {
+    try {
+      window.getSelection()?.removeAllRanges();
+    } catch {
+      /* 選択の解除に失敗しても、並び替えの操作は続ける */
+    }
+  };
+  const openByLongPress = () => {
+    long.current = true;
+    clearSelection();
+    setOpen(true);
+    // 指を離した後に遅れて選択が始まる場合に備え、少しだけ保護を続ける
+    setTimeout(() => {
+      clearSelection();
+      release();
+    }, 600);
+  };
+  useEffect(
+    () => () => {
+      clear();
+      release();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   useEffect(() => {
     if (!open) return;
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
@@ -33,7 +70,7 @@ export function MarketSortButton({ sort, onChange, className }: { sort: MarketSo
   }, [open]);
 
   return (
-    <div className={cn("relative shrink-0", className)}>
+    <div className={cn("relative shrink-0 select-none [-webkit-touch-callout:none] [-webkit-user-select:none]", className)}>
       <button
         type="button"
         className="flex h-11 w-12 items-center justify-center rounded-md border bg-card text-foreground active:bg-muted"
@@ -42,28 +79,32 @@ export function MarketSortButton({ sort, onChange, className }: { sort: MarketSo
         aria-expanded={open}
         data-testid="market-sort"
         data-sort={sort}
-        style={{ touchAction: "manipulation", WebkitTouchCallout: "none", userSelect: "none" }}
+        style={{ touchAction: "manipulation", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTapHighlightColor: "transparent" }}
         onPointerDown={(e) => {
           long.current = false;
           start.current = { x: e.clientX, y: e.clientY };
           clear();
-          timer.current = setTimeout(() => {
-            long.current = true;
-            setOpen(true);
-          }, SORT_LONG_PRESS_MS);
+          guard();
+          timer.current = setTimeout(openByLongPress, SORT_LONG_PRESS_MS);
         }}
         onPointerMove={(e) => {
           const s0 = start.current;
           if (s0 && Math.hypot(e.clientX - s0.x, e.clientY - s0.y) > MOVE_CANCEL_PX) clear();
         }}
-        onPointerUp={clear}
-        onPointerCancel={clear}
+        onPointerUp={() => {
+          clear();
+          // 長押しでなければ（通常のタップ）すぐ保護を解く。長押しのときは openByLongPress の後始末に任せる
+          if (!long.current) release();
+        }}
+        onPointerCancel={() => {
+          clear();
+          if (!long.current) release();
+        }}
         onPointerLeave={clear}
         onContextMenu={(e) => {
           e.preventDefault();
           clear();
-          long.current = true;
-          setOpen(true);
+          if (!long.current) openByLongPress();
         }}
         onClick={() => {
           // 長押しで一覧を開いた直後の click は、次の並び順への切り替えとして扱わない

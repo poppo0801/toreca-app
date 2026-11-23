@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { COMPARE_ROW_CLASS, CompareRowContent, compareYen } from "@/components/compare-row";
 import { RankBadge } from "@/components/rank-badge";
-import { StoreIdentity } from "@/components/store-identity";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { currentWithStatus, indexEvents, statusOf, type PriceEvent, type WithStatus } from "@/lib/zukan/freshness";
 import { cheapestIds, isReferencePrice, sortPrices, storeHistory, type PriceSort } from "@/lib/zukan/zukan";
@@ -25,12 +25,7 @@ export interface PriceRow {
   cardLabel?: string;
 }
 
-const yen = (v: number) => `${v.toLocaleString("ja-JP")}円`;
-/** 一覧の調査日は「月/日」（年は詳細で確認） */
-const shortDate = (d: string) => {
-  const [, m, day] = d.split("-").map(Number);
-  return `${m}/${day}`;
-};
+const yen = compareYen;
 
 /**
  * 店舗価格の一覧（151図鑑の価格調査・相場調査メモ共通）。
@@ -76,6 +71,17 @@ export function PriceList({
   // 並び替え・最安・参考の判定は、確認日（調査日と更新の新しい方）を日付として使う
   const asShown = current.map((r) => ({ ...r, surveyedOn: r.lastConfirmedOn }));
   const sorted = sortPrices(asShown, sort);
+  // カードの種類（収録セット・番号・レアリティ）ごとに比較表を分ける。種類が1つだけなら見出しなし。並びは各表の中で適用し、表は先頭の記録の順
+  const groups = (() => {
+    const m = new Map<string, { key: string; label: string; rows: typeof sorted }>();
+    for (const r of sorted) {
+      const k = r.cardKey ?? "";
+      const g = m.get(k) ?? { key: k, label: r.cardLabel ?? "", rows: [] };
+      g.rows.push(r);
+      m.set(k, g);
+    }
+    return [...m.values()];
+  })();
   const best = cheapestIds(asShown.filter((r) => !r.soldOut), today);
   const opened = openId ? current.find((r) => r.id === openId) : undefined;
   return (
@@ -93,52 +99,39 @@ export function PriceList({
         ))}
       </div>
       {sorted.length === 0 && <p className="text-xs text-muted-foreground">まだ価格の記録がありません。</p>}
-      <ul className="space-y-1">
-        {sorted.map((r) => {
-          const ref = !r.soldOut && isReferencePrice(r, today);
-          const bought = boughtIds.has(r.id);
-          const isBest = best.has(r.id);
-          return (
-            <li key={r.id}>
-              <button
-                type="button"
-                onClick={() => setOpenId(r.id)}
-                data-testid="price-row"
-                data-ref={ref ? "true" : "false"}
-                data-best={isBest ? "true" : "false"}
-                data-bought={bought ? "true" : "false"}
-                data-soldout={r.soldOut ? "true" : "false"}
-                aria-label={`${r.condition} ${r.chainName} ${r.storeName} ${r.lastConfirmedOn} ${yen(r.priceYen)}${r.soldOut ? " 完売" : ""}の詳細を開く`}
-                className={cn("grid min-h-12 w-full grid-cols-[2.25rem_minmax(0,1fr)_auto_auto] items-center gap-x-2 rounded-lg border px-2 py-1 text-left", isBest && "border-l-4 border-l-success", (ref || r.soldOut) && "opacity-70")}
-              >
-                <span data-testid="price-rank-label" className="flex justify-center">
-                  <RankBadge rank={r.condition} />
-                </span>
-                <span className="min-w-0 text-xs leading-tight" data-testid="price-store">
-                  <StoreIdentity chainName={r.chainName} storeName={r.storeName} />
-                  {r.cardLabel && (
-                    <span className="block truncate text-[10px] text-muted-foreground" data-testid="price-card-label">
-                      {r.cardLabel}
-                    </span>
-                  )}
-                </span>
-                <span className="text-[11px] tabular-nums text-muted-foreground" data-testid="price-date">
-                  {shortDate(r.lastConfirmedOn)}
-                </span>
-                <span className={cn("flex items-center justify-end gap-1 whitespace-nowrap text-right text-sm font-bold tabular-nums", isBest && "text-success")} data-testid="price-amount">
-                  {r.soldOut && (
-                    <span className="rounded border border-danger px-1 text-[10px] font-bold leading-4 text-danger" data-testid="soldout-badge">
-                      完売
-                    </span>
-                  )}
-                  {bought && <Check className="size-3 text-info" strokeWidth={3} aria-hidden="true" />}
-                  {yen(r.priceYen)}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {groups.map((g) => (
+        <section key={g.key} aria-label={g.label || "価格"} className="space-y-1" data-testid="price-group">
+          {groups.length > 1 && (
+            <h4 className="text-xs font-bold text-muted-foreground" data-testid="price-group-head">
+              {g.label || "番号・レアリティ未入力"}
+            </h4>
+          )}
+          <ul className="space-y-1">
+            {g.rows.map((r) => {
+              const ref = !r.soldOut && isReferencePrice(r, today);
+              const bought = boughtIds.has(r.id);
+              const isBest = best.has(r.id);
+              return (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(r.id)}
+                    data-testid="price-row"
+                    data-ref={ref ? "true" : "false"}
+                    data-best={isBest ? "true" : "false"}
+                    data-bought={bought ? "true" : "false"}
+                    data-soldout={r.soldOut ? "true" : "false"}
+                    aria-label={`${r.condition} ${r.chainName} ${r.storeName} ${r.lastConfirmedOn} ${compareYen(r.priceYen)}${r.soldOut ? " 完売" : ""}の詳細を開く`}
+                    className={cn(COMPARE_ROW_CLASS, isBest && "border-l-4 border-l-success", (ref || r.soldOut) && "opacity-70")}
+                  >
+                    <CompareRowContent testIdPrefix="price" chainName={r.chainName} storeName={r.storeName} date={r.lastConfirmedOn} condition={r.condition} priceYen={r.priceYen} soldOut={r.soldOut} bought={bought} best={isBest} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
       {opened && (
         <PriceDetail row={opened} rows={rows} evIndex={evIndex} keyOf={key} today={today} bought={boughtIds.has(opened.id)} best={best.has(opened.id)} onClose={() => setOpenId(null)} onBuy={onBuy} onEdit={onEdit} onDelete={onDelete} onConfirm={onConfirm} onSoldOut={onSoldOut} />
       )}

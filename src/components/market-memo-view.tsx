@@ -358,8 +358,8 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
 
 /**
  * カード一覧の1行（相場調査メモ）。コンパクトな3区画（高さを抑える）:
- *   [左] カード画像（ポケモンを特定できたときだけ）＋ カード名（太字）・収録セット（小さな枠）／ 系列 店舗名（長いときは省略）
- *   [中央] レアリティ（独立した列。左右の細い線で区切る）
+ *   [左] カード画像（ポケモンを特定できたときだけ）＋ カード名（太字）・番号（小さな枠。収録パック名は出さない）／ 系列 店舗名（長いときは省略）
+ *   [中央] レアリティ（独立した列。小さめの文字・区切り線なし）
  *   [右] 状態ランク（四角いバッジ）＋ 最安価格（小さめ・右端揃え・折り返さない）
  * カード全体のタップで詳細を開く（詳細・編集・購入の操作は詳細から）。価格の追加は詳細から（および左スワイプ）。行に「＋」ボタンは置かない。カード番号・補足は詳細に表示する。
  */
@@ -378,9 +378,10 @@ function CardRow({ card, top, count, purchased, onOpen, onAddPrice }: { card: Ma
               <span className="min-w-0 truncate text-sm font-bold leading-tight" data-testid="market-card-name-text">
                 {card.name}
               </span>
-              {card.setName && (
-                <span className="max-w-[4.5rem] shrink-0 truncate rounded-md border border-muted-foreground/50 px-1.5 text-[10px] leading-4 text-muted-foreground" title={card.setName} data-testid="row-set">
-                  {card.setName}
+              {/* 収録パック名は出さず、番号（例: SV8）だけを小さな枠で表示する */}
+              {card.cardNumber && (
+                <span className="max-w-[4.5rem] shrink-0 truncate rounded-md border border-muted-foreground/50 px-1.5 text-[10px] leading-4 text-muted-foreground" title={card.cardNumber} data-testid="row-set">
+                  {card.cardNumber}
                 </span>
               )}
               {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
@@ -397,7 +398,7 @@ function CardRow({ card, top, count, purchased, onOpen, onAddPrice }: { card: Ma
             )}
           </span>
         </span>
-        <span className="flex h-9 items-center justify-center border-x text-center text-sm font-extrabold" data-testid="row-rarity">
+        <span className="flex h-9 items-center justify-center text-center text-[11px] font-bold leading-none" data-testid="row-rarity">
           {card.rarity}
         </span>
         {top ? (

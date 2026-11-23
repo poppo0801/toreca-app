@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { COMPARE_ROW_CLASS } from "@/components/compare-row";
 import { PriceList, type PriceRow } from "@/components/price-list";
 import type { PriceEvent } from "@/lib/zukan/freshness";
 
@@ -88,11 +89,29 @@ describe("価格一覧: 最新・完売・更新", () => {
     expect(q("price-row")!.getAttribute("data-ref")).toBe("false");
   });
 
+  it("比較表の行は共通部品: 1行目=系列・店舗（同じ行）｜状態ランク・価格、2行目=日付（「調査」なし）。本日の調査結果の比較表と同じ枠（COMPARE_ROW_CLASS）", async () => {
+    await mount([row({ id: "x", surveyedOn: "2026-11-05" })]);
+    const r = q("price-row")!;
+    for (const c of COMPARE_ROW_CLASS.split(" ")) expect(r.className.split(" ")).toContain(c);
+    const store = q("store-identity")!;
+    expect(store.querySelector('[data-testid="store-chain"] > span:last-child')!.textContent).toBe("トレカキャピタル");
+    expect(store.textContent).toContain("垂水店");
+    expect(store.className).toContain("flex"); // ロゴ・系列名・店舗名は同じ行
+    const date = q("price-date")!;
+    expect(date.textContent).not.toContain("調査");
+    expect(date.compareDocumentPosition(store) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy(); // 日付は店舗の下（後ろ）
+    expect(r.querySelector('[data-testid="price-rank-label"]')).not.toBeNull();
+    expect(qa("price-group-head")).toHaveLength(0); // カードの種類が1つなら見出しなし
+  });
+
   it("151図鑑: 同じポケモンの別カード（セット・番号・レア違い）は別の販売情報（同じ店舗・状態でも1件にまとめない）。「カード情報を編集」の独立ボタンは無く、編集に統合されている", async () => {
     const onEdit = vi.fn();
-    await mount([row({ id: "x", cardKey: "id:sv8|100/106|sar", cardLabel: "SV8 ・ 100/106 ・ SAR" }), row({ id: "y", cardKey: "id:sv8|101/106|sar", cardLabel: "SV8 ・ 101/106 ・ SAR" })], [], { onEdit });
+    await mount([row({ id: "x", cardKey: "id:sv8|100/106|sar", cardLabel: "100/106 ・ SAR" }), row({ id: "y", cardKey: "id:sv8|101/106|sar", cardLabel: "101/106 ・ SAR" })], [], { onEdit });
     expect(qa("price-row")).toHaveLength(2);
-    expect(qa("price-card-label").map((e) => e.textContent)).toEqual(expect.arrayContaining(["SV8 ・ 100/106 ・ SAR", "SV8 ・ 101/106 ・ SAR"]));
+    // 種類ごとに比較表（見出し＋行）を分ける。各行には番号・レアを出さない
+    expect(qa("price-group")).toHaveLength(2);
+    expect(qa("price-group-head").map((e) => e.textContent)).toEqual(["100/106 ・ SAR", "101/106 ・ SAR"]);
+    qa("price-row").forEach((r) => expect(r.textContent).not.toMatch(/SAR|100\/106/));
     await click(qa("price-row")[0]);
     expect(q("price-edit-card")).toBeNull();
     await click(q("price-edit"));
