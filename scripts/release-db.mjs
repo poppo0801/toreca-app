@@ -75,6 +75,7 @@ const REVIEWED = {
   "20261227000111_stage10m_list_items.sql": { sha: "af975618923f", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },
   "20261227000112_stage10n_shadow_opportunities.sql": { sha: "2f8a77972a44", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },
   "20261230000116_market_shared_and_plan_marks.sql": { sha: "c37dbc6c9435", labels: ["drop（表・列・スキーマなど）", "delete"], reason: "相場管理データの共通化。drop は一意索引・外部キーの付け替えのみ（行は消えない）。delete は同一世帯の重複カード統合の1文（価格・購入は代表カードへ付け替え後に重複カードだけ削除）。本番の事前確認で重複カード群は0件（対象行なし）・既存データは全て1プロフィール分のみ" },
+  "20261231000117_market_ranks_events_bulk_buy.sql": { sha: "bd035f8274f5", labels: ["delete"], reason: "関数 market_bulk_buy_tx の本体の delete のみ（移行の実行時には削除しない。一括購入のとき、購入した記録の購入予定マークを外す）。ランクの変換は update（全単射・復元演習の本番コピーで全行の対応を確認済み）" },
 };
 const review = pending.map((f) => {
   const sql = readFileSync(join("supabase/migrations", f), "utf8").replace(/--.*$/gm, "");
