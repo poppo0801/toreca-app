@@ -30,7 +30,7 @@ export function useChainLogos(): (chainName: string) => string | null {
 
 /**
  * 相場の販売情報の「系列・店舗」表示（相場比較表・各カードの価格一覧で共通）。
- * 系列名（ロゴつき・店舗名より少し太く）の下に店舗名。ロゴが無い系列は、系列名の頭文字の小さなタイルで代替する（レイアウトを揃えるため）。系列が無いときは店舗名だけ。
+ * ［小ロゴ］系列名（店舗名より少し太く）店舗名 を**1行**に並べる（長い店舗名は末尾を省略）。ロゴが無い系列は、系列名の頭文字の小さなタイルで代替する（レイアウトを揃えるため）。系列が無いときは店舗名だけ。
  */
 export function StoreIdentity({ chainName, storeName, className }: { chainName: string; storeName: string; className?: string }) {
   const logoOf = useChainLogos();
@@ -39,9 +39,9 @@ export function StoreIdentity({ chainName, storeName, className }: { chainName: 
   const c = chainName.trim();
   const store = c && storeName.startsWith(c) && storeName.trim().length > c.length ? storeName.slice(c.length).trim() : storeName;
   return (
-    <span className={cn("block min-w-0 text-xs leading-tight", className)} data-testid="store-identity">
+    <span className={cn("flex min-w-0 items-center gap-1.5 text-xs leading-tight", className)} data-testid="store-identity">
       {chainName && (
-        <span className="flex min-w-0 items-center gap-1" data-testid="store-chain">
+        <span className="flex max-w-[55%] shrink-0 items-center gap-1" data-testid="store-chain">
           {logo ? (
             <ChainLogo src={logo} name={chainName} className="!m-0 size-3.5 rounded-[3px]" />
           ) : (
@@ -52,7 +52,7 @@ export function StoreIdentity({ chainName, storeName, className }: { chainName: 
           <span className="min-w-0 truncate text-[11px] font-bold">{chainName}</span>
         </span>
       )}
-      <span className="block truncate font-normal">{store}</span>
+      <span className="min-w-0 truncate font-normal" title={store}>{store}</span>
     </span>
   );
 }

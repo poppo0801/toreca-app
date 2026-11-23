@@ -227,11 +227,11 @@ describe("151図鑑の画面", () => {
     expect(qa("price-delete")).toHaveLength(0);
     expect(q("price-history")).toBeNull();
     expect(q("price-list")!.textContent).not.toMatch(/この価格で購入|編集|削除|この店の推移|秘密のメモ|参考価格|最安/);
-    // 1行の中の順序: 状態 → 系列・店舗 → 調査日 → 金額（右端）
+    // 1行の中の順序: 系列・店舗 → 日付（その下）→ 状態 → 金額（右端）
     const row = qa("price-row").find((r) => r.textContent!.includes("甲店"))!;
-    const order4 = ["price-rank-label", "price-store", "price-date", "price-amount"].map((id) => [...row.querySelectorAll("*")].indexOf(row.querySelector(`[data-testid="${id}"]`)!));
+    const order4 = ["price-store", "price-date", "price-rank-label", "price-amount"].map((id) => [...row.querySelectorAll("*")].indexOf(row.querySelector(`[data-testid="${id}"]`)!));
     expect(order4).toEqual([...order4].sort((x, y) => x - y));
-    expect(row.lastElementChild!.getAttribute("data-testid")).toBe("price-amount");
+    expect(row.querySelector('[data-testid="price-amount"]')!.nextElementSibling).toBeNull();
     expect(row.querySelector('[data-testid="price-store"]')!.textContent).toContain("系列A");
     expect(row.querySelector('[data-testid="price-date"]')!.textContent).toBe("11/10"); // 年は詳細で確認
     await click(q("price-sort")!.querySelectorAll("button")[1]);
@@ -399,7 +399,8 @@ describe("相場調査メモの画面", () => {
     expect(left.contains(store)).toBe(true);
     expect(center.getAttribute("data-testid")).toBe("row-rarity");
     expect(center.textContent).toBe("SAR");
-    expect(center.className).toContain("border-x"); // 独立した列（左右の細い線）
+    expect(center.className).not.toContain("border-x"); // 左右の区切り線なし
+    expect(center.className).toContain("text-[11px]"); // 小さめの文字
     // 列は全行で固定幅: レアリティ・状態ランク・価格の位置は店舗名の長さに影響されない
     expect(btn.className).toContain("grid-cols-[minmax(0,1fr)_2.25rem_1.75rem_4.25rem]");
     expect(rankCol.querySelector('[data-testid="rank-badge"]')!.getAttribute("data-rank")).toBe("S");
@@ -640,17 +641,51 @@ describe("相場調査メモの画面", () => {
     expect(q("market-sort-menu")).toBeNull();
   });
 
+  it("並び替えの長押し（iOS Safari対策）: 長押し中・直後は文字の範囲選択（selectstart）を止め、選択は解除する。ボタンは選択・長押しメニューを出さない指定。通常のタップ後は保護を解く", async () => {
+    mdata = { cards: [mcard()], prices: [mprice()], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    const btn = q("market-sort")!;
+    expect(btn.style.userSelect).toBe("none");
+    expect(btn.style.getPropertyValue("-webkit-touch-callout") || (btn.style as unknown as Record<string, string>).WebkitTouchCallout).toBe("none");
+    const sel = () => {
+      const e = new Event("selectstart", { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    expect(sel()).toBe(false); // 通常時は文字選択を妨げない
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 5, clientY: 5 }));
+      await new Promise((r) => setTimeout(r, 520));
+    });
+    expect(q("market-sort-menu")).not.toBeNull();
+    expect(sel()).toBe(true); // 長押しで一覧を開いている間は範囲選択を止める
+    await act(async () => void btn.click()); // 長押し直後の click は切り替えない
+    expect(btn.getAttribute("data-sort")).toBe("new");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 700));
+    });
+    expect(sel()).toBe(false); // しばらくして保護は解除（画面全体の選択は制限しない）
+    // 通常のタップ: 押下中だけ保護し、離したら解く
+    await act(async () => void (qa("market-sort-option")[0] as HTMLElement).click());
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 5, clientY: 5 }));
+      btn.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+    });
+    expect(sel()).toBe(false);
+  });
+
   it("カード一覧の表示: 左=画像・カード名・セット（小さな枠）・系列 店舗／中央=レアリティ（独立列）／右=状態バッジ・価格。カード番号と区切りの「・」・件数は一覧に出さない。図鑑No（画像）は別の情報", async () => {
     mdata = { cards: [mcard({ name: "ピカチュウex", setName: "ステラミラクル", cardNumber: "132/165", rarity: "SAR" })], prices: [mprice({ storeName: "渋谷店", chainName: "", condition: "S", priceYen: 1500 }), mprice({ id: "mp2", storeName: "新宿店", condition: "C", priceYen: 2000 })], purchases: [] };
     await mount(createElement(MarketMemoView));
     const row = q("market-card")!;
     const set = row.querySelector('[data-testid="row-set"]') as HTMLElement;
-    expect(set.textContent).toBe("ステラミラクル");
+    expect(set.textContent).toBe("132/165"); // 収録パック名は出さず、番号だけ
+    expect(row.textContent).not.toContain("ステラミラクル");
     expect(set.className).toMatch(/rounded-md/);
     expect(set.className.split(" ")).toContain("border"); // 線で囲んだ小さな枠
     const rarity = row.querySelector('[data-testid="row-rarity"]') as HTMLElement;
     expect(rarity.textContent).toBe("SAR");
-    expect(rarity.className).toContain("font-extrabold");
+    expect(rarity.className).not.toContain("border-x");
     expect(row.querySelector('[data-testid="row-number"]')).toBeNull(); // カード番号は詳細に
     expect(row.textContent).not.toContain("・");
     expect(row.textContent).not.toContain("件");

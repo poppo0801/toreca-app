@@ -4,19 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { loadCompareAction, type CompareData } from "@/app/(app)/market-memo/daily-actions";
 import { DexImage } from "@/components/dex-image";
-import { RankBadge } from "@/components/rank-badge";
-import { StoreIdentity } from "@/components/store-identity";
+import { COMPARE_ROW_CLASS, CompareRowContent } from "@/components/compare-row";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { mergeDaily, type DailyRow } from "@/lib/zukan/daily";
 import { splitCurrent } from "@/lib/zukan/freshness";
 import { matchPokemonByCardName } from "@/lib/zukan/pokemon-match";
 import { rankOrder } from "@/lib/zukan/zukan";
 
-const yen = (v: number) => `${v.toLocaleString("ja-JP")}円`;
-const md = (d: string) => {
-  const [, m, day] = d.split("-").map(Number);
-  return `${m}/${day}`;
-};
 
 /**
  * 相場比較表（カード名・画像のタップ）。151図鑑と相場調査メモの**両方**から、同じカード（収録セット・番号・レアリティが同じ。無いときは名前）の店舗別価格を比較する。今日の調査結果も含む。
@@ -98,18 +92,10 @@ export function MarketCompareSheet({ card, onClose }: { card: { cardName: string
 }
 
 function CompareRow({ r, past = false }: { r: DailyRow; past?: boolean }) {
+  // 表示は相場調査メモ・151図鑑の価格一覧と共通（CompareRowContent）。日付だけ（最新の販売情報は最終確認日、過去の参考情報は調査日）
   return (
-    <li className="grid min-h-11 grid-cols-[1.75rem_minmax(0,1fr)_auto_auto] items-center gap-x-2 rounded-lg border px-2 py-1" data-testid="compare-row" data-soldout={r.soldOut ? "1" : "0"} data-past={past ? "1" : "0"}>
-      <RankBadge rank={r.condition} />
-      <StoreIdentity chainName={r.chainName} storeName={r.storeName} />
-      {/* 日付だけ（最新の販売情報は最終確認日、過去の参考情報は調査日） */}
-      <span className="text-[11px] tabular-nums text-muted-foreground" data-testid="compare-date">
-        {md(past ? r.surveyedOn : r.lastConfirmedOn)}
-      </span>
-      <span className="flex items-center gap-1 whitespace-nowrap text-sm font-bold tabular-nums">
-        {r.soldOut && <span className="rounded border border-danger px-1 text-[10px] font-bold leading-4 text-danger">完売</span>}
-        {yen(r.priceYen)}
-      </span>
+    <li className={COMPARE_ROW_CLASS} data-testid="compare-row" data-soldout={r.soldOut ? "1" : "0"} data-past={past ? "1" : "0"}>
+      <CompareRowContent testIdPrefix="compare" chainName={r.chainName} storeName={r.storeName} date={past ? r.surveyedOn : r.lastConfirmedOn} condition={r.condition} priceYen={r.priceYen} soldOut={r.soldOut} />
     </li>
   );
 }

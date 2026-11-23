@@ -76,7 +76,7 @@ test("相場調査メモの一覧・並び替え・共通化・5分間の初期�
 
   // --- 一覧のレイアウト（参考画像）: 左=画像・名前・セット・店舗／中央=レアリティ／右=状態・価格
   const row = page.getByTestId("market-card").filter({ hasText: "ミロカロス" });
-  await expect(row.getByTestId("row-set")).toHaveText("SV8");
+  await expect(row.getByTestId("row-set")).toHaveText("100/106");
   await expect(row.getByTestId("row-rarity")).toHaveText("SAR");
   await expect(row.getByTestId("market-card-best")).toHaveText("11,000円");
   await expect(row.getByTestId("market-card-store")).toContainText("垂水店");

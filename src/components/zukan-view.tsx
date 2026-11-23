@@ -194,7 +194,7 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
   const p = pokemonOf(no)!;
   const cards = data.cards.filter((c) => c.dexNo === no);
   const prices = data.prices.filter((r) => r.dexNo === no);
-  const priceRows = prices.map((r) => ({ ...r, cardKey: cardKeyOf(r), cardLabel: [r.setName, r.cardNumber, r.rarity].filter(Boolean).join(" ・ ") }));
+  const priceRows = prices.map((r) => ({ ...r, cardKey: cardKeyOf(r), cardLabel: [r.cardNumber, r.rarity].filter(Boolean).join(" ・ ") || r.setName }));
   const [editing, setEditing] = useState<{ id: string | null; form: CardForm } | null>(null);
   const [pricing, setPricing] = useState<{ rec: ZukanPriceRecord | null } | null>(() => {
     // 日別の調査結果の「編集」から開いたとき: その価格記録の編集フォームを直接開く
