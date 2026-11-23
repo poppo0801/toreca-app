@@ -17,6 +17,9 @@ const MODE: Record<string, string> = { mock: "モック（実AIではない）",
 const MODE_HINT: Record<string, string> = { real: "実AIが作成した登録案です（正しさは未検証。人が確認してください）" };
 const URL_STATUS: Record<string, string> = { url_from_item: "項目自身のリンク", short_unexpanded: "短縮URL未展開", shared_only_unverified: "共通リンクのみ（未確認）", url_missing: "URLなし" };
 const REVIEW: Record<string, string> = { hold: "保留", approve_with_edits: "修正して承認（レビュー記録）", reject: "却下" };
+const DECISION: Record<string, string> = { register: "本登録案", tentative: "暫定", exclude: "除外案", none: "判断なし" };
+const HELD: Record<string, string> = { exclude_without_evidence: "根拠（引用）のある観察が無いまま除外としている", exclude_without_page_evidence: "応募先のページを確認できないまま除外としている", register_unit_unresolved: "本登録案なのに応募単位が未確定", judge_failed: "AIの判断が得られなかった", page_text_loss: "ページの本文の取り出しに欠落の疑い" };
+const heldLabel = (r: string): string => HELD[r] ?? (r.startsWith("quote_not_found") ? "引用が原文に見つからない（" + r.split(":")[1] + "）" : r.startsWith("scope_mismatch") ? "別の店舗・商品のページを根拠にしている" : r.startsWith("field_unknown_has_value") ? "不明のはずの項目に値がある" : r);
 const KEY_FIELDS = ["store", "product", "deadline", "apply_unit"] as const;
 const FIELD_LABEL: Record<string, string> = { store: "店舗", product: "商品", deadline: "締切", apply_unit: "応募単位" };
 const UNIT_LABEL: Record<string, string> = { one_form_one: "1フォーム1応募", store_select: "店舗選択式", per_store: "店舗別に独立", per_product: "商品別", unknown: "不明" };
@@ -51,6 +54,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
     <li className="space-y-1.5 rounded-lg border bg-muted/30 p-2" data-testid="proposal-card" data-item={p.item_no}>
       <div className="flex flex-wrap items-center gap-1">
         <span className="font-medium">{p.item_label || `項目${p.item_no}`}</span>
+        <span className={"rounded border px-1 text-[10px] " + (p.decision === "exclude" ? "border-warn text-warn" : "")} data-testid="proposal-decision">{DECISION[p.decision] ?? p.decision}{!p.verified || p.held_reasons.length ? "・要確認" : ""}</span>
         <span className="rounded border px-1 text-[10px]" data-testid="proposal-mode">{MODE[p.mode] ?? p.mode}</span>
         <span className="rounded border px-1 text-[10px]">{URL_STATUS[p.url_status] ?? p.url_status}</span>
         {p.review && (
@@ -78,6 +82,12 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
       {p.unknowns.length > 0 && (
         <p className="text-warn" data-testid="proposal-unknowns">
           未確認: {p.unknowns.map((u) => `${FIELD_LABEL[u.what] ?? u.what}（${u.why}）`).join("／")}
+        </p>
+      )}
+      {p.held_reasons.length > 0 && (
+        <p className="text-warn" data-testid="proposal-held">
+          検証の指摘: {p.held_reasons.map(heldLabel).join("／")}
+          {p.decision === "exclude" ? "（除外案は、人が確認するまで採用しない）" : ""}
         </p>
       )}
       {p.possibly_same.length > 0 && <p className="text-warn">同じ応募機会の可能性がある別の登録案が {p.possibly_same.length} 件あります（統合はしていません）</p>}

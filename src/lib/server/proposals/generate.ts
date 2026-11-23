@@ -119,6 +119,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       limits,
       now: clock(),
       shouldStop: deps.shouldStop,
+      registerRequiresUnit: true,
       protectedFor: (n) => corrections.get(n),
       ...(deps.perItemCapJpy ? { budgetFor: () => new CaseBudget(budget, deps.perItemCapJpy!) } : {}),
     });

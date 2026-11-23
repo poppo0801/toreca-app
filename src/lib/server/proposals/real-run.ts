@@ -41,6 +41,10 @@ export interface RealRunSummary {
   preflight: PreflightResult | null;
   /** 失敗の分類ごとの件数（内容を含めない） */
   diagnostics: Record<string, number>;
+  /** 判断の内訳（項目単位）: ok=判断あり／defaulted=項目が省略された出力（主張なし。成功と数えない）／failed=判断が得られなかった */
+  judgments: { ok: number; defaulted: number; failed: number };
+  /** 検索の提示と実行（項目単位）: 提示されなかった項目・提示されたが実行しなかった項目・実行した項目。P2 の「検索0回」を、配線の不備と区別して観測する */
+  search: { notOffered: number; offeredNotUsed: number; used: number };
   rows: { candidate: string; status: "done" | "failed" | "skipped"; proposals: number; costJpy: number; reason?: string }[];
 }
 
@@ -95,7 +99,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       /* 監査ログの失敗で実行を壊さない（ただし握りつぶすのは記録側の失敗だけ） */
     }
   };
-  const base: RealRunSummary = { stopReason: "completed", candidates: o.candidates.length, processed: 0, proposals: 0, inserted: 0, costJpy: 0, overruns: 0, preflight: null, diagnostics: {}, rows: [] };
+  const base: RealRunSummary = { stopReason: "completed", candidates: o.candidates.length, processed: 0, proposals: 0, inserted: 0, costJpy: 0, overruns: 0, preflight: null, diagnostics: {}, judgments: { ok: 0, defaulted: 0, failed: 0 }, search: { notOffered: 0, offeredNotUsed: 0, used: 0 }, rows: [] };
   const stop = (reason: StopReason): RealRunSummary => {
     emit({ kind: "run_stop", reason, processed: base.processed, costJpy: base.costJpy });
     return { ...base, stopReason: reason };
@@ -153,6 +157,14 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         consecutive++;
       } else {
         base.proposals += r.records.length;
+        for (const x of r.records) {
+          if (x.decision === "none") base.judgments.failed++;
+          else if (x.unknowns.some((u) => u.what === "AIの判断" && u.why.includes("省略"))) base.judgments.defaulted++;
+          else base.judgments.ok++;
+          if (x.stopReason.includes("search_not_offered")) base.search.notOffered++;
+          else if (/searched:[1-9]/.test(x.stopReason)) base.search.used++;
+          else base.search.offeredNotUsed++;
+        }
         base.inserted += r.save.inserted;
         base.costJpy = Math.round(budget.costJpy * 10_000) / 10_000;
         base.rows.push({ candidate: short(c.id), status: "done", proposals: r.records.length, costJpy: r.costJpy });

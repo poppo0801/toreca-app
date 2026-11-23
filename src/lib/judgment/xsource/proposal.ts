@@ -113,7 +113,9 @@ const UNIT_TOKENS: Record<string, ApplyUnit> = { one_form_one: "one_form_one", s
 export function unitOf(fields: Record<string, ProposalField>): { unit: ApplyUnit; basis: "observed" | "inferred" | "unknown" } {
   const key = Object.keys(fields).find((k) => /apply_?unit|応募単位|applicationunit|^unit$/i.test(k));
   const f = key ? fields[key] : undefined;
-  const u = f?.value ? UNIT_TOKENS[f.value.trim()] : undefined;
+  // 値は列挙の語（one_form_one 等）。AIが注釈を後ろに付けた出力（例: "one_form_one（お一人様1回まで）"）は、先頭の列挙の語だけを採用する（P2 で、この注釈つきの値が unknown に落ちて、AIの判断が失われた）。語の推測はしない（先頭が列挙の語でなければ unknown）
+  const token = f?.value ? /^[a-z_]+/.exec(f.value.trim())?.[0] : undefined;
+  const u = token ? UNIT_TOKENS[token] : undefined;
   return u && f ? { unit: u, basis: f.basis } : { unit: "unknown", basis: "unknown" };
 }
 
@@ -143,9 +145,12 @@ export function toProposalRecords(a: {
     for (const [k, f] of Object.entries(out?.fields ?? {}).slice(0, 12)) {
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
       const isUnitField = /apply_?unit|応募単位|applicationunit|^unit$/i.test(k);
-      const support: SupportKind = isUnitField && f.value && f.basis !== "unknown" && UNIT_TOKENS[f.value.trim()] ? "enum_value" : valueSupport(f.value, f.quote ?? null, ev?.text ?? pageText);
+      const unitToken = f.value ? /^[a-z_]+/.exec(f.value.trim())?.[0] : undefined;
+      const support: SupportKind = isUnitField && f.value && f.basis !== "unknown" && unitToken && UNIT_TOKENS[unitToken] ? "enum_value" : valueSupport(f.value, f.quote ?? null, ev?.text ?? pageText);
       fields[k.slice(0, 40)] = { value: f.value, basis: f.basis, quote: f.quote ? f.quote.slice(0, 160) : null, evidence: f.evidenceId ?? null, support };
     }
+    // 判断の理由（AIの記述。次の分析のために保存する。項目ではなく、予約キー _rationale として持つ。画面の項目には出さない）
+    if (out?.rationale) fields._rationale = { value: out.rationale.slice(0, 300), basis: "inferred", quote: null, evidence: null, support: "no_value" };
     const { unit, basis } = unitOf(fields);
     const unknowns: ProposalRecord["unknowns"] = [];
     if (plan.status === "url_missing") unknowns.push({ what: "応募先URL", why: "この項目にURLが無い（応募単位は未確認）" });
@@ -154,6 +159,7 @@ export function toProposalRecords(a: {
     for (const [k, f] of Object.entries(fields)) if (f.basis === "unknown") unknowns.push({ what: k, why: "AIが不明と判断（根拠なし）" });
     for (const h of result.registration.held?.reasons ?? []) unknowns.push({ what: "検証", why: h.slice(0, 80) });
     if (!out) unknowns.push({ what: "AIの判断", why: "判断が得られなかった（調査は保持）" });
+    else if (out.outputNote === "fields_defaulted") unknowns.push({ what: "AIの判断", why: "項目の出力が省略された（主張なしとして扱った。判断の成功とは数えない）" });
     const searched = new Set(result.searches.map((s) => canonUrl(s.url).key));
     const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length, viaSearch: !!e.url && searched.has(canonUrl(e.url).key) }));
     return {
@@ -181,7 +187,8 @@ export function toProposalRecords(a: {
       promptVersion: PROPOSAL_PROMPT_VERSION,
       costJpy: result.budget.costJpy,
       turns: result.investigation.turns,
-      stopReason: result.investigation.reason,
+      // 停止理由＋検索の提示/実行（P2: 検索が提示されなかった事実を残す）。例: unreachable|searched:1／sufficient|search_not_offered
+      stopReason: `${result.investigation.reason}|${result.searchOffered ? `searched:${result.searches.length ? new Set(result.searches.map((s) => s.query)).size : 0}` : "search_not_offered"}`.slice(0, 60),
       fetchedAt: a.fetchedAt,
     };
   });
