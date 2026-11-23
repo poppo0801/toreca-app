@@ -125,8 +125,8 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     const cid = card.data!.id as string;
     const dup = await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "リザードンex（別名）", set_name: "スカーレットex", card_number: "006/078", rarity: "SR" });
     expect(dup.error?.code).toBe("23505"); // 同一カードは重複作成できない
-    // 別のプロフィールは同じカードを別に持てる（分離）
-    expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pB, name: "リザードンex", set_name: "スカーレットex", card_number: "006/078", rarity: "SR" })).error).toBeNull();
+    // 別のプロフィールも同じカードを重複して持てない（UI改修: 相場管理データは世帯の全員で共通。一意制約は世帯単位）
+    expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pB, name: "リザードンex", set_name: "スカーレットex", card_number: "006/078", rarity: "SR" })).error?.code).toBe("23505");
     // 番号が無いカードは識別の一意制約の対象外（名前だけで同一とみなさない・確認はアプリ側）
     expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "ピカチュウ" })).error).toBeNull();
     expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "ピカチュウ" })).error).toBeNull();

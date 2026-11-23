@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { loadStoreHistoryAction, type HistoryRecord } from "@/app/(app)/market-memo/daily-actions";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
-import { normStore, parseAmount, RANKS, recentPairs, type PriceInput, type Rank, type StorePair } from "@/lib/zukan/zukan";
+import { defaultPair, latestInput, normStore, parseAmount, RANKS, recentPairs, type InputStamp, type PriceInput, type Rank, type StorePair } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
 
 /** 日本時間の今日（YYYY-MM-DD） */
@@ -31,7 +32,7 @@ export interface PriceFormValue {
 }
 
 /** 価格入力の候補: 過去の「系列＋店舗」の組み合わせ（新しい順）と、系列・店舗の入力候補（過去の入力＋マスター） */
-export function usePriceCandidates(records: readonly { chainName: string; storeName: string; surveyedOn: string }[]) {
+export function usePriceCandidates(records: readonly { chainName: string; storeName: string; surveyedOn: string; createdAt?: string }[]) {
   const app = useApp() as { data?: { chains?: { id: string; name: string; archived?: boolean }[]; stores?: { name: string; chainId: string; archived?: boolean }[] } };
   return useMemo(() => {
     const pairs = recentPairs(records, 6);
@@ -45,8 +46,36 @@ export function usePriceCandidates(records: readonly { chainName: string; storeN
       const fromMaster = key ? masterStores.filter((s) => chainIds.has(s.chainId)).map((s) => s.name) : [];
       return [...new Set([...fromHistory, ...fromMaster])].slice(0, 80);
     };
-    return { pairs, chainNames, storesFor };
+    const latest: InputStamp | null = latestInput(records.filter((r): r is typeof r & { createdAt: string } => !!r.createdAt));
+    return { pairs, chainNames, storesFor, latest };
   }, [records, app.data?.chains, app.data?.stores]);
+}
+
+/**
+ * 系列・店舗の入力履歴（151図鑑と相場調査メモの記録を合わせた、世帯の全員で共通の履歴）。どちらの画面で入力した店舗も、もう一方の候補に出る。
+ * 表示時・画面に戻ったとき・フォームを開いたとき・保存後に読み直す（別の利用者の入力も反映される）。
+ */
+export function useStoreCandidates() {
+  const [records, setRecords] = useState<HistoryRecord[]>([]);
+  const refresh = useCallback(async () => {
+    const r = await loadStoreHistoryAction();
+    if (r.ok) setRecords(r.records);
+  }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 表示時に共通の履歴を読み込む（非同期で反映）
+    void refresh();
+    const again = () => {
+      if (document.visibilityState !== "hidden") void refresh();
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, [refresh]);
+  const cand = usePriceCandidates(records);
+  return { ...cand, refreshHistory: refresh };
 }
 
 /**
@@ -61,6 +90,8 @@ export function PriceForm({
   pairs,
   chainNames,
   storesFor,
+  latest,
+  refreshHistory,
   today,
   top,
   optional,
@@ -73,6 +104,10 @@ export function PriceForm({
   pairs: StorePair[];
   chainNames: string[];
   storesFor: (chain: string) => string[];
+  /** 全員共通の「最後の入力」。新規登録では、5分以内なら系列・店舗の初期選択にする（5分以上経過したら空欄。履歴の候補は残る） */
+  latest?: InputStamp | null;
+  /** 履歴を読み直す（フォームを開いたとき・保存後） */
+  refreshHistory?: () => Promise<void> | void;
   today: string;
   /** 最上部（カード名など。必須項目の前） */
   top?: React.ReactNode;
@@ -87,9 +122,25 @@ export function PriceForm({
   const [v, setV] = useState<PriceFormValue>({ storeName: "", chainName: "", surveyedOn: today, condition: "A", price: "", note: "", ...initial });
   const multi = !!onSubmitBatch && !initial;
   const [extra, setExtra] = useState<{ condition: Rank | ""; price: string }[]>([]);
+  const [touched, setTouched] = useState(false);
+  // フォームを開いたとき、履歴を最新にする（別の利用者の入力を反映）
+  useEffect(() => {
+    void refreshHistory?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 開いたときに1回だけ
+  }, []);
+  // 新規登録の初期選択: 全員共通の「最後の入力」が5分以内なら、その系列・店舗を入れる。開いた時点と、履歴の読み込みが後から届いた時点の両方で評価する（入力済み・手で選んだ後は上書きしない）
+  useEffect(() => {
+    if (initial || touched) return;
+    const p = defaultPair(latest ?? null, Date.now());
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 履歴の到着（非同期）に合わせて初期選択を反映する
+    if (p) setV((c) => (c.chainName || c.storeName ? c : { ...c, chainName: p.chainName, storeName: p.storeName }));
+  }, [latest, initial, touched]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const set = <K extends keyof PriceFormValue>(k: K, val: PriceFormValue[K]) => setV((c) => ({ ...c, [k]: val }));
+  const set = <K extends keyof PriceFormValue>(k: K, val: PriceFormValue[K]) => {
+    if (k === "chainName" || k === "storeName") setTouched(true);
+    setV((c) => ({ ...c, [k]: val }));
+  };
   const field = "mt-0.5 h-10 w-full rounded-md border bg-input px-2.5 text-sm";
   const storeOptions = useMemo(() => storesFor(v.chainName), [storesFor, v.chainName]);
 
@@ -119,6 +170,7 @@ export function PriceForm({
     const err = multi && items.length > 1 ? await onSubmitBatch!(items) : await onSubmit(items[0]);
     setBusy(false);
     if (err) setError(err);
+    else void refreshHistory?.();
   };
 
   return (
@@ -131,7 +183,10 @@ export function PriceForm({
               <button
                 key={`${p.chainName}|${p.storeName}`}
                 type="button"
-                onClick={() => setV((c) => ({ ...c, chainName: p.chainName, storeName: p.storeName }))}
+                onClick={() => {
+                  setTouched(true);
+                  setV((c) => ({ ...c, chainName: p.chainName, storeName: p.storeName }));
+                }}
                 className={cn("min-h-8 max-w-full truncate rounded-full border px-2.5 text-xs", v.chainName === p.chainName && v.storeName === p.storeName && "border-primary text-primary-ink")}
                 data-testid="pair-chip"
               >
@@ -183,23 +238,29 @@ export function PriceForm({
       </div>
       {multi &&
         extra.map((x, i) => (
-          <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-1.5" data-testid="price-extra-row">
-            <label className="block text-sm">
-              <span className="text-[13px] font-medium">状態</span>
-              <select value={x.condition} onChange={(e) => setExtra((l) => l.map((y, j) => (j === i ? { ...y, condition: e.target.value as Rank | "" } : y)))} className={field}>
-                <option value="">選択</option>
-                {RANKS.map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-[13px] font-medium">価格（円）</span>
-              <input value={x.price} onChange={(e) => setExtra((l) => l.map((y, j) => (j === i ? { ...y, price: e.target.value } : y)))} inputMode="numeric" className={field} />
-            </label>
-            <Button type="button" variant="ghost" size="sm" className="min-h-10" onClick={() => setExtra((l) => l.filter((_, j) => j !== i))} aria-label={`追加の価格${i + 1}行目を削除`}>
-              削除
-            </Button>
+          // 2件目以降も、最初の登録と同じ A+・A・B+・B・C のボタン選択式（プルダウンは使わない）
+          <div key={i} className="space-y-1" data-testid="price-extra-row">
+            <div role="radiogroup" aria-label={`追加の価格${i + 1}行目の状態ランク`} className="grid grid-cols-5 gap-1" data-testid="price-extra-rank">
+              {RANKS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  role="radio"
+                  aria-checked={x.condition === r}
+                  onClick={() => setExtra((l) => l.map((y, j) => (j === i ? { ...y, condition: r } : y)))}
+                  className={cn("min-h-10 rounded-md border text-sm font-bold", x.condition === r ? "border-primary bg-primary text-primary-foreground" : "bg-input")}
+                  data-testid="price-extra-rank-btn"
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-[1fr_auto] items-center gap-1.5">
+              <input value={x.price} onChange={(e) => setExtra((l) => l.map((y, j) => (j === i ? { ...y, price: e.target.value } : y)))} inputMode="numeric" className={field} placeholder="価格（円）" aria-label={`追加の価格${i + 1}行目の価格`} data-testid="price-extra-yen" />
+              <Button type="button" variant="ghost" size="sm" className="min-h-10" onClick={() => setExtra((l) => l.filter((_, j) => j !== i))} aria-label={`追加の価格${i + 1}行目を削除`}>
+                削除
+              </Button>
+            </div>
           </div>
         ))}
       {multi && extra.length < 4 && (

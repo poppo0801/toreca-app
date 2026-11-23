@@ -53,8 +53,8 @@ describe("カード一覧の並び替え: 図鑑No順・五十音順", () => {
     expect(r.map((c) => c.name)).toEqual(["フシギダネ", "ミュウ"]); // フシギダネ(No.1) が先（収録番号は 999 でも）
   });
   it("見出しの表示: 並び順と向き。全モードが循環に含まれる", () => {
-    expect(MARKET_SORT_ORDER).toEqual(["new", "price", "condition", "kana", "dex"]);
-    expect(marketSortHeading("price")).toBe("価格の安い順 ↑");
+    expect(MARKET_SORT_ORDER).toEqual(["new", "priceDesc", "priceAsc", "condition", "rarity", "kana"]);
+    expect(marketSortHeading("priceAsc")).toBe("価格の安い順 ↑");
     expect(marketSortHeading("kana")).toBe("五十音順 ↑");
     expect(marketSortHeading("dex")).toBe("図鑑No順 ↑");
     expect(marketSortHeading("new")).toBe("新着順 ↓");
@@ -64,7 +64,7 @@ describe("カード一覧の並び替え: 図鑑No順・五十音順", () => {
       { id: "p1", cardId: "1", storeName: "s", surveyedOn: "2026-11-20", condition: "B", priceYen: 900 },
       { id: "p2", cardId: "2", storeName: "s", surveyedOn: "2026-11-20", condition: "A+", priceYen: 1500 },
     ];
-    expect(sortMarketCards(cards.slice(0, 2), prices, "price", "2026-11-22").map((c) => c.id)).toEqual(["1", "2"]);
+    expect(sortMarketCards(cards.slice(0, 2), prices, "priceAsc", "2026-11-22").map((c) => c.id)).toEqual(["1", "2"]);
     expect(sortMarketCards(cards.slice(0, 2), prices, "condition", "2026-11-22").map((c) => c.id)).toEqual(["2", "1"]);
   });
 });

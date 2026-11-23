@@ -116,34 +116,48 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   await expect(page.getByTestId("market-card-store").filter({ hasText: "新宿西口本店（ポケモンカード専門館）" })).toHaveCount(1);
   await expect(page.getByTestId("market-export")).toHaveCount(0);
   await expect(page.getByTestId("market-card-plus")).toHaveCount(0); // 行の「＋」は無い
-  // 並び替え・購入済み切替の操作
+  // 並び替え・購入済み切替の操作（アイコンのみのボタン。タップで 新着→価格降順→価格昇順→状態→レアリティ→五十音。長押しの一覧から図鑑No順なども選べる）
+  const pick = async (sortId: string) => {
+    await page.getByTestId("market-sort").hover();
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    await page.mouse.up();
+    await page.getByTestId("market-sort-option").and(page.locator(`[data-sort="${sortId}"]`)).click();
+  };
+  const priceNums = async () => (await page.getByTestId("market-card-best").allTextContents()).map((t) => Number(t.replace(/[^0-9]/g, "")));
   await page.getByTestId("market-sort").click();
-  await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "price");
-  const prices = await page.getByTestId("market-card-best").allTextContents();
-  const nums = prices.map((t) => Number(t.replace(/[^d]/g, "")));
+  await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "priceDesc");
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("価格の高い順 ↓");
+  const desc = await priceNums();
+  expect(desc).toEqual([...desc].sort((x, y) => y - x)); // 価格の高い順（記録なしは最後）
+  await page.getByTestId("market-sort").click();
+  await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "priceAsc");
+  const nums = await priceNums();
   expect(nums).toEqual([...nums].sort((x, y) => x - y)); // 価格の安い順
   await page.waitForTimeout(500);
   await page.screenshot({ path: "test-results/ui-audit-market-list-price-sort-390.png" });
   await expect(page.getByTestId("market-sort-heading")).toHaveText("価格の安い順 ↑"); // 見出しの右に現在の並び順
   const order = async () => (await page.getByTestId("market-card-name-text").allTextContents()).map((t) => t.trim());
-  await page.getByTestId("market-sort").click(); // 状態優先
-  await expect(page.getByTestId("market-sort-heading")).toHaveText("状態優先 ↑");
+  await page.getByTestId("market-sort").click(); // 状態順
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("状態順 ↑");
+  await page.getByTestId("market-sort").click(); // レアリティ順
+  await expect(page.getByTestId("market-sort-heading")).toHaveText("レアリティ順 ↓");
   await page.getByTestId("market-sort").click(); // 五十音順（ポケモンの読み仮名。ex に影響されない。ポケモンでないカードは末尾）
   await expect(page.getByTestId("market-sort-heading")).toHaveText("五十音順 ↑");
   expect(await order()).toEqual(["オドリドリex", "ピカチュウ", "ブルンゲルex", "ミロカロス", "リザードンex", "ハイパーボール"]);
   await page.waitForTimeout(500);
   await page.screenshot({ path: "test-results/ui-audit-market-list-kana-390.png" });
-  await page.getByTestId("market-sort").click(); // 図鑑No順（全国図鑑番号の昇順）
+  await pick("dex"); // 図鑑No順（全国図鑑番号の昇順。長押しの一覧から）
   await expect(page.getByTestId("market-sort-heading")).toHaveText("図鑑No順 ↑");
   expect(await order()).toEqual(["リザードンex", "ピカチュウ", "ミロカロス", "ブルンゲルex", "オドリドリex", "ハイパーボール"]); // 6, 25, 350, 593, 741, なし
   await page.waitForTimeout(500);
   await page.screenshot({ path: "test-results/ui-audit-market-list-dex-390.png" });
-  // カード番号（細い枠）と図鑑No（画像の元）は別: ピカチュウの行
+  // 図鑑No（画像の元）はカード番号とは別: ピカチュウの行（カード番号は一覧に出さず、詳細に出す）
   const pika = page.getByTestId("market-card").filter({ hasText: "ピカチュウ" });
-  await expect(pika.getByTestId("row-number")).toHaveText("025/165");
+  await expect(pika.getByTestId("row-number")).toHaveCount(0);
   await expect(pika.getByTestId("market-card-summary")).toHaveAttribute("data-dex", "25");
   await expect(pika).not.toContainText("件");
-  await page.getByTestId("market-sort").click(); // 新着順へ戻す
+  await pick("new"); // 新着順へ戻す
   await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "new");
   await expect(page.getByTestId("market-sort-heading")).toHaveText("新着順 ↓");
   await page.getByTestId("market-show-bought").click();

@@ -210,6 +210,29 @@ export function storeHistory<T extends PriceLike>(list: readonly T[], storeName:
 }
 export const normStore = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
+/** 前回の入力（系列＋店舗）を初期選択として使う時間（ミリ秒）。最後の入力からこれ以上経過したら空欄に戻す（履歴の候補は残る） */
+export const DEFAULT_PAIR_WINDOW_MS = 5 * 60 * 1000;
+export interface InputStamp {
+  chainName: string;
+  storeName: string;
+  /** 入力（記録の作成）の日時（ISO）。サーバーの時刻 */
+  at: string;
+}
+/** 全員共通の「最後の入力」から、新規登録フォームの初期選択を決める。5分以上経過・系列か店舗が空・日時が不正なら null（空欄）。フォームを開くたびに評価する */
+export function defaultPair(latest: InputStamp | null, nowMs: number, windowMs = DEFAULT_PAIR_WINDOW_MS): StorePair | null {
+  if (!latest || !latest.chainName.trim() || !latest.storeName.trim()) return null;
+  const t = Date.parse(latest.at);
+  if (!Number.isFinite(t)) return null;
+  const age = nowMs - t;
+  return age < windowMs ? { chainName: latest.chainName, storeName: latest.storeName } : null;
+}
+/** 記録の一覧から「最後の入力」（作成日時が最も新しい、系列・店舗の両方がある記録）を選ぶ */
+export function latestInput(records: readonly { chainName: string; storeName: string; createdAt: string }[]): InputStamp | null {
+  let best: { chainName: string; storeName: string; createdAt: string } | null = null;
+  for (const r of records) if (r.chainName.trim() && r.storeName.trim() && (!best || r.createdAt > best.createdAt)) best = r;
+  return best ? { chainName: best.chainName, storeName: best.storeName, at: best.createdAt } : null;
+}
+
 /** 過去に入力した店舗名の候補（新しい順・重複なし・最大 limit）。素早く再入力するための候補 */
 export function recentStores(records: readonly { storeName: string; surveyedOn: string }[], limit = 8): string[] {
   const seen = new Set<string>();
@@ -230,10 +253,10 @@ export interface StorePair {
   storeName: string;
 }
 /** 過去に入力した「系列＋店舗」の組み合わせ（新しい順・重複なし・系列も店舗も空でないものだけ・最大 limit）。ワンタップで両方を入力する候補 */
-export function recentPairs(records: readonly { chainName: string; storeName: string; surveyedOn: string }[], limit = 6): StorePair[] {
+export function recentPairs(records: readonly { chainName: string; storeName: string; surveyedOn: string; createdAt?: string }[], limit = 6): StorePair[] {
   const seen = new Set<string>();
   const out: StorePair[] = [];
-  for (const r of [...records].sort((a, b) => b.surveyedOn.localeCompare(a.surveyedOn))) {
+  for (const r of [...records].sort((a, b) => b.surveyedOn.localeCompare(a.surveyedOn) || (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))) {
     if (!r.chainName.trim() || !r.storeName.trim()) continue;
     const k = `${normStore(r.chainName)}|${normStore(r.storeName)}`;
     if (seen.has(k)) continue;
@@ -314,12 +337,32 @@ export function matchCard<T extends CardIdentity>(existing: readonly T[], input:
 // ---------------------------------------------------------------------------------------------
 // 相場調査メモ: カード一覧の並び替え（カード詳細内の価格記録の並び替え＝sortPrices とは別の機能）
 // ---------------------------------------------------------------------------------------------
-/** new=登録の新しい順（既定）／price=最安価格の安い順／condition=最安価格の記録の状態が良い順（A+→C。同ランクは安値順）。価格の記録が無いカードは最後 */
-export type MarketSort = "new" | "price" | "condition" | "kana" | "dex";
-export const MARKET_SORT_LABEL: Record<MarketSort, string> = { new: "新着順", price: "価格の安い順", condition: "状態優先", kana: "五十音順", dex: "図鑑No順" };
-export const MARKET_SORT_ORDER: MarketSort[] = ["new", "price", "condition", "kana", "dex"];
-/** 見出しの右に出す現在の並び順（向き付き。↑=昇順・安い順・良い順／↓=新しい順） */
-export const marketSortHeading = (m: MarketSort): string => `${MARKET_SORT_LABEL[m]} ${m === "new" ? "↓" : "↑"}`;
+/**
+ * new=登録の新しい順（既定）／priceDesc=最安価格の高い順／priceAsc=最安価格の安い順／condition=最安価格の記録の状態が良い順（A+→C。同ランクは安値順）／
+ * rarity=レアリティの高い順（同じレアリティは新着順）／kana=五十音順（ポケモンの読み仮名）／dex=図鑑No順（既存。タップの循環には含めず、長押しのメニューから選べる）。
+ * 価格の記録が無いカードは、価格・状態の並びでは最後。
+ */
+export type MarketSort = "new" | "priceDesc" | "priceAsc" | "condition" | "rarity" | "kana" | "dex";
+export const MARKET_SORT_LABEL: Record<MarketSort, string> = { new: "新着順", priceDesc: "価格の高い順", priceAsc: "価格の安い順", condition: "状態順", rarity: "レアリティ順", kana: "五十音順", dex: "図鑑No順" };
+/** 通常タップで切り替える順序（新着順 → 価格降順 → 価格昇順 → 状態順 → レアリティ順 → 五十音順 → 新着順） */
+export const MARKET_SORT_ORDER: MarketSort[] = ["new", "priceDesc", "priceAsc", "condition", "rarity", "kana"];
+/** 長押しで直接選べる全項目 */
+export const MARKET_SORT_MENU: MarketSort[] = [...MARKET_SORT_ORDER, "dex"];
+export const nextMarketSort = (m: MarketSort): MarketSort => MARKET_SORT_ORDER[(MARKET_SORT_ORDER.indexOf(m) + 1) % MARKET_SORT_ORDER.length] ?? "new";
+/** 見出しの右に出す現在の並び順（向き付き。↓=新しい順・高い順／↑=昇順・安い順・良い順） */
+export const marketSortHeading = (m: MarketSort): string => `${MARKET_SORT_LABEL[m]} ${m === "new" || m === "priceDesc" || m === "rarity" ? "↓" : "↑"}`;
+
+/**
+ * レアリティの高い順（左ほど高い）。ポケモンカードの一般的な表記。一覧にないレアリティは、一覧にあるものより後ろ・レアリティ無しは最後。
+ * 並び替えの目安であり、価値の判断ではない。
+ */
+export const RARITY_ORDER = ["MUR", "UR", "HR", "SAR", "BWR", "SSR", "SR", "AR", "ACE", "RRR", "RR", "R", "PR", "K", "U", "C", "S", "A"] as const;
+export const rarityOrder = (r: string): number => {
+  const k = r.normalize("NFKC").trim().toUpperCase();
+  if (!k) return RARITY_ORDER.length + 1;
+  const i = (RARITY_ORDER as readonly string[]).indexOf(k);
+  return i < 0 ? RARITY_ORDER.length : i;
+};
 
 /** カードの「最安価格の記録」: 30日以内の記録のうち最も安いもの（同額は状態の良い方）。無ければ null（参考価格のみ・記録なし） */
 export function cheapestRecord<T extends PriceLike>(prices: readonly T[], today: string): T | null {
@@ -331,7 +374,7 @@ export function cheapestRecord<T extends PriceLike>(prices: readonly T[], today:
 export type DexOf<C> = (card: C) => { no: number; reading: string } | null;
 const READING = new Intl.Collator("ja");
 
-export function sortMarketCards<C extends { id: string; createdAt: string; name?: string; setName?: string; cardNumber?: string }>(cards: readonly C[], prices: readonly (PriceLike & { cardId: string })[], mode: MarketSort, today: string, dexOf?: DexOf<C>): C[] {
+export function sortMarketCards<C extends { id: string; createdAt: string; name?: string; setName?: string; cardNumber?: string; rarity?: string }>(cards: readonly C[], prices: readonly (PriceLike & { cardId: string })[], mode: MarketSort, today: string, dexOf?: DexOf<C>): C[] {
   const best = new Map<string, PriceLike | null>();
   for (const c of cards) best.set(c.id, cheapestRecord(prices.filter((p) => p.cardId === c.id), today));
   const byNew = (a: C, b: C) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
@@ -347,12 +390,13 @@ export function sortMarketCards<C extends { id: string; createdAt: string; name?
       return k || stable(a, b);
     });
   }
+  if (mode === "rarity") return [...cards].sort((a, b) => rarityOrder(a.rarity ?? "") - rarityOrder(b.rarity ?? "") || byNew(a, b));
   return [...cards].sort((a, b) => {
     if (mode === "new") return byNew(a, b);
     const x = best.get(a.id);
     const y = best.get(b.id);
     if (!x || !y) return x ? -1 : y ? 1 : byNew(a, b); // 価格の記録が無いカードは最後
-    const d = mode === "price" ? x.priceYen - y.priceYen || rankOrder(x.condition) - rankOrder(y.condition) : rankOrder(x.condition) - rankOrder(y.condition) || x.priceYen - y.priceYen;
+    const d = mode === "priceAsc" ? x.priceYen - y.priceYen || rankOrder(x.condition) - rankOrder(y.condition) : mode === "priceDesc" ? y.priceYen - x.priceYen || rankOrder(x.condition) - rankOrder(y.condition) : rankOrder(x.condition) - rankOrder(y.condition) || x.priceYen - y.priceYen;
     return d || byNew(a, b);
   });
 }
