@@ -46,7 +46,7 @@ describe.skipIf(env.PROPOSAL_P2_REVIEW !== "1")("P2 比較資料（ローカル�
     const goldBy = new Map((gold.rows as { id: string; category: string; gold: { unit: string; basis: string | null } | null; priorAiUnit: string | null }[]).map((r) => [r.id, r]));
     const out: string[] = ["# P2 比較資料（ローカル限定・Git管理外）", "", "AIの値・引用は実AIの出力です。**正しさは未確認**。『語の近さ』は4文字連続の一致率で、正しさの判定ではありません。", ""];
     const rows: unknown[] = [];
-    let near = { total: 0, notFoundStrict: 0, nearAtLeast80: 0 };
+    const near = { total: 0, notFoundStrict: 0, nearAtLeast80: 0 };
     const resupport: Record<string, number> = {}; // 修正後の導出分類（同じ保存済みの値・引用・本文を、新しい分類で再計算。AIの再実行ではない）
     for (const p of (props ?? []).slice().sort((a, b) => String(keyOf.get(a.candidate_id)).localeCompare(String(keyOf.get(b.candidate_id)), "en", { numeric: true }))) {
       const k = keyOf.get(p.candidate_id)!;

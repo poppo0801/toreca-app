@@ -135,7 +135,7 @@ export function toProposalRecords(a: {
   modelId: string | null;
   fetchedAt: string | null;
   /** 人が確定した値（項目ごと）。入力のハッシュに含める */
-  protectedFor?: (itemNo: number) => Record<string, string> | undefined;
+  protectedFor?: (itemNo: number, plan: ItemPlan) => Record<string, string> | undefined;
 }): ProposalRecord[] {
   const recs: ProposalRecord[] = a.run.results.map(({ plan, result }) => {
     const out = result.registration.output;
@@ -165,7 +165,7 @@ export function toProposalRecords(a: {
     return {
       candidateId: a.candidateId,
       proposalKey: proposalKey(a.candidateId, a.post.postId, plan.itemNo),
-      inputHash: inputHash(plan, result.evidence, a.protectedFor?.(plan.itemNo)),
+      inputHash: inputHash(plan, result.evidence, a.protectedFor?.(plan.itemNo, plan)),
       postId: a.post.postId.slice(0, 40),
       itemNo: plan.itemNo,
       itemLabel: plan.groupLabel.slice(0, 120),

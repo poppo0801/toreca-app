@@ -76,12 +76,12 @@ const asString = (x: unknown, max: number): string => String(x ?? "").slice(0, m
 const claims = (x: unknown): Claim[] => (Array.isArray(x) ? (x as Claim[]).filter((c) => c && typeof c.text === "string" && typeof c.evidenceId === "string").map((c) => ({ text: asString(c.text, 240), evidenceId: asString(c.evidenceId, 20), ...(c.quote ? { quote: asString(c.quote, 240) } : {}) })) : []);
 
 export function renderTurnInput(i: AgentTurnInput): string {
-  const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""} 取得:${e.fetchedAt}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}`).join("\n\n");
+  const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""} 取得:${e.fetchedAt}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}${e.extraWindows?.length ? `\n抜粋より後ろの応募条件の記載（位置つき）: ${e.extraWindows.join(" ｜ ")}` : ""}`).join("\n\n");
   const hist = i.history.map((h) => `- ${h.url}: ${h.outcome}${h.progress ? "（新しい情報あり）" : ""}`).join("\n") || "なし";
   return redact([`案件ID: ${i.caseId}`, ev, `【取得の履歴】\n${hist}`, `【検索】${i.searchAvailable ? `使える（残り${i.remaining.searches ?? 0}回）` : "使えない"}${i.searchResults?.length ? "\n検索結果（候補。証拠ではない）:\n" + i.searchResults.map((r) => `- [${r.query}] ${r.title} ${r.url} ${r.snippet}`).join("\n") : ""}`, `【残り】ターン${i.remaining.turns}・取得${i.remaining.fetches}・費用${i.remaining.costJpy.toFixed(1)}円・時間${Math.round(i.remaining.elapsedMs / 1000)}秒`].join("\n\n"));
 }
 export function renderJudgeInput(i: JudgeInput): string {
-  const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""}${e.scope ? ` scope:${e.scope.origin}/${e.scope.verdict}${e.scope.refutes.length ? "(" + e.scope.refutes.join(",") + ")" : ""}` : ""}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}`).join("\n\n");
+  const ev = i.evidence.map((e) => `【証拠 ${e.id}】種別:${e.kind}${e.url ? ` URL:${e.url}` : ""}${e.scope ? ` scope:${e.scope.origin}/${e.scope.verdict}${e.scope.refutes.length ? "(" + e.scope.refutes.join(",") + ")" : ""}` : ""}\n観察: ${e.observations.join(" / ") || "なし"}\n原文の抜粋: ${e.excerpt}${e.extraWindows?.length ? `\n抜粋より後ろの応募条件の記載（位置つき）: ${e.extraWindows.join(" ｜ ")}` : ""}`).join("\n\n");
   const prot = Object.entries(i.protectedFields).map(([k, v]) => `- ${k}: ${v}`).join("\n") || "なし";
   const last = i.lastTurn ? `最後の調査の整理: 不明点 ${i.lastTurn.unknown.map((u) => `${u.what}（重要度${u.importance}）`).join(" / ") || "なし"}／反対の仮説 ${i.lastTurn.counterHypotheses.join(" / ") || "なし"}` : "調査なし";
   return redact([`案件ID: ${i.caseId}`, `調査の終了理由: ${i.investigationEnd}`, ev, last, `【人が確定した値（変更しない）】\n${prot}`, i.verificationIssues?.length ? `【前回の検証の指摘（この点だけ直す）】${i.verificationIssues.join(", ")}` : ""].filter(Boolean).join("\n\n"));

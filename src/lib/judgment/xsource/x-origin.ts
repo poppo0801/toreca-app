@@ -170,7 +170,7 @@ export async function runXPostReplay(a: {
   /** 協調的な中止（Phase 2）。項目の処理の前に確認し、true なら以降の項目を処理せずに終える（中止した項目は結果に含めない。実行中のAI呼び出しは完了まで待つ）。 */
   shouldStop?: () => boolean;
   /** 人が確定した値（項目ごと。レビューの修正）。調査・判断はこれを変更せず、食い違いは人への確認に回る（検証層が保護）。モデルが学習したのではなく、保存した人の判断を次回の入力に使うだけ */
-  protectedFor?: (itemNo: number) => Record<string, string> | undefined;
+  protectedFor?: (itemNo: number, plan: ItemPlan) => Record<string, string> | undefined;
   /** 項目ごとの予算（1件上限）。未指定なら budget をそのまま使う */
   budgetFor?: (itemNo: number) => CallBudget;
   /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
@@ -186,7 +186,7 @@ export async function runXPostReplay(a: {
       break;
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo), registerRequiresUnit: a.registerRequiresUnit, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({
