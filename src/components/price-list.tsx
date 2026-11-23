@@ -5,6 +5,7 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { RankBadge } from "@/components/rank-badge";
+import { StoreIdentity } from "@/components/store-identity";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { currentWithStatus, indexEvents, statusOf, type PriceEvent, type WithStatus } from "@/lib/zukan/freshness";
 import { cheapestIds, isReferencePrice, sortPrices, storeHistory, type PriceSort } from "@/lib/zukan/zukan";
@@ -52,7 +53,6 @@ export function PriceList({
   onDelete,
   onConfirm,
   onSoldOut,
-  onEditCard,
 }: {
   rows: PriceRow[];
   today: string;
@@ -67,8 +67,6 @@ export function PriceList({
   /** 「更新」「完売」。エラーメッセージ（成功は null）を返す */
   onConfirm?: (r: PriceRow) => Promise<string | null>;
   onSoldOut?: (r: PriceRow) => Promise<string | null>;
-  /** 151図鑑: 登録済みのカード情報の編集 */
-  onEditCard?: (r: PriceRow) => void;
 }) {
   const [sort, setSort] = useState<PriceSort>("condition");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -117,8 +115,7 @@ export function PriceList({
                   <RankBadge rank={r.condition} />
                 </span>
                 <span className="min-w-0 text-xs leading-tight" data-testid="price-store">
-                  {r.chainName && <span className="block truncate text-[10px] text-muted-foreground">{r.chainName}</span>}
-                  <span className="block truncate font-medium">{r.storeName}</span>
+                  <StoreIdentity chainName={r.chainName} storeName={r.storeName} />
                   {r.cardLabel && (
                     <span className="block truncate text-[10px] text-muted-foreground" data-testid="price-card-label">
                       {r.cardLabel}
@@ -143,7 +140,7 @@ export function PriceList({
         })}
       </ul>
       {opened && (
-        <PriceDetail row={opened} rows={rows} evIndex={evIndex} keyOf={key} today={today} bought={boughtIds.has(opened.id)} best={best.has(opened.id)} onClose={() => setOpenId(null)} onBuy={onBuy} onEdit={onEdit} onDelete={onDelete} onConfirm={onConfirm} onSoldOut={onSoldOut} onEditCard={onEditCard} />
+        <PriceDetail row={opened} rows={rows} evIndex={evIndex} keyOf={key} today={today} bought={boughtIds.has(opened.id)} best={best.has(opened.id)} onClose={() => setOpenId(null)} onBuy={onBuy} onEdit={onEdit} onDelete={onDelete} onConfirm={onConfirm} onSoldOut={onSoldOut} />
       )}
     </div>
   );
@@ -164,7 +161,6 @@ function PriceDetail({
   onDelete,
   onConfirm,
   onSoldOut,
-  onEditCard,
 }: {
   row: WithStatus<PriceRow>;
   rows: PriceRow[];
@@ -179,7 +175,6 @@ function PriceDetail({
   onDelete: (r: PriceRow) => void;
   onConfirm?: (r: PriceRow) => Promise<string | null>;
   onSoldOut?: (r: PriceRow) => Promise<string | null>;
-  onEditCard?: (r: PriceRow) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -251,67 +246,58 @@ function PriceDetail({
               {error}
             </p>
           )}
-          <div className="flex flex-wrap gap-1.5">
-            {onConfirm && (
-              <Button size="sm" variant="outline" className="min-h-10" disabled={busy} onClick={() => void run(onConfirm)} data-testid="price-confirm">
-                {row.soldOut ? "更新（販売中に戻す）" : "更新"}
+          {/* 操作: 頻繁に使う「編集・更新・完売」を右側（親指の位置）、「この価格で購入・削除」を左側に置く */}
+          <div className="flex items-center justify-between gap-2" data-testid="price-actions">
+            <div className="flex gap-1.5" data-testid="price-actions-left">
+              <Button
+                size="sm"
+                className="min-h-10"
+                disabled={bought}
+                onClick={() => {
+                  onClose();
+                  onBuy(row);
+                }}
+                data-testid="price-buy"
+              >
+                {bought ? "購入済み" : "この価格で購入"}
               </Button>
-            )}
-            {onSoldOut && (
-              <Button size="sm" variant="outline" className="min-h-10" disabled={busy || row.soldOut} onClick={() => void run(onSoldOut)} data-testid="price-soldout">
-                完売
-              </Button>
-            )}
-            <Button
-              size="sm"
-              className="min-h-10"
-              disabled={bought}
-              onClick={() => {
-                onClose();
-                onBuy(row);
-              }}
-              data-testid="price-buy"
-            >
-              {bought ? "購入済み" : "この価格で購入"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="min-h-10"
-              onClick={() => {
-                onClose();
-                onEdit(row);
-              }}
-              data-testid="price-edit"
-            >
-              編集
-            </Button>
-            {onEditCard && (
               <Button
                 size="sm"
                 variant="outline"
                 className="min-h-10"
                 onClick={() => {
                   onClose();
-                  onEditCard(row);
+                  onDelete(row);
                 }}
-                data-testid="price-edit-card"
+                data-testid="price-delete"
               >
-                カード情報を編集
+                削除
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="min-h-10"
-              onClick={() => {
-                onClose();
-                onDelete(row);
-              }}
-              data-testid="price-delete"
-            >
-              削除
-            </Button>
+            </div>
+            <div className="flex gap-1.5" data-testid="price-actions-right">
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-h-10"
+                onClick={() => {
+                  onClose();
+                  onEdit(row);
+                }}
+                data-testid="price-edit"
+              >
+                編集
+              </Button>
+              {onConfirm && (
+                <Button size="sm" variant="outline" className="min-h-10" disabled={busy} onClick={() => void run(onConfirm)} data-testid="price-confirm">
+                  {row.soldOut ? "更新（販売中に戻す）" : "更新"}
+                </Button>
+              )}
+              {onSoldOut && (
+                <Button size="sm" variant="outline" className="min-h-10" disabled={busy || row.soldOut} onClick={() => void run(onSoldOut)} data-testid="price-soldout">
+                  完売
+                </Button>
+              )}
+            </div>
           </div>
         </SheetBody>
       </SheetContent>

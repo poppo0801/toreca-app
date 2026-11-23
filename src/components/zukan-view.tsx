@@ -8,6 +8,7 @@ import { recordEventAction } from "@/app/(app)/market-memo/daily-actions";
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DexImage } from "@/components/dex-image";
+import { useExpansionMasters } from "@/components/use-expansion-masters";
 import { CardIdentityFields } from "@/components/card-identity-fields";
 import { addPricesSequentially, jstToday, PriceForm, useStoreCandidates } from "@/components/price-form";
 import { PriceList, type PriceRow } from "@/components/price-list";
@@ -16,7 +17,7 @@ import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/
 import { cardKeyOf } from "@/lib/zukan/daily";
 import { dexLabel, pokemonOf } from "@/lib/zukan/pokemon151";
 import type { ZukanPriceRecord } from "@/lib/zukan/rows";
-import { ACQUIRE_LABEL, completeSetFromNumber, DEFAULT_RARITY, DEX_STATUS_LABEL, dexStatus, numberOptions, parseAmount, RANKS, resolveAcquire, setOptions, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type KnownCard, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
+import { ACQUIRE_LABEL, completeSetFromNumber, type PriceInput, DEFAULT_RARITY, DEX_STATUS_LABEL, dexStatus, numberOptions, parseAmount, RANKS, resolveAcquire, setOptions, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type KnownCard, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
 
 /**
@@ -183,7 +184,8 @@ function CardNameField({ v, onChange }: { v: CardInfo; onChange: (v: CardInfo) =
 
 /** 収録セット・番号・レア（任意。必須項目の下）。番号・レアは候補から選べる（先頭1文字から絞り込み・選ぶとセットとレアを補完・自由入力も可）。レアの初期値は AR */
 function CardDetailFields({ v, onChange, known }: { v: CardInfo; onChange: (v: CardInfo) => void; known: KnownCard[] }) {
-  return <CardIdentityFields v={v} onChange={(x) => onChange({ ...v, ...x })} known={known} ids={{ set: "price-card-set", number: "price-card-number", rarity: "price-card-rarity", setList: "zukan-set-options" }} />;
+  const masters = useExpansionMasters();
+  return <CardIdentityFields v={v} onChange={(x) => onChange({ ...v, ...x })} known={known} masters={masters} ids={{ set: "price-card-set", number: "price-card-number", rarity: "price-card-rarity", setList: "zukan-set-options" }} />;
 }
 
 /** ポケモン1匹の詳細（収集カード・価格調査） */
@@ -199,17 +201,26 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
     const rec = initialEditId ? data.prices.find((x) => x.id === initialEditId && x.dexNo === no) : undefined;
     return rec ? { rec } : null;
   });
-  // 登録済みのカード情報（カード名・収録セット・番号・レア）の編集。同じカードの記録すべてに反映する（履歴・購入との関連は変えない）
-  const [cardInfo, setCardInfo] = useState<{ rec: ZukanPriceRecord; form: CardInfo } | null>(null);
-  const [cardInfoError, setCardInfoError] = useState<string | null>(null);
   const [delCard, setDelCard] = useState<ZukanCard | null>(null);
   const [delPrice, setDelPrice] = useState<PriceRow | null>(null);
   const [buy, setBuy] = useState<PriceRow | null>(null);
   const bought = new Set(cards.map((c) => c.priceRecordId).filter((x): x is string => !!x));
   const cand = useStoreCandidates();
   const known = useMemo<KnownCard[]>(() => [...data.prices, ...data.cards].map((x) => ({ setName: x.setName, cardNumber: x.cardNumber, rarity: x.rarity, name: "cardName" in x ? x.cardName : "", usedAt: "createdAt" in x ? x.createdAt : "" })), [data.prices, data.cards]);
-  const [info, setInfo] = useState<CardInfo>({ cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY });
+  const [info, setInfo] = useState<CardInfo>(() => {
+    const rec = initialEditId ? data.prices.find((x) => x.id === initialEditId && x.dexNo === no) : undefined;
+    return rec ? { cardName: rec.cardName, setName: rec.setName, cardNumber: rec.cardNumber, rarity: rec.rarity } : { cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY };
+  });
 
+  /** 編集: 価格を更新し、カード情報（カード名・収録セット・番号・レア）が変わっていれば同じカードの価格記録すべてに反映する（履歴・購入との関連は変えない） */
+  const saveEdited = async (rec: ZukanPriceRecord, v: PriceInput) => {
+    const r = await updateZukanPriceAction(profileId, rec.id, v);
+    if (!r.ok) return r;
+    const same = info.cardName.trim() === rec.cardName && info.setName.trim() === rec.setName && info.cardNumber.trim() === rec.cardNumber && info.rarity.trim() === rec.rarity;
+    if (same) return r;
+    const c = await updateZukanCardInfoAction(profileId, rec.id, info);
+    return c.ok ? r : ({ ok: false, error: `価格は更新しました。カード情報は更新できませんでした: ${c.error}` } as const);
+  };
   const saveCard = async (f: CardForm): Promise<string | null> => {
     const amount = parseAmount(f.amount);
     const r = await saveZukanCardAction(profileId, editing?.id ?? null, {
@@ -303,7 +314,10 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
           <section aria-label="価格調査" className="space-y-1.5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold">価格調査</h3>
-              <Button size="sm" variant="outline" className="min-h-9" onClick={() => setPricing({ rec: null })} data-testid="price-add">
+              <Button size="sm" variant="outline" className="min-h-9" onClick={() => {
+                  setInfo({ cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY });
+                  setPricing({ rec: null });
+                }} data-testid="price-add">
                 <Plus className="size-4" aria-hidden="true" /> 価格を記録
               </Button>
             </div>
@@ -313,8 +327,8 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
                   initial={pricing.rec ? { storeName: pricing.rec.storeName, chainName: pricing.rec.chainName, surveyedOn: pricing.rec.surveyedOn, condition: pricing.rec.condition as never, price: String(pricing.rec.priceYen), note: pricing.rec.note } : undefined}
                   {...cand}
                   today={today}
-                  top={pricing.rec ? undefined : <CardNameField v={info} onChange={setInfo} />}
-                  optional={pricing.rec ? undefined : <CardDetailFields v={info} onChange={setInfo} known={known} />}
+                  top={<CardNameField v={info} onChange={setInfo} />}
+                  optional={<CardDetailFields v={info} onChange={setInfo} known={known} />}
                   submitLabel={pricing.rec ? "更新する" : "記録する"}
                   onCancel={() => setPricing(null)}
                   onSubmitBatch={async (items) => {
@@ -325,43 +339,13 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
                     return null;
                   }}
                   onSubmit={async (v) => {
-                    const r = pricing.rec ? await updateZukanPriceAction(profileId, pricing.rec.id, v) : await addZukanPriceAction(profileId, no, { cardName: info.cardName || p.name, setName: info.setName, cardNumber: info.cardNumber, rarity: info.rarity }, v);
+                    const r = pricing.rec ? await saveEdited(pricing.rec, v) : await addZukanPriceAction(profileId, no, { cardName: info.cardName || p.name, setName: info.setName, cardNumber: info.cardNumber, rarity: info.rarity }, v);
                     if (!r.ok) return r.error;
                     setPricing(null);
                     await reload();
                     return null;
                   }}
                 />
-              </div>
-            )}
-            {cardInfo && (
-              <div className="space-y-1.5 rounded-lg border p-2.5" data-testid="card-info-editor">
-                <p className="text-xs font-bold">登録済みのカード情報を編集（同じカードの価格記録すべてに反映）</p>
-                <CardNameField v={cardInfo.form} onChange={(f) => setCardInfo({ ...cardInfo, form: f })} />
-                <CardDetailFields v={cardInfo.form} onChange={(f) => setCardInfo({ ...cardInfo, form: f })} known={known} />
-                {cardInfoError && (
-                  <p role="alert" className="text-xs text-danger">
-                    {cardInfoError}
-                  </p>
-                )}
-                <div className="flex gap-2">
-                  <Button variant="outline" className="min-h-10 flex-1" onClick={() => setCardInfo(null)}>
-                    キャンセル
-                  </Button>
-                  <Button
-                    className="min-h-10 flex-1"
-                    data-testid="card-info-save"
-                    onClick={async () => {
-                      const res = await updateZukanCardInfoAction(profileId, cardInfo.rec.id, cardInfo.form);
-                      if (!res.ok) return setCardInfoError(res.error);
-                      setCardInfo(null);
-                      setCardInfoError(null);
-                      await reload();
-                    }}
-                  >
-                    保存
-                  </Button>
-                </div>
               </div>
             )}
             <PriceList
@@ -371,12 +355,12 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
               events={data.events}
               keyOf={(r) => `zukan:${r.id}`}
               onBuy={setBuy}
-              onEdit={(r) => setPricing({ rec: prices.find((x) => x.id === r.id) ?? null })}
-              onDelete={setDelPrice}
-              onEditCard={(r) => {
-                const rec = prices.find((x) => x.id === r.id);
-                if (rec) setCardInfo({ rec, form: { cardName: rec.cardName, setName: rec.setName, cardNumber: rec.cardNumber, rarity: rec.rarity } });
+              onEdit={(r) => {
+                const rec = prices.find((x) => x.id === r.id) ?? null;
+                if (rec) setInfo({ cardName: rec.cardName, setName: rec.setName, cardNumber: rec.cardNumber, rarity: rec.rarity });
+                setPricing({ rec });
               }}
+              onDelete={setDelPrice}
               onConfirm={async (r) => {
                 const res = await recordEventAction(profileId, [{ source: "zukan", id: r.id }], "confirmed");
                 if (!res.ok) return res.error;
@@ -429,7 +413,7 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
         <ConfirmDialog
           testId="buy"
           title="この価格で購入しますか？"
-          description={`${buy.storeName}で${yen(buy.priceYen)}（状態${buy.condition}）。図鑑の収集カードとして登録し、単品購入金額に加わります。価格調査の記録は残ります。`}
+          description={`${buy.storeName}で${yen(buy.priceYen)}（状態${buy.condition}）。図鑑の収集カードとして登録し、購入記録（シングルカード）・収支にも反映します（同じ日の購入は合算）。価格調査の記録は残ります。`}
           confirmLabel="購入して登録"
           onClose={() => setBuy(null)}
           onConfirm={async () => {

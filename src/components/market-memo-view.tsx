@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Loader2, Plus, Search, ShoppingBag } from "lucide-react";
 import { recordEventAction } from "@/app/(app)/market-memo/daily-actions";
 import { CardIdentityFields } from "@/components/card-identity-fields";
+import { useExpansionMasters } from "@/components/use-expansion-masters";
 import { MarketSortButton } from "@/components/market-sort-button";
 import { RankBadge } from "@/components/rank-badge";
 import { addMarketPriceAction, buyMarketFromPriceAction, createMarketCardAction, deleteMarketCardAction, deleteMarketPriceAction, loadMarketAction, updateMarketCardAction, updateMarketPriceAction, type MarketData } from "@/app/(app)/market-memo/actions";
@@ -67,9 +68,10 @@ function CardNameField({ v, onChange }: { v: CardFields; onChange: (v: CardField
  * 候補は登録済みのカードだけが根拠。レアリティの初期値は AR。
  */
 function CardDetailFields({ v, onChange, known }: { v: CardFields; onChange: (v: CardFields) => void; known: KnownCard[] }) {
+  const masters = useExpansionMasters();
   return (
     <div className="space-y-2" data-testid="market-card-fields">
-      <CardIdentityFields v={v} onChange={(x) => onChange({ ...v, ...x })} known={known} ids={{ set: "market-card-set", number: "market-card-number", rarity: "market-card-rarity", setList: "market-set-options" }} />
+      <CardIdentityFields v={v} onChange={(x) => onChange({ ...v, ...x })} known={known} masters={masters} ids={{ set: "market-card-set", number: "market-card-number", rarity: "market-card-rarity", setList: "market-set-options" }} />
       <label className="block text-sm">
         <span className="text-[13px] font-medium">補足（任意）</span>
         <input value={v.note} onChange={(e) => onChange({ ...v, note: e.target.value })} className={FIELD} maxLength={500} autoComplete="off" />
@@ -174,6 +176,8 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
     return rec ? { rec } : null;
   });
   const [editCard, setEditCard] = useState<CardFields | null>(null);
+  // 価格の編集に統合したカード情報（カード名・収録セット・番号・レア・補足）。価格が変わらなくてもカード情報だけ直せる
+  const [editInfo, setEditInfo] = useState<CardFields>({ name: card.name, setName: card.setName, cardNumber: card.cardNumber, rarity: card.rarity, note: card.note });
   const [delPrice, setDelPrice] = useState<PriceRow | null>(null);
   const [buy, setBuy] = useState<PriceRow | null>(null);
   const [delCard, setDelCard] = useState(false);
@@ -182,6 +186,16 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
   const submitPrice = async (v: PriceInput): Promise<string | null> => {
     const r = pricing?.rec ? await updateMarketPriceAction(profileId, pricing.rec.id, v) : await addMarketPriceAction(profileId, card.id, v);
     if (!r.ok) return r.error;
+    if (pricing?.rec) {
+      const same = editInfo.name.trim() === card.name && editInfo.setName.trim() === card.setName && editInfo.cardNumber.trim() === card.cardNumber && editInfo.rarity.trim() === card.rarity && editInfo.note.trim() === card.note;
+      if (!same) {
+        const c = await updateMarketCardAction(profileId, card.id, editInfo);
+        if (!c.ok) {
+          await reload();
+          return `価格は更新しました。カード情報は更新できませんでした: ${c.error}`;
+        }
+      }
+    }
     setPricing(null);
     await reload();
     return null;
@@ -212,9 +226,12 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
             <Button size="sm" className="min-h-9" onClick={() => setPricing({ rec: null })} data-testid="market-price-add">
               <Plus className="size-4" aria-hidden="true" /> 価格を記録
             </Button>
-            <Button size="sm" variant="outline" className="min-h-9" onClick={() => setEditCard({ name: card.name, setName: card.setName, cardNumber: card.cardNumber, rarity: card.rarity, note: card.note })}>
-              カード情報を編集
-            </Button>
+            {/* 価格の記録があるカードは、価格の詳細の「編集」でカード情報も変更できる。価格がまだ無いカードだけ、ここから編集する */}
+            {prices.length === 0 && (
+              <Button size="sm" variant="outline" className="min-h-9" onClick={() => setEditCard({ name: card.name, setName: card.setName, cardNumber: card.cardNumber, rarity: card.rarity, note: card.note })}>
+                カード情報を編集
+              </Button>
+            )}
             <Button size="sm" variant="outline" className="min-h-9" onClick={() => setDelCard(true)} data-testid="market-card-delete">
               カードを削除
             </Button>
@@ -246,6 +263,8 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
               initial={pricing.rec ? { storeName: pricing.rec.storeName, chainName: pricing.rec.chainName, surveyedOn: pricing.rec.surveyedOn, condition: pricing.rec.condition as never, price: String(pricing.rec.priceYen), note: pricing.rec.note } : undefined}
               {...cand}
               today={today}
+              top={pricing.rec ? <CardNameField v={editInfo} onChange={setEditInfo} /> : undefined}
+              optional={pricing.rec ? <CardDetailFields v={editInfo} onChange={setEditInfo} known={knownOf(data)} /> : undefined}
               submitLabel={pricing.rec ? "更新する" : "記録する"}
               onCancel={() => setPricing(null)}
               onSubmit={submitPrice}
@@ -265,7 +284,10 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
             events={data.events}
             keyOf={(r) => `market:${r.id}`}
             onBuy={setBuy}
-            onEdit={(r) => setPricing({ rec: r })}
+            onEdit={(r) => {
+              setEditInfo({ name: card.name, setName: card.setName, cardNumber: card.cardNumber, rarity: card.rarity, note: card.note });
+              setPricing({ rec: r });
+            }}
             onDelete={setDelPrice}
             onConfirm={async (r) => {
               const res = await recordEventAction(profileId, [{ source: "market", id: r.id }], "confirmed");
@@ -319,7 +341,7 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose, initia
         <ConfirmDialog
           testId="buy"
           title="この価格で購入しますか？"
-          description={`${buy.storeName}で${yen(buy.priceYen)}（状態${buy.condition}）。購入済みとして記録します。カードと価格の履歴は残ります。`}
+          description={`${buy.storeName}で${yen(buy.priceYen)}（状態${buy.condition}）。購入済みとして記録し、購入記録（シングルカード）・収支にも反映します（同じ日の購入は合算）。カードと価格の履歴は残ります。`}
           confirmLabel="購入して記録"
           onClose={() => setBuy(null)}
           onConfirm={async () => {
@@ -347,41 +369,48 @@ function CardRow({ card, top, count, purchased, onOpen, onAddPrice }: { card: Ma
   const storeLabel = top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}` : count > 0 ? "30日を超えた記録のみ" : "";
   return (
     <li data-testid="market-card" {...swipe}>
-      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[minmax(0,1fr)_3.25rem_auto] items-center rounded-xl border bg-card py-1.5 pl-2 pr-2.5 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
+      {/* 列は全行で固定幅: [カード名・店舗（伸縮）| レアリティ | 状態ランク | 価格]。店舗名が長くても右側の位置はずれない（横スクロールなし・店舗名は折り返して全文を出す） */}
+      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[minmax(0,1fr)_2.25rem_1.75rem_4.25rem] items-center gap-x-1.5 rounded-xl border bg-card py-1.5 pl-2 pr-2.5 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
         <span className="flex min-w-0 items-center gap-2" data-testid="market-card-summary" data-dex={dex?.no ?? ""}>
           {dex ? <DexImage no={dex.no} name={dex.name} className="size-10 shrink-0" /> : <span className="size-10 shrink-0" aria-hidden="true" />}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
-              <span className="min-w-0 truncate text-[15px] font-bold leading-tight" data-testid="market-card-name-text">
+              <span className="min-w-0 truncate text-sm font-bold leading-tight" data-testid="market-card-name-text">
                 {card.name}
               </span>
               {card.setName && (
-                <span className="max-w-[4.5rem] shrink-0 truncate rounded-md border border-muted-foreground/50 px-1.5 text-[11px] leading-[18px] text-muted-foreground" title={card.setName} data-testid="row-set">
+                <span className="max-w-[4.5rem] shrink-0 truncate rounded-md border border-muted-foreground/50 px-1.5 text-[10px] leading-4 text-muted-foreground" title={card.setName} data-testid="row-set">
                   {card.setName}
                 </span>
               )}
               {purchased && <span className="shrink-0 rounded border border-info px-1 text-[10px] text-info">購入済み</span>}
             </span>
             {storeLabel && (
-              <span className="mt-0.5 block truncate text-[13px] leading-tight text-muted-foreground" data-testid="market-card-store">
+              <span className="mt-0.5 line-clamp-2 break-words text-[11px] leading-[1.2] text-muted-foreground" data-testid="market-card-store">
+                {top?.soldOut && (
+                  <span className="mr-1 rounded border border-danger px-0.5 text-[9px] font-bold leading-3 text-danger" data-testid="row-soldout">
+                    完売
+                  </span>
+                )}
                 {storeLabel}
               </span>
             )}
           </span>
         </span>
-        <span className="mx-1 flex h-9 items-center justify-center border-x text-center text-[15px] font-extrabold" data-testid="row-rarity">
+        <span className="flex h-9 items-center justify-center border-x text-center text-sm font-extrabold" data-testid="row-rarity">
           {card.rarity}
         </span>
         {top ? (
-          <span className="flex items-center justify-end gap-1.5 pl-1.5">
-            {top.soldOut && <span className="rounded border border-danger px-1 text-[10px] font-bold leading-4 text-danger" data-testid="row-soldout">完売</span>}
-            <RankBadge rank={top.condition} className="h-6 min-w-[1.75rem] text-[13px]" />
-            <b className="min-w-[4.25rem] whitespace-nowrap text-right text-[15px] font-bold tabular-nums text-success" data-testid="market-card-best">
+          <>
+            <span className="flex justify-center" data-testid="row-rank">
+              <RankBadge rank={top.condition} className="h-6 min-w-[1.75rem] text-[13px]" />
+            </span>
+            <b className="whitespace-nowrap text-right text-[15px] font-bold tabular-nums text-success" data-testid="market-card-best">
               {yen(top.priceYen)}
             </b>
-          </span>
+          </>
         ) : (
-          <span className="pl-1.5 text-right text-xs text-muted-foreground">{count > 0 ? "参考のみ" : "価格なし"}</span>
+          <span className="col-span-2 text-right text-xs text-muted-foreground">{count > 0 ? "参考のみ" : "価格なし"}</span>
         )}
       </button>
     </li>

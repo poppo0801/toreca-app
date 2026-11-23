@@ -157,3 +157,13 @@ export function plannedTotals(rows: readonly DailyRow[]): { count: number; total
   const stores = [...new Set(planned.map((r) => `${r.chainName && !r.storeName.includes(r.chainName) ? r.chainName + " " : ""}${r.storeName}`))];
   return { count: planned.length, totalYen: planned.reduce((t, r) => t + r.priceYen, 0), soldOut: planned.filter((r) => r.soldOut).length, stores };
 }
+
+/**
+ * その日の結果の記録から、「更新」で再確認しただけの記録（調査日がその日ではない）のうち、同じ日に新規登録された記録と**同じ内容**（カード・系列＋店舗・状態・価格）のものを除く（同じ日の同一情報を重複表示しない）。
+ * 再確認の記録どうしの重複は同じ記録元なら別の記録として残る（mergeDaily と同じ扱い）。
+ */
+export function dropDuplicateConfirmations(records: readonly DailyRecord[], day: string): DailyRecord[] {
+  const dupOf = (r: DailyRecord) => `${cardKeyOf(r)}#${storeKeyOf(r)}#${r.condition}#${r.priceYen}`;
+  const fresh = new Set(records.filter((r) => r.surveyedOn === day).map(dupOf));
+  return records.filter((r) => r.surveyedOn === day || !fresh.has(dupOf(r)));
+}

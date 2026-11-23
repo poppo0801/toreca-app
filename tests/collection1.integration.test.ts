@@ -161,8 +161,10 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     expect(((await u2.from("market_prices").select("id")).data ?? []).length).toBe(0);
     const anyPrice = (await u1.from("market_prices").select("id").limit(1)).data as { id: string }[];
     expect((await u2.rpc("market_buy_from_price_tx", { p_price: anyPrice[0].id, p_purchased_on: "2026-11-10" })).error).not.toBeNull();
-    // 二重計上防止: 既存の購入記録・コレクションの表は、この機能では増えない
-    expect(((await u1.from("purchases").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
+    // 個別購入は購入記録（シングルカード）へ反映される（同じ購入者・購入日は合算。この世帯の購入は日付の違う2件の購入記録のみ）。コレクション・カードマスターは増えない
+    const pur = ((await u1.from("purchases").select("category").eq("household_id", hid)).data ?? []) as { category: string }[];
+    expect(pur.length).toBe(2);
+    expect(pur.every((p) => p.category === "single_card")).toBe(true);
     expect(((await u1.from("card_holdings").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
     expect(((await u1.from("card_masters").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
   });

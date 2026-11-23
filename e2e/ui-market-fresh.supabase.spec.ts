@@ -110,8 +110,21 @@ test("相場管理の機能改善: 固定ヘッダー・候補選択・最新/�
   await num.fill("100");
   await page.getByTestId("market-card-number-option").first().dispatchEvent("pointerdown");
   await expect(num).toHaveValue("100/106");
-  await expect(page.getByTestId("market-card-set")).toHaveValue("SV8"); // 補完
-  await expect(page.getByTestId("market-card-rarity")).toHaveValue("SAR");
+  await expect(page.getByTestId("market-card-set")).toHaveValue("SV8"); // 既知のカードから収録セットを補完（一意）
+  await expect(page.getByTestId("market-card-rarity")).toHaveValue("AR"); // レアリティは番号と独立（変わらない）
+  // 収録パックマスター: 番号（エキスパンションマーク）から収録セットを補完。収録セットが空のときだけ
+  await page.getByTestId("market-card-set").fill("");
+  await num.fill("SV2a");
+  await expect(page.getByTestId("market-card-set")).toHaveValue("ポケモンカード151");
+  await num.fill("SV8");
+  await expect(page.getByTestId("market-card-set")).toHaveValue("超電ブレイカー"); // 自動入力した値は番号の変更に追従
+  await page.getByTestId("market-card-set").fill("自分のセット");
+  await num.fill("SV2a");
+  await expect(page.getByTestId("market-card-set")).toHaveValue("自分のセット"); // 入力済みの値は上書きしない
+  await expect(page.getByTestId("set-conflict")).toBeVisible();
+  await page.getByTestId("market-card-set").fill("");
+  await num.fill("SV9");
+  await expect(page.getByTestId("market-card-set")).toHaveValue("バトルパートナーズ"); // 複数候補の選択肢はマスターに該当が出たときに表示（単体テストで確認）
   await num.fill("999/999"); // 一覧に無い番号は自由入力
   await expect(page.getByTestId("market-card-number-option")).toHaveCount(0);
   await expect(num).toHaveValue("999/999");
@@ -126,11 +139,12 @@ test("相場管理の機能改善: 固定ヘッダー・候補選択・最新/�
   await expect(page.getByTestId("zukan-toolbar")).toBeVisible();
   await page.locator('[data-testid="zukan-item"][data-no="25"]').click();
   await page.getByTestId("price-row").first().click();
-  await page.getByTestId("price-edit-card").click();
+  await expect(page.getByTestId("price-edit-card")).toHaveCount(0); // 独立ボタンは無く、「編集」に統合
+  await page.getByTestId("price-edit").click();
   await page.getByTestId("price-card-name").fill("ピカチュウex（改）");
   await page.getByTestId("price-card-rarity").fill("UR");
-  await page.getByTestId("card-info-save").click();
-  await expect(page.getByTestId("card-info-editor")).toHaveCount(0);
+  await page.getByTestId("price-submit").click();
+  await expect(page.getByTestId("price-form")).toHaveCount(0);
   const z = await a.from("zukan_price_records").select("card_name,rarity,price_yen,store_name").eq("household_id", hid);
   expect(z.data).toEqual([{ card_name: "ピカチュウex（改）", rarity: "UR", price_yen: 4000, store_name: "難波店" }]); // 価格・店舗は不変
   await page.keyboard.press("Escape");

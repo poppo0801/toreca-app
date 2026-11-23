@@ -287,7 +287,7 @@ export interface NumberCandidate {
   name: string;
   usedAt: string;
 }
-const nkey = (v: string): string => v.normalize("NFKC").replace(/[s　]+/g, "").toLowerCase();
+const nkey = (v: string): string => v.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 /**
  * 番号の候補を、入力の先頭から絞り込む（先頭1文字から即時。全角・半角・大小・空白の揺れを吸収）。同じ（番号・セット・レアリティ）は1つにまとめ、
  * 最近使ったものを先に出す。番号だけで収録セットが一意に決まらないときは、同じ番号の候補が複数並ぶ（利用者が選ぶ）。番号の無い記録は候補にしない。

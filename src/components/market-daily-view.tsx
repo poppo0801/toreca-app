@@ -215,10 +215,10 @@ export function MarketDailyView() {
           <div className="space-y-2" data-testid="daily-list">
             {groups.map((g) => (
               <section key={g.key} className="overflow-hidden rounded-xl border bg-card" data-testid="daily-group">
-                <GroupHead g={g} onCompare={() => g.card && setCompare({ cardName: g.card.name, setName: g.card.setName, cardNumber: g.card.cardNumber, rarity: g.card.rarity })} />
+                <GroupHead g={g} disabled={plannedOnly} onCompare={() => g.card && setCompare({ cardName: g.card.name, setName: g.card.setName, cardNumber: g.card.cardNumber, rarity: g.card.rarity })} />
                 <ul className="divide-y">
                   {g.rows.map((r) => (
-                    <DailyItem key={r.key} row={r} mode={mode} onToggle={() => tapRow(r)} onDetail={() => setDetail(r)} onCompare={() => setCompare(cardOf(r))} />
+                    <DailyItem key={r.key} row={r} mode={mode} day={day} plannedOnly={plannedOnly} onToggle={() => tapRow(r)} onDetail={() => setDetail(r)} onCompare={() => setCompare(cardOf(r))} />
                   ))}
                 </ul>
               </section>
@@ -233,17 +233,19 @@ export function MarketDailyView() {
       )}
 
       {/* 購入予定のみの画面: 枚数・合計金額・一括購入を下部（下部メニューの直上）に固定表示 */}
-      {plannedOnly && data && <div className="h-20" aria-hidden="true" />}
+      {plannedOnly && data && <div className="h-16" aria-hidden="true" />}
       {plannedOnly && data && (
         <div className="fixed inset-x-0 z-20 border-t bg-card shadow-card" style={{ bottom: navBottom }} data-testid="daily-planned-bar">
           <div className="mx-auto flex w-full max-w-5xl items-center gap-2 px-3 py-2 md:px-6">
-          <div className="min-w-0 flex-1 leading-tight">
-            <p className="text-[11px] text-muted-foreground">購入予定 <b className="text-sm text-foreground" data-testid="daily-planned-bar-count">{totals.count}</b>枚</p>
-            <p className="text-base font-bold tabular-nums" data-testid="daily-planned-bar-total">
-              {yen(totals.totalYen)}
-            </p>
-          </div>
-          <Button className="min-h-11 shrink-0 px-5" disabled={totals.count === 0} onClick={() => setBulk(true)} data-testid="daily-bulk-open">
+          <p className="flex min-w-0 flex-1 items-baseline gap-x-2 whitespace-nowrap text-xs text-muted-foreground" data-testid="daily-planned-line">
+            <span>
+              購入予定 <b className="text-sm text-foreground" data-testid="daily-planned-bar-count">{totals.count}</b>枚
+            </span>
+            <span className="min-w-0 truncate">
+              合計 <b className="text-sm tabular-nums text-foreground" data-testid="daily-planned-bar-total">{yen(totals.totalYen)}</b>
+            </span>
+          </p>
+          <Button className="min-h-10 shrink-0 px-4" disabled={totals.count === 0} onClick={() => setBulk(true)} data-testid="daily-bulk-open">
             一括購入
           </Button>
           </div>
@@ -284,12 +286,13 @@ export function MarketDailyView() {
 }
 
 /** カードのグループ見出し: カード名・画像のタップで相場比較表。店舗別のグループ見出し（店舗名）は操作なし */
-function GroupHead({ g, onCompare }: { g: DailyGroup; onCompare: () => void }) {
+function GroupHead({ g, onCompare, disabled = false }: { g: DailyGroup; onCompare: () => void; disabled?: boolean }) {
   if (!g.card) return <h2 className="border-b bg-muted/40 px-2.5 py-1 text-[13px] font-bold">{g.title}</h2>;
   const dex = matchPokemonByCardName(g.card.name);
   return (
     <h2 className="border-b bg-muted/40 text-sm font-bold" data-testid="daily-group-head">
-      <button type="button" onClick={onCompare} className="flex min-h-11 w-full items-center gap-2 py-1 pl-2 pr-2.5 text-left" aria-label={`${g.card.name}の相場比較表を開く`} data-testid="daily-compare">
+      {/* 購入予定のみの画面では、行のタップ（解除）を優先するため、相場比較表を開く操作は無効（通常の一覧で開く） */}
+      <button type="button" onClick={onCompare} disabled={disabled} className="flex min-h-11 w-full items-center gap-2 py-1 pl-2 pr-2.5 text-left disabled:opacity-100" aria-label={`${g.card.name}の相場比較表を開く`} data-testid="daily-compare">
         {dex ? <DexImage no={dex.no} name={dex.name} className="size-8" /> : <span className="size-8 shrink-0" aria-hidden="true" />}
         <span className="min-w-0 flex-1 truncate">{g.card.name}</span>
         {g.card.setName && <span className="max-w-[5rem] shrink-0 truncate rounded-md border border-muted-foreground/50 px-1.5 text-[11px] font-normal leading-[18px] text-muted-foreground">{g.card.setName}</span>}
@@ -304,7 +307,23 @@ function GroupHead({ g, onCompare }: { g: DailyGroup; onCompare: () => void }) {
  * 一覧の1行。領域を分ける: [カード名（店舗別のときだけ。相場比較表）] [価格・店舗（購入予定のON/OFF）] [ⓘ（記録の詳細）]。
  * 完売は「完売」バッジ（購入予定への新規追加は不可。既に購入予定なら背景は残し、完売を明示）。購入済みは「購入済み」。
  */
-function DailyItem({ row, mode, onToggle, onDetail, onCompare }: { row: DailyRow; mode: "card" | "store"; onToggle: () => void; onDetail: () => void; onCompare: () => void }) {
+function DailyItem({ row, mode, day, plannedOnly, onToggle, onDetail, onCompare }: { row: DailyRow; mode: "card" | "store"; day: string; plannedOnly: boolean; onToggle: () => void; onDetail: () => void; onCompare: () => void }) {
+  const refreshed = !!row.surveyedOn && row.surveyedOn !== day;
+  if (plannedOnly) {
+    // 購入予定のみの画面: 行のどこをタップしても購入予定の解除（確認つき）。比較表・詳細を開く操作は無効にして誤操作を防ぐ
+    return (
+      <li className={cn(row.planned && PLANNED_BG, row.soldOut && "opacity-80")} data-testid="daily-row" data-planned={row.planned ? "1" : "0"} data-soldout={row.soldOut ? "1" : "0"} data-key={row.key}>
+        <button type="button" onClick={onToggle} aria-label={`購入予定を解除: ${row.cardName} ${storeLabel(row)} ${row.condition} ${yen(row.priceYen)}`} className="flex min-h-11 w-full items-center gap-2 py-1.5 pl-2.5 pr-3 text-left" data-testid="daily-toggle">
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-tight" data-testid="daily-row-label">
+            {mode === "store" ? <><b>{row.cardName}</b>{row.setName ? ` ${row.setName}` : ""}{row.rarity ? ` ${row.rarity}` : ""}</> : storeLabel(row)}
+          </span>
+          {row.soldOut && <span className="shrink-0 rounded border border-danger px-1 text-[10px] font-bold leading-4 text-danger" data-testid="daily-soldout">完売</span>}
+          <RankBadge rank={row.condition} className="h-6 min-w-[1.75rem] text-[13px]" />
+          <b className="min-w-[4.25rem] whitespace-nowrap text-right text-[15px] font-bold tabular-nums text-success" data-testid="daily-row-price">{yen(row.priceYen)}</b>
+        </button>
+      </li>
+    );
+  }
   return (
     <li className={cn("flex items-stretch", row.planned && PLANNED_BG, row.soldOut && "opacity-80")} data-testid="daily-row" data-planned={row.planned ? "1" : "0"} data-soldout={row.soldOut ? "1" : "0"} data-key={row.key}>
       {mode === "store" && (
@@ -327,6 +346,11 @@ function DailyItem({ row, mode, onToggle, onDetail, onCompare }: { row: DailyRow
         {mode === "card" && (
           <span className="min-w-0 flex-1 truncate text-[13px] leading-tight" data-testid="daily-row-label">
             {storeLabel(row)}
+          </span>
+        )}
+        {refreshed && (
+          <span className="shrink-0 rounded border border-info px-1 text-[10px] leading-4 text-info" data-testid="daily-refreshed">
+            更新
           </span>
         )}
         {row.soldOut && (
@@ -435,7 +459,7 @@ function BulkBuyDialog({ rows, totals, profileId, today, onClose, onDone }: { ro
     <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
       <DialogContent data-testid="bulk-dialog">
         <DialogTitle>購入予定をまとめて購入</DialogTitle>
-        <DialogDescription>購入予定のカードをまとめて購入として記録します。調整はマークの解除で行ってください。</DialogDescription>
+        <DialogDescription>購入予定のカードをまとめて購入として記録します（同じ日の既存のシングルカード購入記録には合算）。調整はマークの解除で行ってください。</DialogDescription>
         <dl className="mt-2 grid grid-cols-[4.5rem_1fr] gap-y-1 text-sm" data-testid="bulk-summary">
           <dt className="text-muted-foreground">枚数</dt>
           <dd className="font-bold" data-testid="bulk-count">{totals.count}枚</dd>
