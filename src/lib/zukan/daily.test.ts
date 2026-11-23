@@ -137,14 +137,14 @@ describe("並び替えの追加（価格降順・レアリティ順・循環）"
     expect(sortMarketCards(cards, prices, "rarity", "2026-11-22").map((c) => c.id)).toEqual(["4", "2", "1", "5", "3"]);
     expect(rarityOrder("sar")).toBeLessThan(rarityOrder("R"));
   });
-  it("通常タップの循環は指定の順序。長押しの一覧には全項目（図鑑No順を含む）", () => {
-    expect(MARKET_SORT_ORDER).toEqual(["new", "priceDesc", "priceAsc", "condition", "rarity", "kana"]);
+  it("通常タップの循環は指定の順序（新着→図鑑番号→価格降順→価格昇順→状態→レアリティ→五十音）。長押しの一覧には全項目", () => {
+    expect(MARKET_SORT_ORDER).toEqual(["new", "dex", "priceDesc", "priceAsc", "condition", "rarity", "kana"]);
     let m = MARKET_SORT_ORDER[0];
     const seen = [m];
-    for (let i = 0; i < 6; i++) seen.push((m = nextMarketSort(m)));
-    expect(seen).toEqual(["new", "priceDesc", "priceAsc", "condition", "rarity", "kana", "new"]);
-    expect(MARKET_SORT_MENU).toEqual([...MARKET_SORT_ORDER, "dex"]);
-    expect(nextMarketSort("dex")).toBe("new"); // 一覧から図鑑No順を選んだ後のタップは、循環の先頭へ
+    for (let i = 0; i < 7; i++) seen.push((m = nextMarketSort(m)));
+    expect(seen).toEqual(["new", "dex", "priceDesc", "priceAsc", "condition", "rarity", "kana", "new"]);
+    expect(MARKET_SORT_MENU).toEqual([...MARKET_SORT_ORDER]); // 長押しの一覧は全項目
+    expect(nextMarketSort("kana")).toBe("new");
     expect(marketSortHeading("priceDesc")).toBe("価格の高い順 ↓");
   });
 });

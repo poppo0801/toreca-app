@@ -52,15 +52,15 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
   await a.from("zukan_cards").insert(z({ dex_no: 25, card_name: "ピカチュウ", quantity: 1, acquire_method: "pack_opening" }) as never);
   await a.from("zukan_price_records").insert([
     z({ dex_no: 6, card_name: "リザードン", set_name: "テストセット", card_number: "006/078", rarity: "AR", store_name: "新宿店", chain_name: "テスト系列", surveyed_on: new Date().toISOString().slice(0, 10), condition: "A", price_yen: 1200 }),
-    z({ dex_no: 6, card_name: "リザードン", set_name: "テストセット", card_number: "006/078", rarity: "AR", store_name: "渋谷店", chain_name: "別の系列", surveyed_on: "2026-01-05", condition: "B", price_yen: 800 }),
+    z({ dex_no: 6, card_name: "リザードン", set_name: "テストセット", card_number: "006/078", rarity: "AR", store_name: "渋谷店", chain_name: "別の系列", surveyed_on: "2026-01-05", condition: "C", price_yen: 800 }),
   ] as never);
   const mc = await a.from("market_cards").insert({ household_id: hid, profile_id: pid, name: "リザードンex", set_name: "スカーレットex", card_number: "006/078", rarity: "AR" } as never).select("id").single();
   const mc2 = await a.from("market_cards").insert({ household_id: hid, profile_id: pid, name: "ピカチュウ", set_name: "151", card_number: "025/165", rarity: "AR" } as never).select("id").single();
   const day = new Date().toISOString().slice(0, 10);
   const extra = [
     { name: "オドリドリex", store: "トレカキャピタル 新宿西口本店（ポケモンカード専門館）", chain: "トレカキャピタル", cond: "A", yen: 2480 },
-    { name: "ミロカロス", store: "カードラボ 秋葉原店", chain: "カードラボ", cond: "A+", yen: 980 },
-    { name: "ブルンゲルex", store: "ドラゴンスター 渋谷スクランブル交差点前店", chain: "ドラゴンスター", cond: "B+", yen: 1500 },
+    { name: "ミロカロス", store: "カードラボ 秋葉原店", chain: "カードラボ", cond: "S", yen: 980 },
+    { name: "ブルンゲルex", store: "ドラゴンスター 渋谷スクランブル交差点前店", chain: "ドラゴンスター", cond: "B", yen: 1500 },
     { name: "ハイパーボール", store: "短い店", chain: "系列", cond: "A", yen: 100 },
   ];
   for (const [i, c] of extra.entries()) {
@@ -68,7 +68,7 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
     await a.from("market_prices").insert({ household_id: hid, profile_id: pid, card_id: r.data!.id, store_name: c.store, chain_name: c.chain, surveyed_on: day, condition: c.cond, price_yen: c.yen, memo: "" } as never);
   }
   await a.from("market_prices").insert([
-    { household_id: hid, profile_id: pid, card_id: mc.data!.id, store_name: "新宿店", chain_name: "テスト系列", surveyed_on: day, condition: "A+", price_yen: 1500, memo: "備考の例" },
+    { household_id: hid, profile_id: pid, card_id: mc.data!.id, store_name: "新宿店", chain_name: "テスト系列", surveyed_on: day, condition: "S", price_yen: 1500, memo: "備考の例" },
     { household_id: hid, profile_id: pid, card_id: mc.data!.id, store_name: "渋谷店", chain_name: "別の系列", surveyed_on: "2026-01-05", condition: "A", price_yen: 1200, memo: "" },
     { household_id: hid, profile_id: pid, card_id: mc2.data!.id, store_name: "新宿店", chain_name: "テスト系列", surveyed_on: day, condition: "A", price_yen: 300, memo: "" },
   ] as never);
@@ -125,6 +125,8 @@ test("UI監査: 151図鑑・相場調査メモ（390px実画面）", async ({ pa
     await page.getByTestId("market-sort-option").and(page.locator(`[data-sort="${sortId}"]`)).click();
   };
   const priceNums = async () => (await page.getByTestId("market-card-best").allTextContents()).map((t) => Number(t.replace(/[^0-9]/g, "")));
+  await page.getByTestId("market-sort").click();
+  await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "dex"); // 新着順の次は図鑑番号順
   await page.getByTestId("market-sort").click();
   await expect(page.getByTestId("market-sort")).toHaveAttribute("data-sort", "priceDesc");
   await expect(page.getByTestId("market-sort-heading")).toHaveText("価格の高い順 ↓");

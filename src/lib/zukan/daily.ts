@@ -21,6 +21,14 @@ export interface DailyRecord {
   priceYen: number;
   note: string;
   createdAt: string;
+  /** 調査日（日本時間）。日別・相場比較で「その時点の情報」を再現するのに使う */
+  surveyedOn?: string;
+  /** その日（対象日の終わり）時点で完売か。後日の完売の記録で、過去の日の表示は変わらない */
+  soldOut?: boolean;
+  /** 最後に確認した日（調査日・更新の新しい方） */
+  lastConfirmedOn?: string;
+  /** すでに購入済み（151図鑑の収集カード・相場調査メモの購入記録がある） */
+  purchased?: boolean;
 }
 export interface DailyRef {
   source: DailySource;
@@ -42,6 +50,10 @@ export interface DailyRow {
   note: string;
   createdAt: string;
   planned: boolean;
+  surveyedOn: string;
+  soldOut: boolean;
+  lastConfirmedOn: string;
+  purchased: boolean;
 }
 
 const nk = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
@@ -68,6 +80,8 @@ export function mergeDaily(records: readonly DailyRecord[], plannedRefs: Readonl
       if (!cur.refs.some((x) => x.source === r.source)) {
         cur.refs.push(ref);
         cur.planned = cur.planned || marked;
+        cur.soldOut = cur.soldOut || !!r.soldOut;
+        cur.purchased = cur.purchased || !!r.purchased;
         continue;
       }
       byKey.set(`${dup}#${r.source}:${r.id}`, rowOf(r, ck, ref, marked));
@@ -77,7 +91,7 @@ export function mergeDaily(records: readonly DailyRecord[], plannedRefs: Readonl
   }
   return [...byKey.values()];
 }
-const rowOf = (r: DailyRecord, ck: string, ref: DailyRef, marked: boolean): DailyRow => ({ key: `${ref.source}:${ref.id}`, refs: [ref], cardKey: ck, cardName: r.cardName, setName: r.setName, cardNumber: r.cardNumber, rarity: r.rarity, chainName: r.chainName, storeName: r.storeName, condition: r.condition, priceYen: r.priceYen, note: r.note, createdAt: r.createdAt, planned: marked });
+const rowOf = (r: DailyRecord, ck: string, ref: DailyRef, marked: boolean): DailyRow => ({ key: `${ref.source}:${ref.id}`, refs: [ref], cardKey: ck, cardName: r.cardName, setName: r.setName, cardNumber: r.cardNumber, rarity: r.rarity, chainName: r.chainName, storeName: r.storeName, condition: r.condition, priceYen: r.priceYen, note: r.note, createdAt: r.createdAt, planned: marked, surveyedOn: r.surveyedOn ?? "", soldOut: !!r.soldOut, lastConfirmedOn: r.lastConfirmedOn ?? r.surveyedOn ?? "", purchased: !!r.purchased });
 
 export interface DailyFilter {
   /** 空なら全ての状態 */
@@ -136,3 +150,10 @@ export const isDay = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && sh
 
 /** 購入予定マークが有効か（マークした日が今日＝日本時間の当日。翌日以降は無効） */
 export const markActive = (markedOn: string, today: string): boolean => markedOn === today;
+
+/** 購入予定の合計（表示中の行）。同じ調査記録が両方の記録元にあっても、統合済みの1行は1枚として数える（二重計上しない） */
+export function plannedTotals(rows: readonly DailyRow[]): { count: number; totalYen: number; soldOut: number; stores: string[] } {
+  const planned = rows.filter((r) => r.planned);
+  const stores = [...new Set(planned.map((r) => `${r.chainName && !r.storeName.includes(r.chainName) ? r.chainName + " " : ""}${r.storeName}`))];
+  return { count: planned.length, totalYen: planned.reduce((t, r) => t + r.priceYen, 0), soldOut: planned.filter((r) => r.soldOut).length, stores };
+}

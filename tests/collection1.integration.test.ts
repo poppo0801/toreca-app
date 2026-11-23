@@ -59,7 +59,7 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     // 範囲外・不正
     expect((await ins(u1, "zukan_cards", zc({ dex_no: 152 }))).error).not.toBeNull();
     expect((await ins(u1, "zukan_cards", zc({ dex_no: 0 }))).error).not.toBeNull();
-    expect((await ins(u1, "zukan_cards", zc({ condition: "S" }))).error).not.toBeNull();
+    expect((await ins(u1, "zukan_cards", zc({ condition: "A+" }))).error).not.toBeNull();
     expect((await ins(u1, "zukan_cards", zc({ quantity: 0 }))).error).not.toBeNull();
   });
 
@@ -112,10 +112,10 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     expect(kept.price_record_id).toBeNull();
     expect(kept.purchase_amount_yen).toBe(1500);
     // 他の世帯の価格記録は購入できない
-    const foreign = await ins(u2, "zukan_price_records", { household_id: hid2, profile_id: pOther, dex_no: 1, card_name: "フシギダネ", store_name: "他店", condition: "B", price_yen: 100 });
+    const foreign = await ins(u2, "zukan_price_records", { household_id: hid2, profile_id: pOther, dex_no: 1, card_name: "フシギダネ", store_name: "他店", condition: "C", price_yen: 100 });
     expect((await u1.rpc("zukan_buy_from_price_tx", { p_price: foreign.data!.id as string, p_acquired_on: "2026-11-11" })).error).not.toBeNull();
     // 状態ランク・価格の制約
-    expect((await ins(u1, "zukan_price_records", { household_id: hid, profile_id: pA, dex_no: 6, card_name: "x", store_name: "s", condition: "D", price_yen: 1 })).error).not.toBeNull();
+    expect((await ins(u1, "zukan_price_records", { household_id: hid, profile_id: pA, dex_no: 6, card_name: "x", store_name: "s", condition: "A+", price_yen: 1 })).error).not.toBeNull();
     expect((await ins(u1, "zukan_price_records", { household_id: hid, profile_id: pA, dex_no: 6, card_name: "x", store_name: "s", condition: "A", price_yen: -1 })).error).not.toBeNull();
   });
 
@@ -131,13 +131,13 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "ピカチュウ" })).error).toBeNull();
     expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "ピカチュウ" })).error).toBeNull();
     const mk = (store: string, cond: string, price: number, day: string) => ins(u1, "market_prices", { household_id: hid, profile_id: pA, card_id: cid, store_name: store, surveyed_on: day, condition: cond, price_yen: price });
-    const a = await mk("A店", "B", 800, "2026-11-01");
-    await mk("B店", "A+", 1500, "2026-11-02");
+    const a = await mk("A店", "C", 800, "2026-11-01");
+    await mk("B店", "S", 1500, "2026-11-02");
     await mk("A店", "A", 1000, "2026-11-08"); // 同じ店舗の再調査（履歴として残る）
     await mk("C店", "A", 900, "2026-11-09");
     const prices = ((await u1.from("market_prices").select("*").eq("card_id", cid)).data ?? []).map((r: Record<string, unknown>) => toMarketPrice(r));
     expect(prices).toHaveLength(4);
-    expect(sortPrices(prices, "condition").map((p) => `${p.condition}:${p.priceYen}`)).toEqual(["A+:1500", "A:900", "A:1000", "B:800"]);
+    expect(sortPrices(prices, "condition").map((p) => `${p.condition}:${p.priceYen}`)).toEqual(["S:1500", "A:900", "A:1000", "C:800"]);
     expect(sortPrices(prices, "price").map((p) => p.priceYen)).toEqual([800, 900, 1000, 1500]);
     expect(prices.filter((p: { storeName: string }) => p.storeName === "A店")).toHaveLength(2);
     // 価格の制約
@@ -148,7 +148,7 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     const buy = await u1.rpc("market_buy_from_price_tx", { p_price: a.data!.id as string, p_purchased_on: "2026-11-10" });
     expect(buy.error).toBeNull();
     const pur = (await u1.from("market_purchases").select("*").eq("id", buy.data as string).single()).data as Record<string, unknown>;
-    expect(pur).toMatchObject({ card_id: cid, price_id: a.data!.id, purchased_on: "2026-11-10", store_name: "A店", price_yen: 800, condition: "B" });
+    expect(pur).toMatchObject({ card_id: cid, price_id: a.data!.id, purchased_on: "2026-11-10", store_name: "A店", price_yen: 800, condition: "C" });
     expect((await u1.rpc("market_buy_from_price_tx", { p_price: a.data!.id as string, p_purchased_on: "2026-11-11" })).error?.code).toBe("23505");
     expect(((await u1.from("market_purchases").select("id").eq("price_id", a.data!.id as string)).data ?? []).length).toBe(1);
     expect((await u1.from("market_prices").delete().eq("id", a.data!.id as string)).error?.code).toBe("23503"); // 購入済みの価格記録は削除不可

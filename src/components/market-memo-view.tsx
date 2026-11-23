@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Loader2, Plus, Search, ShoppingBag } from "lucide-react";
+import { recordEventAction } from "@/app/(app)/market-memo/daily-actions";
+import { CardIdentityFields } from "@/components/card-identity-fields";
 import { MarketSortButton } from "@/components/market-sort-button";
 import { RankBadge } from "@/components/rank-badge";
 import { addMarketPriceAction, buyMarketFromPriceAction, createMarketCardAction, deleteMarketCardAction, deleteMarketPriceAction, loadMarketAction, updateMarketCardAction, updateMarketPriceAction, type MarketData } from "@/app/(app)/market-memo/actions";
@@ -12,6 +15,7 @@ import { addPricesSequentially, jstToday, PriceForm, useStoreCandidates } from "
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { activityOf, currentWithStatus, displayPrices, indexEvents } from "@/lib/zukan/freshness";
 import { matchPokemonByCardName, pokemonMaster } from "@/lib/zukan/pokemon-match";
 import type { MarketCard } from "@/lib/zukan/rows";
 import { cheapestRecord, completeSetFromNumber, DEFAULT_RARITY, numberOptions, setOptions, sortMarketCards, type KnownCard, type MarketSort, type PriceInput } from "@/lib/zukan/zukan";
@@ -59,44 +63,16 @@ function CardNameField({ v, onChange }: { v: CardFields; onChange: (v: CardField
 }
 
 /**
- * 収録セット・番号・レアリティ・補足（任意）。収録セットとカード番号は**相互補完**: 番号を入力するとき、その番号を持つ既知のカードのセットが1種類だけなら、空のセットに自動で入る。
- * セットを選ぶと、そのセットの既知の番号が候補に出る。レアリティの初期値は AR。既存の候補から選べ、候補が無ければ手入力。
+ * 収録セット・番号・レアリティ・補足（任意）。番号・レアは候補から選べる（タップで一覧・先頭1文字から絞り込み・選ぶとセットとレアを補完・自由入力も可）。
+ * 候補は登録済みのカードだけが根拠。レアリティの初期値は AR。
  */
 function CardDetailFields({ v, onChange, known }: { v: CardFields; onChange: (v: CardFields) => void; known: KnownCard[] }) {
-  const set = (k: keyof CardFields, val: string) => onChange({ ...v, [k]: val });
-  const onNumber = (val: string) => {
-    const guess = !v.setName.trim() ? completeSetFromNumber(known, val) : null;
-    onChange({ ...v, cardNumber: val, ...(guess ? { setName: guess } : {}) });
-  };
   return (
-    <div className="grid grid-cols-2 gap-2" data-testid="market-card-fields">
+    <div className="space-y-2" data-testid="market-card-fields">
+      <CardIdentityFields v={v} onChange={(x) => onChange({ ...v, ...x })} known={known} ids={{ set: "market-card-set", number: "market-card-number", rarity: "market-card-rarity", setList: "market-set-options" }} />
       <label className="block text-sm">
-        <span className="text-[13px] font-medium">収録セット（任意）</span>
-        <input value={v.setName} onChange={(e) => set("setName", e.target.value)} list="market-set-options" className={FIELD} maxLength={120} autoComplete="off" data-testid="market-card-set" />
-        <datalist id="market-set-options">
-          {setOptions(known).map((x) => (
-            <option key={x} value={x} />
-          ))}
-        </datalist>
-      </label>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block text-sm">
-          <span className="text-[13px] font-medium">番号</span>
-          <input value={v.cardNumber} onChange={(e) => onNumber(e.target.value)} list="market-number-options" className={FIELD} maxLength={20} autoComplete="off" data-testid="market-card-number" />
-          <datalist id="market-number-options">
-            {numberOptions(known, v.setName).map((x) => (
-              <option key={x} value={x} />
-            ))}
-          </datalist>
-        </label>
-        <label className="block text-sm">
-          <span className="text-[13px] font-medium">レア</span>
-          <input value={v.rarity} onChange={(e) => set("rarity", e.target.value)} className={FIELD} maxLength={10} autoComplete="off" data-testid="market-card-rarity" />
-        </label>
-      </div>
-      <label className="col-span-2 block text-sm">
         <span className="text-[13px] font-medium">補足（任意）</span>
-        <input value={v.note} onChange={(e) => set("note", e.target.value)} className={FIELD} maxLength={500} autoComplete="off" />
+        <input value={v.note} onChange={(e) => onChange({ ...v, note: e.target.value })} className={FIELD} maxLength={500} autoComplete="off" />
       </label>
     </div>
   );
@@ -113,7 +89,7 @@ function CardFieldsForm({ v, onChange, known }: { v: CardFields; onChange: (v: C
 }
 
 type Cand = ReturnType<typeof useStoreCandidates>;
-const knownOf = (data: MarketData): KnownCard[] => data.cards.map((c) => ({ setName: c.setName, cardNumber: c.cardNumber, rarity: c.rarity }));
+const knownOf = (data: MarketData): KnownCard[] => data.cards.map((c) => ({ setName: c.setName, cardNumber: c.cardNumber, rarity: c.rarity, name: c.name, usedAt: data.prices.filter((p) => p.cardId === c.id).reduce((m, p) => (p.createdAt > m ? p.createdAt : m), c.createdAt) }));
 
 /** カードと最初の価格を一度に登録する。同じカード（セット・番号・レアリティ）が既にあれば、そのカードに価格を追加する。曖昧なときは確認する */
 function AddCardSheet({ profileId, today, cand, known, onDone, onClose }: { profileId: string; today: string; cand: Cand; known: KnownCard[]; onDone: (cardId: string) => Promise<void>; onClose: () => void }) {
@@ -189,10 +165,14 @@ function AddCardSheet({ profileId, today, cand, known, onDone, onClose }: { prof
 }
 
 /** カード詳細: 店舗ごとの価格比較・価格の追加・購入・カード情報の編集と削除 */
-function CardSheet({ card, data, profileId, today, cand, reload, onClose }: { card: MarketCard; data: MarketData; profileId: string; today: string; cand: Cand; reload: () => Promise<void>; onClose: () => void }) {
+function CardSheet({ card, data, profileId, today, cand, reload, onClose, initialEditId }: { card: MarketCard; data: MarketData; profileId: string; today: string; cand: Cand; reload: () => Promise<void>; onClose: () => void; initialEditId?: string }) {
   const prices = data.prices.filter((p) => p.cardId === card.id);
   const bought = new Set(data.purchases.filter((b) => b.cardId === card.id).map((b) => b.priceId));
-  const [pricing, setPricing] = useState<{ rec: PriceRow | null } | null>(null);
+  const [pricing, setPricing] = useState<{ rec: PriceRow | null } | null>(() => {
+    // 日別の調査結果の「編集」から開いたとき: その価格記録の編集フォームを直接開く
+    const rec = initialEditId ? data.prices.find((x) => x.id === initialEditId && x.cardId === card.id) : undefined;
+    return rec ? { rec } : null;
+  });
   const [editCard, setEditCard] = useState<CardFields | null>(null);
   const [delPrice, setDelPrice] = useState<PriceRow | null>(null);
   const [buy, setBuy] = useState<PriceRow | null>(null);
@@ -278,7 +258,28 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose }: { ca
               }}
             />
           )}
-          <PriceList rows={prices} today={today} boughtIds={bought} onBuy={setBuy} onEdit={(r) => setPricing({ rec: r })} onDelete={setDelPrice} />
+          <PriceList
+            rows={prices}
+            today={today}
+            boughtIds={bought}
+            events={data.events}
+            keyOf={(r) => `market:${r.id}`}
+            onBuy={setBuy}
+            onEdit={(r) => setPricing({ rec: r })}
+            onDelete={setDelPrice}
+            onConfirm={async (r) => {
+              const res = await recordEventAction(profileId, [{ source: "market", id: r.id }], "confirmed");
+              if (!res.ok) return res.error;
+              await reload();
+              return null;
+            }}
+            onSoldOut={async (r) => {
+              const res = await recordEventAction(profileId, [{ source: "market", id: r.id }], "sold_out");
+              if (!res.ok) return res.error;
+              await reload();
+              return null;
+            }}
+          />
         </SheetBody>
       </SheetContent>
       {delPrice && (
@@ -340,13 +341,10 @@ function CardSheet({ card, data, profileId, today, cand, reload, onClose }: { ca
  *   [右] 状態ランク（四角いバッジ）＋ 最安価格（小さめ・右端揃え・折り返さない）
  * カード全体のタップで詳細を開く（詳細・編集・購入の操作は詳細から）。価格の追加は詳細から（および左スワイプ）。行に「＋」ボタンは置かない。カード番号・補足は詳細に表示する。
  */
-function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; data: MarketData; today: string; onOpen: () => void; onAddPrice: () => void }) {
-  const prices = data.prices.filter((p) => p.cardId === card.id);
-  const purchased = data.purchases.some((b) => b.cardId === card.id);
-  const top = cheapestRecord(prices, today);
+function CardRow({ card, top, count, purchased, onOpen, onAddPrice }: { card: MarketCard; top: ShownPrice | null; count: number; purchased: boolean; onOpen: () => void; onAddPrice: () => void }) {
   const swipe = useSwipeLeft(onAddPrice);
   const dex = matchPokemonByCardName(card.name);
-  const storeLabel = top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}` : prices.length > 0 ? "30日を超えた記録のみ" : "";
+  const storeLabel = top ? `${top.chainName && !top.storeName.includes(top.chainName) ? top.chainName + " " : ""}${top.storeName}` : count > 0 ? "30日を超えた記録のみ" : "";
   return (
     <li data-testid="market-card" {...swipe}>
       <button type="button" onClick={onOpen} className="grid w-full grid-cols-[minmax(0,1fr)_3.25rem_auto] items-center rounded-xl border bg-card py-1.5 pl-2 pr-2.5 text-left" aria-label={`${card.name}の詳細を開く`} data-testid="market-card-open">
@@ -376,17 +374,30 @@ function CardRow({ card, data, today, onOpen, onAddPrice }: { card: MarketCard; 
         </span>
         {top ? (
           <span className="flex items-center justify-end gap-1.5 pl-1.5">
+            {top.soldOut && <span className="rounded border border-danger px-1 text-[10px] font-bold leading-4 text-danger" data-testid="row-soldout">完売</span>}
             <RankBadge rank={top.condition} className="h-6 min-w-[1.75rem] text-[13px]" />
             <b className="min-w-[4.25rem] whitespace-nowrap text-right text-[15px] font-bold tabular-nums text-success" data-testid="market-card-best">
               {yen(top.priceYen)}
             </b>
           </span>
         ) : (
-          <span className="pl-1.5 text-right text-xs text-muted-foreground">{prices.length > 0 ? "参考のみ" : "価格なし"}</span>
+          <span className="pl-1.5 text-right text-xs text-muted-foreground">{count > 0 ? "参考のみ" : "価格なし"}</span>
         )}
       </button>
     </li>
   );
+}
+
+/** 一覧の代表価格（現在の販売情報のうち最安。販売中が無いときは完売のもの） */
+interface ShownPrice {
+  id: string;
+  cardId: string;
+  storeName: string;
+  chainName: string;
+  surveyedOn: string;
+  condition: string;
+  priceYen: number;
+  soldOut: boolean;
 }
 
 /** 相場調査メモ（Stage Collection-1）。ポケモンカード全般の店舗価格の記録・比較。**世帯の全員で共通**（記録の作成者・更新者は内部履歴）。151図鑑の価格調査とは別の記録（日別の調査結果で統合表示する） */
@@ -417,17 +428,50 @@ export function MarketMemoView({ onSortChange }: { onSortChange?: (m: MarketSort
   }, [reload]);
 
   const cand = useStoreCandidates();
+  // 日別の調査結果の「編集」から来たとき（?edit=<価格記録のID>）: 該当のカードの詳細を開き、その価格の編集フォームを直接開く
+  const editParam = useSearchParams()?.get("edit") ?? null;
+  const [editId, setEditId] = useState<string | null>(null);
+  const editDone = useRef<string | null>(null);
+  useEffect(() => {
+    if (!editParam || !data || editDone.current === editParam) return;
+    const rec = data.prices.find((x) => x.id === editParam);
+    editDone.current = editParam;
+    if (rec) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 読み込み完了後に1回だけ、対象のカードを開く
+      setEditId(rec.id);
+      setOpen(rec.cardId);
+    }
+  }, [editParam, data]);
+  // 現在の販売情報（最新・完売の区別）と、カードごとの代表価格・相場の更新日時（新着順の基準）
+  const view = useMemo(() => {
+    const evIndex = indexEvents(data?.events ?? []);
+    const display: ShownPrice[] = [];
+    const top = new Map<string, ShownPrice | null>();
+    const count = new Map<string, number>();
+    const activity = new Map<string, string>();
+    for (const c of data?.cards ?? []) {
+      const prices = (data?.prices ?? []).filter((x) => x.cardId === c.id);
+      const { current } = currentWithStatus(prices, evIndex, (x) => `market:${x.id}`);
+      const dp = displayPrices(current).map((x): ShownPrice => ({ id: x.id, cardId: x.cardId, storeName: x.storeName, chainName: x.chainName, surveyedOn: x.shownSurveyedOn, condition: x.condition, priceYen: x.priceYen, soldOut: x.soldOut }));
+      display.push(...dp);
+      top.set(c.id, cheapestRecord(dp, today));
+      count.set(c.id, prices.length);
+      const evTimes = prices.flatMap((x) => (evIndex.get(`market:${x.id}`) ?? []).map((e) => e.createdAt));
+      activity.set(c.id, activityOf(c.createdAt, prices.flatMap((x) => [x.createdAt, x.updatedAt ?? ""]), evTimes));
+    }
+    return { display, top, count, activity };
+  }, [data, today]);
   const cards = useMemo(() => {
     if (!data) return [];
     const boughtCards = new Set(data.purchases.map((b) => b.cardId));
     const k = q.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
     const shown = data.cards.filter((c) => (showBought || !boughtCards.has(c.id)) && (!k || `${c.name}${c.setName}${c.cardNumber}${c.rarity}`.normalize("NFKC").replace(/\s+/g, "").toLowerCase().includes(k)));
-    return sortMarketCards(shown, data.prices, sort, today, (c) => {
+    return sortMarketCards(shown, view.display, sort, today, (c) => {
       const p = matchPokemonByCardName(c.name);
       const mst = p ? pokemonMaster(p.no) : null;
       return mst ? { no: mst.no, reading: mst.reading } : null;
-    });
-  }, [data, q, showBought, sort, today]);
+    }, view.activity);
+  }, [data, q, showBought, sort, today, view]);
   const hiddenBought = data ? data.cards.filter((c) => data.purchases.some((b) => b.cardId === c.id)).length : 0;
   const card = data?.cards.find((c) => c.id === (open ?? quick));
   if (error && !data)
@@ -438,7 +482,8 @@ export function MarketMemoView({ onSortChange }: { onSortChange?: (m: MarketSort
     );
   return (
     <div className="space-y-2.5" data-testid="market-memo">
-      <div className="flex items-center gap-1.5">
+      {/* 操作ヘッダー（検索・並び替え・購入済み・追加）: スクロールしても画面上部に固定。アプリ共通ヘッダーの下（スクロール領域の先頭）に貼り付く */}
+      <div className="sticky top-[var(--header-h)] z-20 -mx-3 -mt-1 flex items-center gap-1.5 border-b bg-background px-3 pb-1.5 pt-1 md:-mx-6 md:px-6" data-testid="market-toolbar">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="カード名・セット・番号" aria-label="カードを検索" className="h-11 w-full rounded-md border bg-input pl-8 pr-2 text-sm" data-testid="market-search" />
@@ -479,7 +524,7 @@ export function MarketMemoView({ onSortChange }: { onSortChange?: (m: MarketSort
       ) : (
         <ul className="space-y-1.5" aria-label="カード一覧" data-testid="market-list">
           {cards.map((c) => (
-            <CardRow key={c.id} card={c} data={data} today={today} onOpen={() => setOpen(c.id)} onAddPrice={() => setQuick(c.id)} />
+            <CardRow key={c.id} card={c} top={view.top.get(c.id) ?? null} count={view.count.get(c.id) ?? 0} purchased={data.purchases.some((b) => b.cardId === c.id)} onOpen={() => setOpen(c.id)} onAddPrice={() => setQuick(c.id)} />
           ))}
           {cards.length === 0 && (
             <li className={cn("rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground")}>{data.cards.length === 0 ? "まだカードがありません。右上の＋から、見つけたカードの価格を記録できます。" : "該当するカードがありません。"}</li>
@@ -499,7 +544,10 @@ export function MarketMemoView({ onSortChange }: { onSortChange?: (m: MarketSort
           }}
         />
       )}
-      {open && card && data && <CardSheet card={card} data={data} profileId={profileId} today={today} cand={cand} reload={reload} onClose={() => setOpen(null)} />}
+      {open && card && data && <CardSheet card={card} data={data} profileId={profileId} today={today} cand={cand} reload={reload} onClose={() => {
+        setOpen(null);
+        setEditId(null);
+      }} initialEditId={editId ?? undefined} />}
       {quick && card && data && (
         // 一覧の「＋」・左スワイプ: 価格だけを素早く追加（保存したら元の一覧に戻る）
         <Sheet open onOpenChange={(o) => !o && setQuick(null)}>
