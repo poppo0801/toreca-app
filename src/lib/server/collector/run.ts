@@ -1,4 +1,4 @@
-import { buildEvidence, evidenceFromLastGood, imageReadingsFromExtraction, type StoredEvidence } from "@/lib/collector/evidence";
+import { buildEvidence, evidenceFromLastGood, imageReadingsFromExtraction, MAX_EVIDENCE_LINKS, MAX_IMAGE_REFS, type StoredEvidence } from "@/lib/collector/evidence";
 import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -20,6 +20,7 @@ import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
+import { rememberFullPages, toQueuedPage } from "@/lib/server/collector/collected-docs";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
 import { saveCandidateRows } from "@/lib/server/collector/save-rows";
@@ -31,7 +32,7 @@ import { runInvestigation } from "@/lib/server/collector/investigation-hook";
 import { loadHumanKnowledge } from "@/lib/server/collector/human-knowledge-load";
 import { unifiedMode } from "@/lib/case-model/flag";
 import { beginShadow, type LegacyCapture } from "./shadow-hook";
-import { proposalAfterCandidate } from "./proposal-hook";
+import { proposalAfterCandidate, storeCollectedEvidence } from "./proposal-hook";
 import { buildAiContext } from "@/lib/case-model/context";
 import { aiInputRecord, type AiInputRecord } from "@/lib/case-model/redact";
 import { caseFromExtraction, caseFromInput } from "@/lib/case-model/from-extraction";
@@ -224,7 +225,9 @@ interface QueuedPayload {
     evidenceText?: string;
     evidenceVia?: "x_oembed" | "web_fetch";
     /** Stage 10J: 解析時に取得できた、投稿内のリンク先の公開ページ本文（保存用。投稿本文とは別の出典として last_good.evidence.linkedPages に保存） */
-    linkedPages?: { url: string; text: string }[];
+    linkedPages?: { url: string; text: string; fullChars?: number; truncated?: boolean; depth?: 0 | 1; fromUrl?: string; origins?: string[]; shortUrl?: string }[];
+    /** Phase 2: 発見した全リンクの台帳（取得できた／できなかった／選ばなかった理由） */
+    linkLedger?: StoredEvidence["linkLedger"];
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
     relevanceBasis?: string;
     /** 利用者のXブックマーク由来（Stage 6I。収集元ではなく、利用者が選んだ投稿） */
@@ -460,10 +463,10 @@ function xpostSnapshot(q: QueuedPayload["queued"], evidence: Partial<Record<stri
     username: p.username ?? "",
     ...(p.profile ? { profile: p.profile } : {}),
     createdAt: p.createdAt,
-    text: safeSlice(p.text, 4000),
+    text: safeSlice(p.text, 12_000),
     images: p.images.slice(0, 8),
-    links: p.links.slice(0, 5),
-    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, ...(p.quoted.profile ? { profile: p.quoted.profile } : {}), createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 2000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
+    links: p.links.slice(0, MAX_EVIDENCE_LINKS),
+    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, ...(p.quoted.profile ? { profile: p.quoted.profile } : {}), createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 6000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
     fetchedAt: nowIso,
     via: q.xVia ?? null,
     basis: q.relevanceBasis ?? null,
@@ -509,7 +512,10 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
     // 画像は「見つかった／取得できた／AIへ渡した」を別々に記録する（取得とAI解析を混同しない）
     q.imageStats = rich.stats;
     q.xVia = "api";
-    if (rich.linkedPageText && rich.linkUrl) q.linkedPages = [{ url: rich.linkUrl, text: rich.linkedPageText }];
+    // 取得できたリンク先は**全件**（以前は最初の1件だけ）。キューの行には抜粋だけを載せ、全文は side（collected-docs）で保存処理へ渡す
+    if (rich.linkedPages.length) q.linkedPages = rich.linkedPages.map(toQueuedPage);
+    q.linkLedger = rich.linkLedger;
+    rememberFullPages(q, rich.linkedPages);
     // 保存済みの画像URLがすべて取得できない（期限切れ等）ときは、1回だけX APIで投稿を取り直す（予算の範囲内。X APIが使えなければ従来どおり再試行）
     if (rich.stats.found > 0 && rich.stats.fetched === 0 && deps.xClient && !q.refetched) {
       const inner: QueuedPayload["queued"] = { ...q, kind: "x_oembed", post: undefined, refetched: true };
@@ -548,7 +554,11 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
       if (r.ok) {
         q.imageStats = { found: r.imagesFound, fetched: r.imagesUsed, sent: r.images.length };
         q.xVia = r.via;
-        if (r.linkedPages?.length) q.linkedPages = r.linkedPages;
+        if (r.linkedPages?.length) {
+          q.linkedPages = r.linkedPages.map(toQueuedPage);
+          rememberFullPages(q, r.linkedPages);
+        }
+        if (r.linkLedger?.length) q.linkLedger = r.linkLedger;
         if (r.post) q.post = r.post;
         else if (r.text) {
           q.evidenceText = r.text;
@@ -664,7 +674,7 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
 function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { evidence?: StoredEvidence } {
   try {
     const st = q.imageStats;
-    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
+    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...(q.linkLedger?.length ? { linkLedger: q.linkLedger } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
     return ev ? { evidence: ev } : prior ? { evidence: prior } : {};
   } catch {
     return prior ? { evidence: prior } : {};
@@ -675,7 +685,7 @@ function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string,
 function imageEvidence(q: QueuedPayload["queued"], nowIso: string, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { imageReadings?: ReturnType<typeof imageReadingsFromExtraction>; imageRefs?: string[] } {
   const imageReadings = imageReadingsFromExtraction(extraction, nowIso);
   const refs = [...(q.post?.images ?? []), ...(q.post?.quoted?.images ?? [])].filter((u) => typeof u === "string" && u.startsWith("https://"));
-  return { ...(imageReadings.length ? { imageReadings } : {}), ...(imageReadings.length && refs.length ? { imageRefs: refs.slice(0, 4) } : {}) };
+  return { ...(imageReadings.length ? { imageReadings } : {}), ...(imageReadings.length && refs.length ? { imageRefs: refs.slice(0, MAX_IMAGE_REFS) } : {}) };
 }
 
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
@@ -686,6 +696,11 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 実施した取得方法・元の情報源と応募サービスのホスト・最後に取得できた情報（内部ログ。設定画面には出さない）
   const methods = [q.kind === "x_post" ? "X投稿" : q.kind === "x_oembed" ? "X埋め込み" : "直接取得", ...(q.viaList ? ["一覧の表示（二次情報）"] : [])];
   const originHost = hostOf(c.source_url ?? q.url);
+  // Phase 2: 取得した全文（投稿本文・リンク先の全ページ）を evidence_documents へ保存する（新AI機能が有効な開発環境だけ。失敗しても収集は止めない）
+  {
+    const postText = q.post?.text ? [q.post.text, q.post.quoted?.text ? `（引用元）${q.post.quoted.text}` : ""].filter(Boolean).join("\n") : (q.evidenceText ?? null);
+    await storeCollectedEvidence({ db, householdId: deps.householdId, candidateId: c.id, queued: q, postUrl: c.source_url ?? q.url, postText, nowIso });
+  }
   // 以前に保存した原文は、今回の取得で原文が得られなくても消さない（再確認・再解析で last_good が上書きされるため）
   const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
   const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence, result.ok ? result.extraction : undefined) } };

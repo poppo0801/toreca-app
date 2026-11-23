@@ -91,6 +91,7 @@ export function cachedTools(tools: ResearchTools): ResearchTools & { hits: numbe
     searchHits: 0,
     searched: [] as string[],
     now: () => tools.now(),
+    ...(tools.readHints ? { readHints: (url: string, text: string) => tools.readHints!(url, text) } : {}),
     fetchPage: (url: string): Promise<FetchOutcome> => {
       const k = canonUrl(url).key;
       const hit = cache.get(k);

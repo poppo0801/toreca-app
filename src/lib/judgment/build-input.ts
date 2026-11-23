@@ -7,7 +7,7 @@
  */
 import { classifyEvidence } from "@/lib/case-model/evidence-status";
 import { redact } from "@/lib/case-model/redact";
-import type { StoredEvidence } from "@/lib/collector/evidence";
+import { MAX_LINKED_PAGES, type StoredEvidence } from "@/lib/collector/evidence";
 import { CONTRACT_VERSION, type CurrentCase, type EvidenceItem, type EvidenceStatus, type FailureRecord, type JudgmentInput, type MasterCandidate, type PriorJudgment, type RelatedOpportunity } from "./contract";
 
 export const MAX_EVIDENCE_TEXT = 3500;
@@ -107,7 +107,7 @@ export async function buildJudgmentInput(a: BuildInputArgs): Promise<JudgmentInp
  */
 export function seedsFromStored(url: string, stored: StoredEvidence | null, o: { parsedOk?: boolean; hostBlocked?: boolean; attempted?: boolean } = {}): EvidenceSeed[] {
   const main = seedFromStored(url, stored, o);
-  const linked: EvidenceSeed[] = (stored?.linkedPages ?? []).slice(0, 2).map((l) => ({ url: l.url, fetchedAt: l.fetchedAt, via: "web_fetch", origin: "unknown" as const, text: l.text, hash: null, status: "fetched" as const, reused: true, kind: "linked_page" as const }));
+  const linked: EvidenceSeed[] = (stored?.linkedPages ?? []).slice(0, MAX_LINKED_PAGES).map((l) => ({ url: l.url, fetchedAt: l.fetchedAt, via: "web_fetch", origin: "unknown" as const, text: l.text, hash: null, status: "fetched" as const, reused: true, kind: "linked_page" as const }));
   const reading = imageReadingSeed(stored);
   return [main, ...linked, ...(reading ? [reading] : [])];
 }

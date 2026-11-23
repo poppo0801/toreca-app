@@ -19,6 +19,8 @@ const t = (db: Db, name: string) => (db as unknown as Loose).from(name);
 export const MAX_DOC_CHARS = 400_000;
 
 export interface StoredDocument {
+  /** page=リンク先ページ／post=X投稿本文（既定は page） */
+  kind?: "page" | "post";
   url: string;
   urlKey: string;
   origin: string;
@@ -67,7 +69,7 @@ export async function saveDocuments(db: Db, householdId: string, candidateId: st
         candidate_id: candidateId,
         url: d.url,
         url_key: d.urlKey,
-        kind: "page",
+        kind: d.kind ?? "page",
         origin: d.origin,
         content_hash: d.contentHash,
         fetched_at: d.fetchedAt,

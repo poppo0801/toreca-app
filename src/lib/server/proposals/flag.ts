@@ -16,6 +16,11 @@ export function proposalPreviewEnabled(env: Env = process.env): boolean {
   return env.TOREMANE_ENV === "local" && env.PROPOSAL_PREVIEW === "on";
 }
 
+/** 収集時に、取得した全文を evidence_documents（migration 115）へ保存するか。新AI機能と同じ開発限定の条件（本番では常にfalse。115 が未適用の本番表へは書かない） */
+export function evidenceCollectStoreEnabled(env: Env = process.env): boolean {
+  return proposalPreviewEnabled(env) && env.EVIDENCE_COLLECT_STORE !== "off";
+}
+
 /** 収集（run.ts）からの自動生成を許可するか（さらに別のフラグ。既定OFF。手動の生成だけ使うなら不要） */
 export function proposalAutoGenerateEnabled(env: Env = process.env): boolean {
   return proposalPreviewEnabled(env) && env.PROPOSAL_AUTO === "on";

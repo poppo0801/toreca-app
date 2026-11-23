@@ -83,6 +83,7 @@ export function renderExtras(e: AgentView): string {
   if (e.coverage && !e.coverage.includes("全文確認済み")) lines.push(`提示範囲: ${e.coverage}`);
   if (e.outline?.length) lines.push(`目次（位置: 冒頭）: ${e.outline.join(" | ")}`);
   if (e.extraWindows?.length) lines.push(`抜粋より後ろの応募条件の記載（位置つき）: ${e.extraWindows.join(" ｜ ")}`);
+  if (e.hintWindows?.length) lines.push(`過去の類似ページの経験から「最初に見る価値がある」とされた位置（仮説。ここに無いことは記載なしを意味しない。全文はreadで参照できる）: ${e.hintWindows.join(" ｜ ")}`);
   for (const r of e.readSegments ?? []) lines.push(`参照した原文（${r.from}〜${r.to}字目）: ${r.text.replace(/\n+/g, " / ")}`);
   return lines.length ? "\n" + lines.join("\n") : "";
 }

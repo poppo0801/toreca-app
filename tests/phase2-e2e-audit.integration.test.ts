@@ -129,10 +129,10 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 E2E監査: 項目の対応・人の修
     const long = `【新宿本店】拡張パック 抽選受付 受付期間 11月30日まで ${filler} 抽選を希望する店舗を選んで応募してください。お1人様1回までです。`;
     const item = "《新宿本店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111";
     const full = (u: string): Promise<FetchOutcome> => Promise.resolve({ ok: true, finalUrl: u, html: `<html><body><p>${long}</p></body></html>`, text: long });
-    // (a) 取得が許されている: 収集時の保存本文は3,000字で切り詰められているので、最新の全文が優先され、後半の条件が届く
+    // (a) 取得が許されている: 収集時の保存本文は抜粋（6,000字）で切り詰められているので、最新の全文が優先され、後半の条件が届く
     const c = await addCandidate(item, [{ url: A_URL, text: long }]);
     const stored = (c.last_good as { evidence: { linkedPages: { text: string }[] } }).evidence.linkedPages[0].text;
-    expect(stored.length).toBe(3000); // 収集の保存境界での切り詰めを確認（lp/4 の約3,981字目はこの時点で失われる）
+    expect(stored.length).toBe(6000); // 収集の保存境界（抜粋の上限）での切り詰めを確認（lp/4 の約3,981字目はこの時点で失われる）
     expect(stored).not.toContain("抽選を希望する店舗を選んで");
     const { sent } = await run(c, {}, full);
     const judge = sent.find((x) => x.tools[0] === "submit_registration_judgment")!;
@@ -154,7 +154,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 E2E監査: 項目の対応・人の修
     const { sent: sent1 } = await run(c1);
     const j1 = sent1.find((x) => x.tools[0] === "submit_registration_judgment")!;
     expect(j1.text).not.toContain("抽選を希望する店舗を選んで");
-    expect(j1.text).toContain("先頭3000字に切り詰められており、後半は確認できない（無いのではなく未確認）");
+    expect(j1.text).toContain("先頭6000字（全文");
+    expect(j1.text).toContain("に切り詰められており、後半は確認できない（無いのではなく未確認）");
     // 同時実行: ロックまたは冪等で、現行の登録案は項目ごとに1件
     const c2 = await addCandidate(AB, [{ url: A_URL, text: pageA() }, { url: B_URL, text: pageB() }]);
     await Promise.allSettled([run(c2), run(c2)]);
