@@ -238,8 +238,14 @@ export function PriceForm({
       </div>
       {multi &&
         extra.map((x, i) => (
-          // 2件目以降も、最初の登録と同じ A+・A・B+・B・C のボタン選択式（プルダウンは使わない）
+          // 2件目以降も、最初の登録と同じ順序（価格 → 状態ランク）・同じ S・A・B・C・D のボタン選択式（プルダウンは使わない）
           <div key={i} className="space-y-1" data-testid="price-extra-row">
+            <div className="grid grid-cols-[1fr_auto] items-center gap-1.5">
+              <input value={x.price} onChange={(e) => setExtra((l) => l.map((y, j) => (j === i ? { ...y, price: e.target.value } : y)))} inputMode="numeric" className={field} placeholder="価格（円）" aria-label={`追加の価格${i + 1}行目の価格`} data-testid="price-extra-yen" />
+              <Button type="button" variant="ghost" size="sm" className="min-h-10" onClick={() => setExtra((l) => l.filter((_, j) => j !== i))} aria-label={`追加の価格${i + 1}行目を削除`}>
+                削除
+              </Button>
+            </div>
             <div role="radiogroup" aria-label={`追加の価格${i + 1}行目の状態ランク`} className="grid grid-cols-5 gap-1" data-testid="price-extra-rank">
               {RANKS.map((r) => (
                 <button
@@ -254,12 +260,6 @@ export function PriceForm({
                   {r}
                 </button>
               ))}
-            </div>
-            <div className="grid grid-cols-[1fr_auto] items-center gap-1.5">
-              <input value={x.price} onChange={(e) => setExtra((l) => l.map((y, j) => (j === i ? { ...y, price: e.target.value } : y)))} inputMode="numeric" className={field} placeholder="価格（円）" aria-label={`追加の価格${i + 1}行目の価格`} data-testid="price-extra-yen" />
-              <Button type="button" variant="ghost" size="sm" className="min-h-10" onClick={() => setExtra((l) => l.filter((_, j) => j !== i))} aria-label={`追加の価格${i + 1}行目を削除`}>
-                削除
-              </Button>
             </div>
           </div>
         ))}

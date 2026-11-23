@@ -74,13 +74,13 @@ describe("購入金額: 未入力と0円の区別・入手方法との整合", (
     expect(nul.success && nul.data.purchaseAmountYen).toBeNull();
     expect(zukanCardInputSchema.safeParse({ ...base, dexNo: 152, acquireMethod: "pack_opening" }).success).toBe(false);
     expect(zukanCardInputSchema.safeParse({ ...base, cardName: " ", acquireMethod: "pack_opening" }).success).toBe(false);
-    expect(zukanCardInputSchema.safeParse({ ...base, acquireMethod: "pack_opening", condition: "S" }).success).toBe(false);
+    expect(zukanCardInputSchema.safeParse({ ...base, acquireMethod: "pack_opening", condition: "A+" }).success).toBe(false);
     expect(zukanCardInputSchema.safeParse({ ...base, quantity: 0, acquireMethod: "pack_opening" }).success).toBe(false);
   });
   it("価格記録の入力検証: 状態ランクは5段階・価格は0円以上の整数・系列と店舗は必須", () => {
-    const ok = { storeName: "店A", chainName: "系列A", surveyedOn: "2026-11-10", condition: "A+", priceYen: 1200 };
+    const ok = { storeName: "店A", chainName: "系列A", surveyedOn: "2026-11-10", condition: "S", priceYen: 1200 };
     expect(priceInputSchema.safeParse(ok).success).toBe(true);
-    expect(priceInputSchema.safeParse({ ...ok, condition: "D" }).success).toBe(false);
+    expect(priceInputSchema.safeParse({ ...ok, condition: "A+" }).success).toBe(false);
     expect(priceInputSchema.safeParse({ ...ok, priceYen: -1 }).success).toBe(false);
     expect(priceInputSchema.safeParse({ ...ok, storeName: "" }).success).toBe(false);
     expect(priceInputSchema.safeParse({ ...ok, chainName: "" }).success).toBe(false); // 系列も必須
@@ -91,21 +91,21 @@ describe("購入金額: 未入力と0円の区別・入手方法との整合", (
 
 describe("価格調査の並び替え・参考価格", () => {
   const p = (id: string, condition: string, priceYen: number, surveyedOn = "2026-11-10", storeName = "店" + id): PriceLike => ({ id, condition, priceYen, surveyedOn, storeName });
-  const list = [p("1", "B", 300), p("2", "A+", 900), p("3", "A", 500), p("4", "A+", 700), p("5", "C", 100), p("6", "B+", 400)];
-  it("初期は状態の良い順（A+→A→B+→B→C）、同ランク内は価格の安い順", () => {
+  const list = [p("1", "C", 300), p("2", "S", 900), p("3", "A", 500), p("4", "S", 700), p("5", "D", 100), p("6", "B", 400)];
+  it("初期は状態の良い順（S→A→B→C→D）、同ランク内は価格の安い順", () => {
     expect(sortPrices(list, "condition").map((x) => x.id)).toEqual(["4", "2", "3", "6", "1", "5"]);
   });
   it("切り替えで、状態を問わず価格の安い順（同額は状態の良い順）。元の配列は変えない", () => {
     const copy = [...list];
     expect(sortPrices(list, "price").map((x) => x.id)).toEqual(["5", "1", "6", "3", "4", "2"]);
     expect(list).toEqual(copy);
-    expect(sortPrices([p("a", "B", 100), p("b", "A", 100)], "price").map((x) => x.id)).toEqual(["b", "a"]);
+    expect(sortPrices([p("a", "C", 100), p("b", "A", 100)], "price").map((x) => x.id)).toEqual(["b", "a"]);
   });
   it("30日を超えた記録は参考価格。30日ちょうどは対象。最安値の強調は30日以内の記録だけ（参考価格だけなら強調なし）", () => {
     expect(daysSince("2026-10-11", "2026-11-10")).toBe(30);
     expect(isReferencePrice({ surveyedOn: "2026-10-11" }, "2026-11-10")).toBe(false);
     expect(isReferencePrice({ surveyedOn: "2026-10-10" }, "2026-11-10")).toBe(true);
-    const mix = [p("old", "A", 100, "2026-09-01"), p("new1", "A", 500, "2026-11-09"), p("new2", "B", 450, "2026-11-01")];
+    const mix = [p("old", "A", 100, "2026-09-01"), p("new1", "A", 500, "2026-11-09"), p("new2", "C", 450, "2026-11-01")];
     expect(cheapestIds(mix, "2026-11-10")).toEqual(new Set(["new2"]));
     expect(cheapestIds([p("old", "A", 100, "2026-09-01")], "2026-11-10")).toEqual(new Set());
     expect(cheapestIds([p("x", "A", 300), p("y", "A", 300)], "2026-11-10")).toEqual(new Set(["x", "y"]));

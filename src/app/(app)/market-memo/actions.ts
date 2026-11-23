@@ -1,7 +1,8 @@
 "use server";
 
 import { z } from "zod";
-import { parsePriceInput, priceRow, toMarketCard, toMarketPrice, toMarketPurchase, type MarketCard, type MarketPrice, type MarketPurchase } from "@/lib/zukan/rows";
+import type { PriceEvent } from "@/lib/zukan/freshness";
+import { parsePriceInput, priceRow, toMarketCard, toPriceEvents, toMarketPrice, toMarketPurchase, type MarketCard, type MarketPrice, type MarketPurchase } from "@/lib/zukan/rows";
 import { matchCard, type PriceInput } from "@/lib/zukan/zukan";
 import { createClient } from "@/lib/supabase/server";
 
@@ -36,19 +37,22 @@ export interface MarketData {
   cards: MarketCard[];
   prices: MarketPrice[];
   purchases: MarketPurchase[];
+  /** 販売情報の更新（確認）・完売の履歴（追記専用）。現在の状態の計算に使う */
+  events?: PriceEvent[];
 }
 
 export async function loadMarketAction(profileId: string): Promise<R<{ data: MarketData }>> {
   if (!uuid.safeParse(profileId).success) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const [c, p, b] = await Promise.all([
+  const [c, p, b, ev] = await Promise.all([
     any(db).from("market_cards").select("*").order("created_at", { ascending: false }).limit(5000),
     any(db).from("market_prices").select("*").order("surveyed_on", { ascending: false }).limit(20000),
     any(db).from("market_purchases").select("*").limit(20000),
+    any(db).from("market_price_events").select("*").not("market_price_id", "is", null).order("created_at").limit(50000),
   ]);
-  if (c.error || p.error || b.error) return fail("読み込めませんでした");
-  return { ok: true, data: { cards: (c.data ?? []).map(toMarketCard), prices: (p.data ?? []).map(toMarketPrice), purchases: (b.data ?? []).map(toMarketPurchase) } };
+  if (c.error || p.error || b.error || ev.error) return fail("読み込めませんでした");
+  return { ok: true, data: { cards: (c.data ?? []).map(toMarketCard), prices: (p.data ?? []).map(toMarketPrice), purchases: (b.data ?? []).map(toMarketPurchase), events: toPriceEvents(ev.data ?? []) } };
 }
 
 const cardInput = z.object({

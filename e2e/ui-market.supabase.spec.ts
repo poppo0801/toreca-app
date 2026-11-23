@@ -57,21 +57,21 @@ test("相場調査メモの一覧・並び替え・共通化・5分間の初期�
   await expect(page.getByTestId("market-add-sheet")).toHaveCount(0);
   await expect(page.getByTestId("market-card")).toHaveCount(2);
 
-  // 状態違いの価格を追加（カード詳細の「価格を記録」）: 2件目以降も A+・A・B+・B・C のボタン選択式（プルダウンではない）
+  // 状態違いの価格を追加（カード詳細の「価格を記録」）: 2件目以降も S・A・B・C・D のボタン選択式（プルダウンではない）
   await page.getByTestId("market-card").filter({ hasText: "ドリュウズ" }).getByTestId("market-card-open").click();
   await page.getByTestId("market-price-add").click();
-  await page.getByTestId("price-rank").getByRole("radio", { name: "A+", exact: true }).click();
+  await page.getByTestId("price-rank").getByRole("radio", { name: "S", exact: true }).click();
   await page.getByTestId("price-yen").fill("900");
   await page.getByTestId("price-extra-add").click();
   const extra = page.getByTestId("price-extra-row").first();
   await expect(extra.locator("select")).toHaveCount(0);
-  expect(await extra.getByTestId("price-extra-rank-btn").allTextContents()).toEqual(["A+", "A", "B+", "B", "C"]);
-  await extra.getByTestId("price-extra-rank-btn").nth(3).click(); // B
+  expect(await extra.getByTestId("price-extra-rank-btn").allTextContents()).toEqual(["S", "A", "B", "C", "D"]);
+  await extra.getByTestId("price-extra-rank-btn").nth(3).click(); // C
   await extra.getByTestId("price-extra-yen").fill("750");
   expect(await noOverflow(page)).toBe(true);
   await page.screenshot({ path: "test-results/ui-market-form-390.png" });
   await page.getByTestId("price-submit").click();
-  await expect(page.getByTestId("price-row")).toHaveCount(3); // 800(A)・900(A+)・750(B)
+  await expect(page.getByTestId("price-row")).toHaveCount(3); // 800(A)・900(A+)・750(C)
   await page.keyboard.press("Escape");
 
   // --- 一覧のレイアウト（参考画像）: 左=画像・名前・セット・店舗／中央=レアリティ／右=状態・価格
@@ -93,11 +93,11 @@ test("相場調査メモの一覧・並び替え・共通化・5分間の初期�
   const hq = (await page.getByTestId("market-search").boundingBox())!.height;
   expect([hs, hq]).toEqual([ha, ha]); // 検索・並び替え・購入済み・追加のボタンはすべて同じ高さ
   const seen: string[] = [(await sort.getAttribute("data-sort"))!];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 7; i++) {
     await sort.click();
     seen.push((await sort.getAttribute("data-sort"))!);
   }
-  expect(seen).toEqual(["new", "priceDesc", "priceAsc", "condition", "rarity", "kana", "new"]);
+  expect(seen).toEqual(["new", "dex", "priceDesc", "priceAsc", "condition", "rarity", "kana", "new"]);
   await expect(page.getByTestId("market-sort-heading")).toHaveText(/新着順/);
   await sort.hover();
   await page.mouse.down();
@@ -153,9 +153,9 @@ test("相場調査メモの一覧・並び替え・共通化・5分間の初期�
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(page.getByTestId("daily-planned-count")).toHaveText("1"); // 当日中は維持
-  await page.getByTestId("daily-rank").filter({ hasText: /^B$/ }).click(); // 状態Bだけ
+  await page.getByTestId("daily-rank").filter({ hasText: /^C$/ }).click(); // 状態Bだけ
   await expect(page.getByTestId("daily-row")).toHaveCount(1);
-  await page.getByTestId("daily-rank").filter({ hasText: /^B$/ }).click();
+  await page.getByTestId("daily-rank").filter({ hasText: /^C$/ }).click();
   // 店舗別に切り替え
   await page.getByTestId("daily-mode-store").click();
   expect(await page.getByTestId("daily-group").count()).toBe(2); // トレカキャピタル 垂水店（4件）・カードラボ 梅田店（1件）
