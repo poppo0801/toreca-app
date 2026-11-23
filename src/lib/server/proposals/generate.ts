@@ -9,7 +9,7 @@
  *  - 協調的な中止（shouldStop）・失敗の分類（reason。内容・機密を含めない）・費用の予約/計上（呼び出し側が渡す CallBudget）に対応する。
  */
 import { CallBudget, CaseBudget } from "@/lib/judgment/call-budget";
-import { evidenceFromLastGood } from "@/lib/collector/evidence";
+import { evidenceFromLastGood, MAX_LINKED_PAGE_CHARS } from "@/lib/collector/evidence";
 import { canonUrl } from "@/lib/judgment/xsource/normalize";
 import { proposalKey, toProposalRecords, type ProposalMode, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { mockRegistrationJudge, mockResearchAgent } from "@/lib/judgment/xsource/proposal-mock";
@@ -67,18 +67,21 @@ export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSu
 type Loose = { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** 候補の各項目について、最新の人のレビューの修正を「人が確定した値」として読む（AIが上書きしない）。却下・保留は値を持たない */
-export async function loadHumanCorrections(db: Db, householdId: string, candidateId: string, postId: string): Promise<Map<number, Record<string, string>>> {
+export async function loadHumanCorrections(db: Db, householdId: string, candidateId: string, postId: string): Promise<Map<number, { values: Record<string, string>; label: string | null }>> {
   const keys = new Map<string, number>();
   for (let i = 1; i <= 30; i++) keys.set(proposalKey(candidateId, postId, i), i);
-  const out = new Map<number, Record<string, string>>();
-  const r = (await (db as unknown as Loose).from("registration_proposal_reviews").select("proposal_key,decision,edits,created_at").eq("household_id", householdId).in("proposal_key", [...keys.keys()]).order("created_at", { ascending: false })) as { data: { proposal_key: string; decision: string; edits: Record<string, string> }[] | null };
+  const out = new Map<number, { values: Record<string, string>; label: string | null }>();
+  const r = (await (db as unknown as Loose).from("registration_proposal_reviews").select("proposal_key,proposal_id,decision,edits,created_at").eq("household_id", householdId).in("proposal_key", [...keys.keys()]).order("created_at", { ascending: false })) as { data: { proposal_key: string; proposal_id: string; decision: string; edits: Record<string, string> }[] | null };
   const seen = new Set<string>();
   for (const x of r.data ?? []) {
     if (seen.has(x.proposal_key)) continue; // 最新のレビューだけ
     seen.add(x.proposal_key);
     if (x.decision !== "approve_with_edits") continue;
     const vals = Object.fromEntries(Object.entries(x.edits ?? {}).filter(([, v]) => typeof v === "string" && v.trim()));
-    if (Object.keys(vals).length) out.set(keys.get(x.proposal_key)!, vals);
+    if (!Object.keys(vals).length) continue;
+    // レビューした版の項目の見出し（店舗など）。再収集で項目の並びが変わっても、別の項目へ人の修正を移さないための照合に使う
+    const row = (await (db as unknown as Loose).from("registration_proposals").select("item_label").eq("household_id", householdId).eq("id", x.proposal_id).maybeSingle()) as { data: { item_label: string } | null };
+    out.set(keys.get(x.proposal_key)!, { values: vals, label: row.data ? row.data.item_label : null });
   }
   return out;
 }
@@ -100,7 +103,17 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
     ...(deps.search ? { search: deps.search } : {}),
     fetchPage: async (u: string): Promise<FetchOutcome> => {
       const hit = linked.get(canonUrl(u).key);
-      if (hit) return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
+      if (hit) {
+        // 収集時の保存は先頭 MAX_LINKED_PAGE_CHARS 字で切り詰められる。上限に達した保存本文は後半の応募条件が欠けている可能性があるため、取得が許されていれば最新の全文を優先し、
+        // 取れなければ保存本文を使う（切り詰めの事実は本文の末尾に明示し、AIが「無い」と読まないようにする）
+        const truncated = hit.text.length >= MAX_LINKED_PAGE_CHARS;
+        if (truncated && deps.liveFetch) {
+          const live = await deps.liveFetch(u).catch(() => null);
+          if (live && live.ok) return live;
+        }
+        const notice = truncated ? `この本文は収集時の保存で先頭${MAX_LINKED_PAGE_CHARS}字に切り詰められており、後半は確認できない（無いのではなく未確認）` : undefined;
+        return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text, ...(notice ? { notice } : {}) }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
+      }
       if (deps.liveFetch) return deps.liveFetch(u);
       return { ok: false, reason: "not_public" };
     },
@@ -108,8 +121,13 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   try {
     const budget = deps.budget ?? new CallBudget({ maxCalls: 40, maxCostJpy: 0.0001 }); // mock/replay: 費用ゼロ（予約0）
     const limits = deps.limits ?? { agentReserveJpy: 0, judgeReserveJpy: 0, searchReserveJpy: 0, maxSearches: 0, maxTurns: 3, maxFetches: 3 };
-    const corrections = await loadHumanCorrections(a.db, a.householdId, a.candidate.id, post.postId).catch(() => new Map<number, Record<string, string>>());
+    const corrections = await loadHumanCorrections(a.db, a.householdId, a.candidate.id, post.postId).catch(() => new Map<number, { values: Record<string, string>; label: string | null }>());
     const before = budget.costJpy;
+    // 人の修正は、レビューした項目と今の項目の見出しが一致するときだけ適用する（項目番号だけで当てると、並びが変わったとき別の店舗へ移る）
+    const protectedFor = (n: number, plan: { groupLabel: string }): Record<string, string> | undefined => {
+      const c = corrections.get(n);
+      return c && c.label !== null && c.label === plan.groupLabel.slice(0, 120) ? c.values : undefined;
+    };
     const run = await runXPostReplay({
       post,
       agent: deps.agent,
@@ -120,10 +138,10 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       now: clock(),
       shouldStop: deps.shouldStop,
       registerRequiresUnit: true,
-      protectedFor: (n) => corrections.get(n),
+      protectedFor,
       ...(deps.perItemCapJpy ? { budgetFor: () => new CaseBudget(budget, deps.perItemCapJpy!) } : {}),
     });
-    const records = toProposalRecords({ candidateId: a.candidate.id, post, run, mode: deps.mode, modelId: deps.modelId, fetchedAt: stored?.fetchedAt ?? null, protectedFor: (n) => corrections.get(n) });
+    const records = toProposalRecords({ candidateId: a.candidate.id, post, run, mode: deps.mode, modelId: deps.modelId, fetchedAt: stored?.fetchedAt ?? null, protectedFor });
     const save = a.persist === false ? { inserted: 0, unchanged: 0, superseded: 0, failed: 0 } : await saveProposals(a.db, a.householdId, records);
     if (save.failed > 0 && save.inserted === 0 && save.unchanged === 0) return { ok: false, reason: "save_failed" };
     return { ok: true, records, save, stopped: run.stopped, costJpy: Math.round((budget.costJpy - before) * 10_000) / 10_000 };

@@ -38,7 +38,7 @@ export interface ResearchLimits {
 export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = { maxTurns: 6, maxFetches: 6, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 3, judgeReserveJpy: 3, maxSearches: 2, searchReserveJpy: 3 };
 
 export type FetchFailure = "blocked" | "robots" | "not_public" | "login_required" | "failed" | "timeout";
-export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string } | { ok: false; reason: FetchFailure };
+export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string; /** 取得元の制約の注記（例: 保存時の切り詰め）。観察としてAIに渡す（本文の一部にしない） */ notice?: string } | { ok: false; reason: FetchFailure };
 /** AIが使えるツール（読み取り専用）。公開ページの取得だけ。SSRF・robots・レート制限・サイズ・時間は実装側（既存の安全な取得）が担う */
 export interface SearchHitLite {
   title: string;
@@ -67,6 +67,8 @@ export interface Evidence {
   scope?: EvidenceScope;
   /** 本文の取り出しで、構造として認識できた語（題名・受付枠・項目の値）が本文から欠けた（Stage 10Y）。あれば、このページを根拠にした観察は保留にする */
   textLoss?: string[];
+  /** 取得元の制約の注記（AIの観察に出す） */
+  notice?: string;
 }
 export interface EvidenceScope {
   /** 例: item_entity / parent_shared / parent_card / discovered */
@@ -102,6 +104,8 @@ export interface AgentView {
   /** 構造化した観察（受付枠・関連イベント・フォーム設問・欠落）と原文の抜粋 */
   observations: string[];
   excerpt: string;
+  /** 抜粋（先頭）の外にある応募条件の記載（店舗選択・人数/回数の上限・店舗ごと 等）の周辺。位置つき。原文の一部であり、引用の検証は本文全体に対して行う */
+  extraWindows?: string[];
 }
 export interface AgentTurnInput {
   caseId: string;
@@ -207,14 +211,42 @@ function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: tru
   const required = structure ? [structure.title ?? "", ...structure.slots.flatMap((s) => [s.title, ...s.details.map((d) => d.value)])] : [];
   const checked = o.html ? pageTextChecked(o.html, required) : null;
   const text = checked && checked.text.length >= 20 ? checked.text : o.text;
-  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
+  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
 }
 
 /** AIに渡す原文の抜粋の長さ（本文に整形したあと。実評価で、本文が見えず観察の要約を引用した失敗の是正） */
 export const EXCERPT_CHARS = 2500;
 
+/** 応募条件に関わる語（意味判断ではなく、AIに見せる箇所を選ぶための目印。個別サイトの規則を持たない） */
+const RULE_WORDS = /(店舗(を|の)?(選択|選んで|お選び|希望)|お?1人様|お一人様|1名様|ご?応募は[^。\n]{0,8}(1|一)(回|度|店舗)|1店舗(のみ|だけ)|各店舗|店舗ごと|店舗別|重複|1回(のみ|だけ|まで)|上限)/g;
+export const WINDOW_MAX = 8;
+export const WINDOW_CHARS = 1600;
+/** 先頭の抜粋（from まで）より後ろにある応募条件の記載の周辺を、位置つきで最大 WINDOW_MAX 箇所・合計 WINDOW_CHARS 字まで返す（近いものは1つにまとめる） */
+export function ruleWindows(text: string, from: number): string[] {
+  const spans: [number, number][] = [];
+  for (const m of text.matchAll(RULE_WORDS)) {
+    const at = m.index ?? 0;
+    if (at + m[0].length <= from) continue;
+    const a = Math.max(from, at - 60);
+    const b = Math.min(text.length, at + m[0].length + 100);
+    const last = spans[spans.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else spans.push([a, b]);
+  }
+  const out: string[] = [];
+  let total = 0;
+  for (const [a, b] of spans) {
+    if (out.length >= WINDOW_MAX) break;
+    const piece = text.slice(a, Math.min(b, a + 400)).replace(/\n+/g, " / ");
+    if (total + piece.length > WINDOW_CHARS) break;
+    total += piece.length;
+    out.push(`（${a}字目〜）${piece}`);
+  }
+  return out;
+}
+
 export function toAgentView(e: Evidence): AgentView {
-  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: [...(e.textLoss?.length ? ["【注意】本文の取り出しで、構造として認識できた語が本文から欠けている（本文だけでは確認できない項目がある）"] : []), ...(e.structure ? structureToObservations(e.structure) : [])], excerpt: e.text.slice(0, EXCERPT_CHARS) };
+  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: [...(e.notice ? [`【注意】${e.notice}`] : []), ...(e.textLoss?.length ? ["【注意】本文の取り出しで、構造として認識できた語が本文から欠けている（本文だけでは確認できない項目がある）"] : []), ...(e.structure ? structureToObservations(e.structure) : [])], excerpt: e.text.slice(0, EXCERPT_CHARS), ...(e.text.length > EXCERPT_CHARS ? (() => { const w = ruleWindows(e.text, EXCERPT_CHARS); return w.length ? { extraWindows: w } : {}; })() : {}) };
 }
 
 /** 同じ内容（転載・同一ページの別URL）は独立した裏付けと数えない */
