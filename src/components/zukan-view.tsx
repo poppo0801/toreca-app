@@ -6,7 +6,7 @@ import { buyZukanFromPriceAction, addZukanPriceAction, deleteZukanCardAction, de
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DexImage } from "@/components/dex-image";
-import { addPricesSequentially, jstToday, PriceForm, usePriceCandidates } from "@/components/price-form";
+import { addPricesSequentially, jstToday, PriceForm, useStoreCandidates } from "@/components/price-form";
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -225,7 +225,7 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
   const [delPrice, setDelPrice] = useState<PriceRow | null>(null);
   const [buy, setBuy] = useState<PriceRow | null>(null);
   const bought = new Set(cards.map((c) => c.priceRecordId).filter((x): x is string => !!x));
-  const cand = usePriceCandidates(data.prices);
+  const cand = useStoreCandidates();
   const known = useMemo<KnownCard[]>(() => [...data.prices, ...data.cards].map((x) => ({ setName: x.setName, cardNumber: x.cardNumber, rarity: x.rarity })), [data.prices, data.cards]);
   const [info, setInfo] = useState<CardInfo>({ cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY });
 

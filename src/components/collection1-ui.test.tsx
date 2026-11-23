@@ -48,6 +48,15 @@ vi.mock("@/app/(app)/market-memo/actions", () => ({
   buyMarketFromPriceAction: (...a: unknown[]) => buyM(...a),
   exportMarketAction: vi.fn(async () => ({ ok: true, json: "{}" })),
 }));
+const loadHistory = vi.fn(async () => ({
+  ok: true as const,
+  records: [...zdata.prices, ...mdata.prices].map((r) => ({ chainName: r.chainName, storeName: r.storeName, surveyedOn: r.surveyedOn, createdAt: r.createdAt })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+}));
+vi.mock("@/app/(app)/market-memo/daily-actions", () => ({
+  loadStoreHistoryAction: () => loadHistory(),
+  loadDailyAction: vi.fn(async () => ({ ok: false, error: "unused" })),
+  setPlanMarkAction: vi.fn(async () => ({ ok: true })),
+}));
 let appSettings: { zukanRareMissing?: number[] } = {};
 const saveSettingsMock = vi.fn(async (p: Record<string, unknown>) => {
   appSettings = { ...appSettings, ...p };
@@ -369,33 +378,37 @@ describe("相場調査メモの画面", () => {
     expect(q("market-add")).not.toBeNull();
   });
 
-  it("相場調査メモの一覧: 長い店名を途中で切らず（文字列は完全に出力し、最大2行で折り返す）、最安価格は右端。1行目=カード名＋価格、2行目=セット・番号・レア、3行目=系列 店舗・状態・件数", async () => {
+  it("相場調査メモの一覧: コンパクトな3区画（左=画像・カード名・セット枠・系列 店舗／中央=レアリティ／右=状態バッジ・価格）。長い店名は省略表示を許容し、価格は小さめ・右端・折り返さない", async () => {
     const longStore = "トレカキャピタル東京都新宿区西新宿本店（ポケモンカード専門館）";
-    mdata = { cards: [mcard()], prices: [mprice({ storeName: longStore, chainName: "トレカキャピタル", condition: "A+", priceYen: 1500 })], purchases: [] };
+    mdata = { cards: [mcard({ rarity: "SAR" })], prices: [mprice({ storeName: longStore, chainName: "トレカキャピタル", condition: "A+", priceYen: 1500 })], purchases: [] };
     await mount(createElement(MarketMemoView));
     const store = q("market-card-store")!;
-    expect(store.textContent).toContain(longStore); // 省略（…）なし
-    expect(store.textContent).toBe(`A+${longStore}`); // 状態バッジ＋店名（店名に系列名が含まれるときは、系列名を重ねて出さない）。件数は出さない
-    expect(store.className).not.toMatch(/truncate|line-clamp/); // 途中で切らない（必要な分だけ折り返す）
-    expect(store.querySelector('[data-testid="rank-badge"]')!.getAttribute("data-rank")).toBe("A+"); // 四角い色分けバッジ
+    expect(store.textContent).toBe(longStore); // 店名に系列名が含まれるときは、系列名を重ねて出さない。文字列は完全に出力される（見た目の省略はCSS）
+    expect(store.className).toContain("truncate"); // 長い場合は省略表示
+    const btn = q("market-card-open")!;
+    expect(btn.className).toContain("grid");
+    expect(btn.className).toContain("items-center");
     const best = q("market-card-best")!;
     expect(best.textContent).toBe("1,500円");
-    // 横方向の配置: [画像] [カード名・セット/番号/レア・状態バッジ+店舗+件数] [最安価格（右端）]。縦方向の中央揃え
-    const btn = q("market-card-open")!;
-    expect(btn.className).toContain("items-center");
-    expect(btn.lastElementChild).toBe(best);
     expect(best.className).toMatch(/whitespace-nowrap/); // 桁数で折り返さない
-    expect(best.className).toContain("text-lg"); // カード名（text-sm）より大きい
-    const text = [...q("market-card-summary")!.querySelectorAll("*")];
-    const idx = (el: Element) => text.indexOf(el);
-    expect(idx(q("market-card-name-text")!)).toBeLessThan(idx(q("market-card-meta")!));
-    expect(idx(q("market-card-meta")!)).toBeLessThan(idx(store));
+    expect(best.className).toContain("text-[15px]"); // 従来（text-lg）より小さい
+    expect(best.className).not.toContain("text-lg");
+    // 区画の順序: 左（画像・名前・店舗）→ 中央（レアリティ）→ 右（状態バッジ・価格）
+    const [left, center, right] = [...btn.children] as HTMLElement[];
+    expect(left.contains(q("market-card-name-text")!)).toBe(true);
+    expect(left.contains(store)).toBe(true);
+    expect(center.getAttribute("data-testid")).toBe("row-rarity");
+    expect(center.textContent).toBe("SAR");
+    expect(center.className).toContain("border-x"); // 独立した列（左右の細い線）
+    expect(right.querySelector('[data-testid="rank-badge"]')!.getAttribute("data-rank")).toBe("A+");
+    expect(right.lastElementChild).toBe(best);
+    expect(left.contains(right.querySelector('[data-testid="rank-badge"]'))).toBe(false); // 状態は右側
   });
 
   it("相場調査メモの一覧: 店名に系列名が含まれないときは「系列 店舗」の順で出す", async () => {
     mdata = { cards: [mcard()], prices: [mprice({ storeName: "渋谷店", chainName: "別系列" })], purchases: [] };
     await mount(createElement(MarketMemoView));
-    expect(q("market-card-store")!.textContent).toBe("A別系列 渋谷店");
+    expect(q("market-card-store")!.textContent).toBe("別系列 渋谷店");
   });
 
   it("状態違いの価格を同じ系列・店舗・調査日でまとめて登録できる。同じ状態の重複・入力不足は保存前に止める", async () => {
@@ -405,8 +418,10 @@ describe("相場調査メモの画面", () => {
     await fillPrice("系列B", "B店", "1200"); // 状態は A が初期選択
     await click(q("price-extra-add"));
     const row = q("price-extra-row")!;
-    await type(row.querySelector("select") as HTMLSelectElement, "B");
-    await type(row.querySelector("input") as HTMLInputElement, "900");
+    expect(row.querySelector("select")).toBeNull(); // 2件目以降も、最初の登録と同じボタン選択式
+    expect([...row.querySelectorAll('[data-testid="price-extra-rank-btn"]')].map((b) => b.textContent)).toEqual(["A+", "A", "B+", "B", "C"]);
+    await click([...row.querySelectorAll('[data-testid="price-extra-rank-btn"]')][3]); // B
+    await type(row.querySelector('[data-testid="price-extra-yen"]') as HTMLInputElement, "900");
     await click(q("price-submit"));
     expect(addMPrice).toHaveBeenCalledTimes(2);
     expect(addMPrice.mock.calls.map((c) => c[2] as { condition: string; priceYen: number; storeName: string; chainName: string })).toMatchObject([
@@ -418,8 +433,8 @@ describe("相場調査メモの画面", () => {
     await swipeLeft(q("market-card")!);
     await fillPrice("系列B", "B店", "1200");
     await click(q("price-extra-add"));
-    await type(q("price-extra-row")!.querySelector("select") as HTMLSelectElement, "A");
-    await type(q("price-extra-row")!.querySelector("input") as HTMLInputElement, "1000");
+    await click(q("price-extra-row")!.querySelectorAll('[data-testid="price-extra-rank-btn"]')[1]); // A（1件目と同じ状態）
+    await type(q("price-extra-row")!.querySelector('[data-testid="price-extra-yen"]') as HTMLInputElement, "1000");
     await click(q("price-submit"));
     expect(addMPrice).not.toHaveBeenCalled();
     expect(q("price-error")!.textContent).toContain("重複");
@@ -533,79 +548,116 @@ describe("相場調査メモの画面", () => {
     expect(addMPrice).toHaveBeenCalledWith(PID, "m1", expect.objectContaining({ storeName: "Z店", priceYen: 650 }));
   });
 
-  it("カード一覧の並び替え（詳細内の価格の並び替えとは別）: 新着順 → 価格の安い順 → 状態優先。価格の記録が無いカードは最後。購入済みの表示切替は常に使える", async () => {
+  it("カード一覧の並び替え: アイコンのみのボタンで 新着順 → 価格降順 → 価格昇順 → 状態順 → レアリティ順 → 五十音順 → 新着順。価格の記録が無いカードは価格・状態の並びで最後。購入済みの表示切替は常に使える", async () => {
     mdata = {
-      cards: [mcard({ id: "n1", name: "新しい", setName: "s", cardNumber: "1", createdAt: "2026-11-15T00:00:00Z" }), mcard({ id: "n2", name: "安い", setName: "s", cardNumber: "2", createdAt: "2026-11-10T00:00:00Z" }), mcard({ id: "n3", name: "状態良", setName: "s", cardNumber: "3", createdAt: "2026-11-05T00:00:00Z" }), mcard({ id: "n4", name: "記録なし", setName: "s", cardNumber: "4", createdAt: "2026-11-16T00:00:00Z" })],
+      cards: [mcard({ id: "n1", name: "新しい", setName: "s", cardNumber: "1", rarity: "R", createdAt: "2026-11-15T00:00:00Z" }), mcard({ id: "n2", name: "安い", setName: "s", cardNumber: "2", rarity: "SAR", createdAt: "2026-11-10T00:00:00Z" }), mcard({ id: "n3", name: "状態良", setName: "s", cardNumber: "3", rarity: "UR", createdAt: "2026-11-05T00:00:00Z" }), mcard({ id: "n4", name: "記録なし", setName: "s", cardNumber: "4", rarity: "", createdAt: "2026-11-16T00:00:00Z" })],
       prices: [mprice({ id: "p1", cardId: "n1", condition: "B", priceYen: 900 }), mprice({ id: "p2", cardId: "n2", condition: "B", priceYen: 300 }), mprice({ id: "p3", cardId: "n3", condition: "A+", priceYen: 1500 })],
       purchases: [],
     };
     await mount(createElement(MarketMemoView));
     const names = () => qa("market-card-name-text").map((e) => e.textContent);
-    expect(q("market-sort")!.getAttribute("data-sort")).toBe("new");
+    const sort = () => q("market-sort")!.getAttribute("data-sort");
+    expect(q("market-sort")!.textContent).toBe(""); // ボタン内に文字は無い（アイコンのみ）
+    expect(q("market-sort")!.querySelector("svg")).not.toBeNull();
+    expect(sort()).toBe("new");
     expect(names()).toEqual(["記録なし", "新しい", "安い", "状態良"]); // 新着順（登録の新しい順）
     await click(q("market-sort"));
-    expect(q("market-sort")!.getAttribute("data-sort")).toBe("price");
+    expect(sort()).toBe("priceDesc");
+    expect(names()).toEqual(["状態良", "新しい", "安い", "記録なし"]); // 最安価格の高い順・記録なしは最後
+    await click(q("market-sort"));
+    expect(sort()).toBe("priceAsc");
     expect(names()).toEqual(["安い", "新しい", "状態良", "記録なし"]); // 最安価格の安い順・記録なしは最後
     await click(q("market-sort"));
-    expect(q("market-sort")!.getAttribute("data-sort")).toBe("condition");
+    expect(sort()).toBe("condition");
     expect(names()).toEqual(["状態良", "安い", "新しい", "記録なし"]); // 最安記録の状態が良い順（A+→B）。同ランクは安値順
     expect(q("market-show-bought")).not.toBeNull(); // 購入済みが無くても切替ボタンは常にある
     await click(q("market-sort"));
-    expect(q("market-sort")!.getAttribute("data-sort")).toBe("kana"); // 五十音順・図鑑No順が循環に加わった
+    expect(sort()).toBe("rarity");
+    expect(names()).toEqual(["状態良", "安い", "新しい", "記録なし"]); // UR > SAR > R > なし
     await click(q("market-sort"));
-    expect(q("market-sort")!.getAttribute("data-sort")).toBe("dex");
+    expect(sort()).toBe("kana");
     await click(q("market-sort"));
-    expect(q("market-sort")!.getAttribute("data-sort")).toBe("new"); // 一巡
+    expect(sort()).toBe("new"); // 一巡（図鑑No順は長押しの一覧から選べる）
   });
 
-  it("カード一覧の表示: カード名 → レアリティ（太字）→ 収録セット → カード番号（細い線の角丸四角・細い文字）。区切りの「・」と「N件」は無い。図鑑No（画像）とカード番号は別", async () => {
-    mdata = { cards: [mcard({ name: "ピカチュウex", setName: "ステラミラクル", cardNumber: "132/165", rarity: "SAR" })], prices: [mprice({ storeName: "渋谷店", chainName: "", condition: "A+", priceYen: 1500 }), mprice({ id: "mp2", storeName: "新宿店", priceYen: 1800 })], purchases: [] };
+  it("並び替えの長押し: 全ての項目を一覧し、直接選べる。選ぶと閉じ、通常タップの循環は選んだ並びから続く。長押しの直後のclickは次の並びへ切り替えない", async () => {
+    mdata = { cards: [mcard()], prices: [mprice()], purchases: [] };
+    await mount(createElement(MarketMemoView));
+    const btn = q("market-sort")!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 5, clientY: 5 }));
+      await new Promise((r) => setTimeout(r, 520));
+    });
+    expect(q("market-sort-menu")).not.toBeNull();
+    expect(qa("market-sort-option").map((o) => o.getAttribute("data-sort"))).toEqual(["new", "priceDesc", "priceAsc", "condition", "rarity", "kana", "dex"]);
+    await act(async () => void btn.click()); // 長押し直後の click
+    expect(btn.getAttribute("data-sort")).toBe("new"); // 切り替わらない
+    await act(async () => void (qa("market-sort-option").find((o) => o.getAttribute("data-sort") === "rarity")!).click());
+    expect(q("market-sort-menu")).toBeNull();
+    expect(btn.getAttribute("data-sort")).toBe("rarity");
+    await act(async () => void btn.click());
+    expect(btn.getAttribute("data-sort")).toBe("kana"); // 循環は選んだ並びから続く
+    // 通常タップ（短い押下）では一覧は開かない
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 5, clientY: 5 }));
+      await new Promise((r) => setTimeout(r, 100));
+      btn.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 520)); // 離したので、時間が経っても一覧は開かない
+    });
+    expect(q("market-sort-menu")).toBeNull();
+  });
+
+  it("カード一覧の表示: 左=画像・カード名・セット（小さな枠）・系列 店舗／中央=レアリティ（独立列）／右=状態バッジ・価格。カード番号と区切りの「・」・件数は一覧に出さない。図鑑No（画像）は別の情報", async () => {
+    mdata = { cards: [mcard({ name: "ピカチュウex", setName: "ステラミラクル", cardNumber: "132/165", rarity: "SAR" })], prices: [mprice({ storeName: "渋谷店", chainName: "", condition: "A+", priceYen: 1500 }), mprice({ id: "mp2", storeName: "新宿店", condition: "B", priceYen: 2000 })], purchases: [] };
     await mount(createElement(MarketMemoView));
     const row = q("market-card")!;
-    const els = [...row.querySelectorAll("*")];
-    const order = ["market-card-name-text", "row-rarity", "row-set", "row-number"].map((id) => els.indexOf(row.querySelector(`[data-testid="${id}"]`)!));
-    expect(order.every((i) => i >= 0)).toBe(true);
-    expect(order).toEqual([...order].sort((a, b) => a - b));
+    const set = row.querySelector('[data-testid="row-set"]') as HTMLElement;
+    expect(set.textContent).toBe("ステラミラクル");
+    expect(set.className).toMatch(/rounded-md/);
+    expect(set.className.split(" ")).toContain("border"); // 線で囲んだ小さな枠
     const rarity = row.querySelector('[data-testid="row-rarity"]') as HTMLElement;
-    expect(rarity.tagName).toBe("B");
-    expect(rarity.className).toContain("font-bold"); // レアリティは太字
     expect(rarity.textContent).toBe("SAR");
-    const num = row.querySelector('[data-testid="row-number"]') as HTMLElement;
-    expect(num.textContent).toBe("132/165");
-    expect(num.className).toMatch(/rounded-md/);
-    expect(num.className.split(" ")).toContain("border"); // 線で囲む（細い線の角丸四角）
-    expect(num.className).toContain("font-light"); // 細い文字
-    expect(row.textContent).not.toContain("・"); // 区切りの「・」は削除
-    expect(row.textContent).not.toContain("件"); // 価格記録件数は出さない
+    expect(rarity.className).toContain("font-extrabold");
+    expect(row.querySelector('[data-testid="row-number"]')).toBeNull(); // カード番号は詳細に
+    expect(row.textContent).not.toContain("・");
+    expect(row.textContent).not.toContain("件");
     // 図鑑番号（ピカチュウ=25）とカード番号（132/165）は別の情報
     expect(q("market-card-summary")!.getAttribute("data-dex")).toBe("25");
     expect(q("market-card-summary")!.textContent).not.toContain("025");
     expect(row.querySelector('[data-testid="dex-image"]')!.getAttribute("src")).toBe("/api/pokemon-image/25?v=2");
-    // 維持: 状態バッジ・店舗・最安価格（右端）・行全体のタップ
+    // 順序: 名前 → セット（同じ行）、店舗（次の行）、レアリティ（中央）、状態バッジ・最安価格（右端）
+    const els = [...row.querySelectorAll("*")];
+    const at = (el: Element) => els.indexOf(el);
+    expect(at(q("market-card-name-text")!)).toBeLessThan(at(set));
+    expect(at(set)).toBeLessThan(at(q("market-card-store")!));
+    expect(at(q("market-card-store")!)).toBeLessThan(at(rarity));
+    expect(at(rarity)).toBeLessThan(at(row.querySelector('[data-testid="rank-badge"]')!));
     expect(row.querySelector('[data-testid="rank-badge"]')!.textContent).toBe("A+");
-    expect(q("market-card-store")!.textContent).toBe("A+渋谷店");
+    expect(q("market-card-store")!.textContent).toBe("渋谷店");
     expect(q("market-card-best")!.textContent).toBe("1,500円");
-    expect(q("market-card-open")!.lastElementChild).toBe(q("market-card-best"));
+    expect(q("market-card-open")!.lastElementChild!.lastElementChild).toBe(q("market-card-best"));
   });
 
   it("カード一覧の五十音順・図鑑No順（実際の表示順）。見出し用の並び順の表示も更新される", async () => {
-    mdata = { cards: [mcard({ id: "a", name: "リザードンex", cardNumber: "006/078" }), mcard({ id: "b", name: "ピカチュウV", cardNumber: "001/100" }), mcard({ id: "c", name: "ハイパーボール", cardNumber: "100/100" }), mcard({ id: "d", name: "フシギダネ", cardNumber: "999/999" }), mcard({ id: "e", name: "ミュウex", cardNumber: "005/151" })], prices: [], purchases: [] };
+    mdata = { cards: [mcard({ id: "a", name: "リザードンex", cardNumber: "006/078" }), mcard({ id: "b", name: "ピカチュウV", cardNumber: "001/100" }), mcard({ id: "c", name: "ハイパーボール", cardNumber: "100/100" }), mcard({ id: "d", name: "フシギダネ", cardNumber: "999/999" }), mcard({ id: "e", name: "ミュウex", cardNumber: "151/151" })], prices: [], purchases: [] };
     const seen: string[] = [];
     await mount(createElement(MarketMemoView as unknown as React.ComponentType<{ onSortChange?: (m: MarketSort) => void }>, { onSortChange: (m: MarketSort) => void seen.push(m) }));
     const names = () => qa("market-card-name-text").map((e) => e.textContent);
-    await click(q("market-sort")); // price（価格なし＝並びは新着順のまま）
-    await click(q("market-sort")); // condition
-    await click(q("market-sort")); // kana
+    for (let i = 0; i < 5; i++) await click(q("market-sort")); // priceDesc, priceAsc, condition, rarity, kana
     expect(names()).toEqual(["ピカチュウV", "フシギダネ", "ミュウex", "リザードンex", "ハイパーボール"]); // 読み仮名順。ex の有無に影響されない・番号なしは末尾
-    await click(q("market-sort")); // dex
+    await act(async () => {
+      q("market-sort")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 5, clientY: 5 }));
+      await new Promise((r) => setTimeout(r, 520));
+    });
+    await click(qa("market-sort-option").find((o) => o.getAttribute("data-sort") === "dex")!);
     expect(names()).toEqual(["フシギダネ", "リザードンex", "ピカチュウV", "ミュウex", "ハイパーボール"]); // 全国図鑑No 1,6,25,151。カードの収録番号(999/999 等)は無関係
-    expect(seen).toEqual(["price", "condition", "kana", "dex"]); // 見出しの表示が即時更新されるための通知
+    expect(seen).toEqual(["priceDesc", "priceAsc", "condition", "rarity", "kana", "dex"]); // 見出しの表示が即時更新されるための通知
   });
 
   it("状態ランクは四角い色分けバッジ（A+/A/B+/B/C で色が異なる）。カード一覧は最安記録の状態を表示", async () => {
     mdata = { cards: [mcard()], prices: [mprice({ condition: "B+", priceYen: 700 })], purchases: [] };
     await mount(createElement(MarketMemoView));
-    const b = q("market-card-store")!.querySelector('[data-testid="rank-badge"]') as HTMLElement;
+    const b = q("market-card-open")!.querySelector('[data-testid="rank-badge"]') as HTMLElement;
     expect(b.textContent).toBe("B+");
     const { RankBadge } = await import("@/components/rank-badge");
     const classes = ["A+", "A", "B+", "B", "C"].map((r) => {

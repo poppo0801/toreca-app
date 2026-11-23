@@ -7,7 +7,7 @@ import { pokemonOf } from "@/lib/zukan/pokemon151";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * 151図鑑の読み書き（Stage Collection-1）。ログイン必須・自世帯のみ（RLS）。**プロフィール単位**: 読み書きはすべて profile_id で絞る。
+ * 151図鑑の読み書き（Stage Collection-1）。ログイン必須・自世帯のみ（RLS）。**世帯の全員で共通**: プロフィールでは絞らない（profile_id は作成者、updated_by_profile_id は更新者の内部履歴）。
  * 入力はサーバーで必ず再検証する。既存の購入記録（purchases）・コレクション（card_holdings）・支出には一切書き込まない（二重計上の防止）。
  */
 type R<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -38,8 +38,8 @@ export async function loadZukanAction(profileId: string): Promise<R<{ data: Zuka
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
   const [c, p] = await Promise.all([
-    any(db).from("zukan_cards").select("*").eq("profile_id", profileId).order("dex_no").order("created_at").limit(5000),
-    any(db).from("zukan_price_records").select("*").eq("profile_id", profileId).order("surveyed_on", { ascending: false }).limit(5000),
+    any(db).from("zukan_cards").select("*").order("dex_no").order("created_at").limit(5000),
+    any(db).from("zukan_price_records").select("*").order("surveyed_on", { ascending: false }).limit(5000),
   ]);
   if (c.error || p.error) return fail("読み込めませんでした");
   return { ok: true, data: { cards: (c.data ?? []).map(toZukanCard), prices: (p.data ?? []).map(toZukanPrice) } };
@@ -60,7 +60,7 @@ export async function saveZukanCardAction(profileId: string, id: string | null, 
     if (error) return fail(mapError(error));
     return { ok: true, id: data.id as string };
   }
-  const { data, error } = await any(db).from("zukan_cards").update({ ...zukanCardRow(parsed.data), updated_at: new Date().toISOString() }).eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("zukan_cards").update({ ...zukanCardRow(parsed.data), updated_at: new Date().toISOString(), updated_by_profile_id: profileId }).eq("id", id).select("id");
   if (error) return fail(mapError(error));
   if (!data || data.length !== 1) return fail("対象が見つかりません");
   return { ok: true, id };
@@ -71,7 +71,7 @@ export async function deleteZukanCardAction(profileId: string, id: string): Prom
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(id).success) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("zukan_cards").delete().eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("zukan_cards").delete().eq("id", id).select("id");
   if (error) return fail(mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -107,7 +107,7 @@ export async function updateZukanPriceAction(profileId: string, id: string, inpu
   if (!price.success) return fail(price.error.issues[0]?.message ?? "入力内容を確認してください");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("zukan_price_records").update({ ...priceRow(price.data, "note"), updated_at: new Date().toISOString() }).eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("zukan_price_records").update({ ...priceRow(price.data, "note"), updated_at: new Date().toISOString(), updated_by_profile_id: profileId }).eq("id", id).select("id");
   if (error) return fail(mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -117,7 +117,7 @@ export async function deleteZukanPriceAction(profileId: string, id: string): Pro
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(id).success) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("zukan_price_records").delete().eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("zukan_price_records").delete().eq("id", id).select("id");
   if (error) return fail(mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -127,15 +127,15 @@ export async function buyZukanFromPriceAction(profileId: string, priceId: string
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(priceId).success || !/^\d{4}-\d{2}-\d{2}$/.test(acquiredOn)) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  // 操作しているプロフィールの記録だけを購入できる
-  const { data: rec } = await any(db).from("zukan_price_records").select("id").eq("id", priceId).eq("profile_id", profileId).maybeSingle();
+  // 世帯の記録だけを購入できる（RLS）
+  const { data: rec } = await any(db).from("zukan_price_records").select("id").eq("id", priceId).maybeSingle();
   if (!rec) return fail("対象が見つかりません");
   const { data, error } = await any(db).rpc("zukan_buy_from_price_tx", { p_price: priceId, p_acquired_on: acquiredOn });
   if (error) return fail(error.code === "23505" ? "この価格の記録からは、すでに購入済みです" : mapError(error));
   return { ok: true, cardId: data as string };
 }
 
-/** バックアップ用: このプロフィールの図鑑データ（収集カード・価格調査）をJSONで返す */
+/** バックアップ用: 世帯共通の図鑑データ（収集カード・価格調査）をJSONで返す */
 export async function exportZukanAction(profileId: string): Promise<R<{ json: string }>> {
   const r = await loadZukanAction(profileId);
   if (!r.ok) return r;
