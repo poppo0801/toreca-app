@@ -6,7 +6,7 @@
 -- 本番適用は別承認（docs/RELEASE_FLOW.md）。新AI機能（既定OFF・開発限定）からだけ書かれる。既存の表・データは変更しない（新しい表の追加のみ）。
 -- 注意: この表は collection_candidates（既存）だけを参照し、120（evidence_documents）の表には依存しない。ただし運用上は 120 → 121 の順に適用する（120 の全文保存が先にあって経験の位置が意味を持つ）。
 -- 番号: 本番には 116〜118 が適用済みのため、未適用だった AI の移行（旧 115・旧 119）は 118 より後ろの版（120・121）へ付け替えた（適用済みの履歴は変更していない。docs/reports/phase2-vision-runtime-and-safety.md）。
--- 逆戻し（参考・本番では実行しない）: drop table public.investigation_experiences; drop table public.evidence_image_observations;
+-- 逆戻し（参考・本番では実行しない）: drop table public.investigation_experiences; drop table public.evidence_image_observations; drop function public.phase2_append_only_guard();
 
 create table public.evidence_image_observations (
   id uuid primary key default gen_random_uuid(),
