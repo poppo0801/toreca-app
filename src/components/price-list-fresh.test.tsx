@@ -88,13 +88,24 @@ describe("価格一覧: 最新・完売・更新", () => {
     expect(q("price-row")!.getAttribute("data-ref")).toBe("false");
   });
 
-  it("151図鑑: 同じポケモンの別カード（セット・番号・レア違い）は別の販売情報（同じ店舗・状態でも1件にまとめない）。カード情報の編集ボタンがある", async () => {
-    const onEditCard = vi.fn();
-    await mount([row({ id: "x", cardKey: "id:sv8|100/106|sar", cardLabel: "SV8 ・ 100/106 ・ SAR" }), row({ id: "y", cardKey: "id:sv8|101/106|sar", cardLabel: "SV8 ・ 101/106 ・ SAR" })], [], { onEditCard });
+  it("151図鑑: 同じポケモンの別カード（セット・番号・レア違い）は別の販売情報（同じ店舗・状態でも1件にまとめない）。「カード情報を編集」の独立ボタンは無く、編集に統合されている", async () => {
+    const onEdit = vi.fn();
+    await mount([row({ id: "x", cardKey: "id:sv8|100/106|sar", cardLabel: "SV8 ・ 100/106 ・ SAR" }), row({ id: "y", cardKey: "id:sv8|101/106|sar", cardLabel: "SV8 ・ 101/106 ・ SAR" })], [], { onEdit });
     expect(qa("price-row")).toHaveLength(2);
     expect(qa("price-card-label").map((e) => e.textContent)).toEqual(expect.arrayContaining(["SV8 ・ 100/106 ・ SAR", "SV8 ・ 101/106 ・ SAR"]));
     await click(qa("price-row")[0]);
-    await click(q("price-edit-card"));
-    expect(onEditCard).toHaveBeenCalledTimes(1);
+    expect(q("price-edit-card")).toBeNull();
+    await click(q("price-edit"));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("詳細の操作ボタンの配置: 右側=編集・更新・完売（頻繁に使う）／左側=この価格で購入・削除", async () => {
+    await mount([row({ id: "a" })], [], { onConfirm: vi.fn(async () => null), onSoldOut: vi.fn(async () => null) });
+    await click(q("price-row"));
+    const left = q("price-actions-left")!;
+    const right = q("price-actions-right")!;
+    expect([...left.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["この価格で購入", "削除"]);
+    expect([...right.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["編集", "更新", "完売"]);
+    expect(left.nextElementSibling).toBe(right); // 右側のグループが後ろ（画面の右）
   });
 });

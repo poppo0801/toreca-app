@@ -148,6 +148,7 @@ test("相場調査メモの一覧・並び替え・共通化・5分間の初期�
   await page.getByTestId("daily-planned-only").click();
   await expect(page.getByTestId("daily-row")).toHaveCount(1);
   await page.screenshot({ path: "test-results/ui-market-daily-planned-390.png" });
+  await page.getByTestId("daily-planned-only").click(); // 購入予定のみの画面では行全体が解除の操作になるため、詳細は通常の一覧で開く
   await target.getByTestId("daily-detail").click();
   await expect(page.getByTestId("daily-detail-sheet")).toContainText("11,000円");
   await page.keyboard.press("Escape");

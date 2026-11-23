@@ -122,6 +122,7 @@
 - 5T: AI 予算の予約（`reserve_ai_budget`）。5T-3・7R: 系列の区分（直営/その他）・カードボックスの2系列。
 - 7P〜7Q: 重複登録の DB ガード（`auto_dedupe_key` ほか）、情報元の保存。
 - 7S（`20261211000093`）: `store_reference_counts`・`delete_store`・`merge_store_masters`。住所変更でトリガー `stores_geo_reset` が座標をリセットする（座標を同時に更新すれば維持）。
+- 相場管理（116〜118）: 116=世帯共通化・購入予定マーク、117=状態ランク S/A/B/C/D・更新/完売の追記専用履歴（`market_price_events`）・一括購入、118=収録パックマスター（`expansion_marks`。公式サイトのカード検索から取得。番号→収録セットの補完は一意なときだけ）と、個別購入・一括購入の購入記録への合算（`market_attach_single_purchase`: 同じ購入者・同じ購入日のシングルカード購入記録へ明細を追加。収集カード／相場購入の `purchase_item_id` で明細にひも付け、削除・金額・日付の訂正に連動）。収支は購入記録から集計されるため二重計上しない。
 - 注意: `service_role` から使えない RPC・テーブルがある（`_repoint_store`、`member_numbers`、`chain_conditions`）。整理は SQL（postgres）で行う。
 
 ## 7. 従来方式から変えた理由（まとめ）

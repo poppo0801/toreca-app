@@ -160,7 +160,7 @@ export async function buyMarketFromPriceAction(profileId: string, priceId: strin
   if (!db) return fail("ログインが必要です");
   const { data: rec } = await any(db).from("market_prices").select("id").eq("id", priceId).maybeSingle();
   if (!rec) return fail("対象が見つかりません");
-  const { data, error } = await any(db).rpc("market_buy_from_price_tx", { p_price: priceId, p_purchased_on: purchasedOn });
+  const { data, error } = await any(db).rpc("market_buy_from_price_tx", { p_price: priceId, p_purchased_on: purchasedOn, p_profile: profileId });
   if (error) return fail(error.code === "23505" ? "この価格の記録からは、すでに購入済みです" : mapError(error));
   return { ok: true, purchaseId: data as string };
 }

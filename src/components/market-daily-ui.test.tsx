@@ -125,6 +125,52 @@ describe("本日の調査結果: 操作の領域・購入予定", () => {
     expect(q("daily-planned-bar-total")!.textContent).toBe(`${(13500 - firstPrice).toLocaleString("ja-JP")}円`); // 解除後の合計（表示中の購入予定）
   });
 
+  it("購入予定のみの画面: 行のどこをタップしても解除の確認を出す（カード名・価格・ⓘの領域も同じ）。比較表・詳細を開く操作は無効。通常の一覧では従来どおり比較表・詳細が開く", async () => {
+    const a = rec({ priceYen: 11000 });
+    daily.records = [a];
+    await mount([`market:${a.id}`]);
+    // 通常の一覧: カード名で相場比較表、ⓘで詳細
+    expect(q("daily-compare")).not.toBeNull();
+    expect(q("daily-detail")).not.toBeNull();
+    await click(q("daily-planned-only")); // 系列・店舗別へ切り替わる（行に比較表の領域は無い）
+    await click(q("daily-mode-card")); // カード別に戻しても、見出しの比較表は無効
+    expect((q("daily-compare") as HTMLButtonElement).disabled).toBe(true); // 比較表を開く操作は無効（解除を優先）
+    expect(q("daily-detail")).toBeNull(); // 行全体が1つのタップ領域（ⓘの別領域は無い）
+    expect(qa("daily-row")[0].querySelectorAll("button")).toHaveLength(1);
+    await click(q("daily-compare")); // 無効のボタンは何も起こさない
+    expect(q("compare-sheet")).toBeNull();
+    // 行の端（価格の文字）をタップしても確認ダイアログ
+    await click(q("daily-row-price"));
+    expect(q("unmark-dialog")).not.toBeNull();
+    expect(setMark).not.toHaveBeenCalled();
+  });
+
+  it("購入予定の固定バーは1行（購入予定 N枚 ／ 合計 金額 ／ 一括購入）。2段にならない", async () => {
+    const a = rec({ priceYen: 1080 });
+    const b = rec({ storeName: "梅田店", priceYen: 1080 });
+    daily.records = [a, b];
+    await mount([`market:${a.id}`, `market:${b.id}`]);
+    await click(q("daily-planned-only"));
+    const bar = q("daily-planned-bar")!;
+    const line = q("daily-planned-line")!;
+    expect(line.textContent).toBe("購入予定 2枚合計 2,160円");
+    expect(line.className).toContain("whitespace-nowrap");
+    expect(bar.querySelectorAll("p")).toHaveLength(1); // 枚数と金額は同じ1つの行
+    expect(bar.firstElementChild!.className).toContain("flex"); // [文字の行 | 一括購入] が横並び
+    expect(bar.firstElementChild!.className).not.toContain("flex-col");
+  });
+
+  it("更新で再確認した記録（調査日が別の日）も、その日の結果に「更新」つきで表示する。同じ日に新規登録された同一内容は重複表示しない", async () => {
+    const reconfirmed = rec({ surveyedOn: "2026-11-10", lastConfirmedOn: "2026-11-23", storeName: "更新店", priceYen: 900 });
+    const fresh = rec({ storeName: "新規店", priceYen: 1200 });
+    daily.records = [reconfirmed, fresh];
+    await mount();
+    expect(qa("daily-row")).toHaveLength(2);
+    const rows = qa("daily-row");
+    expect(rows.find((r) => r.textContent!.includes("更新店"))!.querySelector('[data-testid="daily-refreshed"]')).not.toBeNull();
+    expect(rows.find((r) => r.textContent!.includes("新規店"))!.querySelector('[data-testid="daily-refreshed"]')).toBeNull();
+  });
+
   it("下部の合計は同じ調査記録を二重計上しない。購入予定が無いときは一括購入を押せない（通常の一覧には固定表示しない）", async () => {
     const a = rec({ priceYen: 700 });
     const z = rec({ source: "zukan", priceYen: 700 });

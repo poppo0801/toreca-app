@@ -384,7 +384,7 @@ describe("相場調査メモの画面", () => {
     await mount(createElement(MarketMemoView));
     const store = q("market-card-store")!;
     expect(store.textContent).toBe(longStore); // 店名に系列名が含まれるときは、系列名を重ねて出さない。文字列は完全に出力される（見た目の省略はCSS）
-    expect(store.className).toContain("truncate"); // 長い場合は省略表示
+    expect(store.className).toContain("line-clamp-2"); // 長い店名は折り返して全文を出す（最大2行）
     const btn = q("market-card-open")!;
     expect(btn.className).toContain("grid");
     expect(btn.className).toContain("items-center");
@@ -394,15 +394,17 @@ describe("相場調査メモの画面", () => {
     expect(best.className).toContain("text-[15px]"); // 従来（text-lg）より小さい
     expect(best.className).not.toContain("text-lg");
     // 区画の順序: 左（画像・名前・店舗）→ 中央（レアリティ）→ 右（状態バッジ・価格）
-    const [left, center, right] = [...btn.children] as HTMLElement[];
+    const [left, center, rankCol, priceCol] = [...btn.children] as HTMLElement[];
     expect(left.contains(q("market-card-name-text")!)).toBe(true);
     expect(left.contains(store)).toBe(true);
     expect(center.getAttribute("data-testid")).toBe("row-rarity");
     expect(center.textContent).toBe("SAR");
     expect(center.className).toContain("border-x"); // 独立した列（左右の細い線）
-    expect(right.querySelector('[data-testid="rank-badge"]')!.getAttribute("data-rank")).toBe("S");
-    expect(right.lastElementChild).toBe(best);
-    expect(left.contains(right.querySelector('[data-testid="rank-badge"]'))).toBe(false); // 状態は右側
+    // 列は全行で固定幅: レアリティ・状態ランク・価格の位置は店舗名の長さに影響されない
+    expect(btn.className).toContain("grid-cols-[minmax(0,1fr)_2.25rem_1.75rem_4.25rem]");
+    expect(rankCol.querySelector('[data-testid="rank-badge"]')!.getAttribute("data-rank")).toBe("S");
+    expect(priceCol).toBe(best);
+    expect(left.contains(rankCol.querySelector('[data-testid="rank-badge"]'))).toBe(false); // 状態は右側
   });
 
   it("相場調査メモの一覧: 店名に系列名が含まれないときは「系列 店舗」の順で出す", async () => {
@@ -490,11 +492,12 @@ describe("相場調査メモの画面", () => {
     const num = q("market-card-number") as HTMLInputElement;
     await click(num);
     const opts = () => qa("market-card-number-option").map((o) => o.textContent);
-    expect(opts()).toHaveLength(3); // 006/078（2つのセット）・099/100
+    expect(opts()).toHaveLength(2); // 番号単独の候補: 006/078（2つのセットがあっても1つ）・099/100
     await type(num, "0");
-    expect(opts()).toHaveLength(3);
+    expect(opts()).toHaveLength(2);
     await type(num, "09");
-    expect(opts()).toEqual(["099/100セットX ・ SR"]);
+    expect(opts()).toEqual(["099/100セットX"]);
+    const rarityBefore = (q("market-card-rarity") as HTMLInputElement).value;
     const pick = async (el: Element) => {
       await act(async () => void el.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
       await flush();
@@ -502,14 +505,15 @@ describe("相場調査メモの画面", () => {
     await pick(qa("market-card-number-option")[0]);
     expect(num.value).toBe("099/100");
     expect((q("market-card-set") as HTMLInputElement).value).toBe("セットX"); // 番号を選ぶと、対応する収録セットを自動補完
-    expect((q("market-card-rarity") as HTMLInputElement).value).toBe("SR"); // レアリティも補完
-    // 同じ番号が複数のセットにあるとき: 候補が別々に並び、正しいものを選ぶ（番号だけでセットを推測しない）
+    expect((q("market-card-rarity") as HTMLInputElement).value).toBe(rarityBefore); // 番号とレアリティの候補は独立（番号を選んでもレアは変わらない）
+    // 同じ番号が複数のセットにあるとき: 自動入力せず、収録セットを選ばせる（番号だけでセットを推測しない）
     await type(q("market-card-set") as HTMLInputElement, "");
     await type(num, "006/078");
     expect((q("market-card-set") as HTMLInputElement).value).toBe("");
-    expect(opts()).toHaveLength(2);
-    await pick(qa("market-card-number-option")[1]);
-    expect((q("market-card-set") as HTMLInputElement).value).not.toBe(""); // 選んだ候補のセット
+    expect(opts()).toHaveLength(1);
+    expect(qa("set-choice")).toHaveLength(2);
+    await click(qa("set-choice")[1]);
+    expect((q("market-card-set") as HTMLInputElement).value).not.toBe(""); // 選んだ収録セット
     // 一覧に無い番号・レアリティは自由入力できる
     await type(num, "999/999");
     expect(num.value).toBe("999/999");
@@ -664,7 +668,7 @@ describe("相場調査メモの画面", () => {
     expect(row.querySelector('[data-testid="rank-badge"]')!.textContent).toBe("S");
     expect(q("market-card-store")!.textContent).toBe("渋谷店");
     expect(q("market-card-best")!.textContent).toBe("1,500円");
-    expect(q("market-card-open")!.lastElementChild!.lastElementChild).toBe(q("market-card-best"));
+    expect(q("market-card-open")!.lastElementChild).toBe(q("market-card-best"));
   });
 
   it("カード一覧の五十音順・図鑑No順（実際の表示順）。見出し用の並び順の表示も更新される", async () => {

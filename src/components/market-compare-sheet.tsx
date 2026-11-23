@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { loadCompareAction, type CompareData } from "@/app/(app)/market-memo/daily-actions";
 import { DexImage } from "@/components/dex-image";
 import { RankBadge } from "@/components/rank-badge";
+import { StoreIdentity } from "@/components/store-identity";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { mergeDaily, type DailyRow } from "@/lib/zukan/daily";
 import { splitCurrent } from "@/lib/zukan/freshness";
@@ -12,7 +13,6 @@ import { matchPokemonByCardName } from "@/lib/zukan/pokemon-match";
 import { rankOrder } from "@/lib/zukan/zukan";
 
 const yen = (v: number) => `${v.toLocaleString("ja-JP")}円`;
-const storeLabel = (r: Pick<DailyRow, "chainName" | "storeName">) => `${r.chainName && !r.storeName.includes(r.chainName) ? r.chainName + " " : ""}${r.storeName}`;
 const md = (d: string) => {
   const [, m, day] = d.split("-").map(Number);
   return `${m}/${day}`;
@@ -99,14 +99,12 @@ export function MarketCompareSheet({ card, onClose }: { card: { cardName: string
 
 function CompareRow({ r, past = false }: { r: DailyRow; past?: boolean }) {
   return (
-    <li className="grid min-h-11 grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-lg border px-2 py-1" data-testid="compare-row" data-soldout={r.soldOut ? "1" : "0"} data-past={past ? "1" : "0"}>
+    <li className="grid min-h-11 grid-cols-[1.75rem_minmax(0,1fr)_auto_auto] items-center gap-x-2 rounded-lg border px-2 py-1" data-testid="compare-row" data-soldout={r.soldOut ? "1" : "0"} data-past={past ? "1" : "0"}>
       <RankBadge rank={r.condition} />
-      <span className="min-w-0 text-xs leading-tight">
-        <span className="block truncate font-medium">{storeLabel(r)}</span>
-        <span className="block truncate text-[10px] text-muted-foreground">
-          調査 {md(r.surveyedOn)}
-          {!past && r.lastConfirmedOn !== r.surveyedOn ? ` ・ 最終確認 ${md(r.lastConfirmedOn)}` : ""}
-        </span>
+      <StoreIdentity chainName={r.chainName} storeName={r.storeName} />
+      {/* 日付だけ（最新の販売情報は最終確認日、過去の参考情報は調査日） */}
+      <span className="text-[11px] tabular-nums text-muted-foreground" data-testid="compare-date">
+        {md(past ? r.surveyedOn : r.lastConfirmedOn)}
       </span>
       <span className="flex items-center gap-1 whitespace-nowrap text-sm font-bold tabular-nums">
         {r.soldOut && <span className="rounded border border-danger px-1 text-[10px] font-bold leading-4 text-danger">完売</span>}

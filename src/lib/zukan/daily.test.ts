@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** 日別相場調査結果（統合・グループ化・絞り込み・日付・購入予定の有効期限）と、系列・店舗の「最後の入力」から5分間の初期選択、並び替えの追加分。 */
 import { describe, expect, it } from "vitest";
-import { cardKeyOf, filterDaily, groupByCard, groupByStore, isDay, jstDay, markActive, mergeDaily, shiftDay, type DailyRecord } from "./daily";
+import { cardKeyOf, dropDuplicateConfirmations, filterDaily, groupByCard, groupByStore, isDay, jstDay, markActive, mergeDaily, shiftDay, type DailyRecord } from "./daily";
 import { DEFAULT_PAIR_WINDOW_MS, defaultPair, latestInput, MARKET_SORT_MENU, MARKET_SORT_ORDER, marketSortHeading, nextMarketSort, rarityOrder, recentPairs, sortMarketCards } from "./zukan";
 
 let n = 0;
@@ -146,5 +146,18 @@ describe("並び替えの追加（価格降順・レアリティ順・循環）"
     expect(MARKET_SORT_MENU).toEqual([...MARKET_SORT_ORDER]); // 長押しの一覧は全項目
     expect(nextMarketSort("kana")).toBe("new");
     expect(marketSortHeading("priceDesc")).toBe("価格の高い順 ↓");
+  });
+});
+
+describe("更新で再確認した記録の重複排除", () => {
+  const D = "2026-11-23";
+  it("調査日が別の日の再確認の記録は、同じ日に新規登録された同一内容（カード・店舗・状態・価格）があれば除く。内容が違えば残す。新規登録の記録は常に残る", () => {
+    const fresh = rec({ surveyedOn: D, storeName: "垂水店", priceYen: 1000 });
+    const dupConfirm = rec({ surveyedOn: "2026-11-10", lastConfirmedOn: D, storeName: "垂水店", priceYen: 1000 });
+    const otherPrice = rec({ surveyedOn: "2026-11-10", lastConfirmedOn: D, storeName: "垂水店", priceYen: 900 });
+    const otherStore = rec({ surveyedOn: "2026-11-11", lastConfirmedOn: D, storeName: "梅田店", priceYen: 1000 });
+    const out = dropDuplicateConfirmations([fresh, dupConfirm, otherPrice, otherStore], D);
+    expect(out.map((r) => r.id)).toEqual([fresh.id, otherPrice.id, otherStore.id]);
+    expect(dropDuplicateConfirmations([dupConfirm], D)).toHaveLength(1); // 新規登録が無ければ再確認の記録を表示
   });
 });

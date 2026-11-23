@@ -126,7 +126,10 @@ export async function deleteZukanPriceAction(profileId: string, id: string): Pro
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
 
-/** 「この価格で購入」: 価格調査の記録のカード・店舗・価格・状態を引き継いで、収集カード（単品購入）を登録する。1つの記録からは1回だけ。購入後も価格の履歴は残る */
+/**
+ * 「この価格で購入」: 価格調査の記録のカード・店舗・価格・状態を引き継いで、収集カード（単品購入）を登録する。1つの記録からは1回だけ。購入後も価格の履歴は残る。
+ * 同時に購入記録（シングルカード）へも反映する（1トランザクション）: 同じ購入者・同じ購入日の既存のシングルカード購入記録があれば明細を追加して合算し、収支は購入記録から集計される。
+ */
 export async function buyZukanFromPriceAction(profileId: string, priceId: string, acquiredOn: string): Promise<R<{ cardId: string }>> {
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(priceId).success || !/^\d{4}-\d{2}-\d{2}$/.test(acquiredOn)) return fail("リクエストが不正です");
   const db = await ctx();
@@ -134,7 +137,7 @@ export async function buyZukanFromPriceAction(profileId: string, priceId: string
   // 世帯の記録だけを購入できる（RLS）
   const { data: rec } = await any(db).from("zukan_price_records").select("id").eq("id", priceId).maybeSingle();
   if (!rec) return fail("対象が見つかりません");
-  const { data, error } = await any(db).rpc("zukan_buy_from_price_tx", { p_price: priceId, p_acquired_on: acquiredOn });
+  const { data, error } = await any(db).rpc("zukan_buy_from_price_tx", { p_price: priceId, p_acquired_on: acquiredOn, p_profile: profileId });
   if (error) return fail(error.code === "23505" ? "この価格の記録からは、すでに購入済みです" : mapError(error));
   return { ok: true, cardId: data as string };
 }

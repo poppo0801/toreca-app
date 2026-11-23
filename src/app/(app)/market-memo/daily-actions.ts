@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { cardKeyOf, isDay, jstDay, type DailyRecord, type DailyRef } from "@/lib/zukan/daily";
+import { cardKeyOf, dropDuplicateConfirmations, isDay, jstDay, type DailyRecord, type DailyRef } from "@/lib/zukan/daily";
 import { indexEvents, statusOf } from "@/lib/zukan/freshness";
 import { toPriceEvents } from "@/lib/zukan/rows";
 import { createClient } from "@/lib/supabase/server";
@@ -95,16 +95,30 @@ export async function loadDailyAction(day: string): Promise<R<{ data: DailyData 
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
   const today = jstDay(new Date());
-  const [z1, m1, mk] = await Promise.all([
+  const [z1, m1, mk, ev] = await Promise.all([
     any(db).from("zukan_price_records").select("*").eq("surveyed_on", day).order("created_at").limit(5000),
     any(db).from("market_prices").select("*").eq("surveyed_on", day).order("created_at").limit(5000),
     any(db).from("market_plan_marks").select("zukan_price_id,market_price_id").eq("marked_on", today).limit(20000),
+    // 「更新」でその日に販売を再確認した記録（調査日はもっと前でもよい）も、その日の結果に含める
+    any(db).from("market_price_events").select("zukan_price_id,market_price_id").eq("happened_on", day).eq("event", "confirmed").limit(20000),
   ]);
-  if (z1.error || m1.error || mk.error) return fail("読み込めませんでした");
-  const r = await toRecords(db, z1.data ?? [], m1.data ?? [], day);
+  if (z1.error || m1.error || mk.error || ev.error) return fail("読み込めませんでした");
+  const zRows: Row[] = [...(z1.data ?? [])];
+  const mRows: Row[] = [...(m1.data ?? [])];
+  const have = (rows: Row[]) => new Set(rows.map((x) => s(x.id)));
+  for (const [table, col, rows] of [["zukan_price_records", "zukan_price_id", zRows], ["market_prices", "market_price_id", mRows]] as const) {
+    const seen = have(rows);
+    const extra = [...new Set<string>((ev.data ?? []).map((x: Row) => s(x[col])).filter((x: string) => x && !seen.has(x)))];
+    for (let i = 0; i < extra.length; i += 100) {
+      const more = await any(db).from(table).select("*").in("id", extra.slice(i, i + 100));
+      if (more.error) return fail("読み込めませんでした");
+      rows.push(...(more.data ?? []));
+    }
+  }
+  const r = await toRecords(db, zRows, mRows, day);
   if (!r.ok) return r;
   const planned = (mk.data ?? []).flatMap((x: Row) => [x.zukan_price_id ? `zukan:${s(x.zukan_price_id)}` : null, x.market_price_id ? `market:${s(x.market_price_id)}` : null]).filter((x: string | null): x is string => !!x);
-  return { ok: true, data: { today, day, records: r.records, planned } };
+  return { ok: true, data: { today, day, records: dropDuplicateConfirmations(r.records, day), planned } };
 }
 
 export interface CompareData {
