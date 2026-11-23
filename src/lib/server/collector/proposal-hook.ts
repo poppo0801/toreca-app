@@ -8,7 +8,8 @@
  *  - 書き込み先は registration_proposals だけ（lotteries・応募・購入・通知・履歴には書かない）。サービス権限のクライアントでないと保存できない（RLS）ため、利用者のセッションで呼ばれた場合は保存に失敗して何もしない。
  */
 import type { Db } from "@/lib/server/lottery-service";
-import { proposalAutoGenerateEnabled } from "@/lib/server/proposals/flag";
+import { persistCollectedDocuments } from "@/lib/server/proposals/collected-store";
+import { evidenceCollectStoreEnabled, proposalAutoGenerateEnabled } from "@/lib/server/proposals/flag";
 import { generateProposalsForCandidate, mockDeps } from "@/lib/server/proposals/generate";
 
 const warn = (code: string): void => {
@@ -18,6 +19,20 @@ const warn = (code: string): void => {
     /* ログの失敗は無視 */
   }
 };
+
+/**
+ * 収集で取得した全文（投稿本文・リンク先の全ページ）を evidence_documents（migration 115）へ保存する（Phase 2）。新AI機能が有効な開発環境だけ（本番では何もしない）。
+ * 失敗しても収集は止めず、件数だけ返す。
+ */
+export async function storeCollectedEvidence(a: { db: Db; householdId: string; candidateId: string; queued: object; postUrl: string; postText: string | null; nowIso: string; env?: Record<string, string | undefined> }): Promise<{ saved: number; existing: number; failed: number } | null> {
+  if (!evidenceCollectStoreEnabled(a.env ?? process.env)) return null;
+  try {
+    return await persistCollectedDocuments(a.db, a.householdId, a.candidateId, a.queued, { postUrl: a.postUrl, postText: a.postText, nowIso: a.nowIso });
+  } catch {
+    warn("collected_store_failed");
+    return null;
+  }
+}
 
 export async function proposalAfterCandidate(a: { db: Db; householdId: string; candidateId: string; env?: Record<string, string | undefined>; timeoutMs?: number }): Promise<void> {
   const env = a.env ?? process.env;

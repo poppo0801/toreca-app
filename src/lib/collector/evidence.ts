@@ -8,10 +8,21 @@ import { redact } from "@/lib/case-model/redact";
  *  - 個人情報・APIキーは伏せ字にし、本文は最大 MAX_EVIDENCE_CHARS 文字に切り詰める（保存容量・外部コンテンツの取り扱い）。画像そのものは保存しない（枚数と取得状態のみ）。
  *  - 保存されていない過去の情報を、取得済みとして扱わない（この形式の記録が無ければ「保存なし」）。
  */
-export const MAX_EVIDENCE_CHARS = 3500;
+/** 投稿・ページ本文の抜粋上限。以前は3,500字（長い投稿の後半が欠けた）。X投稿は最大約25,000字。全文は evidence_documents にも保存する（truncated で切れを明示） */
+export const MAX_EVIDENCE_CHARS = 12_000;
 export const EVIDENCE_VERSION = 1;
-/** リンク先の公開ページ本文の保存上限（1ページあたり）。保存容量を抑える */
-export const MAX_LINKED_PAGE_CHARS = 3000;
+/**
+ * リンク先の公開ページ本文を last_good（jsonb）に抜粋として持つ上限（1ページあたり）。**全文はここではなく evidence_documents（migration 115）へ保存する**。
+ * 抜粋が全文より短いページは truncated=true と fullChars を残し、「後半は未確認」を判別できるようにする（無いのではなく未確認）。
+ */
+export const MAX_LINKED_PAGE_CHARS = 6000;
+/** 1投稿から保存するリンク先ページ数の上限（以前は2件。複数店舗・商品を含む投稿の2件目以降が欠けていた）。取得側の上限（link-plan）と整合 */
+export const MAX_LINKED_PAGES = 30;
+/** 原文に含まれていたリンク先のURLの保存上限（以前は5件）。発見した全リンクの台帳は linkLedger */
+export const MAX_EVIDENCE_LINKS = 60;
+export const MAX_LINK_LEDGER = 80;
+/** 元画像への参照の保存上限（以前は4件） */
+export const MAX_IMAGE_REFS = 16;
 
 /** 取得方法: x_api=X公式API／x_oembed=公開oEmbed（本文のみ）／web_fetch=ページを直接取得／list_card=まとめサイト一覧のカード（二次情報） */
 export type EvidenceVia = "x_api" | "x_oembed" | "web_fetch" | "list_card";
@@ -63,7 +74,9 @@ export interface StoredEvidence {
    * Stage 10J（追加の項目）: 投稿内のリンク先の公開ページ本文（収集時に既に取得していたもの。最大2件・各3,000字・伏せ字済み）。
    * 投稿本文（text）とは**別の出典**として分けて保存する（混同しない）。本文が無い・取得できなかった場合は付けない。
    */
-  linkedPages?: { url: string; text: string; fetchedAt: string }[];
+  linkedPages?: { url: string; text: string; fetchedAt: string; /** 取得時の全文の字数。text が抜粋のとき fullChars > text.length */ fullChars?: number; /** 抜粋または取得元が切れている（後半は未確認） */ truncated?: boolean; depth?: 0 | 1; fromUrl?: string; origins?: string[]; shortUrl?: string }[];
+  /** Phase 2: 発見した全リンクの台帳（取得できた／できなかった／選ばなかった理由）。無言の欠落を防ぐ（取得できなかったリンクを「無い」と扱わない） */
+  linkLedger?: { url: string; key: string; host: string; order: number; origins: string[]; shortUrl?: string; status: string; reason?: string; chars?: number; truncated?: boolean; at?: string }[];
   /**
    * Stage 10K（追加の項目）: 収集時に既に行った画像解析（AI）が読み取った、画像由来の根拠（項目ごとの短い抜粋）。**原文（text・linkedPages）とは別の出典**で、
    * 画像そのものは保存しない・再解析しない。AIの読み取り（OCRではない）で、原本と照合できない（verified は常に null）。無い記録は「画像読み取りなし」。
@@ -89,7 +102,8 @@ export interface EvidenceSource {
   viaList?: boolean;
   imageStatus?: StoredEvidence["imageStatus"];
   /** 投稿内のリンク先の公開ページ本文（収集時に取得済みのもの） */
-  linkedPages?: { url: string; text: string }[];
+  linkedPages?: { url: string; text: string; fullChars?: number; truncated?: boolean; depth?: 0 | 1; fromUrl?: string; origins?: string[]; shortUrl?: string }[];
+  linkLedger?: StoredEvidence["linkLedger"];
   /** 収集時の画像解析の読み取り（`imageReadingsFromExtraction` の結果） */
   imageReadings?: ImageReading[];
   /** 元画像への参照（公開URL） */
@@ -168,11 +182,17 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
   const text = joined.slice(0, MAX_EVIDENCE_CHARS);
   const imageReadings = (src.imageReadings ?? []).slice(0, 12);
   const linkMap = (src.post?.linkMap ?? []).filter((m) => m && typeof m.short === "string" && typeof m.url === "string" && m.short.startsWith("https://t.co/") && m.url.startsWith("https://")).map((m) => ({ short: m.short.slice(0, 40), url: m.url.slice(0, 300) })).slice(0, 30);
-  const imageRefs = (src.imageRefs ?? []).filter((u) => typeof u === "string" && u.startsWith("https://")).map((u) => u.slice(0, 500)).slice(0, 4);
+  const imageRefs = (src.imageRefs ?? []).filter((u) => typeof u === "string" && u.startsWith("https://")).map((u) => u.slice(0, 500)).slice(0, MAX_IMAGE_REFS);
   const linkedPages = (src.linkedPages ?? [])
-    .map((l) => ({ url: String(l.url).slice(0, 500), text: clean(String(l.text)).slice(0, MAX_LINKED_PAGE_CHARS), fetchedAt: nowIso }))
+    .map((l) => {
+      const full = clean(String(l.text));
+      const text = full.slice(0, MAX_LINKED_PAGE_CHARS);
+      const fullChars = Math.max(full.length, l.fullChars ?? 0);
+      return { url: String(l.url).slice(0, 500), text, fetchedAt: nowIso, fullChars, truncated: text.length < fullChars || !!l.truncated, ...(l.depth !== undefined ? { depth: l.depth } : {}), ...(l.fromUrl ? { fromUrl: l.fromUrl.slice(0, 500) } : {}), ...(l.origins?.length ? { origins: l.origins.slice(0, 4) } : {}), ...(l.shortUrl ? { shortUrl: l.shortUrl.slice(0, 40) } : {}) };
+    })
     .filter((l) => l.url.startsWith("https://") && l.text.length >= 30)
-    .slice(0, 2);
+    .slice(0, MAX_LINKED_PAGES);
+  const linkLedger = (src.linkLedger ?? []).slice(0, MAX_LINK_LEDGER).map((e) => ({ ...e, url: String(e.url).slice(0, 500), key: String(e.key).slice(0, 300), ...(e.reason ? { reason: String(e.reason).slice(0, 160) } : {}) }));
   return {
     v: EVIDENCE_VERSION,
     url: src.url.slice(0, 500),
@@ -181,12 +201,13 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
     origin,
     text,
     truncated: joined.length > text.length,
-    links: [...new Set(links)].filter((l) => /^https?:\/\//.test(l)).slice(0, 5),
+    links: [...new Set(links)].filter((l) => /^https?:\/\//.test(l)).slice(0, MAX_EVIDENCE_LINKS),
     imageCount,
     imageStatus: src.imageStatus ?? (imageCount === 0 ? "none" : "not_fetched"),
     hash: createHash("sha256").update(text).digest("hex").slice(0, 32),
     textSource,
     ...(linkedPages.length ? { linkedPages } : {}),
+    ...(linkLedger.length ? { linkLedger } : {}),
     ...(imageReadings.length ? { imageReadings } : {}),
     ...(imageRefs.length ? { imageRefs } : {}),
     ...(linkMap.length ? { linkMap } : {}),
@@ -198,14 +219,16 @@ export function evidenceFromLastGood(lastGood: unknown): StoredEvidence | null {
   if (!lastGood || typeof lastGood !== "object") return null;
   const e = (lastGood as { evidence?: unknown }).evidence as Partial<StoredEvidence> | undefined;
   if (!e || e.v !== EVIDENCE_VERSION || typeof e.url !== "string" || typeof e.text !== "string" || e.text.length < 8 || typeof e.fetchedAt !== "string" || typeof e.hash !== "string") return null;
-  const linkedPages = Array.isArray(e.linkedPages) ? e.linkedPages.filter((l) => l && typeof l.url === "string" && typeof l.text === "string").slice(0, 2) : undefined;
-  const { linkedPages: _ignored, imageReadings: _ir, imageRefs: _refs, linkMap: _lm, ...rest } = e as StoredEvidence;
+  const linkedPages = Array.isArray(e.linkedPages) ? e.linkedPages.filter((l) => l && typeof l.url === "string" && typeof l.text === "string").slice(0, MAX_LINKED_PAGES) : undefined;
+  const linkLedger = Array.isArray(e.linkLedger) ? e.linkLedger.filter((x) => x && typeof x.url === "string" && typeof x.status === "string").slice(0, MAX_LINK_LEDGER) : undefined;
+  const { linkLedger: _ll, linkedPages: _ignored, imageReadings: _ir, imageRefs: _refs, linkMap: _lm, ...rest } = e as StoredEvidence;
   void _lm;
+  void _ll;
   void _ignored;
   void _ir;
   void _refs;
   const imageReadings = Array.isArray(e.imageReadings) ? e.imageReadings.filter((r) => r && r.kind === "ai_reading" && typeof r.text === "string" && typeof r.field === "string").slice(0, 12) : undefined;
   const linkMap = Array.isArray(e.linkMap) ? e.linkMap.filter((m) => m && typeof m.short === "string" && typeof m.url === "string").slice(0, 30) : undefined;
-  const imageRefs = Array.isArray(e.imageRefs) ? e.imageRefs.filter((u) => typeof u === "string" && u.startsWith("https://")).slice(0, 4) : undefined;
-  return { ...rest, links: Array.isArray(e.links) ? e.links.slice(0, 5) : [], ...(linkedPages?.length ? { linkedPages } : {}), ...(imageReadings?.length ? { imageReadings } : {}), ...(imageRefs?.length ? { imageRefs } : {}), ...(linkMap?.length ? { linkMap } : {}) };
+  const imageRefs = Array.isArray(e.imageRefs) ? e.imageRefs.filter((u) => typeof u === "string" && u.startsWith("https://")).slice(0, MAX_IMAGE_REFS) : undefined;
+  return { ...rest, links: Array.isArray(e.links) ? e.links.slice(0, MAX_EVIDENCE_LINKS) : [], ...(linkedPages?.length ? { linkedPages } : {}), ...(linkLedger?.length ? { linkLedger } : {}), ...(imageReadings?.length ? { imageReadings } : {}), ...(imageRefs?.length ? { imageRefs } : {}), ...(linkMap?.length ? { linkMap } : {}) };
 }

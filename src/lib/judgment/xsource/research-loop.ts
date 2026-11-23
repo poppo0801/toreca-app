@@ -49,8 +49,15 @@ export interface SearchHitLite {
   url: string;
   snippet: string;
 }
+export interface ReadHintLite {
+  from: number;
+  to: number;
+  why: string;
+}
 export interface ResearchTools {
   fetchPage(url: string): Promise<FetchOutcome>;
+  /** （任意）過去の調査経験から、この本文で最初に見せる位置の提案（仮説）。本文の全文参照・目次・条件語の周辺は変わらない。検証済みの経験が不足なら空 */
+  readHints?(url: string, text: string): ReadHintLite[];
   now(): Date;
   /** （任意・読み取り専用）公開Webの検索。結果は**候補のURLと抜粋（データ）**で、証拠ではない（取得してページ構造・対応の検査を通して初めて証拠になる）。無い環境では検索できない */
   search?(query: string): Promise<{ ok: true; hits: SearchHitLite[]; costJpy: number | null } | { ok: false; reason: string }>;
@@ -75,6 +82,8 @@ export interface Evidence {
   notice?: string;
   /** AIが read で参照した範囲（本文の字位置。重複・隣接は結合）。判断AIへも同じ範囲の原文を渡す */
   reads?: { from: number; to: number }[];
+  /** 過去の調査経験に基づく「最初に見せる位置」（仮説）。位置の優先だけで、全文の参照可能性は変わらない。「ここに無い」ことは「記載なし」を意味しない */
+  hintSpans?: ReadHintLite[];
   /** 収集時の文脈の注記（本文の切り詰め・画像から読み取った情報など）。**観察として渡し、引用の根拠にはしない**（本文ではないため） */
   notes?: string[];
 }
@@ -114,6 +123,8 @@ export interface AgentView {
   excerpt: string;
   /** 抜粋（先頭）の外にある応募条件の記載（店舗選択・人数/回数の上限・店舗ごと 等）の周辺。位置つき。原文の一部であり、引用の検証は本文全体に対して行う */
   extraWindows?: string[];
+  /** 過去の調査経験から「最初に見せる」と提案された位置の原文（仮説。位置の優先だけで、ここに無いことは「記載なし」を意味しない。全文は read で参照できる） */
+  hintWindows?: string[];
   /** 本文の全字数 */
   chars?: number;
   /** 全文のうち、AIの入力に出ている範囲の説明（全文提示／一部のみ＋未確認の範囲）。「無い」ではなく「未確認」を区別するため */
@@ -289,11 +300,13 @@ export function outlineOf(text: string): string[] {
   }
   return out;
 }
+const hintRanges = (e: Pick<Evidence, "text" | "hintSpans">): { from: number; to: number }[] => (e.hintSpans ?? []).map((h) => ({ from: Math.max(0, h.from), to: Math.min(e.text.length, h.to) })).filter((h) => h.to > h.from).slice(0, 4);
+
 /** この証拠のうち、AIの入力に出ている範囲（先頭の抜粋・条件語の周辺・参照した範囲） */
-export function shownRanges(e: Pick<Evidence, "text" | "reads">): { from: number; to: number }[] {
+export function shownRanges(e: Pick<Evidence, "text" | "reads" | "hintSpans">): { from: number; to: number }[] {
   const n = e.text.length;
   if (n <= FULL_VIEW_CHARS) return [{ from: 0, to: n }];
-  return mergeRanges([{ from: 0, to: EXCERPT_CHARS }, ...ruleSpans(e.text, EXCERPT_CHARS).map(([a, b]) => ({ from: a, to: b })), ...(e.reads ?? [])]);
+  return mergeRanges([{ from: 0, to: EXCERPT_CHARS }, ...ruleSpans(e.text, EXCERPT_CHARS).map(([a, b]) => ({ from: a, to: b })), ...hintRanges(e), ...(e.reads ?? [])]);
 }
 const shownChars = (r: readonly { from: number; to: number }[]): number => r.reduce((t, x) => t + (x.to - x.from), 0);
 
@@ -309,6 +322,7 @@ export function toAgentView(e: Evidence): AgentView {
     ...base,
     excerpt: e.text.slice(0, EXCERPT_CHARS),
     ...(w.length ? { extraWindows: w } : {}),
+    ...(hintRanges(e).length ? { hintWindows: hintRanges(e).map((h, i) => `（${h.from}字目〜・過去の類似ページの経験からの仮説）${e.text.slice(h.from, h.to).replace(/\n+/g, " / ")}  ※${e.hintSpans?.[i]?.why ?? ""}`) } : {}),
     outline: outlineOf(e.text),
     ...(reads.length ? { readSegments: reads } : {}),
     coverage: `全文${n}字のうち${covered}字（先頭抜粋・条件語の周辺・参照した範囲）を提示。残り${n - covered}字は未確認（「記載が無い」とは限らない）。read（位置・字数）で原文の任意の範囲を参照できる`,
@@ -549,6 +563,8 @@ export async function runResearch(args: {
           const pe = pageEvidence(evidence.length, url, r, args.tools.now());
           const sc = args.scoper?.(url, pe);
           if (sc) pe.scope = sc;
+          const hs = args.tools.readHints?.(url, pe.text);
+          if (hs?.length) pe.hintSpans = hs.slice(0, 4).map((h) => ({ from: h.from, to: h.to, why: h.why.slice(0, 200) }));
           evidence.push(pe);
           history.push({ key, host: cu.host, outcome: "ok", contentHash: hash, at, progress: true });
           trace.push({ turn, kind: "fetch", detail: `ok:${cu.host}` });

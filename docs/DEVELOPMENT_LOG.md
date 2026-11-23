@@ -126,3 +126,5 @@
 
 ## 7. 従来方式から変えた理由（まとめ）
 - 測定補正 → 構造で解決（下部メニュー）。日次 AI 上限 → 月額予算の予約。ページ再描画（`revalidatePath`）→ 構造共有と楽観的更新（★のみ）。JSON バックアップ → SQL ダンプ＋全 Storage の完全バックアップ。個別の重複判定 → `findDuplicates` に集約。店舗名の表記ゆれ → 正規化に集約。
+
+- Phase 2（UI改修後・未マージのAI系PR）: X投稿のリンク先取得は「最初の1件のみ」（Stage 4C `enrichXPost`）が根本原因で、10M〜10Wの複数URL対応は対応付けの層だった。発見/選別/取得/保存を分離（`link-plan.ts`・台帳）し、全リンク取得＋全文は evidence_documents へ、画像はビジョン注入＋再利用＋矛盾検出、調査経験は検証の強さ別に蓄積して「最初に見せる位置」だけに反映（migration 119）。詳細は `docs/reports/phase2-post-ui-collector-image-learning.md`。

@@ -147,7 +147,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 証拠の保存・計測・人の修�
   });
 
   it("④収集時の文脈: 本文の切り詰め・画像の読み取りは、AIの入力に『観察』として届き（引用の根拠にはならない）、登録案の未確認事項に残る。画像の内容が無いときも未確認と明示される", async () => {
-    const longPost = "《新宿本店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111 《渋谷西口店（東京）- 1件》 ・拡張BOX 抽選 11/30(月)23:59 https://t.co/ccc333 " + "お知らせ。".repeat(900);
+    const longPost = "《新宿本店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111 《渋谷西口店（東京）- 1件》 ・拡張BOX 抽選 11/30(月)23:59 https://t.co/ccc333 " + "お知らせ。".repeat(3000);
     n++;
     const url = `${URL_BASE}/${n}`;
     const ev = buildEvidence({ url, kind: "x_post", post: { text: longPost, links: [], linkMap: MAP, images: ["https://pbs.example.invalid/1.jpg", "https://pbs.example.invalid/2.jpg"] }, linkedPages: pages, imageReadings: [{ field: "applyDeadline", text: "締切 11/30 23:59", source: "画像1枚目", imageIndex: 1, kind: "ai_reading", verified: null, uncertainty: "high" } as never] }, new Date().toISOString());

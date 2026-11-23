@@ -9,7 +9,7 @@
  *  - 協調的な中止（shouldStop）・失敗の分類（reason。内容・機密を含めない）・費用の予約/計上（呼び出し側が渡す CallBudget）に対応する。
  */
 import { CallBudget, CaseBudget } from "@/lib/judgment/call-budget";
-import { evidenceFromLastGood, MAX_LINKED_PAGE_CHARS } from "@/lib/collector/evidence";
+import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import { canonUrl } from "@/lib/judgment/xsource/normalize";
 import { itemFingerprint, proposalKey, toProposalRecords, type ProposalMode, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { mockRegistrationJudge, mockResearchAgent } from "@/lib/judgment/xsource/proposal-mock";
@@ -20,6 +20,9 @@ import { proposalPreviewEnabled } from "./flag";
 import { isRealRunTicket, type RealRunTicket } from "./real-gate";
 import { coverageStatsOf, documentFromEvidence, loadBestDocument, saveCoverageStats, saveDocuments, type StoredDocument } from "./evidence-store";
 import { saveProposals, type SaveSummary } from "./store";
+import { advise, discoverFeatures, type ReadHint } from "@/lib/judgment/xsource/experience";
+import { analyzeImages, type ImageAnalysisResult, type VisionClient } from "@/lib/judgment/xsource/image-evidence";
+import { experiencesFromResult, loadExperiences, loadImageObservation, saveExperience, saveImageObservation } from "./experience-store";
 
 export interface GenerateDeps {
   agent: ResearchAgent;
@@ -40,6 +43,13 @@ export interface GenerateDeps {
   perItemCapJpy?: number;
   /** 協調的な中止（true で、以降の項目を処理しない） */
   shouldStop?: () => boolean;
+  /**
+   * 画像のビジョン解析（注入。既定は無し）。収集時の画像読み取りが無い画像だけを解析する（再利用・重複課金の回避）。**有料の実ビジョンは別途の明示承認が必要**で、ここでは作らない。
+   * 画像から読んだ内容は仮説（原本未照合）として観察に渡し、本文と矛盾すれば矛盾として残す（事実へ昇格させない）。
+   */
+  vision?: VisionClient;
+  /** 調査経験の反映と蓄積（既定 true）。false で、経験を読まず・書かない（比較実験の対照群） */
+  learn?: boolean;
 }
 
 /** 費用ゼロのモード（既定）。実AIではない */
@@ -83,7 +93,7 @@ const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g,
 
 /** 失敗の分類（内容・機密を含めない）。無言で握りつぶさず、呼び出し側が記録できる */
 export type FailReason = "disabled" | "no_evidence" | "run_failed" | "real_not_permitted" | "no_budget" | "save_failed";
-export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSummary; storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number } }; stopped: boolean; costJpy: number } | { ok: false; reason: FailReason };
+export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSummary; storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number }; experiences?: { saved: number; hinted: number }; images?: ImageAnalysisResult["counts"] }; stopped: boolean; costJpy: number } | { ok: false; reason: FailReason };
 
 type Loose = { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -136,22 +146,55 @@ export async function loadHumanCorrections(db: Db, householdId: string, candidat
 export async function generateProposalsForCandidate(a: { db: Db; householdId: string; candidate: CandidateRow; deps?: GenerateDeps; env?: Record<string, string | undefined>; persist?: boolean }): Promise<GenerateResult> {
   const env = a.env ?? process.env;
   if (!proposalPreviewEnabled(env)) return { ok: false, reason: "disabled" };
-  const post = postFromCandidate(a.candidate);
-  if (!post) return { ok: false, reason: "no_evidence" };
+  const post0 = postFromCandidate(a.candidate);
+  if (!post0) return { ok: false, reason: "no_evidence" };
   const deps = a.deps ?? mockDeps();
   const real = deps.mode === "real";
   if (real && !isRealRunTicket(deps.ticket)) return { ok: false, reason: "real_not_permitted" }; // 実AIは、承認済みの関門を通った評価入口の許可証がある場合だけ
   if (real && !deps.budget) return { ok: false, reason: "no_budget" }; // 予算なしの実AIは実行しない
   const stored = evidenceFromLastGood(a.candidate.last_good);
+  const clock0 = deps.now ?? (() => new Date());
+  // 画像: 収集時の読み取りを再利用し、読み取りの無い画像だけを（注入されたビジョンで）解析する。結果は仮説として観察に渡し、本文との矛盾を残す
+  let imageAnalysis: ImageAnalysisResult | null = null;
+  const cachedUrls = new Set<string>();
+  if (stored?.imageRefs?.length) {
+    const vision: VisionClient | undefined = deps.vision
+      ? async (req) => {
+          const c = await loadImageObservation(a.db, a.householdId, a.candidate.id, req.imageUrl, deps.mode);
+          if (c) {
+            cachedUrls.add(req.imageUrl);
+            return { readings: c.readings };
+          }
+          return deps.vision!(req);
+        }
+      : undefined;
+    imageAnalysis = await analyzeImages({ imageRefs: stored.imageRefs, existing: stored.imageReadings ?? [], postText: [stored.text, ...(stored.linkedPages ?? []).map((l) => l.text)].join("\n").slice(0, 60_000), ...(vision ? { vision } : {}) }).catch(() => null);
+  }
+  const post = imageAnalysis
+    ? { ...post0, notes: [...(post0.notes ?? []).filter((n) => !n.startsWith("収集時のAIが画像から読み取った情報") && n !== NOTE_IMAGE_UNREAD), ...imageAnalysis.notes].slice(0, 16) }
+    : post0;
+  // 調査経験: 類似ページの検証済みの経験があれば、最初に見せる位置の提案（仮説）を作る。位置の優先だけで、全文の参照可能性は変わらない
+  const experiences = deps.learn === false ? [] : await loadExperiences(a.db, a.householdId);
+  const hintsByUrl = new Map<string, ReadHint[]>();
   const linked = new Map((stored?.linkedPages ?? []).map((l) => [canonUrl(l.url).key, l]));
   const clock = deps.now ?? (() => new Date());
   const tools: ResearchTools = {
     now: clock,
+    ...(experiences.length > 0
+      ? {
+          readHints: (url: string, text: string) => {
+            const adv = advise({ features: discoverFeatures({ url, text }), docChars: text.length, experiences, now: clock().toISOString() });
+            hintsByUrl.set(canonUrl(url).key, adv.hints);
+            return adv.hints;
+          },
+        }
+      : {}),
     ...(deps.search ? { search: deps.search } : {}),
     fetchPage: async (u: string): Promise<FetchOutcome> => {
       // 順序: ①収集時の保存本文（上限に達していなければ全文）②最新の取得（許可されている場合）③以前に保存した全文（evidence_documents）④切り詰められた収集時の本文（切り詰めを明示）
       const hit = linked.get(canonUrl(u).key);
-      const truncated = !!hit && hit.text.length >= MAX_LINKED_PAGE_CHARS;
+      // 抜粋が全文より短い（収集時に fullChars を記録）ページは切り詰め。記録が無い古い保存は、抜粋の上限に達していれば切り詰めとみなす
+      const truncated = !!hit && (hit.truncated === true || (hit.fullChars !== undefined && hit.fullChars > hit.text.length) || (hit.fullChars === undefined && hit.text.length >= 3000));
       if (hit && !truncated) return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);
@@ -166,7 +209,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       if (doc && (!hit || doc.textChars > hit.text.length)) return fromDocument(doc);
       if (hit) {
         // 収集時の保存は先頭 MAX_LINKED_PAGE_CHARS 字で切り詰められる。後半は確認できない事実を観察に明示し、AIが「無い」と読まないようにする
-        const notice = `この本文は収集時の保存で先頭${MAX_LINKED_PAGE_CHARS}字に切り詰められており、後半は確認できない（無いのではなく未確認）`;
+        const notice = `この本文は収集時の保存で先頭${hit.text.length}字（全文${hit.fullChars ?? "不明"}字）に切り詰められており、後半は確認できない（無いのではなく未確認）`;
         return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text, notice };
       }
       return { ok: false, reason: "not_public" };
@@ -201,12 +244,27 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
     const save = a.persist === false ? { inserted: 0, unchanged: 0, superseded: 0, failed: 0 } : await saveProposals(a.db, a.householdId, records);
     if (save.failed > 0 && save.inserted === 0 && save.unchanged === 0) return { ok: false, reason: "save_failed" };
     // 取得した全文と、取得網羅性の計測を保存する（失敗しても登録案は失わない。失敗は件数で返す）
-    const storage = { documents: { saved: 0, existing: 0, failed: 0 }, stats: { saved: 0, failed: 0 } };
+    const storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number }; experiences?: { saved: number; hinted: number }; images?: ImageAnalysisResult["counts"] } = { documents: { saved: 0, existing: 0, failed: 0 }, stats: { saved: 0, failed: 0 } };
     if (a.persist !== false) {
-      const docs = run.results.flatMap(({ result }) => result.evidence.map((e) => documentFromEvidence(e, { collectorTruncatedAt: e.notice ? MAX_LINKED_PAGE_CHARS : undefined })).filter((d): d is StoredDocument => d !== null));
+      const docs = run.results.flatMap(({ result }) => result.evidence.map((e) => documentFromEvidence(e, { collectorTruncatedAt: e.notice ? e.text.length : undefined })).filter((d): d is StoredDocument => d !== null));
       storage.documents = await saveDocuments(a.db, a.householdId, a.candidate.id, docs);
-      const stats = run.results.flatMap(({ plan, result }) => coverageStatsOf({ proposalKey: proposalKey(a.candidate.id, post.postId, plan.itemNo), result, mode: deps.mode, collectorLimit: MAX_LINKED_PAGE_CHARS }));
+      const stats = run.results.flatMap(({ plan, result }) => coverageStatsOf({ proposalKey: proposalKey(a.candidate.id, post.postId, plan.itemNo), result, mode: deps.mode, collectorLimit: undefined }));
       storage.stats = await saveCoverageStats(a.db, a.householdId, stats);
+      if (imageAnalysis) {
+        storage.images = imageAnalysis.counts;
+        for (const o of imageAnalysis.observations) if (o.status === "analyzed" || o.status === "unreadable") if (!cachedUrls.has(o.url)) await saveImageObservation(a.db, a.householdId, a.candidate.id, o, { mode: deps.mode, modelId: deps.modelId, at: clock0().toISOString() });
+      }
+      if (deps.learn !== false) {
+        let saved = 0;
+        let hinted = 0;
+        for (const { plan, result } of run.results) {
+          for (const e of experiencesFromResult({ result, candidateId: a.candidate.id, proposalKey: proposalKey(a.candidate.id, post.postId, plan.itemNo), mode: deps.mode, at: clock0().toISOString(), hintsByUrl })) {
+            if (await saveExperience(a.db, a.householdId, e)) saved++;
+            if (e.hintUsed) hinted++;
+          }
+        }
+        storage.experiences = { saved, hinted };
+      }
     }
     return { ok: true, records, save, storage, stopped: run.stopped, costJpy: Math.round((budget.costJpy - before) * 10_000) / 10_000 };
   } catch {
