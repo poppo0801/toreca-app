@@ -55,7 +55,7 @@ describe("analyzeImages: 再利用・解析・失敗の扱い", () => {
     const v = mockVision({ [U1]: [], [U2]: null });
     const r = await analyzeImages({ imageRefs: [U1, U2, U3], existing: [], postText: "x", vision: v, maxAnalyses: 2 });
     expect(r.observations.map((o) => o.status)).toEqual(["unreadable", "failed", "skipped_limit"]);
-    expect(r.notes.join("\n")).toContain("画像1・2・3枚目は内容を確認できていない");
+    expect(r.notes.join("\n")).toMatch(/画像の内容を確認できていない.*画像1枚目.*画像2枚目.*画像3枚目/);
     expect(r.notes.join("\n")).toContain("未確認");
     const none = await analyzeImages({ imageRefs: [U1], existing: [], postText: "x" });
     expect(none.observations[0].status).toBe("not_analyzed");

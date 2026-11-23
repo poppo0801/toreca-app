@@ -43,3 +43,8 @@ private-assets/
 /pokemon-image*/
 *.webp.local
 eval/real-data/
+
+# Phase 2 比較試験: 実データ由来の入力・gold・結果・監査ログ（架空のサンプル eval/phase2-compare/sample/ だけをコミットする）
+eval/phase2-compare/*.local.json
+eval/phase2-compare/*.local.jsonl
+eval/phase2-compare/.compare.lock

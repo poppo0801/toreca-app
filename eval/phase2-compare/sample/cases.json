@@ -1,0 +1,72 @@
+[
+ {
+  "caseId": "sample1",
+  "postText": "《新宿本店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111 《渋谷店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/bbb222 《大阪店（大阪）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/ccc333",
+  "links": [],
+  "linkMap": [
+   {
+    "short": "https://t.co/aaa111",
+    "url": "https://shop-a.example.invalid/e/1"
+   },
+   {
+    "short": "https://t.co/bbb111",
+    "url": "https://shop-b.example.invalid/e/2"
+   },
+   {
+    "short": "https://t.co/ccc111",
+    "url": "https://shop-c.example.invalid/e/3"
+   }
+  ],
+  "pages": [
+   {
+    "url": "https://shop-a.example.invalid/e/1",
+    "text": "【新宿本店】拡張パック 抽選受付\n受付期間 11月30日まで\nお一人様1回まで。新宿本店の店頭受取のみ。"
+   },
+   {
+    "url": "https://shop-b.example.invalid/e/2",
+    "text": "【渋谷店】拡張パック 抽選受付\n受付期間 11月30日まで\nお一人様1回まで。渋谷店の店頭受取のみ。"
+   },
+   {
+    "url": "https://shop-c.example.invalid/e/3",
+    "text": "【大阪店】拡張パック 抽選受付\n受付期間 11月30日まで\nお一人様1回まで。大阪店の店頭受取のみ。"
+   }
+  ],
+  "imageRefs": [],
+  "imageReadings": []
+ },
+ {
+  "caseId": "sample2",
+  "postText": "《新宿本店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/aaa111 《渋谷店（東京）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/bbb222 《大阪店（大阪）- 1件》 ・拡張パック 抽選 11/30(月)23:59 https://t.co/ccc333",
+  "links": [],
+  "linkMap": [
+   {
+    "short": "https://t.co/aaa111",
+    "url": "https://shop-a.example.invalid/e/1"
+   },
+   {
+    "short": "https://t.co/bbb111",
+    "url": "https://shop-b.example.invalid/e/2"
+   },
+   {
+    "short": "https://t.co/ccc111",
+    "url": "https://shop-c.example.invalid/e/3"
+   }
+  ],
+  "pages": [
+   {
+    "url": "https://shop-a.example.invalid/e/1",
+    "text": "【新宿本店】拡張パック 抽選受付\n受付期間 11月30日まで\nお一人様1回まで。新宿本店の店頭受取のみ。"
+   },
+   {
+    "url": "https://shop-b.example.invalid/e/2",
+    "text": "【渋谷店】拡張パック 抽選受付\n受付期間 11月30日まで\nお一人様1回まで。渋谷店の店頭受取のみ。"
+   },
+   {
+    "url": "https://shop-c.example.invalid/e/3",
+    "text": "【大阪店】拡張パック 抽選受付\n受付期間 11月30日まで\nお一人様1回まで。大阪店の店頭受取のみ。"
+   }
+  ],
+  "imageRefs": [],
+  "imageReadings": []
+ }
+]

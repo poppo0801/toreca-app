@@ -1,6 +1,7 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
-import { discoverLinks, ledgerFromPlan, looksLikeLoginWall, planLinkFetches, type LinkLedgerEntry, type LinkOrigin } from "@/lib/collector/link-plan";
+import { HostThrottle, RunFetchBudget, type FetchOutcomeKind } from "@/lib/collector/fetch-control";
+import { discoverLinks, ledgerFromPlan, looksLikeLoginWall, planLinkFetches, RECHECKABLE_REASONS, type LinkLedgerEntry, type LinkOrigin } from "@/lib/collector/link-plan";
 import type { ExtractRequest } from "@/lib/ai/provider";
 import { remainingPosts, type QuotedPost, type XPost } from "@/lib/collector/x-posts";
 import { MAX_IMAGES } from "@/lib/server/lottery-extract-service";
@@ -43,9 +44,29 @@ export interface XRichOk {
 }
 export type XRichResult = XRichOk | { ok: false; message: string };
 
+/** 取得の負荷制御（Phase 2）。投稿・実行をまたいで共有する。未指定なら従来どおり制御しない（テスト・単件解析） */
+export interface FetchControl {
+  throttle?: HostThrottle;
+  budget?: RunFetchBudget;
+  shouldCancel?: () => boolean;
+}
+
 export interface EnrichDeps {
   fetchPage?: (url: string) => Promise<SafeFetchResult>;
   fetchImage?: typeof fetchXImage;
+  control?: FetchControl;
+}
+
+/** 取得結果をホストの制御用の種類へ（404は「ページが無い」だけで、ホストの不調ではない） */
+export function outcomeOf(r: SafeFetchResult): FetchOutcomeKind {
+  if (r.ok) return "ok";
+  if (r.code === "robots" || r.code === "blocked") return "blocked";
+  if (r.code === "http_error") {
+    if (r.status === 429 || r.status === 503) return "rate_limited";
+    if (r.status === 401 || r.status === 403) return "blocked";
+    if (r.status === 404 || r.status === 410) return "ok";
+  }
+  return "failure";
 }
 
 /** 画像の扱いを3段階で区別する: 見つかった（投稿に添付されていた）／取得できた（ダウンロード成功）／AIへ渡した（縦長の分割後の枚数） */
@@ -151,7 +172,28 @@ export async function enrichXPost(
       entry.reason = "time_limit";
       return null;
     }
-    const pg = await fetchPage(url).catch((): SafeFetchResult => ({ ok: false, code: "network", message: "取得に失敗しました" }));
+    const ctl = deps.control;
+    const refuse = (cause: string) => {
+      entry.status = "skipped";
+      entry.reason = cause; // 取得しなかった理由は残す（上限・ホスト停止・締切・中止）。無言で捨てない
+      return null;
+    };
+    if (ctl?.shouldCancel?.()) return refuse("cancelled");
+    if (ctl?.budget) {
+      const b = ctl.budget.tryStart("page");
+      if (!b.ok) return refuse(b.cause);
+    }
+    const doFetch = () => fetchPage(url).catch((): SafeFetchResult => ({ ok: false, code: "network", message: "取得に失敗しました" }));
+    let pg: SafeFetchResult;
+    if (ctl?.throttle) {
+      const t = await ctl.throttle.run(meta.host, async () => {
+        const r = await doFetch();
+        return { value: r, outcome: outcomeOf(r) };
+      }, { deadlineAt: Math.min(started + LINK_FETCH_MAX_MS, ctl.budget?.limits.deadlineAt ?? Number.POSITIVE_INFINITY), ...(ctl.shouldCancel ? { shouldCancel: ctl.shouldCancel } : {}) });
+      if (!t.ran) return refuse(t.cause);
+      pg = t.value;
+    } else pg = await doFetch();
+    if (pg.ok) ctl?.budget?.addBytes(pg.body.length);
     entry.at = new Date().toISOString();
     if (!pg.ok) {
       entry.status = pg.code === "robots" || pg.code === "blocked" ? "blocked" : "failed";
@@ -209,7 +251,7 @@ export async function enrichXPost(
   });
   const ledgerList = [...ledger.values()].sort((a, b) => a.order - b.order);
   const omitted = ledgerList.filter((e) => e.status !== "fetched" && e.reason !== "social_post" && e.reason !== "duplicate");
-  if (omitted.length > 0) text += `\n\n【取得できなかったリンク（${omitted.length}件）】\n${omitted.slice(0, 20).map((e) => `- ${e.url}（${e.status}${e.reason ? `: ${e.reason}` : ""}）`).join("\n")}`;
+  if (omitted.length > 0) text += `\n\n【取得できなかったリンク（${omitted.length}件）】\n${omitted.slice(0, 20).map((e) => `- ${e.url}（${e.status}${e.reason ? `: ${e.reason}` : ""}${e.reason && RECHECKABLE_REASONS.has(e.reason) ? "・未取得（上限・時間・制限のため。再調査で取得できる）" : ""}）`).join("\n")}`;
 
   const urls = [...post.images, ...(q?.images ?? [])];
   const images: ImageInput[] = [];
@@ -293,7 +335,7 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
         if (imageStatus === "not_fetched") notices.push(`画像未取得: 添付画像${rich.stats.found}枚を取得できませんでした（本文のみで解析します）`);
         else if (imageStatus === "partial") notices.push(`添付画像${rich.stats.found}枚のうち${rich.imagesUsed}枚を取得できました`);
         if (rich.linkLedger.some((e) => e.status !== "fetched" && e.reason !== "social_post") && !rich.linkedPage) notices.push("リンク先の本文は取得できませんでした（本文と画像のみで解析します）");
-        else if (rich.linkLedger.some((e) => e.status !== "fetched" && e.reason !== "social_post")) notices.push(`リンク${rich.linkLedger.length}件のうち${rich.linkedPages.length}件の本文を取得しました（取得できなかったリンクは台帳に記録）`);
+        else if (rich.linkLedger.some((e) => e.status !== "fetched" && e.reason !== "social_post")) notices.push(`リンク${rich.linkLedger.length}件のうち${rich.linkedPages.length}件の本文を取得しました（取得できなかったリンクは台帳に記録${rich.linkLedger.some((e) => e.reason && RECHECKABLE_REASONS.has(e.reason)) ? `。うち${rich.linkLedger.filter((e) => e.reason && RECHECKABLE_REASONS.has(e.reason)).length}件は上限・時間・制限のため未取得で、再解析で取得できます` : ""}）`);
         return { ok: true, text: rich.text, author: p.authorId, postedOn: p.createdAt.slice(0, 10), images: rich.images, via: "api", notices, imagesFound: rich.stats.found, imagesUsed: rich.imagesUsed, linkedPage: rich.linkedPage, ...(rich.linkedPages.length ? { linkedPages: rich.linkedPages } : {}), linkLedger: rich.linkLedger, imageStatus, post: { id: p.id, text: p.text, images: p.images, links: p.links, createdAt: p.createdAt, username: p.username ?? parsed.user, ...(p.profile ? { profile: p.profile } : {}), ...(p.quoted ? { quoted: p.quoted } : {}) } };
       }
       notices.push(`X APIで取得できませんでした（${r.message}）。本文のみを取得します`);

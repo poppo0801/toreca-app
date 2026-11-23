@@ -24,15 +24,47 @@ export interface VisionRequest {
   imageIndex: number;
   /** 読み取ってほしい項目（応募期間・店・商品・応募単位・購入条件 など） */
   wantFields: string[];
+  /** 期間を過ぎた保存済みの解析結果（画像を取り直して内容のハッシュが同じなら、有料の解析を重ねずこの結果を再利用する） */
+  known?: { sha256: string; readings: VisionReading[] };
 }
-/** 注入されるビジョンクライアント。失敗・読み取れないときは null（例外を投げない）。実AIの実装はここでは作らない */
-export type VisionClient = (req: VisionRequest) => Promise<{ readings: VisionReading[] } | null>;
+/** 画像の取得・解析に関する付随情報（再利用の鮮度判定・費用の記録・出所の追跡に使う。原本の画像は含まない） */
+export interface VisionMeta {
+  /** 取得した原本のバイトの SHA-256 先頭16桁（同一性・差し替えの検出） */
+  sha256?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  /** 縦長の分割後の枚数（1なら分割なし） */
+  tiles?: number;
+  fetchedAt?: string;
+  costJpy?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  modelId?: string;
+  /** 保存済みの解析結果を再利用した（有料の解析を重ねていない） */
+  reusedFromCache?: boolean;
+}
+/** 取得・解析に失敗した結果。reason は分類コード（robots・not_found・too_large_pixels・budget など）。retryable=true は保存せず、次回再試行できる */
+export interface VisionFailure {
+  failed: string;
+  message?: string;
+  retryable?: boolean;
+  meta?: VisionMeta;
+}
+export type VisionOutcome = { readings: VisionReading[]; meta?: VisionMeta } | VisionFailure | null;
+/** 注入されるビジョンクライアント。失敗・読み取れないときは失敗の結果か null（例外を投げない）。実AI版は vision-real.ts（承認と許可証が無いと作れない） */
+export type VisionClient = (req: VisionRequest) => Promise<VisionOutcome>;
 
 export type ImageStatusKind = "reused" | "analyzed" | "unreadable" | "failed" | "skipped_limit" | "not_analyzed";
 export interface ImageObservation {
   imageIndex: number;
+  /** 画像の識別子（番号＋内容のハッシュまたはURLのハッシュ）。AIへの注記・登録案の根拠表示・保存で同じ画像を指すために使う */
+  imageId: string;
   url: string;
   status: ImageStatusKind;
+  /** 失敗・未解析の理由（分類コード）。画像の内容が「無い」のではなく「確認できていない」理由 */
+  failureReason?: string;
+  meta?: VisionMeta;
   /** この画像由来の読み取り（再利用・新規）。仮説であり、原文の事実ではない */
   readings: { field: string; text: string; uncertainty: "high" | "medium" | "low" | null; origin: "collector_reading" | "vision"; region?: string }[];
 }
@@ -60,6 +92,36 @@ export const DEFAULT_WANT_FIELDS = ["応募期間", "応募開始", "応募締�
 export const MAX_VISION_ANALYSES = 4;
 
 const nfkc = (s: string): string => s.normalize("NFKC");
+
+const hash6 = (s: string): string => {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(16).padStart(8, "0").slice(0, 6);
+};
+export const imageIdOf = (index: number, url: string, sha256?: string): string => `IMG${index}-${sha256 ? sha256.slice(0, 8) : hash6(url)}`;
+
+/** 失敗の分類コードの表示用の説明（画像の内容が無いのではなく、確認できていない理由） */
+export const FAILURE_LABEL: Record<string, string> = {
+  invalid_url: "URLが不正",
+  private_url: "個人用・期限つきのURLのため取得しない",
+  blocked: "取得できないアドレス",
+  robots: "サイトが取得を許可していない（robots）",
+  auth_required: "ログインや権限が必要",
+  not_found: "画像が見つからない（期限切れの可能性）",
+  rate_limited: "アクセス制限（429）",
+  http_error: "取得エラー",
+  timeout: "取得がタイムアウト",
+  network: "接続できない",
+  unsupported_type: "画像以外の種類",
+  spoofed_type: "申告と中身の形式が一致しない（不正な可能性）",
+  too_large_bytes: "ファイルが大きすぎる",
+  too_large_pixels: "画像のピクセル数が大きすぎる",
+  corrupt: "画像が壊れている",
+  not_attempted: "取得の上限・停止のため未取得",
+  budget: "解析の費用・回数の上限のため未解析",
+  vision_error: "画像解析の呼び出しに失敗",
+  analysis_unavailable: "画像解析が許可されていない（未実施）",
+};
 const DATE_FIELD = /(deadline|start|end|date|period|result|announce|期間|締切|開始|終了|発表|日)/i;
 
 /** 文字列から日付（月/日）を集める。「11/30」「11月30日」「2026-11-30」など。年は無視して月日で比較（年またぎの誤判定を避けるため月日だけ） */
@@ -119,23 +181,33 @@ export async function analyzeImages(a: {
     const url = refs[i - 1];
     const have = byIndex(i);
     if (have.length > 0) {
-      obs.push({ imageIndex: i, url, status: "reused", readings: have.map((r) => ({ field: r.field, text: r.text, uncertainty: r.uncertainty, origin: "collector_reading" as const })) });
+      obs.push({ imageIndex: i, imageId: imageIdOf(i, url), url, status: "reused", readings: have.map((r) => ({ field: r.field, text: r.text, uncertainty: r.uncertainty, origin: "collector_reading" as const })) });
       continue;
     }
     if (!a.vision) {
-      obs.push({ imageIndex: i, url, status: "not_analyzed", readings: [] });
+      obs.push({ imageIndex: i, imageId: imageIdOf(i, url), url, status: "not_analyzed", failureReason: "analysis_unavailable", readings: [] });
       continue;
     }
     if (analyzed >= max) {
-      obs.push({ imageIndex: i, url, status: "skipped_limit", readings: [] });
+      obs.push({ imageIndex: i, imageId: imageIdOf(i, url), url, status: "skipped_limit", failureReason: "budget", readings: [] });
+      continue;
+    }
+    // 同じURLの画像が複数回ある（投稿と引用元の重複など）ときは、1回だけ解析して結果を共有する（重複課金の回避）
+    const dup = obs.find((o) => o.url === url && (o.status === "analyzed" || o.status === "unreadable" || o.status === "failed"));
+    if (dup) {
+      obs.push({ ...dup, imageIndex: i, imageId: imageIdOf(i, url, dup.meta?.sha256), meta: dup.meta ? { ...dup.meta, reusedFromCache: true } : dup.meta, readings: dup.readings.map((x) => ({ ...x })) });
       continue;
     }
     analyzed++;
-    const r = await a.vision({ imageUrl: url, imageIndex: i, wantFields: want }).catch(() => null);
-    if (!r) obs.push({ imageIndex: i, url, status: "failed", readings: [] });
-    else if (r.readings.length === 0) obs.push({ imageIndex: i, url, status: "unreadable", readings: [] });
-    else obs.push({ imageIndex: i, url, status: "analyzed", readings: r.readings.slice(0, 20).map((x) => ({ field: x.field.slice(0, 40), text: x.text.slice(0, 300), uncertainty: x.uncertainty ?? null, origin: "vision" as const, ...(x.region ? { region: x.region.slice(0, 80) } : {}) })) });
+    const r: VisionOutcome = await a.vision({ imageUrl: url, imageIndex: i, wantFields: want }).catch(() => null);
+    const id = imageIdOf(i, url, r && "meta" in r ? r.meta?.sha256 : undefined);
+    if (!r) obs.push({ imageIndex: i, imageId: id, url, status: "failed", failureReason: "vision_error", readings: [] });
+    else if ("failed" in r) obs.push({ imageIndex: i, imageId: id, url, status: r.failed === "budget" ? "skipped_limit" : "failed", failureReason: r.failed, ...(r.meta ? { meta: r.meta } : {}), readings: [] });
+    else if (r.readings.length === 0) obs.push({ imageIndex: i, imageId: id, url, status: "unreadable", failureReason: "unreadable", ...(r.meta ? { meta: r.meta } : {}), readings: [] });
+    else obs.push({ imageIndex: i, imageId: id, url, status: "analyzed", ...(r.meta ? { meta: r.meta } : {}), readings: r.readings.slice(0, 20).map((x) => ({ field: x.field.slice(0, 40), text: x.text.slice(0, 300), uncertainty: x.uncertainty ?? null, origin: "vision" as const, ...(x.region ? { region: x.region.slice(0, 80) } : {}) })) });
   }
+  const idOf = new Map(obs.map((o) => [o.imageIndex, o.imageId]));
+  const imgLabel = (n: number): string => `画像${n}枚目(${idOf.get(n) ?? "?"})`;
   const reconciled: ReconciledReading[] = obs.flatMap((o) =>
     o.readings.map((r) => {
       const c = reconcileReading(r.field, r.text, a.postText);
@@ -144,14 +216,24 @@ export async function analyzeImages(a: {
   );
   const notes: string[] = [];
   for (const r of reconciled) {
-    const head = `画像${r.imageIndex}枚目・${r.field}`;
+    const head = `${imgLabel(r.imageIndex)}・${r.field}`;
     const unc = r.uncertainty ? `・確度${r.uncertainty}` : "";
     if (r.status === "conflict") notes.push(`【矛盾・未確定】${head}「${r.imageText.slice(0, 60)}」は本文の日付（${(r.textValues ?? []).join("・")}）と食い違う（どちらも確認済みとしない。人または別の一次情報で確認が必要${unc}）`);
     else if (r.status === "image_only") notes.push(`${head}「${r.imageText.slice(0, 80)}」は画像のみの情報（AIの読み取り・原本と未照合・事実として確定しない${unc}）`);
     else if (r.status === "confirmed_by_text") notes.push(`${head}「${r.imageText.slice(0, 60)}」は本文でも確認できる`);
   }
   const bad = obs.filter((o) => o.status === "failed" || o.status === "unreadable" || o.status === "skipped_limit" || o.status === "not_analyzed");
-  if (bad.length) notes.push(`画像${bad.map((o) => o.imageIndex).join("・")}枚目は内容を確認できていない（${[...new Set(bad.map((o) => ({ failed: "解析に失敗", unreadable: "文字を読み取れない", skipped_limit: "解析の上限で未実施", not_analyzed: "未解析", reused: "", analyzed: "" })[o.status]))].join("・")}）。画像の内容は「無い」ではなく未確認`);
+  if (bad.length) {
+    const why = (o: ImageObservation): string => (o.status === "unreadable" ? "文字を読み取れない" : FAILURE_LABEL[o.failureReason ?? ""] ?? ({ failed: "解析に失敗", skipped_limit: "解析の上限で未実施", not_analyzed: "未解析" } as Record<string, string>)[o.status] ?? "確認できない");
+    notes.push(`画像の内容を確認できていない: ${bad.map((o) => `${imgLabel(o.imageIndex)}（${why(o)}）`).join("／")}。画像の内容は「無い」ではなく未確認（画像に重要な条件が書かれている可能性がある）`);
+  }
+  // 画像から読み取れなかった項目（読み取れた画像があるときだけ。画像に書かれていない、とは断定しない）
+  const readable = obs.filter((o) => o.readings.length > 0);
+  if (readable.length > 0 && !a.wantFields) {
+    const got = readable.flatMap((o) => o.readings.map((r) => nfkc(r.field)));
+    const missing = DEFAULT_WANT_FIELDS.filter((w) => !got.some((g) => g.includes(nfkc(w).slice(0, 2)) || nfkc(w).includes(g.slice(0, 2))));
+    if (missing.length > 0 && missing.length < DEFAULT_WANT_FIELDS.length) notes.push(`画像から読み取れなかった項目: ${missing.slice(0, 6).join("・")}（画像に書かれていない、とは断定しない。本文・リンク先で確認する）`);
+  }
   return {
     observations: obs,
     reconciled,

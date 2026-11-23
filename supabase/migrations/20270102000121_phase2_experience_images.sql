@@ -4,7 +4,8 @@
 --  - investigation_experiences: 過去の調査の経験（ページの候補特徴・重要条件が見つかった本文の相対位置の分布・検証の強さ）。次回の調査で「最初に見せる位置」の提案に使う（位置の優先だけ。全文の参照可能性は変えない）。
 --    検証の強さ（human/gold/ai_unverified）を分けて記録し、AIの観察だけでは提案に使えない（自己強化の防止）。原文・URL・個人情報は保存しない（ホスト名・特徴語・位置の統計のみ）。
 -- 本番適用は別承認（docs/RELEASE_FLOW.md）。新AI機能（既定OFF・開発限定）からだけ書かれる。既存の表・データは変更しない（新しい表の追加のみ）。
--- 注意: migration 115（evidence_documents）に依存する（candidate への参照は collection_candidates）。115 は未適用のため、本番では 115 → 119 の順に適用する（番号の順序は 116〜118 が先に適用済みのため、適用手順を release-db plan で確認する）。
+-- 注意: この表は collection_candidates（既存）だけを参照し、120（evidence_documents）の表には依存しない。ただし運用上は 120 → 121 の順に適用する（120 の全文保存が先にあって経験の位置が意味を持つ）。
+-- 番号: 本番には 116〜118 が適用済みのため、未適用だった AI の移行（旧 115・旧 119）は 118 より後ろの版（120・121）へ付け替えた（適用済みの履歴は変更していない。docs/reports/phase2-vision-runtime-and-safety.md）。
 -- 逆戻し（参考・本番では実行しない）: drop table public.investigation_experiences; drop table public.evidence_image_observations;
 
 create table public.evidence_image_observations (
@@ -15,17 +16,28 @@ create table public.evidence_image_observations (
   url_key text not null check (char_length(url_key) <= 300),
   image_index int not null check (image_index between 1 and 40),
   -- analyzed=読み取れた／unreadable=解析したが文字を読み取れなかった（失敗・上限超過は保存しない＝再解析できる）
-  status text not null check (status in ('analyzed', 'unreadable')),
+  -- failed=取得・解析ができなかった（再試行しても無駄な理由だけ保存: robots・期限切れ・過大・不正など。通信や上限の失敗は保存しない＝再試行できる）
+  status text not null check (status in ('analyzed', 'unreadable', 'failed')),
+  failure_reason text check (failure_reason is null or char_length(failure_reason) <= 40),
+  -- 取得した原本のバイトの SHA-256 先頭16桁。同じURLでも内容が変わった（差し替え）ときに再解析するための鮮度判定。原本の画像は保存しない
+  content_sha256 text check (content_sha256 is null or content_sha256 ~ '^[0-9a-f]{16}$'),
+  width int check (width is null or width between 1 and 100000),
+  height int check (height is null or height between 1 and 100000),
+  tiles int check (tiles is null or tiles between 1 and 10),
+  -- 解析の費用の記録（円・トークン）。再利用（呼び出しなし）の行は null
+  cost_jpy numeric(10, 4) check (cost_jpy is null or cost_jpy >= 0),
+  input_tokens int check (input_tokens is null or input_tokens >= 0),
+  output_tokens int check (output_tokens is null or output_tokens >= 0),
   -- 読み取り（項目・文言・確度・位置の記述）。AIの読み取りであり原文の事実ではない。画像そのものは保存しない
   readings jsonb not null check (jsonb_typeof(readings) = 'array' and pg_column_size(readings) <= 20000),
   mode text not null check (mode in ('mock', 'replay', 'real')),
   model_id text check (model_id is null or char_length(model_id) <= 80),
   observed_at timestamptz not null,
   created_at timestamptz not null default now(),
-  -- 同じ画像・同じモードの解析は1件（モックの結果を実AIの結果として再利用しない）
-  unique (household_id, candidate_id, url_key, mode),
+  -- モックの結果を実AIの結果として再利用しない（モードを分ける）。内容（ハッシュ）が変わった同じURLは別の行として追記できる
   foreign key (candidate_id, household_id) references public.collection_candidates (id, household_id) on delete cascade
 );
+create unique index evidence_image_observations_unique on public.evidence_image_observations (household_id, candidate_id, url_key, mode, coalesce(content_sha256, ''));
 create index evidence_image_observations_candidate on public.evidence_image_observations (household_id, candidate_id);
 
 create table public.investigation_experiences (
