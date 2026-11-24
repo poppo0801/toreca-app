@@ -72,6 +72,10 @@ describe.skipIf(!dbTestsEnabled)("Phase 2: 同条件比較試験の基盤（モ�
     expect(r.claim).toBe("pipeline_check_only"); // モックの結果は精度ではない
     expect(r.comparison.verdict).toBe("inconclusive"); // gold が2件しかない
     expect(r.goldLeak).toEqual({ ok: true, leaks: [] });
+    // 上限・切り詰めの監査が毎回記録される（記録の無い欠落が無い）
+    expect(r.limitAudit.level).not.toBe("fail");
+    expect(r.limitAudit.report.silentLoss).toEqual([]);
+    expect(r.limitAudit.report.candidates).toBe(4);
   });
 
   it("②text_depth: 旧方式は抜粋だけで全文を保存しない／新方式は全文を保存する。画像・ヒントは比較対象以外同じ", async () => {

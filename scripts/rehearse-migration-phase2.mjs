@@ -38,8 +38,9 @@ let depOk = true;
 const depDetail = [];
 for (const f of pending) {
   const sql = readFileSync(`supabase/migrations/${f}`, "utf8").replace(/--.*$/gm, "");
-  for (const m of sql.matchAll(/references\s+public\.(\w+)/gi)) if (!created.has(m[1])) { depOk = false; depDetail.push(`${f.slice(0, 14)}→${m[1]}`); }
-  for (const m of sql.matchAll(/create\s+table\s+public\.(\w+)/gi)) created.add(m[1]);
+  const own = new Set([...sql.matchAll(/create\s+table\s+public\.(\w+)/gi)].map((m) => m[1])); // 同じ移行の中で先に作る表も参照先として許す
+  for (const m of sql.matchAll(/references\s+public\.(\w+)/gi)) if (!created.has(m[1]) && !own.has(m[1])) { depOk = false; depDetail.push(`${f.slice(0, 14)}→${m[1]}`); }
+  for (const t of own) created.add(t);
 }
 check("依存する表が全て存在する（外部キーの参照先）", depOk, depDetail.join(","));
 
@@ -78,10 +79,10 @@ const apply = (list) => {
 };
 apply(pending);
 compare("適用後も既存の全行が変更・削除されていない");
-check("新しい表が揃った", q("select count(*) from information_schema.tables where table_schema='public' and table_name in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences')") === "4");
+check("新しい表が揃った", q("select count(*) from information_schema.tables where table_schema='public' and table_name in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences','fetch_host_gate','fetch_host_leases','link_recheck_tasks')") === "7");
 check("registration_proposals に item_fingerprint 列が追加された（NULL許容）", q("select is_nullable from information_schema.columns where table_name='registration_proposals' and column_name='item_fingerprint'") === "YES");
-check("新しい表は全て RLS 有効", q("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences') and c.relrowsecurity") === "4");
-check("anon は新しい表に何もできない", q("select count(*) from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences')") === "0");
+check("新しい表は全て RLS 有効", q("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences','fetch_host_gate','fetch_host_leases','link_recheck_tasks') and c.relrowsecurity") === "7");
+check("anon は新しい表に何もできない", q("select count(*) from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences','fetch_host_gate','fetch_host_leases','link_recheck_tasks')") === "0");
 check("追記専用のトリガーがある（更新を拒否）", q("select count(*) from pg_trigger where tgname in ('evidence_image_observations_no_update','investigation_experiences_no_update') and not tgisinternal") === "2");
 
 // 外部キー: 候補の削除に伴い、画像観察が連鎖して消える（候補の削除を妨げない）。テスト用の世帯・候補は後で消す
@@ -94,6 +95,12 @@ check("追記専用: 更新を拒否する", run("update public.evidence_image_o
 run(`delete from public.collection_candidates where id='${cand}'`);
 check("候補を削除すると画像観察は連鎖して消える（候補の削除を妨げない）", q("select count(*) from public.evidence_image_observations") === "0");
 
+// 取得制御・再調査・掃除の関数が動く（ホストの許可→解放・タスクの取り出し・掃除の dry-run）
+const gateOk = q("select granted from public.fetch_gate_acquire('rehearse.example.invalid', 0, 1, 5000, 50)") === "t";
+check("取得制御（fetch_gate_acquire）が動く", gateOk);
+check("掃除の dry-run は何も消さず件数を返す", q("select (public.phase2_retention_purge(now(), true))->>'dry_run'") === "true");
+check("再調査の取り出し（link_recheck_claim）が空でも動く", q("select count(*) from public.link_recheck_claim(1, 60, now())") === "0");
+run("delete from public.fetch_host_gate where host = 'rehearse.example.invalid'");
 // 旧アプリ相当: 新しい表・列を知らない既存の読み書きが動く
 const okOld = run(`select count(*) from public.lotteries; select id, status from public.collection_candidates limit 1; insert into public.collection_candidates (household_id, dedupe_key, source_url, title, status, job_state, reasons) values ('${hh}', 'rehearse://p2/2', 'rehearse://p2/2', 'old-app', 'pending', 'review', '{}'); delete from public.collection_candidates where dedupe_key='rehearse://p2/2';`).status === 0;
 check("旧アプリ相当の読み書き（新しい表・列を使わない）が動く", okOld);
@@ -101,6 +108,14 @@ check("旧アプリ相当の読み書き（新しい表・列を使わない）�
 // ロールバック（新しい表にデータがある状態で）
 run(`insert into public.investigation_experiences (household_id, host, features, doc_chars, found_buckets, verification, source, mode, recorded_at) values ('${hh}', 'example.invalid', array['host:example.invalid'], 100, array[1,0,0,0,0,0,0,0,0,0], 'human', 'human_review', 'mock', now())`);
 const rollback = `begin;
+drop function public.phase2_retention_purge(timestamptz, boolean);
+drop function public.link_recheck_finish(uuid, text, text, int);
+drop function public.link_recheck_claim(int, int, timestamptz);
+drop table public.link_recheck_tasks;
+drop function public.fetch_gate_release(uuid, text, int, int, int, int, int, int);
+drop function public.fetch_gate_acquire(text, int, int, int, int);
+drop table public.fetch_host_leases;
+drop table public.fetch_host_gate;
 drop table public.investigation_experiences;
 drop table public.evidence_image_observations;
 drop table public.evidence_coverage_stats;
@@ -119,7 +134,7 @@ check("ロールバック後の適用履歴が適用前と同じ", q("select cou
 // 再適用
 apply(pending);
 compare("再適用後も既存の全行が変わらない");
-check("再適用後に新しい表が揃っている", q("select count(*) from information_schema.tables where table_schema='public' and table_name in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences')") === "4");
+check("再適用後に新しい表が揃っている", q("select count(*) from information_schema.tables where table_schema='public' and table_name in ('evidence_documents','evidence_coverage_stats','evidence_image_observations','investigation_experiences','fetch_host_gate','fetch_host_leases','link_recheck_tasks')") === "7");
 
 console.log(results.every(Boolean) ? "\n全て合格（ローカルの本番相当スキーマでのリハーサル）。本番への適用は別承認（docs/RELEASE_FLOW.md）" : "\n不合格あり");
 process.exit(results.every(Boolean) ? 0 : 1);

@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { describe, expect, it, vi } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { checkJudgmentRealRun } from "@/lib/judgment/real-gate";
+import { composeR1Cases, pageCandidate, validatePageGold, worksheetMarkdown, type R1PageGold } from "@/lib/judgment/xsource/r1-worksheet";
 import { armsOf, EXPERIMENTS, planComparison, splitCalibration, validateGold, type CompareCase, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
 import { HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
 import { makeRealVisionClient, worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
@@ -51,7 +52,7 @@ const planOf = (cases: CompareCase[], gold: GoldCase[], model = "claude-haiku-5-
   return planComparison({ experiments: experiments(), cases: cases.length, itemsPerCase: avgItems, imagesPerCase: Math.round(avgImages * 10) / 10, model, avgJpy: { agentTurn: 0.163, judge: 0.148, image: Number.isFinite(image) ? image : 0.15 }, turnsPerItem: 2, judgesPerItem: 1.3, caps: CAPS(), goldCases: gold.length });
 };
 
-describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
+describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
   it("plan: 実行前の計画（無課金）", () => {
     if (MODE !== "plan") return;
     const { cases, gold, sample } = load();
@@ -80,6 +81,38 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "run"].includ
     expect(cases.length).toBeGreaterThan(0);
     writeFileSync(`${DIR}/gold-template.local.json`, JSON.stringify(goldTemplate(cases), null, 1));
     console.log("TEMPLATE", JSON.stringify({ cases: cases.length, next: "記入後、gold の配列だけを eval/phase2-compare/gold.local.json に保存する" }));
+  });
+
+  it("r1-worksheet: 保存済みの実在の公開ページ（LivePocket）から、人が独立goldを確認するための資料を作る（AI出力を含めない）", () => {
+    if (MODE !== "r1-worksheet") return;
+    const dir = "eval/real-data/10t-html";
+    const idx = JSON.parse(readFileSync(`${dir}/index.json`, "utf8")) as { n: number; url: string; ok: boolean }[];
+    const pages = idx.filter((x) => x.ok).map((x) => ({ n: x.n, url: x.url, html: readFileSync(`${dir}/lp-${x.n}.html`, "utf8") }));
+    const cands = pages.map(pageCandidate);
+    mkdirSync(DIR, { recursive: true });
+    writeFileSync(`${DIR}/r1-worksheet.local.md`, worksheetMarkdown(cands));
+    const skeleton: R1PageGold[] = cands.map((c) => ({ n: c.n, verified: { by: "human", at: "", basis: "" }, store: c.storeCandidate ?? "", product: (c.productCandidate ?? "").replace(/^\d{1,2}\/\d{1,2}[(（][^)）]*[)）]発売\s*/, ""), applyEnd: c.applyEndGuess ? `2026-${c.applyEndGuess.md.split("/").map((x) => x.padStart(2, "0")).join("-")}` : null, applyUnit: null, region: null, evidence: c.applyEndGuess ? [{ quote: c.applyEndGuess.quote }] : [] }));
+    writeFileSync(`${DIR}/r1-gold-pages.template.local.json`, JSON.stringify(skeleton, null, 1));
+    console.log("R1_WORKSHEET", JSON.stringify({ pages: pages.length, recognized: cands.filter((c) => c.recognized).length, withStore: cands.filter((c) => c.storeCandidate).length, withDeadlineCandidate: cands.filter((c) => c.deadlineCandidates.length).length, needAttention: cands.filter((c) => c.attention.length).length, next: "r1-worksheet.local.md を見て、r1-gold-pages.template.local.json を記入し r1-gold-pages.local.json として保存" }));
+    expect(pages.length).toBeGreaterThan(0);
+  });
+
+  it("r1-build: 人が確認したページ単位のgoldから、R1の比較用の案件とgoldを組み立てる", () => {
+    if (MODE !== "r1-build") return;
+    const dir = "eval/real-data/10t-html";
+    const idx = JSON.parse(readFileSync(`${dir}/index.json`, "utf8")) as { n: number; url: string; ok: boolean }[];
+    const pages = idx.filter((x) => x.ok).map((x) => ({ n: x.n, url: x.url, html: readFileSync(`${dir}/lp-${x.n}.html`, "utf8") }));
+    const g = read<R1PageGold[]>(`${DIR}/r1-gold-pages.local.json`);
+    if (!g) throw new Error("実行しません: r1-gold-pages.local.json（人が確認した gold）がありません");
+    const v = validatePageGold(g, pages);
+    if (!v.ok) throw new Error(`実行しません: gold が条件を満たしていません: ${v.errors.slice(0, 3).join(" / ")}`);
+    const out = composeR1Cases({ pages, gold: g, cases: Number(env.PHASE2_CMP_R1_CASES) || 12, linksPerCase: 3, at: new Date().toISOString() });
+    const gv = validateGold(out.gold);
+    if (!gv.ok) throw new Error(`実行しません: ${gv.errors.slice(0, 3).join(" / ")}`);
+    writeFileSync(`${DIR}/cases.local.json`, JSON.stringify(out.cases, null, 1));
+    writeFileSync(`${DIR}/gold.local.json`, JSON.stringify(out.gold, null, 1));
+    console.log("R1_BUILT", JSON.stringify({ cases: out.cases.length, goldCases: out.gold.length, pagesUsed: g.filter((x) => !x.exclude).length }));
+    expect(out.cases.length).toBeGreaterThan(0);
   });
 
   it("mock: 台本のAI（費用0）で全経路を通す。結果は精度ではない", async () => {
@@ -156,7 +189,7 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "run"].includ
     const results: Record<string, unknown> = {};
     for (const e of exps) {
       const r = await scoreExperiment({ db: db as unknown as Db, experiment: e, prepared: prepared.filter((p) => p.arm.experiment === e), gold, modes: ["real"] });
-      results[e] = { verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, deltas: r.comparison.deltas, paired: r.comparison.paired, cases: r.comparison.cases, required: r.comparison.required, goldLeak: r.goldLeak };
+      results[e] = { verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, deltas: r.comparison.deltas, paired: r.comparison.paired, cases: r.comparison.cases, required: r.comparison.required, goldLeak: r.goldLeak, limitAudit: { level: r.limitAudit.level, messages: r.limitAudit.messages, candidates: r.limitAudit.report.candidates, pages: r.limitAudit.report.pages, hitCandidates: r.limitAudit.report.hitCandidates, notes: r.limitAudit.report.notes } };
     }
     writeFileSync(`${DIR}/result.local.json`, JSON.stringify({ at: new Date().toISOString(), summary, vision: typeof visionStats === "function" ? (visionStats as () => unknown)() : null, results }, null, 1));
     console.log("RESULT", JSON.stringify({ stopReason: summary.stopReason, processed: summary.processed, costJpy: summary.costJpy, overruns: summary.overruns, verdicts: Object.fromEntries(Object.entries(results).map(([k, x]) => [k, (x as { verdict: string }).verdict])) }));

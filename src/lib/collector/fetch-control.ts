@@ -49,7 +49,12 @@ interface HostState {
 
 export type ThrottleResult<T> = { ran: true; value: T; outcome: FetchOutcomeKind } | { ran: false; cause: SkipCause };
 
-export class HostThrottle {
+/** ホスト別の取得制御の共通の形。プロセス内（HostThrottle）と、複数インスタンスで共有するDB版（DbHostGate）が実装する */
+export interface HostGate {
+  run<T>(host: string, fn: () => Promise<{ value: T; outcome: FetchOutcomeKind; retryAfterMs?: number }>, ctl?: { deadlineAt?: number; shouldCancel?: () => boolean }): Promise<ThrottleResult<T>>;
+}
+
+export class HostThrottle implements HostGate {
   private readonly o: ThrottleOptions;
   private readonly hosts = new Map<string, HostState>();
   private active = 0;

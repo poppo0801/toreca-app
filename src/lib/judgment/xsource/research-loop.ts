@@ -294,7 +294,9 @@ export function mergeRanges(r: readonly { from: number; to: number }[]): { from:
 /** 長文の目次（位置と、その位置の冒頭の語）。見出し・注意書き・フォーム項目の場所を、全文を送らずに示す */
 export function outlineOf(text: string): string[] {
   const out: string[] = [];
-  for (let at = 0; at < text.length && out.length < OUTLINE_MAX; at += OUTLINE_CHUNK) {
+  // 目次の粒度は、全文の末尾まで届くように広げる（旧: 1,200字×80＝96,000字までしか示さず、120,000字のページの末尾に目次が無かった。Phase 2 の上限監査で発見）
+  const step = Math.max(OUTLINE_CHUNK, Math.ceil(text.length / OUTLINE_MAX));
+  for (let at = 0; at < text.length && out.length < OUTLINE_MAX; at += step) {
     const head = text.slice(at, at + 40).replace(/\s+/g, " ").trim();
     out.push(`${at}: ${head}`);
   }

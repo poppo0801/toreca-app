@@ -178,3 +178,32 @@ export async function saveImageObservation(db: Db, householdId: string, candidat
     return false;
   }
 }
+
+// ------------------------------------------------------------------ 収集時の画像の取得・検査（解析はしない。mode=intake）
+export interface IntakeRow {
+  status: "fetched" | "failed";
+  failureReason: string | null;
+  sha256: string | null;
+  width: number | null;
+  height: number | null;
+  observedAt: string;
+}
+/** 収集時に取得・検査した画像の記録（画像URL→最新の行）。解析の結果（mock/replay/real）とは別のモード */
+export async function loadIntakeObservations(db: Db, householdId: string, candidateId: string): Promise<Map<string, IntakeRow>> {
+  const m = new Map<string, IntakeRow>();
+  try {
+    const r = (await t(db, "evidence_image_observations").select("image_url,status,failure_reason,content_sha256,width,height,observed_at").eq("household_id", householdId).eq("candidate_id", candidateId).eq("mode", "intake").order("observed_at", { ascending: true })) as { data: Record<string, unknown>[] | null };
+    for (const x of r.data ?? []) m.set(String(x.image_url), { status: x.status as IntakeRow["status"], failureReason: (x.failure_reason as string | null) ?? null, sha256: (x.content_sha256 as string | null) ?? null, width: (x.width as number | null) ?? null, height: (x.height as number | null) ?? null, observedAt: String(x.observed_at) });
+  } catch {
+    /* 読めなければ空 */
+  }
+  return m;
+}
+export async function saveIntakeObservation(db: Db, householdId: string, candidateId: string, a: { url: string; index: number; status: "fetched" | "failed"; failureReason?: string; sha256?: string; width?: number; height?: number; at: string }): Promise<boolean> {
+  try {
+    const r = (await t(db, "evidence_image_observations").insert({ household_id: householdId, candidate_id: candidateId, image_url: a.url.slice(0, 500), url_key: canonUrl(a.url).key.slice(0, 300), image_index: Math.min(40, Math.max(1, a.index)), status: a.status, failure_reason: a.status === "failed" ? (a.failureReason ?? null) : null, content_sha256: a.sha256 ?? null, width: a.width ?? null, height: a.height ?? null, readings: [], mode: "intake", observed_at: a.at })) as { error: { code?: string } | null };
+    return !r.error || r.error.code === "23505";
+  } catch {
+    return false;
+  }
+}

@@ -250,12 +250,14 @@ function requestOnce(url: URL, o: Required<Pick<SafeFetchOptions, "timeoutMs" | 
   });
 }
 
+/** safeFetch の既定の本文サイズ上限（バイト）。超えた分は切れて truncated になり、台帳・抜粋の切れ目として記録される */
+export const SAFE_FETCH_DEFAULT_MAX_BYTES = 1_500_000;
 const DEFAULT_ACCEPT = ["text/html", "application/xhtml+xml", "text/plain"];
 
 /** 安全にURLを取得する。失敗は例外ではなく結果オブジェクトで返す（理由は利用者向けの日本語） */
 export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}): Promise<SafeFetchResult> {
   const timeoutMs = options.timeoutMs ?? 10_000;
-  const maxBytes = options.maxBytes ?? 1_500_000;
+  const maxBytes = options.maxBytes ?? SAFE_FETCH_DEFAULT_MAX_BYTES;
   const maxRedirects = options.maxRedirects ?? 4;
   const accept = options.accept ?? DEFAULT_ACCEPT;
   const allowLoopback = options.testOnlyAllowLoopback === true;

@@ -11,6 +11,8 @@ import { armsOf, assertNoGoldLeak, claimOf, compareArms, scoreCase, type Arm, ty
 import type { ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { rememberFullPages } from "@/lib/server/collector/collected-docs";
 import type { Db } from "@/lib/server/lottery-service";
+import { evidenceFromLastGood } from "@/lib/collector/evidence";
+import { coverageReport, evaluateCoverage, type CoverageReport } from "@/lib/server/collector/limits-audit";
 import { persistCollectedDocuments } from "./collected-store";
 import { generateProposalsForCandidate, mockDeps, type CandidateRow, type GenerateDeps } from "./generate";
 
@@ -73,6 +75,8 @@ export interface ExperimentOutcome {
   scores: { baseline: CaseScore[]; treatment: CaseScore[] };
   /** AIへ渡した入力に gold の合言葉が混ざっていないこと */
   goldLeak: { ok: boolean; leaks: string[] };
+  /** 上限・切り詰めの監査（毎回記録する）。記録の無い欠落があれば level=fail（結果の信頼性に関わるため、報告で明示する） */
+  limitAudit: { report: CoverageReport; level: "ok" | "warn" | "fail"; messages: string[] };
 }
 
 /** 準備済みの候補の登録案を gold と採点し、2つのアームを比較する（採点は実行の後。gold はここで初めて読まれる） */
@@ -86,7 +90,8 @@ export async function scoreExperiment(a: { db: Db; experiment: ExperimentId; pre
     scores[p.arm.role].push(scoreCase(g, records, { postText: p.postText, pages: p.pages }));
   }
   const visible = a.prepared.flatMap((p) => [p.postText, ...p.pages.map((x) => x.text), JSON.stringify((p.candidate.last_good as { evidence?: unknown } | null)?.evidence ?? {})]);
-  return { comparison: compareArms(a.experiment, scores.baseline, scores.treatment, a.required !== undefined ? { required: a.required } : {}), claim: claimOf(a.modes), scores, goldLeak: assertNoGoldLeak(visible, a.gold) };
+  const audit = coverageReport(a.prepared.map((p) => ({ ev: evidenceFromLastGood(p.candidate.last_good), texts: p.pages })));
+  return { limitAudit: { report: audit, ...evaluateCoverage(audit) }, comparison: compareArms(a.experiment, scores.baseline, scores.treatment, a.required !== undefined ? { required: a.required } : {}), claim: claimOf(a.modes), scores, goldLeak: assertNoGoldLeak(visible, a.gold) };
 }
 
 /** モック（費用0・台本のAI）で、候補の作成 → 登録案の生成 → 採点 → 比較の全経路を通す。**結果は精度ではなく、試験の仕組みの確認**（claim=pipeline_check_only） */

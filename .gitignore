@@ -48,3 +48,4 @@ eval/real-data/
 eval/phase2-compare/*.local.json
 eval/phase2-compare/*.local.jsonl
 eval/phase2-compare/.compare.lock
+eval/phase2-compare/*.local.md
