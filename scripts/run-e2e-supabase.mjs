@@ -58,7 +58,7 @@ if (!isolate) {
   console.log(`[e2e] ${files.length} ファイルを1つずつ実行します（ファイルごとに世帯を作り直す）`);
   freePort();
   // ビルドと起動は1回。playwright.config.ts の webServer は使わず、起動済みのサーバーへ繋ぐ（E2E_BASE_URL）
-  const appEnv = { ...process.env, ...ISOLATED_AGENT_ENV, NEXT_PUBLIC_DATA_SOURCE: "supabase", AI_PROVIDER: "mock", NEXT_PUBLIC_POKEMON_IMAGES: "on" };
+  const appEnv = { ...process.env, ...ISOLATED_AGENT_ENV, NEXT_PUBLIC_DATA_SOURCE: "supabase", AI_PROVIDER: "mock", NEXT_PUBLIC_POKEMON_IMAGES: "on", GOLD_REVIEW: "on", GOLD_REVIEW_DIR: "e2e/.gold-review", GOLD_REVIEW_PAGES_DIR: "e2e/.gold-fixture" };
   const build = spawnSync("npm", ["run", "build"], { stdio: "inherit", shell: true, env: appEnv });
   if (build.status !== 0) process.exit(build.status ?? 1);
   const server = spawn("npx", ["next", "start", "-p", String(PORT)], { stdio: "ignore", shell: true, env: appEnv });

@@ -58,6 +58,10 @@ create table public.evidence_coverage_stats (
   read_chars int not null default 0 check (read_chars >= 0),
   -- 最初に参照した位置（字目）。重要条件が本文のどこにあったかの傾向の材料
   first_read_at int check (first_read_at is null or first_read_at >= 0),
+  -- どの文書の、どの区間がAIの入力に出ていた／AIが read で読んだか（字位置の区間。原文・URLは含まない。文書はURLのハッシュで識別）。gold の重要条件の位置と突き合わせて、読み飛ばしを測る
+  url_hash text check (url_hash is null or url_hash ~ '^[0-9a-f]{16}$'),
+  shown_ranges jsonb not null default '[]'::jsonb check (jsonb_typeof(shown_ranges) = 'array' and pg_column_size(shown_ranges) <= 4000),
+  read_ranges jsonb not null default '[]'::jsonb check (jsonb_typeof(read_ranges) = 'array' and pg_column_size(read_ranges) <= 4000),
   fetch_outcome text not null check (char_length(fetch_outcome) <= 30),
   -- 取得が上限・切断で不完全だったか、調査終了の理由、判断（register/tentative/exclude/none）
   end_reason text check (end_reason is null or char_length(end_reason) <= 30),

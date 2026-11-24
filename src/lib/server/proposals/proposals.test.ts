@@ -206,11 +206,20 @@ describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server 
   it("画像の実解析（vision-real）・比較試験の実行部（compare-run）は、評価入口（real-run・compare-real）以外の非テストのコードから読み込まれない。収集・画面・server action は画像取得の本体（image-fetch）も読み込まない", () => {
     expect(importers(/xsource\/vision-real|\.\/vision-real/, ["src/lib/judgment/xsource/vision-real.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
     expect(importers(/proposals\/compare-run|\.\/compare-run/, ["src/lib/server/proposals/compare-run.ts"])).toEqual([]);
-    expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/judgment/xsource/r1-worksheet.ts", "src/lib/server/proposals/compare-run.ts"])).toEqual([]);
+    expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/judgment/xsource/r1-worksheet.ts", "src/lib/server/proposals/compare-run.ts", "src/lib/server/proposals/real-post-capture.ts"])).toEqual([]);
     expect(importers(/images\/image-fetch|\.\/image-fetch/,["src/lib/server/images/image-fetch.ts", "src/lib/server/images/split-adapter.ts", "src/lib/judgment/xsource/vision-real.ts", "src/lib/judgment/xsource/vision-mock.ts", "src/lib/server/collector/image-intake.ts"])).toEqual([]);
     for (const f of ["src/lib/server/collector/run.ts", "src/lib/server/collector/x-rich.ts", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/proposals/generate.ts", "src/app/(app)/lotteries/candidates/proposal-actions.ts"]) {
       expect(readFileSync(f, "utf8"), f).not.toMatch(/vision-real|images\/image-fetch|makeRealVisionClient|fetchPublicImage/);
     }
+  });
+  it("実投稿の資料化（real-post-capture・実ネットワークを伴う）は評価入口以外から読み込まれない。独立gold確認（開発専用）は、ナビ・設定・他の画面から誘導されず、gold確認のコードは収集・AI・抽選のコードを読み込まない", () => {
+    expect(importers(/proposals\/real-post-capture|\.\/real-post-capture/, ["src/lib/server/proposals/real-post-capture.ts"])).toEqual([]);
+    const gold = nonTest.filter((f) => /gold-review/.test(f) && !/^src\/(app\/\(app\)\/dev\/gold-review|components\/gold-review-view|lib\/server\/gold-review|lib\/gold-review)/.test(f));
+    expect(gold).toEqual([]);
+    // gold確認のページ・部品を参照してよいのは、自分自身（ページ・actions・view・store）だけ
+    expect(importers(/gold-review/, [...nonTest.filter((f) => /gold-review/.test(f))])).toEqual([]);
+    // 収集・登録案・AIのコードを読み込まない（gold確認はAIの出力に触れない）
+    for (const f of nonTest.filter((x) => /(gold-review)/.test(x))) expect(readFileSync(f, "utf8"), f).not.toMatch(/server\/collector\/|server\/proposals\/|@anthropic-ai\/sdk|judgment\/xsource\/(research|proposal|vision)/);
   });
   it("実AIの比較試験の入口は、承認文・独立goldの検証・計画の費用の検査・ローカルDBの確認を行い、サンプルでは実AIを実行しない", () => {
     const t = readFileSync("src/lib/server/proposals/compare-real.real.test.ts", "utf8");

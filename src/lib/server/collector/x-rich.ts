@@ -356,7 +356,10 @@ export function makeXRichFetcher(o: XRichOptions): (url: string) => Promise<XRic
     const hasPic = /pic\.(x|twitter)\.com\//i.test(x.text);
     notices.push(hasPic ? "画像未取得: この投稿には画像があります。応募期間・受取方法などが画像にある場合は読み取れていません（本文のみ）" : "添付画像とリンク先は解析できていません（本文のみ）");
     // 本文のみの取得でも、投稿内の外部リンク（応募ページなど）の本文は統合する
-    const links = [...(x.text.split("【投稿内のリンク】")[1] ?? "").matchAll(/https:\/\/\S+/g)].map((m) => m[0]);
+    // 展開できた宛先と、展開できなかった短縮リンク（台帳に「短縮URL」として理由つきで残す。無言で消さない）
+    const linkPart = x.text.split("【投稿内のリンク】")[1]?.split("【展開できなかった短縮リンク")[0] ?? "";
+    const unexpandedPart = x.text.split("【展開できなかった短縮リンク")[1] ?? "";
+    const links = [...linkPart.matchAll(/https:\/\/\S+/g), ...unexpandedPart.matchAll(/https:\/\/t\.co\/\S+/g)].map((m) => m[0]);
     const withLink = links.length > 0 ? await enrichXPost({ text: x.text, links, images: [] }, o.enrich ?? {}) : null;
     if (withLink && !withLink.linkedPage) notices.push("リンク先の本文は取得できませんでした");
     return { ok: true, text: withLink?.text ?? x.text, author: x.author, postedOn: x.postedOn, images: [], via: "oembed", notices, imagesFound: 0, imagesUsed: 0, linkedPage: Boolean(withLink?.linkedPage), ...(withLink?.linkedPages.length ? { linkedPages: withLink.linkedPages } : {}), ...(withLink ? { linkLedger: withLink.linkLedger } : {}), imageStatus: hasPic ? "not_fetched" : "none" };

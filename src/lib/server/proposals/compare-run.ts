@@ -7,13 +7,14 @@
  *  - 本番のDB・候補には接続しない（呼び出し側がローカルのSupabaseを渡す）。
  */
 import { buildEvidence } from "@/lib/collector/evidence";
-import { armsOf, assertNoGoldLeak, claimOf, compareArms, scoreCase, type Arm, type CaseScore, type CompareCase, type Comparison, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
+import { armsOf, assertNoGoldLeak, classifyReadStage, datasetClaim, type DatasetKind, compareArms, scoreCase, summarizeReadAudit, type ReadAuditSummary, type ReadStage, type Arm, type CaseScore, type CompareCase, type Comparison, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
 import type { ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { rememberFullPages } from "@/lib/server/collector/collected-docs";
 import type { Db } from "@/lib/server/lottery-service";
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import { coverageReport, evaluateCoverage, type CoverageReport } from "@/lib/server/collector/limits-audit";
 import { persistCollectedDocuments } from "./collected-store";
+import { loadBestDocument, urlHashOf } from "./evidence-store";
 import { generateProposalsForCandidate, mockDeps, type CandidateRow, type GenerateDeps } from "./generate";
 
 export const CMP_HOST = "https://eval-cmp.invalid";
@@ -71,38 +72,58 @@ export async function readProposalRecords(db: Db, candidateId: string): Promise<
 
 export interface ExperimentOutcome {
   comparison: Comparison;
-  claim: "accuracy" | "pipeline_check_only";
+  claim: "accuracy" | "pipeline_check_only" | "structure_check_only";
+  /** データセットの種類（合成と実投稿は別の結果。合成は精度として主張しない） */
+  dataset: DatasetKind;
   scores: { baseline: CaseScore[]; treatment: CaseScore[] };
   /** AIへ渡した入力に gold の合言葉が混ざっていないこと */
   goldLeak: { ok: boolean; leaks: string[] };
   /** 上限・切り詰めの監査（毎回記録する）。記録の無い欠落があれば level=fail（結果の信頼性に関わるため、報告で明示する） */
+  /** gold の重要条件が、収集→保存→AI入力→読み取り→判断のどこまで届いたか（段階ごとの件数）。アーム別 */
+  readAudit: Record<"baseline" | "treatment", ReadAuditSummary>;
   limitAudit: { report: CoverageReport; level: "ok" | "warn" | "fail"; messages: string[] };
 }
 
 /** 準備済みの候補の登録案を gold と採点し、2つのアームを比較する（採点は実行の後。gold はここで初めて読まれる） */
-export async function scoreExperiment(a: { db: Db; experiment: ExperimentId; prepared: readonly ArmCandidate[]; gold: readonly GoldCase[]; modes: readonly string[]; required?: number }): Promise<ExperimentOutcome> {
+export async function scoreExperiment(a: { dataset?: DatasetKind; householdId?: string; db: Db; experiment: ExperimentId; prepared: readonly ArmCandidate[]; gold: readonly GoldCase[]; modes: readonly string[]; required?: number }): Promise<ExperimentOutcome> {
   const goldBy = new Map(a.gold.map((g) => [g.caseId, g]));
   const scores = { baseline: [] as CaseScore[], treatment: [] as CaseScore[] };
+  const stages: Record<"baseline" | "treatment", { stage: ReadStage }[]> = { baseline: [], treatment: [] };
   for (const p of a.prepared) {
     const g = goldBy.get(p.caseId);
     if (!g) continue; // gold の無い案件は採点しない（精度に数えない）
     const records = await readProposalRecords(a.db, p.candidate.id);
-    scores[p.arm.role].push(scoreCase(g, records, { postText: p.postText, pages: p.pages }));
+    const sc = scoreCase(g, records, { postText: p.postText, pages: p.pages });
+    scores[p.arm.role].push(sc);
+    // 読み飛ばしの切り分け（gold の引用ごと）
+    if (a.householdId) {
+      const stats = ((await (a.db as unknown as { from: (n: string) => any }).from("evidence_coverage_stats").select("proposal_key,url_hash,shown_ranges,read_ranges").in("proposal_key", records.map((r) => r.proposalKey))).data ?? []) as { proposal_key: string; url_hash: string | null; shown_ranges: number[][]; read_ranges: number[][] }[];  
+      for (const o of g.opportunities) {
+        const m = sc.matches.find((x) => x.oppId === o.oppId);
+        const url = o.url;
+        const collected = !!url && p.pages.some((x) => x.url === url);
+        const doc = collected && url ? await loadBestDocument(a.db, a.householdId, p.candidate.id, url) : null;
+        const ev = evidenceFromLastGood(p.candidate.last_good);
+        const stored = doc?.text ?? (url ? ev?.linkedPages?.find((l) => l.url === url)?.text : undefined) ?? null;
+        const stat = m?.proposalKey && url ? stats.find((s) => s.proposal_key === m.proposalKey && s.url_hash === urlHashOf(url)) : undefined;
+        for (const e of o.evidence) stages[p.arm.role].push(classifyReadStage({ quote: e.quote, collected, storedText: stored, stat: stat ? { shownRanges: stat.shown_ranges, readRanges: stat.read_ranges } : null, fieldsCorrect: m ? m.store !== false && m.product !== false && m.deadline !== false : null }));
+      }
+    }
   }
   const visible = a.prepared.flatMap((p) => [p.postText, ...p.pages.map((x) => x.text), JSON.stringify((p.candidate.last_good as { evidence?: unknown } | null)?.evidence ?? {})]);
   const audit = coverageReport(a.prepared.map((p) => ({ ev: evidenceFromLastGood(p.candidate.last_good), texts: p.pages })));
-  return { limitAudit: { report: audit, ...evaluateCoverage(audit) }, comparison: compareArms(a.experiment, scores.baseline, scores.treatment, a.required !== undefined ? { required: a.required } : {}), claim: claimOf(a.modes), scores, goldLeak: assertNoGoldLeak(visible, a.gold) };
+  return { readAudit: { baseline: summarizeReadAudit(stages.baseline), treatment: summarizeReadAudit(stages.treatment) }, limitAudit: { report: audit, ...evaluateCoverage(audit) }, comparison: compareArms(a.experiment, scores.baseline, scores.treatment, a.required !== undefined ? { required: a.required } : {}), claim: datasetClaim(a.dataset ?? "real_post", a.modes), dataset: a.dataset ?? "real_post", scores, goldLeak: assertNoGoldLeak(visible, a.gold) };
 }
 
 /** モック（費用0・台本のAI）で、候補の作成 → 登録案の生成 → 採点 → 比較の全経路を通す。**結果は精度ではなく、試験の仕組みの確認**（claim=pipeline_check_only） */
-export async function runExperimentMock(a: { db: Db; householdId: string; experiment: ExperimentId; cases: readonly CompareCase[]; gold: readonly GoldCase[]; env: Record<string, string | undefined>; now?: string; extraDeps?: (arm: Arm) => Partial<GenerateDeps>; required?: number }): Promise<ExperimentOutcome & { prepared: ArmCandidate[] }> {
+export async function runExperimentMock(a: { db: Db; householdId: string; experiment: ExperimentId; cases: readonly CompareCase[]; gold: readonly GoldCase[]; dataset?: DatasetKind; env: Record<string, string | undefined>; now?: string; extraDeps?: (arm: Arm) => Partial<GenerateDeps>; required?: number }): Promise<ExperimentOutcome & { prepared: ArmCandidate[] }> {
   const now = a.now ?? new Date().toISOString();
   const prepared = await prepareArmCandidates({ db: a.db, householdId: a.householdId, experiment: a.experiment, cases: a.cases, now });
   for (const p of prepared) {
     const r = await generateProposalsForCandidate({ db: a.db, householdId: a.householdId, candidate: p.candidate, env: a.env, deps: mockDeps({ learn: p.arm.learn, ...(a.extraDeps?.(p.arm) ?? {}) }) });
     if (!r.ok) throw new Error(`登録案の生成に失敗: ${r.reason}`);
   }
-  const out = await scoreExperiment({ db: a.db, experiment: a.experiment, prepared, gold: a.gold, modes: ["mock"], ...(a.required !== undefined ? { required: a.required } : {}) });
+  const out = await scoreExperiment({ householdId: a.householdId, db: a.db, experiment: a.experiment, prepared, gold: a.gold, modes: ["mock"], ...(a.dataset ? { dataset: a.dataset } : {}), ...(a.required !== undefined ? { required: a.required } : {}) });
   return { ...out, prepared };
 }
 

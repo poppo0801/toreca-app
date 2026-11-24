@@ -537,3 +537,90 @@ export function splitCalibration<T extends { caseId: string }>(cases: readonly T
   if (evaluation.length === 0 && calibration.length > 0) evaluation.push(calibration.pop() as T);
   return { calibration, evaluation };
 }
+
+// ------------------------------------------------------------------ 読み飛ばしの切り分け（情報の到達の段階）
+/**
+ * gold の重要条件（根拠の引用）が、AIの判断に届くまでのどの段階で失われたかを分ける。
+ *   not_collected  : そのページを収集していない（取得の上限・未取得・先頭1件だけ）
+ *   not_stored     : 収集したが、保存された文書に引用が含まれない（切り詰め・保存の欠落）
+ *   not_in_ai_input: 保存されているが、その項目の調査にそのページが渡っていない
+ *   in_input_unread: 調査に渡ったが、重要条件の位置が提示範囲にも read にも入っていない（読み飛ばし）
+ *   seen_wrong     : 読んだ（提示範囲に入った）が、項目の値が gold と違う（誤判断）
+ *   seen_ok        : 読んで、項目の値も合っている
+ *   no_position    : 引用の位置を文書の中に特定できない（gold の引用が保存文書と表記違いなど）
+ */
+export type ReadStage = "not_collected" | "not_stored" | "not_in_ai_input" | "in_input_unread" | "seen_wrong" | "seen_ok" | "no_position";
+export const READ_STAGES: ReadStage[] = ["not_collected", "not_stored", "not_in_ai_input", "in_input_unread", "seen_wrong", "seen_ok", "no_position"];
+
+const posOf = (doc: string, quote: string): number => {
+  const i = doc.indexOf(quote.trim());
+  if (i >= 0) return i;
+  const a = doc.normalize("NFKC");
+  return a.indexOf(quote.normalize("NFKC").trim());
+};
+
+export function classifyReadStage(a: { quote: string; collected: boolean; storedText: string | null; stat: { shownRanges: number[][]; readRanges: number[][] } | null; fieldsCorrect: boolean | null }): { stage: ReadStage; position: number | null } {
+  if (!a.collected) return { stage: "not_collected", position: null };
+  if (a.storedText === null) return { stage: "not_stored", position: null };
+  const at = posOf(a.storedText, a.quote);
+  if (at < 0) return { stage: "not_stored", position: null };
+  if (!a.stat) return { stage: "not_in_ai_input", position: at };
+  const seen = [...a.stat.shownRanges, ...a.stat.readRanges].some(([f, t]) => at >= f && at < t);
+  if (!seen) return { stage: "in_input_unread", position: at };
+  return { stage: a.fieldsCorrect === false ? "seen_wrong" : "seen_ok", position: at };
+}
+
+export interface ReadAuditSummary {
+  total: number;
+  byStage: Record<ReadStage, number>;
+  /** 重要条件が入力に届いたのに読まれなかった（読み飛ばし）の率。分母=調査に渡ったもの */
+  unreadRate: number | null;
+}
+export function summarizeReadAudit(rows: readonly { stage: ReadStage }[]): ReadAuditSummary {
+  const byStage = Object.fromEntries(READ_STAGES.map((s) => [s, 0])) as Record<ReadStage, number>;
+  for (const r of rows) byStage[r.stage]++;
+  const inInput = byStage.in_input_unread + byStage.seen_wrong + byStage.seen_ok;
+  return { total: rows.length, byStage, unreadRate: inInput ? byStage.in_input_unread / inInput : null };
+}
+
+// ------------------------------------------------------------------ データセットの区別（合成と実投稿を混ぜない）
+/**
+ * synthetic_lp: 保存済みの実在ページ（LivePocket）を、合成した投稿文に組み合わせた案件。**構造の検証用**。ページの使い回し・サイトの偏り・独立性の不足があるため、精度の主張に使わない。
+ * real_post   : 実在のX投稿（複数の応募リンクを持つ）と、そのリンク先の保存済みの本文。出所（投稿URL・取得日時・取得元）を持つ。実AIの結果だけが精度の根拠になりうる（件数が少なければ断定しない）。
+ */
+export type DatasetKind = "synthetic_lp" | "real_post";
+export interface RealPostProvenance {
+  /** 実在の投稿のURL（https://x.com/<user>/status/<id>） */
+  postUrl: string;
+  /** 保存した日時（ISO） */
+  capturedAt: string;
+  /** 取得元: saved_public=保存済みの公開データ／user_supplied=利用者が提供した保存データ。有料API・検索で無承認に取得したものは載せない */
+  source: "saved_public" | "user_supplied";
+  /** 短縮URLを展開した宛先の数（展開できなかった短縮URLは数えない） */
+  expandedLinks: number;
+}
+export type RealPostCase = CompareCase & { provenance: RealPostProvenance };
+
+export function validateRealPostCases(cases: readonly RealPostCase[]): { ok: boolean; errors: string[] } {
+  const errors: string[] = [];
+  for (const c of cases) {
+    const p = c.provenance;
+    if (!p) {
+      errors.push(`${c.caseId}: 出所（provenance）が必要`);
+      continue;
+    }
+    if (!/^https:\/\/(x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d{5,25}$/.test(p.postUrl)) errors.push(`${c.caseId}: 投稿URLが実在の投稿の形式ではない`);
+    if (!p.capturedAt || Number.isNaN(Date.parse(p.capturedAt))) errors.push(`${c.caseId}: 取得日時が必要`);
+    if (p.source !== "saved_public" && p.source !== "user_supplied") errors.push(`${c.caseId}: 取得元は saved_public / user_supplied のみ`);
+    if (c.linkMap.length < 2 || c.pages.length < 2) errors.push(`${c.caseId}: 複数リンク（展開済み2件以上・本文取得済み2ページ以上）が必要`);
+    if (/^r1c\d+$/.test(c.caseId)) errors.push(`${c.caseId}: 合成案件のIDです（実投稿のデータセットに入れない）`);
+    if (p.expandedLinks < 2) errors.push(`${c.caseId}: 短縮URLを展開できた宛先が2件未満`);
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+/** 結果の主張の上限: 合成データセットは、実AIでも精度として主張しない（構造の検証のみ）。実投稿は実AIの結果だけが精度の根拠になりうる */
+export function datasetClaim(dataset: DatasetKind, modes: readonly string[]): "accuracy" | "pipeline_check_only" | "structure_check_only" {
+  if (claimOf(modes) !== "accuracy") return "pipeline_check_only";
+  return dataset === "synthetic_lp" ? "structure_check_only" : "accuracy";
+}
