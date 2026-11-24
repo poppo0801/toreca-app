@@ -107,6 +107,20 @@ describe("締切の時刻・年の採点", () => {
   });
 });
 
+describe("採点の補助指標（是正）", () => {
+  it("登録すべき機会を『除外』にした誤除外を、保留・欠落と別に数える。推論（inferred）の項目の無効な引用も別に数える（重大指標の定義は変えない）", () => {
+    const base = rec({ key: "k1", store: "新宿本店", product: "拡張パック", deadline: "11/30", url: "https://shop-a.example.invalid/e/1", decision: "exclude" });
+    const withInferred = { ...base, fields: { ...base.fields, apply_unit: { value: "one_form_one", basis: "inferred", quote: "原文に存在しない引用の文章です", evidence: null, support: "none" } } } as unknown as ProposalRecord;
+    const s1 = scoreCase(gold(1), [withInferred, rec({ key: "k2", store: "大阪店", product: "拡張パック", deadline: "11/30", url: "https://shop-c.example.invalid/e/3", decision: "tentative" })], ctx);
+    const a1 = aggregate([s1]);
+    expect(a1.wronglyExcludedRate.value).toBe(0.5); // 2機会のうち1つを除外
+    expect(a1.missedRegisterRate.value).toBe(1); // 除外も保留も取りこぼし
+    expect(s1.invalidInferred).toBe(1);
+    expect(s1.invalidQuotes).toBe(0); // 重大指標（observed の引用）は変えない
+    expect(a1.invalidQuoteAllBasisRate.value).toBeGreaterThan(0);
+  });
+});
+
 describe("採点", () => {
   it("全ての機会を正しく登録: 再現率・項目の正解率が1。店舗・商品・締切・応募単位・URL・登録の判断", () => {
     const s = scoreCase(gold(1), [

@@ -92,7 +92,7 @@ const planOf = (cases: CompareCase[], gold: GoldCase[], model = "claude-haiku-5-
   return planComparison({ experiments: experiments(), cases: cases.length, itemsPerCase: avgItems, imagesPerCase: Math.round(avgImages * 10) / 10, model, avgJpy: { agentTurn: 0.163, judge: 0.148, image: Number.isFinite(image) ? image : 0.15 }, turnsPerItem: 2, judgesPerItem: 1.3, caps: CAPS(), goldCases: gold.length });
 };
 
-describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "real-validate", "real-posts-scan", "real-posts-expand", "readiness", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
+describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "real-validate", "real-posts-scan", "real-posts-expand", "readiness", "rescore", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
   it("plan: 実行前の計画（無課金）", () => {
     if (MODE !== "plan") return;
     const { cases, gold, sample } = load();
@@ -277,6 +277,27 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     expect(Object.keys(out)).toHaveLength(experiments().length);
   }, 600_000);
 
+  it("rescore: 【無課金・読み取りだけ】保存済みの実行結果（ローカルDBの登録案）を、現在の採点で採点し直す。AI・ネットワークは呼ばない。修正前後の採点の比較用", async () => {
+    if (MODE !== "rescore") return;
+    const { cases, gold } = load();
+    const db = admin();
+    const { data: hh } = await db.from("households").select("id").limit(1).maybeSingle();
+    const exp = experiments()[0];
+    const { data: cands } = await db.from("collection_candidates").select("id,x_post_id,source_url,last_good,title,created_at").like("title", `cmp ${exp} %`).order("created_at", { ascending: false }).limit(cases.length * 2);
+    const prepared = [] as Awaited<ReturnType<typeof prepareArmCandidates>>;
+    for (const base of cases) {
+      for (const arm of armsOf(exp)) {
+        const row = (cands ?? []).find((c) => (c.title as string) === `cmp ${exp} ${base.caseId} ${arm.role}`);
+        if (!row) continue;
+        const c = arm.transform(base);
+        prepared.push({ arm, caseId: c.caseId, candidate: row as unknown as CandidateRow, pages: c.pages, postText: c.postText });
+      }
+    }
+    const r = await scoreExperiment({ dataset: DATASET, householdId: hh!.id as string, db: db as unknown as Db, experiment: exp, prepared, gold, modes: ["real"] });
+    console.log("RESCORE", JSON.stringify({ candidates: prepared.length, verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, paired: r.comparison.paired, deltas: Object.fromEntries(r.comparison.deltas.map((d) => [d.metric, { baseline: d.baseline, treatment: d.treatment }])), readAudit: r.readAudit }));
+    expect(prepared.length).toBeGreaterThan(0);
+  }, 300_000);
+
   it("run: 実AI（有料・承認後）。関門・事前検査・独立goldの検証・停止条件つき", async () => {
     if (MODE !== "run") return;
     const { cases, gold, sample } = load();
@@ -350,6 +371,18 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
       lockPath: `${DIR}/.compare.lock`,
       onEvent,
     });
+    // 有料の実行の生の出力（登録案の全項目・判断・保留理由・未確認事項）を、DBとは別のローカルファイルに保全する（ローカルDBの初期化・テスト用データの削除で失われないように。Git管理外）
+    try {
+      const keep = [] as unknown[];
+      for (const p of prepared) {
+        const { data } = await (db as unknown as { from: (n: string) => any }).from("registration_proposals").select("*").eq("candidate_id", p.candidate.id).is("superseded_at", null).order("item_no");
+        keep.push({ caseId: p.caseId, arm: p.arm.id, role: p.arm.role, candidateId: p.candidate.id, proposals: data ?? [] });
+      }
+      mkdirSync(`${DIR}/run-exports`, { recursive: true });
+      writeFileSync(`${DIR}/run-exports/${runId}.local.json`, JSON.stringify({ at: new Date().toISOString(), stageKey, summary, runs: keep }, null, 1));
+    } catch {
+      /* 保全の失敗で実行結果の記録を止めない */
+    }
     // 実費を台帳に記録する（この行が無い＝異常終了した実行は、承認額の満額を使ったものとして通算に数えられる）
     writeFileSync(ledgerPath, JSON.stringify(finishRun(read<Ledger>(ledgerPath) ?? ledger0, runId, summary.costJpy, new Date().toISOString()), null, 1));
     const results: Record<string, unknown> = {};

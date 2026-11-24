@@ -181,6 +181,8 @@ export interface OppMatch {
   decision: boolean | null;
   /** 登録（register）すべきでないのに register した（誤登録。重大） */
   falseRegister: boolean;
+  /** 登録すべき（gold）機会を、**除外**にした（応募の機会を失わせる。保留より重い）。保留・欠落は missedRegister で別に数える */
+  wronglyExcluded: boolean;
   /** 登録すべき機会を、除外・保留・欠落にした（取りこぼし） */
   missedRegister: boolean;
 }
@@ -200,6 +202,9 @@ export interface CaseScore {
   crossContamination: number;
   observedFields: number;
   invalidQuotes: number;
+  /** 推論（inferred）の項目で引用がついているものの数と、そのうち原文に無いもの（検証層は observed だけを検査するため、別に数える） */
+  quotedInferred: number;
+  invalidInferred: number;
   costJpy: number;
   turns: number;
   /** ヒントを出した調査のうち、重要条件がヒントの範囲にあった数（hints 実験）。ヒントなしは 0/0 */
@@ -240,6 +245,7 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
       url: r && o.url ? r.sourceUrls.includes(o.url) : null,
       decision: decisionOk,
       falseRegister: !!r && r.decision === "register" && o.decision !== "register",
+      wronglyExcluded: !!r && o.decision === "register" && r.decision === "exclude",
       missedRegister: o.decision === "register" && (!r || r.decision !== "register"),
     });
   }
@@ -249,11 +255,18 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
   const nAll = norm(allText);
   let observed = 0;
   let invalid = 0;
+  let quotedInferred = 0;
+  let invalidInferred = 0;
   let contam = 0;
   records.forEach((r, i) => {
     const mine = matches.find((m) => m.proposalKey === r.proposalKey);
     const opp = mine ? g.opportunities.find((o) => o.oppId === mine.oppId) : undefined;
     for (const f of Object.values(r.fields ?? {})) {
+      if (f.basis === "inferred" && f.quote) {
+        quotedInferred++;
+        const qi = norm(f.quote);
+        if (qi.length < 4 || !nAll.includes(qi)) invalidInferred++;
+      }
       if (f.basis !== "observed" || !f.quote) continue;
       observed++;
       const q = norm(f.quote);
@@ -293,6 +306,8 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
     crossContamination: contam,
     observedFields: observed,
     invalidQuotes: invalid,
+    quotedInferred,
+    invalidInferred,
     costJpy: records.reduce((n, r) => n + (r.costJpy ?? 0), 0),
     turns: records.reduce((n, r) => n + r.turns, 0),
     hintUsed: ctx.hint?.used ?? 0,
@@ -300,9 +315,9 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
   };
 }
 
-export type MetricKey = "mismergeCount" | "oversplitCount" | "oppRecall" | "oppPrecision" | "storeAccuracy" | "productAccuracy" | "deadlineAccuracy" | "deadlineTimeAccuracy" | "deadlineYearAccuracy" | "applyUnitAccuracy" | "urlAccuracy" | "decisionAccuracy" | "falseRegisterRate" | "missedRegisterRate" | "crossContaminationRate" | "invalidQuoteRate" | "hintFirstReadRate" | "costPerOppJpy" | "turnsPerCase";
+export type MetricKey = "mismergeCount" | "oversplitCount" | "oppRecall" | "oppPrecision" | "storeAccuracy" | "productAccuracy" | "deadlineAccuracy" | "deadlineTimeAccuracy" | "deadlineYearAccuracy" | "applyUnitAccuracy" | "urlAccuracy" | "decisionAccuracy" | "falseRegisterRate" | "missedRegisterRate" | "wronglyExcludedRate" | "invalidQuoteAllBasisRate" | "crossContaminationRate" | "invalidQuoteRate" | "hintFirstReadRate" | "costPerOppJpy" | "turnsPerCase";
 /** 値が大きいほど良い指標か（false は小さいほど良い） */
-export const HIGHER_IS_BETTER: Record<MetricKey, boolean> = { mismergeCount: false, oversplitCount: false, oppRecall: true, oppPrecision: true, storeAccuracy: true, productAccuracy: true, deadlineAccuracy: true, deadlineTimeAccuracy: true, deadlineYearAccuracy: true, applyUnitAccuracy: true, urlAccuracy: true, decisionAccuracy: true, falseRegisterRate: false, missedRegisterRate: false, crossContaminationRate: false, invalidQuoteRate: false, hintFirstReadRate: true, costPerOppJpy: false, turnsPerCase: false };
+export const HIGHER_IS_BETTER: Record<MetricKey, boolean> = { mismergeCount: false, oversplitCount: false, oppRecall: true, oppPrecision: true, storeAccuracy: true, productAccuracy: true, deadlineAccuracy: true, deadlineTimeAccuracy: true, deadlineYearAccuracy: true, applyUnitAccuracy: true, urlAccuracy: true, decisionAccuracy: true, falseRegisterRate: false, missedRegisterRate: false, wronglyExcludedRate: false, invalidQuoteAllBasisRate: false, crossContaminationRate: false, invalidQuoteRate: false, hintFirstReadRate: true, costPerOppJpy: false, turnsPerCase: false };
 export interface Rate {
   n: number;
   k: number;
@@ -334,6 +349,8 @@ export function aggregate(scores: readonly CaseScore[]): Aggregate {
     decisionAccuracy: acc((m) => m.decision),
     falseRegisterRate: rate(ms.filter((m) => m.falseRegister).length, matched.length),
     missedRegisterRate: rate(ms.filter((m) => m.missedRegister).length, ms.length),
+    wronglyExcludedRate: rate(ms.filter((m) => m.wronglyExcluded).length, ms.length),
+    invalidQuoteAllBasisRate: rate(sum((s) => s.invalidQuotes + s.invalidInferred), Math.max(1, sum((s) => s.observedFields + s.quotedInferred))),
     mismergeCount: { n: scores.length, value: sum((s) => s.mismerge) },
     oversplitCount: { n: scores.length, value: sum((s) => s.oversplit) },
     crossContaminationRate: rate(sum((s) => s.crossContamination), Math.max(1, sum((s) => s.observedFields))),
@@ -595,11 +612,24 @@ export function splitCalibration<T extends { caseId: string }>(cases: readonly T
 export type ReadStage = "not_collected" | "not_stored" | "not_in_ai_input" | "in_input_unread" | "seen_wrong" | "seen_ok" | "no_position";
 export const READ_STAGES: ReadStage[] = ["not_collected", "not_stored", "not_in_ai_input", "in_input_unread", "seen_wrong", "seen_ok", "no_position"];
 
-const posOf = (doc: string, quote: string): number => {
+/** 引用の位置（元の本文の文字位置）。完全一致→NFKC一致→空白除去・小文字化の一致（検証層 research-loop の norm と同じ基準）の順。見つからなければ -1 */
+export const posOf = (doc: string, quote: string): number => {
   const i = doc.indexOf(quote.trim());
   if (i >= 0) return i;
   const a = doc.normalize("NFKC");
-  return a.indexOf(quote.normalize("NFKC").trim());
+  const j = a.indexOf(quote.normalize("NFKC").trim());
+  if (j >= 0 && a.length === doc.length) return j;
+  const nq = quote.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+  if (nq.length < 2) return -1;
+  let acc = "";
+  const map: number[] = [];
+  for (let k = 0; k < doc.length; k++) {
+    const n = doc[k].normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+    acc += n;
+    for (let m = 0; m < n.length; m++) map.push(k);
+  }
+  const at = acc.indexOf(nq);
+  return at < 0 ? -1 : map[at];
 };
 
 export function classifyReadStage(a: { quote: string; collected: boolean; storedText: string | null; stat: { shownRanges: number[][]; readRanges: number[][] } | null; fieldsCorrect: boolean | null }): { stage: ReadStage; position: number | null } {

@@ -10,7 +10,15 @@ import type { ItemPlan, StoredXPost } from "./x-origin";
 import { FULL_VIEW_CHARS, shownRanges, type Evidence, type ResearchResult } from "./research-loop";
 import { canonUrl } from "./normalize";
 
-export const PROPOSAL_PROMPT_VERSION = "10z-1";
+/**
+ * 最終の扱い（登録境界）。AIの判断（register/exclude）が検証を通っていないときは、暫定（tentative）として扱う。
+ * 根拠が無効・欠落している断定で本登録・除外を通さない。tentative・none はそのまま。保存済みの古い行（AIの申告のまま保存されたもの）にも同じ規則を当てる。
+ */
+export function effectiveDecision(r: { decision: ProposalRecord["decision"]; verified: boolean }): ProposalRecord["decision"] {
+  return (r.decision === "register" || r.decision === "exclude") && !r.verified ? "tentative" : r.decision;
+}
+
+export const PROPOSAL_PROMPT_VERSION = "10z-2";
 export type ProposalMode = "mock" | "replay" | "real";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product" | "unknown";
 /** near_match: 言い換え・書式・括弧の違いを除くと、値の語が本文にほぼ含まれる（数字は完全一致が条件）。enum_value: 応募単位のような**列挙値**（語の一致では確認できない。人が確認する） */
@@ -171,6 +179,10 @@ export function toProposalRecords(a: {
     if (plan.status === "shared_only_unverified") unknowns.push({ what: "応募先URL", why: "親投稿共通のリンクだけで、この項目への対応が未確認" });
     for (const [k, f] of Object.entries(fields)) if (f.basis === "unknown") unknowns.push({ what: k, why: "AIが不明と判断（根拠なし）" });
     for (const h of result.registration.held?.reasons ?? []) unknowns.push({ what: "検証", why: h.slice(0, 80) });
+    // 任意項目の検証失敗: その項目の主張は採用しない（不明として明示。ほかの根拠のある項目は残す）
+    for (const w of result.registration.warnings ?? []) unknowns.push({ what: `任意項目の根拠が未確認: ${w.slice(w.indexOf(":") + 1)}`.slice(0, 40), why: w.slice(0, 80) });
+    // AIの判断（本登録・除外）が検証を通らなかったときは、最終の扱いを暫定に下げた事実を残す（AIの判断は書き換えない）
+    if (result.registration.decision !== result.registration.finalDecision && result.registration.decision !== "none") unknowns.push({ what: "AIの判断", why: `AIは${result.registration.decision}としたが、根拠の検証を通らないため暫定（tentative）として扱う`.slice(0, 80) });
     const cov: ProposalRecord["unknowns"] = [];
     if (a.correctionSkipped?.(plan.itemNo, plan)) cov.push({ what: "人の修正", why: "以前の人の修正は、項目が変わったため適用していない（再確認が必要）" });
     // 収集時の文脈（本文の切り詰め・画像の未確認）は、未確認事項として必ず残す
@@ -198,7 +210,7 @@ export function toProposalRecords(a: {
       urlStatus: plan.status,
       sourceUrls: plan.scopedUrls.slice(0, 5),
       linkHosts: plan.links.slice(0, 12).map((l) => ({ host: hostOfUrl(l.url), origin: l.origin })),
-      decision: result.registration.decision,
+      decision: result.registration.finalDecision,
       verified: result.registration.verified,
       heldReasons: (result.registration.held?.reasons ?? []).slice(0, 16),
       endReason: result.investigation.reason,

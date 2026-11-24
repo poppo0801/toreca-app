@@ -151,12 +151,15 @@ describe("検証層: 根拠の実在・不明値・人が確定した値の保�
     const judge = judgeOf({ fields: { deadline: { value: "11/24", basis: "observed", evidenceId: "s1", quote: "存在しない引用" } } });
     const r = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "stop", reason: "sufficient", why: "" })]), judge, tools: tools({}), budget: budget() });
     expect(judge.inputs).toHaveLength(2); // 初回＋限定的な再評価（1回）
-    expect((judge.inputs[1] as { verificationIssues: string[] }).verificationIssues).toEqual(["quote_not_found:deadline"]);
-    expect(r.registration).toMatchObject({ decision: "register", verified: false, held: { reasons: ["quote_not_found:deadline"] }, proposals: [] }); // 実行用の提案は出さない
+    const vi = (judge.inputs[1] as { verificationIssues: string[] }).verificationIssues;
+    expect(vi).toHaveLength(1);
+    expect(vi[0]).toContain("quote_not_found:deadline"); // 原因（原文に見当たらない）と、写せないときの対処つき
+    expect(vi[0]).toContain("原因");
+    expect(r.registration).toMatchObject({ decision: "register", finalDecision: "tentative", verified: false, held: { reasons: ["quote_not_found:deadline"] }, proposals: [] }); // 実行用の提案は出さない
   });
   it("再評価で修正されれば確定できる", async () => {
     let n = 0;
-    const judge = (async () => ({ decision: "register", fields: n++ === 0 ? { deadline: { value: "11/24", basis: "observed", evidenceId: "s1", quote: "存在しない" } } : { deadline: { value: "11/24", basis: "observed", evidenceId: "s1", quote: "応募は" } }, rationale: "", unresolvedImpact: "none", monitor: { continue: true, why: "" }, costJpy: 0 }) as JudgeOutput) as RegistrationJudge;
+    const judge = (async () => ({ decision: "register", fields: n++ === 0 ? { deadline: { value: "11/24", basis: "observed", evidenceId: "s1", quote: "存在しない" } } : { deadline: { value: "11/27", basis: "observed", evidenceId: "s1", quote: "11/27発売" } }, rationale: "", unresolvedImpact: "none", monitor: { continue: true, why: "" }, costJpy: 0 }) as JudgeOutput) as RegistrationJudge;
     const r = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "stop", reason: "sufficient", why: "" })]), judge, tools: tools({}), budget: budget() });
     expect(r.registration.verified).toBe(true);
   });
