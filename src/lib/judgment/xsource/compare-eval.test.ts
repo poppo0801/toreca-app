@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Phase 2: 同条件比較試験の採点・比較・計画（全て架空のデータ・モックの数値。精度の主張ではなく、仕組みの検証）。 */
 import { describe, expect, it } from "vitest";
-import { aggregate, armsOf, datasetClaim, validateRealPostCases, classifyReadStage, summarizeReadAudit, signTestP, assertNoGoldLeak, claimOf, compareArms, EXPERIMENTS, minImprovementOf, OLD_EXCERPT_CHARS, planComparison, requiredCasesFor, requiredGoldCases, scoreCase, validateGold, type CompareCase, type GoldCase, type PlanInput } from "./compare-eval";
+import { timeTokens, yearTokens, aggregate, armsOf, datasetClaim, validateRealPostCases, classifyReadStage, summarizeReadAudit, signTestP, assertNoGoldLeak, claimOf, compareArms, EXPERIMENTS, minImprovementOf, OLD_EXCERPT_CHARS, planComparison, requiredCasesFor, requiredGoldCases, scoreCase, validateGold, type CompareCase, type GoldCase, type PlanInput } from "./compare-eval";
 import type { ProposalRecord } from "./proposal";
 
 const gold = (n: number, over: Partial<GoldCase> = {}): GoldCase => ({
@@ -54,7 +54,7 @@ describe("gold の独立性（人が根拠を確認したものだけ）", () =>
 });
 
 describe("締切の時刻・年の採点", () => {
-  const withTime = (t: string | null) => gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEndTime: t })) });
+  const withTime = (t: string | null) => gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEndTime: t, evidence: t ? [...o.evidence, { where: "page:0", quote: `応募締切 ${t} まで` }] : o.evidence })) });
   const one = (deadline: string) => [rec({ key: "k1", store: "新宿本店", product: "拡張パック", deadline, url: "https://shop-a.example.invalid/e/1" }), rec({ key: "k2", store: "大阪店", product: "拡張パック", deadline, url: "https://shop-c.example.invalid/e/3" })];
   it("goldに確認済みの時刻が無ければ、時刻は採点しない（AIの推測で補わない）", () => {
     const a = aggregate([scoreCase(withTime(null), one("2026年11月30日 23:59"), ctx)]);
@@ -73,9 +73,36 @@ describe("締切の時刻・年の採点", () => {
     expect(aggregate([scoreCase(gold(1), one("2025年11月30日"), ctx)]).deadlineYearAccuracy.value).toBe(0);
     expect(aggregate([scoreCase(gold(1), one("11/30"), ctx)]).deadlineYearAccuracy.value).toBeNull();
   });
+  it("表記ゆれ: 全角・午後表記・時のみ・「23:59」を同一視。午後11時59分を11:59と誤読しない", () => {
+    expect(timeTokens("２３：５９まで")).toEqual(["23:59"]);
+    expect(timeTokens("午後11時59分")).toEqual(["23:59"]);
+    expect(timeTokens("午前0時")).toEqual(["00:00"]);
+    expect(timeTokens("PM 11:59")).toEqual(["23:59"]);
+    expect(timeTokens("23時")).toEqual(["23:00"]);
+    expect(timeTokens("締切 12/1 25:99")).toEqual([]);
+    expect(yearTokens("２０２６年１１月")).toEqual([2026]);
+  });
+  it("日付またぎ: goldが12/1 00:00 のとき、「11/30 24:00」「12/1 0:00」「12/1 午前0時」は一致。11/30 23:59 は不一致（別の瞬間）", () => {
+    const g = gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEnd: "2026-12-01", applyEndTime: "00:00" })) });
+    for (const [dl, dateOk, timeOk] of [["11/30 24:00", true, true], ["12/1 0:00", true, true], ["12月1日 午前0時", true, true], ["11/30 23:59", false, false], ["12/1", true, false]] as const) {
+      const a = aggregate([scoreCase(g, one(dl), ctx)]);
+      expect(a.deadlineAccuracy.value, "date " + dl).toBe(dateOk ? 1 : 0);
+      expect(a.deadlineTimeAccuracy.value, "time " + dl).toBe(timeOk ? 1 : 0);
+    }
+  });
+  it("goldが11/30 23:59 のとき、12/1 00:00 や 11/30 24:00 は一致としない（24:00 の同一視は 00:00 のgoldだけ）", () => {
+    const a = aggregate([scoreCase(withTime("23:59"), one("11/30 24:00"), ctx)]);
+    expect(a.deadlineTimeAccuracy.value).toBe(0);
+  });
+  it("時刻の母数: goldに時刻が無いときは 0（未測定として扱い、0%や100%に見せない）", () => {
+    const a = aggregate([scoreCase(gold(1), one("11/30 23:59"), ctx)]);
+    expect(a.deadlineTimeAccuracy).toMatchObject({ n: 0, value: null });
+  });
   it("goldの時刻の形式不正・日付なしの時刻は拒否", () => {
     expect(validateGold([withTime("25:00")]).ok).toBe(false);
     expect(validateGold([withTime("23:59")]).ok).toBe(true);
+    // 時刻は本文の引用に書かれているものだけ（引用に無い時刻は拒否）
+    expect(validateGold([gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEndTime: "23:59" })) })]).errors.join()).toContain("引用に書かれていません");
     expect(validateGold([gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEnd: null, applyEndTime: "23:59" })) })]).ok).toBe(false);
   });
 });

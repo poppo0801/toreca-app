@@ -16,7 +16,7 @@ import { SELECT_STORE_PLACEHOLDER } from "@/lib/applied-store";
 import { isDummyStoreName, storeKey } from "@/lib/store-name";
 import { ONLINE_STORE_NAME, isOnlineStore, isOnlineStoreName } from "@/lib/store-online";
 import { ackCautions, pruneCautionsOnEdit, type EditSnapshot } from "@/lib/live-cautions";
-import type { Caution } from "@/lib/collector/attention";
+import { normalizeCautions, type Caution } from "@/lib/collector/attention";
 import { findDuplicates } from "@/lib/lottery-match";
 import { loadMasterEntries, resolveMasterAndLearn } from "@/lib/server/master-identity/alias-service";
 import { validateLink } from "@/lib/profile-link";
@@ -107,7 +107,7 @@ async function readEditSnapshot(db: Db, lotteryId: string): Promise<{ cautions: 
   const { data: r } = await db.from("lotteries").select("cautions,apply_deadline_at,apply_deadline_date,result_date,apply_method,receive_method").eq("id", lotteryId).maybeSingle();
   if (!r) return null;
   return {
-    cautions: (Array.isArray(r.cautions) ? r.cautions : []) as unknown as Caution[],
+    cautions: normalizeCautions(r.cautions),
     snap: { applyDeadline: r.apply_deadline_at ?? r.apply_deadline_date, resultDate: r.result_date, applyMethod: r.apply_method, receiveMethod: r.receive_method },
   };
 }
@@ -606,7 +606,7 @@ export async function loadAppData(db: Db, householdId?: string): Promise<AppData
       createdAt: l.created_at,
       updatedAt: l.updated_at,
       unconfirmedFields: l.unconfirmed_fields ?? [],
-      cautions: Array.isArray(l.cautions) ? (l.cautions as unknown as NonNullable<import("@/types/domain").Lottery["cautions"]>) : [],
+      cautions: normalizeCautions(l.cautions),
       confidence: (l.confidence ?? null) as import("@/types/domain").Lottery["confidence"],
       updateHistory: (Array.isArray((l as unknown as { update_history?: unknown }).update_history) ? ((l as unknown as { update_history: Record<string, unknown>[] }).update_history) : []).flatMap((h) => (typeof h?.id === "string" && typeof h?.at === "string" ? [{ id: h.id, at: h.at, summary: Array.isArray(h.summary) ? (h.summary as unknown[]).filter((x): x is string => typeof x === "string") : [], sourceUrl: typeof h.sourceUrl === "string" ? h.sourceUrl : "", official: h.official === true, ...(typeof h.revertedAt === "string" ? { revertedAt: h.revertedAt } : {}) }] : [])),
     })),

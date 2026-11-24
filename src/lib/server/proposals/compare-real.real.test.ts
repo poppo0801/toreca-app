@@ -57,10 +57,33 @@ const load = (): { cases: CompareCase[]; gold: GoldCase[]; sample: boolean } => 
   const cases = read<CompareCase[]>(`${DIR}/${FILES.cases}`);
   const gold = read<GoldCase[]>(`${DIR}/${FILES.gold}`);
   // 実AIで試験するのは、独立goldのある案件だけ（goldの無い案件は採点できず、費用だけがかかる）
-  if (cases && gold) return { cases: cases.filter((c) => gold.some((g) => g.caseId === c.caseId)), gold, sample: false };
+  if (cases && gold) {
+    // 価値の高い案件（goldの応募機会が多い＝取りこぼし・取り違えを測りやすい）から順に並べる。段階実行は --case-from / --case-limit で、この順の範囲を指定する
+    const oppsOf = (id: string) => gold.find((g) => g.caseId === id)?.opportunities.length ?? 0;
+    const ranked = cases.filter((c) => gold.some((g) => g.caseId === c.caseId)).sort((a, b) => oppsOf(b.caseId) - oppsOf(a.caseId) || a.caseId.localeCompare(b.caseId));
+    const from = Math.max(0, Number(env.PHASE2_CMP_CASE_FROM) || 0);
+    const limit = Number(env.PHASE2_CMP_CASE_LIMIT) || ranked.length;
+    return { cases: ranked.slice(from, from + limit), gold, sample: false };
+  }
   return { cases: read<CompareCase[]>(`${DIR}/sample/cases.json`) ?? [], gold: read<GoldCase[]>(`${DIR}/sample/gold.json`) ?? [], sample: true };
 };
 const CAPS = () => ({ totalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY) || Number(env.PHASE2_CMP_TOTAL_JPY) || 60, perCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) || Number(env.PHASE2_CMP_PER_CASE_JPY) || 5, maxImagesPerCase: 4, maxFetchPerCase: 30, maxMinutes: 120 });
+/** 予算の完走見込み（保証ではない）。期待費用・1回の最大予約額・上限から、全件を完走できるか／保証できる件数／段階実行の案を出す */
+const feasibilityOf = (runs: number, expectedJpy: number, cases: CompareCase[], gold: GoldCase[]) => {
+  const totalCap = CAPS().totalJpy;
+  const perRunMaxReserved = 3.6; // 調査4ターン×0.6 + 判断2回×0.6（readiness の事前検査と同じ設定）
+  const perRunExpected = runs ? expectedJpy / runs : 0;
+  const guaranteedRuns = Math.floor(totalCap / perRunMaxReserved);
+  const armsPerCase = cases.length ? runs / cases.length : 2;
+  const opps = (id: string) => gold.find((g) => g.caseId === id)?.opportunities.length ?? 0;
+  const stages: { stage: string; cases: number; opportunities: number; expectedJpy: number }[] = [];
+  const size = Math.max(1, Math.ceil(cases.length / 3));
+  for (let i = 0; i < cases.length; i += size) {
+    const part = cases.slice(i, i + size);
+    stages.push({ stage: `案件${i + 1}〜${i + part.length}（価値の高い順）`, cases: part.length, opportunities: part.reduce((n, c) => n + opps(c.caseId), 0), expectedJpy: Math.round(part.length * armsPerCase * perRunExpected * 100) / 100 });
+  }
+  return { totalCapJpy: totalCap, expectedJpy, expectedShareOfCap: totalCap ? Math.round((expectedJpy / totalCap) * 1000) / 1000 : null, perRunExpectedJpy: Math.round(perRunExpected * 1000) / 1000, perRunMaxReservedJpy: perRunMaxReserved, guaranteedCompleteRuns: guaranteedRuns, plannedRuns: runs, guaranteedToComplete: runs <= guaranteedRuns, note: runs <= guaranteedRuns ? "最大予約額で数えても全回を完走できる" : `最大予約額で数えると ${guaranteedRuns} 回（${Math.floor(guaranteedRuns / Math.max(1, armsPerCase))} 案件）までしか保証できない。期待費用が上限の ${totalCap ? Math.round((expectedJpy / totalCap) * 100) : 0}% に収まる見込みだが、完走は保証しない（途中で予算に達した場合は、処理済みの案件だけで判定し、改善は主張しない）`, stages };
+};
 const planOf = (cases: CompareCase[], gold: GoldCase[], model = "claude-haiku-5-5") => {
   const avgImages = cases.length ? cases.reduce((n, c) => n + Math.min(4, c.imageRefs.length), 0) / cases.length : 0;
   const avgItems = cases.length ? Math.max(1, Math.round(cases.reduce((n, c) => n + Math.max(1, c.pages.length), 0) / cases.length)) : 3;
@@ -74,7 +97,8 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     const { cases, gold, sample } = load();
     const v = validateGold(gold);
     const p = planOf(cases, gold);
-    console.log("PLAN", JSON.stringify({ input: sample ? "架空のサンプル（仕組みの確認用。実AIの実行には使えない）" : "ローカルの実データ", experiments: experiments(), cases: cases.length, goldCases: gold.length, goldValid: v.ok, goldErrors: v.errors.slice(0, 5), arms: experiments().flatMap((e) => armsOf(e).map((a) => `${a.id}（${a.label}）`)), questions: Object.fromEntries(experiments().map((e) => [e, EXPERIMENTS[e].question])), plan: p }));
+    const feas = feasibilityOf(p.runs, p.expectedJpy, cases, gold);
+    console.log("PLAN", JSON.stringify({ feasibility: feas, input: sample ? "架空のサンプル（仕組みの確認用。実AIの実行には使えない）" : "ローカルの実データ", experiments: experiments(), cases: cases.length, goldCases: gold.length, goldValid: v.ok, goldErrors: v.errors.slice(0, 5), arms: experiments().flatMap((e) => armsOf(e).map((a) => `${a.id}（${a.label}）`)), questions: Object.fromEntries(experiments().map((e) => [e, EXPERIMENTS[e].question])), plan: p }));
     expect(cases.length).toBeGreaterThan(0);
   });
 
@@ -267,7 +291,8 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     for (const e of exps) prepared.push(...(await prepareArmCandidates({ db: db as unknown as Db, householdId: hid, experiment: e, cases: e === "hints" && split ? split.evaluation : cases, now })));
     // 案件ごとにアーム（baseline/treatment）を隣り合わせて実行する（予算が尽きても、片方のアームだけが多く評価されない）
     const armOf = new Map(prepared.map((p) => [p.candidate.id, p.arm]));
-    const order = [...prepared].sort((a, b) => a.caseId.localeCompare(b.caseId) || a.arm.experiment.localeCompare(b.arm.experiment) || a.arm.role.localeCompare(b.arm.role));
+    const rank = new Map(cases.map((c, i) => [c.caseId, i]));
+    const order = [...prepared].sort((a, b) => (rank.get(a.caseId) ?? 0) - (rank.get(b.caseId) ?? 0) || a.arm.experiment.localeCompare(b.arm.experiment) || a.arm.role.localeCompare(b.arm.role));
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model); // モデルの利用可否（無課金）

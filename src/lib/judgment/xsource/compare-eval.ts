@@ -17,6 +17,8 @@
  */
 import type { ApplyUnit, ProposalRecord } from "./proposal";
 import { dateTokens } from "./image-evidence";
+import { timeTokens, yearTokens } from "./time-tokens";
+export { timeTokens, yearTokens };
 
 // ------------------------------------------------------------------ 入力（AIが見るもの）と正解（採点だけが見るもの）
 export interface CompareCase {
@@ -75,6 +77,7 @@ export function validateGold(g: readonly GoldCase[]): { ok: boolean; errors: str
       if (!o.evidence.length || o.evidence.some((e) => !e.quote.trim() || !e.where.trim())) errors.push(`${c.caseId}/${o.oppId}: 根拠（場所と原文の引用）が必要`);
       if (o.applyEnd && !/^\d{4}-\d{2}-\d{2}$/.test(o.applyEnd)) errors.push(`${c.caseId}/${o.oppId}: applyEnd は YYYY-MM-DD か null`);
       if (o.applyEndTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(o.applyEndTime)) errors.push(`${c.caseId}/${o.oppId}: applyEndTime は HH:MM か null`);
+      if (o.applyEndTime && !o.evidence.some((e) => timeTokens(e.quote).includes(o.applyEndTime!) || (o.applyEndTime === "00:00" && timeTokens(e.quote).includes("24:00")))) errors.push(`${c.caseId}/${o.oppId}: applyEndTime の時刻が根拠の引用に書かれていません（本文にある時刻だけをgoldにする）`);
       if (o.applyEndTime && !o.applyEnd) errors.push(`${c.caseId}/${o.oppId}: applyEndTime は applyEnd（日付）が確認できる場合だけ`);
       if (!o.store.trim() || !o.product.trim()) errors.push(`${c.caseId}/${o.oppId}: store・product が必要`);
       if (o.evidence.some((e) => FORBIDDEN_ORIGINS.test(e.where))) errors.push(`${c.caseId}/${o.oppId}: 根拠の場所がAI由来に見える`);
@@ -156,22 +159,11 @@ const same = (a: string | null | undefined, b: string): boolean => {
   const y = nf(b);
   return x.length >= 2 && y.length >= 2 && (x.includes(y) || y.includes(x));
 };
-/** 文字列中の時刻（「23:59」「23時59分」「23時」）を HH:MM の集合にする */
-export function timeTokens(text: string): string[] {
-  const t = text.normalize("NFKC");
-  const out = new Set<string>();
-  const add = (h: number, m: number) => {
-    if (h >= 0 && h <= 24 && m >= 0 && m <= 59) out.add(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-  };
-  for (const m of t.matchAll(/(?<!\d)(\d{1,2}):(\d{2})(?!\d)/g)) add(Number(m[1]), Number(m[2]));
-  for (const m of t.matchAll(/(?<!\d)(\d{1,2})時(?:\s*(\d{1,2})分)?/g)) add(Number(m[1]), m[2] ? Number(m[2]) : 0);
-  return [...out];
-}
-/** 文字列中の西暦年（「2026年」「2026/」など）の集合 */
-export function yearTokens(text: string): number[] {
-  return [...new Set([...text.normalize("NFKC").matchAll(/(?<!\d)(20\d{2})\s*[年/.-]/g)].map((m) => Number(m[1])))];
-}
-
+/** 前日の月日（「12/1 00:00」と「11/30 24:00」は同じ瞬間） */
+const prevMd = (iso: string): string => {
+  const d = new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)) - 1));
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+};
 const mdOf = (iso: string): string => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 export interface OppMatch {
@@ -240,8 +232,9 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
       proposalKey: r?.proposalKey ?? null,
       store: r ? true : null,
       product: r ? true : null,
-      deadline: r && o.applyEnd ? !!dl && dateTokens(dl).includes(mdOf(o.applyEnd)) : null,
-      deadlineTime: r && o.applyEnd && o.applyEndTime ? !!dl && timeTokens(dl).includes(o.applyEndTime) : null,
+      deadline: r && o.applyEnd ? !!dl && (dateTokens(dl).includes(mdOf(o.applyEnd)) || (o.applyEndTime === "00:00" && timeTokens(dl).includes("24:00") && dateTokens(dl).includes(prevMd(o.applyEnd)))) : null,
+      // 0:00 の締切は「前日の24:00」とも書かれる（同じ瞬間）。それ以外は表記ゆれ（23:59・23時59分・午後11時59分）だけを同一視する
+      deadlineTime: r && o.applyEnd && o.applyEndTime ? !!dl && (timeTokens(dl).includes(o.applyEndTime) || (o.applyEndTime === "00:00" && timeTokens(dl).includes("24:00"))) : null,
       deadlineYear: r && o.applyEnd && dl && yearTokens(dl).length > 0 ? yearTokens(dl).includes(Number(o.applyEnd.slice(0, 4))) : null,
       applyUnit: r && o.applyUnit ? r.applyUnit === o.applyUnit : null,
       url: r && o.url ? r.sourceUrls.includes(o.url) : null,
