@@ -189,7 +189,7 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     const results: Record<string, unknown> = {};
     for (const e of exps) {
       const r = await scoreExperiment({ db: db as unknown as Db, experiment: e, prepared: prepared.filter((p) => p.arm.experiment === e), gold, modes: ["real"] });
-      results[e] = { verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, deltas: r.comparison.deltas, paired: r.comparison.paired, cases: r.comparison.cases, required: r.comparison.required, goldLeak: r.goldLeak };
+      results[e] = { verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, deltas: r.comparison.deltas, paired: r.comparison.paired, cases: r.comparison.cases, required: r.comparison.required, goldLeak: r.goldLeak, limitAudit: { level: r.limitAudit.level, messages: r.limitAudit.messages, candidates: r.limitAudit.report.candidates, pages: r.limitAudit.report.pages, hitCandidates: r.limitAudit.report.hitCandidates, notes: r.limitAudit.report.notes } };
     }
     writeFileSync(`${DIR}/result.local.json`, JSON.stringify({ at: new Date().toISOString(), summary, vision: typeof visionStats === "function" ? (visionStats as () => unknown)() : null, results }, null, 1));
     console.log("RESULT", JSON.stringify({ stopReason: summary.stopReason, processed: summary.processed, costJpy: summary.costJpy, overruns: summary.overruns, verdicts: Object.fromEntries(Object.entries(results).map(([k, x]) => [k, (x as { verdict: string }).verdict])) }));

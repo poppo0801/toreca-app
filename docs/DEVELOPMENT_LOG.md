@@ -130,3 +130,5 @@
 - Phase 2（UI改修後・未マージのAI系PR）: X投稿のリンク先取得は「最初の1件のみ」（Stage 4C `enrichXPost`）が根本原因で、10M〜10Wの複数URL対応は対応付けの層だった。発見/選別/取得/保存を分離（`link-plan.ts`・台帳）し、全リンク取得＋全文は evidence_documents へ、画像はビジョン注入＋再利用＋矛盾検出、調査経験は検証の強さ別に蓄積して「最初に見せる位置」だけに反映（migration 119）。詳細は `docs/reports/phase2-post-ui-collector-image-learning.md`。
 
 - Phase 2（画像の実運用・負荷の安全化・DB移行整備・比較試験の準備。未マージのAI系PR）: 画像は取得・検査（SSRF・robots・実バイトの形式・ピクセル・サイズ）→解析（vision-real は許可証＋共通の CallBudget が無いと作れない）→本文と照合→保存（モード別・ハッシュで鮮度）。収集の取得はホスト別の間隔・同時接続・バックオフ・実行の総量・締切で制御し、取得しなかったリンクは理由つきで台帳に残す。未適用のAI移行（旧115・旧119）は本番適用済みの118より後ろ（120・121）へ付け替えた（本番へは未適用）。比較試験は同条件のアーム＋独立gold検証＋計画（dry-run）まで用意し、実AIは承認なしでは動かない（モックの結果は精度として主張しない）。詳細は `docs/reports/phase2-vision-runtime-and-safety.md`。
+
+- Phase 2（既知課題の自律解消）: 未取得リンクを耐久キュー（link_recheck_tasks）で再取得して候補の証拠へ戻し、ホスト別制御はDB共有（fetch_gate_*）、収集時の画像は取得・検査まで接続（解析は承認待ちと明示）、掃除の関数（既定dry-run）を追加（migration 122）。上限の監査（limits-audit）で、http/短いページ・統合テキスト・目次・上限で落ちた件数の無言の欠落を発見して修正し、記録の無い欠落は失敗になる回帰ゲートにした。ui-auditの不合格は E2E の画像フラグ未設定が原因。R1 の実AIは独立gold（人の確認）と金額承認の待ち。詳細は `docs/reports/phase2-autonomous-remediation-real-eval.md`。
