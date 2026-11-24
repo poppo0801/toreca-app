@@ -1,5 +1,6 @@
 // @vitest-environment node
 /** 独立gold確認（開発専用）の保存・検査・R1への連携。架空のページ・一時フォルダのみ。 */
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyChecks, emptyDraft, progressOf, validateConfirm, type Draft, type FieldChecks } from "@/lib/gold-review/model";
 import { composeR1Cases } from "@/lib/judgment/xsource/r1-worksheet";
 import { validateGold } from "@/lib/judgment/xsource/compare-eval";
-import { buildR1PageGold, goldReviewEnabled, importState, loadPages, loadState, opConfirm, opExclude, opReopen, opSaveDraft, saveState, writeR1Gold } from "./store";
+import { buildR1PageGold, buildRealGold, goldReviewEnabled, importState, loadPages, loadRealPages, loadState, opConfirm, opExclude, opHold, opReopen, opSaveDraft, saveState, writeR1Gold, writeRealGold } from "./store";
 
 vi.mock("server-only", () => ({}));
 
@@ -156,5 +157,83 @@ describe("ページの読み込み", () => {
     writeFileSync(join(dir, "pages", "index.json"), JSON.stringify([{ n: 1, url: "https://ok.example.invalid/e/1", ok: true }, { n: 2, url: "http://insecure.example.invalid/e/2", ok: true }, { n: 3, url: "javascript:alert(1)", ok: true }, { n: 4, url: "https://x.example.invalid/", ok: false }]));
     write(3, "<html/>");
     expect(loadPages(env).map((p) => p.n)).toEqual([1]);
+  });
+});
+
+describe("実投稿のリンク先ページ（real set）", () => {
+  const caps = (text: string, o: Record<string, unknown> = {}) => ({ caseId: "rpaaaa1111", order: 0, short: "https://t.co/a", url: "https://shop-a.example.invalid/e/1", finalUrl: "https://shop-a.example.invalid/e/1", hops: 0, fetchedAt: "2026-11-24T00:00:00.000Z", status: 200, title: "", chars: text.length, textHash: "0123456789abcdef", truncated: false, text, sameContentAs: null, ...o });
+  const setup = () => {
+    const sdir = join(dir, "state");
+    mkdirSync(sdir, { recursive: true });
+    const idc = "post-1";
+    const id8 = createHash("sha256").update(idc).digest("hex").slice(0, 8);
+    const caseId = `rp${id8}`;
+    const t1 = "【新宿本店】拡張パック 抽選受付 応募締切 ：11月30日（月）23:59まで お一人様1回まで。";
+    const t2 = "【渋谷店】拡張パック 抽選受付 応募締切 ：2026年12月1日（火）まで お一人様1回まで。";
+    const t3 = "【渋谷店】拡張パック 抽選受付 （再掲）応募締切 ：2026年12月1日（火）まで お一人様1回まで。";
+    writeFileSync(join(sdir, "real-pages.local.json"), JSON.stringify([
+      caps(t1, { caseId, order: 0, short: "https://t.co/a", url: "https://shop-a.example.invalid/e/1", textHash: "a".repeat(16) }),
+      caps(t2, { caseId, order: 1, short: "https://t.co/b", url: "https://shop-b.example.invalid/e/2", textHash: "b".repeat(16) }),
+      caps(t3, { caseId, order: 2, short: "https://t.co/c", url: "https://shop-b.example.invalid/e/2x", textHash: "c".repeat(16) }),
+    ]));
+    writeFileSync(join(sdir, "real-post-candidates.local.json"), JSON.stringify([{ id: idc, postUrl: "https://x.com/official/status/1234567890123", text: "《新宿》 https://t.co/a 《渋谷》 https://t.co/b https://t.co/c", capturedAt: "x" }]));
+    writeFileSync(join(sdir, "cases.real.local.json"), JSON.stringify([{ caseId, pages: [{ url: "https://shop-a.example.invalid/e/1" }, { url: "https://shop-b.example.invalid/e/2" }, { url: "https://shop-b.example.invalid/e/2x" }] }]));
+    return { caseId, t1, t2, t3 };
+  };
+
+  it("実投稿のページを、出所（投稿・短縮URL・展開先・取得）つきで読み込む。年が書かれていない締切の年は補わない（書かれていれば年を示す）", () => {
+    setup();
+    const pages = loadRealPages(env);
+    expect(pages).toHaveLength(3);
+    expect(pages[0].source).toMatchObject({ short: "https://t.co/a", postUrl: "https://x.com/official/status/1234567890123", order: 0 });
+    expect(pages[0].source!.postText).toContain("https://t.co/a");
+    expect(pages[0].candidate.applyEndGuess).toMatchObject({ md: "11/30", year: null }); // 年は書かれていない → 補わない
+    expect(pages[1].candidate.applyEndGuess).toMatchObject({ md: "12/1", year: 2026 });
+    expect(pages[0].candidate.attention.join()).toContain("構造は保存していない");
+    expect(new Set(pages.map((p) => p.n)).size).toBe(3);
+    // 同じ入力なら同じ番号（再取得しても同じページは同じ番号）
+    expect(loadRealPages(env).map((p) => p.n)).toEqual(pages.map((p) => p.n));
+  });
+
+  it("案件のgold: 全ページが確認済みの投稿だけを案件にする。同じ応募機会（人が印を付けたもの）は1機会にまとめ、除外・保留・未確認が残る投稿は理由つきで見送る", () => {
+    const { caseId } = setup();
+    const pages = loadRealPages(env);
+    let st = loadState(pages, env, "real");
+    const d = (shop: string, product: string, end: string, quote: string, same: number | null = null): Draft => ({ ...emptyDraft(), store: shop, product, applyEnd: end, applyUnit: "one_form_one", quotes: [quote], sameOpportunityAs: same });
+    st = opConfirm(st, pages[0], d("新宿本店", "拡張パック", "2026-11-30", "応募締切 ：11月30日（月）23:59まで"), allChecks(), "公式ページを目視で確認", "rev1").state;
+    st = opConfirm(st, pages[1], d("渋谷店", "拡張パック", "2026-12-01", "応募締切 ：2026年12月1日（火）まで"), allChecks(), "公式ページを目視で確認", "rev1").state;
+    const cases = [{ caseId, pages: pages.map((p) => ({ url: p.url })) }];
+    // 3ページ目が未確認 → 案件は見送り
+    let r = buildRealGold(st, pages, cases, "2026-11-25");
+    expect(r.gold).toEqual([]);
+    expect(r.deferred[0].reason).toContain("ページ3");
+    // 3ページ目は2ページ目と同じ応募機会（再掲）→ 1機会にまとめる（2機会と数えない）
+    st = opConfirm(st, pages[2], d("渋谷店", "拡張パック", "2026-12-01", "（再掲）応募締切 ：2026年12月1日（火）まで", pages[1].n), allChecks(), "公式ページを目視で確認", "rev1").state;
+    r = buildRealGold(st, pages, cases, "2026-11-25");
+    expect(r.gold).toHaveLength(1);
+    expect(r.gold[0].opportunities).toHaveLength(2); // 3ページ・2機会
+    expect(r.gold[0].opportunities[1].evidence.map((e) => e.where)).toEqual(["page:1", "page:2"]); // 重ねて書いたページの引用は、同じ機会の根拠として両方残る
+    expect(validateGold(r.gold).ok).toBe(true);
+    // 除外が1つでもあれば見送り
+    const ex = opExclude(opReopen(st, pages[2].n), pages[2], "multi_slot", "受付枠が複数");
+    expect(buildRealGold(ex, pages, cases, "2026-11-25").deferred[0].reason).toContain("除外");
+    // 書き出し（gold.real.local.json）
+    mkdirSync(env.GOLD_REVIEW_DIR, { recursive: true });
+    expect(writeRealGold(pages, st, env)).toMatchObject({ ok: true, cases: 1 });
+    expect(existsSync(join(env.GOLD_REVIEW_DIR, "gold.real.local.json"))).toBe(true);
+  });
+
+  it("公式ページを開けないときは保留（要再確認）。確認済みにはならず、確認済みのページは保留にできない。実投稿の状態は別ファイルに保存される", () => {
+    setup();
+    const pages = loadRealPages(env);
+    let st = loadState(pages, env, "real");
+    st = opHold(st, pages[0].n, "公式ページが開けない");
+    expect(st.pages.find((p) => p.n === pages[0].n)).toMatchObject({ status: "needs_recheck" });
+    expect(st.pages.find((p) => p.n === pages[0].n)!.history.at(-1)).toMatchObject({ action: "held", note: "公式ページが開けない" });
+    saveState(st, env, "real");
+    expect(existsSync(join(env.GOLD_REVIEW_DIR, "gold-review-real.local.json"))).toBe(true);
+    expect(existsSync(join(env.GOLD_REVIEW_DIR, "gold-review.local.json"))).toBe(false); // lp12 の状態とは別
+    const ok = opConfirm(loadState(pages, env, "real"), pages[1], { ...emptyDraft(), store: "渋谷店", product: "拡張パック", applyEnd: "2026-12-01", applyUnit: "one_form_one", quotes: ["応募締切 ：2026年12月1日（火）まで"] }, allChecks(), "公式ページを目視で確認", "rev1");
+    expect(() => opHold(ok.state, pages[1].n, "x")).toThrow(/再確認/);
   });
 });

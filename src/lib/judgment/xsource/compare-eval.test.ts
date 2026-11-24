@@ -53,6 +53,33 @@ describe("gold の独立性（人が根拠を確認したものだけ）", () =>
   });
 });
 
+describe("締切の時刻・年の採点", () => {
+  const withTime = (t: string | null) => gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEndTime: t })) });
+  const one = (deadline: string) => [rec({ key: "k1", store: "新宿本店", product: "拡張パック", deadline, url: "https://shop-a.example.invalid/e/1" }), rec({ key: "k2", store: "大阪店", product: "拡張パック", deadline, url: "https://shop-c.example.invalid/e/3" })];
+  it("goldに確認済みの時刻が無ければ、時刻は採点しない（AIの推測で補わない）", () => {
+    const a = aggregate([scoreCase(withTime(null), one("2026年11月30日 23:59"), ctx)]);
+    expect(a.deadlineTimeAccuracy.n).toBe(0);
+    expect(a.deadlineTimeAccuracy.value).toBeNull();
+  });
+  it("時刻がgoldにあるとき: 23:59・23時59分は一致、時刻なし・別の時刻は不一致", () => {
+    for (const [dl, ok] of [["11/30 23:59", true], ["11月30日 23時59分まで", true], ["11/30", false], ["11/30 18:00", false]] as const) {
+      const a = aggregate([scoreCase(withTime("23:59"), one(dl), ctx)]);
+      expect(a.deadlineTimeAccuracy.value, dl).toBe(ok ? 1 : 0);
+      expect(a.deadlineAccuracy.value, dl).toBe(1);
+    }
+  });
+  it("年: AIの出力に年が書かれているときだけ採点。違う年は不一致、年なしは対象外", () => {
+    expect(aggregate([scoreCase(gold(1), one("2026年11月30日"), ctx)]).deadlineYearAccuracy.value).toBe(1);
+    expect(aggregate([scoreCase(gold(1), one("2025年11月30日"), ctx)]).deadlineYearAccuracy.value).toBe(0);
+    expect(aggregate([scoreCase(gold(1), one("11/30"), ctx)]).deadlineYearAccuracy.value).toBeNull();
+  });
+  it("goldの時刻の形式不正・日付なしの時刻は拒否", () => {
+    expect(validateGold([withTime("25:00")]).ok).toBe(false);
+    expect(validateGold([withTime("23:59")]).ok).toBe(true);
+    expect(validateGold([gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEnd: null, applyEndTime: "23:59" })) })]).ok).toBe(false);
+  });
+});
+
 describe("採点", () => {
   it("全ての機会を正しく登録: 再現率・項目の正解率が1。店舗・商品・締切・応募単位・URL・登録の判断", () => {
     const s = scoreCase(gold(1), [
@@ -250,5 +277,26 @@ describe("データセットの区別（合成と実投稿を混ぜない）", (
     expect(datasetClaim("real_post", ["real"])).toBe("accuracy");
     expect(datasetClaim("real_post", ["mock"])).toBe("pipeline_check_only");
     expect(datasetClaim("synthetic_lp", ["mock"])).toBe("pipeline_check_only");
+  });
+});
+
+describe("機会の同一性（誤統合・誤分割）", () => {
+  const g = (): GoldCase => ({ caseId: "id1", canary: "CANARY-IDENT-0001", verified: { by: "human", at: "2026-11-25", basis: "公式ページを人が確認（架空）" }, opportunities: [
+    { oppId: "a", store: "新宿本店", product: "拡張パック", applyEnd: null, region: null, url: "https://shop-a.example.invalid/e/1", applyUnit: null, decision: "register", evidenceIn: ["page"], pageIndex: 0, evidence: [{ where: "page:0", quote: "受付期間 11月30日まで" }] },
+    { oppId: "b", store: "新宿本店", product: "拡張パック（第2回）", applyEnd: null, region: null, url: "https://shop-a.example.invalid/e/2", applyUnit: null, decision: "register", evidenceIn: ["page"], pageIndex: 1, evidence: [{ where: "page:1", quote: "第2回 受付期間 12月5日まで" }] },
+  ] });
+  const r = (key: string, store: string, product: string, url: string) => ({ proposalKey: key, sourceUrls: [url], decision: "register", applyUnit: "unknown", costJpy: 1, turns: 1, fields: { store: { value: store, basis: "observed", quote: null, evidence: null, support: "literal_in_quote" }, product: { value: product, basis: "observed", quote: null, evidence: null, support: "literal_in_quote" } } }) as never;
+  const ctxx = { postText: "", pages: [] as { url: string; text: string }[] };
+  it("同じ店舗の別開催回: それぞれ別の機会として対応づく（誤統合・誤分割なし）", () => {
+    const s = scoreCase(g(), [r("k1", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/1"), r("k2", "新宿本店", "拡張パック（第2回）", "https://shop-a.example.invalid/e/2")], ctxx);
+    expect(s).toMatchObject({ oppFound: 2, mismerge: 0, oversplit: 0 });
+  });
+  it("誤統合: 別の開催回のページを根拠にしている登録案を数える。誤分割: 同じ機会に複数の登録案（重複）を数える", () => {
+    const wrong = scoreCase(g(), [r("k1", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/2")], ctxx); // 第1回の機会に、第2回のURL
+    expect(wrong.mismerge).toBe(1);
+    const dup = scoreCase(g(), [r("k1", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/1"), r("k9", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/1")], ctxx);
+    expect(dup.oversplit).toBe(1);
+    expect(aggregate([wrong, dup]).mismergeCount.value).toBe(1);
+    expect(aggregate([wrong, dup]).oversplitCount.value).toBe(1);
   });
 });

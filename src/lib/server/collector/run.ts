@@ -1,4 +1,4 @@
-import { buildEvidence, evidenceFromLastGood, imageReadingsFromExtraction, MAX_EVIDENCE_LINKS, MAX_IMAGE_REFS, type StoredEvidence } from "@/lib/collector/evidence";
+import { buildEvidence, carryOverRechecked, evidenceFromLastGood, imageReadingsFromExtraction, MAX_EVIDENCE_LINKS, MAX_IMAGE_REFS, type StoredEvidence } from "@/lib/collector/evidence";
 import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -681,7 +681,7 @@ function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string,
   try {
     const st = q.imageStats;
     const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...(q.linkLedger?.length ? { linkLedger: q.linkLedger } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
-    return ev ? { evidence: ev } : prior ? { evidence: prior } : {};
+    return ev ? { evidence: carryOverRechecked(ev, prior) } : prior ? { evidence: prior } : {};
   } catch {
     return prior ? { evidence: prior } : {};
   }

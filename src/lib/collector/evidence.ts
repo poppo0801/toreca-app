@@ -262,3 +262,32 @@ export function evidenceFromLastGood(lastGood: unknown): StoredEvidence | null {
   const imageRefs = Array.isArray(e.imageRefs) ? e.imageRefs.filter((u) => typeof u === "string" && u.startsWith("https://")).slice(0, MAX_IMAGE_REFS) : undefined;
   return { ...rest, links: Array.isArray(e.links) ? e.links.slice(0, MAX_EVIDENCE_LINKS) : [], ...(linkedPages?.length ? { linkedPages } : {}), ...(linkLedger?.length ? { linkLedger } : {}), ...(imageReadings?.length ? { imageReadings } : {}), ...(imageRefs?.length ? { imageRefs } : {}), ...(linkMap?.length ? { linkMap } : {}) };
 }
+
+/**
+ * 再収集で証拠を作り直すとき、**前回の再調査で戻したページ**（recheckSeq>0）を失わない（Phase 2 の監査で発見: 再収集の取得が時間切れ・上限で一部未取得になると、
+ * 以前に再調査で取得できていたページが、新しい証拠から消えて「未取得」に戻っていた）。
+ *  - 新しい証拠で取得できていないページ（台帳が取得済み以外、または台帳に無い）だけ、前回のページを引き継ぐ。**新しく取得できたページは、新しい方が正**（古い版で上書きしない）。
+ *  - 新しい取得が「恒久的に取得できない」（robots・ログイン・404 等）と分かっているページは引き継がない（無くなったページを残さない）。
+ *  - 引き継いだページは取得日時が古いまま残る（鮮度が分かる）。台帳は「取得済み」に戻し、引き継いだことを理由に残す（carried）。
+ */
+const GONE_REASONS = new Set(["robots", "blocked", "not_found", "login_required", "unsafe", "invalid", "social_post", "shortener", "http_error"]);
+export function carryOverRechecked(next: StoredEvidence, prior: StoredEvidence | null): StoredEvidence {
+  if (!prior || !(prior.recheckSeq && prior.recheckSeq > 0) || !prior.linkedPages?.length) return { ...next, ...(prior?.recheckSeq ? { recheckSeq: prior.recheckSeq } : {}) };
+  const have = new Set((next.linkedPages ?? []).map((p) => p.url));
+  const ledger = [...(next.linkLedger ?? [])];
+  const carried = prior.linkedPages.filter((p) => {
+    if (have.has(p.url)) return false;
+    const e = ledger.find((x) => x.url === p.url);
+    return !(e && e.status !== "fetched" && e.reason && GONE_REASONS.has(e.reason));
+  });
+  if (carried.length === 0) return { ...next, recheckSeq: prior.recheckSeq };
+  const pages = [...(next.linkedPages ?? []), ...carried].slice(0, MAX_LINKED_PAGES);
+  const kept = new Set(pages.map((p) => p.url));
+  for (const p of carried.filter((x) => kept.has(x.url))) {
+    const i = ledger.findIndex((x) => x.url === p.url);
+    const e = { url: p.url, key: ledger[i]?.key ?? p.url.replace(/^https?:\/\//, "").slice(0, 300), host: ledger[i]?.host ?? new URL(p.url).hostname, order: ledger[i]?.order ?? 900, origins: p.origins ?? ledger[i]?.origins ?? ["post"], status: "fetched", reason: "carried", ...(p.fullChars ? { chars: p.fullChars } : {}), ...(p.truncated ? { truncated: true } : {}), at: p.fetchedAt };
+    if (i >= 0) ledger[i] = e;
+    else ledger.push(e);
+  }
+  return { ...next, linkedPages: pages, linkLedger: ledger.slice(0, MAX_LINK_LEDGER), recheckSeq: prior.recheckSeq };
+}

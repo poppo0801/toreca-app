@@ -57,6 +57,17 @@ export const OEMBED_EXPAND_MAX = 12;
 export const OEMBED_EXPAND_TOTAL_MS = 20_000;
 
 /**
+ * 短縮リンクの応答が 3xx ではなく HTML（meta refresh / location.replace）で宛先を返す場合の宛先。t.co は、ブラウザ風でないクライアントには 301 を返すが、
+ * HTML で返すことがある。宛先は http(s) のURLだけ（javascript: 等は無視）。見つからなければ null。
+ */
+export function extractMetaRefresh(html: string): string | null {
+  const m = /<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["']?\s*\d+\s*;\s*url=['"]?([^"'>\s]+)/i.exec(html) ?? /location\.replace\(["']([^"']+)["']\)/i.exec(html);
+  if (!m) return null;
+  const u = decodeEntities(m[1]).replace(/\\\//g, "/").trim();
+  return /^https?:\/\//i.test(u) ? u : null;
+}
+
+/**
  * 投稿内のリンクを展開する（t.co は最初の Location だけを取得。本文は取得しない）。順序は元の順序を保つ。
  * 展開できなかった（上限超過・時間切れ・失敗）短縮リンクは unexpanded に残し、**無言で捨てない**。
  */
@@ -80,7 +91,9 @@ export async function expandPostLinks(links: readonly string[], o: { max?: numbe
         continue;
       }
       const r = await doFetch(l, { noFollow: true, timeoutMs: 4_000, accept: ["text/html", "text/plain"] }).catch(() => null);
+      const meta = r && r.ok && r.status === 200 ? extractMetaRefresh(r.body) : null;
       if (r && r.ok && r.finalUrl && r.finalUrl !== l) slots[i] = r.finalUrl;
+      else if (meta) slots[i] = meta;
       else unexpanded.push(l);
     }
   };

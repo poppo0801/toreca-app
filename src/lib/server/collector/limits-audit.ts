@@ -2,7 +2,7 @@ import "server-only";
 import { MAX_EVIDENCE_CHARS, MAX_EVIDENCE_LINKS, MAX_IMAGE_REFS, MAX_LINK_LEDGER, MAX_LINKED_PAGE_CHARS, MAX_LINKED_PAGES, type StoredEvidence } from "@/lib/collector/evidence";
 import { DEFAULT_RUN_LIMITS } from "@/lib/collector/fetch-control";
 import { DEFAULT_LINK_LIMITS, RECHECKABLE_REASONS } from "@/lib/collector/link-plan";
-import { EXCERPT_CHARS, FULL_VIEW_CHARS, OUTLINE_MAX, READ_CHARS_MAX, ruleSpans, WINDOW_CHARS, WINDOW_MAX, outlineOf } from "@/lib/judgment/xsource/research-loop";
+import { EXCERPT_CHARS, FULL_VIEW_CHARS, OUTLINE_MAX, READ_CHARS_MAX, ruleSpans, shownRanges, WINDOW_CHARS, WINDOW_MAX, outlineOf } from "@/lib/judgment/xsource/research-loop";
 import { MAX_VISION_ANALYSES } from "@/lib/judgment/xsource/image-evidence";
 import { SAFE_FETCH_DEFAULT_MAX_BYTES } from "@/lib/server/safe-fetch";
 import { ANALYSIS_LINK_BUDGET, ANALYSIS_TEXT_MAX, FOLLOW_MAX_PER_PAGE, FOLLOW_MAX_TOTAL, LINK_FETCH_MAX_MS, LINKED_PAGE_MAX_CHARS } from "./x-rich";
@@ -69,10 +69,12 @@ export interface EvidenceAudit {
   needsRead: number;
   /** 目次が全文の末尾まで届くか */
   outlineReachesEnd: boolean;
+  /** AIの**最初の提示**（先頭抜粋＋条件語の周辺）に出ない部分の割合（文書ごと。12,000字以下は全文提示で0）。欠落ではなく「readが要る」領域の大きさ。AIが実際に読んだかは別（読み飛ばしの測定） */
+  unseenRatios: number[];
 }
 
 export function auditEvidence(ev: StoredEvidence | null, fullDocs: { url: string; chars: number }[] = [], texts: { url: string; text: string }[] = []): EvidenceAudit {
-  const out: EvidenceAudit = { recorded: {}, silentLoss: [], pageChars: [], needsRead: 0, outlineReachesEnd: true };
+  const out: EvidenceAudit = { recorded: {}, silentLoss: [], pageChars: [], needsRead: 0, outlineReachesEnd: true, unseenRatios: [] };
   if (!ev) return out;
   Object.assign(out.recorded, ev.limitHits ?? {});
   for (const p of ev.linkedPages ?? []) {
@@ -93,6 +95,8 @@ export function auditEvidence(ev: StoredEvidence | null, fullDocs: { url: string
     if (p?.fullChars && d.chars < p.fullChars) out.silentLoss.push(`full_text_shorter_than_fetched:${d.url.slice(0, 60)}`);
   }
   for (const t of texts) {
+    const shown = shownRanges({ text: t.text, reads: [] }).reduce((n, r) => n + (r.to - r.from), 0);
+    out.unseenRatios.push(t.text.length ? Math.round((1 - Math.min(1, shown / t.text.length)) * 1000) / 1000 : 0);
     if (t.text.length > FULL_VIEW_CHARS) {
       const spans = ruleSpans(t.text, EXCERPT_CHARS);
       const all = [...t.text.slice(EXCERPT_CHARS).matchAll(/(お?1人様|お一人様|1店舗(のみ|だけ)|各店舗|店舗ごと|重複|上限|禁止|不可|できません|ご注意|無効|複数口)/g)].length;
@@ -130,6 +134,8 @@ export interface CoverageReport {
   silentLoss: string[];
   needsRead: number;
   outlineNotReaching: number;
+  /** 最初の提示に出ない部分の割合の分布と、全文提示の範囲（12,000字）を超える文書の数。**記録の無い欠落が0でも、未読の領域は別に数える** */
+  unseen: { docs: number; overFullView: number; ratio: Dist };
   /** 観測不足の注記（件数が少ない・実データが無い）。「十分」と断定しない */
   notes: string[];
 }
@@ -165,6 +171,7 @@ export function coverageReport(items: { ev: StoredEvidence | null; fullDocs?: { 
     silentLoss: audits.flatMap((a) => a.silentLoss),
     needsRead: audits.reduce((n, a) => n + a.needsRead, 0),
     outlineNotReaching: audits.filter((a) => !a.outlineReachesEnd).length,
+    unseen: { docs: audits.reduce((n, a) => n + a.unseenRatios.length, 0), overFullView: audits.reduce((n, a) => n + a.unseenRatios.filter((x) => x > 0).length, 0), ratio: dist(audits.flatMap((a) => a.unseenRatios)) },
     notes,
   };
 }

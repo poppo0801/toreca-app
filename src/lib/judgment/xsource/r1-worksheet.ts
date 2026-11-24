@@ -24,7 +24,7 @@ export interface PageCandidate {
   /** 締切らしい日付の候補（月/日）と、その周辺の原文 */
   deadlineCandidates: { md: string; context: string }[];
   /** 「応募締切：M月D日」の形で明記されている場合の候補（年はページに無いため、記入時に人が確認する）と、その原文の引用。機械抽出・未確認 */
-  applyEndGuess: { md: string; quote: string } | null;
+  applyEndGuess: { md: string; quote: string; /** 引用の中に年が書かれていればその年。無ければ null（**年を推測して補わない**。人が確認して入力する） */ year: number | null } | null;
   slots: { title: string; details: string[]; notes: string[] }[];
   pageNotes: string[];
   /** 人が見るべき点（複数の受付枠・店舗が読み取れない・締切の候補が複数 など） */
@@ -55,8 +55,9 @@ export function pageCandidate(p: { n: number; url: string; html: string }): Page
   if (!store) attention.push("店舗名の候補が見つからない");
   if (new Set(deadlines.map((d) => d.md)).size > 1) attention.push("締切らしい日付の候補が複数ある（どれが応募の締切か人が確認）");
   if (deadlines.length === 0) attention.push("締切らしい日付が見つからない（ページに無い・画像の中・JS描画の可能性）");
-  const em = /応募締切\s*[：:]\s*(\d{1,2})月\s*(\d{1,2})日[^\n。]{0,20}/.exec(text.normalize("NFKC"));
-  const applyEndGuess = em ? { md: `${Number(em[1])}/${Number(em[2])}`, quote: em[0].trim() } : null;
+  const em = /応募締切\s*[：:]\s*(?:(\d{4})\s*年\s*)?(\d{1,2})月\s*(\d{1,2})日[^\n。]{0,20}/.exec(text.normalize("NFKC"));
+  const ym = em && em[1] ? [em[0], em[1]] : null;
+  const applyEndGuess = em ? { md: `${Number(em[2])}/${Number(em[3])}`, quote: em[0].trim(), year: ym ? Number(ym[1]) : null } : null;
   return { n: p.n, url: p.url, chars: text.length, title, recognized: st.recognized, storeCandidate: store, productCandidate: product, deadlineCandidates: deadlines, applyEndGuess, slots: st.slots.map((s) => ({ title: s.title, details: s.details.map((d) => `${d.label}: ${d.value}`).slice(0, 6), notes: s.notes.slice(0, 4) })), pageNotes: st.pageNotes.slice(0, 5), attention };
 }
 
@@ -84,6 +85,7 @@ export interface R1PageGold {
   store: string;
   product: string;
   applyEnd: string | null;
+  applyEndTime?: string | null;
   applyUnit: Exclude<GoldOpportunity["applyUnit"], null> | null;
   region: string | null;
   /** 根拠の原文の引用（ページの本文にある一字一句）。必須 */
@@ -139,8 +141,27 @@ export function composeR1Cases(a: { pages: readonly { n: number; url: string; ht
       caseId,
       canary: `CANARY-${caseId.toUpperCase()}-${(a.at.replace(/\D/g, "") || "0").slice(0, 8)}-GOLD`,
       verified: { by: "human", at: ordered[0].verified.at, basis: `ページ単位の人の確認（${ordered.map((g) => `ページ${g.n}`).join("・")}）から組み立て` },
-      opportunities: ordered.map((g, k) => ({ oppId: `p${g.n}`, store: g.store, product: g.product, applyEnd: g.applyEnd, region: g.region, url: pageBy.get(g.n)!.url, applyUnit: g.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: k, evidence: g.evidence.map((e) => ({ where: `page:${k}`, quote: e.quote })) })),
+      opportunities: ordered.map((g, k) => ({ oppId: `p${g.n}`, store: g.store, product: g.product, applyEnd: g.applyEnd, applyEndTime: g.applyEndTime ?? null, region: g.region, url: pageBy.get(g.n)!.url, applyUnit: g.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: k, evidence: g.evidence.map((e) => ({ where: `page:${k}`, quote: e.quote })) })),
     });
   }
   return { cases, gold: golds };
+}
+
+/**
+ * 本文（テキスト）だけから作る候補（HTMLを保存していない実投稿のリンク先ページ用）。構造（受付枠など）は取り出せないため、その旨を attention に残す。機械抽出・未確認。
+ * 年が書かれていない締切は、年を補わない（year=null）。
+ */
+export function candidateFromText(p: { n: number; url: string; text: string; title?: string | null }): PageCandidate {
+  const text = p.text;
+  const title = p.title?.trim() || text.split("\n").map((l) => l.trim()).find((l) => /【[^】]{2,40}】/.test(l)) || null;
+  const store = title ? (/【([^】]{2,40})】/.exec(title)?.[1] ?? null) : null;
+  const product = title ? title.replace(/【[^】]*】/g, "").trim() || null : null;
+  const deadlines = deadlineContexts(text);
+  const em = /応募締切\s*[：:]\s*(?:(\d{4})\s*年\s*)?(\d{1,2})月\s*(\d{1,2})日[^\n。]{0,20}/.exec(text.normalize("NFKC"));
+  const ym = em && em[1] ? [em[0], em[1]] : null;
+  const attention: string[] = ["受付枠などのページ構造は保存していない（本文だけで確認する。複数の受付枠が無いか、公式ページで確認）"];
+  if (!store) attention.push("店舗名の候補が見つからない");
+  if (new Set(deadlines.map((d) => d.md)).size > 1) attention.push("締切らしい日付の候補が複数ある（どれが応募の締切か人が確認）");
+  if (deadlines.length === 0) attention.push("締切らしい日付が見つからない（ページに無い・画像の中・JS描画の可能性）");
+  return { n: p.n, url: p.url, chars: text.length, title, recognized: false, storeCandidate: store, productCandidate: product, deadlineCandidates: deadlines, applyEndGuess: em ? { md: `${Number(em[2])}/${Number(em[3])}`, quote: em[0].trim(), year: ym ? Number(ym[1]) : null } : null, slots: [], pageNotes: [], attention };
 }

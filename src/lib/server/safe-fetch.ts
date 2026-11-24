@@ -29,6 +29,13 @@ export interface SafeFetchOptions {
   noFollow?: boolean;
   /** テスト専用: ループバックのテストサーバーに接続するため検査を緩める。アプリ本体からは指定しない */
   testOnlyAllowLoopback?: boolean;
+  /**
+   * **実際のHTTPリクエスト（リダイレクトの各ホップ・robots.txt を含む）の直前**に呼ばれる。false を返すと、そのリクエストを送らずに中止する（総リクエスト数の上限を、付随リクエストまで含めて数えるため）。
+   * 例外は投げない。呼び出し側が数える（Phase 2: 実投稿の取得で、robots・リダイレクトの付随リクエストを数え漏らしていた）。
+   */
+  beforeRequest?: (url: URL) => boolean | void;
+  /** 応答を受け取った直後（本文のバイト数を数えるため） */
+  onResponse?: (info: { host: string; status: number; bytes: number }) => void;
 }
 
 export const USER_AGENT = "ToreCaApp/1.0 (personal-use lottery manager; contact: owner)";
@@ -268,8 +275,10 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
     let r: Hop;
+    if (options.beforeRequest?.(url) === false) return { ok: false, code: "blocked", message: "リクエストの上限のため中止しました" };
     try {
       r = await requestOnce(url, { timeoutMs, maxBytes, accept: accept.join(","), allowLoopback, readBody: true });
+      options.onResponse?.({ host: url.hostname, status: r.status, bytes: r.body.length });
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === "EBLOCKED") return { ok: false, code: "blocked", message: "このアドレスは取得できません" };
@@ -332,8 +341,10 @@ export async function safeFetchBytes(rawUrl: string, options: SafeFetchOptions &
   let url = first.url;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     let r: Hop;
+    if (options.beforeRequest?.(url) === false) return { ok: false, code: "blocked", message: "リクエストの上限のため中止しました" };
     try {
       r = await requestOnce(url, { timeoutMs, maxBytes, accept: options.accept.join(","), allowLoopback, readBody: true });
+      options.onResponse?.({ host: url.hostname, status: r.status, bytes: r.body.length });
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === "EBLOCKED") return { ok: false, code: "blocked", message: "このアドレスは取得できません" };

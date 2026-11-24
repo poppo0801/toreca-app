@@ -34,6 +34,7 @@ if (cmd === "mock") start({ PHASE2_CMP_MODE: "mock" });
 if (cmd === "export-cases") start({ PHASE2_CMP_MODE: "export-cases", ...(arg("from") ? { PHASE2_CMP_FROM: arg("from") } : {}) });
 if (cmd === "real-posts-scan") start({ PHASE2_CMP_MODE: "real-posts-scan" });
 if (cmd === "real-posts-expand") start({ PHASE2_CMP_MODE: "real-posts-expand", ...(flag("allow-network") ? { PHASE2_REAL_EXPAND: "allow" } : {}), ...(arg("max-requests") ? { PHASE2_REAL_EXPAND_MAX: arg("max-requests") } : {}) });
+if (cmd === "readiness") start({ PHASE2_CMP_MODE: "readiness", PHASE2_CMP_EXPERIMENTS: arg("experiments") ?? "links" });
 if (cmd === "real-validate") start({ PHASE2_CMP_MODE: "real-validate" });
 if (cmd === "r1-worksheet") start({ PHASE2_CMP_MODE: "r1-worksheet" });
 if (cmd === "r1-build") start({ PHASE2_CMP_MODE: "r1-build", ...(arg("cases") ? { PHASE2_CMP_R1_CASES: arg("cases") } : {}) });
