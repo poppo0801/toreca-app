@@ -205,7 +205,7 @@ export interface ResearchResult {
   investigation: { state: "ended"; reason: EndReason; turns: number };
   /** 登録判断の各ラウンド（最初の判断→限定的な再評価）の引用の分類。最終状態は registration（重複なし） */
   quoteAudit: { round: number; rows: QuoteAuditRow[] }[];
-  registration: { decision: JudgeOutput["decision"] | "none"; output: JudgeOutput | null; verified: boolean; held: { reasons: string[] } | null; proposals: FieldProposal[] };
+  registration: { /** AIの判断（自己申告。検証の結果で書き換えない） */ decision: JudgeOutput["decision"] | "none"; /** 最終の扱い: 検証を通らない本登録・除外は暫定（tentative）に下げる（根拠が無効な断定で自動登録を通さない）。AIの判断は decision に残る */ finalDecision: JudgeOutput["decision"] | "none"; output: JudgeOutput | null; verified: boolean; held: { reasons: string[] } | null; /** 任意項目の検証失敗（その項目だけ不採用。登録は止めない） */ warnings: string[]; proposals: FieldProposal[] };
   monitoring: { state: "active" | "ended"; why: string; reopenOn: ReopenTrigger[] };
   evidence: Evidence[];
   history: FetchRecord[];
@@ -226,6 +226,8 @@ export interface FieldProposal {
 
 // ------------------------------------------------------------------ 補助
 const sha = (s: string): string => createHash("sha256").update(s.normalize("NFKC").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
+import { describeQuoteIssue, diagnoseQuote } from "./quote-diagnosis";
+import { dateTokens } from "./image-evidence";
 const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
 export function seedEvidence(id: string, text: string, now: Date, url: string | null = null, notes: string[] = []): Evidence {
@@ -312,7 +314,30 @@ export function shownRanges(e: Pick<Evidence, "text" | "reads" | "hintSpans">): 
 }
 const shownChars = (r: readonly { from: number; to: number }[]): number => r.reduce((t, x) => t + (x.to - x.from), 0);
 
+/**
+ * AIへ見せる本文だけ、互換文字（康熙部首「⼊」・全角英数・互換漢字など）を通常の字にそろえる。**1文字→1文字の場合だけ**（位置・read の範囲がずれない）。
+ * 原文（保存・証拠）は変えない。検証層は NFKC で照合するため、AIが見たとおりに写した引用が検証と一致する（Stage A で、稀な部首文字を別の記号に写し間違えた引用があった）。
+ */
+export function foldCompat(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const n = ch.normalize("NFKC");
+    out += [...n].length === 1 && n.length === ch.length ? n : ch;
+  }
+  return out;
+}
+/** 位置の見出し「（19765字目〜）」はそのまま、本文部分だけ統一する */
+const foldWindow = (w: string): string => {
+  const m = /^(（[^）]*）)([\s\S]*)$/.exec(w);
+  return m ? m[1] + foldCompat(m[2]) : foldCompat(w);
+};
+function foldView(v: AgentView): AgentView {
+  return { ...v, excerpt: foldCompat(v.excerpt), ...(v.extraWindows ? { extraWindows: v.extraWindows.map(foldWindow) } : {}), ...(v.hintWindows ? { hintWindows: v.hintWindows.map(foldWindow) } : {}), ...(v.readSegments ? { readSegments: v.readSegments.map((r) => ({ ...r, text: foldCompat(r.text) })) } : {}) };
+}
 export function toAgentView(e: Evidence): AgentView {
+  return foldView(buildAgentView(e));
+}
+function buildAgentView(e: Evidence): AgentView {
   const n = e.text.length;
   const base = { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: [...(e.notes ?? []).map((x) => `【収集時の注記】${x}`), ...(e.notice ? [`【注意】${e.notice}`] : []), ...(e.textLoss?.length ? ["【注意】本文の取り出しで、構造として認識できた語が本文から欠けている（本文だけでは確認できない項目がある）"] : []), ...(e.structure ? structureToObservations(e.structure) : [])], chars: n };
   if (n <= FULL_VIEW_CHARS) return { ...base, excerpt: e.text, coverage: `全文${n}字をすべて提示している（全文確認済み）` };
@@ -377,7 +402,14 @@ export interface VerifyInput {
   registerRequiresUnit?: boolean;
 }
 /** 根拠の実在・不明値の扱い・人が確定した値の保護。問題の理由（AIへ返す文）を返す。結論は書き換えない */
-export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[] } {
+/** 本登録の可否を左右する項目。ここの検証失敗は本登録を止める。それ以外（任意項目）の失敗は、その項目の主張だけを採用せず不明として明示する（根拠のある別項目まで捨てない） */
+export const CRITICAL_FIELDS: ReadonlySet<string> = new Set(["store", "product", "deadline", "apply_unit"]);
+export const isBlockingIssue = (issue: string): boolean => {
+  const k = issue.indexOf(":");
+  return k < 0 || CRITICAL_FIELDS.has(issue.slice(k + 1));
+};
+
+export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[]; /** 本登録を止める指摘（重要項目・全体） */ blocking: string[]; /** 任意項目の指摘（その項目だけ不採用。登録は止めない） */ nonBlocking: string[]; /** AIへ返す訂正用の指摘文（原因・原文の近い箇所つき） */ details: string[] } {
   const issues: string[] = [];
   const proposals: FieldProposal[] = [];
   const byId = new Map(i.evidence.map((e) => [e.id, e]));
@@ -394,6 +426,12 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       else if (ev.textLoss?.length) issues.push(`page_text_loss:${name}`); // 本文の取り出しで構造上の語が欠けたページを根拠にしない（保留。基準は緩めない）
       else if (ev.scope?.verdict === "mismatch") issues.push(`scope_mismatch:${name}`); // 別の店舗・商品・系列・開催回のページを根拠にしない
       else if (ev.scope?.verdict === "unknown" && ev.scope.origin.startsWith("parent")) issues.push(`shared_link_scope_unverified:${name}`); // 親投稿共通のリンクを、対応が確認されないまま根拠にしない
+    }
+    // 値と引用の意味の対応（締切）: 引用が実在しても、値の日付が引用に書かれていなければ、別の箇所の日付を断定している（根拠にならない）
+    if (f.basis === "observed" && name === "deadline" && f.value && f.quote && !issues.some((x) => x.endsWith(":" + name))) {
+      const vd = dateTokens(f.value);
+      const qd = dateTokens(f.quote);
+      if (vd.length > 0 && !vd.some((d) => qd.includes(d))) issues.push("value_not_in_quote:" + name);
     }
     const prot = i.protectedFields[name];
     if (prot !== undefined && f.value !== null && norm(prot) !== norm(f.value)) {
@@ -413,7 +451,27 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
   // 取得したページ（応募先の公開ページ）の証拠が無いまま「除外」とするのは、取得できなかっただけの可能性があり、応募の機会を失わせる。人の確認に回す（投稿の原文だけで除外が妥当な場合も、人が確認する側に倒す）。AIの結論は書き換えない
   if (i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page")) issues.push("exclude_without_page_evidence");
-  return { issues, proposals };
+  // 除外は、応募できない・対象外であることを示す根拠（exclude_reason・引用つき・検証済み）が要る。店舗や商品を観察できただけでは、除外の根拠にならない（応募の機会を失わせるため）
+  if (i.output.decision === "exclude") {
+    const r = i.output.fields["exclude_reason"];
+    const ev = r?.evidenceId ? byId.get(r.evidenceId) : undefined;
+    if (!r || r.basis !== "observed" || !r.value || !ev || !r.quote || !norm(ev.text).includes(norm(r.quote))) issues.push("exclude_reason_missing");
+  }
+  // 重要項目の失敗は本登録を止める。任意項目の失敗は、その項目の提案だけを採用しない
+  const blocking = issues.filter(isBlockingIssue);
+  const nonBlocking = issues.filter((x) => !isBlockingIssue(x));
+  const droppedFields = new Set(nonBlocking.map((x) => x.slice(x.indexOf(":") + 1)));
+  const kept = proposals.filter((p) => !droppedFields.has(p.field));
+  // 訂正用の指摘文: 引用が見つからないときは、原因と原文の実在する近い箇所を添える（引用の捏造を誘わず、写せないなら不明にさせる）
+  const details = issues.map((x) => {
+    if (!x.startsWith("quote_not_found:")) return x;
+    const name = x.slice("quote_not_found:".length);
+    const f = i.output.fields[name];
+    const ev = f?.evidenceId ? byId.get(f.evidenceId) : undefined;
+    if (!f || !ev) return x;
+    return describeQuoteIssue(x, diagnoseQuote(f.quote, ev.text));
+  });
+  return { issues, proposals: kept, blocking, nonBlocking, details };
 }
 
 // ------------------------------------------------------------------ 本体
@@ -583,6 +641,7 @@ export async function runResearch(args: {
   let held: { reasons: string[] } | null = null;
   let proposals: FieldProposal[] = [];
   let issues: string[] | undefined;
+  let warnings: string[] = [];
   const quoteAudit: ResearchResult["quoteAudit"] = [];
   for (let rev = 0; rev <= L.maxRevisions; rev++) {
     const js = args.budget.start("registration_judge", L.judgeReserveJpy);
@@ -598,14 +657,16 @@ export async function runResearch(args: {
     quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
     const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit });
     proposals = v.proposals;
-    if (v.issues.length === 0) { verified = true; held = null; break; }
+    warnings = v.nonBlocking;
+    if (v.blocking.length === 0) { verified = true; held = null; if (v.nonBlocking.length) trace.push({ turn, kind: "verify", detail: `non_blocking:${v.nonBlocking.join(",")}` }); break; }
     trace.push({ turn, kind: "verify", detail: v.issues.join(",") });
-    issues = v.issues;
-    held = { reasons: v.issues }; // 限定的な再評価でも解消しなければ、実行不可として理由を残す（別の結論に置き換えない）
+    issues = v.details; // 原因と原文の近い箇所つきで、AIに訂正させる（回数は maxRevisions の範囲。無限に繰り返さない）
+    held = { reasons: v.blocking }; // 限定的な再評価でも解消しなければ、実行不可として理由を残す（AIの判断は書き換えず、最終の扱いは finalDecision で保留に下げる）
   }
   const decision = output ? output.decision : "none";
+  const finalDecision: JudgeOutput["decision"] | "none" = !output ? "none" : verified ? output.decision : "tentative";
   const monitoring: ResearchResult["monitoring"] = output ? { state: output.monitor.continue ? "active" : "ended", why: output.monitor.why, reopenOn: output.monitor.continue ? ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] : ["user_correction"] } : { state: "active", why: "登録判断が得られなかったため、監視は継続", reopenOn: ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] };
-  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog, searchOffered };
+  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, finalDecision, output, verified, held, warnings, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog, searchOffered };
 }
 
 // ------------------------------------------------------------------ 再開（調査終了後の必要な部分だけの再評価）

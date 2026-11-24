@@ -310,9 +310,11 @@ describe("根拠のない除外は検証の指摘にする（P2: 取得できな
     const { verifyRegistration } = await import("@/lib/judgment/xsource/research-loop");
     const ev = [{ id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "【A店】拡張パック 抽選 11/30まで", structure: null, independent: true }] as never;
     const out = (fields: Record<string, unknown>, decision = "exclude") => ({ decision, fields, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
-    expect(verifyRegistration({ output: out({ product: { value: null, basis: "unknown" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_without_evidence"]);
-    expect(verifyRegistration({ output: out({}), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_without_evidence"]);
-    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
+    expect(verifyRegistration({ output: out({ product: { value: null, basis: "unknown" } }), evidence: ev, protectedFields: {} }).issues).toContain("exclude_without_evidence");
+    expect(verifyRegistration({ output: out({}), evidence: ev, protectedFields: {} }).issues).toContain("exclude_without_evidence");
+    // 除外には、応募できない・対象外を示す根拠（exclude_reason・引用つき）が要る。店舗を観察できただけでは除外できない（Stage A: 応募できる機会を除外した例）
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_missing"]);
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
     expect(verifyRegistration({ output: out({}, "tentative"), evidence: ev, protectedFields: {} }).issues).toEqual([]); // 暫定は対象外
   });
 });

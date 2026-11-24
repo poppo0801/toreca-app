@@ -48,6 +48,9 @@ eval/real-data/
 eval/phase2-compare/*.local.json
 eval/phase2-compare/*.local.jsonl
 eval/phase2-compare/.compare.lock
+eval/phase2-compare/run-exports/
+eval/phase2-compare/*-backup/
+eval/phase2-compare/*-backups/
 eval/phase2-compare/*.local.md
 e2e/.gold-review
 e2e/.gold-fixture

@@ -8,7 +8,7 @@
  */
 import { buildEvidence } from "@/lib/collector/evidence";
 import { armsOf, assertNoGoldLeak, classifyReadStage, datasetClaim, type DatasetKind, compareArms, scoreCase, summarizeReadAudit, type ReadAuditSummary, type ReadStage, type Arm, type CaseScore, type CompareCase, type Comparison, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
-import type { ProposalRecord } from "@/lib/judgment/xsource/proposal";
+import { effectiveDecision, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { rememberFullPages } from "@/lib/server/collector/collected-docs";
 import type { Db } from "@/lib/server/lottery-service";
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
@@ -66,8 +66,8 @@ export async function prepareArmCandidates(a: { db: Db; householdId: string; exp
 
 /** 登録案の行（DB）→ 採点用の記録 */
 export async function readProposalRecords(db: Db, candidateId: string): Promise<ProposalRecord[]> {
-  const { data } = await (db as unknown as { from: (n: string) => any }).from("registration_proposals").select("proposal_key,source_urls,decision,apply_unit,cost_jpy,turns,fields").eq("candidate_id", candidateId).is("superseded_at", null).order("item_no");
-  return ((data ?? []) as Record<string, any>[]).map((r) => ({ proposalKey: r.proposal_key, sourceUrls: r.source_urls ?? [], decision: r.decision, applyUnit: r.apply_unit, costJpy: r.cost_jpy, turns: r.turns ?? 0, fields: r.fields ?? {} }) as unknown as ProposalRecord);
+  const { data } = await (db as unknown as { from: (n: string) => any }).from("registration_proposals").select("proposal_key,source_urls,decision,verified,held_reasons,apply_unit,cost_jpy,turns,fields").eq("candidate_id", candidateId).is("superseded_at", null).order("item_no");
+  return ((data ?? []) as Record<string, any>[]).map((r) => ({ proposalKey: r.proposal_key, sourceUrls: r.source_urls ?? [], decision: effectiveDecision({ decision: r.decision, verified: r.verified !== false }), aiDecision: r.decision, verified: r.verified !== false, heldReasons: r.held_reasons ?? [], applyUnit: r.apply_unit, costJpy: r.cost_jpy, turns: r.turns ?? 0, fields: r.fields ?? {} }) as unknown as ProposalRecord);
 }
 
 export interface ExperimentOutcome {

@@ -101,7 +101,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 P2 原因: 検索の配線・未確定
     const ra = await run(a, { judgeDecisions: ["register", "register"] }, false);
     expect(ra.calls.filter((x) => x.kind === "submit_registration_judgment")).toHaveLength(2); // 指摘を受けて、限定的に再評価が1回
     const pa = (await rows(a.id))[0];
-    expect(pa).toMatchObject({ decision: "register", verified: false });
+    expect(pa).toMatchObject({ decision: "tentative", verified: false }); // AIはregisterとしたが、検証を通らないため最終の扱いは暫定（根拠が無効・欠落した断定で本登録を通さない）
     expect(pa.held_reasons).toContain("register_unit_unresolved");
     // register → 再評価で暫定に直す（AIが自分で直せる）
     const b = await withUrl();
@@ -116,7 +116,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 P2 原因: 検索の配線・未確定
     const d = await addCandidate(NOURL);
     await run(d, { judgeDecisions: ["exclude", "exclude"] }, false);
     const pd = (await rows(d.id))[0];
-    expect(pd).toMatchObject({ decision: "exclude", verified: false });
+    expect(pd).toMatchObject({ decision: "tentative", verified: false }); // 根拠のない除外も、最終の扱いは暫定（応募の機会を失わせない）
     expect(pd.held_reasons).toContain("exclude_without_evidence");
   });
 
