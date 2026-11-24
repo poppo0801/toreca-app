@@ -38,8 +38,9 @@ let depOk = true;
 const depDetail = [];
 for (const f of pending) {
   const sql = readFileSync(`supabase/migrations/${f}`, "utf8").replace(/--.*$/gm, "");
-  for (const m of sql.matchAll(/references\s+public\.(\w+)/gi)) if (!created.has(m[1])) { depOk = false; depDetail.push(`${f.slice(0, 14)}→${m[1]}`); }
-  for (const m of sql.matchAll(/create\s+table\s+public\.(\w+)/gi)) created.add(m[1]);
+  const own = new Set([...sql.matchAll(/create\s+table\s+public\.(\w+)/gi)].map((m) => m[1])); // 同じ移行の中で先に作る表も参照先として許す
+  for (const m of sql.matchAll(/references\s+public\.(\w+)/gi)) if (!created.has(m[1]) && !own.has(m[1])) { depOk = false; depDetail.push(`${f.slice(0, 14)}→${m[1]}`); }
+  for (const t of own) created.add(t);
 }
 check("依存する表が全て存在する（外部キーの参照先）", depOk, depDetail.join(","));
 
