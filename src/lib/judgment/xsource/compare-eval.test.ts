@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Phase 2: 同条件比較試験の採点・比較・計画（全て架空のデータ・モックの数値。精度の主張ではなく、仕組みの検証）。 */
 import { describe, expect, it } from "vitest";
-import { aggregate, armsOf, assertNoGoldLeak, claimOf, compareArms, EXPERIMENTS, minImprovementOf, OLD_EXCERPT_CHARS, planComparison, requiredCasesFor, requiredGoldCases, scoreCase, validateGold, type CompareCase, type GoldCase, type PlanInput } from "./compare-eval";
+import { aggregate, armsOf, signTestP, assertNoGoldLeak, claimOf, compareArms, EXPERIMENTS, minImprovementOf, OLD_EXCERPT_CHARS, planComparison, requiredCasesFor, requiredGoldCases, scoreCase, validateGold, type CompareCase, type GoldCase, type PlanInput } from "./compare-eval";
 import type { ProposalRecord } from "./proposal";
 
 const gold = (n: number, over: Partial<GoldCase> = {}): GoldCase => ({
@@ -150,6 +150,23 @@ describe("比較と合否（重大な悪化は相殺しない・goldが足りな
     expect(c.verdict).toBe("inconclusive");
     expect(c.reasons.join()).toContain("goldが足りない");
     expect(c.paired.better).toBe(6);
+  });
+  it("案件ごとの符号検定: 勝敗が8件以上で偏りが明らか（p<0.05）なら、gold が必要件数に満たなくても小標本の合格。件数が少ない・偏りが弱い・悪化があれば合格にしない", () => {
+    expect(signTestP(0, 0)).toBeNull();
+    expect(signTestP(6, 0)).toBeCloseTo(0.03125);
+    expect(signTestP(5, 1)).toBeCloseTo(0.21875);
+    expect(signTestP(10, 0)).toBeLessThan(0.002);
+    const c = compareArms("links", caseScores(10, firstOnly), caseScores(10, full));
+    expect(c.verdict).toBe("pass");
+    expect(c.cases).toBeLessThan(c.required);
+    expect(c.reasons.join()).toContain("小標本の合格");
+    expect(c.signTestP).toBeLessThan(0.05);
+    // 7件（勝負が8件未満）は、全勝でも inconclusive
+    expect(compareArms("links", caseScores(7, firstOnly), caseScores(7, full)).verdict).toBe("inconclusive");
+    // 偏りが弱い（改善5・悪化4・同じ多数）は合格にしない
+    const mixed = (i: number) => (i < 5 ? full() : i < 9 ? [] : firstOnly());
+    const base = (i: number) => (i < 5 ? firstOnly() : i < 9 ? firstOnly() : firstOnly());
+    expect(compareArms("links", caseScores(12, base), caseScores(12, mixed)).verdict).not.toBe("pass");
   });
   it("gold が十分で、主指標が改善し重大な悪化が無ければ pass", () => {
     const c = compareArms("links", caseScores(req, firstOnly), caseScores(req, full), { required: req });

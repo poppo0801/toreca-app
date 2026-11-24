@@ -314,6 +314,8 @@ export interface MetricDelta {
   improved: boolean;
 }
 export interface Comparison {
+  /** 案件ごとの勝ち負けの符号検定（両側・正確確率）。差が無い案件は除く。勝ち負けの合計が0なら null */
+  signTestP: number | null;
   experiment: ExperimentId;
   verdict: Verdict;
   reasons: string[];
@@ -344,6 +346,22 @@ export function requiredCasesFor(e: ExperimentId, avgOppsPerCase = 3): number {
   const opps = requiredGoldCases({ baselineRate: 0.6, minDetectable: minImprovementOf(e) });
   return Math.ceil((opps * CRITERIA.designEffect) / Math.max(1, avgOppsPerCase));
 }
+
+/** 符号検定（両側）の正確確率。案件ごとの対応のある比較で、改善した案件数と悪化した案件数の偏りが偶然か */
+export function signTestP(better: number, worse: number): number | null {
+  const n = better + worse;
+  if (n === 0) return null;
+  const k = Math.min(better, worse);
+  let c = 1; // C(n, 0)
+  let sum = 0;
+  for (let i = 0; i <= k; i++) {
+    sum += c;
+    c = (c * (n - i)) / (i + 1);
+  }
+  return Math.min(1, (2 * sum) / 2 ** n);
+}
+/** gold が必要件数に満たなくても、案件ごとの符号検定で偏りが明らかなら合格にできる最小の勝ち負けの件数（少数の差の運を避ける） */
+export const MIN_SIGN_TEST_CASES = 8;
 
 export function compareArms(experiment: ExperimentId, base: readonly CaseScore[], treat: readonly CaseScore[], opts: { required?: number } = {}): Comparison {
   const E = EXPERIMENTS[experiment];
@@ -380,22 +398,24 @@ export function compareArms(experiment: ExperimentId, base: readonly CaseScore[]
   const cost = deltas.find((d) => d.metric === "costPerOppJpy")!;
   if (cost.baseline && cost.treatment && cost.treatment > cost.baseline * CRITERIA.costRatioWarn) reasons.push(`警告: 費用が baseline の${(cost.treatment / cost.baseline).toFixed(1)}倍（機会あたり）`);
   const n = Math.min(base.length, treat.length);
+  const signP = signTestP(better, worse);
+  const primaryOk = primary.improvement !== null && primary.improvement >= minImprovementOf(experiment) && worse < better;
   let verdict: Verdict;
   if (regressions.length > 0) verdict = "fail";
-  else if (n < required) {
+  else if (n < required && !(signP !== null && signP < 0.05 && better + worse >= MIN_SIGN_TEST_CASES && primaryOk)) {
     verdict = "inconclusive";
-    reasons.push(`goldが足りない（${n}件 < 必要${required}件）。重大な悪化は無いが、改善の有無は言えない`);
+    reasons.push(`goldが足りない（${n}件 < 必要${required}件）。重大な悪化は無いが、改善の有無は言えない${signP !== null ? `（案件ごとの符号検定 p=${signP.toFixed(3)}・勝${better}負${worse}。合格には勝負${MIN_SIGN_TEST_CASES}件以上かつ p<0.05 が要る）` : ""}`);
   } else if (primary.improvement === null) {
     verdict = "inconclusive";
     reasons.push(`主指標 ${E.primary} を採点できない（goldに該当項目が無い）`);
   } else if (primary.improvement >= minImprovementOf(experiment) && worse <= better) {
     verdict = "pass";
-    reasons.push(`主指標 ${E.primary} が ${(primary.improvement * 100).toFixed(1)}ポイント改善（案件ごと: 改善${better}・悪化${worse}・同じ${same}）`);
+    reasons.push(`主指標 ${E.primary} が ${(primary.improvement * 100).toFixed(1)}ポイント改善（案件ごと: 改善${better}・悪化${worse}・同じ${same}${signP !== null ? `・符号検定 p=${signP.toFixed(3)}` : ""}）${n < required ? `。gold が必要件数（${required}）未満のため、案件ごとの符号検定に基づく小標本の合格（効果の大きさの推定は不確か）` : ""}`);
   } else {
     verdict = "fail";
     reasons.push(`主指標 ${E.primary} の改善が基準（+${(minImprovementOf(experiment) * 100).toFixed(1)}ポイント）に届かない、または悪化した案件が多い（改善${better}・悪化${worse}）`);
   }
-  return { experiment, verdict, reasons, deltas, paired: { better, worse, same }, cases: n, required };
+  return { experiment, verdict, reasons, deltas, paired: { better, worse, same }, signTestP: signP, cases: n, required };
 }
 
 /**

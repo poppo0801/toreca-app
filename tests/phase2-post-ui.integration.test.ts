@@ -120,7 +120,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 2（UI改修後）: 全経路", () => {
     expect(r.ok && r.storage.images).toMatchObject({ images: 2, reused: 1, analyzed: 1 });
     expect(calls.map((x) => x.imageIndex)).toEqual([2]); // 収集時に読み取り済みの画像1は再解析しない
     const all = seen.join("\n");
-    expect(all).toContain("画像2枚目・応募期間");
+    expect(all).toMatch(/画像2枚目\(IMG2-[0-9a-f]{6,8}\)・応募期間/);
     expect(all).toContain("矛盾・未確定"); // リンク先の本文の日付（11月30日）と画像の12/20が食い違う
     expect(all).toContain("どちらも確認済みとしない");
     const obs = (await admin.from("evidence_image_observations").select("*").eq("candidate_id", c.id)).data ?? [];
