@@ -105,6 +105,9 @@ export async function loadBestDocument(db: Db, householdId: string, candidateId:
 }
 
 // ------------------------------------------------------------------ 取得網羅性の計測（原文・URLを含まない）
+/** 文書の識別子（正規化したURLのハッシュ先頭16桁）。計測にURLそのものを残さない */
+export const urlHashOf = (url: string): string => createHash("sha256").update(canonUrl(url).key).digest("hex").slice(0, 16);
+
 export interface CoverageStat {
   proposalKey: string | null;
   host: string;
@@ -115,6 +118,10 @@ export interface CoverageStat {
   reads: number;
   readChars: number;
   firstReadAt: number | null;
+  /** 文書の識別（URLのハッシュ）と、AIの入力に出ていた区間・readした区間（字位置。最大各40区間） */
+  urlHash?: string | null;
+  shownRanges?: number[][];
+  readRanges?: number[][];
   fetchOutcome: string;
   endReason: string;
   decision: "register" | "tentative" | "exclude" | "none";
@@ -133,7 +140,7 @@ export function coverageStatsOf(a: { proposalKey: string | null; result: Researc
   return pages.map((e) => {
     const host = (e.url ? canonUrl(e.url).host : "unknown").slice(0, 120);
     const reads = e.reads ?? [];
-    return { ...common, host, sourceChars: e.text.length, truncated: !!e.notice || (a.collectorLimit !== undefined && e.text.length >= a.collectorLimit), viewMode: e.text.length > FULL_VIEW_CHARS ? "indexed" : "full", shownChars: shownRanges(e).reduce((s, x) => s + (x.to - x.from), 0), reads: reads.length, readChars: reads.reduce((s, x) => s + (x.to - x.from), 0), firstReadAt: reads.length ? Math.min(...reads.map((x) => x.from)) : null, fetchOutcome: outcome(host).slice(0, 30) };
+    return { ...common, host, sourceChars: e.text.length, truncated: !!e.notice || (a.collectorLimit !== undefined && e.text.length >= a.collectorLimit), viewMode: e.text.length > FULL_VIEW_CHARS ? "indexed" : "full", shownChars: shownRanges(e).reduce((s, x) => s + (x.to - x.from), 0), reads: reads.length, readChars: reads.reduce((s, x) => s + (x.to - x.from), 0), firstReadAt: reads.length ? Math.min(...reads.map((x) => x.from)) : null, urlHash: e.url ? urlHashOf(e.url) : null, shownRanges: shownRanges(e).slice(0, 40).map((x) => [x.from, x.to]), readRanges: reads.slice(0, 40).map((x) => [x.from, x.to]), fetchOutcome: outcome(host).slice(0, 30) };
   });
 }
 
@@ -141,7 +148,7 @@ export async function saveCoverageStats(db: Db, householdId: string, stats: Cove
   const out = { saved: 0, failed: 0 };
   for (const s of stats) {
     try {
-      const r = (await t(db, "evidence_coverage_stats").insert({ household_id: householdId, proposal_key: s.proposalKey, host: s.host, source_chars: s.sourceChars, truncated: s.truncated, view_mode: s.viewMode, shown_chars: s.shownChars, reads: s.reads, read_chars: s.readChars, first_read_at: s.firstReadAt, fetch_outcome: s.fetchOutcome, end_reason: s.endReason, decision: s.decision, unresolved: s.unresolved, cost_jpy: s.costJpy, mode: s.mode })) as { error: unknown };
+      const r = (await t(db, "evidence_coverage_stats").insert({ household_id: householdId, proposal_key: s.proposalKey, host: s.host, source_chars: s.sourceChars, truncated: s.truncated, view_mode: s.viewMode, shown_chars: s.shownChars, reads: s.reads, read_chars: s.readChars, first_read_at: s.firstReadAt, url_hash: s.urlHash ?? null, shown_ranges: s.shownRanges ?? [], read_ranges: s.readRanges ?? [], fetch_outcome: s.fetchOutcome, end_reason: s.endReason, decision: s.decision, unresolved: s.unresolved, cost_jpy: s.costJpy, mode: s.mode })) as { error: unknown };
       if (r.error) out.failed++;
       else out.saved++;
     } catch {

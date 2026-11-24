@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Phase 2: 同条件比較試験の採点・比較・計画（全て架空のデータ・モックの数値。精度の主張ではなく、仕組みの検証）。 */
 import { describe, expect, it } from "vitest";
-import { aggregate, armsOf, signTestP, assertNoGoldLeak, claimOf, compareArms, EXPERIMENTS, minImprovementOf, OLD_EXCERPT_CHARS, planComparison, requiredCasesFor, requiredGoldCases, scoreCase, validateGold, type CompareCase, type GoldCase, type PlanInput } from "./compare-eval";
+import { aggregate, armsOf, datasetClaim, validateRealPostCases, classifyReadStage, summarizeReadAudit, signTestP, assertNoGoldLeak, claimOf, compareArms, EXPERIMENTS, minImprovementOf, OLD_EXCERPT_CHARS, planComparison, requiredCasesFor, requiredGoldCases, scoreCase, validateGold, type CompareCase, type GoldCase, type PlanInput } from "./compare-eval";
 import type { ProposalRecord } from "./proposal";
 
 const gold = (n: number, over: Partial<GoldCase> = {}): GoldCase => ({
@@ -210,5 +210,45 @@ describe("実行前の計画（dry-run・無課金）", () => {
     const p = planComparison({ ...input, cases: 200, caps: { ...input.caps, totalJpy: 20 } });
     expect(p.withinCap).toBe(false);
     expect(p.warnings.join()).toContain("超える");
+  });
+});
+
+describe("読み飛ばしの切り分け（収集→保存→AI入力→読み取り→判断）", () => {
+  const doc = "冒頭の案内。".repeat(600) + "お一人様1回まで。店頭受取のみ。";
+  const at = doc.indexOf("お一人様1回まで");
+  const q = "お一人様1回まで";
+  it("各段階を区別する: 未収集／保存に無い／AI入力に無い／入力にあるが読まれていない／読んだが誤り／読んで正しい", () => {
+    const stat = (shown: number[][], reads: number[][] = []) => ({ shownRanges: shown, readRanges: reads });
+    expect(classifyReadStage({ quote: q, collected: false, storedText: doc, stat: null, fieldsCorrect: null }).stage).toBe("not_collected");
+    expect(classifyReadStage({ quote: q, collected: true, storedText: null, stat: null, fieldsCorrect: null }).stage).toBe("not_stored");
+    expect(classifyReadStage({ quote: q, collected: true, storedText: doc.slice(0, 200), stat: null, fieldsCorrect: null }).stage).toBe("not_stored"); // 切り詰めで引用が保存に無い
+    expect(classifyReadStage({ quote: q, collected: true, storedText: doc, stat: null, fieldsCorrect: null })).toMatchObject({ stage: "not_in_ai_input", position: at });
+    expect(classifyReadStage({ quote: q, collected: true, storedText: doc, stat: stat([[0, 2500]]), fieldsCorrect: true }).stage).toBe("in_input_unread");
+    expect(classifyReadStage({ quote: q, collected: true, storedText: doc, stat: stat([[0, 2500]], [[at - 10, at + 100]]), fieldsCorrect: true }).stage).toBe("seen_ok");
+    expect(classifyReadStage({ quote: q, collected: true, storedText: doc, stat: stat([[at, at + 50]]), fieldsCorrect: false }).stage).toBe("seen_wrong");
+  });
+  it("集計: 入力に届いたもののうち読み飛ばした率を出す（届かなかったものは分母に入れない）", () => {
+    const s = summarizeReadAudit([{ stage: "not_collected" }, { stage: "in_input_unread" }, { stage: "seen_ok" }, { stage: "seen_wrong" }, { stage: "seen_ok" }]);
+    expect(s.total).toBe(5);
+    expect(s.byStage.in_input_unread).toBe(1);
+    expect(s.unreadRate).toBeCloseTo(0.25);
+    expect(summarizeReadAudit([]).unreadRate).toBeNull();
+  });
+});
+
+describe("データセットの区別（合成と実投稿を混ぜない）", () => {
+  const real = (o: Record<string, unknown> = {}) => ({ caseId: "rp01", postText: "p", links: [], linkMap: [{ short: "https://t.co/a", url: "https://a.example.invalid/1" }, { short: "https://t.co/b", url: "https://b.example.invalid/2" }], pages: [{ url: "https://a.example.invalid/1", text: "A" }, { url: "https://b.example.invalid/2", text: "B" }], imageRefs: [], imageReadings: [], provenance: { postUrl: "https://x.com/shop/status/1234567890123", capturedAt: "2026-11-20T00:00:00Z", source: "saved_public" as const, expandedLinks: 2 }, ...o });
+  it("実投稿は出所（実在の投稿URL・取得日時・取得元）・複数リンク・展開済みの宛先を必須とし、合成案件のIDは受け付けない", () => {
+    expect(validateRealPostCases([real()]).ok).toBe(true);
+    expect(validateRealPostCases([real({ provenance: undefined })]).ok).toBe(false);
+    expect(validateRealPostCases([real({ provenance: { postUrl: "https://example.com/x", capturedAt: "x", source: "paid_api", expandedLinks: 0 } })]).errors.length).toBeGreaterThanOrEqual(3);
+    expect(validateRealPostCases([real({ linkMap: [], pages: [] })]).errors.join()).toContain("複数リンク");
+    expect(validateRealPostCases([real({ caseId: "r1c01" })]).errors.join()).toContain("合成案件");
+  });
+  it("合成データセットは、実AIでも精度として主張しない（構造の検証のみ）。実投稿は実AIの結果だけが精度の根拠になりうる。モックは常に仕組みの確認", () => {
+    expect(datasetClaim("synthetic_lp", ["real"])).toBe("structure_check_only");
+    expect(datasetClaim("real_post", ["real"])).toBe("accuracy");
+    expect(datasetClaim("real_post", ["mock"])).toBe("pipeline_check_only");
+    expect(datasetClaim("synthetic_lp", ["mock"])).toBe("pipeline_check_only");
   });
 });

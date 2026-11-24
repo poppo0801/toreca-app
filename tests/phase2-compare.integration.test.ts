@@ -69,6 +69,10 @@ describe.skipIf(!dbTestsEnabled)("Phase 2: 同条件比較試験の基盤（モ�
     expect(r.comparison.deltas.filter((d) => d.critical).every((d) => !d.regressed)).toBe(true);
     // 各登録案は自分の店舗のページだけを根拠にする（混入なし）
     expect(r.scores.treatment.every((s) => s.crossContamination === 0 && s.invalidQuotes === 0)).toBe(true);
+    // 読み飛ばしの切り分け: 旧方式は2件目以降のページを収集していない／新方式は全て収集・保存・AI入力に届き、短いページは全文が提示範囲に入る
+    expect(r.readAudit.baseline.byStage.not_collected).toBe(4); // 2案件×（2件目・3件目）
+    expect(r.readAudit.treatment.byStage.not_collected).toBe(0);
+    expect(r.readAudit.treatment.byStage.seen_ok + r.readAudit.treatment.byStage.seen_wrong).toBe(6);
     expect(r.claim).toBe("pipeline_check_only"); // モックの結果は精度ではない
     expect(r.comparison.verdict).toBe("inconclusive"); // gold が2件しかない
     expect(r.goldLeak).toEqual({ ok: true, leaks: [] });
