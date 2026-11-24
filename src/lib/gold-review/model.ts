@@ -7,7 +7,7 @@
  *  - 確認したページの版（HTMLのハッシュ）を残す。あとでページが変わったら「要再確認」に戻る。履歴（誰が・いつ・何を）を残す。
  *  - 1ページ=1応募機会に合わないページ（複数の受付枠・商品・店舗）は、理由つきで「除外」にして残す（別の試験＝複数機会の試験の対象にできる）。
  */
-import { timeTokens } from "@/lib/judgment/xsource/time-tokens";
+import { deadlineTimeTokens } from "@/lib/judgment/xsource/time-tokens";
 
 export type ReviewStatus = "unreviewed" | "confirmed" | "excluded" | "needs_recheck";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product";
@@ -114,7 +114,7 @@ export function validateConfirm(a: { draft: Draft; checks: FieldChecks; basis: s
   if (!d.product.trim()) p.push({ field: "product", message: "商品を入力してください" });
   if (d.applyEnd !== null && !/^\d{4}-\d{2}-\d{2}$/.test(d.applyEnd)) p.push({ field: "applyEnd", message: "応募締切は YYYY-MM-DD で入力してください" });
   if (d.applyEndTime !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(d.applyEndTime)) p.push({ field: "applyEndTime", message: "締切の時刻は HH:MM（24時間表記）で入力してください" });
-  if (d.applyEndTime !== null && !d.quotes.some((q) => timeTokens(q).includes(d.applyEndTime!) || (d.applyEndTime === "00:00" && timeTokens(q).includes("24:00")))) p.push({ field: "applyEndTime", message: "時刻は、根拠の引用（ページ本文）に書かれている場合だけ入力できます。引用に時刻を含めてください" });
+  if (d.applyEndTime !== null && !d.quotes.some((q) => deadlineTimeTokens(q).includes(d.applyEndTime!) || (d.applyEndTime === "00:00" && deadlineTimeTokens(q).includes("24:00")))) p.push({ field: "applyEndTime", message: "時刻は、根拠の引用に「応募締切」の時刻として書かれている場合だけ入力できます（受付時間・当選発表の時刻は不可）。締切の時刻を含む引用にしてください" });
   if (d.applyEndTime !== null && d.applyEnd === null) p.push({ field: "applyEndTime", message: "時刻は締切の日付がある場合だけ入力できます" });
   if (d.applyEnd === null && !d.applyEndUnknown) p.push({ field: "applyEnd", message: "応募締切を入力するか、「ページに締切が無い／確認できない」を明示してください" });
   if (d.applyUnit === null && !d.applyUnitUnknown) p.push({ field: "applyUnit", message: "応募単位を選ぶか、「確認できない」を明示してください" });

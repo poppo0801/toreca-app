@@ -40,7 +40,7 @@ if (cmd === "r1-worksheet") start({ PHASE2_CMP_MODE: "r1-worksheet" });
 if (cmd === "r1-build") start({ PHASE2_CMP_MODE: "r1-build", ...(arg("cases") ? { PHASE2_CMP_R1_CASES: arg("cases") } : {}) });
 if (cmd === "gold-template") start({ PHASE2_CMP_MODE: "gold-template" });
 if (cmd !== "run") {
-  console.error('使い方: node scripts/compare-phase2.mjs plan | mock | export-cases | gold-template | run --approved-total-jpy=… --approved-per-case-jpy=… --confirm="APPROVE C <総額>JPY" [--experiments=…] [--images]');
+  console.error('使い方: node scripts/compare-phase2.mjs plan | mock | export-cases | gold-template | run --approved-total-jpy=… --approved-per-case-jpy=… --program-cap-jpy=… --confirm="APPROVE C <総額>JPY" [--experiments=…] [--case-from=N --case-limit=N] [--rerun-stage] [--images]');
   process.exit(2);
 }
 const total = Number(arg("approved-total-jpy"));
@@ -52,6 +52,11 @@ if (!(total > 0) || !(per > 0)) {
 }
 if (confirm !== `APPROVE C ${total}JPY`) {
   console.error(`確認文が一致しません（期待: "APPROVE C ${total}JPY"）。承認された金額で、実行のたびに指定してください`);
+  process.exit(2);
+}
+const programCap = Number(arg("program-cap-jpy"));
+if (!(programCap > 0) || programCap < total) {
+  console.error("通算上限（--program-cap-jpy=<円>）を、利用者が明示してください（既定値はありません）。関門の総額は1回の実行ごとにリセットされるため、段階・再実行をまたぐ通算の上限は、この台帳（spend-ledger）が検査します。この実行の承認総額以上の値が必要です");
   process.exit(2);
 }
 const MIN_PER_CASE = 1.5; // 調査＋判断の予約（preflightRun が最終的に検査する）
@@ -66,6 +71,8 @@ start({
   JUDGMENT_REAL_CONFIRM: "yes",
   JUDGMENT_APPROVED_TOTAL_JPY: String(total),
   JUDGMENT_APPROVED_PER_CASE_JPY: String(per),
+  PHASE2_PROGRAM_CAP_JPY: String(programCap),
+  ...(flag("rerun-stage") ? { PHASE2_RERUN_STAGE: "1" } : {}),
   JUDGMENT_REUSE_EXISTING_KEY: "allow",
   ...(key ? { JUDGMENT_REUSE_FALLBACK_KEY: key } : {}),
   ...(flag("images") ? { PHASE2_CMP_IMAGES: "allow" } : {}),

@@ -20,6 +20,7 @@ import { makeRealVisionClient, worstCaseVisionCallJpy } from "@/lib/judgment/xso
 import { fetchPublicImage } from "@/lib/server/images/image-fetch";
 import { splitPublicImage } from "@/lib/server/images/split-adapter";
 import type { Db } from "@/lib/server/lottery-service";
+import { checkLedger, committedOf, finishRun, startRun, stageKeyOf, type Ledger } from "@/lib/judgment/xsource/spend-ledger";
 import { preflightRun } from "@/lib/judgment/xsource/cost-preflight";
 import { OUTPUT_MAX_TOKENS } from "@/lib/judgment/xsource/research-ai";
 import { buildMetricsSnapshot, renderMetrics } from "@/lib/judgment/xsource/measured-metrics";
@@ -98,7 +99,20 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     const v = validateGold(gold);
     const p = planOf(cases, gold);
     const feas = feasibilityOf(p.runs, p.expectedJpy, cases, gold);
-    console.log("PLAN", JSON.stringify({ feasibility: feas, input: sample ? "架空のサンプル（仕組みの確認用。実AIの実行には使えない）" : "ローカルの実データ", experiments: experiments(), cases: cases.length, goldCases: gold.length, goldValid: v.ok, goldErrors: v.errors.slice(0, 5), arms: experiments().flatMap((e) => armsOf(e).map((a) => `${a.id}（${a.label}）`)), questions: Object.fromEntries(experiments().map((e) => [e, EXPERIMENTS[e].question])), plan: p }));
+    const led = read<Ledger>(`${DIR}/spend-ledger.local.json`) ?? { runs: [] };
+    const ledgerInfo = { runs: led.runs.length, ...committedOf(led), note: "通算上限は実行時に --program-cap-jpy で利用者が指定。台帳は実行ごとの承認額・実費を記録し、上限超過・同じ段階の二重実行・未終了の実行を開始前に拒否する" };
+    const goldOpps = gold.flatMap((g) => g.opportunities);
+    const evaluation = {
+      dataset: DATASET,
+      claim: DATASET === "real_post" ? "実AIの結果だけが精度の根拠になりうる。ただし4案件・1サイト（livepocket.jp）のため一般化できず、改善は断言できない" : "構造確認のみ（精度として主張しない）",
+      caseOrder: cases.map((c, i) => ({ order: i + 1, caseId: c.caseId, pages: c.pages.length, goldOpportunities: gold.find((g) => g.caseId === c.caseId)?.opportunities.length ?? 0 })),
+      goldOpportunities: goldOpps.length,
+      negativeExamples: goldOpps.filter((o) => o.decision !== "register").length,
+      timeScoring: { goldWithTime: goldOpps.filter((o) => o.applyEndTime).length, population: goldOpps.filter((o) => o.applyEnd && o.applyEndTime).length, note: "時刻の母数が0なら、時刻の正解率は未測定（日付・年の採点は進められる）" },
+      metrics: ["応募機会の見落とし（再現率）", "誤登録（goldで登録しない機会を登録・gold以外の登録案の混入は適合率で測る）", "異店舗・別抽選の混同（誤統合・誤分割・他の機会のページの引用の混入）", "根拠（引用の実在・混入・読み飛ばし段階）", "締切（日付・時刻・年）", "応募単位・URL・登録の判断"],
+      limits: ["gold の登録しない例（decision≠register）が" + goldOpps.filter((o) => o.decision !== "register").length + "件のため、誤登録率は『goldで登録すべきでない機会を登録した』形では測れない。gold以外の登録案は適合率（unmatched）で見る", "製品と無関係なページ（SNS・短縮・危険ドメイン等）は取得段階で除外済み。評価用ページにはいずれも抽選の語がある（無関係ページへの耐性は未測定）"],
+    };
+    console.log("PLAN", JSON.stringify({ evaluation, feasibility: feas, ledger: ledgerInfo, input: sample ? "架空のサンプル（仕組みの確認用。実AIの実行には使えない）" : "ローカルの実データ", experiments: experiments(), cases: cases.length, goldCases: gold.length, goldValid: v.ok, goldErrors: v.errors.slice(0, 5), arms: experiments().flatMap((e) => armsOf(e).map((a) => `${a.id}（${a.label}）`)), questions: Object.fromEntries(experiments().map((e) => [e, EXPERIMENTS[e].question])), plan: p }));
     expect(cases.length).toBeGreaterThan(0);
   });
 
@@ -279,6 +293,15 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
     const plan = planOf(cases, gold, gate.model);
     if (!plan.withinCap) throw new Error(`実行しません: 計画の期待費用 ${plan.expectedJpy}円が承認額 ${plan.warnings.join(" / ")}`);
+    // 費用の通算台帳: 関門の上限は1回の実行ごとにリセットされるため、利用者が選んだ「通算上限」を超える実行は開始前に拒否する
+    const ledgerPath = `${DIR}/spend-ledger.local.json`;
+    const ledger0 = read<Ledger>(ledgerPath) ?? { runs: [] };
+    const stageKey = stageKeyOf({ dataset: DATASET, experiments: experiments(), from: Math.max(0, Number(env.PHASE2_CMP_CASE_FROM) || 0), limit: Number(env.PHASE2_CMP_CASE_LIMIT) || null });
+    const lc = checkLedger({ ledger: ledger0, programCapJpy: Number(env.PHASE2_PROGRAM_CAP_JPY), approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), stageKey, allowRerun: env.PHASE2_RERUN_STAGE === "1" });
+    if (!lc.ok) throw new Error(`実行しません（費用の通算台帳）: ${lc.errors.join(" / ")}`);
+    const runId = `run-${Date.now()}`;
+    mkdirSync(DIR, { recursive: true });
+    writeFileSync(ledgerPath, JSON.stringify(startRun(ledger0, { id: runId, stageKey, startedAt: new Date().toISOString(), approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) }), null, 1));
     const db = admin();
     const { data: hh } = await db.from("households").select("id").limit(1).maybeSingle();
     const hid = hh!.id as string;
@@ -327,6 +350,8 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
       lockPath: `${DIR}/.compare.lock`,
       onEvent,
     });
+    // 実費を台帳に記録する（この行が無い＝異常終了した実行は、承認額の満額を使ったものとして通算に数えられる）
+    writeFileSync(ledgerPath, JSON.stringify(finishRun(read<Ledger>(ledgerPath) ?? ledger0, runId, summary.costJpy, new Date().toISOString()), null, 1));
     const results: Record<string, unknown> = {};
     for (const e of exps) {
       const r = await scoreExperiment({ dataset: DATASET, householdId: hid, db: db as unknown as Db, experiment: e, prepared: prepared.filter((p) => p.arm.experiment === e), gold, modes: ["real"] });

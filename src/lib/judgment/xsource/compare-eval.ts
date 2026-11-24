@@ -17,8 +17,8 @@
  */
 import type { ApplyUnit, ProposalRecord } from "./proposal";
 import { dateTokens } from "./image-evidence";
-import { timeTokens, yearTokens } from "./time-tokens";
-export { timeTokens, yearTokens };
+import { deadlineTimeTokens, parseTimes, timeTokens, yearTokens } from "./time-tokens";
+export { deadlineTimeTokens, parseTimes, timeTokens, yearTokens };
 
 // ------------------------------------------------------------------ 入力（AIが見るもの）と正解（採点だけが見るもの）
 export interface CompareCase {
@@ -77,7 +77,7 @@ export function validateGold(g: readonly GoldCase[]): { ok: boolean; errors: str
       if (!o.evidence.length || o.evidence.some((e) => !e.quote.trim() || !e.where.trim())) errors.push(`${c.caseId}/${o.oppId}: 根拠（場所と原文の引用）が必要`);
       if (o.applyEnd && !/^\d{4}-\d{2}-\d{2}$/.test(o.applyEnd)) errors.push(`${c.caseId}/${o.oppId}: applyEnd は YYYY-MM-DD か null`);
       if (o.applyEndTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(o.applyEndTime)) errors.push(`${c.caseId}/${o.oppId}: applyEndTime は HH:MM か null`);
-      if (o.applyEndTime && !o.evidence.some((e) => timeTokens(e.quote).includes(o.applyEndTime!) || (o.applyEndTime === "00:00" && timeTokens(e.quote).includes("24:00")))) errors.push(`${c.caseId}/${o.oppId}: applyEndTime の時刻が根拠の引用に書かれていません（本文にある時刻だけをgoldにする）`);
+      if (o.applyEndTime && !o.evidence.some((e) => deadlineTimeTokens(e.quote).includes(o.applyEndTime!) || (o.applyEndTime === "00:00" && deadlineTimeTokens(e.quote).includes("24:00")))) errors.push(`${c.caseId}/${o.oppId}: applyEndTime の時刻が、根拠の引用の「応募締切」の文脈に書かれていません（受付時間・当選発表などの時刻は締切の時刻にしない）`);
       if (o.applyEndTime && !o.applyEnd) errors.push(`${c.caseId}/${o.oppId}: applyEndTime は applyEnd（日付）が確認できる場合だけ`);
       if (!o.store.trim() || !o.product.trim()) errors.push(`${c.caseId}/${o.oppId}: store・product が必要`);
       if (o.evidence.some((e) => FORBIDDEN_ORIGINS.test(e.where))) errors.push(`${c.caseId}/${o.oppId}: 根拠の場所がAI由来に見える`);
