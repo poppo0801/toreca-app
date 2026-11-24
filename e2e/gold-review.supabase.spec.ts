@@ -68,6 +68,7 @@ test("独立gold確認: JSON編集なしで、確認・除外・書き出しま�
   await page.getByTestId("gold-quote-0").fill("【新宿本店】拡張パック 抽選");
   await expect(page.getByTestId("gold-quote-state-0")).toHaveAttribute("data-found", "true");
   await page.getByTestId("gold-applyEnd").fill("2026-11-30");
+  await page.getByTestId("gold-applyEnd-time").fill("23:59");
   await page.screenshot({ path: "test-results/gold-review-detail-390.png", fullPage: true });
 
   // 項目ごとに確認して確認済みにする

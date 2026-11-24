@@ -56,7 +56,8 @@ const FILES = DATASET === "real_post" ? { cases: "cases.real.local.json", gold: 
 const load = (): { cases: CompareCase[]; gold: GoldCase[]; sample: boolean } => {
   const cases = read<CompareCase[]>(`${DIR}/${FILES.cases}`);
   const gold = read<GoldCase[]>(`${DIR}/${FILES.gold}`);
-  if (cases && gold) return { cases, gold, sample: false };
+  // 実AIで試験するのは、独立goldのある案件だけ（goldの無い案件は採点できず、費用だけがかかる）
+  if (cases && gold) return { cases: cases.filter((c) => gold.some((g) => g.caseId === c.caseId)), gold, sample: false };
   return { cases: read<CompareCase[]>(`${DIR}/sample/cases.json`) ?? [], gold: read<GoldCase[]>(`${DIR}/sample/gold.json`) ?? [], sample: true };
 };
 const CAPS = () => ({ totalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY) || Number(env.PHASE2_CMP_TOTAL_JPY) || 60, perCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) || Number(env.PHASE2_CMP_PER_CASE_JPY) || 5, maxImagesPerCase: 4, maxFetchPerCase: 30, maxMinutes: 120 });

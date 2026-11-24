@@ -37,6 +37,8 @@ export interface GoldOpportunity {
   product: string;
   /** 応募の締切（ISO日付 YYYY-MM-DD）。確認できない項目は null（採点しない） */
   applyEnd: string | null;
+  /** 応募締切の時刻（HH:MM・24時間表記）。人が確認した場合だけ入る。未確認・不明は null/省略（時刻は採点しない。AIの推測で補わない） */
+  applyEndTime?: string | null;
   region: string | null;
   /** この機会の応募先URL（正解）。null は採点しない */
   url: string | null;
@@ -72,6 +74,8 @@ export function validateGold(g: readonly GoldCase[]): { ok: boolean; errors: str
     for (const o of c.opportunities) {
       if (!o.evidence.length || o.evidence.some((e) => !e.quote.trim() || !e.where.trim())) errors.push(`${c.caseId}/${o.oppId}: 根拠（場所と原文の引用）が必要`);
       if (o.applyEnd && !/^\d{4}-\d{2}-\d{2}$/.test(o.applyEnd)) errors.push(`${c.caseId}/${o.oppId}: applyEnd は YYYY-MM-DD か null`);
+      if (o.applyEndTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(o.applyEndTime)) errors.push(`${c.caseId}/${o.oppId}: applyEndTime は HH:MM か null`);
+      if (o.applyEndTime && !o.applyEnd) errors.push(`${c.caseId}/${o.oppId}: applyEndTime は applyEnd（日付）が確認できる場合だけ`);
       if (!o.store.trim() || !o.product.trim()) errors.push(`${c.caseId}/${o.oppId}: store・product が必要`);
       if (o.evidence.some((e) => FORBIDDEN_ORIGINS.test(e.where))) errors.push(`${c.caseId}/${o.oppId}: 根拠の場所がAI由来に見える`);
     }
@@ -152,6 +156,22 @@ const same = (a: string | null | undefined, b: string): boolean => {
   const y = nf(b);
   return x.length >= 2 && y.length >= 2 && (x.includes(y) || y.includes(x));
 };
+/** 文字列中の時刻（「23:59」「23時59分」「23時」）を HH:MM の集合にする */
+export function timeTokens(text: string): string[] {
+  const t = text.normalize("NFKC");
+  const out = new Set<string>();
+  const add = (h: number, m: number) => {
+    if (h >= 0 && h <= 24 && m >= 0 && m <= 59) out.add(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+  };
+  for (const m of t.matchAll(/(?<!\d)(\d{1,2}):(\d{2})(?!\d)/g)) add(Number(m[1]), Number(m[2]));
+  for (const m of t.matchAll(/(?<!\d)(\d{1,2})時(?:\s*(\d{1,2})分)?/g)) add(Number(m[1]), m[2] ? Number(m[2]) : 0);
+  return [...out];
+}
+/** 文字列中の西暦年（「2026年」「2026/」など）の集合 */
+export function yearTokens(text: string): number[] {
+  return [...new Set([...text.normalize("NFKC").matchAll(/(?<!\d)(20\d{2})\s*[年/.-]/g)].map((m) => Number(m[1])))];
+}
+
 const mdOf = (iso: string): string => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 export interface OppMatch {
@@ -160,6 +180,10 @@ export interface OppMatch {
   store: boolean | null;
   product: boolean | null;
   deadline: boolean | null;
+  /** 締切の時刻。goldに確認済みの時刻があるときだけ採点（無ければ null＝採点対象外）。AIの出力に時刻が無ければ不一致 */
+  deadlineTime: boolean | null;
+  /** 締切の年。AIの出力に年が書かれているときだけ採点（年を書かない出力は、年の誤りとは見なさず null） */
+  deadlineYear: boolean | null;
   applyUnit: boolean | null;
   url: boolean | null;
   decision: boolean | null;
@@ -217,6 +241,8 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
       store: r ? true : null,
       product: r ? true : null,
       deadline: r && o.applyEnd ? !!dl && dateTokens(dl).includes(mdOf(o.applyEnd)) : null,
+      deadlineTime: r && o.applyEnd && o.applyEndTime ? !!dl && timeTokens(dl).includes(o.applyEndTime) : null,
+      deadlineYear: r && o.applyEnd && dl && yearTokens(dl).length > 0 ? yearTokens(dl).includes(Number(o.applyEnd.slice(0, 4))) : null,
       applyUnit: r && o.applyUnit ? r.applyUnit === o.applyUnit : null,
       url: r && o.url ? r.sourceUrls.includes(o.url) : null,
       decision: decisionOk,
@@ -281,9 +307,9 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
   };
 }
 
-export type MetricKey = "mismergeCount" | "oversplitCount" | "oppRecall" | "oppPrecision" | "storeAccuracy" | "productAccuracy" | "deadlineAccuracy" | "applyUnitAccuracy" | "urlAccuracy" | "decisionAccuracy" | "falseRegisterRate" | "missedRegisterRate" | "crossContaminationRate" | "invalidQuoteRate" | "hintFirstReadRate" | "costPerOppJpy" | "turnsPerCase";
+export type MetricKey = "mismergeCount" | "oversplitCount" | "oppRecall" | "oppPrecision" | "storeAccuracy" | "productAccuracy" | "deadlineAccuracy" | "deadlineTimeAccuracy" | "deadlineYearAccuracy" | "applyUnitAccuracy" | "urlAccuracy" | "decisionAccuracy" | "falseRegisterRate" | "missedRegisterRate" | "crossContaminationRate" | "invalidQuoteRate" | "hintFirstReadRate" | "costPerOppJpy" | "turnsPerCase";
 /** 値が大きいほど良い指標か（false は小さいほど良い） */
-export const HIGHER_IS_BETTER: Record<MetricKey, boolean> = { mismergeCount: false, oversplitCount: false, oppRecall: true, oppPrecision: true, storeAccuracy: true, productAccuracy: true, deadlineAccuracy: true, applyUnitAccuracy: true, urlAccuracy: true, decisionAccuracy: true, falseRegisterRate: false, missedRegisterRate: false, crossContaminationRate: false, invalidQuoteRate: false, hintFirstReadRate: true, costPerOppJpy: false, turnsPerCase: false };
+export const HIGHER_IS_BETTER: Record<MetricKey, boolean> = { mismergeCount: false, oversplitCount: false, oppRecall: true, oppPrecision: true, storeAccuracy: true, productAccuracy: true, deadlineAccuracy: true, deadlineTimeAccuracy: true, deadlineYearAccuracy: true, applyUnitAccuracy: true, urlAccuracy: true, decisionAccuracy: true, falseRegisterRate: false, missedRegisterRate: false, crossContaminationRate: false, invalidQuoteRate: false, hintFirstReadRate: true, costPerOppJpy: false, turnsPerCase: false };
 export interface Rate {
   n: number;
   k: number;
@@ -308,6 +334,8 @@ export function aggregate(scores: readonly CaseScore[]): Aggregate {
     storeAccuracy: acc((m) => m.store),
     productAccuracy: acc((m) => m.product),
     deadlineAccuracy: acc((m) => m.deadline),
+    deadlineTimeAccuracy: acc((m) => m.deadlineTime),
+    deadlineYearAccuracy: acc((m) => m.deadlineYear),
     applyUnitAccuracy: acc((m) => m.applyUnit),
     urlAccuracy: acc((m) => m.url),
     decisionAccuracy: acc((m) => m.decision),

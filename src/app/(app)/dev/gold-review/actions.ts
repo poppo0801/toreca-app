@@ -15,7 +15,7 @@ export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; error: 
 
 const setSchema = z.enum(["lp12", "real"]);
 const nSchema = z.number().int().min(1).max(99999);
-const draftSchema = z.object({ store: z.string().max(120), product: z.string().max(200), applyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), applyEndUnknown: z.boolean(), applyUnit: z.enum(["one_form_one", "store_select", "per_store", "per_product"]).nullable(), applyUnitUnknown: z.boolean(), region: z.string().max(60), round: z.string().max(120), quotes: z.array(z.string().max(400)).max(10), sameOpportunityAs: nSchema.nullable() });
+const draftSchema = z.object({ store: z.string().max(120), product: z.string().max(200), applyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), applyEndUnknown: z.boolean(), applyEndTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().default(null), applyUnit: z.enum(["one_form_one", "store_select", "per_store", "per_product"]).nullable(), applyUnitUnknown: z.boolean(), region: z.string().max(60), round: z.string().max(120), quotes: z.array(z.string().max(400)).max(10), sameOpportunityAs: nSchema.nullable() });
 const checksSchema = z.object({ officialPageOpened: z.boolean(), store: z.boolean(), product: z.boolean(), applyEnd: z.boolean(), applyUnit: z.boolean(), quotes: z.boolean() });
 
 async function who(): Promise<string | null> {

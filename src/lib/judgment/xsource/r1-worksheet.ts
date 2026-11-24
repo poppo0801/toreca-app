@@ -85,6 +85,7 @@ export interface R1PageGold {
   store: string;
   product: string;
   applyEnd: string | null;
+  applyEndTime?: string | null;
   applyUnit: Exclude<GoldOpportunity["applyUnit"], null> | null;
   region: string | null;
   /** 根拠の原文の引用（ページの本文にある一字一句）。必須 */
@@ -140,7 +141,7 @@ export function composeR1Cases(a: { pages: readonly { n: number; url: string; ht
       caseId,
       canary: `CANARY-${caseId.toUpperCase()}-${(a.at.replace(/\D/g, "") || "0").slice(0, 8)}-GOLD`,
       verified: { by: "human", at: ordered[0].verified.at, basis: `ページ単位の人の確認（${ordered.map((g) => `ページ${g.n}`).join("・")}）から組み立て` },
-      opportunities: ordered.map((g, k) => ({ oppId: `p${g.n}`, store: g.store, product: g.product, applyEnd: g.applyEnd, region: g.region, url: pageBy.get(g.n)!.url, applyUnit: g.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: k, evidence: g.evidence.map((e) => ({ where: `page:${k}`, quote: e.quote })) })),
+      opportunities: ordered.map((g, k) => ({ oppId: `p${g.n}`, store: g.store, product: g.product, applyEnd: g.applyEnd, applyEndTime: g.applyEndTime ?? null, region: g.region, url: pageBy.get(g.n)!.url, applyUnit: g.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: k, evidence: g.evidence.map((e) => ({ where: `page:${k}`, quote: e.quote })) })),
     });
   }
   return { cases, gold: golds };

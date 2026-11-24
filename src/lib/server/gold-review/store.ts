@@ -151,7 +151,7 @@ export function loadState(pages: readonly ReviewPage[], env: Env = process.env, 
   return { ...st, pages: out };
 }
 
-const draftSchema = z.object({ store: z.string().max(120), product: z.string().max(200), applyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), applyEndUnknown: z.boolean(), applyUnit: z.enum(["one_form_one", "store_select", "per_store", "per_product"]).nullable(), applyUnitUnknown: z.boolean(), region: z.string().max(60), round: z.string().max(120), quotes: z.array(z.string().max(400)).max(10), sameOpportunityAs: z.number().int().min(1).max(99999).nullable().default(null) });
+const draftSchema = z.object({ store: z.string().max(120), product: z.string().max(200), applyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), applyEndUnknown: z.boolean(), applyEndTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().default(null), applyUnit: z.enum(["one_form_one", "store_select", "per_store", "per_product"]).nullable(), applyUnitUnknown: z.boolean(), region: z.string().max(60), round: z.string().max(120), quotes: z.array(z.string().max(400)).max(10), sameOpportunityAs: z.number().int().min(1).max(99999).nullable().default(null) });
 const checksSchema = z.object({ officialPageOpened: z.boolean(), store: z.boolean(), product: z.boolean(), applyEnd: z.boolean(), applyUnit: z.boolean(), quotes: z.boolean() });
 const versionSchema = z.object({ hash: z.string().regex(/^[0-9a-f]{16}$/), chars: z.number().int().min(0), savedAt: z.string().max(40) });
 const historySchema = z.object({ at: z.string().max(40), action: z.enum(["draft_saved", "confirmed", "excluded", "reopened", "imported", "page_changed", "held"]), changed: z.array(z.string().max(30)).max(12).optional(), note: z.string().max(200).optional() });
@@ -274,7 +274,7 @@ export function buildR1PageGold(st: ReviewState): { gold: R1PageGold[]; excluded
       gold.push({ n: p.n, exclude: true, verified: { by: "human", at: p.excluded.at, basis: `除外（${p.excluded.reason}）` }, store: "", product: "", applyEnd: null, applyUnit: null, region: null, evidence: [] });
     } else if (p.status === "confirmed" && p.confirmed) {
       const c = p.confirmed;
-      gold.push({ n: p.n, verified: { by: "human", at: c.verifiedAt, basis: `${c.basis}（確認したページの版 ${c.pageVersion.hash}）` }, store: c.draft.store.trim(), product: c.draft.product.trim(), applyEnd: c.draft.applyEnd, applyUnit: c.draft.applyUnit, region: c.draft.region.trim() || null, evidence: c.draft.quotes.filter(Boolean).map((quote) => ({ quote })) });
+      gold.push({ n: p.n, verified: { by: "human", at: c.verifiedAt, basis: `${c.basis}（確認したページの版 ${c.pageVersion.hash}）` }, store: c.draft.store.trim(), product: c.draft.product.trim(), applyEnd: c.draft.applyEnd, applyEndTime: c.draft.applyEndTime, applyUnit: c.draft.applyUnit, region: c.draft.region.trim() || null, evidence: c.draft.quotes.filter(Boolean).map((quote) => ({ quote })) });
     }
   }
   return { gold, excluded };
@@ -318,7 +318,7 @@ export function buildRealGold(st: ReviewState, pages: readonly ReviewPage[], cas
       const members = recs.map((r, idx) => ({ r: r!, idx })).filter((m) => rootOf(m.r) === root);
       const main = members.find((m) => m.r.n === root) ?? members[0];
       const d = main.r.confirmed!.draft;
-      return { oppId: `p${root}`, store: d.store.trim(), product: d.product.trim(), applyEnd: d.applyEnd, region: d.region.trim() || null, url: ps[main.idx]!.url, applyUnit: d.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: main.idx, evidence: members.flatMap((m) => m.r.confirmed!.draft.quotes.filter(Boolean).map((quote) => ({ where: `page:${m.idx}`, quote }))) };
+      return { oppId: `p${root}`, store: d.store.trim(), product: d.product.trim(), applyEnd: d.applyEnd, applyEndTime: d.applyEndTime, region: d.region.trim() || null, url: ps[main.idx]!.url, applyUnit: d.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: main.idx, evidence: members.flatMap((m) => m.r.confirmed!.draft.quotes.filter(Boolean).map((quote) => ({ where: `page:${m.idx}`, quote }))) };
     });
     gold.push({ caseId: c.caseId, canary: `CANARY-${c.caseId.toUpperCase()}-${(at.replace(/\D/g, "") || "0").slice(0, 8)}-GOLD`, verified: { by: "human", at: recs.map((r) => r!.confirmed!.verifiedAt).sort().at(-1)!, basis: `ページ単位の人の確認（${recs.map((r) => `#${r!.n}・版${r!.confirmed!.pageVersion.hash}`).join(" ")}）から組み立て` }, opportunities: opps });
   }

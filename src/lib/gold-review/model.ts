@@ -31,6 +31,8 @@ export interface Draft {
   /** YYYY-MM-DD。ページに締切が無い・確認できないときは null（その場合 applyEndUnknown を明示する） */
   applyEnd: string | null;
   applyEndUnknown: boolean;
+  /** 締切の時刻 HH:MM（24時間表記）。ページに書かれていれば人が入力。無ければ null（時刻は採点しない。AIは補わない） */
+  applyEndTime: string | null;
   applyUnit: ApplyUnit | null;
   applyUnitUnknown: boolean;
   region: string;
@@ -41,7 +43,7 @@ export interface Draft {
   /** 同じ応募機会を別のページ（番号）が重ねて書いている場合の、最初のページの番号。**同じ企画・同一の応募機会を2機会と数えない**ための印（人が判断する） */
   sameOpportunityAs: number | null;
 }
-export const emptyDraft = (): Draft => ({ store: "", product: "", applyEnd: null, applyEndUnknown: false, applyUnit: null, applyUnitUnknown: false, region: "", round: "", quotes: [], sameOpportunityAs: null });
+export const emptyDraft = (): Draft => ({ store: "", product: "", applyEnd: null, applyEndUnknown: false, applyEndTime: null, applyUnit: null, applyUnitUnknown: false, region: "", round: "", quotes: [], sameOpportunityAs: null });
 
 /** 項目ごとの確認（全て true でないと確認済みにできない） */
 export interface FieldChecks {
@@ -109,6 +111,8 @@ export function validateConfirm(a: { draft: Draft; checks: FieldChecks; basis: s
   if (!d.store.trim()) p.push({ field: "store", message: "店舗を入力してください" });
   if (!d.product.trim()) p.push({ field: "product", message: "商品を入力してください" });
   if (d.applyEnd !== null && !/^\d{4}-\d{2}-\d{2}$/.test(d.applyEnd)) p.push({ field: "applyEnd", message: "応募締切は YYYY-MM-DD で入力してください" });
+  if (d.applyEndTime !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(d.applyEndTime)) p.push({ field: "applyEndTime", message: "締切の時刻は HH:MM（24時間表記）で入力してください" });
+  if (d.applyEndTime !== null && d.applyEnd === null) p.push({ field: "applyEndTime", message: "時刻は締切の日付がある場合だけ入力できます" });
   if (d.applyEnd === null && !d.applyEndUnknown) p.push({ field: "applyEnd", message: "応募締切を入力するか、「ページに締切が無い／確認できない」を明示してください" });
   if (d.applyUnit === null && !d.applyUnitUnknown) p.push({ field: "applyUnit", message: "応募単位を選ぶか、「確認できない」を明示してください" });
   for (const k of ["store", "product", "applyEnd", "applyUnit", "quotes"] as const) if (!a.checks[k]) p.push({ field: `check_${k}`, message: `「${{ store: "店舗", product: "商品", applyEnd: "応募締切", applyUnit: "応募単位", quotes: "根拠の引用" }[k]}」の確認にチェックしてください（項目ごとに確認が必要です）` });

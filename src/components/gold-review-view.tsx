@@ -350,9 +350,10 @@ function PageDetail({ page, rec, siblings, busy, onBack, onSave, onConfirm, onEx
         </Row>
         <Row label="応募締切（年を含めて確認）" ck={c.applyEnd} onCk={(v) => chk("applyEnd", v)} testid="applyEnd">
           <div className="flex flex-wrap items-center gap-2">
-            <input type="date" className={`${field} max-w-44`} value={d.applyEnd ?? ""} onChange={(e) => setD((x) => ({ ...x, applyEnd: e.target.value || null, applyEndUnknown: e.target.value ? false : x.applyEndUnknown }))} data-testid="gold-applyEnd" />
+            <input type="date" className={`${field} max-w-44`} value={d.applyEnd ?? ""} onChange={(e) => setD((x) => ({ ...x, applyEnd: e.target.value || null, applyEndTime: e.target.value ? x.applyEndTime : null, applyEndUnknown: e.target.value ? false : x.applyEndUnknown }))} data-testid="gold-applyEnd" />
+            <input type="time" className={`${field} max-w-32`} value={d.applyEndTime ?? ""} disabled={!d.applyEnd} onChange={(e) => setD((x) => ({ ...x, applyEndTime: e.target.value || null }))} aria-label="締切の時刻（ページに書かれていれば）" data-testid="gold-applyEnd-time" />
             <label className="flex items-center gap-1 text-xs">
-              <input type="checkbox" checked={d.applyEndUnknown} onChange={(e) => setD((x) => ({ ...x, applyEndUnknown: e.target.checked, applyEnd: e.target.checked ? null : x.applyEnd }))} data-testid="gold-applyEnd-unknown" />
+              <input type="checkbox" checked={d.applyEndUnknown} onChange={(e) => setD((x) => ({ ...x, applyEndUnknown: e.target.checked, applyEnd: e.target.checked ? null : x.applyEnd, applyEndTime: e.target.checked ? null : x.applyEndTime }))} data-testid="gold-applyEnd-unknown" />
               ページに締切が無い／確認できない
             </label>
           </div>
