@@ -1,5 +1,6 @@
 // @vitest-environment node
 /** 独立gold確認（開発専用）の保存・検査・R1への連携。架空のページ・一時フォルダのみ。 */
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,7 +166,7 @@ describe("実投稿のリンク先ページ（real set）", () => {
     const sdir = join(dir, "state");
     mkdirSync(sdir, { recursive: true });
     const idc = "post-1";
-    const id8 = require("node:crypto").createHash("sha256").update(idc).digest("hex").slice(0, 8);
+    const id8 = createHash("sha256").update(idc).digest("hex").slice(0, 8);
     const caseId = `rp${id8}`;
     const t1 = "【新宿本店】拡張パック 抽選受付 応募締切 ：11月30日（月）23:59まで お一人様1回まで。";
     const t2 = "【渋谷店】拡張パック 抽選受付 応募締切 ：2026年12月1日（火）まで お一人様1回まで。";
