@@ -22,7 +22,7 @@ import { coverageStatsOf, documentFromEvidence, loadBestDocument, saveCoverageSt
 import { saveProposals, type SaveSummary } from "./store";
 import { advise, discoverFeatures, type ReadHint } from "@/lib/judgment/xsource/experience";
 import { analyzeImages, type ImageAnalysisResult, type VisionClient } from "@/lib/judgment/xsource/image-evidence";
-import { experiencesFromResult, loadExperiences, loadImageObservation, saveExperience, saveImageObservation } from "./experience-store";
+import { experiencesFromResult, loadExperiences, loadImageObservation, loadIntakeObservations, saveExperience, saveImageObservation } from "./experience-store";
 
 export interface GenerateDeps {
   agent: ResearchAgent;
@@ -170,7 +170,11 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
           return deps.vision!(c && c.status !== "failed" && c.sha256 ? { ...req, known: { sha256: c.sha256, readings: c.readings } } : req);
         }
       : undefined;
-    imageAnalysis = await analyzeImages({ imageRefs: stored.imageRefs, existing: stored.imageReadings ?? [], postText: [stored.text, ...(stored.linkedPages ?? []).map((l) => l.text)].join("\n").slice(0, 60_000), ...(vision ? { vision } : {}) }).catch(() => null);
+    // 収集時に取得・検査した結果（解析が未実施の画像の理由を、承認待ち／取得失敗の分類として明示する）
+    const intakeRows = await loadIntakeObservations(a.db, a.householdId, a.candidate.id);
+    const intake: Record<string, { reason: string; meta?: { sha256?: string; width?: number; height?: number } }> = {};
+    for (const [u, r] of intakeRows) intake[u] = { reason: r.status === "failed" ? (r.failureReason ?? "vision_error") : "pending_approval", meta: { ...(r.sha256 ? { sha256: r.sha256 } : {}), ...(r.width ? { width: r.width } : {}), ...(r.height ? { height: r.height } : {}) } };
+    imageAnalysis = await analyzeImages({ intake, imageRefs: stored.imageRefs, existing: stored.imageReadings ?? [], postText: [stored.text, ...(stored.linkedPages ?? []).map((l) => l.text)].join("\n").slice(0, 1_000_000), ...(vision ? { vision } : {}) }).catch(() => null);
   }
   const post = imageAnalysis
     ? { ...post0, notes: [...(post0.notes ?? []).filter((n) => !n.startsWith("収集時のAIが画像から読み取った情報") && n !== NOTE_IMAGE_UNREAD), ...imageAnalysis.notes].slice(0, 16) }

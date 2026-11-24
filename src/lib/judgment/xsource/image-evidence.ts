@@ -102,6 +102,7 @@ export const imageIdOf = (index: number, url: string, sha256?: string): string =
 
 /** 失敗の分類コードの表示用の説明（画像の内容が無いのではなく、確認できていない理由） */
 export const FAILURE_LABEL: Record<string, string> = {
+  pending_approval: "取得・検査は済んでいるが、画像の解析（有料）は承認が必要で未実施",
   invalid_url: "URLが不正",
   private_url: "個人用・期限つきのURLのため取得しない",
   blocked: "取得できないアドレス",
@@ -166,6 +167,8 @@ export async function analyzeImages(a: {
   /** 比較に使う投稿・ページ本文 */
   postText: string;
   vision?: VisionClient;
+  /** 収集時の画像の取得・検査の結果（URL→理由コード・付随情報）。ビジョンが無いとき、未解析の理由を「承認待ち」や取得失敗の分類として明示する */
+  intake?: Record<string, { reason: string; meta?: VisionMeta }>;
   wantFields?: string[];
   maxAnalyses?: number;
 }): Promise<ImageAnalysisResult> {
@@ -185,7 +188,8 @@ export async function analyzeImages(a: {
       continue;
     }
     if (!a.vision) {
-      obs.push({ imageIndex: i, imageId: imageIdOf(i, url), url, status: "not_analyzed", failureReason: "analysis_unavailable", readings: [] });
+      const k = a.intake?.[url];
+      obs.push({ imageIndex: i, imageId: imageIdOf(i, url, k?.meta?.sha256), url, status: "not_analyzed", failureReason: k?.reason ?? "analysis_unavailable", ...(k?.meta ? { meta: k.meta } : {}), readings: [] });
       continue;
     }
     if (analyzed >= max) {

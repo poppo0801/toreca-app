@@ -156,7 +156,7 @@ describe("静的確認: 登録案の機能は、抽選・応募・購入・通�
     expect(run.indexOf("proposalAfterCandidate(")).toBeGreaterThan(run.indexOf("shadow.schedule("));
   });
   it("登録案のコードを import する非テストのファイルは、想定した入口だけ（候補の画面・その操作・収集の接続口・登録案の部品）", () => {
-    const allowed = new Set(["src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/judgment/xsource/vision-real.ts"]);
+    const allowed = new Set(["src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/judgment/xsource/vision-real.ts", "src/lib/server/collector/link-recheck.ts", "src/lib/server/collector/db-host-gate.ts", "src/lib/server/collector/image-intake.ts"]);
     const users = walk("src").filter((f) => !/\.test\.tsx?$/.test(f) && !f.startsWith("src/lib/server/proposals/") && /server\/proposals\//.test(readFileSync(f, "utf8")));
     for (const f of users) expect(allowed.has(f.split("\\").join("/")), f).toBe(true);
   });
@@ -207,7 +207,7 @@ describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server 
     expect(importers(/xsource\/vision-real|\.\/vision-real/, ["src/lib/judgment/xsource/vision-real.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
     expect(importers(/proposals\/compare-run|\.\/compare-run/, ["src/lib/server/proposals/compare-run.ts"])).toEqual([]);
     expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/server/proposals/compare-run.ts"])).toEqual([]);
-    expect(importers(/images\/image-fetch|\.\/image-fetch/,["src/lib/server/images/image-fetch.ts", "src/lib/server/images/split-adapter.ts", "src/lib/judgment/xsource/vision-real.ts", "src/lib/judgment/xsource/vision-mock.ts"])).toEqual([]);
+    expect(importers(/images\/image-fetch|\.\/image-fetch/,["src/lib/server/images/image-fetch.ts", "src/lib/server/images/split-adapter.ts", "src/lib/judgment/xsource/vision-real.ts", "src/lib/judgment/xsource/vision-mock.ts", "src/lib/server/collector/image-intake.ts"])).toEqual([]);
     for (const f of ["src/lib/server/collector/run.ts", "src/lib/server/collector/x-rich.ts", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/proposals/generate.ts", "src/app/(app)/lotteries/candidates/proposal-actions.ts"]) {
       expect(readFileSync(f, "utf8"), f).not.toMatch(/vision-real|images\/image-fetch|makeRealVisionClient|fetchPublicImage/);
     }

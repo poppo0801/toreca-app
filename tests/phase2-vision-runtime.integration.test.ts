@@ -176,7 +176,9 @@ describe.skipIf(!dbTestsEnabled)("Phase 2: 画像の取得→解析入力→保�
     expect(((await from(u1, "evidence_image_observations").select("id").eq("household_id", hid)).data ?? []).length).toBeGreaterThan(0);
     expect(((await from(u2, "evidence_image_observations").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
     const one = (await admin.from("evidence_image_observations").select("*").eq("household_id", hid).limit(1)).data![0];
-    const { id: _i, created_at: _c, ...rest } = one;
+    const rest: Record<string, unknown> = { ...one };
+    delete rest.id;
+    delete rest.created_at;
     expect((await from(u1, "evidence_image_observations").insert({ ...rest, url_key: "x" })).error).not.toBeNull();
     expect((await admin.from("evidence_image_observations").update({ status: "unreadable" }).eq("id", one.id)).error).not.toBeNull();
     expect((await admin.from("evidence_image_observations").delete().eq("id", one.id)).error).toBeNull(); // 候補の削除に伴う削除は cascade（直接の削除は管理者権限のみ）

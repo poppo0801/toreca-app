@@ -34,6 +34,9 @@ import { loadHumanKnowledge } from "@/lib/server/collector/human-knowledge-load"
 import { unifiedMode } from "@/lib/case-model/flag";
 import { beginShadow, type LegacyCapture } from "./shadow-hook";
 import { proposalAfterCandidate, storeCollectedEvidence } from "./proposal-hook";
+import { maybeEnqueueLinkRechecks, maybeRunLinkRechecks } from "./link-recheck";
+import { intakeCollectedImages } from "./image-intake";
+import { selectHostGate } from "./db-host-gate";
 import { buildAiContext } from "@/lib/case-model/context";
 import { aiInputRecord, type AiInputRecord } from "@/lib/case-model/redact";
 import { caseFromExtraction, caseFromInput } from "@/lib/case-model/from-extraction";
@@ -703,6 +706,10 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   {
     const postText = q.post?.text ? [q.post.text, q.post.quoted?.text ? `（引用元）${q.post.quoted.text}` : ""].filter(Boolean).join("\n") : (q.evidenceText ?? null);
     await storeCollectedEvidence({ db, householdId: deps.householdId, candidateId: c.id, queued: q, postUrl: c.source_url ?? q.url, postText, nowIso });
+    // 時間・予算・ホスト制限で取得しなかったリンクは、耐久的な再調査タスクとして残す（開発限定。別の実行で再取得して候補の証拠へ戻す）
+    // 公開画像の安全な取得・検査（解析はしない＝費用0。開発限定・IMAGE_INTAKE=on のときだけ）。新AIの調査へ「取得・検査済み／未解析の理由」を受け渡す
+    await intakeCollectedImages({ db, householdId: deps.householdId, candidateId: c.id, imageRefs: [...(q.post?.images ?? []), ...(q.post?.quoted?.images ?? [])], ...(deps.fetchControl?.throttle ? { gate: deps.fetchControl.throttle } : {}), ...(deps.fetchControl?.budget ? { budget: deps.fetchControl.budget } : {}), ...(deps.fetchControl?.shouldCancel ? { shouldCancel: deps.fetchControl.shouldCancel } : {}) });
+    await maybeEnqueueLinkRechecks({ db, householdId: deps.householdId, candidateId: c.id, ledger: q.linkLedger as never, now: deps.now });
   }
   // 以前に保存した原文は、今回の取得で原文が得られなくても消さない（再確認・再解析で last_good が上書きされるため）
   const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
@@ -1682,7 +1689,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   deps.excludedChains = rules.some((r) => r.scope === "chain") ? await loadExcludedChains(db, householdId).catch(() => []) : [];
   const userRules = await activeUserRules(db, householdId);
   // 取得の負荷制御: ホスト別の間隔は実行をまたいで共有（プロセス内）、総量は今回の実行ぶん。時間切れが近づいたら新しい取得は始めない
-  deps.fetchControl ??= { throttle: sharedHostThrottle, budget: new RunFetchBudget({ ...DEFAULT_RUN_LIMITS, deadlineAt: Date.now() + ctx.timeLeft() }), shouldCancel: () => ctx.timeLeft() < 8_000 };
+  deps.fetchControl ??= { throttle: selectHostGate(db, sharedHostThrottle), budget: new RunFetchBudget({ ...DEFAULT_RUN_LIMITS, deadlineAt: Date.now() + ctx.timeLeft() }), shouldCancel: () => ctx.timeLeft() < 8_000 };
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;
@@ -1822,6 +1829,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   // 開発環境のシャドー比較の終了待ち（旧方式の全候補の処理・保存が終わった後。残り時間の範囲で打ち切る。旧方式の結果は変わらない）
   await shadow?.settle(ctx.timeLeft());
   if (!out.stopReason) await db.from("collection_settings").update({ consecutive_failures: fails }).eq("household_id", householdId);
+  // 残り時間に余裕があれば、前の実行で取得しきれなかったリンクを再調査する（開発限定・追加費用0）
+  await maybeRunLinkRechecks({ db, householdId, gate: deps.fetchControl?.throttle ?? sharedHostThrottle, timeLeft: ctx.timeLeft });
   const left = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["pending", "retry", "processing"]);
   out.queued = left.count ?? 0;
   await bumpStats(db, householdId, now, { queue_remaining: out.queued });

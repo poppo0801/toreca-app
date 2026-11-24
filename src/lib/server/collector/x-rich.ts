@@ -1,6 +1,6 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
-import { HostThrottle, RunFetchBudget, type FetchOutcomeKind } from "@/lib/collector/fetch-control";
+import { type HostGate, RunFetchBudget, type FetchOutcomeKind } from "@/lib/collector/fetch-control";
 import { discoverLinks, ledgerFromPlan, looksLikeLoginWall, planLinkFetches, RECHECKABLE_REASONS, type LinkLedgerEntry, type LinkOrigin } from "@/lib/collector/link-plan";
 import type { ExtractRequest } from "@/lib/ai/provider";
 import { remainingPosts, type QuotedPost, type XPost } from "@/lib/collector/x-posts";
@@ -46,7 +46,7 @@ export type XRichResult = XRichOk | { ok: false; message: string };
 
 /** 取得の負荷制御（Phase 2）。投稿・実行をまたいで共有する。未指定なら従来どおり制御しない（テスト・単件解析） */
 export interface FetchControl {
-  throttle?: HostThrottle;
+  throttle?: HostGate;
   budget?: RunFetchBudget;
   shouldCancel?: () => boolean;
 }
@@ -78,6 +78,8 @@ export interface ImageStats {
 
 /** 1ページの整形後本文として保持する上限（取得元の1.5MB上限と整合。通常の告知ページは数千〜数万字）。超えたら truncated を台帳に残す */
 export const LINKED_PAGE_MAX_CHARS = 120_000;
+/** 解析（AI）へ渡す統合テキスト全体の上限。超えたら**末尾を無言で切らず**、切ったことを本文に明記し、呼び出し側へ inputTruncated で知らせる（全文は別に保存済み） */
+export const ANALYSIS_TEXT_MAX = 20_000;
 /** 解析（AI）の入力に入れるリンク先本文の合計の目安。各リンクへ公平に配分し、先頭のリンクが後続を押し出さない（全文は別に保存される） */
 export const ANALYSIS_LINK_BUDGET = 14_000;
 /** 1投稿のリンク取得にかける時間の上限（超えたら残りは「時間切れ」として台帳に残す） */
@@ -145,6 +147,9 @@ export async function enrichXPost(
   linkUrl?: string;
   stats: ImageStats;
   quotedUsed: boolean;
+  /** 統合テキストが解析の入力の上限で切れたか（切れたときは本文に明記される）と、切る前の字数 */
+  inputTruncated: boolean;
+  inputChars: number;
   /** 取得できた全ページ（全文）。深さ1の追跡分を含む */
   linkedPages: FetchedLinkPage[];
   /** 発見した全リンクの台帳（取得できた／できなかった／選ばなかった理由） */
@@ -267,7 +272,10 @@ export async function enrichXPost(
   const first = pages[0];
   const firstUrl = plan.find((p) => p.decision === "fetch")?.url;
   return {
-    text: text.slice(0, 20_000),
+    text: text.length > ANALYSIS_TEXT_MAX ? `${text.slice(0, ANALYSIS_TEXT_MAX - 80)}
+（以下は解析の入力の上限（${ANALYSIS_TEXT_MAX}字）のため省略。全文は保存済み）` : text,
+    inputTruncated: text.length > ANALYSIS_TEXT_MAX,
+    inputChars: text.length,
     images: used,
     linkedPage: pages.length > 0,
     ...(first ? { linkedPageText: first.text.slice(0, 6000) } : {}),

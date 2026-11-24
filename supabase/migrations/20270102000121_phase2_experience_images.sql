@@ -17,7 +17,8 @@ create table public.evidence_image_observations (
   image_index int not null check (image_index between 1 and 40),
   -- analyzed=読み取れた／unreadable=解析したが文字を読み取れなかった（失敗・上限超過は保存しない＝再解析できる）
   -- failed=取得・解析ができなかった（再試行しても無駄な理由だけ保存: robots・期限切れ・過大・不正など。通信や上限の失敗は保存しない＝再試行できる）
-  status text not null check (status in ('analyzed', 'unreadable', 'failed')),
+  -- fetched=収集時に安全に取得・検査した（ハッシュ・寸法を記録）が、解析（有料）は承認が必要で未実施（mode=intake）
+  status text not null check (status in ('analyzed', 'unreadable', 'failed', 'fetched')),
   failure_reason text check (failure_reason is null or char_length(failure_reason) <= 40),
   -- 取得した原本のバイトの SHA-256 先頭16桁。同じURLでも内容が変わった（差し替え）ときに再解析するための鮮度判定。原本の画像は保存しない
   content_sha256 text check (content_sha256 is null or content_sha256 ~ '^[0-9a-f]{16}$'),
@@ -30,7 +31,8 @@ create table public.evidence_image_observations (
   output_tokens int check (output_tokens is null or output_tokens >= 0),
   -- 読み取り（項目・文言・確度・位置の記述）。AIの読み取りであり原文の事実ではない。画像そのものは保存しない
   readings jsonb not null check (jsonb_typeof(readings) = 'array' and pg_column_size(readings) <= 20000),
-  mode text not null check (mode in ('mock', 'replay', 'real')),
+  -- intake=収集時の取得・検査だけ（AIではない）。mock/replay/real の解析結果とは別の行・別の読み出し（混ざらない）
+  mode text not null check (mode in ('mock', 'replay', 'real', 'intake')),
   model_id text check (model_id is null or char_length(model_id) <= 80),
   observed_at timestamptz not null,
   created_at timestamptz not null default now(),

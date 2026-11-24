@@ -86,6 +86,13 @@ export interface StoredEvidence {
   imageRefs?: string[];
   /** Stage 10M（追加の項目）: 本文中の短縮URL（t.co）→展開後のURL の対応（最大30件）。まとめ投稿の項目ごとの応募先の特定に使う */
   linkMap?: { short: string; url: string }[];
+  /** Phase 2: 再調査で取得したリンク先を戻した回数（同じ候補への書き戻しの楽観的排他に使う）。無ければ0 */
+  recheckSeq?: number;
+  /**
+   * Phase 2: 上限・切り詰めで実際に失われた情報の件数（0より大きいものだけ）。**無言の欠落を作らないための記録**（上限の十分性を継続的に監査する材料。limits-audit）。
+   * textTruncated=本文が上限で切れた／linksDropped=リンクが上限で落ちた／ledgerDropped=台帳が上限で落ちた／pagesDropped*=リンク先ページが（https以外・短すぎ・件数上限で）保存対象から外れた／pagesTruncated=抜粋が全文より短い／imageRefsDropped・imageReadingsDropped・linkMapDropped
+   */
+  limitHits?: Record<string, number>;
 }
 
 export interface EvidenceSource {
@@ -181,18 +188,40 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
   if (joined.length < 8) return null;
   const text = joined.slice(0, MAX_EVIDENCE_CHARS);
   const imageReadings = (src.imageReadings ?? []).slice(0, 12);
+  const hits: Record<string, number> = {};
+  const hit = (k: string, n: number) => {
+    if (n > 0) hits[k] = n;
+  };
+  hit("textTruncated", joined.length - text.length);
+  hit("imageReadingsDropped", (src.imageReadings ?? []).length - imageReadings.length);
   const linkMap = (src.post?.linkMap ?? []).filter((m) => m && typeof m.short === "string" && typeof m.url === "string" && m.short.startsWith("https://t.co/") && m.url.startsWith("https://")).map((m) => ({ short: m.short.slice(0, 40), url: m.url.slice(0, 300) })).slice(0, 30);
   const imageRefs = (src.imageRefs ?? []).filter((u) => typeof u === "string" && u.startsWith("https://")).map((u) => u.slice(0, 500)).slice(0, MAX_IMAGE_REFS);
-  const linkedPages = (src.linkedPages ?? [])
+  const linkedPagesAll = (src.linkedPages ?? [])
     .map((l) => {
       const full = clean(String(l.text));
       const text = full.slice(0, MAX_LINKED_PAGE_CHARS);
       const fullChars = Math.max(full.length, l.fullChars ?? 0);
       return { url: String(l.url).slice(0, 500), text, fetchedAt: nowIso, fullChars, truncated: text.length < fullChars || !!l.truncated, ...(l.depth !== undefined ? { depth: l.depth } : {}), ...(l.fromUrl ? { fromUrl: l.fromUrl.slice(0, 500) } : {}), ...(l.origins?.length ? { origins: l.origins.slice(0, 4) } : {}), ...(l.shortUrl ? { shortUrl: l.shortUrl.slice(0, 40) } : {}) };
     })
-    .filter((l) => l.url.startsWith("https://") && l.text.length >= 30)
-    .slice(0, MAX_LINKED_PAGES);
-  const linkLedger = (src.linkLedger ?? []).slice(0, MAX_LINK_LEDGER).map((e) => ({ ...e, url: String(e.url).slice(0, 500), key: String(e.key).slice(0, 300), ...(e.reason ? { reason: String(e.reason).slice(0, 160) } : {}) }));
+    ;
+  const linkedPagesOk = linkedPagesAll.filter((l) => l.url.startsWith("https://") && l.text.length >= 30);
+  const linkedPages = linkedPagesOk.slice(0, MAX_LINKED_PAGES);
+  hit("pagesDroppedNotHttps", linkedPagesAll.filter((l) => !l.url.startsWith("https://")).length);
+  hit("pagesDroppedTooShort", linkedPagesAll.filter((l) => l.url.startsWith("https://") && l.text.length < 30).length);
+  hit("pagesDroppedOverCap", linkedPagesOk.length - linkedPages.length);
+  hit("pagesTruncated", linkedPages.filter((l) => l.truncated).length);
+  const keptUrls = new Set(linkedPages.map((l) => l.url));
+  const ledgerAll = src.linkLedger ?? [];
+  hit("ledgerDropped", ledgerAll.length - Math.min(ledgerAll.length, MAX_LINK_LEDGER));
+  // 保存対象から外れたページは、台帳で「取得済み」のままにせず、保存されなかった理由を残す（無言の欠落にしない）
+  const linkLedger = ledgerAll.slice(0, MAX_LINK_LEDGER).map((e) => {
+    const lost = e.status === "fetched" && !keptUrls.has(String(e.url).slice(0, 500)) && linkedPagesAll.length > 0;
+    return { ...e, ...(lost ? { status: "skipped" as const, reason: "not_stored" } : {}), url: String(e.url).slice(0, 500), key: String(e.key).slice(0, 300), ...(!lost && e.reason ? { reason: String(e.reason).slice(0, 160) } : {}) };
+  });
+  const linksAll = [...new Set(links)].filter((l) => /^https?:\/\//.test(l));
+  hit("linksDropped", linksAll.length - Math.min(linksAll.length, MAX_EVIDENCE_LINKS));
+  hit("imageRefsDropped", (src.imageRefs ?? []).filter((u) => typeof u === "string" && u.startsWith("https://")).length - imageRefs.length);
+  hit("linkMapDropped", (src.post?.linkMap ?? []).filter((m) => m && typeof m.short === "string" && typeof m.url === "string" && m.short.startsWith("https://t.co/") && m.url.startsWith("https://")).length - linkMap.length);
   return {
     v: EVIDENCE_VERSION,
     url: src.url.slice(0, 500),
@@ -211,6 +240,7 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
     ...(imageReadings.length ? { imageReadings } : {}),
     ...(imageRefs.length ? { imageRefs } : {}),
     ...(linkMap.length ? { linkMap } : {}),
+    ...(Object.keys(hits).length ? { limitHits: hits } : {}),
   };
 }
 

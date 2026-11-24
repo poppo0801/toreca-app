@@ -21,6 +21,16 @@ export function evidenceCollectStoreEnabled(env: Env = process.env): boolean {
   return proposalPreviewEnabled(env) && env.EVIDENCE_COLLECT_STORE !== "off";
 }
 
+/** 未取得リンクの自動再調査（耐久キュー）を使うか。新AI機能と同じ開発限定の条件（本番では常にfalse。122 が未適用の本番表へは書かない） */
+export function linkRecheckEnabled(env: Env = process.env): boolean {
+  return proposalPreviewEnabled(env) && env.LINK_RECHECK !== "off";
+}
+
+/** ホスト別の取得制御をDB共有（複数インスタンス）にするか。開発限定（既定は off＝プロセス内）。DB版は migration 122 が必要 */
+export function dbHostGateEnabled(env: Env = process.env): boolean {
+  return proposalPreviewEnabled(env) && env.FETCH_GATE === "db";
+}
+
 /** 収集（run.ts）からの自動生成を許可するか（さらに別のフラグ。既定OFF。手動の生成だけ使うなら不要） */
 export function proposalAutoGenerateEnabled(env: Env = process.env): boolean {
   return proposalPreviewEnabled(env) && env.PROPOSAL_AUTO === "on";

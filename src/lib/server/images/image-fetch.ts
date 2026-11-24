@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { HostThrottle, RunFetchBudget, type FetchOutcomeKind } from "@/lib/collector/fetch-control";
+import { type HostGate, RunFetchBudget, type FetchOutcomeKind } from "@/lib/collector/fetch-control";
 import { MAX_SOURCE_PIXELS } from "@/lib/image-tiles";
 import { robotsAllows, safeFetch, safeFetchBytes, type SafeBytesResult } from "@/lib/server/safe-fetch";
 
@@ -123,7 +123,7 @@ export interface ImageFetchDeps {
   /** 取得の実体の差し替え（テスト。既定は safeFetchBytes） */
   fetchBytes?: (url: string, o: { timeoutMs: number; maxBytes: number; maxRedirects: number; accept: string[]; testOnlyAllowLoopback?: boolean }) => Promise<SafeBytesResult>;
   fetchRobots?: (url: string) => Promise<string | null>;
-  throttle?: HostThrottle;
+  throttle?: HostGate;
   budget?: RunFetchBudget;
   shouldCancel?: () => boolean;
   now?: () => number;
