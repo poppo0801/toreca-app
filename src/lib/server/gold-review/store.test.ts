@@ -47,6 +47,16 @@ describe("確認の検査（一括承認・不実な確認を許さない）", (
     for (const k of Object.keys(allChecks()) as (keyof FieldChecks)[]) expect(validateConfirm({ ...base, checks: { ...allChecks(), [k]: false } }).length, k).toBeGreaterThan(0);
     expect(validateConfirm({ ...base, checks: emptyChecks() }).length).toBeGreaterThanOrEqual(6);
   });
+  it("締切の時刻: 引用（ページ本文）に書かれている時刻だけ入力できる。日付が無い時刻・形式不正・引用に無い時刻は拒否。時刻なしは従来どおり確認済みにできる（既存の確認を変えない）", () => {
+    const text = "【新宿本店】拡張パック 抽選 応募締切 11月30日（月）23:59まで お一人様1回まで。";
+    const base = { checks: allChecks(), basis: "公式ページを目視で確認", pageText: text };
+    const d = { ...goodDraft("新宿本店", "拡張パック"), quotes: ["【新宿本店】拡張パック 抽選 応募締切 11月30日（月）23:59まで"] };
+    expect(validateConfirm({ ...base, draft: d })).toEqual([]); // 時刻なし
+    expect(validateConfirm({ ...base, draft: { ...d, applyEndTime: "23:59" } })).toEqual([]);
+    expect(validateConfirm({ ...base, draft: { ...d, applyEndTime: "18:00" } }).map((x) => x.field)).toContain("applyEndTime"); // 引用に無い時刻
+    expect(validateConfirm({ ...base, draft: { ...d, applyEndTime: "25:00" } }).map((x) => x.field)).toContain("applyEndTime");
+    expect(validateConfirm({ ...base, draft: { ...d, applyEnd: null, applyEndUnknown: true, applyEndTime: "23:59" } }).map((x) => x.field)).toContain("applyEndTime");
+  });
   it("引用がページの本文に無い・短すぎる・確認の基準がAI等に頼っている・締切も不明の明示も無い・店舗が本文に無い、は拒否", () => {
     const base = { checks: allChecks(), basis: "公式ページを目視で確認", pageText: page().text };
     const d = goodDraft("新宿本店", "拡張パック");

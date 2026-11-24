@@ -212,6 +212,20 @@ export function confidenceOf(fields: FieldMap, hasCautions: boolean, hasConflict
   return origins.size >= 2 ? "multi_source" : "single_source";
 }
 
+/**
+ * DB（jsonb）から読んだ注意を、画面が安全に使える形にそろえる（境界での検証）。
+ * 古い・不完全な行（message が無い・code が無い・配列でない）で描画が落ちないよう、コードの無い要素は捨て、文言が無ければ既定の文言を補う（ユーザー向けの注意が消えないようにするため）。
+ */
+export function normalizeCautions(raw: unknown): Caution[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((x): Caution[] => {
+    if (!x || typeof x !== "object") return [];
+    const o = x as Partial<Caution>;
+    if (typeof o.code !== "string" || !o.code) return [];
+    return [{ ...(o as Caution), message: typeof o.message === "string" && o.message.trim() ? o.message : "確認が必要な項目があります（詳細は抽選の詳細で確認）" }];
+  });
+}
+
 /** 注意付きカードの要約（一覧のアイコンのツールチップ・詳細の見出し用）。注意が無ければ空 */
 export function cautionSummary(cautions: Caution[] | undefined | null): string {
   const cs = cautions ?? [];

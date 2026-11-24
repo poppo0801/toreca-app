@@ -25,7 +25,7 @@ try {
 }
 const dataset = process.argv.find((a) => a.startsWith("--dataset="))?.slice(10);
 const start = (extra) => {
-  const r = spawnSync("npx", ["vitest", "run", "--silent=false", FILE], { stdio: "inherit", shell: true, env: { ...process.env, TOREMANE_ENV: "local", PHASE2_COMPARE: "1", ...(dataset ? { PHASE2_CMP_DATASET: dataset } : {}), ...(arg("experiments") ? { PHASE2_CMP_EXPERIMENTS: arg("experiments") } : {}), ...extra } });
+  const r = spawnSync("npx", ["vitest", "run", "--silent=false", FILE], { stdio: "inherit", shell: true, env: { ...process.env, TOREMANE_ENV: "local", PHASE2_COMPARE: "1", ...(dataset ? { PHASE2_CMP_DATASET: dataset } : {}), ...(arg("experiments") ? { PHASE2_CMP_EXPERIMENTS: arg("experiments") } : {}), ...(arg("case-from") ? { PHASE2_CMP_CASE_FROM: arg("case-from") } : {}), ...(arg("case-limit") ? { PHASE2_CMP_CASE_LIMIT: arg("case-limit") } : {}), ...extra } });
   process.exit(r.status ?? 1);
 };
 
