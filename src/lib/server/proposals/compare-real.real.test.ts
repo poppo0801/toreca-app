@@ -103,7 +103,7 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     const cands = pages.map(pageCandidate);
     mkdirSync(DIR, { recursive: true });
     writeFileSync(`${DIR}/r1-worksheet.local.md`, worksheetMarkdown(cands));
-    const skeleton: R1PageGold[] = cands.map((c) => ({ n: c.n, verified: { by: "human", at: "", basis: "" }, store: c.storeCandidate ?? "", product: (c.productCandidate ?? "").replace(/^\d{1,2}\/\d{1,2}[(（][^)）]*[)）]発売\s*/, ""), applyEnd: c.applyEndGuess ? `2026-${c.applyEndGuess.md.split("/").map((x) => x.padStart(2, "0")).join("-")}` : null, applyUnit: null, region: null, evidence: c.applyEndGuess ? [{ quote: c.applyEndGuess.quote }] : [] }));
+    const skeleton: R1PageGold[] = cands.map((c) => ({ n: c.n, verified: { by: "human", at: "", basis: "" }, store: c.storeCandidate ?? "", product: (c.productCandidate ?? "").replace(/^\d{1,2}\/\d{1,2}[(（][^)）]*[)）]発売\s*/, ""), applyEnd: c.applyEndGuess?.year ? `${c.applyEndGuess.year}-${c.applyEndGuess.md.split("/").map((x) => x.padStart(2, "0")).join("-")}` : null /* 年が書かれていない締切は、年を補わない */, applyUnit: null, region: null, evidence: c.applyEndGuess ? [{ quote: c.applyEndGuess.quote }] : [] }));
     writeFileSync(`${DIR}/r1-gold-pages.template.local.json`, JSON.stringify(skeleton, null, 1));
     console.log("R1_WORKSHEET", JSON.stringify({ pages: pages.length, recognized: cands.filter((c) => c.recognized).length, withStore: cands.filter((c) => c.storeCandidate).length, withDeadlineCandidate: cands.filter((c) => c.deadlineCandidates.length).length, needAttention: cands.filter((c) => c.attention.length).length, next: "r1-worksheet.local.md を見て、r1-gold-pages.template.local.json を記入し r1-gold-pages.local.json として保存" }));
     expect(pages.length).toBeGreaterThan(0);
@@ -150,10 +150,12 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     if (env.PHASE2_REAL_EXPAND !== "allow") throw new Error("実行しません: 第三者サイトへの実アクセスを伴うため、利用者の許可（--allow-network）が必要です");
     const cands = read<CaptureRow[]>(`${DIR}/real-post-candidates.local.json`);
     if (!cands?.length) throw new Error("実行しません: 先に real-posts-scan を実行してください");
-    const { cases, report } = await captureRealPosts({ rows: cands, maxRequests: Number(env.PHASE2_REAL_EXPAND_MAX) || 150 });
+    const max = Math.min(150, Number(env.PHASE2_REAL_EXPAND_MAX) || 150); // 許可された範囲（最大150リクエスト）を超えない
+    const { cases, pages, report } = await captureRealPosts({ rows: cands, maxRequests: max });
     writeFileSync(`${DIR}/cases.real.local.json`, JSON.stringify(cases, null, 1));
+    writeFileSync(`${DIR}/real-pages.local.json`, JSON.stringify(pages, null, 1)); // 取得したページ（出所・取得日時・ハッシュ・本文。Git管理外）
     writeFileSync(`${DIR}/real-capture-report.local.json`, JSON.stringify(report, null, 1));
-    console.log("REAL_POSTS_EXPAND", JSON.stringify({ withMultiLinks: report.withMultiLinks, built: report.built, requests: report.requests, stoppedBy: report.stoppedBy }));
+    console.log("REAL_POSTS_EXPAND", JSON.stringify({ withMultiLinks: report.withMultiLinks, processed: report.processed, built: report.built, pages: pages.length, requests: report.requests, bytes: report.bytes, shortLinks: report.shortLinks, failures: report.failures, shortenerRobots: report.shortenerRobots, stoppedBy: report.stoppedBy, elapsedMs: report.elapsedMs }));
   }, 1_800_000);
 
   it("real-validate: 実投稿のデータセット（cases.real.local.json・gold.real.local.json）の出所・複数リンク・goldの独立性を検査する", () => {

@@ -38,8 +38,10 @@ export interface Draft {
   round: string;
   /** 根拠の原文の引用（ページの本文にある一字一句） */
   quotes: string[];
+  /** 同じ応募機会を別のページ（番号）が重ねて書いている場合の、最初のページの番号。**同じ企画・同一の応募機会を2機会と数えない**ための印（人が判断する） */
+  sameOpportunityAs: number | null;
 }
-export const emptyDraft = (): Draft => ({ store: "", product: "", applyEnd: null, applyEndUnknown: false, applyUnit: null, applyUnitUnknown: false, region: "", round: "", quotes: [] });
+export const emptyDraft = (): Draft => ({ store: "", product: "", applyEnd: null, applyEndUnknown: false, applyUnit: null, applyUnitUnknown: false, region: "", round: "", quotes: [], sameOpportunityAs: null });
 
 /** 項目ごとの確認（全て true でないと確認済みにできない） */
 export interface FieldChecks {
@@ -62,7 +64,7 @@ export interface PageVersion {
 
 export interface HistoryEntry {
   at: string;
-  action: "draft_saved" | "confirmed" | "excluded" | "reopened" | "imported" | "page_changed";
+  action: "draft_saved" | "confirmed" | "excluded" | "reopened" | "imported" | "page_changed" | "held";
   /** 変更した項目名だけ（値は履歴に重ねて持たない。確認済みの値は confirmed に残る） */
   changed?: string[];
   note?: string;

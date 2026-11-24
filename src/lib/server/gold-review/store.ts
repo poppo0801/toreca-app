@@ -5,7 +5,9 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { emptyChecks, emptyDraft, nowIso, progressOf, validateConfirm, type Draft, type ExcludeReason, type FieldChecks, type HistoryEntry, type PageRecord, type PageVersion, type Problem, type ReviewState } from "@/lib/gold-review/model";
 import { pageText } from "@/lib/judgment/xsource/html-text";
-import { pageCandidate, validatePageGold, type PageCandidate, type R1PageGold } from "@/lib/judgment/xsource/r1-worksheet";
+import type { GoldCase } from "@/lib/judgment/xsource/compare-eval";
+import { candidateFromText, pageCandidate, validatePageGold, type PageCandidate, type R1PageGold } from "@/lib/judgment/xsource/r1-worksheet";
+import type { CapturedPage } from "@/lib/server/proposals/real-post-capture";
 
 /**
  * 独立gold確認（開発専用）の保存と読み込み。**Git管理外のローカルファイルだけ**（eval/phase2-compare/gold-review.local.json）。本番・Vercelでは使えない。
@@ -24,16 +26,65 @@ export function goldReviewEnabled(env: Env = process.env): boolean {
 
 export const reviewDir = (env: Env = process.env): string => resolve(env.GOLD_REVIEW_DIR || "eval/phase2-compare");
 export const pagesDir = (env: Env = process.env): string => resolve(env.GOLD_REVIEW_PAGES_DIR || "eval/real-data/10t-html");
-const stateFile = (env: Env = process.env): string => join(reviewDir(env), "gold-review.local.json");
-const backupDir = (env: Env = process.env): string => join(reviewDir(env), "gold-review-backups");
+/** 確認の対象: lp12=保存済みの実在LivePocketページ12件（合成R1の入力）／real=実投稿のリンク先ページ（実投稿R1の入力）。状態・バックアップは別ファイル */
+export type ReviewSet = "lp12" | "real";
+const stateFile = (env: Env = process.env, set: ReviewSet = "lp12"): string => join(reviewDir(env), set === "real" ? "gold-review-real.local.json" : "gold-review.local.json");
+const backupDir = (env: Env = process.env, set: ReviewSet = "lp12"): string => join(reviewDir(env), set === "real" ? "gold-review-real-backups" : "gold-review-backups");
 
+/** 実投稿のページの出所（投稿・短縮URL・展開先・取得） */
+export interface RealSource {
+  caseId: string;
+  order: number;
+  short: string;
+  postUrl: string;
+  postText: string;
+  finalUrl: string;
+  hops: number;
+  status: number;
+  fetchedAt: string;
+  sameContentAs: number | null;
+}
 export interface ReviewPage {
   n: number;
   url: string;
   text: string;
   version: PageVersion;
   candidate: PageCandidate;
+  set?: ReviewSet;
+  source?: RealSource;
 }
+
+const sha8 = (s: string): string => createHash("sha256").update(s).digest("hex").slice(0, 8);
+
+/** 実投稿のリンク先ページ（real-post-capture が保存した記録）。ページ番号は、案件ID×URLから決まる（再取得で並びが変わっても同じページは同じ番号） */
+export function loadRealPages(env: Env = process.env): ReviewPage[] {
+  const pf = join(reviewDir(env), "real-pages.local.json");
+  if (!existsSync(pf)) return [];
+  const pages = JSON.parse(readFileSync(pf, "utf8")) as CapturedPage[];
+  const cf = join(reviewDir(env), "real-post-candidates.local.json");
+  const rows = existsSync(cf) ? (JSON.parse(readFileSync(cf, "utf8")) as { id: string; postUrl: string; text: string }[]) : [];
+  const post = new Map(rows.map((r) => [`rp${sha8(r.id)}`, r]));
+  const used = new Set<number>();
+  const out: ReviewPage[] = [];
+  for (const p of pages) {
+    let n = 1000 + (parseInt(sha8(`${p.caseId}|${p.url}`).slice(0, 6), 16) % 90000);
+    while (used.has(n)) n++;
+    used.add(n);
+    let url: string;
+    try {
+      const u = new URL(p.url);
+      if (u.protocol !== "https:") continue;
+      url = u.toString();
+    } catch {
+      continue;
+    }
+    const row = post.get(p.caseId);
+    out.push({ n, url, text: p.text, set: "real", version: { hash: p.textHash, chars: p.chars, savedAt: p.fetchedAt }, candidate: candidateFromText({ n, url, text: p.text, title: p.title }), source: { caseId: p.caseId, order: p.order, short: p.short, postUrl: row?.postUrl ?? "", postText: row?.text ?? "", finalUrl: p.finalUrl, hops: p.hops, status: p.status, fetchedAt: p.fetchedAt, sameContentAs: p.sameContentAs } });
+  }
+  return out.sort((a, b) => (a.source!.caseId < b.source!.caseId ? -1 : a.source!.caseId > b.source!.caseId ? 1 : a.source!.order - b.source!.order));
+}
+
+export const loadReviewPages = (set: ReviewSet, env: Env = process.env): ReviewPage[] => (set === "real" ? loadRealPages(env) : loadPages(env));
 
 /** 保存済みの公開ページ（index.json の ok のもの）。公式ページへのリンクは https の URL だけ */
 export function loadPages(env: Env = process.env): ReviewPage[] {
@@ -64,8 +115,8 @@ export function loadPages(env: Env = process.env): ReviewPage[] {
 const newRecord = (n: number): PageRecord => ({ n, status: "unreviewed", draft: emptyDraft(), checks: emptyChecks(), history: [] });
 
 /** 保存された状態を読み、ページの一覧と同期する（新しいページは未確認で追加／ページが変わっていたら要再確認／ページが消えた記録は残す） */
-export function loadState(pages: readonly ReviewPage[], env: Env = process.env): ReviewState {
-  const f = stateFile(env);
+export function loadState(pages: readonly ReviewPage[], env: Env = process.env, set: ReviewSet = "lp12"): ReviewState {
+  const f = stateFile(env, set);
   let st: ReviewState = { v: 1, updatedAt: nowIso(), pages: [] };
   if (existsSync(f)) {
     try {
@@ -85,16 +136,16 @@ export function loadState(pages: readonly ReviewPage[], env: Env = process.env):
   return { ...st, pages: out };
 }
 
-const draftSchema = z.object({ store: z.string().max(120), product: z.string().max(200), applyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), applyEndUnknown: z.boolean(), applyUnit: z.enum(["one_form_one", "store_select", "per_store", "per_product"]).nullable(), applyUnitUnknown: z.boolean(), region: z.string().max(60), round: z.string().max(120), quotes: z.array(z.string().max(400)).max(10) });
+const draftSchema = z.object({ store: z.string().max(120), product: z.string().max(200), applyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), applyEndUnknown: z.boolean(), applyUnit: z.enum(["one_form_one", "store_select", "per_store", "per_product"]).nullable(), applyUnitUnknown: z.boolean(), region: z.string().max(60), round: z.string().max(120), quotes: z.array(z.string().max(400)).max(10), sameOpportunityAs: z.number().int().min(1).max(99999).nullable().default(null) });
 const checksSchema = z.object({ officialPageOpened: z.boolean(), store: z.boolean(), product: z.boolean(), applyEnd: z.boolean(), applyUnit: z.boolean(), quotes: z.boolean() });
 const versionSchema = z.object({ hash: z.string().regex(/^[0-9a-f]{16}$/), chars: z.number().int().min(0), savedAt: z.string().max(40) });
-const historySchema = z.object({ at: z.string().max(40), action: z.enum(["draft_saved", "confirmed", "excluded", "reopened", "imported", "page_changed"]), changed: z.array(z.string().max(30)).max(12).optional(), note: z.string().max(200).optional() });
+const historySchema = z.object({ at: z.string().max(40), action: z.enum(["draft_saved", "confirmed", "excluded", "reopened", "imported", "page_changed", "held"]), changed: z.array(z.string().max(30)).max(12).optional(), note: z.string().max(200).optional() });
 const stateSchema = z.object({
   v: z.literal(1),
   updatedAt: z.string().max(40),
   pages: z.array(
     z.object({
-      n: z.number().int().min(1).max(9999),
+      n: z.number().int().min(1).max(99999),
       status: z.enum(["unreviewed", "confirmed", "excluded", "needs_recheck"]),
       draft: draftSchema,
       checks: checksSchema,
@@ -107,14 +158,14 @@ const stateSchema = z.object({
 export { stateSchema };
 
 /** 原子的に保存（直前の状態をバックアップ）。バックアップは最大30世代 */
-export function saveState(st: ReviewState, env: Env = process.env): void {
-  const f = stateFile(env);
+export function saveState(st: ReviewState, env: Env = process.env, set: ReviewSet = "lp12"): void {
+  const f = stateFile(env, set);
   mkdirSync(reviewDir(env), { recursive: true });
   if (existsSync(f)) {
-    mkdirSync(backupDir(env), { recursive: true });
-    copyFileSync(f, join(backupDir(env), `${new Date().toISOString().replace(/[:.]/g, "-")}.json`));
-    const olds = readdirSync(backupDir(env)).filter((x) => x.endsWith(".json")).sort();
-    for (const o of olds.slice(0, Math.max(0, olds.length - 30))) unlinkSync(join(backupDir(env), o));
+    mkdirSync(backupDir(env, set), { recursive: true });
+    copyFileSync(f, join(backupDir(env, set), `${new Date().toISOString().replace(/[:.]/g, "-")}.json`));
+    const olds = readdirSync(backupDir(env, set)).filter((x) => x.endsWith(".json")).sort();
+    for (const o of olds.slice(0, Math.max(0, olds.length - 30))) unlinkSync(join(backupDir(env, set), o));
   }
   const tmp = `${f}.tmp`;
   writeFileSync(tmp, JSON.stringify({ ...st, updatedAt: nowIso() }, null, 1));
@@ -150,6 +201,14 @@ export function opExclude(st: ReviewState, page: ReviewPage, reason: ExcludeReas
   if (reason === "other" && note.trim().length < 3) throw new Error("「その他」の理由をメモに書いてください");
   const at = nowIso();
   return replace(st, hist({ ...rec, status: "excluded", excluded: { reason, note: note.trim().slice(0, 400), at, pageVersion: page.version }, confirmed: undefined }, { at, action: "excluded", note: reason }));
+}
+
+/** 公式ページを開けない・確認できない: 確認済みにせず「要再確認」で保留する（保存原文との比較だけでは、独立した確認済みにしない） */
+export function opHold(st: ReviewState, n: number, note: string): ReviewState {
+  const rec = st.pages.find((p) => p.n === n);
+  if (!rec) throw new Error("ページが見つかりません");
+  if (rec.status === "confirmed") throw new Error("確認済みのページは、先に「再確認にする」を押してください");
+  return replace(st, hist({ ...rec, status: "needs_recheck", excluded: undefined }, { at: nowIso(), action: "held", note: note.trim().slice(0, 180) || "公式ページを開けないため保留" }));
 }
 
 /** 確認済み・除外・要再確認を「未確認」へ戻す（入力した内容は下書きに残る。確認済みの内容は履歴に残らず下書きへ移る） */
@@ -214,6 +273,52 @@ export function writeR1Gold(pages: readonly ReviewPage[], st: ReviewState, env: 
   if (!v.ok) return { ok: false, reason: `引用の再照合に失敗しました: ${v.errors.slice(0, 2).join(" / ")}` };
   writeFileSync(join(reviewDir(env), "r1-gold-pages.local.json"), JSON.stringify(built.gold, null, 1));
   return { ok: true, confirmed: built.gold.filter((g) => !g.exclude).length, excluded: built.excluded.length };
+}
+
+/**
+ * 実投稿の案件のgold（人が確認したページ単位の記録から）。案件（投稿）の**全ての（内容の異なる）ページが確認済み**のときだけ案件にする。除外・保留・未確認が1つでもあれば、
+ * その案件は見送り（複数機会の別試験・再確認の対象として理由つきで残す）。同じ応募機会を重ねて書いているページ（人が印を付けたもの）は、1つの機会にまとめる（2機会と数えない）。
+ */
+export function buildRealGold(st: ReviewState, pages: readonly ReviewPage[], cases: readonly { caseId: string; pages: { url: string }[] }[], at: string): { gold: GoldCase[]; deferred: { caseId: string; reason: string }[] } {
+  const rec = new Map(st.pages.map((p) => [p.n, p]));
+  const byUrl = new Map(pages.map((p) => [p.url, p]));
+  const gold: GoldCase[] = [];
+  const deferred: { caseId: string; reason: string }[] = [];
+  for (const c of cases) {
+    const ps = c.pages.map((x) => byUrl.get(x.url));
+    if (ps.some((p) => !p)) {
+      deferred.push({ caseId: c.caseId, reason: "ページが見つからない" });
+      continue;
+    }
+    const recs = ps.map((p) => rec.get(p!.n));
+    const bad = recs.findIndex((r) => !r || r.status !== "confirmed" || !r.confirmed);
+    if (bad >= 0) {
+      deferred.push({ caseId: c.caseId, reason: `ページ${bad + 1}が${recs[bad]?.status === "excluded" ? "除外（" + (recs[bad]?.excluded?.reason ?? "") + "）" : "未確認／要再確認"}` });
+      continue;
+    }
+    // 同じ機会のまとめ: sameOpportunityAs が指すページ（番号）と同じ機会
+    const rootOf = (r: PageRecord): number => (r.confirmed!.draft.sameOpportunityAs && rec.get(r.confirmed!.draft.sameOpportunityAs)?.confirmed ? rootOf(rec.get(r.confirmed!.draft.sameOpportunityAs)!) : r.n);
+    const roots = [...new Set(recs.map((r) => rootOf(r!)))];
+    const opps = roots.map((root) => {
+      const members = recs.map((r, idx) => ({ r: r!, idx })).filter((m) => rootOf(m.r) === root);
+      const main = members.find((m) => m.r.n === root) ?? members[0];
+      const d = main.r.confirmed!.draft;
+      return { oppId: `p${root}`, store: d.store.trim(), product: d.product.trim(), applyEnd: d.applyEnd, region: d.region.trim() || null, url: ps[main.idx]!.url, applyUnit: d.applyUnit, decision: "register" as const, evidenceIn: ["page" as const], pageIndex: main.idx, evidence: members.flatMap((m) => m.r.confirmed!.draft.quotes.filter(Boolean).map((quote) => ({ where: `page:${m.idx}`, quote }))) };
+    });
+    gold.push({ caseId: c.caseId, canary: `CANARY-${c.caseId.toUpperCase()}-${(at.replace(/\D/g, "") || "0").slice(0, 8)}-GOLD`, verified: { by: "human", at: recs.map((r) => r!.confirmed!.verifiedAt).sort().at(-1)!, basis: `ページ単位の人の確認（${recs.map((r) => `#${r!.n}・版${r!.confirmed!.pageVersion.hash}`).join(" ")}）から組み立て` }, opportunities: opps });
+  }
+  return { gold, deferred };
+}
+
+/** 実投稿のgoldを書き出す（gold.real.local.json）。確認が完了した案件だけ。見送った案件の理由を返す */
+export function writeRealGold(pages: readonly ReviewPage[], st: ReviewState, env: Env = process.env): { ok: true; cases: number; deferred: { caseId: string; reason: string }[] } | { ok: false; reason: string } {
+  const cf = join(reviewDir(env), "cases.real.local.json");
+  if (!existsSync(cf)) return { ok: false, reason: "実投稿の案件（cases.real.local.json）がありません" };
+  const cases = JSON.parse(readFileSync(cf, "utf8")) as { caseId: string; pages: { url: string }[] }[];
+  const r = buildRealGold(st, pages, cases, nowIso());
+  if (r.gold.length === 0) return { ok: false, reason: `確認が完了した案件がありません（見送り ${r.deferred.length}件）` };
+  writeFileSync(join(reviewDir(env), "gold.real.local.json"), JSON.stringify(r.gold, null, 1));
+  return { ok: true, cases: r.gold.length, deferred: r.deferred };
 }
 
 export const reviewerId = (userId: string): string => createHash("sha256").update(`gold-review:${userId}`).digest("hex").slice(0, 12);
