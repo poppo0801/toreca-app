@@ -160,12 +160,14 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   if (stored?.imageRefs?.length) {
     const vision: VisionClient | undefined = deps.vision
       ? async (req) => {
-          const c = await loadImageObservation(a.db, a.householdId, a.candidate.id, req.imageUrl, deps.mode);
-          if (c) {
+          // 保存済みの解析結果（同じモードのものだけ）。期間内なら取得せず再利用／期間を過ぎていたら画像を取り直し、内容が同じなら再利用・違えば再解析
+          const c = await loadImageObservation(a.db, a.householdId, a.candidate.id, req.imageUrl, deps.mode, clock0());
+          if (c && !c.stale) {
             cachedUrls.add(req.imageUrl);
-            return { readings: c.readings };
+            const meta = { ...(c.sha256 ? { sha256: c.sha256 } : {}), reusedFromCache: true };
+            return c.status === "failed" ? { failed: c.failureReason ?? "unknown", message: "前回取得できなかった画像（再試行の期間内）", retryable: false, meta } : { readings: c.readings, meta };
           }
-          return deps.vision!(req);
+          return deps.vision!(c && c.status !== "failed" && c.sha256 ? { ...req, known: { sha256: c.sha256, readings: c.readings } } : req);
         }
       : undefined;
     imageAnalysis = await analyzeImages({ imageRefs: stored.imageRefs, existing: stored.imageReadings ?? [], postText: [stored.text, ...(stored.linkedPages ?? []).map((l) => l.text)].join("\n").slice(0, 60_000), ...(vision ? { vision } : {}) }).catch(() => null);
@@ -252,7 +254,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       storage.stats = await saveCoverageStats(a.db, a.householdId, stats);
       if (imageAnalysis) {
         storage.images = imageAnalysis.counts;
-        for (const o of imageAnalysis.observations) if (o.status === "analyzed" || o.status === "unreadable") if (!cachedUrls.has(o.url)) await saveImageObservation(a.db, a.householdId, a.candidate.id, o, { mode: deps.mode, modelId: deps.modelId, at: clock0().toISOString() });
+        for (const o of imageAnalysis.observations) if (!cachedUrls.has(o.url)) await saveImageObservation(a.db, a.householdId, a.candidate.id, o, { mode: deps.mode, modelId: deps.modelId, at: clock0().toISOString() });
       }
       if (deps.learn !== false) {
         let saved = 0;

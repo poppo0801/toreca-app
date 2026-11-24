@@ -19,7 +19,8 @@ import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service"
 import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
-import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
+import { enrichXPost, makeXRichFetcher, type FetchControl } from "@/lib/server/collector/x-rich";
+import { DEFAULT_RUN_LIMITS, HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
 import { rememberFullPages, toQueuedPage } from "@/lib/server/collector/collected-docs";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
@@ -137,6 +138,8 @@ export interface CollectDeps {
   fetchOembed?: typeof fetchXPost;
   xClient: XClient | null;
   fetchImage?: typeof fetchXImage;
+  /** 取得の負荷制御（ホスト別の間隔・同時接続・バックオフ・1回の実行の総量）。processQueue が実行の最初に用意する */
+  fetchControl?: FetchControl;
   budgetMs?: number;
   /** 円換算の為替レート(世帯の設定)。実行の最初に読み込む */
   usdJpy?: number;
@@ -508,7 +511,7 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
   if (q.kind === "x_post" && q.post) {
     const p = q.post;
     // 本文＋添付画像（複数・縦長は分割）＋リンク先の本文を統合（単件・一括・共有と共通の処理）
-    const rich = await enrichXPost(p, { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage });
+    const rich = await enrichXPost(p, { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage, control: deps.fetchControl });
     // 画像は「見つかった／取得できた／AIへ渡した」を別々に記録する（取得とAI解析を混同しない）
     q.imageStats = rich.stats;
     q.xVia = "api";
@@ -1654,6 +1657,9 @@ export async function triageQueue(deps: CollectDeps, cond: CollectionConditions)
   return n;
 }
 
+/** プロセス内で共有するホスト別の取得制御（複数の投稿・実行が同じ公式サイトへ集中しても間隔・同時接続を守る） */
+const sharedHostThrottle = new HostThrottle();
+
 const AI_PAUSE_AFTER = 5;
 const AI_PAUSE_MS = 6 * 3600_000;
 
@@ -1675,6 +1681,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   const rules = await activeExclusions(db, householdId);
   deps.excludedChains = rules.some((r) => r.scope === "chain") ? await loadExcludedChains(db, householdId).catch(() => []) : [];
   const userRules = await activeUserRules(db, householdId);
+  // 取得の負荷制御: ホスト別の間隔は実行をまたいで共有（プロセス内）、総量は今回の実行ぶん。時間切れが近づいたら新しい取得は始めない
+  deps.fetchControl ??= { throttle: sharedHostThrottle, budget: new RunFetchBudget({ ...DEFAULT_RUN_LIMITS, deadlineAt: Date.now() + ctx.timeLeft() }), shouldCancel: () => ctx.timeLeft() < 8_000 };
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;

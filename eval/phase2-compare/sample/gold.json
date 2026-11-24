@@ -1,0 +1,144 @@
+[
+ {
+  "caseId": "sample1",
+  "canary": "CANARY-SAMPLE-1-ONLY",
+  "verified": {
+   "by": "human",
+   "at": "2026-11-24",
+   "basis": "架空のサンプル（仕組みの確認用。実データではない）"
+  },
+  "opportunities": [
+   {
+    "oppId": "o0",
+    "store": "新宿本店",
+    "product": "拡張パック",
+    "applyEnd": "2026-11-30",
+    "region": null,
+    "url": "https://shop-a.example.invalid/e/1",
+    "applyUnit": null,
+    "decision": "register",
+    "evidenceIn": [
+     "page"
+    ],
+    "pageIndex": 0,
+    "evidence": [
+     {
+      "where": "page:0",
+      "quote": "受付期間 11月30日まで"
+     }
+    ]
+   },
+   {
+    "oppId": "o1",
+    "store": "渋谷店",
+    "product": "拡張パック",
+    "applyEnd": "2026-11-30",
+    "region": null,
+    "url": "https://shop-b.example.invalid/e/2",
+    "applyUnit": null,
+    "decision": "register",
+    "evidenceIn": [
+     "page"
+    ],
+    "pageIndex": 1,
+    "evidence": [
+     {
+      "where": "page:1",
+      "quote": "受付期間 11月30日まで"
+     }
+    ]
+   },
+   {
+    "oppId": "o2",
+    "store": "大阪店",
+    "product": "拡張パック",
+    "applyEnd": "2026-11-30",
+    "region": null,
+    "url": "https://shop-c.example.invalid/e/3",
+    "applyUnit": null,
+    "decision": "register",
+    "evidenceIn": [
+     "page"
+    ],
+    "pageIndex": 2,
+    "evidence": [
+     {
+      "where": "page:2",
+      "quote": "受付期間 11月30日まで"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "caseId": "sample2",
+  "canary": "CANARY-SAMPLE-2-ONLY",
+  "verified": {
+   "by": "human",
+   "at": "2026-11-24",
+   "basis": "架空のサンプル（仕組みの確認用。実データではない）"
+  },
+  "opportunities": [
+   {
+    "oppId": "o0",
+    "store": "新宿本店",
+    "product": "拡張パック",
+    "applyEnd": "2026-11-30",
+    "region": null,
+    "url": "https://shop-a.example.invalid/e/1",
+    "applyUnit": null,
+    "decision": "register",
+    "evidenceIn": [
+     "page"
+    ],
+    "pageIndex": 0,
+    "evidence": [
+     {
+      "where": "page:0",
+      "quote": "受付期間 11月30日まで"
+     }
+    ]
+   },
+   {
+    "oppId": "o1",
+    "store": "渋谷店",
+    "product": "拡張パック",
+    "applyEnd": "2026-11-30",
+    "region": null,
+    "url": "https://shop-b.example.invalid/e/2",
+    "applyUnit": null,
+    "decision": "register",
+    "evidenceIn": [
+     "page"
+    ],
+    "pageIndex": 1,
+    "evidence": [
+     {
+      "where": "page:1",
+      "quote": "受付期間 11月30日まで"
+     }
+    ]
+   },
+   {
+    "oppId": "o2",
+    "store": "大阪店",
+    "product": "拡張パック",
+    "applyEnd": "2026-11-30",
+    "region": null,
+    "url": "https://shop-c.example.invalid/e/3",
+    "applyUnit": null,
+    "decision": "register",
+    "evidenceIn": [
+     "page"
+    ],
+    "pageIndex": 2,
+    "evidence": [
+     {
+      "where": "page:2",
+      "quote": "受付期間 11月30日まで"
+     }
+    ]
+   }
+  ]
+ }
+]

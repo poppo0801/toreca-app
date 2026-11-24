@@ -14,10 +14,12 @@ import { CANDIDATE_CAP_PER_CASE_JPY, type JudgmentRealGate } from "@/lib/judgmen
 import { preflightRun, type PreflightResult } from "@/lib/judgment/xsource/cost-preflight";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, OUTPUT_MAX_TOKENS, type AiDiagnostic } from "@/lib/judgment/xsource/research-ai";
 import type { FetchOutcome, ResearchLimits } from "@/lib/judgment/xsource/research-loop";
+import type { VisionClient } from "@/lib/judgment/xsource/image-evidence";
+import { worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
 import { makeSearchTool, type SearchProviderLike } from "@/lib/judgment/xsource/research-search";
 import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, type CandidateRow } from "./generate";
-import { issueRealRunTicket } from "./real-gate";
+import { issueRealRunTicket, type RealRunTicket } from "./real-gate";
 
 type Client = Parameters<typeof makeAnthropicResearchAgent>[0];
 
@@ -61,6 +63,14 @@ export interface RealRunOptions {
   /** 検索（読み取り専用）。渡したときだけ検索を使う。worstJpy は検索1回の最悪費用（円。予約の検査に使う） */
   search?: { provider: SearchProviderLike; worstJpy: number; reserveJpy?: number };
   liveFetch?: (url: string) => Promise<FetchOutcome>;
+  /** 画像の実解析（vision-real の makeRealVisionClient が返す）。同じ予算（budget）を共有する。渡さなければ画像は解析しない（読み取り済みの再利用だけ） */
+  vision?: VisionClient;
+  /** 実行の予算・許可証が出来てから画像解析のクライアントを作る（同じ予算を共有させるため）。halted は認証・利用上限で停止中かを返す */
+  visionFactory?: (ctx: { ticket: RealRunTicket; budget: CallBudget }) => { vision: VisionClient; halted?: () => string | null };
+  /** 候補ごとの設定の差（比較試験のアーム: 経験ヒントの有無・画像解析の有無）。許可証・予算・モード・AIは上書きできない */
+  depsFor?: (c: CandidateRow) => { learn?: boolean; vision?: boolean };
+  /** 1候補あたりに解析する画像の最大枚数（preflight の予約に含める） */
+  maxImagesPerCase?: number;
   limits?: Partial<ResearchLimits>;
   maxConsecutiveFailures?: number;
   shouldStop?: () => boolean;
@@ -117,7 +127,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
   if (!releaseLock) return stop("locked");
   try {
     const limits: ResearchLimits = { maxTurns: 4, maxFetches: 3, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxSearches: o.search ? 1 : 0, searchReserveJpy: o.search?.reserveJpy ?? 2.5, maxReads: 8, maxReadChars: 24_000, ...o.limits };
-    const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
+    const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), ...(o.vision || o.visionFactory ? { images: { perCaseCount: o.maxImagesPerCase ?? 4, worstJpyEach: worstCaseVisionCallJpy(ticket.model, [{ width: 1200, height: 1600 }]) } } : {}), gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
     base.preflight = pf;
     emit({ kind: "preflight", ok: pf.ok, errors: pf.errors, warnings: pf.warnings, minPerCaseJpy: pf.minPerCaseJpy, maxReservedPerCaseJpy: pf.maxReservedPerCaseJpy, reservationCoversWorstCase: pf.reservationCoversWorstCase });
     if (!pf.ok) return stop("preflight_failed"); // 1回もAIを呼ばない
@@ -138,6 +148,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
     const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic });
     const judge = makeAnthropicRegistrationJudge(o.client, { model: ticket.model, onDiagnostic });
     const searchTool = o.search ? makeSearchTool(o.search.provider) : undefined;
+    const visionHandle = o.visionFactory ? o.visionFactory({ ticket, budget }) : o.vision ? { vision: o.vision } : undefined;
     const maxConsecutive = o.maxConsecutiveFailures ?? 3;
 
     for (const c of o.candidates) {
@@ -150,9 +161,15 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         householdId: o.householdId,
         candidate: c,
         env,
-        deps: { agent, judge, mode: "real", modelId: ticket.model, ticket, budget, perItemCapJpy: ticket.perCaseCapJpy, limits, ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), now: o.now, shouldStop: () => !!fatal || !!o.shouldStop?.() },
+        deps: { agent, judge, mode: "real", modelId: ticket.model, ticket, budget, perItemCapJpy: ticket.perCaseCapJpy, limits, ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(() => {
+          const d = o.depsFor?.(c);
+          return { ...(d?.learn !== undefined ? { learn: d.learn } : {}), ...(visionHandle && d?.vision !== false ? { vision: visionHandle.vision } : {}) };
+        })(), now: o.now, shouldStop: () => !!fatal || !!o.shouldStop?.() },
       });
       base.processed++;
+      const vh = visionHandle?.halted?.();
+      if (vh === "auth_error") fatal = "auth_error";
+      else if (vh === "rate_limited") fatal = "rate_limited"; // 画像解析の認証・利用上限エラーも、以降を止める
       if (!r.ok) {
         base.rows.push({ candidate: short(c.id), status: "failed", proposals: 0, costJpy: 0, reason: r.reason });
         emit({ kind: "candidate_failed", candidate: short(c.id), reason: r.reason });

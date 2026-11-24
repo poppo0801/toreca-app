@@ -4,7 +4,7 @@
 --  - evidence_coverage_stats: 取得量・切断・参照位置・費用・結果の計測（原文・個人情報を含まない。将来の取得/読む範囲の最適化の比較実験の材料）。追記専用。
 --  - registration_proposals.item_fingerprint: 項目の本文から作る識別子。人の修正を別の項目へ移さないための照合（見出しだけでは同じ見出し内の入れ替わりを区別できない）。
 -- 本番適用は別承認（docs/RELEASE_FLOW.md）。いずれも新AI機能（既定OFF）からだけ書かれる。既存の表・データは変更しない（列の追加のみ・NULL許容）。
--- 逆戻し（参考・本番では実行しない）: alter table public.registration_proposals drop column item_fingerprint; drop table public.evidence_coverage_stats; drop table public.evidence_documents;
+-- 逆戻し（参考・本番では実行しない）: alter table public.registration_proposals drop column item_fingerprint; drop table public.evidence_coverage_stats; drop table public.evidence_documents; drop function public.evidence_documents_guard(); drop function public.evidence_coverage_stats_no_update();
 
 create table public.evidence_documents (
   id uuid primary key default gen_random_uuid(),

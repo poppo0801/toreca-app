@@ -160,3 +160,14 @@ export function looksLikeLoginWall(text: string): boolean {
 export function ledgerFromPlan(plan: readonly PlannedLink[]): LinkLedgerEntry[] {
   return plan.map((p) => ({ url: p.url.slice(0, 500), key: p.key.slice(0, 300), host: p.host, order: p.order, origins: p.origins, ...(p.shortUrl ? { shortUrl: p.shortUrl } : {}), status: "skipped" as const, ...(p.reason ? { reason: p.reason } : {}) }));
 }
+
+/** 時間・総量・ホストの制限・中止で「取得しなかった」だけで、リンク自体に問題はない理由（次の収集・再調査で取得できる）。取りこぼしを隠さないための分類 */
+export const RECHECKABLE_REASONS: ReadonlySet<string> = new Set(["time_limit", "deadline", "backoff_beyond_deadline", "budget_requests", "budget_bytes", "budget_images", "host_suspended", "cancelled", "over_total_limit", "over_host_limit", "timeout", "network"]);
+
+/**
+ * 台帳のうち「あとで取得し直す価値がある」未取得のリンク（上限・時間切れ・ホストの制限・一時的な通信失敗）。本当に取得できない（robots・ログイン・短縮・X・不正）ものは含めない。
+ * 順序は発見順。利用者・AI・再調査が「取得できていない部分がある」ことを知るための根拠（取得できなかった事実を、情報が無いことにしない）。
+ */
+export function pendingRecheck(ledger: readonly LinkLedgerEntry[]): LinkLedgerEntry[] {
+  return ledger.filter((e) => e.status !== "fetched" && !!e.reason && RECHECKABLE_REASONS.has(e.reason)).sort((a, b) => a.order - b.order);
+}

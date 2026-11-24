@@ -156,7 +156,7 @@ describe("静的確認: 登録案の機能は、抽選・応募・購入・通�
     expect(run.indexOf("proposalAfterCandidate(")).toBeGreaterThan(run.indexOf("shadow.schedule("));
   });
   it("登録案のコードを import する非テストのファイルは、想定した入口だけ（候補の画面・その操作・収集の接続口・登録案の部品）", () => {
-    const allowed = new Set(["src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx"]);
+    const allowed = new Set(["src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/judgment/xsource/vision-real.ts"]);
     const users = walk("src").filter((f) => !/\.test\.tsx?$/.test(f) && !f.startsWith("src/lib/server/proposals/") && /server\/proposals\//.test(readFileSync(f, "utf8")));
     for (const f of users) expect(allowed.has(f.split("\\").join("/")), f).toBe(true);
   });
@@ -202,6 +202,27 @@ describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server 
     const sdk = nonTest.filter((f) => /@anthropic-ai\/sdk/.test(readFileSync(f, "utf8")) && f.startsWith("src/lib/server/proposals/"));
     expect(sdk).toEqual([]);
     for (const f of ["src/lib/server/proposals/real-run.ts", "src/lib/server/proposals/real-gate.ts", "src/lib/server/proposals/generate.ts", "src/lib/server/proposals/eval-candidates.ts"]) expect(readFileSync(f, "utf8"), f).not.toMatch(/process\.env\.(ANTHROPIC|AGENT_ANTHROPIC|JUDGMENT_EVAL)_API_KEY|apiKey:/);
+  });
+  it("画像の実解析（vision-real）・比較試験の実行部（compare-run）は、評価入口（real-run・compare-real）以外の非テストのコードから読み込まれない。収集・画面・server action は画像取得の本体（image-fetch）も読み込まない", () => {
+    expect(importers(/xsource\/vision-real|\.\/vision-real/, ["src/lib/judgment/xsource/vision-real.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
+    expect(importers(/proposals\/compare-run|\.\/compare-run/, ["src/lib/server/proposals/compare-run.ts"])).toEqual([]);
+    expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/server/proposals/compare-run.ts"])).toEqual([]);
+    expect(importers(/images\/image-fetch|\.\/image-fetch/,["src/lib/server/images/image-fetch.ts", "src/lib/server/images/split-adapter.ts", "src/lib/judgment/xsource/vision-real.ts", "src/lib/judgment/xsource/vision-mock.ts"])).toEqual([]);
+    for (const f of ["src/lib/server/collector/run.ts", "src/lib/server/collector/x-rich.ts", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/proposals/generate.ts", "src/app/(app)/lotteries/candidates/proposal-actions.ts"]) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/vision-real|images\/image-fetch|makeRealVisionClient|fetchPublicImage/);
+    }
+  });
+  it("実AIの比較試験の入口は、承認文・独立goldの検証・計画の費用の検査・ローカルDBの確認を行い、サンプルでは実AIを実行しない", () => {
+    const t = readFileSync("src/lib/server/proposals/compare-real.real.test.ts", "utf8");
+    expect(t).toContain("checkJudgmentRealRun(");
+    expect(t.indexOf("checkJudgmentRealRun(")).toBeLessThan(t.indexOf("new Anthropic("));
+    expect(t.indexOf("validateGold(gold)")).toBeLessThan(t.indexOf("new Anthropic("));
+    expect(t).toContain("ローカルのSupabase以外には接続しません");
+    expect(t).toContain("架空のサンプルでは実AIを実行しない");
+    const s = readFileSync("scripts/compare-phase2.mjs", "utf8");
+    expect(s).toContain("既定値はありません");
+    expect(s).toContain("APPROVE C ${total}JPY");
+    expect(readFileSync(".gitignore", "utf8")).toContain("eval/phase2-compare/*.local.json");
   });
   it("実AIの評価入口は、事前検査の後でないとクライアントを作らず、ローカルDB以外に接続せず、承認なしでは起動しない", () => {
     const t = readFileSync("src/lib/server/proposals/proposal-real.real.test.ts", "utf8");

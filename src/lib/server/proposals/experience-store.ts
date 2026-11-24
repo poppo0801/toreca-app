@@ -116,21 +116,64 @@ export async function recordHumanExperience(a: { db: Db; householdId: string; pr
 }
 
 // ------------------------------------------------------------------ 画像の解析結果の再利用
-export async function loadImageObservation(db: Db, householdId: string, candidateId: string, imageUrl: string, mode: ExperienceMode): Promise<{ status: "analyzed" | "unreadable"; readings: VisionReading[] } | null> {
+/** 同じURLの解析結果を、取得し直さずに再利用してよい期間（日）。これを過ぎたら画像を取り直し、内容（ハッシュ）が同じなら再利用・違えば再解析する */
+export const IMAGE_REUSE_DAYS = 7;
+/** 取得できなかった画像（robots・期限切れ等）を、再び取りに行かない期間（日） */
+export const IMAGE_FAILED_RETRY_DAYS = 3;
+/** 保存してよい失敗（再試行しても同じ結果になる理由）。通信・タイムアウト・上限・停止などの一時的な失敗は保存せず、次回再試行する */
+export const PERSISTENT_FAILURES = new Set(["private_url", "robots", "auth_required", "not_found", "unsupported_type", "spoofed_type", "too_large_bytes", "too_large_pixels", "corrupt", "invalid_url", "blocked"]);
+
+export interface LoadedImageObservation {
+  status: "analyzed" | "unreadable" | "failed";
+  readings: VisionReading[];
+  failureReason: string | null;
+  sha256: string | null;
+  observedAt: string;
+  /** 再利用の期間を過ぎている（画像を取り直して、ハッシュが同じなら再利用する） */
+  stale: boolean;
+}
+
+/** 同じ候補・同じ画像URL・同じモードの最新の解析結果。**モード（mock/replay/real）が違う結果は返さない**（モックを実解析として再利用しない） */
+export async function loadImageObservation(db: Db, householdId: string, candidateId: string, imageUrl: string, mode: ExperienceMode, now: Date = new Date()): Promise<LoadedImageObservation | null> {
   try {
-    const r = (await t(db, "evidence_image_observations").select("status,readings").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", canonUrl(imageUrl).key.slice(0, 300)).eq("mode", mode).limit(1)) as { data: { status: "analyzed" | "unreadable"; readings: VisionReading[] }[] | null };
+    const r = (await t(db, "evidence_image_observations").select("status,readings,failure_reason,content_sha256,observed_at").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", canonUrl(imageUrl).key.slice(0, 300)).eq("mode", mode).order("observed_at", { ascending: false }).limit(1)) as { data: { status: LoadedImageObservation["status"]; readings: VisionReading[]; failure_reason: string | null; content_sha256: string | null; observed_at: string }[] | null };
     const x = r.data?.[0];
-    return x ? { status: x.status, readings: x.readings ?? [] } : null;
+    if (!x) return null;
+    const ageDays = (now.getTime() - new Date(x.observed_at).getTime()) / 86_400_000;
+    const limit = x.status === "failed" ? IMAGE_FAILED_RETRY_DAYS : IMAGE_REUSE_DAYS;
+    return { status: x.status, readings: x.readings ?? [], failureReason: x.failure_reason, sha256: x.content_sha256, observedAt: x.observed_at, stale: ageDays > limit };
   } catch {
     return null;
   }
 }
 
 export async function saveImageObservation(db: Db, householdId: string, candidateId: string, o: ImageObservation, a: { mode: ExperienceMode; modelId: string | null; at: string }): Promise<boolean> {
-  if (o.status !== "analyzed" && o.status !== "unreadable") return false; // 失敗・上限超過は保存しない（再解析できる）
+  const persistFailure = o.status === "failed" && !!o.failureReason && PERSISTENT_FAILURES.has(o.failureReason);
+  if (o.status !== "analyzed" && o.status !== "unreadable" && !persistFailure) return false; // 一時的な失敗・上限超過は保存しない（再解析できる）
+  if (o.meta?.reusedFromCache) return true; // 保存済みの結果を再利用しただけ（同じ内容の行が既にある）
   try {
-    const r = (await t(db, "evidence_image_observations").insert({ household_id: householdId, candidate_id: candidateId, image_url: o.url.slice(0, 500), url_key: canonUrl(o.url).key.slice(0, 300), image_index: Math.min(40, Math.max(1, o.imageIndex)), status: o.status, readings: o.readings.map((x) => ({ field: x.field, text: x.text, ...(x.uncertainty ? { uncertainty: x.uncertainty } : {}), ...(x.region ? { region: x.region } : {}) })), mode: a.mode, model_id: a.modelId, observed_at: a.at })) as { error: { code?: string } | null };
-    return !r.error || r.error.code === "23505"; // 既にある（同じ画像・モード）は成功扱い
+    const m = o.meta;
+    const r = (await t(db, "evidence_image_observations").insert({
+      household_id: householdId,
+      candidate_id: candidateId,
+      image_url: o.url.slice(0, 500),
+      url_key: canonUrl(o.url).key.slice(0, 300),
+      image_index: Math.min(40, Math.max(1, o.imageIndex)),
+      status: o.status,
+      failure_reason: o.status === "failed" ? (o.failureReason ?? null) : null,
+      content_sha256: m?.sha256 ?? null,
+      width: m?.width ?? null,
+      height: m?.height ?? null,
+      tiles: m?.tiles ?? null,
+      cost_jpy: m?.costJpy ?? null,
+      input_tokens: m?.inputTokens ?? null,
+      output_tokens: m?.outputTokens ?? null,
+      readings: o.readings.map((x) => ({ field: x.field, text: x.text, ...(x.uncertainty ? { uncertainty: x.uncertainty } : {}), ...(x.region ? { region: x.region } : {}) })),
+      mode: a.mode,
+      model_id: a.modelId,
+      observed_at: a.at,
+    })) as { error: { code?: string } | null };
+    return !r.error || r.error.code === "23505"; // 既にある（同じ画像・同じ内容・モード）は成功扱い
   } catch {
     return false;
   }
