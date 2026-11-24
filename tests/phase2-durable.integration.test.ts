@@ -22,6 +22,7 @@ const U = (i: number) => `https://shop-${"abc"[i]}.example.invalid/e/${i + 1}`;
 const html = (shop: string) => `<html><title>${shop}</title><body><h1>【${shop}】拡張パック 抽選受付</h1><p>受付期間 11月30日まで。お一人様1回まで。${shop}の店頭受取のみ。</p><p>応募方法の詳細。本ページの内容をご確認ください。</p></body></html>`;
 const okPage = (url: string): SafeFetchResult => ({ ok: true, finalUrl: url, status: 200, contentType: "text/html", body: html(SHOPS[Number(/e\/(\d)/.exec(url)?.[1] ?? 1) - 1]), truncated: false });
 const sleepFast = async () => undefined;
+const page0 = () => "【新宿本店】拡張パック 抽選受付。受付期間 11月30日まで。お一人様1回まで。新しい版のページ。";
 
 describe.skipIf(!dbTestsEnabled)("Phase 2: 耐久的な取得制御・再調査・掃除", () => {
   const admin = adminClient();
@@ -192,6 +193,28 @@ describe.skipIf(!dbTestsEnabled)("Phase 2: 耐久的な取得制御・再調査�
     await run();
     const ev = ((await admin.from("collection_candidates").select("last_good").eq("id", row.id).single()).data as any).last_good.evidence;
     expect(ev.linkedPages.map((p: any) => p.url).sort()).toEqual([U(0), U(1)]); // 両方が残る
+  }, 60_000);
+
+  it("②監査で発見: 古い再取得結果で、より新しい証拠を上書きしない／完了・諦めたタスクが再収集でまた未取得になったら、1時間後に再び対象にする", async () => {
+    const { row, ledger } = await mkCandidate([U(0)], POST);
+    await enqueueLinkRechecks({ db: db(), householdId: hid, candidateId: row.id, ledger, now: new Date() });
+    await admin.from("link_recheck_tasks").update({ next_attempt_at: new Date(Date.now() - 2 * 86_400_000).toISOString() }).eq("candidate_id", row.id);
+    // 証拠には、このタスクの取得時刻（過去の時刻を注入）より新しいページが既にある
+    const ev0 = (row.last_good as any).evidence;
+    const newer = { url: U(0), text: page0(), fetchedAt: new Date(Date.now() + 3600_000).toISOString(), fullChars: 100, truncated: false };
+    await admin.from("collection_candidates").update({ last_good: { evidence: { ...ev0, linkedPages: [newer] } } as never }).eq("id", row.id);
+    const old = new Date(Date.now() - 86_400_000);
+    const s = await runLinkRechecks({ db: db(), householdId: hid, gate: gate(), limit: 5, timeLeft: () => 60_000, now: () => old, fetchPage: async (u) => okPage(u), onUpdated: async () => undefined });
+    expect(s.done).toBe(1);
+    const after = ((await admin.from("collection_candidates").select("last_good").eq("id", row.id).single()).data as any).last_good.evidence;
+    expect(after.linkedPages[0].fetchedAt).toBe(newer.fetchedAt); // 新しい証拠が残る（古い再取得結果で上書きしない）
+    expect(after.recheckSeq).toBeUndefined();
+    // 完了したタスク: 直後の再登録では再開しない（連続登録の暴走を防ぐ）。1時間以上たてば、台帳がまだ未取得なら再び対象になる
+    await enqueueLinkRechecks({ db: db(), householdId: hid, candidateId: row.id, ledger, now: new Date() });
+    expect((await tasksOf(row.id))[0].status).toBe("done");
+    await admin.from("link_recheck_tasks").update({ done_at: new Date(Date.now() - 2 * 3600_000).toISOString() }).eq("candidate_id", row.id);
+    await enqueueLinkRechecks({ db: db(), householdId: hid, candidateId: row.id, ledger, now: new Date() });
+    expect(await tasksOf(row.id)).toMatchObject([{ status: "pending", attempts: 0 }]);
   }, 60_000);
 
   it("③保持期間の掃除: dry-run は何も消さない。古い版・ai_unverified・失敗の画像観察だけが対象で、最新版・human・保留中の候補の全文は残る", async () => {

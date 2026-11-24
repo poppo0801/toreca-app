@@ -35,7 +35,17 @@ export async function enqueueLinkRechecks(a: { db: Db; householdId: string; cand
   if (take.length === 0) return { queued: 0, skipped: pend.length };
   const rows = take.map((e) => ({ household_id: a.householdId, candidate_id: a.candidateId, url: e.url.slice(0, 500), url_key: e.key.slice(0, 300), host: e.host.slice(0, 200), order_no: e.order, origins: e.origins, reason: (e.reason ?? "unknown").slice(0, 60), next_attempt_at: new Date(a.now.getTime() + 60_000).toISOString(), expires_at: new Date(a.now.getTime() + 3 * 86_400_000).toISOString() }));
   const r = await t("link_recheck_tasks").upsert(rows, { onConflict: "candidate_id,url_key", ignoreDuplicates: true });
-  return r.error ? { queued: 0, skipped: pend.length } : { queued: take.length, skipped: pend.length - take.length };
+  if (r.error) return { queued: 0, skipped: pend.length };
+  // 完了（done）・諦め（gave_up）のタスクが残っていると、同じリンクが再収集で再び未取得になっても二度と再調査されない（監査で発見）。
+  // 完了・諦めから1時間以上たち、台帳がまだ未取得を示すなら、新しい試行として戻す（試行回数・期限をリセット。1時間は連続する再登録の暴走を防ぐ）
+  const reopenBefore = new Date(a.now.getTime() - 3600_000).toISOString();
+  await t("link_recheck_tasks")
+    .update({ status: "pending", attempts: 0, last_error: null, done_at: null, lease_until: null, next_attempt_at: new Date(a.now.getTime() + 60_000).toISOString(), expires_at: new Date(a.now.getTime() + 3 * 86_400_000).toISOString(), updated_at: a.now.toISOString() })
+    .eq("candidate_id", a.candidateId)
+    .in("url_key", take.map((x) => x.key.slice(0, 300)))
+    .in("status", ["done", "gave_up"])
+    .lt("done_at", reopenBefore);
+  return { queued: take.length, skipped: pend.length - take.length };
 }
 
 /** 再取得したページを、候補の証拠へ戻す（純関数）。台帳の該当リンクを取得済みにし、リンク先ページを追加する。上限（30ページ・台帳80件）・全文/抜粋の記録は収集時と同じ */
@@ -137,6 +147,13 @@ export async function runLinkRechecks(a: {
     if (!ev) {
       await finish(task.id, "gave_up", "candidate_or_evidence_missing");
       out.gaveUp++;
+      continue;
+    }
+    // 既に、このタスクの取得より**新しい**取得結果（再収集など）が証拠にあるときは、古い再取得結果で上書きしない（完了として扱い、記録する）
+    const existing = ev.linkedPages?.find((p) => p.url === page.url);
+    if (existing && existing.fetchedAt > page.fetchedAt) {
+      await finish(task.id, "done", null);
+      out.done++;
       continue;
     }
     const merged = mergeRecheckedPage(ev, page, { key: task.url_key, order: task.order_no, origins: task.origins, host: task.host });

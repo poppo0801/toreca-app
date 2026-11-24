@@ -252,3 +252,24 @@ describe("データセットの区別（合成と実投稿を混ぜない）", (
     expect(datasetClaim("synthetic_lp", ["mock"])).toBe("pipeline_check_only");
   });
 });
+
+describe("機会の同一性（誤統合・誤分割）", () => {
+  const g = (): GoldCase => ({ caseId: "id1", canary: "CANARY-IDENT-0001", verified: { by: "human", at: "2026-11-25", basis: "公式ページを人が確認（架空）" }, opportunities: [
+    { oppId: "a", store: "新宿本店", product: "拡張パック", applyEnd: null, region: null, url: "https://shop-a.example.invalid/e/1", applyUnit: null, decision: "register", evidenceIn: ["page"], pageIndex: 0, evidence: [{ where: "page:0", quote: "受付期間 11月30日まで" }] },
+    { oppId: "b", store: "新宿本店", product: "拡張パック（第2回）", applyEnd: null, region: null, url: "https://shop-a.example.invalid/e/2", applyUnit: null, decision: "register", evidenceIn: ["page"], pageIndex: 1, evidence: [{ where: "page:1", quote: "第2回 受付期間 12月5日まで" }] },
+  ] });
+  const r = (key: string, store: string, product: string, url: string) => ({ proposalKey: key, sourceUrls: [url], decision: "register", applyUnit: "unknown", costJpy: 1, turns: 1, fields: { store: { value: store, basis: "observed", quote: null, evidence: null, support: "literal_in_quote" }, product: { value: product, basis: "observed", quote: null, evidence: null, support: "literal_in_quote" } } }) as never;
+  const ctxx = { postText: "", pages: [] as { url: string; text: string }[] };
+  it("同じ店舗の別開催回: それぞれ別の機会として対応づく（誤統合・誤分割なし）", () => {
+    const s = scoreCase(g(), [r("k1", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/1"), r("k2", "新宿本店", "拡張パック（第2回）", "https://shop-a.example.invalid/e/2")], ctxx);
+    expect(s).toMatchObject({ oppFound: 2, mismerge: 0, oversplit: 0 });
+  });
+  it("誤統合: 別の開催回のページを根拠にしている登録案を数える。誤分割: 同じ機会に複数の登録案（重複）を数える", () => {
+    const wrong = scoreCase(g(), [r("k1", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/2")], ctxx); // 第1回の機会に、第2回のURL
+    expect(wrong.mismerge).toBe(1);
+    const dup = scoreCase(g(), [r("k1", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/1"), r("k9", "新宿本店", "拡張パック", "https://shop-a.example.invalid/e/1")], ctxx);
+    expect(dup.oversplit).toBe(1);
+    expect(aggregate([wrong, dup]).mismergeCount.value).toBe(1);
+    expect(aggregate([wrong, dup]).oversplitCount.value).toBe(1);
+  });
+});

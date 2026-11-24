@@ -176,6 +176,10 @@ export interface CaseScore {
   /** gold のどの機会にも対応しない登録案（余計な機会・誤った機会） */
   unmatchedProposals: number;
   matches: OppMatch[];
+  /** 誤統合: 機会Aに対応づけた登録案が、別の機会Bの応募先URLを根拠にしている（機会の取り違え） */
+  mismerge: number;
+  /** 誤分割: 同じ機会（店舗・商品が一致）に対する登録案が複数ある（1機会を複数に割った・重複） */
+  oversplit: number;
   /** 他の機会のページにしか無い引用を根拠にした項目（他店舗・他商品の根拠の混入。重大） */
   crossContamination: number;
   observedFields: number;
@@ -195,9 +199,13 @@ const fieldValue = (r: ProposalRecord, k: string): string | null => r.fields?.[k
  */
 export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: { postText: string; pages: { url: string; text: string }[]; hint?: { used: number; hit: number } }): CaseScore {
   const used = new Set<number>();
+  const eq = (x: string | null | undefined, y: string): boolean => !!x && nf(x) === nf(y);
+  const exactClaimed = (r: ProposalRecord): boolean => g.opportunities.some((o) => eq(fieldValue(r, "store"), o.store) && eq(fieldValue(r, "product"), o.product));
   const matches: OppMatch[] = [];
   for (const o of g.opportunities) {
-    let idx = records.findIndex((r, i) => !used.has(i) && same(fieldValue(r, "store"), o.store) && same(fieldValue(r, "product"), o.product));
+    // 1) 店舗・商品が完全に一致する登録案を優先（「拡張パック」と「拡張パック（第2回）」のような、包含関係にある別の機会を取り違えない）。2) 完全一致する別の機会に取られている登録案は、包含による対応づけに使わない
+    let idx = records.findIndex((r, i) => !used.has(i) && eq(fieldValue(r, "store"), o.store) && eq(fieldValue(r, "product"), o.product));
+    if (idx < 0) idx = records.findIndex((r, i) => !used.has(i) && !exactClaimed(r) && same(fieldValue(r, "store"), o.store) && same(fieldValue(r, "product"), o.product));
     if (idx < 0 && o.url) idx = records.findIndex((r, i) => !used.has(i) && r.sourceUrls.some((u) => u === o.url) && (same(fieldValue(r, "store"), o.store) || same(fieldValue(r, "product"), o.product)));
     const r = idx >= 0 ? records[idx] : null;
     if (idx >= 0) used.add(idx);
@@ -244,8 +252,20 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
     }
     void i;
   });
+  // 誤統合・誤分割（機会の同一性）
+  let mismerge = 0;
+  for (const m of matches) {
+    if (!m.proposalKey) continue;
+    const r = records.find((x) => x.proposalKey === m.proposalKey)!;
+    const own = g.opportunities.find((o) => o.oppId === m.oppId)!;
+    const others = g.opportunities.filter((o) => o.oppId !== m.oppId && o.url);
+    if (r.sourceUrls.length > 0 && !(own.url && r.sourceUrls.includes(own.url)) && others.some((o) => r.sourceUrls.includes(o.url!))) mismerge++;
+  }
+  const oversplit = records.filter((r, i) => !used.has(i) && g.opportunities.some((o) => same(fieldValue(r, "store"), o.store) && same(fieldValue(r, "product"), o.product))).length;
   return {
     caseId: g.caseId,
+    mismerge,
+    oversplit,
     oppTotal: g.opportunities.length,
     oppFound: matches.filter((m) => m.proposalKey).length,
     proposalTotal: records.length,
@@ -261,9 +281,9 @@ export function scoreCase(g: GoldCase, records: readonly ProposalRecord[], ctx: 
   };
 }
 
-export type MetricKey = "oppRecall" | "oppPrecision" | "storeAccuracy" | "productAccuracy" | "deadlineAccuracy" | "applyUnitAccuracy" | "urlAccuracy" | "decisionAccuracy" | "falseRegisterRate" | "missedRegisterRate" | "crossContaminationRate" | "invalidQuoteRate" | "hintFirstReadRate" | "costPerOppJpy" | "turnsPerCase";
+export type MetricKey = "mismergeCount" | "oversplitCount" | "oppRecall" | "oppPrecision" | "storeAccuracy" | "productAccuracy" | "deadlineAccuracy" | "applyUnitAccuracy" | "urlAccuracy" | "decisionAccuracy" | "falseRegisterRate" | "missedRegisterRate" | "crossContaminationRate" | "invalidQuoteRate" | "hintFirstReadRate" | "costPerOppJpy" | "turnsPerCase";
 /** 値が大きいほど良い指標か（false は小さいほど良い） */
-export const HIGHER_IS_BETTER: Record<MetricKey, boolean> = { oppRecall: true, oppPrecision: true, storeAccuracy: true, productAccuracy: true, deadlineAccuracy: true, applyUnitAccuracy: true, urlAccuracy: true, decisionAccuracy: true, falseRegisterRate: false, missedRegisterRate: false, crossContaminationRate: false, invalidQuoteRate: false, hintFirstReadRate: true, costPerOppJpy: false, turnsPerCase: false };
+export const HIGHER_IS_BETTER: Record<MetricKey, boolean> = { mismergeCount: false, oversplitCount: false, oppRecall: true, oppPrecision: true, storeAccuracy: true, productAccuracy: true, deadlineAccuracy: true, applyUnitAccuracy: true, urlAccuracy: true, decisionAccuracy: true, falseRegisterRate: false, missedRegisterRate: false, crossContaminationRate: false, invalidQuoteRate: false, hintFirstReadRate: true, costPerOppJpy: false, turnsPerCase: false };
 export interface Rate {
   n: number;
   k: number;
@@ -293,6 +313,8 @@ export function aggregate(scores: readonly CaseScore[]): Aggregate {
     decisionAccuracy: acc((m) => m.decision),
     falseRegisterRate: rate(ms.filter((m) => m.falseRegister).length, matched.length),
     missedRegisterRate: rate(ms.filter((m) => m.missedRegister).length, ms.length),
+    mismergeCount: { n: scores.length, value: sum((s) => s.mismerge) },
+    oversplitCount: { n: scores.length, value: sum((s) => s.oversplit) },
     crossContaminationRate: rate(sum((s) => s.crossContamination), Math.max(1, sum((s) => s.observedFields))),
     invalidQuoteRate: rate(sum((s) => s.invalidQuotes), Math.max(1, sum((s) => s.observedFields))),
     hintFirstReadRate: rate(sum((s) => s.hintHit), sum((s) => s.hintUsed)),

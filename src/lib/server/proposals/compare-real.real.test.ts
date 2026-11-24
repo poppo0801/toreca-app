@@ -14,12 +14,15 @@ import { createClient } from "@supabase/supabase-js";
 import { checkJudgmentRealRun } from "@/lib/judgment/real-gate";
 import { progressOf, type ReviewState } from "@/lib/gold-review/model";
 import { composeR1Cases, pageCandidate, validatePageGold, worksheetMarkdown, type R1PageGold } from "@/lib/judgment/xsource/r1-worksheet";
-import { type DatasetKind, type RealPostCase, validateRealPostCases, armsOf, EXPERIMENTS, planComparison, splitCalibration, validateGold, type CompareCase, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
+import { assertNoGoldLeak, type DatasetKind, type RealPostCase, validateRealPostCases, armsOf, EXPERIMENTS, planComparison, splitCalibration, validateGold, type CompareCase, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
 import { HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
 import { makeRealVisionClient, worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
 import { fetchPublicImage } from "@/lib/server/images/image-fetch";
 import { splitPublicImage } from "@/lib/server/images/split-adapter";
 import type { Db } from "@/lib/server/lottery-service";
+import { preflightRun } from "@/lib/judgment/xsource/cost-preflight";
+import { OUTPUT_MAX_TOKENS } from "@/lib/judgment/xsource/research-ai";
+import { buildMetricsSnapshot, renderMetrics } from "@/lib/judgment/xsource/measured-metrics";
 import { captureRealPosts, type CaptureRow } from "./real-post-capture";
 import { casesFromCandidates, CMP_HOST, goldTemplate, prepareArmCandidates, runExperimentMock, scoreExperiment, seedGoldExperiences } from "./compare-run";
 import type { CandidateRow } from "./generate";
@@ -64,7 +67,7 @@ const planOf = (cases: CompareCase[], gold: GoldCase[], model = "claude-haiku-5-
   return planComparison({ experiments: experiments(), cases: cases.length, itemsPerCase: avgItems, imagesPerCase: Math.round(avgImages * 10) / 10, model, avgJpy: { agentTurn: 0.163, judge: 0.148, image: Number.isFinite(image) ? image : 0.15 }, turnsPerItem: 2, judgesPerItem: 1.3, caps: CAPS(), goldCases: gold.length });
 };
 
-describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "real-validate", "real-posts-scan", "real-posts-expand", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
+describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "real-validate", "real-posts-scan", "real-posts-expand", "readiness", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
   it("plan: 実行前の計画（無課金）", () => {
     if (MODE !== "plan") return;
     const { cases, gold, sample } = load();
@@ -157,6 +160,55 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     writeFileSync(`${DIR}/real-capture-report.local.json`, JSON.stringify(report, null, 1));
     console.log("REAL_POSTS_EXPAND", JSON.stringify({ withMultiLinks: report.withMultiLinks, processed: report.processed, built: report.built, pages: pages.length, requests: report.requests, bytes: report.bytes, shortLinks: report.shortLinks, failures: report.failures, shortenerRobots: report.shortenerRobots, stoppedBy: report.stoppedBy, elapsedMs: report.elapsedMs }));
   }, 1_800_000);
+
+  it("readiness: 実AI試験（R1）を始められる状態かの判定（無課金・読み取りだけ）。ブロッカー（人の確認・承認待ちなど）と警告を出す。承認の値は一切代入しない", () => {
+    if (MODE !== "readiness") return;
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+    const ok: string[] = [];
+    // 1) 独立gold確認の状態（人の確認）
+    const lp = read<ReviewState>(`${DIR}/gold-review.local.json`);
+    const real = read<ReviewState>(`${DIR}/gold-review-real.local.json`);
+    const lpP = lp ? progressOf(lp.pages) : null;
+    if (!lpP) blockers.push("独立gold確認（LivePocket 12ページ）が未着手です（/dev/gold-review）");
+    else if (!lpP.complete) blockers.push(`独立gold確認が完了していません（未確認 ${lpP.unreviewed}・要再確認 ${lpP.needs_recheck}・確認済み ${lpP.confirmed}・除外 ${lpP.excluded}）`);
+    else ok.push(`独立gold確認（LivePocket）が完了（確認済み ${lpP.confirmed}・除外 ${lpP.excluded}）`);
+    const realP = real ? progressOf(real.pages) : null;
+    if (!realP) warnings.push("実投稿のリンク先の確認は未着手です（実投稿R1は別途。合成R1とは別の結果）");
+    else ok.push(`実投稿のgold確認: 確認済み ${realP.confirmed}・除外 ${realP.excluded}・未確認 ${realP.unreviewed}・要再確認 ${realP.needs_recheck}`);
+    // 2) 入力と gold（合成データセット）
+    const cases = read<CompareCase[]>(`${DIR}/cases.synthetic.local.json`);
+    const gold = read<GoldCase[]>(`${DIR}/gold.synthetic.local.json`);
+    if (!cases || !gold) blockers.push("R1の入力（cases.synthetic.local.json・gold.synthetic.local.json）が未作成です（gold確認の完了後に r1-build）");
+    else {
+      const v = validateGold(gold);
+      if (!v.ok) blockers.push(`goldの独立性の検査に失敗: ${v.errors.slice(0, 2).join(" / ")}`);
+      else ok.push(`gold ${gold.length}案件が独立性の検査に合格（人の確認・根拠の引用・合言葉）`);
+      const leak = assertNoGoldLeak(cases.flatMap((c) => [c.postText, ...c.pages.map((p) => p.text)]), gold);
+      if (!leak.ok) blockers.push("AIへ渡す入力に、gold の合言葉が混ざっています");
+      else ok.push("AIへの入力に gold の合言葉が混ざっていない");
+    }
+    // 3) 費用の最悪予約（承認額ではなく、関門の上限＝最大で見た場合）
+    const model = "claude-haiku-5-5";
+    const n = cases?.length ?? 12;
+    // 案件が未作成のときは、R1の想定（12案件・各3ページ）で見積もる
+    const placeholder: CompareCase[] = Array.from({ length: 12 }, (_, i) => ({ caseId: `ph${i}`, postText: "", links: [], linkMap: [], pages: [1, 2, 3].map((k) => ({ url: `https://ph.example.invalid/${k}`, text: "x" })), imageRefs: [], imageReadings: [] }));
+    const plan = planOf(cases ?? placeholder, gold ?? [], model);
+    const limits = { maxTurns: 4, maxSearches: 0, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, searchReserveJpy: 2.5 };
+    const pf = preflightRun({ model, totalJpy: 60, perCaseJpy: 5, cases: n, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, gatePerCaseCapJpy: 5 });
+    if (!pf.ok) blockers.push(`費用の事前検査に失敗: ${pf.errors.join(", ")}`);
+    else ok.push(`費用の事前検査に合格（1件の最小予約 ${pf.minPerCaseJpy}円・最大予約 ${pf.maxReservedPerCaseJpy}円・1回の最悪 ${pf.worstCaseCallJpy}円・予約が最悪以上: ${pf.reservationCoversWorstCase}）`);
+    if (!pf.reservationCoversWorstCase) warnings.push("予約額が1回の最悪費用より小さい設定があります（承認額を1回分超えうる）");
+    // 4) 承認の値が事前に入っていないこと（偽造・代理入力の防止）
+    for (const k of ["JUDGMENT_APPROVED_TOTAL_JPY", "JUDGMENT_APPROVED_PER_CASE_JPY", "JUDGMENT_REAL_CONFIRM", "JUDGMENT_REAL_EVAL"]) if (env[k]) blockers.push(`承認に関する環境変数 ${k} が設定されています（実行時に利用者が指定する値です。事前に設定しない）`);
+    if (!env.PHASE2_CMP_TOTAL_JPY) ok.push("承認額は未設定（承認文は実行時に利用者が指定する）");
+    // 5) 実測指標
+    const cap = read<{ requests: { total: number }; shortLinks: { total: number; resolved: number }; built: number }>(`${DIR}/real-capture-report.local.json`);
+    const metrics = buildMetricsSnapshot({ capture: cap ? { shortTotal: cap.shortLinks.total, shortResolved: cap.shortLinks.resolved, casesBuilt: cap.built } : null, gold: gold ? { cases: gold.length, opportunities: gold.reduce((a, g) => a + g.opportunities.length, 0) } : null, review: lp ? { total: lp.pages.length, unreviewed: lp.pages.filter((p) => p.status !== "confirmed" && p.status !== "excluded").length } : null, historyViolations: null });
+    console.log("READINESS", JSON.stringify({ readyForApproval: blockers.length === 0, blockers, warnings, ok, plan: { experiments: experiments(), cases: n, expectedJpy: plan.expectedJpy, apiCalls: plan.apiCalls, caps: "関門の上限（総額60円・1件5円）を最大として見た場合。承認額ではありません", approvalPhrase: "実行時に利用者が指定します（金額は利用者が決める）" } }));
+    console.log("METRICS\n" + renderMetrics(metrics));
+    expect(Array.isArray(blockers)).toBe(true);
+  });
 
   it("real-validate: 実投稿のデータセット（cases.real.local.json・gold.real.local.json）の出所・複数リンク・goldの独立性を検査する", () => {
     if (MODE !== "real-validate") return;

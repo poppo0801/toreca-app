@@ -7,7 +7,22 @@ import { emptyChecks, emptyDraft, nowIso, progressOf, validateConfirm, type Draf
 import { pageText } from "@/lib/judgment/xsource/html-text";
 import type { GoldCase } from "@/lib/judgment/xsource/compare-eval";
 import { candidateFromText, pageCandidate, validatePageGold, type PageCandidate, type R1PageGold } from "@/lib/judgment/xsource/r1-worksheet";
-import type { CapturedPage } from "@/lib/server/proposals/real-post-capture";
+/** 取得したリンク先ページの記録（real-post-capture の CapturedPage と同じ形。確認画面は収集・取得のコードを読み込まないため、必要な項目だけを構造的に定義する） */
+interface CapturedPage {
+  caseId: string;
+  order: number;
+  short: string;
+  url: string;
+  finalUrl: string;
+  hops: number;
+  fetchedAt: string;
+  status: number;
+  title: string;
+  chars: number;
+  textHash: string;
+  text: string;
+  sameContentAs: number | null;
+}
 
 /**
  * 独立gold確認（開発専用）の保存と読み込み。**Git管理外のローカルファイルだけ**（eval/phase2-compare/gold-review.local.json）。本番・Vercelでは使えない。
