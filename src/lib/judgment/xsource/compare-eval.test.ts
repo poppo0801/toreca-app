@@ -102,7 +102,7 @@ describe("締切の時刻・年の採点", () => {
     expect(validateGold([withTime("25:00")]).ok).toBe(false);
     expect(validateGold([withTime("23:59")]).ok).toBe(true);
     // 時刻は本文の引用に書かれているものだけ（引用に無い時刻は拒否）
-    expect(validateGold([gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEndTime: "23:59" })) })]).errors.join()).toContain("引用に書かれていません");
+    expect(validateGold([gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEndTime: "23:59" })) })]).errors.join()).toContain("応募締切」の文脈");
     expect(validateGold([gold(1, { opportunities: gold(1).opportunities.map((o) => ({ ...o, applyEnd: null, applyEndTime: "23:59" })) })]).ok).toBe(false);
   });
 });
