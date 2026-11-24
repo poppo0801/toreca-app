@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildEvidence } from "@/lib/collector/evidence";
 import { makeFetchingMockVision } from "@/lib/judgment/xsource/vision-mock";
 import { mockResearchAgent } from "@/lib/judgment/xsource/proposal-mock";
+import { intakeCollectedImages } from "@/lib/server/collector/image-intake";
 import { clearRobotsCache, fetchPublicImage } from "@/lib/server/images/image-fetch";
 import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, mockDeps, type CandidateRow } from "@/lib/server/proposals/generate";
@@ -169,6 +170,38 @@ describe.skipIf(!dbTestsEnabled)("Phase 2: 画像の取得→解析入力→保�
     await run(c3, { vision });
     expect(calls).toHaveLength(1);
     expect((await obsOf(c3.id)).length).toBe(2);
+  });
+
+  it("④通常の収集からの接続: 画像を安全に取得・検査して記録（解析はしない＝費用0・開発限定）→ 新AIの調査へ『取得・検査済みだが解析は承認が必要』『取得できない理由』を受け渡す。重複して取得しない。無効なら何もしない", async () => {
+    files.set(IMG(20), await png("#abc"));
+    files.set(IMG(21), { fail: "404" });
+    files.set(IMG(22), { fail: "timeout" });
+    const c = await add(POST, { imageRefs: [IMG(20), IMG(21), IMG(22)], imageReadings: [] });
+    const env = { ...ENV, IMAGE_INTAKE: "on" };
+    const fi = (u: string) => fetchImage(u);
+    expect(await intakeCollectedImages({ db: admin as unknown as Db, householdId: hid, candidateId: c.id, imageRefs: [IMG(20)], fetchImage: fi, env: { ...ENV } })).toBeNull(); // 既定OFF
+    expect((await obsOf(c.id)).length).toBe(0);
+    const r1 = await intakeCollectedImages({ db: admin as unknown as Db, householdId: hid, candidateId: c.id, imageRefs: [IMG(20), IMG(21), IMG(22)], fetchImage: fi, env });
+    expect(r1).toEqual({ fetched: 1, failed: 1, skipped: 1, existing: 0 }); // 取得できた／期限切れ（保存）／タイムアウト（保存しない）
+    const rows = await obsOf(c.id);
+    expect(rows.map((o) => [o.image_index, o.mode, o.status, o.failure_reason])).toEqual([[1, "intake", "fetched", null], [2, "intake", "failed", "not_found"]]);
+    expect(rows[0].content_sha256).toMatch(/^[0-9a-f]{16}$/);
+    expect(rows.every((o) => (o.readings as unknown[]).length === 0)).toBe(true); // 解析はしていない
+    fetched.length = 0;
+    const r2 = await intakeCollectedImages({ db: admin as unknown as Db, householdId: hid, candidateId: c.id, imageRefs: [IMG(20), IMG(21), IMG(22)], fetchImage: fi, env });
+    expect(r2).toEqual({ fetched: 0, failed: 0, skipped: 1, existing: 2 });
+    expect([...new Set(fetched)]).toEqual([IMG(22)]); // 保存済みは再取得しない・一時的な失敗だけ再取得（再試行は1回まで）
+    // 新AIの調査への受け渡し（ビジョンなし＝有料の解析は承認が必要で未実施）。画像の内容は「無い」ではなく未確認
+    const { seen, agent } = seenBy();
+    await run(c, { agent });
+    const text = seen.join("\n");
+    expect(text).toMatch(/画像1枚目\(IMG1-[0-9a-f]{8}\)（取得・検査は済んでいるが、画像の解析（有料）は承認が必要で未実施）/);
+    expect(text).toContain("画像が見つからない");
+    expect(text).toContain("「無い」ではなく未確認");
+    expect((await obsOf(c.id)).filter((o) => o.mode !== "intake")).toEqual([]); // 解析の結果（mock/replay/real）は作られていない
+    // 解析の読み出し（mock/real）は、intake の行を読まない（混ざらない）
+    expect(await loadImageObservation(admin as unknown as Db, hid, c.id, IMG(20), "mock")).toBeNull();
+    expect(await loadImageObservation(admin as unknown as Db, hid, c.id, IMG(20), "real")).toBeNull();
   });
 
   it("④権限・追記専用: 構成員だけが読める・他世帯は読めない・利用者は書けない・更新できない", async () => {
