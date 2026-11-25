@@ -254,3 +254,21 @@ describe("保存文書の実際の取得時刻（基準時刻で記録された�
     expect(actualFetchedAt("discovered", "2026-11-24T21:05:01.670Z", undefined)).toBe("2026-11-24T21:05:01.670Z");
   });
 });
+
+describe("再確認の呼び出しが失敗しても、最初の検証済みの出力を失わない", () => {
+  it("2回目の判断が null（不正出力）でも、1回目の検証済みの暫定へ戻る（judge_failed にしない）", async () => {
+    const url = "https://pocket.example.invalid/e/x1";
+    let n = 0;
+    const judge: RegistrationJudge = async () => (n++ === 0 ? out({ decision: "tentative", fields: {
+      store: { value: "チェーンX", basis: "observed", evidenceId: "p1", quote: "チェーンX「商品Z」抽選販売" },
+      product: { value: "商品Z", basis: "observed", evidenceId: "p1", quote: "チェーンX「商品Z」抽選販売" },
+      deadline: { value: "2026年11月26日(木) 23:59", basis: "observed", evidenceId: "p1", quote: "■応募期間：2026年11月24日(火)12：00～11月26日(木)23：59まで" },
+      apply_unit: { value: null, basis: "unknown" },
+    } }) : (null as unknown as JudgeOutput));
+    const r = await runResearch({ caseId: "u5", seed: SEED("seed"), agent: agent(url), judge, tools: toolsFor(url, MULTI_STORE_PAGE), budget: budget(), registerRequiresUnit: true });
+    expect(n).toBe(2);
+    expect(r.registration).toMatchObject({ decision: "tentative", verified: true });
+    expect(r.registration.held).toBeNull();
+    expect(r.trace.some((t) => t.detail === "unit_recheck_failed_reverted")).toBe(true);
+  });
+});
