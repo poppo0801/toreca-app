@@ -18,7 +18,7 @@ export function effectiveDecision(r: { decision: ProposalRecord["decision"]; ver
   return (r.decision === "register" || r.decision === "exclude") && !r.verified ? "tentative" : r.decision;
 }
 
-export const PROPOSAL_PROMPT_VERSION = "10z-4";
+export const PROPOSAL_PROMPT_VERSION = "10z-5";
 export type ProposalMode = "mock" | "replay" | "real";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product" | "unknown";
 /** near_match: 言い換え・書式・括弧の違いを除くと、値の語が本文にほぼ含まれる（数字は完全一致が条件）。enum_value: 応募単位のような**列挙値**（語の一致では確認できない。人が確認する） */

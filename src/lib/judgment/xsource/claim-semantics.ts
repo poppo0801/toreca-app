@@ -9,7 +9,7 @@
  * 判別できないもの（未知の理由・役割が読み取れない引用）は「支持されていない／確認できない」として呼び出し側が保留にする。**検証済みと称さない**。
  */
 
-export type ClaimClass = "closed" | "sold_out" | "ineligible" | "unknown";
+export type ClaimClass = "closed" | "sold_out" | "ineligible" | "out_of_area" | "unknown";
 
 const nf = (s: string): string => s.normalize("NFKC");
 
@@ -18,6 +18,7 @@ export function claimClassOf(value: string): ClaimClass {
   const v = nf(value);
   if (/完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売/.test(v)) return "sold_out";
   if (/受付終了|応募終了|募集終了|締め?切|〆切|期限切れ|期間外|終了/.test(v)) return "closed";
+  if (/地域外|対象地域|エリア外|県外|圏外|所在地|地域.{0,6}(不適合|合わな|外)|適合しない/.test(v)) return "out_of_area";
   if (/対象外|非対象|限定|不可|不要|資格|条件を満たさ|対象でない|違う/.test(v)) return "ineligible";
   return "unknown";
 }
@@ -151,9 +152,10 @@ function closedSupport(quote: string, now: Date | undefined): SemanticVerdict & 
  * - sold_out / ineligible: 引用にその状態を表す語があること
  * - unknown（語彙に無い理由）: 機械的に支持できない
  */
-export function checkExcludeSemantics(a: { claim: string; quote: string; now?: Date; otherDeadlines?: readonly string[] }): SemanticVerdict {
+export function checkExcludeSemantics(a: { claim: string; quote: string; now?: Date; otherDeadlines?: readonly string[]; userRegion?: UserRegion }): SemanticVerdict {
   const cls = claimClassOf(a.claim);
   const q = nf(a.quote);
+  if (cls === "out_of_area") return checkRegionExclusion(a.quote, a.userRegion);
   if (cls === "unknown") return { ok: false, code: "unverifiable", reason: "除外理由の種類を機械的に判別できず、引用が支持するか確認できない（人が確認するまで保留）" };
   if (cls === "sold_out") return /完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売|終了/.test(q) ? { ok: true, reason: "引用に売り切れ・終了を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、売り切れ・終了を表す記述が無い" };
   if (cls === "ineligible") return /対象外|非対象|限定|不可|できません|お受けできません|対象となりません|ご利用いただけません|対象でない|対象外となり/.test(q) ? { ok: true, reason: "引用に対象外・制限を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、対象外・応募不可を表す記述が無い" };
@@ -197,10 +199,51 @@ export function checkValueCorrespondence(value: string, quote: string): Semantic
   const grams = new Set<string>();
   for (let i = 0; i + 2 <= v.length; i++) grams.add(v.slice(i, i + 2));
   const hit = [...grams].filter((g) => q.includes(g)).length;
-  return grams.size > 0 && hit / grams.size >= 0.5 ? { ok: true, reason: "値の大半が引用に対応する" } : { ok: false, code: "unsupported", reason: "値が引用に対応していない（引用は別の事柄の記載）" };
+  if (grams.size > 0 && hit / grams.size >= 0.5) return { ok: true, reason: "値の大半が引用に対応する" };
+  const miss = uncoveredParts(value, quote);
+  return { ok: false, code: "unsupported", reason: `値が引用に対応していない${miss.length ? `（値のうち引用に書かれていない部分: ${miss.map((m) => `「${m}」`).join("")}）` : "（引用は別の事柄の記載）"}` };
 }
 
 /** 応募単位の値の引用に、応募の回数・範囲を述べる語があるか（対象者・範囲・回数の語）。無ければ、単位の根拠として確認できない */
 export function checkUnitQuote(quote: string): SemanticVerdict {
   return /(\d+\s*(人|名|回|口|点|アカウント|店舗|店|フォーム|件|枚)|一人|1人|お一人|ひとり|各店|店舗ごと|店舗別|店舗を選|店舗選択|フォーム|ごとに|につき|あたり|アカウント|会員|重複|複数|のみ)/.test(nf(quote)) ? { ok: true, reason: "引用に応募の回数・範囲を示す語がある" } : { ok: false, code: "unsupported", reason: "引用に、応募の回数・対象・範囲を述べる記述が無い（応募単位の根拠にならない）" };
+}
+
+/** 利用者の対象地域（既存の収集設定: 都道府県・オンライン可否）。固定の店名・県名のルールではなく、設定から渡される */
+export interface UserRegion {
+  prefectures: readonly string[];
+  includeOnline: boolean;
+}
+
+const PREFECTURES = ["北海道", "青森", "岩手", "宮城", "秋田", "山形", "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "東京", "神奈川", "新潟", "富山", "石川", "福井", "山梨", "長野", "岐阜", "静岡", "愛知", "三重", "滋賀", "京都", "大阪", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山", "広島", "山口", "徳島", "香川", "愛媛", "高知", "福岡", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄"];
+const prefKey = (p: string): string => nf(p).replace(/[都道府県]$/, "");
+/** 引用に現れる都道府県（名称の先頭一致。「京都」「東京」等。県名だけの一致で、市区町村名の偶然の一致を避けるため、「県・府・都・道」または所在地を示す文脈を要する） */
+export function prefecturesIn(text: string): string[] {
+  const t = nf(text);
+  // 完全な名称（東京都・京都府・大阪府・北海道・〇〇県）で照合する。「東京都府中市」が京都府に一致しないよう、名称ごとの接尾辞を固定する
+  return PREFECTURES.filter((p) => (p === "京都" ? /(?<!東)京都府/.test(t) : t.includes(p === "北海道" ? "北海道" : p === "東京" ? "東京都" : p === "大阪" ? "大阪府" : p + "県")));
+}
+
+/**
+ * 「対象地域外」を理由とする除外の検証。AIが、店舗の所在地（原文の引用）と利用者の設定を比べて判断し、ここでは事実だけを確認する（意味の判断は書き換えない）:
+ *  - 引用に、店舗の所在地として都道府県が書かれていること
+ *  - その都道府県が、利用者の対象地域の設定に含まれていないこと（設定が空＝全国なら、地域外は成立しない）
+ * 通販・発送・オンライン応募の有無は、この検査では確認できない（AIの観察に依存）。設定がオンライン対象なら、その旨を未確認として残す。
+ */
+export function checkRegionExclusion(quote: string, region: UserRegion | undefined): SemanticVerdict {
+  if (!region) return { ok: false, code: "unverifiable", reason: "利用者の対象地域の設定が無く、地域外かどうかを確認できない（保留）" };
+  const mine = new Set(region.prefectures.map(prefKey));
+  if (mine.size === 0) return { ok: false, code: "unsupported", reason: "利用者の対象地域の設定は都道府県の指定なし（全国）で、地域外にはならない" };
+  const found = prefecturesIn(quote);
+  if (found.length === 0) return { ok: false, code: "unsupported", reason: "引用に店舗の所在地（都道府県）が書かれていない。所在地が書かれた箇所を、そのまま引用する" };
+  const outside = found.filter((p) => !mine.has(prefKey(p)));
+  if (outside.length < found.length) return { ok: false, code: "contradicted", reason: "引用に、利用者の対象地域に含まれる都道府県が書かれている（地域外とは言えない）" };
+  return { ok: true, reason: "引用の所在地が、利用者の対象地域の設定に含まれない", unconfirmed: region.includeOnline ? ["通販・オンライン応募の有無は引用から確認できていない（利用者の設定はオンラインも対象）"] : ["通販・発送の有無は引用から確認できていない"] };
+}
+
+/** 値のうち、引用に書かれていない部分（区切りで分けた塊）。訂正の指示に使う（値の要約・補足が引用に無いことを具体的に示す） */
+export function uncoveredParts(value: string, quote: string): string[] {
+  const k = (x: string): string => nf(x).replace(/[\s　【】「」『』()（）・、,。.\-_]/g, "").toLowerCase();
+  const q = k(quote);
+  return value.split(/[（()）、,，。・／\/]/).map((c) => c.trim()).filter((c) => k(c).length >= 2 && !q.includes(k(c))).slice(0, 4).map((c) => c.slice(0, 40));
 }

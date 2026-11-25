@@ -228,7 +228,7 @@ export interface FieldProposal {
 const sha = (s: string): string => createHash("sha256").update(s.normalize("NFKC").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
 import { describeQuoteIssue, diagnoseQuote } from "./quote-diagnosis";
 import { dateTokens } from "./image-evidence";
-import { checkDeadlineRole, checkExcludeSemantics, checkUnitQuote, checkValueCorrespondence, type SemanticVerdict } from "./claim-semantics";
+import { checkDeadlineRole, checkExcludeSemantics, checkUnitQuote, checkValueCorrespondence, type SemanticVerdict, type UserRegion } from "./claim-semantics";
 const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
 export function seedEvidence(id: string, text: string, now: Date, url: string | null = null, notes: string[] = []): Evidence {
@@ -403,6 +403,8 @@ export interface VerifyInput {
   registerRequiresUnit?: boolean;
   /** 評価時点（意味検証で「締切を過ぎたか」を判定する）。無いと、日付による終了の判定は確認できない扱いで保留になる */
   now?: Date;
+  /** 利用者の対象地域（既存の収集設定）。『対象地域外』を理由とする除外の事実確認に使う（無ければ、地域を理由とする除外は確認できない扱いで保留） */
+  userRegion?: UserRegion;
 }
 /** 根拠の実在・不明値の扱い・人が確定した値の保護。問題の理由（AIへ返す文）を返す。結論は書き換えない */
 /** 本登録の可否を左右する項目。ここの検証失敗は本登録を止める。それ以外（任意項目）の失敗は、その項目の主張だけを採用せず不明として明示する（根拠のある別項目まで捨てない） */
@@ -472,7 +474,7 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     else {
       // 引用が実在するだけでは除外の根拠にならない。理由の種類と引用の意味・評価時点の対応を検証し、支持されない・矛盾・判別不能なら保留にする（応募の機会を消さない）
       const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
-      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others });
+      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others, ...(i.userRegion ? { userRegion: i.userRegion } : {}) });
       if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
       else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
     }
@@ -484,6 +486,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   const kept = proposals.filter((p) => !droppedFields.has(p.field));
   // 訂正用の指摘文: 引用が見つからないときは、原因と原文の実在する近い箇所を添える（引用の捏造を誘わず、写せないなら不明にさせる）
   const details = issues.map((x) => {
+    // 値が引用と対応しない: どう直せば通るかを具体的に返す（値を引用に書かれた語に絞る／値を含む箇所を引用し直す。補足・要約・件数は別の項目へ）。
+    if (x.startsWith("value_not_in_quote:") && reasonOf.has(x)) return `${x} — ${reasonOf.get(x)}。直し方: 値は、引用に書かれている語だけで構成する（要約・件数・補足は値に混ぜず、別の項目に書く）。値を引用に含まれる部分に絞るか、値を含む箇所を原文から1つの連続した文字列として引用し直す。どちらもできなければ、値を null・basis を unknown にする`;
     if (reasonOf.has(x)) return `${x} — ${reasonOf.get(x)}。根拠にならないなら、値を null・basis を unknown にするか、exclude をやめて暫定にする`;
     if (!x.startsWith("quote_not_found:")) return x;
     const name = x.slice("quote_not_found:".length);
@@ -508,6 +512,8 @@ export async function runResearch(args: {
   protectedFields?: Record<string, string>;
   /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
   registerRequiresUnit?: boolean;
+  /** 利用者の対象地域（既存の収集設定）。地域外を理由とする除外の事実確認に使う */
+  userRegion?: UserRegion;
   /** 以前の取得履歴（再開時。同じURL・同じ内容の無益な再取得を避ける） */
   history?: FetchRecord[];
   evidence?: Evidence[];
@@ -676,7 +682,7 @@ export async function runResearch(args: {
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
     quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
-    const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now() });
+    const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now(), ...(args.userRegion ? { userRegion: args.userRegion } : {}) });
     proposals = v.proposals;
     warnings = [...v.nonBlocking, ...v.unconfirmed.map((u) => "unconfirmed:" + u)];
     if (v.blocking.length === 0) { verified = true; held = null; if (v.nonBlocking.length) trace.push({ turn, kind: "verify", detail: `non_blocking:${v.nonBlocking.join(",")}` }); break; }

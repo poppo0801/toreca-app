@@ -231,7 +231,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
       expect(p).toContain("利用者の対象地域の設定");
       expect(p).toContain("東京都・神奈川県");
       expect(p).toContain("fit_region");
-      expect(p).toContain("地域が合わないことだけを理由に除外しない");
+      expect(p).toContain("地域の表示だけで機会の実在を否定しない");
+      expect(p).toContain("exclude_reason");
     }
     expect(s2.prompts[0]).toBe(e.prompts[0]);
     await clean();
@@ -248,6 +249,36 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     expect(await unconfirmedReserveJpy(admin as unknown as Db, hid, 3, [])).toBe(0); // 実行中
     await admin.from("shadow_jobs").update({ lease_until: new Date(Date.now() - 1000).toISOString() }).eq("id", job!.id);
     expect(await unconfirmedReserveJpy(admin as unknown as Db, hid, 3, [])).toBe(3); // 期限切れで記録なし＝打ち切りの疑い
+    await clean();
+  });
+
+  it("⑧取得元ページは、収集時に保存した全文（取得時刻つき）を最優先で読む。外部アクセスなしで、短い保存文（card）より長い全文が証拠になる（評価入口と本番入口で同じ）", async () => {
+    await clean();
+    await setSettings();
+    const { saveDocuments } = await import("@/lib/server/proposals/evidence-store");
+    const FULL = FIXTURES[1].text + " 【収集時に保存された全文にだけある記載】応募方法の詳細・注意事項・店舗所在地";
+    const prep = async (tag: string) => {
+      const c = await mkCandidate(1, tag);
+      const ev = (c.last_good as { evidence: { url: string } }).evidence;
+      const r = await saveDocuments(admin as unknown as Db, hid, c.id, [{ kind: "page", url: ev.url, urlKey: ev.url.slice(8), origin: "discovered", contentHash: "a".repeat(32), fetchedAt: FETCHED, text: FULL, textChars: FULL.length, sourceChars: FULL.length, truncated: false, truncatedReason: null, structure: null, textLoss: null }]);
+      expect(r.failed).toBe(0);
+      return c;
+    };
+    const ce = await prep("docE");
+    const e = recording();
+    const before = fetched.length;
+    const lfE = makeLivePublicFetch({ env: { TOREMANE_ENV: "local", JUDGMENT_LIVE_FETCH: "allow" }, fetchImpl: mkFetchImpl(), sleep });
+    await runRealProposals({ db: admin as unknown as Db, householdId: hid, candidates: [ce], client: e.client as never, gate: checkJudgmentRealRun({ env: EVAL_GATE_ENV, confirm: true, approvedTotalJpy: 25, approvedPerCaseJpy: 3 }), env: { TOREMANE_ENV: "local", PROPOSAL_PREVIEW: "on", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:55321" }, liveFetch: lfE.fetchPage, limits: { maxElapsedMs: 60_000 } });
+    const cs = await prep("docS");
+    await enqueue(cs);
+    const s2 = recording();
+    await runShadow(s2.client, shadowEnv());
+    expect(fetched.length).toBe(before); // 保存全文があるので、外部アクセスをしない
+    for (const p of [e.prompts, s2.prompts]) {
+      expect(p.length).toBeGreaterThanOrEqual(2);
+      expect(p[1]).toContain("収集時に保存された全文にだけある記載"); // 2ターン目の入力に、保存全文が証拠として入る
+      expect(p[1]).toContain("収集時（2026-11-24"); // 取得時刻つきの注記（現在の状態ではない旨）
+    }
     await clean();
   });
 });
