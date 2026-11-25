@@ -156,7 +156,7 @@ describe("静的確認: 登録案の機能は、抽選・応募・購入・通�
     expect(run.indexOf("proposalAfterCandidate(")).toBeGreaterThan(run.indexOf("shadow.schedule("));
   });
   it("登録案のコードを import する非テストのファイルは、想定した入口だけ（候補の画面・その操作・収集の接続口・登録案の部品）", () => {
-    const allowed = new Set(["src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/judgment/xsource/vision-real.ts", "src/lib/server/collector/link-recheck.ts", "src/lib/server/collector/db-host-gate.ts", "src/lib/server/collector/image-intake.ts"]);
+    const allowed = new Set(["src/lib/server/shadow/proposal-job.ts", "src/lib/server/shadow/worker.ts", "src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/judgment/xsource/vision-real.ts", "src/lib/server/collector/link-recheck.ts", "src/lib/server/collector/db-host-gate.ts", "src/lib/server/collector/image-intake.ts"]);
     const users = walk("src").filter((f) => !/\.test\.tsx?$/.test(f) && !f.startsWith("src/lib/server/proposals/") && /server\/proposals\//.test(readFileSync(f, "utf8")));
     for (const f of users) expect(allowed.has(f.split("\\").join("/")), f).toBe(true);
   });
@@ -190,7 +190,7 @@ describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server 
     expect(importers(/issueRealRunTicket/, ["src/lib/server/proposals/real-gate.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
     expect(importers(/proposals\/real-run|\.\/real-run/, ["src/lib/server/proposals/real-run.ts"])).toEqual([]);
     expect(importers(/xsource\/scripted-client|\.\/scripted-client/, ["src/lib/judgment/xsource/scripted-client.ts"])).toEqual([]);
-    expect(importers(/proposals\/prod-gate|\.\/prod-gate/, ["src/lib/server/proposals/prod-gate.ts"])).toEqual([]);
+    expect(importers(/proposals\/prod-gate|\.\/prod-gate/, ["src/lib/server/proposals/prod-gate.ts", "src/lib/server/shadow/proposal-job.ts"])).toEqual([]); // Phase 3: 本番の多重ゲートを呼ぶのは本番シャドーの登録案ジョブだけ
   });
   it("画面・server action・収集の接続口・候補の画面は、real-run・real-gate・AIクライアントを読み込まない（環境変数や画面操作だけで有料AIが動かない）", () => {
     for (const f of ["src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/app/(app)/lotteries/candidates/page.tsx", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/collector/run.ts"]) {

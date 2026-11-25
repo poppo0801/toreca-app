@@ -5,6 +5,7 @@ import type { Db } from "@/lib/server/lottery-service";
 import { shadowWorkerPermission } from "@/lib/server/shadow/allow";
 import { fetchXImage } from "@/lib/server/collector/x-client";
 import { verifyImageReadings } from "@/lib/server/shadow/image-verifier";
+import { runShadowProposalJob } from "@/lib/server/shadow/proposal-job";
 import { runShadowWorker } from "@/lib/server/shadow/worker";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +33,10 @@ async function handle(req: NextRequest) {
   // 1回の実行のハード上限（回数・費用）。判断の再試行・再評価・画像の書き起こし・一覧の項目判断をすべて合算して数える
   const callBudget = new CallBudget({ maxCalls: 30, maxCostJpy: 12 });
   const imageVerify = (a: Parameters<typeof verifyImageReadings>[1]) => verifyImageReadings({ db, fetchImage: fetchXImage, transcribe: withCallBudgetTranscriber(makeAnthropicTranscriber(client), callBudget) }, a);
-  const result = await runShadowWorker({ db, model, imageVerify, listModel: makeAnthropicListModel(client), callBudget, workerId: `cron-${crypto.randomUUID().slice(0, 8)}`, limit: 3, timeBudgetMs: 100_000 });
+  // Phase 3: 本番シャドーの登録案ジョブ。PROPOSAL_PROD_PREVIEW=on のときだけ（既定OFF）。以降の本番ゲート（承認スイッチ・世帯の許可リスト・専用予算・停止）は runShadowProposalJob が毎ジョブ確認する
+  const proposalMode = ["on", "1", "yes"].includes(process.env.PROPOSAL_PROD_PREVIEW ?? "");
+  const proposalJob = proposalMode ? (a: Parameters<NonNullable<Parameters<typeof runShadowWorker>[0]["proposalJob"]>>[0]) => runShadowProposalJob({ db, ...a, client: client as never, runBudget: callBudget }) : undefined;
+  const result = await runShadowWorker({ db, model, ...(proposalJob ? { proposalJob } : {}), imageVerify, listModel: makeAnthropicListModel(client), callBudget, workerId: `cron-${crypto.randomUUID().slice(0, 8)}`, limit: 3, timeBudgetMs: 100_000 });
   // 保持期限の掃除（期限を過ぎた記録・終了済みジョブ）。失敗しても本処理には影響しない
   await (db as unknown as { rpc: (n: string) => PromiseLike<unknown> }).rpc("shadow_purge").then(
     () => undefined,

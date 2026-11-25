@@ -16,6 +16,8 @@ export interface RealRunTicket {
   readonly perCaseCapJpy: number;
   /** 発行時刻（監査用） */
   readonly issuedAt: string;
+  /** 発行元: eval=承認済み評価入口（ローカル）／prod_shadow=本番シャドー（多重の本番ゲートを通ったときだけ）。prod_shadow は検索・実取得を持たない読み取り専用の解析に限る */
+  readonly origin: "eval" | "prod_shadow";
 }
 
 export type TicketResult = { ok: true; ticket: RealRunTicket } | { ok: false; reason: string };
@@ -26,7 +28,18 @@ export function issueRealRunTicket(gate: JudgmentRealGate, env: Record<string, s
   if (env.VERCEL || env.VERCEL_ENV) return { ok: false, reason: "vercel" };
   if (env.TOREMANE_ENV !== "local") return { ok: false, reason: "not_local_env" };
   if (!LOCAL_SUPABASE.test(env.NEXT_PUBLIC_SUPABASE_URL ?? "")) return { ok: false, reason: "not_local_database" }; // 本番の候補に対して実AIを実行しない
-  return { ok: true, ticket: Object.freeze({ [MARK]: true as const, model: gate.model, totalCapJpy: gate.totalCapJpy, perCaseCapJpy: gate.perCaseCapJpy, issuedAt: new Date().toISOString() }) };
+  return { ok: true, ticket: Object.freeze({ [MARK]: true as const, model: gate.model, totalCapJpy: gate.totalCapJpy, perCaseCapJpy: gate.perCaseCapJpy, issuedAt: new Date().toISOString(), origin: "eval" as const }) };
+}
+
+/**
+ * 本番シャドー（Phase 3）の許可証。**本番の多重ゲート（productionPreviewPermission: 本番環境・2つのスイッチ・停止なし・DB設定・世帯の許可リスト・専用予算・専用キー）が allowed のときだけ**発行する。
+ * 承認額の関門（checkJudgmentRealRun）は評価用（開発専用キー・ローカル限定）なので通らない。上限は本番側の設定（日次・月次・1件）から呼び出し側が渡す（ここでは1件上限を5円・総額を1000円で頭打ち）。
+ */
+export function issueProductionShadowTicket(decision: { allowed: true } | { allowed: false }, a: { model: string; totalCapJpy: number; perCaseCapJpy: number }): TicketResult {
+  if (!decision.allowed) return { ok: false, reason: "prod_gate_denied" };
+  if (!(a.totalCapJpy > 0) || !(a.perCaseCapJpy > 0)) return { ok: false, reason: "no_budget" };
+  if (!/^claude-[a-z0-9.-]{3,60}$/.test(a.model)) return { ok: false, reason: "bad_model" };
+  return { ok: true, ticket: Object.freeze({ [MARK]: true as const, model: a.model, totalCapJpy: Math.min(a.totalCapJpy, 1000), perCaseCapJpy: Math.min(a.perCaseCapJpy, 5), issuedAt: new Date().toISOString(), origin: "prod_shadow" as const }) };
 }
 
 export const isRealRunTicket = (x: unknown): x is RealRunTicket => !!x && typeof x === "object" && (x as Record<symbol, unknown>)[MARK] === true;

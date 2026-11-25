@@ -166,7 +166,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
   );
 }
 
-export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
+export function ProposalPreview({ proposals, shadow }: { proposals: ProposalView[]; /** 本番シャドー: 読み取りとレビューの記録だけ（登録案の作成ボタンを出さない） */ shadow?: boolean }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [msg, setMsg] = useState("");
@@ -180,7 +180,7 @@ export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
     <details className="rounded-lg border p-2" data-testid="proposal-preview" open={proposals.length > 0}>
       <summary className="cursor-pointer text-xs font-medium">新AIの登録案（プレビュー）{proposals.length > 0 ? `　${proposals.length}件` : ""}</summary>
       <div className="mt-2 space-y-2">
-        <p className="text-[11px] text-muted-foreground">開発用のプレビューです。承認は記録だけで、抽選は登録されません。</p>
+        <p className="text-[11px] text-muted-foreground">{shadow ? "並行稼働の試験結果です（現行の候補とは独立）。承認は記録だけで、抽選は登録されません。" : "開発用のプレビューです。承認は記録だけで、抽選は登録されません。"}</p>
         {proposals.length === 0 ? (
           <p className="text-muted-foreground" data-testid="proposal-empty">
             まだ登録案がありません。
@@ -192,12 +192,14 @@ export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
             ))}
           </ul>
         )}
+        {!shadow && (
         <div className="flex items-center justify-end gap-2">
           {msg && <span className="text-[11px] text-muted-foreground" data-testid="proposal-gen-msg">{msg}</span>}
           <Button size="sm" variant="outline" onClick={generate} disabled={busy} data-testid="proposal-generate">
             登録案を作る（モック・費用0）
           </Button>
         </div>
+        )}
       </div>
     </details>
   );

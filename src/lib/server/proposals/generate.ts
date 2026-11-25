@@ -145,7 +145,9 @@ export async function loadHumanCorrections(db: Db, householdId: string, candidat
 
 export async function generateProposalsForCandidate(a: { db: Db; householdId: string; candidate: CandidateRow; deps?: GenerateDeps; env?: Record<string, string | undefined>; persist?: boolean }): Promise<GenerateResult> {
   const env = a.env ?? process.env;
-  if (!proposalPreviewEnabled(env)) return { ok: false, reason: "disabled" };
+  const shadowTicket = isRealRunTicket(a.deps?.ticket) && a.deps?.ticket.origin === "prod_shadow"; // 本番シャドーの許可証は、多重の本番ゲートを通した呼び出し側だけが持つ
+  if (!proposalPreviewEnabled(env) && !shadowTicket) return { ok: false, reason: "disabled" };
+  if (shadowTicket && (a.deps?.liveFetch || a.deps?.search || a.deps?.vision)) return { ok: false, reason: "real_not_permitted" }; // 本番シャドーは、収集済みの保存データだけを使う（検索・実取得・画像の実解析は持たない）
   const post0 = postFromCandidate(a.candidate);
   if (!post0) return { ok: false, reason: "no_evidence" };
   const deps = a.deps ?? mockDeps();

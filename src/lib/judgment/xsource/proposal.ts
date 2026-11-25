@@ -226,7 +226,7 @@ export function toProposalRecords(a: {
       costJpy: result.budget.costJpy,
       turns: result.investigation.turns,
       // 停止理由＋検索の提示/実行（P2: 検索が提示されなかった事実を残す）。例: unreachable|searched:1／sufficient|search_not_offered
-      stopReason: `${result.investigation.reason}|${result.searchOffered ? `searched:${result.searches.length ? new Set(result.searches.map((s) => s.query)).size : 0}` : "search_not_offered"}`.slice(0, 60),
+      stopReason: `${result.investigation.reason}|${result.searchOffered ? `searched:${result.searches.length ? new Set(result.searches.map((s) => s.query)).size : 0}` : "search_not_offered"}${(result.quoteAudit ?? []).length > 1 ? `|rev:${(result.quoteAudit ?? []).length - 1}` : ""}`.slice(0, 60), // rev:N = 検証に通らず訂正を求めた回数（自己修正の成功率は rev:N かつ verified で測る）
       fetchedAt: a.fetchedAt,
     };
   });

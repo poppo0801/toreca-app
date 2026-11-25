@@ -3,7 +3,7 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { currentHouseholdId, type Db } from "@/lib/server/lottery-service";
-import { proposalPreviewEnabled } from "@/lib/server/proposals/flag";
+import { proposalPreviewEnabled, proposalSurfaceEnabled } from "@/lib/server/proposals/flag";
 import { generateForPendingCandidates } from "@/lib/server/proposals/generate";
 import { recordReview } from "@/lib/server/proposals/review";
 import { createClient } from "@/lib/supabase/server";
@@ -41,7 +41,7 @@ export async function generateProposalsAction(): Promise<R<{ candidates: number;
 }
 
 export async function reviewProposalAction(input: { proposalId: string; decision: string; edits?: Record<string, string>; note?: string }): Promise<R> {
-  if (!proposalPreviewEnabled()) return { ok: false, error: "この機能は有効になっていません" };
+  if (!proposalSurfaceEnabled()) return { ok: false, error: "この機能は有効になっていません" };
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
   const r = await recordReview({ db: c.db, householdId: c.householdId, proposalId: String(input.proposalId), decision: String(input.decision), edits: input.edits, note: input.note });

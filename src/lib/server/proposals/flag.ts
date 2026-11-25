@@ -16,6 +16,20 @@ export function proposalPreviewEnabled(env: Env = process.env): boolean {
   return env.TOREMANE_ENV === "local" && env.PROPOSAL_PREVIEW === "on";
 }
 
+/**
+ * 本番シャドー（Phase 3）の登録案を、管理画面で**読む**ことの許可。本番環境（VERCEL_ENV=production）で、本番の2つのスイッチ（PROPOSAL_PROD_PREVIEW=on・PROPOSAL_PROD_APPROVED=yes）が立ち、停止（PROPOSAL_KILL）が無いときだけ。
+ * 登録案の生成は別（ワーカー）で、この許可には含まれない。レビュー（保留／却下／修正して承認）は記録だけで、抽選は登録されない。ローカル開発の許可（proposalPreviewEnabled）とは独立。
+ */
+export function proposalShadowViewEnabled(env: Env = process.env): boolean {
+  const on = (v: string | undefined): boolean => v === "on" || v === "1" || v === "yes";
+  return env.VERCEL_ENV === "production" && on(env.PROPOSAL_PROD_PREVIEW) && env.PROPOSAL_PROD_APPROVED === "yes" && !on(env.PROPOSAL_KILL);
+}
+
+/** 登録案を画面で読む・レビューを記録する許可（ローカル開発のプレビュー または 本番シャドーの閲覧） */
+export function proposalSurfaceEnabled(env: Env = process.env): boolean {
+  return proposalPreviewEnabled(env) || proposalShadowViewEnabled(env);
+}
+
 /** 収集時に、取得した全文を evidence_documents（migration 115）へ保存するか。新AI機能と同じ開発限定の条件（本番では常にfalse。115 が未適用の本番表へは書かない） */
 export function evidenceCollectStoreEnabled(env: Env = process.env): boolean {
   return proposalPreviewEnabled(env) && env.EVIDENCE_COLLECT_STORE !== "off";

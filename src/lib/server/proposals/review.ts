@@ -4,7 +4,7 @@
  * 利用者のセッションのクライアント（RLS: 世帯の構成員・本人名義）で呼ぶ。
  */
 import type { Db } from "@/lib/server/lottery-service";
-import { proposalPreviewEnabled } from "./flag";
+import { proposalSurfaceEnabled } from "./flag";
 import { recordHumanExperience } from "./experience-store";
 
 export const REVIEW_DECISIONS = ["hold", "approve_with_edits", "reject"] as const;
@@ -15,7 +15,7 @@ export type ReviewResult = { ok: true } | { ok: false; reason: "disabled" | "inv
 const EDIT_FIELDS = /^[\p{L}\p{N}_ ]{1,40}$/u;
 
 export async function recordReview(a: { db: Db; householdId: string; proposalId: string; decision: string; edits?: Record<string, unknown>; note?: string; env?: Record<string, string | undefined> }): Promise<ReviewResult> {
-  if (!proposalPreviewEnabled(a.env ?? process.env)) return { ok: false, reason: "disabled" };
+  if (!proposalSurfaceEnabled(a.env ?? process.env)) return { ok: false, reason: "disabled" };
   if (!(REVIEW_DECISIONS as readonly string[]).includes(a.decision)) return { ok: false, reason: "invalid" };
   const edits: Record<string, string> = {};
   for (const [k, v] of Object.entries(a.edits ?? {}).slice(0, 12)) {

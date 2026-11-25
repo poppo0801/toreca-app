@@ -66,7 +66,7 @@ describe("本番限定プレビューの許可判定（設計・未接続）", (
 describe("静的確認: この判定はどこにも接続されていない（設計のみ）", () => {
   const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = `${d}/${n}`; return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
   it("prod-gate を import する非テストのファイルは無い", () => {
-    const users = walk("src").filter((f) => !/\.test\.tsx?$/.test(f) && !f.endsWith("prod-gate.ts") && /proposals\/prod-gate|\.\/prod-gate/.test(readFileSync(f, "utf8")));
+    const users = walk("src").filter((f) => !/\.test\.tsx?$/.test(f) && !f.endsWith("prod-gate.ts") && !f.endsWith("shadow/proposal-job.ts") && /proposals\/prod-gate|\.\/prod-gate/.test(readFileSync(f, "utf8")));
     expect(users).toEqual([]);
   });
 });
