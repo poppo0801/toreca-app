@@ -84,7 +84,8 @@ export function inputHash(plan: ItemPlan, evidence: readonly Evidence[], protect
   const pages = evidence.filter((e) => e.kind === "page").map((e) => e.contentHash).sort();
   // 人が確定した値（レビューの修正）も入力の一部: 修正が変わったら再評価の結果が変わりうるため、新しい版にする（古い版・レビューは残る）
   const prot = protectedValues ? Object.entries(protectedValues).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(";") : "";
-  return sha(`${plan.seedText}|${(plan.notes ?? []).join("¦")}|${pages.join(",")}|${prot}`).slice(0, 16);
+  // プロンプト版も入力の一部: 版を上げた再評価は、同じ原文・同じページでも新しい版として残す（版別に比較でき、費用をかけた結果が「変更なし」で捨てられない）
+  return sha(`${plan.seedText}|${(plan.notes ?? []).join("¦")}|${pages.join(",")}|${prot}|${PROPOSAL_PROMPT_VERSION}`).slice(0, 16);
 }
 
 /** 値が引用・本文から導けるかの機械的な分類（正しさの判定ではない）。日付・数字は書式の違い（11/27・11月27日・2026年11月27日）を吸収して照合する */
