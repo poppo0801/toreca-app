@@ -246,7 +246,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
         const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
         // ページ内リンク（次に調べる候補）を持たない旧い保存文書は、実取得できるなら取得し直して、リンクつきで保存し直す（実取得が無ければ保存全文を使う）
         const hasLinks = saved?.structure?.links !== undefined;
-        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0) && (hasLinks || !deps.liveFetch)) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。この取得時刻の時点のページの内容。評価の基準時刻（収集時刻）での状態は、このページの記載（受付期間・受付中の表示）と基準時刻を照らして判断する` };
+        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0) && (hasLinks || !deps.liveFetch || saved.origin === "prefetch")) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : saved.origin === "prefetch" ? "調査の前に事前取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。この取得時刻の時点のページの内容。評価の基準時刻（収集時刻）での状態は、このページの記載（受付期間・受付中の表示）と基準時刻を照らして判断する` };
       }
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);

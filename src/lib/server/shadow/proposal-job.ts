@@ -13,6 +13,7 @@ import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import { preflightRun } from "@/lib/judgment/xsource/cost-preflight";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, OUTPUT_MAX_TOKENS, type AiDiagnostic } from "@/lib/judgment/xsource/research-ai";
 import type { ResearchLimits } from "@/lib/judgment/xsource/research-loop";
+import { prefetchSourcePage } from "./source-prefetch";
 import { makeSearchTool, type SearchProviderLike } from "@/lib/judgment/xsource/research-search";
 import { makeShadowLivePublicFetch, shadowLiveFetchAllowed, type LiveRecord } from "@/lib/judgment/xsource/live-fetch";
 import { makeRealVisionClient, worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
@@ -55,6 +56,8 @@ export interface ProposalTrace {
   pages: number;
   turns: number;
   images?: Record<string, number>;
+  /** 取得元ページの事前取得（none=取得元なし／saved_recent=24時間以内に保存済み／stored=今回保存／failed:理由）。AIの費用は掛からない */
+  prefetch?: string;
 }
 
 export type ProposalJobResult =
@@ -135,6 +138,12 @@ export async function runShadowProposalJob(a: {
   if (!pf.ok) return { ok: false, reason: "budget" };
   if (!wantVision) why.vision = "no_images";
 
+  // 取得元ページの事前取得・保存（AIの費用なし・現行の収集とは独立）。保存した全文は、調査（generate の fetchPage）が最優先で読む。失敗しても調査は続く
+  let prefetch = "not_permitted";
+  if (lfAllowed.ok) {
+    const pre = makeShadowLivePublicFetch({ env, maxFetches: 1, minIntervalMs: 1000, ...(a.fetchHooks ?? {}) });
+    prefetch = (await prefetchSourcePage({ db: a.db, householdId: a.householdId, candidate: a.candidate, fetchPage: pre.fetchPage, ...(a.now ? { now: a.now } : {}) })).status;
+  }
   const diagnostics: Record<string, number> = {};
   const state: { fatal: "auth_error" | "rate_limited" | null } = { fatal: null };
   const onDiagnostic = (d: AiDiagnostic): void => {
@@ -166,7 +175,7 @@ export async function runShadowProposalJob(a: {
   const bump = (m: Record<string, number>, k: string): void => {
     m[k] = (m[k] ?? 0) + 1;
   };
-  const trace: ProposalTrace = { tools: toolReport(tools, why), fetches: fetchLog.slice(0, 12).map((x) => ({ host: x.host, outcome: x.outcome })), endReasons: {}, urlStatuses: {}, pages: 0, turns: 0 };
+  const trace: ProposalTrace = { tools: toolReport(tools, why), fetches: fetchLog.slice(0, 12).map((x) => ({ host: x.host, outcome: x.outcome })), endReasons: {}, urlStatuses: {}, pages: 0, turns: 0, prefetch };
   if (!r.ok) return { ok: false, reason: `generate:${r.reason}`, costJpy: spent, trace, ...(state.fatal ? { fatal: state.fatal } : {}) };
   const decisions: Record<string, number> = {};
   const rev = { rounds: 0, verified: 0, held: 0 };

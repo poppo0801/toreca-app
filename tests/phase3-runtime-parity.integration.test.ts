@@ -161,6 +161,50 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     }
     await clean();
   });
+  it("⑩取得元ページは調査の前に独立して事前取得・保存される（AI費用なし）。24時間以内に保存済みなら再取得しない。取得失敗（robots）・実取得なしでも調査は続き、理由を記録する", async () => {
+    const docsOf = async (id: string) => ((await admin.from("evidence_documents").select("origin,text_chars,fetched_at,structure").eq("candidate_id", id).eq("origin", "prefetch")).data ?? []) as { origin: string; text_chars: number; fetched_at: string; structure: { links?: unknown[] } | null }[];
+    const prefetchOf = async (id: string) => ((await admin.from("shadow_judgments").select("record").eq("candidate_id", id)).data?.[0] as { record: { trace: { prefetch?: string } } }).record.trace.prefetch;
+    await clean();
+    await setSettings();
+    const c = await mkCandidate(0, "pre1");
+    await enqueue(c);
+    const t0 = fetched.length;
+    const r1 = await runShadow(recording().client, shadowEnv());
+    expect(r1.done).toBe(1);
+    expect(await prefetchOf(c.id)).toBe("stored");
+    const d1 = await docsOf(c.id);
+    expect(d1).toHaveLength(1);
+    expect(d1[0].text_chars).toBeGreaterThan(30);
+    expect(Date.now() - new Date(d1[0].fetched_at).getTime()).toBeLessThan(120_000); // 実際の取得時刻（収集時刻ではない）
+    expect(fetched.length).toBeGreaterThan(t0);
+    // 24時間以内に保存済み: 事前取得は再取得しない（調査側が保存全文を使うので、外部アクセスは増えない）
+    await clean();
+    const c2 = await mkCandidate(0, "pre1");
+    const { saveDocuments } = await import("@/lib/server/proposals/evidence-store");
+    expect((await saveDocuments(admin as unknown as Db, hid, c2.id, d1.map((d) => ({ kind: "page" as const, url: (c2.last_good as { evidence: { url: string } }).evidence.url, urlKey: (c2.last_good as { evidence: { url: string } }).evidence.url.slice(8), origin: "prefetch", contentHash: "b".repeat(32), fetchedAt: new Date().toISOString(), text: "x".repeat(400), textChars: 400, sourceChars: 400, truncated: false, truncatedReason: null, structure: { title: null, slots: [], links: [] } as never, textLoss: null })))).failed).toBe(0);
+    await enqueue(c2);
+    const t1 = fetched.length;
+    await runShadow(recording().client, shadowEnv());
+    expect(await prefetchOf(c2.id)).toBe("saved_recent");
+    expect(fetched.length).toBe(t1);
+    // 取得失敗（robots）: 理由を記録し、調査は続く（保存全文が無いので取得元のカード文で判断）
+    await clean();
+    const c3 = await mkCandidate(1, "pre-robots");
+    await enqueue(c3);
+    const r3 = await runShadow(recording().client, shadowEnv(), mkFetchImpl("robots"));
+    expect(r3.done).toBe(1);
+    expect(await prefetchOf(c3.id)).toMatch(/^failed:/);
+    expect(await docsOf(c3.id)).toHaveLength(0);
+    // 実取得が許可されていない: 取得せず理由を記録
+    await clean();
+    const c4 = await mkCandidate(2, "pre-nolf");
+    await enqueue(c4);
+    const t2 = fetched.length;
+    await runShadow(recording().client, shadowEnv({ SHADOW_LIVE_FETCH: "" }));
+    expect(await prefetchOf(c4.id)).toBe("not_permitted");
+    expect(fetched.length).toBe(t2);
+    await clean();
+  });
   it("②実取得が許可されていない（SHADOW_LIVE_FETCH なし）と、取得せず、理由つきで記録する（黙って能力を落とさない）。保存した取得元の文章は注記つきで読める", async () => {
     await clean();
     await setSettings();

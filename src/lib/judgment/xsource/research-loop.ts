@@ -236,6 +236,8 @@ export function seedEvidence(id: string, text: string, now: Date, url: string | 
   return { id, kind: "seed", url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure: null, independent: true, ...(notes.length ? { notes: notes.slice(0, 16) } : {}) };
 }
 
+/** 取得結果から証拠（ページ）を作る。保存の前処理（事前取得）でも同じ整形を使う */
+export const pageEvidenceFromFetch = (n: number, url: string, o: Extract<FetchOutcome, { ok: true }>, now: Date): Evidence => pageEvidence(n, url, o, now);
 function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: true }>, now: Date): Evidence {
   if (o.cleaned) return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: o.fetchedAt ?? now.toISOString(), contentHash: sha(o.text), text: o.text, structure: o.structure ?? null, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(o.textLoss?.length ? { textLoss: o.textLoss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
   const structure = parseApplyPage(o.html);
