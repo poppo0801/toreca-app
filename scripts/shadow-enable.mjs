@@ -161,6 +161,17 @@ if (!flag("execute")) {
   console.log("dry-run: 何も書いていません。書き込みは --execute。");
   process.exit(0);
 }
+if (flag("resume")) {
+  // 一時停止からの再開: enabled・enqueue_enabled だけを戻す。試行期間（valid_until）・通算の起点（total_since）・上限は変えない。期限が過ぎていれば再開しない
+  const vu = cur.data?.valid_until ? new Date(cur.data.valid_until).getTime() : null;
+  if (!cur.data || (vu !== null && vu <= Date.now())) {
+    console.error("試行期間が過ぎている（または設定がない）ため、再開しません。");
+    process.exit(1);
+  }
+  const r = await db.from("shadow_settings").update({ enabled: true, enqueue_enabled: true }).eq("household_id", hid);
+  console.log(r.error ? "再開に失敗しました" : `再開しました（期限 ${cur.data.valid_until} は変更なし）`);
+  process.exit(r.error ? 1 : 0);
+}
 if (flag("disable")) {
   const r = await db.from("shadow_settings").update({ enabled: false, enqueue_enabled: false }).eq("household_id", hid);
   console.log(r.error ? "停止に失敗しました" : "停止しました（enabled=false・enqueue_enabled=false）");
