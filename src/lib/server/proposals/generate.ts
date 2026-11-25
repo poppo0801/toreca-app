@@ -244,7 +244,9 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       // 取得時刻は**実際に取得した時刻**で、評価の基準時刻（収集時刻）とは別。由来も区別する（収集時に取得／以前の調査で取得）。現在の状態ではない。保存が無い・切り詰められているときだけ、実取得へ進む。
       if (!hit && post0.sourcePage && canonUrl(u).key === canonUrl(post0.sourcePage.url).key) {
         const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
-        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0)) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。現在の状態ではない` };
+        // ページ内リンク（次に調べる候補）を持たない旧い保存文書は、実取得できるなら取得し直して、リンクつきで保存し直す（実取得が無ければ保存全文を使う）
+        const hasLinks = saved?.structure?.links !== undefined;
+        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0) && (hasLinks || !deps.liveFetch)) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。現在の状態ではない` };
       }
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);

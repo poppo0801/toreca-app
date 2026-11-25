@@ -260,7 +260,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const prep = async (tag: string) => {
       const c = await mkCandidate(1, tag);
       const ev = (c.last_good as { evidence: { url: string } }).evidence;
-      const r = await saveDocuments(admin as unknown as Db, hid, c.id, [{ kind: "page", url: ev.url, urlKey: ev.url.slice(8), origin: "discovered", contentHash: "a".repeat(32), fetchedAt: FETCHED, text: FULL, textChars: FULL.length, sourceChars: FULL.length, truncated: false, truncatedReason: null, structure: null, textLoss: null }]);
+      const r = await saveDocuments(admin as unknown as Db, hid, c.id, [{ kind: "page", url: ev.url, urlKey: ev.url.slice(8), origin: "discovered", contentHash: "a".repeat(32), fetchedAt: FETCHED, text: FULL, textChars: FULL.length, sourceChars: FULL.length, truncated: false, truncatedReason: null, structure: { recognized: true, siteKind: "generic", title: null, pageNotes: [], slots: [], relatedEvents: [], formChoices: [], formQuestions: [], gaps: [], links: [] } as never, textLoss: null }]);
       expect(r.failed).toBe(0);
       return c;
     };
