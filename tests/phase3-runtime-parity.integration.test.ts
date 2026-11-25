@@ -279,6 +279,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
       expect(p[1]).toContain("収集時に保存された全文にだけある記載"); // 2ターン目の入力に、保存全文が証拠として入る
       expect(p[1]).toContain("取得時刻 2026-"); // 実際の取得時刻（古い記録は保存時刻で補正。evidence-store の actualFetchedAt） // 実際の取得時刻つきの注記。現在の状態ではない旨
       expect(p[1]).toContain("以前の調査で取得");
+      expect(p[1]).toContain("この取得時刻の時点のページの内容");
     }
     await clean();
   });
