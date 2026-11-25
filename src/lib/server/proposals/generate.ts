@@ -11,6 +11,7 @@
 import { CallBudget, CaseBudget } from "@/lib/judgment/call-budget";
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import { canonUrl } from "@/lib/judgment/xsource/normalize";
+import { isShadowTool } from "@/lib/judgment/xsource/shadow-tool-mark";
 import { itemFingerprint, proposalKey, toProposalRecords, type ProposalMode, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { mockRegistrationJudge, mockResearchAgent } from "@/lib/judgment/xsource/proposal-mock";
 import type { FetchOutcome, RegistrationJudge, ResearchAgent, ResearchLimits, ResearchTools } from "@/lib/judgment/xsource/research-loop";
@@ -80,10 +81,28 @@ export function contextNotes(e: NonNullable<ReturnType<typeof evidenceFromLastGo
   return notes;
 }
 
+/**
+ * 利用者の対象地域の条件（既存の収集設定: 都道府県・オンライン可否）を、AIへの観察として渡す注記にする。設定の読み取りに失敗・未設定なら注記なし（推測で補わない）。
+ * 「応募機会が実在するか」（登録案の判断）と「利用者に適合するか」（地域）は別の軸。地域外だけを理由に除外させず、適合は fit_region に根拠つきで記録させる。
+ */
+export async function regionFitNote(db: Db, householdId: string): Promise<string | null> {
+  try {
+    const { data } = await (db as unknown as { from: (n: string) => { select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { prefectures?: string[] | null; include_online?: boolean | null } | null }> } } } }).from("collection_settings").select("prefectures,include_online").eq("household_id", householdId).maybeSingle();
+    if (!data) return null;
+    const prefs = (data.prefectures ?? []).filter((p) => typeof p === "string" && p.length <= 8).slice(0, 47);
+    return `利用者の対象地域の設定（既存の収集設定）: ${prefs.length ? prefs.join("・") : "都道府県の指定なし"}／オンライン抽選: ${data.include_online ? "対象" : "対象外"}。これは応募機会が実在するかの判断とは別の軸（適合）。地域が合わないことだけを理由に除外しない。適合は fit_region 項目に、適合・不適合・不明のいずれかと根拠（basis）を書く`.slice(0, 380);
+  } catch {
+    return null;
+  }
+}
+
 export function postFromCandidate(c: CandidateRow): StoredXPost | null {
   const e = evidenceFromLastGood(c.last_good);
   if (!e) return null;
-  return { postId: (c.x_post_id ?? e.hash).slice(0, 40), text: e.text, links: e.links ?? [], ...(e.linkMap?.length ? { linkMap: e.linkMap } : {}), recordedAt: e.fetchedAt, ...(contextNotes(e).length ? { notes: contextNotes(e) } : {}) };
+  // 取得元ページ（収集時に取得したページ）。応募先URLとは別の意味で渡す。公開の http(s) のみ。X・短縮URLは対象外（追跡しない既存方針）
+  const src = e.url ?? c.source_url ?? null;
+  const sourcePage = src && /^https?:\/\//i.test(src) && !/^https?:\/\/(?:[^/]*\.)?(?:x\.com|twitter\.com|t\.co)(?:[/:?#]|$)/i.test(src) ? { url: src.slice(0, 500), via: e.via, fetchedAt: e.fetchedAt } : null;
+  return { postId: (c.x_post_id ?? e.hash).slice(0, 40), text: e.text, links: e.links ?? [], ...(e.linkMap?.length ? { linkMap: e.linkMap } : {}), recordedAt: e.fetchedAt, ...(sourcePage ? { sourcePage } : {}), ...(contextNotes(e).length ? { notes: contextNotes(e) } : {}) };
 }
 
 /** 保存済みの全文（整形後）から取得結果を作る。HTMLは保存しないため、本文と構造化の観察をそのまま使う */
@@ -147,7 +166,8 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   const env = a.env ?? process.env;
   const shadowTicket = isRealRunTicket(a.deps?.ticket) && a.deps?.ticket.origin === "prod_shadow"; // 本番シャドーの許可証は、多重の本番ゲートを通した呼び出し側だけが持つ
   if (!proposalPreviewEnabled(env) && !shadowTicket) return { ok: false, reason: "disabled" };
-  if (shadowTicket && (a.deps?.liveFetch || a.deps?.search || a.deps?.vision)) return { ok: false, reason: "real_not_permitted" }; // 本番シャドーは、収集済みの保存データだけを使う（検索・実取得・画像の実解析は持たない）
+  // 本番シャドーの道具: 実取得・画像解析は、本番の許可（承認済みの入口）を通して作った印つきのものだけ。検索は予算の都合で本番シャドーには渡さない（1件¥3の枠に検索の予約が収まらない。Phase 3 RUNTIME_PARITY の差の表を参照）
+  if (shadowTicket && (a.deps?.search || (a.deps?.liveFetch && !isShadowTool(a.deps.liveFetch)) || (a.deps?.vision && !isShadowTool(a.deps.vision)))) return { ok: false, reason: "real_not_permitted" };
   const post0 = postFromCandidate(a.candidate);
   if (!post0) return { ok: false, reason: "no_evidence" };
   const deps = a.deps ?? mockDeps();
@@ -178,9 +198,12 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
     for (const [u, r] of intakeRows) intake[u] = { reason: r.status === "failed" ? (r.failureReason ?? "vision_error") : "pending_approval", meta: { ...(r.sha256 ? { sha256: r.sha256 } : {}), ...(r.width ? { width: r.width } : {}), ...(r.height ? { height: r.height } : {}) } };
     imageAnalysis = await analyzeImages({ intake, imageRefs: stored.imageRefs, existing: stored.imageReadings ?? [], postText: [stored.text, ...(stored.linkedPages ?? []).map((l) => l.text)].join("\n").slice(0, 1_000_000), ...(vision ? { vision } : {}) }).catch(() => null);
   }
-  const post = imageAnalysis
+  const post1 = imageAnalysis
     ? { ...post0, notes: [...(post0.notes ?? []).filter((n) => !n.startsWith("収集時のAIが画像から読み取った情報") && n !== NOTE_IMAGE_UNREAD), ...imageAnalysis.notes].slice(0, 16) }
     : post0;
+  // 利用者の対象地域（既存の収集設定）: 「応募機会の実在」とは別軸の「適合」として渡す。地域が合わないことだけを除外の根拠にしない
+  const fitNote = await regionFitNote(a.db, a.householdId);
+  const post = fitNote ? { ...post1, notes: [...(post1.notes ?? []), fitNote].slice(0, 16) } : post1;
   // 調査経験: 類似ページの検証済みの経験があれば、最初に見せる位置の提案（仮説）を作る。位置の優先だけで、全文の参照可能性は変わらない
   const experiences = deps.learn === false ? [] : await loadExperiences(a.db, a.householdId);
   const hintsByUrl = new Map<string, ReadHint[]>();
@@ -215,6 +238,10 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       }
       const doc = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
       if (doc && (!hit || doc.textChars > hit.text.length)) return fromDocument(doc);
+      // 取得元ページ（収集時に取得したページ）: 実取得できない（許可なし・失敗）ときは、収集時に保存した文章を、全文ではない旨の注記つきで返す（再取得ではない）
+      if (!hit && stored?.text && post0.sourcePage && canonUrl(u).key === canonUrl(post0.sourcePage.url).key) {
+        return { ok: true, finalUrl: post0.sourcePage.url, html: `<html><body>${escapeHtml(stored.text)}</body></html>`, text: stored.text, notice: `収集時に保存された取得元ページの文章（${stored.text.length}字。ページ全文ではない可能性がある。後半・他の部分は確認できない）` };
+      }
       if (hit) {
         // 収集時の保存は先頭 MAX_LINKED_PAGE_CHARS 字で切り詰められる。後半は確認できない事実を観察に明示し、AIが「無い」と読まないようにする
         const notice = `この本文は収集時の保存で先頭${hit.text.length}字（全文${hit.fullChars ?? "不明"}字）に切り詰められており、後半は確認できない（無いのではなく未確認）`;

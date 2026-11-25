@@ -20,6 +20,7 @@ import { makeSearchTool, type SearchProviderLike } from "@/lib/judgment/xsource/
 import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, type CandidateRow } from "./generate";
 import { issueRealRunTicket, type RealRunTicket } from "./real-gate";
+import { assembleGenerateDeps, basisClock, researchLimits } from "./pipeline";
 
 type Client = Parameters<typeof makeAnthropicResearchAgent>[0];
 
@@ -131,7 +132,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
   const releaseLock = o.lockPath ? acquireRunLock(o.lockPath) : () => undefined;
   if (!releaseLock) return stop("locked");
   try {
-    const limits: ResearchLimits = { maxTurns: 4, maxFetches: 3, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxSearches: o.search ? 1 : 0, searchReserveJpy: o.search?.reserveJpy ?? 2.5, maxReads: 8, maxReadChars: 24_000, ...o.limits };
+    const limits: ResearchLimits = researchLimits({ search: !!o.search, ...(o.search?.reserveJpy !== undefined ? { searchReserveJpy: o.search.reserveJpy } : {}), ...o.limits }); // 本番シャドーと共通の調査上限（pipeline.ts）
     const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), ...(o.vision || o.visionFactory ? { images: { perCaseCount: o.maxImagesPerCase ?? 4, worstJpyEach: worstCaseVisionCallJpy(ticket.model, [{ width: 1200, height: 1600 }]) } } : {}), gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
     base.preflight = pf;
     emit({ kind: "preflight", ok: pf.ok, errors: pf.errors, warnings: pf.warnings, minPerCaseJpy: pf.minPerCaseJpy, maxReservedPerCaseJpy: pf.maxReservedPerCaseJpy, reservationCoversWorstCase: pf.reservationCoversWorstCase });
@@ -166,10 +167,11 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         householdId: o.householdId,
         candidate: c,
         env,
-        deps: { agent, judge, mode: "real", modelId: ticket.model, ticket, budget, perItemCapJpy: ticket.perCaseCapJpy, limits, ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(() => {
-          const d = o.depsFor?.(c);
-          return { ...(d?.learn !== undefined ? { learn: d.learn } : {}), ...(visionHandle && d?.vision !== false ? { vision: visionHandle.vision } : {}) };
-        })(), now: o.now, shouldStop: () => !!fatal || !!o.shouldStop?.() },
+        deps: (() => {
+          const dd = o.depsFor?.(c);
+          // 共通の組み立て（pipeline.ts）。本番シャドーと同じ形の依存を作る
+          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, perItemCapJpy: ticket.perCaseCapJpy, tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
+        })(),
       });
       base.processed++;
       const vh = visionHandle?.halted?.();

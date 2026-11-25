@@ -40,7 +40,9 @@ describe.skipIf(!dbTestsEnabled)("Stage 10Z: 収集候補 → 新AI → 登録�
     return data as { id: string; x_post_id: string; source_url: string; last_good: unknown };
   };
   const setEvidence = async (id: string, text: string, opts: Parameters<typeof addCandidate>[1]) => {
-    const stored = buildEvidence({ url: `${URL_BASE}/x${id.slice(0, 4)}`, kind: "x_post", post: { text, links: opts?.links ?? [], ...(opts?.linkMap ? { linkMap: opts.linkMap } : {}) }, ...(opts?.pages ? { linkedPages: opts.pages } : {}) }, new Date().toISOString());
+    // 取得元ページのURLは変えない（入力の一部。URLが変われば、項目すべての入力が変わる＝新しい版になるのは仕様）。変えるのは本文・リンク先ページだけ
+    const srcUrl = ((await u1.from("collection_candidates").select("source_url").eq("id", id).single()).data as { source_url: string }).source_url;
+    const stored = buildEvidence({ url: srcUrl, kind: "x_post", post: { text, links: opts?.links ?? [], ...(opts?.linkMap ? { linkMap: opts.linkMap } : {}) }, ...(opts?.pages ? { linkedPages: opts.pages } : {}) }, new Date().toISOString());
     await u1.from("collection_candidates").update({ last_good: { evidence: stored } as never }).eq("id", id);
     return (await u1.from("collection_candidates").select("id,x_post_id,source_url,last_good").eq("id", id).single()).data as { id: string; x_post_id: string; source_url: string; last_good: unknown };
   };

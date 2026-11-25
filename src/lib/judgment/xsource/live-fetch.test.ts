@@ -113,8 +113,21 @@ describe("安全な範囲だけ（迂回しない）", () => {
 
 describe("通常の画面・収集・cron から読み込まれない（静的確認）", () => {
   const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = `${d}/${n}`; return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
-  it("live-fetch を import するのは、評価の実行コード（*.test.ts）だけ", () => {
+  it("live-fetch を import するのは、評価の実行コード（*.test.ts）と、本番シャドーの調査ジョブ（shadow/proposal-job.ts。多重の本番ゲートの後）だけ", () => {
     const users = walk("src").filter((f) => !f.endsWith("live-fetch.ts") && !f.endsWith("live-fetch.test.ts") && /xsource\/live-fetch|\.\/live-fetch/.test(readFileSync(f, "utf8")));
-    for (const f of users) expect(f, f).toMatch(/\.test\.ts$/);
+    for (const f of users) expect(f.replace(/\\/g, "/"), f).toMatch(/\.test\.ts$|src\/lib\/server\/shadow\/proposal-job\.ts$/);
+  });
+  it("本番シャドーの取得許可は、本番かつ明示許可のときだけ。開発の許可とは独立で、印つきの関数だけが本番シャドーの生成に渡せる", async () => {
+    const { shadowLiveFetchAllowed, makeShadowLivePublicFetch } = await import("./live-fetch");
+    const { isShadowTool } = await import("./shadow-tool-mark");
+    expect(shadowLiveFetchAllowed({}).ok).toBe(false);
+    expect(shadowLiveFetchAllowed({ VERCEL_ENV: "production" }).ok).toBe(false);
+    expect(shadowLiveFetchAllowed({ SHADOW_LIVE_FETCH: "allow" }).ok).toBe(false);
+    expect(shadowLiveFetchAllowed({ VERCEL_ENV: "production", SHADOW_LIVE_FETCH: "allow" }).ok).toBe(true);
+    expect(() => makeShadowLivePublicFetch({ env: { TOREMANE_ENV: "local", JUDGMENT_LIVE_FETCH: "allow" } })).toThrow(); // 開発の許可では本番シャドーの取得は作れない
+    expect(liveFetchAllowed({ VERCEL_ENV: "production", SHADOW_LIVE_FETCH: "allow" }).ok).toBe(false); // 逆も同様
+    const f = makeShadowLivePublicFetch({ env: { VERCEL_ENV: "production", SHADOW_LIVE_FETCH: "allow" }, fetchImpl: async () => ({ ok: true, finalUrl: "https://shop.example/e/1", status: 200, contentType: "text/html", body: "<html><body>x</body></html>", truncated: false }), sleep: async () => undefined });
+    expect(isShadowTool(f.fetchPage)).toBe(true);
+    expect(isShadowTool(async () => ({ ok: false }))).toBe(false);
   });
 });

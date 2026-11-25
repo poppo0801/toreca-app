@@ -43,9 +43,12 @@ describe("本番シャドーの許可証", () => {
 
 describe("静的確認: 本番シャドーの登録案ジョブは読み取り専用の範囲に収まる", () => {
   const s = readFileSync("src/lib/server/shadow/proposal-job.ts", "utf8");
-  it("抽選・応募・購入・通知・履歴の表に書かない／検索・実取得・画像解析を渡さない／キーは専用キーだけ", () => {
+  it("抽選・応募・購入・通知・履歴の表に書かない／検索を渡さない／実取得・画像解析は本番の許可を通した印つきの入口だけ／キーは専用キー（または明示スイッチの既存キー）だけ", () => {
     expect(s).not.toMatch(/\.from\(["'](lotteries|applications|purchases|notification_deliveries|application_results|audit_logs)/);
-    expect(s).not.toMatch(/liveFetch\s*[:=]|search\s*:\s*|vision\s*:/);
+    expect(s).not.toMatch(/\bsearch\s*:\s*[a-zA-Z(]/); // 検索ツールを渡さない（提示しない理由は toolReport に記録。型の注記 search?: string は対象外）
+    expect(s).toContain("makeShadowLivePublicFetch"); // 実取得は本番許可（SHADOW_LIVE_FETCH）を通した入口
+    expect(s).toContain("markShadowTool"); // 画像解析は印つき
+    expect(s).not.toMatch(/makeLivePublicFetch\(/); // 開発用の取得入口は使わない
     expect(s).toContain("SHADOW_ANTHROPIC_API_KEY");
     expect(s).not.toMatch(/process\.env\.(AGENT_ANTHROPIC|JUDGMENT_)/);
   });

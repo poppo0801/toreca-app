@@ -24,6 +24,11 @@ export interface StoredXPost {
   links: string[];
   linkMap?: { short: string; url: string }[];
   recordedAt: string | null;
+  /**
+   * 収集時にこの投稿・カードを取得した元のページ（source_url／evidence.url）。**応募先URLとは別の意味**: 応募先とは限らず、これだけで応募機会・応募単位を確定しない。
+   * AIには出所つき（「収集時の取得元ページ」）で渡し、ページ内の記載を読んで判断させる。無ければ従来どおり。
+   */
+  sourcePage?: { url: string; via?: string; fetchedAt?: string | null };
   /** 収集時の文脈の注記（本文の切り詰め・画像から読み取った情報など）。全項目の観察として渡す（引用の根拠にはしない） */
   notes?: string[];
 }
@@ -67,6 +72,8 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
     const scoped = itemScopedUrls(links);
     const status: ItemUrlStatus = scoped.length ? "url_from_item" : links.some((l) => l.origin === "item_text_short_unexpanded") ? "short_unexpanded" : links.some((l) => l.origin === "parent_shared" || l.origin === "parent_card") ? "shared_only_unverified" : "url_missing";
     const lines = [`【この項目の原文】${it.text}`, `【リンクの出所】${STATUS_LINE[status]}`];
+    // 収集時の取得元ページ: 応募先URLとは別の意味で渡す（応募先とは限らない・これだけで応募機会や応募単位を確定しない。ページ内の記載を読んで判断する）
+    if (post.sourcePage) lines.push(`【収集時の取得元ページ（応募先とは限らない。応募先URLとは別）${parsed.isList ? "・投稿全体の取得元で、この項目との対応は未確認" : ""}${post.sourcePage.via ? `・取得方法: ${post.sourcePage.via}` : ""}】 ${post.sourcePage.url}`);
     for (const l of links) {
       const host = canonUrl(l.url).host;
       lines.push(l.origin === "item_entity" ? `- この項目自身のリンク: ${l.url}` : l.origin === "item_text_short_unexpanded" ? `- 短縮URL（未展開・追跡しない）: ${host}` : `- 親投稿に共通のリンク（対応未確認）: ${l.url}`);
