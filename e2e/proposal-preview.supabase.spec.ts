@@ -55,6 +55,7 @@ async function seed() {
   const EMPTY = { precision: "unknown", date: "", time: "" };
   const input = { chain: { id: null, name: "テスト系列" }, store: { id: null, name: "新宿本店", prefecture: "" }, campaignId: null, newCampaign: null, items: [{ product: { id: null, name: "拡張パック" }, quantity: 1, unit: "box" }], multiMode: "single", applyStart: { precision: "date_only", date: "2026-11-01", time: "" }, applyDeadline: { precision: "date_only", date: "2099-01-20", time: "" }, resultDate: EMPTY, procedureStart: EMPTY, procedureDeadline: EMPTY, receiveMethod: "store", applyMethod: "web", requirementTags: [], conditionsText: "", verificationText: "", announcementMethod: "", announcementUrl: "", sourceUrls: [], eventState: "open", limitBasis: "account", limitMaxCount: 1, memo: "", applications: [] };
   const draft = { input, flags: {}, summary: { chain: "none", store: "none", items: [{ name: "x", kind: "none", matchedName: null }] }, warnings: [], modePending: false, verdict: "review", ready: false, notices: [] };
+  await a.from("collection_candidates").delete().eq("household_id", hid).eq("dedupe_key", evidence.url); // 同じファイル内の前のテストの候補（登録案・レビューは連鎖して消える）を消してから始める
   const { data, error } = await a.from("collection_candidates").insert({ household_id: hid, dedupe_key: evidence.url, source_url: evidence.url, x_post_id: "910000001", title: "E2E10Z 抽選まとめ", status: "pending", job_state: "review", kind: "new", reasons: ["要確認"], last_good: { evidence } as never, draft: draft as never } as never).select("id").single();
   expect(error).toBeNull();
   return { a, hid, candidateId: data!.id as string };
@@ -138,4 +139,65 @@ test("収集候補 → 登録案を作る（モック・費用0）→ 保留／�
   expect(await counts(a, hid)).toEqual(before); // 承認しても、抽選・応募・購入・通知は作られない
   expect((await a.from("collection_candidates").select("status,job_state,draft,lottery_id").eq("id", candidateId).single()).data).toEqual(candBefore); // 候補の状態も不変（登録は従来の「確認・登録」で行う）
   await page.screenshot({ path: "test-results/10z-proposal-reviewed-390.png" });
+});
+
+test("実AIの登録案の表示（モード・費用）・再評価後の差分・集計の1行。人のレビューは版が変わっても残る（390px）", async ({ page }) => {
+  test.skip(!on, "PROPOSAL_PREVIEW=on の実行だけ");
+  test.setTimeout(240_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const { a, hid, candidateId } = await seed();
+  const key = "ab12cd34ef56ab12cd34ef56";
+  const base = { household_id: hid, candidate_id: candidateId, proposal_key: key, post_id: "910000001", item_no: 1, item_label: "《新宿本店（東京）- 1件》", url_status: "url_from_item", source_urls: [], link_hosts: [], decision: "tentative", verified: true, held_reasons: [], end_reason: "sufficient", apply_unit: "unknown", apply_unit_basis: "unknown", unknowns: [], pages: [], possibly_same: [], mode: "real", model_id: "claude-haiku-5-5", prompt_version: "10z-1", cost_jpy: 0.41, turns: 2, stop_reason: "sufficient" };
+  const f = (store: string) => ({ store: { value: store, basis: "observed", quote: `【${store}】`, evidence: "p1", support: "literal_in_quote" }, product: { value: "拡張パック", basis: "observed", quote: "拡張パック 抽選", evidence: "p1", support: "literal_in_quote" } });
+  const v1 = await a.from("registration_proposals").insert({ ...base, version: 1, input_hash: "1111111111111111", fields: f("新宿本店") as never }).select("id").single();
+  expect(v1.error).toBeNull();
+  await a.from("registration_proposal_reviews").insert({ household_id: hid, proposal_key: key, proposal_id: v1.data!.id, decision: "approve_with_edits", edits: { deadline: "11/30" }, note: "締切を確認", reviewed_by: (await a.auth.admin.listUsers({ perPage: 200 })).data.users.find((u) => u.email === email)!.id });
+
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  const panel = page.getByTestId("candidate-detail").getByTestId("proposal-preview");
+  await expect(panel.getByTestId("proposal-mode")).toHaveText("実AI");
+  await expect(panel).toContainText("実AIが作成した登録案です（正しさは未検証。人が確認してください）");
+  await expect(panel).toContainText("費用 0.41円");
+  await expect(panel.getByTestId("proposal-diff")).toHaveCount(0); // まだ再評価なし
+
+  // 再評価: 新しい版（店舗が変わる）。古い版は superseded。人のレビューは残る
+  await a.from("registration_proposals").update({ superseded_at: new Date().toISOString() }).eq("id", v1.data!.id);
+  const v2 = await a.from("registration_proposals").insert({ ...base, version: 2, input_hash: "2222222222222222", fields: f("新宿西口店") as never }).select("id").single();
+  expect(v2.error).toBeNull();
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  const p2 = page.getByTestId("candidate-detail").getByTestId("proposal-preview");
+  await expect(p2.getByTestId("proposal-review-state")).toContainText("再評価で内容が変わりました");
+  await expect(p2.getByTestId("proposal-diff")).toContainText("店舗: 新宿本店 → 新宿西口店");
+  await expect(p2.getByTestId("proposal-diff")).toContainText("前回レビューは v1・現行は v2");
+  await expect(p2.getByTestId("proposal-edit").first()).toContainText("11/30"); // 人の修正は残り、AIの値は別に表示
+  await page.screenshot({ path: "test-results/phase2-proposal-real-diff-390.png" });
+  await page.keyboard.press("Escape");
+  const sum = page.getByTestId("proposal-summary");
+  await expect(sum).toContainText("1候補・1件");
+  await expect(sum).toContainText("レビュー済 1件（修正あり 1・却下 0・保留 0）");
+  await expect(sum).toContainText("解決率 100%");
+  await expect(sum).toContainText("費用 0.41円");
+  const w = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(w).toBeLessThanOrEqual(1);
+  // DB: 旧版は残り、レビューは追記のまま・抽選などは作られない
+  expect((await a.from("registration_proposals").select("version,superseded_at").eq("candidate_id", candidateId).order("version")).data!.map((x) => [x.version, x.superseded_at !== null])).toEqual([[1, true], [2, false]]);
+  expect((await a.from("registration_proposal_reviews").select("id").eq("household_id", hid)).data).toHaveLength(1);
+  expect((await counts(a, hid)).lotteries).toBe(0);
+
+  // 要確認の登録案（除外案・ページ確認なし／本登録案・応募単位未確定）は、判断の種別と検証の指摘が見える。除外案は「人が確認するまで採用しない」
+  await a.from("registration_proposals").insert({ ...base, item_no: 2, proposal_key: "cd34ef56ab12cd34ef56ab12", version: 1, input_hash: "3333333333333333", decision: "exclude", verified: false, held_reasons: ["exclude_without_page_evidence"], fields: f("渋谷西口店") as never });
+  await a.from("registration_proposals").insert({ ...base, item_no: 3, proposal_key: "ef56ab12cd34ef56ab12cd34", version: 1, input_hash: "4444444444444444", decision: "register", verified: false, held_reasons: ["register_unit_unresolved"], fields: f("池袋店") as never });
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  const p3 = page.getByTestId("candidate-detail").getByTestId("proposal-preview");
+  const ex = p3.getByTestId("proposal-card").filter({ has: page.getByTestId("proposal-decision").filter({ hasText: "除外案" }) });
+  await expect(ex.getByTestId("proposal-decision")).toHaveText("除外案・要確認");
+  await expect(ex.getByTestId("proposal-held")).toContainText("応募先のページを確認できないまま除外としている");
+  await expect(ex.getByTestId("proposal-held")).toContainText("人が確認するまで採用しない");
+  const rg = p3.getByTestId("proposal-card").filter({ has: page.getByTestId("proposal-decision").filter({ hasText: "本登録案" }) });
+  await expect(rg.getByTestId("proposal-held")).toContainText("本登録案なのに応募単位が未確定");
+  await page.screenshot({ path: "test-results/phase2-root-cause-held-390.png" });
 });

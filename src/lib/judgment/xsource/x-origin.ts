@@ -24,6 +24,8 @@ export interface StoredXPost {
   links: string[];
   linkMap?: { short: string; url: string }[];
   recordedAt: string | null;
+  /** 収集時の文脈の注記（本文の切り詰め・画像から読み取った情報など）。全項目の観察として渡す（引用の根拠にはしない） */
+  notes?: string[];
 }
 
 export type ItemUrlStatus = "url_from_item" | "short_unexpanded" | "shared_only_unverified" | "url_missing";
@@ -39,13 +41,15 @@ export interface ItemPlan {
   seedText: string;
   /** この項目の応募先URLの根拠（展開方式・本文中の位置・項目の範囲・未展開の理由）。URLなしの項目も1件残る */
   linkEvidence: LinkEvidenceRecord[];
+  /** 投稿全体の注記（StoredXPost.notes）。調査・判断の入力に観察として届く */
+  notes: string[];
 }
 
 const STATUS_LINE: Record<ItemUrlStatus, string> = {
   url_from_item: "この項目自身のリンク（出所を確認済み）から応募先が分かっている",
-  short_unexpanded: "この項目には短縮URLがあるが展開結果が無く、追跡していない（応募先は未確認）",
+  short_unexpanded: "この項目には短縮URLがあるが展開結果が無く、追跡していない（応募先は未確認）。検索が使えるなら、原文の店舗名・商品名・日時で公開ページを探してよい（見つけたページが、この項目の店舗・商品と一致するか確認する）",
   shared_only_unverified: "この項目自身のリンクは無く、親投稿に共通のリンクだけがある（この項目への対応は未確認。別の店舗のページかもしれない）",
-  url_missing: "URLなし（応募先は不明）。応募単位は未確認",
+  url_missing: "URLなし（応募先は不明）。応募単位は未確認。検索が使えるなら、原文の店舗名・商品名・日時で公開ページを探してよい（見つけたページが、この項目の店舗・商品と一致するか確認する）",
 };
 
 /** 保存済みの公開投稿を項目に分け、各項目の応募先リンクの出所と状態を決める（意味判断はしない） */
@@ -67,18 +71,27 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
       const host = canonUrl(l.url).host;
       lines.push(l.origin === "item_entity" ? `- この項目自身のリンク: ${l.url}` : l.origin === "item_text_short_unexpanded" ? `- 短縮URL（未展開・追跡しない）: ${host}` : `- 親投稿に共通のリンク（対応未確認）: ${l.url}`);
     }
-    return { itemNo: it.no, groupLabel: it.groupLabel, itemText: it.text, links, scopedUrls: scoped, status, seedText: lines.join("\n"), linkEvidence: evidence.filter((e) => e.itemNo === it.no) };
+    return { itemNo: it.no, groupLabel: it.groupLabel, itemText: it.text, links, scopedUrls: scoped, status, seedText: lines.join("\n"), linkEvidence: evidence.filter((e) => e.itemNo === it.no), notes: post.notes ?? [] };
   });
   return { isList: parsed.isList, header: parsed.header, items: plans };
 }
 
-/** 同じ投稿内で、同じURLを重複して取得しない（キャッシュ）。ヒット数を数える */
-export function cachedTools(tools: ResearchTools): ResearchTools & { hits: number; fetched: string[] } {
+/**
+ * 同じ投稿内で、同じURLを重複して取得しない／同じ検索語を重複して実行しない（キャッシュ）。ヒット数を数える。
+ * **検索ツール（search）も引き継ぐ**（Phase 2 P2 の不具合: 以前は fetchPage と now しか返さず、注入した検索ツールが消えていた。調査AIには「検索は使えない」と通知され、URLなしの3件で検索が0回だった）。
+ * 検索の上限・予算の予約・重複の禁止・結果の安全化（makeSearchTool）は調査ループとツール側が担う。ここは「同じ投稿内の同じ検索語」を有料検索で2回実行しないためのキャッシュだけ（2回目は費用0）。
+ */
+export function cachedTools(tools: ResearchTools): ResearchTools & { hits: number; fetched: string[]; searchHits: number; searched: string[] } {
   const cache = new Map<string, Promise<FetchOutcome>>();
+  const searchCache = new Map<string, ReturnType<NonNullable<ResearchTools["search"]>>>();
+  const nq = (q: string): string => q.normalize("NFKC").toLowerCase().replace(/[\s　]+/g, "");
   const wrapped = {
     hits: 0,
     fetched: [] as string[],
+    searchHits: 0,
+    searched: [] as string[],
     now: () => tools.now(),
+    ...(tools.readHints ? { readHints: (url: string, text: string) => tools.readHints!(url, text) } : {}),
     fetchPage: (url: string): Promise<FetchOutcome> => {
       const k = canonUrl(url).key;
       const hit = cache.get(k);
@@ -91,6 +104,22 @@ export function cachedTools(tools: ResearchTools): ResearchTools & { hits: numbe
       cache.set(k, p);
       return p;
     },
+    ...(tools.search
+      ? {
+          search: (query: string) => {
+            const k = nq(query);
+            const hit = searchCache.get(k);
+            if (hit) {
+              wrapped.searchHits++;
+              return hit.then((r) => (r.ok ? { ...r, costJpy: 0 } : r)); // 同じ検索語の2回目は実行しない（費用0）
+            }
+            wrapped.searched.push(query);
+            const p = tools.search!(query);
+            searchCache.set(k, p);
+            return p;
+          },
+        }
+      : {}),
   };
   return wrapped;
 }
@@ -143,13 +172,26 @@ export async function runXPostReplay(a: {
   budget: CallBudget;
   limits?: Partial<ResearchLimits>;
   now: Date;
-}): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number }> {
+  /** 協調的な中止（Phase 2）。項目の処理の前に確認し、true なら以降の項目を処理せずに終える（中止した項目は結果に含めない。実行中のAI呼び出しは完了まで待つ）。 */
+  shouldStop?: () => boolean;
+  /** 人が確定した値（項目ごと。レビューの修正）。調査・判断はこれを変更せず、食い違いは人への確認に回る（検証層が保護）。モデルが学習したのではなく、保存した人の判断を次回の入力に使うだけ */
+  protectedFor?: (itemNo: number, plan: ItemPlan) => Record<string, string> | undefined;
+  /** 項目ごとの予算（1件上限）。未指定なら budget をそのまま使う */
+  budgetFor?: (itemNo: number) => CallBudget;
+  /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
+  registerRequiresUnit?: boolean;
+}): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean }> {
   const { items } = planXPost(a.post);
   const tools = cachedTools(a.tools);
   const results: { plan: ItemPlan; result: ResearchResult }[] = [];
+  let stopped = false;
   for (const plan of items) {
+    if (a.shouldStop?.()) {
+      stopped = true;
+      break;
+    }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now), agent: a.agent, judge: a.judge, tools, budget: a.budget, limits: a.limits, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({
@@ -166,5 +208,5 @@ export async function runXPostReplay(a: {
     fieldBasis: Object.fromEntries(Object.entries(result.registration.output?.fields ?? {}).map(([k, f]) => [k, f.basis])),
     turns: result.investigation.turns,
   }));
-  return { plans: items, results, trace, cacheHits: tools.hits };
+  return { plans: items, results, trace, cacheHits: tools.hits, stopped };
 }

@@ -24,6 +24,8 @@ export interface PreflightInput {
   searchWorstJpy?: number;
   /** 関門の候補上限（1件） */
   gatePerCaseCapJpy?: number;
+  /** 画像の実解析（Phase 2）。1件あたりの最大枚数と、1枚あたりの最悪費用（円）。画像は調査・判断と同じ予算を使う */
+  images?: { perCaseCount: number; worstJpyEach: number };
 }
 
 export interface PreflightResult {
@@ -58,7 +60,8 @@ export function preflightRun(i: PreflightInput): PreflightResult {
   // 調査の各ターンは、調査＋判断の予約が残っていることを要求する。検索は検索の予約も要る
   const minPerCase = r4(L.agentReserveJpy + L.judgeReserveJpy);
   const minWithSearch = useSearch ? r4(minPerCase + L.searchReserveJpy) : minPerCase;
-  const maxReserved = r4(L.maxTurns * L.agentReserveJpy + L.maxSearches * L.searchReserveJpy + (1 + L.maxRevisions) * L.judgeReserveJpy);
+  const imageMax = i.images ? r4(i.images.perCaseCount * i.images.worstJpyEach) : 0;
+  const maxReserved = r4(L.maxTurns * L.agentReserveJpy + L.maxSearches * L.searchReserveJpy + (1 + L.maxRevisions) * L.judgeReserveJpy + imageMax);
   if (!(i.totalJpy > 0) || !(i.perCaseJpy > 0) || !Number.isFinite(i.totalJpy) || !Number.isFinite(i.perCaseJpy)) errors.push("approval_amounts_missing");
   if (i.perCaseJpy > i.totalJpy + eps) errors.push("per_case_exceeds_total");
   if (i.gatePerCaseCapJpy !== undefined && i.perCaseJpy > i.gatePerCaseCapJpy + eps) errors.push(`per_case_exceeds_gate_cap:${i.gatePerCaseCapJpy}`);
@@ -69,6 +72,10 @@ export function preflightRun(i: PreflightInput): PreflightResult {
   if (Number.isFinite(worst)) {
     if (L.agentReserveJpy + eps < worst || L.judgeReserveJpy + eps < worst) warnings.push(`reserve_below_worst_case_call:${L.agentReserveJpy}/${L.judgeReserveJpy}<${worst}`);
     if (useSearch && L.searchReserveJpy + eps < (i.searchWorstJpy ?? Number.POSITIVE_INFINITY)) warnings.push(`search_reserve_below_worst_case:${L.searchReserveJpy}<${i.searchWorstJpy ?? "unknown"}`);
+  }
+  if (i.images) {
+    if (!Number.isFinite(i.images.worstJpyEach)) errors.push("image_price_unknown");
+    else if (i.perCaseJpy + eps < minPerCase + i.images.worstJpyEach) warnings.push(`per_case_cannot_afford_image:${i.perCaseJpy}<${r4(minPerCase + i.images.worstJpyEach)}（画像の解析が予算で止まり、未解析として残る）`);
   }
   if (i.cases * Math.min(i.perCaseJpy, maxReserved) > i.totalJpy * 4) warnings.push("total_much_smaller_than_sum_of_case_caps（総額が先に尽きる設定。後ろの事例が評価されない可能性）");
   const coversCall = Number.isFinite(worst) && L.agentReserveJpy + eps >= worst && L.judgeReserveJpy + eps >= worst;

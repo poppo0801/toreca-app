@@ -1,0 +1,81 @@
+// Phase 2: 同条件比較試験の起動入口（開発専用・ローカルDBのみ）。**有料の実AIは、承認が無ければ呼べない**。
+//   node scripts/compare-phase2.mjs plan [--experiments=links,text_depth,image,hints] [--total-jpy=60 --per-case-jpy=5]
+//        … 件数・API呼び出し数・費用の見積・合否基準・承認文・停止条件を表示するだけ（AI・検索・ネットワークなし・無課金）
+//   node scripts/compare-phase2.mjs mock [--experiments=…]            … 台本のAI（費用0）で全経路を通す。結果は精度ではなく仕組みの確認
+//   node scripts/compare-phase2.mjs export-cases [--from="<dedupe_keyのLIKE>"]   … ローカルDBの候補から入力 cases.local.json を作る（gold・AI出力を含めない）
+//   node scripts/compare-phase2.mjs real-posts-scan                    … 保存済みの実投稿（過去の抽出）から、複数リンクの実投稿を数える（ネットワークなし）
+//   node scripts/compare-phase2.mjs real-posts-expand --allow-network [--max-requests=150]   … 【第三者サイトへの実アクセスを伴う・利用者の許可が必要】短縮URLの展開とリンク先の公開ページの取得（無課金・robots/SSRF対策つき）
+//   node scripts/compare-phase2.mjs real-validate                      … 実投稿のデータセットの出所・複数リンク・goldを検査する
+//   node scripts/compare-phase2.mjs r1-worksheet                       … R1: 保存済みの実在の公開ページ（LivePocket）から、人が独立goldを確認する資料（r1-worksheet.local.md）と記入用の雛形を作る（AI出力を含めない）
+//   node scripts/compare-phase2.mjs r1-build [--cases=12]               … R1: 人が確認したページ単位のgold（r1-gold-pages.local.json）から、複数リンクの比較用の案件とgoldを組み立てる
+//   node scripts/compare-phase2.mjs gold-template                      … 人が gold を記入する下書きを作る（AI出力を含めない）
+//   node scripts/compare-phase2.mjs run --approved-total-jpy=<円> --approved-per-case-jpy=<円> --confirm="APPROVE C <総額>JPY" [--experiments=…] [--images]
+//        … **有料**。承認額・確認文・開発専用キー・独立gold・計画の費用がすべて通ったときだけ実行する。承認の金額・確認文に既定値は無い
+// 画像の実解析（--images）は、画像の取得（公開画像・robots・SSRF対策つき）を伴う。本番DB・本番の候補には接続しない（ローカルのSupabase以外では止まる）。
+import { spawnSync } from "node:child_process";
+
+const arg = (n) => process.argv.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
+const flag = (n) => process.argv.includes(`--${n}`);
+const cmd = process.argv[2];
+const FILE = "src/lib/server/proposals/compare-real.real.test.ts";
+try {
+  process.loadEnvFile(".env.local");
+} catch {
+  /* 関門が止める */
+}
+const dataset = process.argv.find((a) => a.startsWith("--dataset="))?.slice(10);
+const start = (extra) => {
+  const r = spawnSync("npx", ["vitest", "run", "--silent=false", FILE], { stdio: "inherit", shell: true, env: { ...process.env, TOREMANE_ENV: "local", PHASE2_COMPARE: "1", ...(dataset ? { PHASE2_CMP_DATASET: dataset } : {}), ...(arg("experiments") ? { PHASE2_CMP_EXPERIMENTS: arg("experiments") } : {}), ...(arg("case-from") ? { PHASE2_CMP_CASE_FROM: arg("case-from") } : {}), ...(arg("case-limit") ? { PHASE2_CMP_CASE_LIMIT: arg("case-limit") } : {}), ...extra } });
+  process.exit(r.status ?? 1);
+};
+
+if (cmd === "plan") start({ PHASE2_CMP_MODE: "plan", ...(arg("total-jpy") ? { PHASE2_CMP_TOTAL_JPY: arg("total-jpy") } : {}), ...(arg("per-case-jpy") ? { PHASE2_CMP_PER_CASE_JPY: arg("per-case-jpy") } : {}) });
+if (cmd === "mock") start({ PHASE2_CMP_MODE: "mock" });
+if (cmd === "export-cases") start({ PHASE2_CMP_MODE: "export-cases", ...(arg("from") ? { PHASE2_CMP_FROM: arg("from") } : {}) });
+if (cmd === "real-posts-scan") start({ PHASE2_CMP_MODE: "real-posts-scan" });
+if (cmd === "real-posts-expand") start({ PHASE2_CMP_MODE: "real-posts-expand", ...(flag("allow-network") ? { PHASE2_REAL_EXPAND: "allow" } : {}), ...(arg("max-requests") ? { PHASE2_REAL_EXPAND_MAX: arg("max-requests") } : {}) });
+if (cmd === "readiness") start({ PHASE2_CMP_MODE: "readiness", PHASE2_CMP_EXPERIMENTS: arg("experiments") ?? "links" });
+if (cmd === "unit-audit") start({ PHASE2_CMP_MODE: "unit-audit" }); // 応募単位の再評価（無課金）。goldは変更せず、変更候補を別ファイルに出す
+if (cmd === "rescore") start({ PHASE2_CMP_MODE: "rescore", PHASE2_CMP_EXPERIMENTS: arg("experiments") ?? "links", ...(arg("journal") ? { PHASE2_RESCORE_JOURNAL: arg("journal") } : {}) }); // --journal=<実行ID>: 保存済みジャーナルからDBなしで再採点
+if (cmd === "real-validate") start({ PHASE2_CMP_MODE: "real-validate" });
+if (cmd === "r1-worksheet") start({ PHASE2_CMP_MODE: "r1-worksheet" });
+if (cmd === "r1-build") start({ PHASE2_CMP_MODE: "r1-build", ...(arg("cases") ? { PHASE2_CMP_R1_CASES: arg("cases") } : {}) });
+if (cmd === "gold-template") start({ PHASE2_CMP_MODE: "gold-template" });
+if (cmd !== "run") {
+  console.error('使い方: node scripts/compare-phase2.mjs plan | mock | export-cases | gold-template | run --approved-total-jpy=… --approved-per-case-jpy=… --program-cap-jpy=… --confirm="APPROVE C <総額>JPY" [--experiments=…] [--case-from=N --case-limit=N] [--rerun-stage] [--images]');
+  process.exit(2);
+}
+const total = Number(arg("approved-total-jpy"));
+const per = Number(arg("approved-per-case-jpy"));
+const confirm = arg("confirm");
+if (!(total > 0) || !(per > 0)) {
+  console.error("承認された総額と1件あたりの上限（円）を明示してください（既定値はありません）");
+  process.exit(2);
+}
+if (confirm !== `APPROVE C ${total}JPY`) {
+  console.error(`確認文が一致しません（期待: "APPROVE C ${total}JPY"）。承認された金額で、実行のたびに指定してください`);
+  process.exit(2);
+}
+const programCap = Number(arg("program-cap-jpy"));
+if (!(programCap > 0) || programCap < total) {
+  console.error("通算上限（--program-cap-jpy=<円>）を、利用者が明示してください（既定値はありません）。関門の総額は1回の実行ごとにリセットされるため、段階・再実行をまたぐ通算の上限は、この台帳（spend-ledger）が検査します。この実行の承認総額以上の値が必要です");
+  process.exit(2);
+}
+const MIN_PER_CASE = 1.5; // 調査＋判断の予約（preflightRun が最終的に検査する）
+if (per < MIN_PER_CASE) {
+  console.error(`1件あたりの上限が小さすぎます（${MIN_PER_CASE} 円以上）`);
+  process.exit(2);
+}
+const key = process.env.AGENT_ANTHROPIC_API_KEY;
+start({
+  PHASE2_CMP_MODE: "run",
+  JUDGMENT_REAL_EVAL: "allow",
+  JUDGMENT_REAL_CONFIRM: "yes",
+  JUDGMENT_APPROVED_TOTAL_JPY: String(total),
+  JUDGMENT_APPROVED_PER_CASE_JPY: String(per),
+  PHASE2_PROGRAM_CAP_JPY: String(programCap),
+  ...(flag("rerun-stage") ? { PHASE2_RERUN_STAGE: "1" } : {}),
+  JUDGMENT_REUSE_EXISTING_KEY: "allow",
+  ...(key ? { JUDGMENT_REUSE_FALLBACK_KEY: key } : {}),
+  ...(flag("images") ? { PHASE2_CMP_IMAGES: "allow" } : {}),
+});

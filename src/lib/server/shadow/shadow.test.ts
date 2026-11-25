@@ -35,11 +35,11 @@ describe("書き込み先・配線の静的検査", () => {
   it("ワーカーが書き込む表は shadow_* の3表だけ（候補は読み取りのみ）。他の表への update/insert/delete・rpc を持たない", () => {
     const writes = [...worker.matchAll(/table\(db, "([a-z_]+)"\)\s*\.(insert|update|upsert|delete)/g)].map((m) => m[1]);
     expect(writes.length).toBeGreaterThan(0);
-    expect(new Set(writes)).toEqual(new Set(["shadow_jobs", "shadow_judgments"]));
+    expect(new Set(writes)).toEqual(new Set(["shadow_jobs", "shadow_judgments", "shadow_settings"])); // shadow_settings への書き込みは、費用の記録に失敗したときの緊急停止（enabled=false）だけ
     const reads = [...worker.matchAll(/table\(db, "([a-z_]+)"\)\s*\.select/g)].map((m) => m[1]);
     expect(new Set(reads)).toEqual(new Set(["shadow_settings", "collection_candidates"]));
     const rpcs = [...worker.matchAll(/rpc\(db\)\("([a-z_]+)"/g)].map((m) => m[1]);
-    expect(new Set(rpcs)).toEqual(new Set(["shadow_lease", "shadow_spent"]));
+    expect(new Set(rpcs)).toEqual(new Set(["shadow_lease", "shadow_spent", "shadow_budget_lock", "shadow_budget_unlock"]));
     expect(worker).not.toMatch(/process\.env\.(AGENT_|JUDGMENT_)|TOREMANE_ENV/);
   });
   it("通常収集の投入は、AIを呼ばず・1.5秒を超えて待たず・失敗を握りつぶす。cronの入口は認証を要求し、既定では何もしない", () => {

@@ -26,6 +26,7 @@ const rowOf = (householdId: string, r: ProposalRecord, version: number) => ({
   post_id: r.postId,
   item_no: r.itemNo,
   item_label: r.itemLabel,
+  item_fingerprint: r.itemFingerprint,
   url_status: r.urlStatus,
   source_urls: r.sourceUrls,
   link_hosts: r.linkHosts,
@@ -103,7 +104,7 @@ export interface StoredProposal {
   apply_unit: string;
   apply_unit_basis: string;
   unknowns: { what: string; why: string }[];
-  pages: { host: string; scope: string | null; slots: number; textLoss: boolean }[];
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch?: boolean }[];
   possibly_same: string[];
   mode: string;
   model_id: string | null;
@@ -124,6 +125,8 @@ export interface StoredReview {
 export interface ProposalView extends StoredProposal {
   /** この登録案（現行の版）への最新のレビュー。無ければ null */
   review: StoredReview | null;
+  /** レビューした版が現行と違うとき、その版の内容（差分の表示用。AIの値）。無ければ null */
+  reviewedVersion: { version: number; fields: StoredProposal["fields"]; apply_unit: string } | null;
   /** レビューした版が現行の版と違う（再評価で内容が変わった）。人のレビューは残るが、再確認が必要 */
   reviewOutdated: boolean;
 }
@@ -139,10 +142,18 @@ export async function loadProposals(db: Db, candidateIds: string[]): Promise<Rec
   const rv = (await t(db, "registration_proposal_reviews").select("id,proposal_key,proposal_id,decision,edits,note,created_at").in("proposal_key", list.map((x) => x.proposal_key)).order("created_at", { ascending: false })) as Rows;
   const latest = new Map<string, StoredReview>();
   for (const r of ((rv.data as StoredReview[] | null) ?? [])) if (!latest.has(r.proposal_key)) latest.set(r.proposal_key, r);
+  // 再評価で版が変わったとき、レビューした版の内容を読む（差分の表示用）
+  const oldIds = [...new Set([...latest.values()].filter((r) => !list.some((x) => x.id === r.proposal_id)).map((r) => r.proposal_id))];
+  const prev = new Map<string, { version: number; fields: StoredProposal["fields"]; apply_unit: string }>();
+  if (oldIds.length) {
+    const pv = (await t(db, "registration_proposals").select("id,version,fields,apply_unit").in("id", oldIds)) as Rows;
+    for (const p of ((pv.data as { id: string; version: number; fields: StoredProposal["fields"]; apply_unit: string }[] | null) ?? [])) prev.set(p.id, { version: p.version, fields: p.fields, apply_unit: p.apply_unit });
+  }
   const out: Record<string, ProposalView[]> = {};
   for (const x of list) {
     const review = latest.get(x.proposal_key) ?? null;
-    (out[x.candidate_id] ??= []).push({ ...x, review, reviewOutdated: !!review && review.proposal_id !== x.id });
+    const outdated = !!review && review.proposal_id !== x.id;
+    (out[x.candidate_id] ??= []).push({ ...x, review, reviewOutdated: outdated, reviewedVersion: outdated && review ? prev.get(review.proposal_id) ?? null : null });
   }
   return out;
 }

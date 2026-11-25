@@ -1,4 +1,4 @@
-import { buildEvidence, evidenceFromLastGood, imageReadingsFromExtraction, type StoredEvidence } from "@/lib/collector/evidence";
+import { buildEvidence, carryOverRechecked, evidenceFromLastGood, imageReadingsFromExtraction, MAX_EVIDENCE_LINKS, MAX_IMAGE_REFS, type StoredEvidence } from "@/lib/collector/evidence";
 import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -19,7 +19,9 @@ import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service"
 import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
-import { enrichXPost, makeXRichFetcher } from "@/lib/server/collector/x-rich";
+import { enrichXPost, makeXRichFetcher, type FetchControl } from "@/lib/server/collector/x-rich";
+import { DEFAULT_RUN_LIMITS, HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
+import { rememberFullPages, toQueuedPage } from "@/lib/server/collector/collected-docs";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
 import { saveCandidateRows } from "@/lib/server/collector/save-rows";
@@ -31,7 +33,10 @@ import { runInvestigation } from "@/lib/server/collector/investigation-hook";
 import { loadHumanKnowledge } from "@/lib/server/collector/human-knowledge-load";
 import { unifiedMode } from "@/lib/case-model/flag";
 import { beginShadow, type LegacyCapture } from "./shadow-hook";
-import { proposalAfterCandidate } from "./proposal-hook";
+import { proposalAfterCandidate, storeCollectedEvidence } from "./proposal-hook";
+import { maybeEnqueueLinkRechecks, maybeRunLinkRechecks } from "./link-recheck";
+import { intakeCollectedImages } from "./image-intake";
+import { selectHostGate } from "./db-host-gate";
 import { buildAiContext } from "@/lib/case-model/context";
 import { aiInputRecord, type AiInputRecord } from "@/lib/case-model/redact";
 import { caseFromExtraction, caseFromInput } from "@/lib/case-model/from-extraction";
@@ -136,6 +141,8 @@ export interface CollectDeps {
   fetchOembed?: typeof fetchXPost;
   xClient: XClient | null;
   fetchImage?: typeof fetchXImage;
+  /** 取得の負荷制御（ホスト別の間隔・同時接続・バックオフ・1回の実行の総量）。processQueue が実行の最初に用意する */
+  fetchControl?: FetchControl;
   budgetMs?: number;
   /** 円換算の為替レート(世帯の設定)。実行の最初に読み込む */
   usdJpy?: number;
@@ -224,7 +231,9 @@ interface QueuedPayload {
     evidenceText?: string;
     evidenceVia?: "x_oembed" | "web_fetch";
     /** Stage 10J: 解析時に取得できた、投稿内のリンク先の公開ページ本文（保存用。投稿本文とは別の出典として last_good.evidence.linkedPages に保存） */
-    linkedPages?: { url: string; text: string }[];
+    linkedPages?: { url: string; text: string; fullChars?: number; truncated?: boolean; depth?: 0 | 1; fromUrl?: string; origins?: string[]; shortUrl?: string }[];
+    /** Phase 2: 発見した全リンクの台帳（取得できた／できなかった／選ばなかった理由） */
+    linkLedger?: StoredEvidence["linkLedger"];
     /** AI解析へ回した根拠（本文／画像／引用／リンク） */
     relevanceBasis?: string;
     /** 利用者のXブックマーク由来（Stage 6I。収集元ではなく、利用者が選んだ投稿） */
@@ -460,10 +469,10 @@ function xpostSnapshot(q: QueuedPayload["queued"], evidence: Partial<Record<stri
     username: p.username ?? "",
     ...(p.profile ? { profile: p.profile } : {}),
     createdAt: p.createdAt,
-    text: safeSlice(p.text, 4000),
+    text: safeSlice(p.text, 12_000),
     images: p.images.slice(0, 8),
-    links: p.links.slice(0, 5),
-    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, ...(p.quoted.profile ? { profile: p.quoted.profile } : {}), createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 2000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
+    links: p.links.slice(0, MAX_EVIDENCE_LINKS),
+    ...(p.quoted ? { quoted: { id: p.quoted.id, username: p.quoted.username, ...(p.quoted.profile ? { profile: p.quoted.profile } : {}), createdAt: p.quoted.createdAt, text: safeSlice(p.quoted.text, 6000), images: p.quoted.images.slice(0, 8), links: p.quoted.links.slice(0, 5) } } : {}),
     fetchedAt: nowIso,
     via: q.xVia ?? null,
     basis: q.relevanceBasis ?? null,
@@ -505,11 +514,14 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
   if (q.kind === "x_post" && q.post) {
     const p = q.post;
     // 本文＋添付画像（複数・縦長は分割）＋リンク先の本文を統合（単件・一括・共有と共通の処理）
-    const rich = await enrichXPost(p, { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage });
+    const rich = await enrichXPost(p, { fetchPage: deps.fetchPage, fetchImage: deps.fetchImage, control: deps.fetchControl });
     // 画像は「見つかった／取得できた／AIへ渡した」を別々に記録する（取得とAI解析を混同しない）
     q.imageStats = rich.stats;
     q.xVia = "api";
-    if (rich.linkedPageText && rich.linkUrl) q.linkedPages = [{ url: rich.linkUrl, text: rich.linkedPageText }];
+    // 取得できたリンク先は**全件**（以前は最初の1件だけ）。キューの行には抜粋だけを載せ、全文は side（collected-docs）で保存処理へ渡す
+    if (rich.linkedPages.length) q.linkedPages = rich.linkedPages.map(toQueuedPage);
+    q.linkLedger = rich.linkLedger;
+    rememberFullPages(q, rich.linkedPages);
     // 保存済みの画像URLがすべて取得できない（期限切れ等）ときは、1回だけX APIで投稿を取り直す（予算の範囲内。X APIが使えなければ従来どおり再試行）
     if (rich.stats.found > 0 && rich.stats.fetched === 0 && deps.xClient && !q.refetched) {
       const inner: QueuedPayload["queued"] = { ...q, kind: "x_oembed", post: undefined, refetched: true };
@@ -548,7 +560,11 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
       if (r.ok) {
         q.imageStats = { found: r.imagesFound, fetched: r.imagesUsed, sent: r.images.length };
         q.xVia = r.via;
-        if (r.linkedPages?.length) q.linkedPages = r.linkedPages;
+        if (r.linkedPages?.length) {
+          q.linkedPages = r.linkedPages.map(toQueuedPage);
+          rememberFullPages(q, r.linkedPages);
+        }
+        if (r.linkLedger?.length) q.linkLedger = r.linkLedger;
         if (r.post) q.post = r.post;
         else if (r.text) {
           q.evidenceText = r.text;
@@ -664,8 +680,8 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
 function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { evidence?: StoredEvidence } {
   try {
     const st = q.imageStats;
-    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
-    return ev ? { evidence: ev } : prior ? { evidence: prior } : {};
+    const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...(q.linkLedger?.length ? { linkLedger: q.linkLedger } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
+    return ev ? { evidence: carryOverRechecked(ev, prior) } : prior ? { evidence: prior } : {};
   } catch {
     return prior ? { evidence: prior } : {};
   }
@@ -675,7 +691,7 @@ function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string,
 function imageEvidence(q: QueuedPayload["queued"], nowIso: string, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { imageReadings?: ReturnType<typeof imageReadingsFromExtraction>; imageRefs?: string[] } {
   const imageReadings = imageReadingsFromExtraction(extraction, nowIso);
   const refs = [...(q.post?.images ?? []), ...(q.post?.quoted?.images ?? [])].filter((u) => typeof u === "string" && u.startsWith("https://"));
-  return { ...(imageReadings.length ? { imageReadings } : {}), ...(imageReadings.length && refs.length ? { imageRefs: refs.slice(0, 4) } : {}) };
+  return { ...(imageReadings.length ? { imageReadings } : {}), ...(imageReadings.length && refs.length ? { imageRefs: refs.slice(0, MAX_IMAGE_REFS) } : {}) };
 }
 
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
@@ -686,6 +702,15 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   // 実施した取得方法・元の情報源と応募サービスのホスト・最後に取得できた情報（内部ログ。設定画面には出さない）
   const methods = [q.kind === "x_post" ? "X投稿" : q.kind === "x_oembed" ? "X埋め込み" : "直接取得", ...(q.viaList ? ["一覧の表示（二次情報）"] : [])];
   const originHost = hostOf(c.source_url ?? q.url);
+  // Phase 2: 取得した全文（投稿本文・リンク先の全ページ）を evidence_documents へ保存する（新AI機能が有効な開発環境だけ。失敗しても収集は止めない）
+  {
+    const postText = q.post?.text ? [q.post.text, q.post.quoted?.text ? `（引用元）${q.post.quoted.text}` : ""].filter(Boolean).join("\n") : (q.evidenceText ?? null);
+    await storeCollectedEvidence({ db, householdId: deps.householdId, candidateId: c.id, queued: q, postUrl: c.source_url ?? q.url, postText, nowIso });
+    // 時間・予算・ホスト制限で取得しなかったリンクは、耐久的な再調査タスクとして残す（開発限定。別の実行で再取得して候補の証拠へ戻す）
+    // 公開画像の安全な取得・検査（解析はしない＝費用0。開発限定・IMAGE_INTAKE=on のときだけ）。新AIの調査へ「取得・検査済み／未解析の理由」を受け渡す
+    await intakeCollectedImages({ db, householdId: deps.householdId, candidateId: c.id, imageRefs: [...(q.post?.images ?? []), ...(q.post?.quoted?.images ?? [])], ...(deps.fetchControl?.throttle ? { gate: deps.fetchControl.throttle } : {}), ...(deps.fetchControl?.budget ? { budget: deps.fetchControl.budget } : {}), ...(deps.fetchControl?.shouldCancel ? { shouldCancel: deps.fetchControl.shouldCancel } : {}) });
+    await maybeEnqueueLinkRechecks({ db, householdId: deps.householdId, candidateId: c.id, ledger: q.linkLedger as never, now: deps.now });
+  }
   // 以前に保存した原文は、今回の取得で原文が得られなくても消さない（再確認・再解析で last_good が上書きされるため）
   const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
   const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence, result.ok ? result.extraction : undefined) } };
@@ -1639,6 +1664,9 @@ export async function triageQueue(deps: CollectDeps, cond: CollectionConditions)
   return n;
 }
 
+/** プロセス内で共有するホスト別の取得制御（複数の投稿・実行が同じ公式サイトへ集中しても間隔・同時接続を守る） */
+const sharedHostThrottle = new HostThrottle();
+
 const AI_PAUSE_AFTER = 5;
 const AI_PAUSE_MS = 6 * 3600_000;
 
@@ -1660,6 +1688,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   const rules = await activeExclusions(db, householdId);
   deps.excludedChains = rules.some((r) => r.scope === "chain") ? await loadExcludedChains(db, householdId).catch(() => []) : [];
   const userRules = await activeUserRules(db, householdId);
+  // 取得の負荷制御: ホスト別の間隔は実行をまたいで共有（プロセス内）、総量は今回の実行ぶん。時間切れが近づいたら新しい取得は始めない
+  deps.fetchControl ??= { throttle: selectHostGate(db, sharedHostThrottle), budget: new RunFetchBudget({ ...DEFAULT_RUN_LIMITS, deadlineAt: Date.now() + ctx.timeLeft() }), shouldCancel: () => ctx.timeLeft() < 8_000 };
   deps.xLinks ??= await loadXLinks(db, householdId).catch(() => new Map<string, XLink>());
   deps.xIdentities ??= await loadXIdentities(db, householdId).catch(() => new Map<string, SavedIdentity>());
   let budgetHit = false;
@@ -1799,6 +1829,8 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
   // 開発環境のシャドー比較の終了待ち（旧方式の全候補の処理・保存が終わった後。残り時間の範囲で打ち切る。旧方式の結果は変わらない）
   await shadow?.settle(ctx.timeLeft());
   if (!out.stopReason) await db.from("collection_settings").update({ consecutive_failures: fails }).eq("household_id", householdId);
+  // 残り時間に余裕があれば、前の実行で取得しきれなかったリンクを再調査する（開発限定・追加費用0）
+  await maybeRunLinkRechecks({ db, householdId, gate: deps.fetchControl?.throttle ?? sharedHostThrottle, timeLeft: ctx.timeLeft });
   const left = await db.from("collection_candidates").select("id", { count: "exact", head: true }).eq("household_id", householdId).in("job_state", ["pending", "retry", "processing"]);
   out.queued = left.count ?? 0;
   await bumpStats(db, householdId, now, { queue_remaining: out.queued });

@@ -4,7 +4,8 @@
  * 利用者のセッションのクライアント（RLS: 世帯の構成員・本人名義）で呼ぶ。
  */
 import type { Db } from "@/lib/server/lottery-service";
-import { proposalPreviewEnabled } from "./flag";
+import { proposalSurfaceEnabled } from "./flag";
+import { recordHumanExperience } from "./experience-store";
 
 export const REVIEW_DECISIONS = ["hold", "approve_with_edits", "reject"] as const;
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
@@ -14,7 +15,7 @@ export type ReviewResult = { ok: true } | { ok: false; reason: "disabled" | "inv
 const EDIT_FIELDS = /^[\p{L}\p{N}_ ]{1,40}$/u;
 
 export async function recordReview(a: { db: Db; householdId: string; proposalId: string; decision: string; edits?: Record<string, unknown>; note?: string; env?: Record<string, string | undefined> }): Promise<ReviewResult> {
-  if (!proposalPreviewEnabled(a.env ?? process.env)) return { ok: false, reason: "disabled" };
+  if (!proposalSurfaceEnabled(a.env ?? process.env)) return { ok: false, reason: "disabled" };
   if (!(REVIEW_DECISIONS as readonly string[]).includes(a.decision)) return { ok: false, reason: "invalid" };
   const edits: Record<string, string> = {};
   for (const [k, v] of Object.entries(a.edits ?? {}).slice(0, 12)) {
@@ -28,5 +29,8 @@ export async function recordReview(a: { db: Db; householdId: string; proposalId:
   if (!cur.data) return { ok: false, reason: "invalid" };
   if (cur.data.superseded_at) return { ok: false, reason: "not_current" }; // 古い版にはレビューしない（現行の版を見て判断する）
   const ins = (await db.from("registration_proposal_reviews").insert({ household_id: a.householdId, proposal_key: cur.data.proposal_key, proposal_id: cur.data.id, decision: a.decision, edits, note })) as { error: unknown };
-  return ins.error ? { ok: false, reason: "failed" } : { ok: true };
+  if (ins.error) return { ok: false, reason: "failed" };
+  // 人の確認（修正あり承認）は、検証済み（human）の調査経験として追記する（次回以降の「最初に見せる位置」の根拠）。失敗してもレビューの記録は成功のまま
+  if (a.decision === "approve_with_edits") await recordHumanExperience({ db: a.db, householdId: a.householdId, proposalId: cur.data.id, edits, at: new Date().toISOString() }).catch(() => undefined);
+  return { ok: true };
 }

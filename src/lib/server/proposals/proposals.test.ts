@@ -156,7 +156,7 @@ describe("静的確認: 登録案の機能は、抽選・応募・購入・通�
     expect(run.indexOf("proposalAfterCandidate(")).toBeGreaterThan(run.indexOf("shadow.schedule("));
   });
   it("登録案のコードを import する非テストのファイルは、想定した入口だけ（候補の画面・その操作・収集の接続口・登録案の部品）", () => {
-    const allowed = new Set(["src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx"]);
+    const allowed = new Set(["src/lib/server/shadow/proposal-job.ts", "src/lib/server/shadow/worker.ts", "src/app/(app)/lotteries/candidates/page.tsx", "src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/lib/server/collector/proposal-hook.ts", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/judgment/xsource/vision-real.ts", "src/lib/server/collector/link-recheck.ts", "src/lib/server/collector/db-host-gate.ts", "src/lib/server/collector/image-intake.ts"]);
     const users = walk("src").filter((f) => !/\.test\.tsx?$/.test(f) && !f.startsWith("src/lib/server/proposals/") && /server\/proposals\//.test(readFileSync(f, "utf8")));
     for (const f of users) expect(allowed.has(f.split("\\").join("/")), f).toBe(true);
   });
@@ -179,5 +179,144 @@ describe("登録案の集計（引用の実在と値の導出を別に数える�
     // 検証を通過した案でも、導出できない値（not_found）が残ることが見える
     expect(m.quoteVerified).toBeGreaterThan(0);
     expect(m.support.not_found).toBeGreaterThan(0);
+  });
+});
+
+describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server action・cron・収集は実AIを動かせない", () => {
+  const walk2 = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = `${d}/${n}`; return statSync(p).isDirectory() ? walk2(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
+  const nonTest = walk2("src").filter((f) => !/\.test\.tsx?$/.test(f)).map((f) => f.split("\\").join("/"));
+  const importers = (re: RegExp, self: string[]): string[] => nonTest.filter((f) => !self.includes(f) && re.test(readFileSync(f, "utf8")));
+  it("許可証の発行（issueRealRunTicket）を使えるのは real-run.ts だけ。実AIの評価入口（real-run）・擬似クライアント・本番プレビューの判定は、非テストのコードから読み込まれない", () => {
+    expect(importers(/issueRealRunTicket/, ["src/lib/server/proposals/real-gate.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
+    expect(importers(/proposals\/real-run|\.\/real-run/, ["src/lib/server/proposals/real-run.ts"])).toEqual([]);
+    expect(importers(/xsource\/scripted-client|\.\/scripted-client/, ["src/lib/judgment/xsource/scripted-client.ts"])).toEqual([]);
+    expect(importers(/proposals\/prod-gate|\.\/prod-gate/, ["src/lib/server/proposals/prod-gate.ts", "src/lib/server/shadow/proposal-job.ts"])).toEqual([]); // Phase 3: 本番の多重ゲートを呼ぶのは本番シャドーの登録案ジョブだけ
+  });
+  it("画面・server action・収集の接続口・候補の画面は、real-run・real-gate・AIクライアントを読み込まない（環境変数や画面操作だけで有料AIが動かない）", () => {
+    for (const f of ["src/app/(app)/lotteries/candidates/proposal-actions.ts", "src/app/(app)/lotteries/candidates/page.tsx", "src/components/proposal-preview.tsx", "src/components/candidates-view.tsx", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/collector/run.ts"]) {
+      const s = readFileSync(f, "utf8");
+      expect(s, f).not.toMatch(/real-run|real-gate|issueRealRunTicket|@anthropic-ai\/sdk|new Anthropic\(|AnthropicWebSearch|makeAnthropic/);
+    }
+  });
+  it("実AIのクライアントを作る・キーを読むのは評価入口（*.real.test.ts）だけ。登録案・収集・hook のコードはキーを扱わない", () => {
+    const sdk = nonTest.filter((f) => /@anthropic-ai\/sdk/.test(readFileSync(f, "utf8")) && f.startsWith("src/lib/server/proposals/"));
+    expect(sdk).toEqual([]);
+    for (const f of ["src/lib/server/proposals/real-run.ts", "src/lib/server/proposals/real-gate.ts", "src/lib/server/proposals/generate.ts", "src/lib/server/proposals/eval-candidates.ts"]) expect(readFileSync(f, "utf8"), f).not.toMatch(/process\.env\.(ANTHROPIC|AGENT_ANTHROPIC|JUDGMENT_EVAL)_API_KEY|apiKey:/);
+  });
+  it("画像の実解析（vision-real）・比較試験の実行部（compare-run）は、評価入口（real-run・compare-real）以外の非テストのコードから読み込まれない。収集・画面・server action は画像取得の本体（image-fetch）も読み込まない", () => {
+    expect(importers(/xsource\/vision-real|\.\/vision-real/, ["src/lib/judgment/xsource/vision-real.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
+    expect(importers(/proposals\/compare-run|\.\/compare-run/, ["src/lib/server/proposals/compare-run.ts"])).toEqual([]);
+    expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/judgment/xsource/r1-worksheet.ts", "src/lib/judgment/xsource/eval-layers.ts", "src/lib/server/proposals/compare-run.ts", "src/lib/server/proposals/real-post-capture.ts", "src/lib/server/gold-review/store.ts"])).toEqual([]);
+    expect(importers(/images\/image-fetch|\.\/image-fetch/,["src/lib/server/images/image-fetch.ts", "src/lib/server/images/split-adapter.ts", "src/lib/judgment/xsource/vision-real.ts", "src/lib/judgment/xsource/vision-mock.ts", "src/lib/server/collector/image-intake.ts"])).toEqual([]);
+    for (const f of ["src/lib/server/collector/run.ts", "src/lib/server/collector/x-rich.ts", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/proposals/generate.ts", "src/app/(app)/lotteries/candidates/proposal-actions.ts"]) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/vision-real|images\/image-fetch|makeRealVisionClient|fetchPublicImage/);
+    }
+  });
+  it("実投稿の資料化（real-post-capture・実ネットワークを伴う）は評価入口以外から読み込まれない。独立gold確認（開発専用）は、ナビ・設定・他の画面から誘導されず、gold確認のコードは収集・AI・抽選のコードを読み込まない", () => {
+    expect(importers(/proposals\/real-post-capture|\.\/real-post-capture/, ["src/lib/server/proposals/real-post-capture.ts"])).toEqual([]);
+    const gold = nonTest.filter((f) => /gold-review/.test(f) && !/^src\/(app\/\(app\)\/dev\/gold-review|components\/gold-review-view|lib\/server\/gold-review|lib\/gold-review)/.test(f));
+    expect(gold).toEqual([]);
+    // gold確認のページ・部品を参照してよいのは、自分自身（ページ・actions・view・store）だけ
+    expect(importers(/gold-review/, [...nonTest.filter((f) => /gold-review/.test(f))])).toEqual([]);
+    // 収集・登録案・AIのコードを読み込まない（gold確認はAIの出力に触れない）
+    for (const f of nonTest.filter((x) => /(gold-review)/.test(x))) expect(readFileSync(f, "utf8"), f).not.toMatch(/server\/collector\/|server\/proposals\/|@anthropic-ai\/sdk|judgment\/xsource\/(research|proposal|vision)/);
+  });
+  it("実AIの比較試験の入口は、承認文・独立goldの検証・計画の費用の検査・ローカルDBの確認を行い、サンプルでは実AIを実行しない", () => {
+    const t = readFileSync("src/lib/server/proposals/compare-real.real.test.ts", "utf8");
+    expect(t).toContain("checkJudgmentRealRun(");
+    expect(t.indexOf("checkJudgmentRealRun(")).toBeLessThan(t.indexOf("new Anthropic("));
+    expect(t.indexOf("validateGold(gold)")).toBeLessThan(t.indexOf("new Anthropic("));
+    expect(t).toContain("ローカルのSupabase以外には接続しません");
+    expect(t).toContain("架空のサンプルでは実AIを実行しない");
+    const s = readFileSync("scripts/compare-phase2.mjs", "utf8");
+    expect(s).toContain("既定値はありません");
+    expect(s).toContain("APPROVE C ${total}JPY");
+    expect(readFileSync(".gitignore", "utf8")).toContain("eval/phase2-compare/*.local.json");
+  });
+  it("実AIの評価入口は、事前検査の後でないとクライアントを作らず、ローカルDB以外に接続せず、承認なしでは起動しない", () => {
+    const t = readFileSync("src/lib/server/proposals/proposal-real.real.test.ts", "utf8");
+    expect(t).toContain("checkJudgmentRealRun(");
+    expect(t.indexOf("checkJudgmentRealRun(")).toBeLessThan(t.indexOf("new Anthropic("));
+    expect(t).toContain("ローカルのSupabase以外には接続しません");
+    const r = readFileSync("src/lib/server/proposals/real-run.ts", "utf8");
+    expect(r.indexOf("preflightRun(")).toBeLessThan(r.indexOf("generateProposalsForCandidate("));
+    const s = readFileSync("scripts/proposal-real.mjs", "utf8");
+    expect(s).toContain("既定値はありません");
+    expect(s).toContain("APPROVE P ${total}JPY");
+    expect(s).toContain("MIN_PER_CASE");
+  });
+});
+
+describe("実AIの評価入力（保存済みの公開投稿・公開ページ → 収集と同じ構造の候補）", () => {
+  it("r10s は短縮URL未展開のまま（URLなしで調べさせる）・lp は項目自身のリンクと保存ページを持つ。架空は対象外。goldや人の回答を含めない", async () => {
+    const { buildEvalCandidates, estimateRunCost } = await import("./eval-candidates");
+    const { planXPost } = await import("@/lib/judgment/xsource/x-origin");
+    const html = `<html><body><h1 class="heading01">【テスト店】拡張パック 抽選</h1><h2>受付・チケット情報</h2><section class="event-detail-ticket-card"><h4 class="event-detail-ticket-card__title">拡張パック 1BOX</h4><p class="event-detail-ticket-card__text">受付</p></section></body></html>`;
+    const c = buildEvalCandidates({ review: [{ id: "r1", real: true, sourceText: ["・拡張パック抽選 https://t.co/abc123 11/30(月)23:59〆"] }, { id: "r2", real: false, sourceText: ["架空"] }], lp: [{ n: 1, url: "https://shop.example.invalid/e/1", html }], now: "2026-11-22T00:00:00.000Z" });
+    expect(c.map((x) => [x.kind, x.ref])).toEqual([["r10s", "r1"], ["lp", "1"]]);
+    const plan = (x: (typeof c)[number]) => planXPost(postFromCandidate({ id: "i", last_good: { evidence: x.evidence } })!).items;
+    expect(plan(c[0]).map((i) => i.status)).toEqual(["short_unexpanded"]);
+    expect(plan(c[1]).map((i) => i.status)).toEqual(["url_from_item"]);
+    expect(c[1].evidence.linkedPages?.[0].url).toBe("https://shop.example.invalid/e/1");
+    expect(JSON.stringify(c)).not.toMatch(/gold|correctUnit|verdict|aiUnit/);
+    const e = estimateRunCost({ itemsWithUrl: 12, itemsWithoutUrl: 3, search: true, maxReservedPerItemJpy: 6.1 });
+    expect(e.expectedJpy).toBeGreaterThan(10);
+    expect(e.reservedWorstJpy).toBe(91.5);
+    expect(estimateRunCost({ itemsWithUrl: 0, itemsWithoutUrl: 3, search: false, maxReservedPerItemJpy: 3.6 }).expectedJpy).toBeLessThan(e.expectedJpy);
+  });
+});
+
+describe("P2 の結果を受けた無課金の修正（値の導出の近さ・列挙値・検索の促し・判断出力の許容）", () => {
+  it("言い換え・括弧・空白の違いは near_match（数字は完全一致が条件）。数字が違えば not_found。列挙値は語の一致で確認しない", () => {
+    const text = "ポケモンカードゲーム MEGA 拡張パック「ハドウシーカー」 1BOX 6,000円(税込)";
+    expect(valueSupport("ポケモンカードゲーム MEGA拡張パック『ハドウシーカー』(1BOX, 6,000円税込)", "ポケモンカードゲーム MEGA 拡張パック", text)).toBe("near_match");
+    expect(valueSupport("ポケモンカードゲーム MEGA拡張パック『ハドウシーカー』(1BOX, 5,000円税込)", "ポケモンカードゲーム MEGA 拡張パック", text)).toBe("not_found"); // 金額が違う
+    expect(valueSupport("全く別の長い商品名の文字列です", "ポケモンカードゲーム", text)).toBe("not_found");
+    expect(valueSupport("短い値", "x", text)).toBe("not_found"); // 8文字未満は近さを使わない
+  });
+  it("応募単位の列挙値（observed）は support=enum_value（人が確認）。引用の実在とは別", async () => {
+    const { toProposalRecords } = await import("@/lib/judgment/xsource/proposal");
+    const post = { postId: "p", text: "《A店（東京）- 1件》 ・拡張パック", links: [], recordedAt: null };
+    const plan = { itemNo: 1, groupLabel: "《A店》", itemText: "x", links: [], scopedUrls: [], status: "url_missing", seedText: "s", linkEvidence: [] } as never;
+    const result = { investigation: { reason: "sufficient", turns: 1 }, registration: { decision: "tentative", verified: true, held: null, output: { fields: { apply_unit: { value: "per_store", basis: "observed", evidenceId: "s1", quote: "各店舗につき1回" } }, decision: "tentative" } }, evidence: [{ id: "s1", kind: "seed", text: "各店舗につき1回", contentHash: "h" }], searches: [], searchOffered: false, budget: { costJpy: 0 } } as never;
+    const r = toProposalRecords({ candidateId: "c", post, run: { results: [{ plan, result }] }, mode: "real", modelId: "m", fetchedAt: null });
+    expect(r[0].fields.apply_unit).toMatchObject({ support: "enum_value", basis: "observed" });
+    expect(r[0].applyUnit).toBe("per_store");
+  });
+  it("URLなし・短縮URL未展開の項目の入力に『検索が使えるなら探してよい』が入り、調査AIの指示は『到達不能ではない』と明記する", async () => {
+    const { planXPost } = await import("@/lib/judgment/xsource/x-origin");
+    const { RESEARCH_SYSTEM } = await import("@/lib/judgment/xsource/research-ai");
+    const p = planXPost({ postId: "p", text: "・拡張パック抽選 https://t.co/abc123 11/30", links: [], recordedAt: null });
+    expect(p.items[0].seedText).toContain("検索が使えるなら");
+    expect(planXPost({ postId: "p", text: "・拡張パック抽選 11/30", links: [], recordedAt: null }).items[0].seedText).toContain("検索が使えるなら");
+    expect(RESEARCH_SYSTEM).toContain("「到達不能」ではない");
+  });
+  it("登録判断の出力で fields が省略されても、判断は採用し（主張なし）、診断に記録する。判断の種類が不正なら不備のまま", async () => {
+    const { makeAnthropicRegistrationJudge } = await import("@/lib/judgment/xsource/research-ai");
+    const mk = (input: unknown) => ({ messages: { create: vi.fn(async () => ({ stop_reason: "tool_use", content: [{ type: "tool_use", name: "submit_registration_judgment", input }], usage: { input_tokens: 1000, output_tokens: 100 } })) } }) as never;
+    const seen: string[] = [];
+    const ji = { caseId: "c", evidence: [], lastTurn: null, investigationEnd: "unreachable" as const, protectedFields: {} };
+    const ok = await makeAnthropicRegistrationJudge(mk({ decision: "tentative", rationale: "証拠なし", unresolvedImpact: "material", monitor: { continue: true, why: "" } }), { onDiagnostic: (d) => seen.push(d.reason) })(ji);
+    expect(ok).toMatchObject({ decision: "tentative", fields: {} });
+    expect(seen).toEqual(["fields_defaulted"]);
+    const bad = await makeAnthropicRegistrationJudge(mk({ decision: "maybe", fields: {} }), { onDiagnostic: (d) => seen.push(d.reason) })(ji);
+    expect(bad).toBeNull();
+    expect(seen.at(-1)).toMatch(/^bad_output:/);
+  });
+});
+
+describe("根拠のない除外は検証の指摘にする（P2: 取得できないまま exclude とした事例）", () => {
+  it("観察（検証済みの引用つき）の項目が1つも無い exclude は exclude_without_evidence。観察があれば指摘しない。結論は書き換えない", async () => {
+    const { verifyRegistration } = await import("@/lib/judgment/xsource/research-loop");
+    const ev = [{ id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "【A店】拡張パック 抽選 11/30まで 会員限定のため対象外", structure: null, independent: true }] as never;
+    const out = (fields: Record<string, unknown>, decision = "exclude") => ({ decision, fields, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
+    expect(verifyRegistration({ output: out({ product: { value: null, basis: "unknown" } }), evidence: ev, protectedFields: {} }).issues).toContain("exclude_without_evidence");
+    expect(verifyRegistration({ output: out({}), evidence: ev, protectedFields: {} }).issues).toContain("exclude_without_evidence");
+    // 除外には、応募できない・対象外を示す根拠（exclude_reason・引用つき）が要る。店舗を観察できただけでは除外できない（Stage A: 応募できる機会を除外した例）
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_missing"]);
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "会員限定のため対象外" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
+    // 引用が実在しても、除外の理由を支えない（11/30までは対象外の根拠でも、受付終了の根拠でもない）なら、保留にする
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_unsupported"]);
+    expect(verifyRegistration({ output: out({}, "tentative"), evidence: ev, protectedFields: {} }).issues).toEqual([]); // 暫定は対象外
   });
 });

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { generateProposalsAction, reviewProposalAction } from "@/app/(app)/lotteries/candidates/proposal-actions";
 import { Button } from "@/components/ui/button";
+import { diffProposal, summarizeProposals } from "@/lib/judgment/xsource/proposal-summary";
 import type { ProposalView } from "@/lib/server/proposals/store";
 
 /**
@@ -13,8 +14,12 @@ import type { ProposalView } from "@/lib/server/proposals/store";
  */
 const BASIS: Record<string, string> = { observed: "観察", inferred: "推論", unknown: "不明" };
 const MODE: Record<string, string> = { mock: "モック（実AIではない）", replay: "再生", real: "実AI" };
+const MODE_HINT: Record<string, string> = { real: "実AIが作成した登録案です（正しさは未検証。人が確認してください）" };
 const URL_STATUS: Record<string, string> = { url_from_item: "項目自身のリンク", short_unexpanded: "短縮URL未展開", shared_only_unverified: "共通リンクのみ（未確認）", url_missing: "URLなし" };
 const REVIEW: Record<string, string> = { hold: "保留", approve_with_edits: "修正して承認（レビュー記録）", reject: "却下" };
+const DECISION: Record<string, string> = { register: "本登録案", tentative: "暫定", exclude: "除外案", none: "判断なし" };
+const HELD: Record<string, string> = { exclude_without_evidence: "根拠（引用）のある観察が無いまま除外としている", exclude_without_page_evidence: "応募先のページを確認できないまま除外としている", register_unit_unresolved: "本登録案なのに応募単位が未確定", judge_failed: "AIの判断が得られなかった", page_text_loss: "ページの本文の取り出しに欠落の疑い" };
+const heldLabel = (r: string): string => HELD[r] ?? (r.startsWith("quote_not_found") ? "引用が原文に見つからない（" + r.split(":")[1] + "）" : r.startsWith("scope_mismatch") ? "別の店舗・商品のページを根拠にしている" : r.startsWith("field_unknown_has_value") ? "不明のはずの項目に値がある" : r);
 const KEY_FIELDS = ["store", "product", "deadline", "apply_unit"] as const;
 const FIELD_LABEL: Record<string, string> = { store: "店舗", product: "商品", deadline: "締切", apply_unit: "応募単位" };
 const UNIT_LABEL: Record<string, string> = { one_form_one: "1フォーム1応募", store_select: "店舗選択式", per_store: "店舗別に独立", per_product: "商品別", unknown: "不明" };
@@ -23,7 +28,7 @@ function SupportMark({ support, basis }: { support: string; basis: string }) {
   if (basis !== "observed" || support === "literal_in_quote" || support === "no_value") return null;
   return (
     <span className="ml-1 text-warn" data-testid="proposal-support-warn">
-      {support === "not_found" ? "⚠値が根拠から確認できない" : support === "literal_in_text" ? "△引用には無く本文にある" : "△書式を変換して一致"}
+      {support === "not_found" ? "⚠値が根拠から確認できない" : support === "literal_in_text" ? "△引用には無く本文にある" : support === "near_match" ? "△言い換えの可能性（語が近い）" : support === "enum_value" ? "△選択肢の値（人が確認）" : "△書式を変換して一致"}
     </span>
   );
 }
@@ -49,6 +54,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
     <li className="space-y-1.5 rounded-lg border bg-muted/30 p-2" data-testid="proposal-card" data-item={p.item_no}>
       <div className="flex flex-wrap items-center gap-1">
         <span className="font-medium">{p.item_label || `項目${p.item_no}`}</span>
+        <span className={"rounded border px-1 text-[10px] " + (p.decision === "exclude" ? "border-warn text-warn" : "")} data-testid="proposal-decision">{DECISION[p.decision] ?? p.decision}{!p.verified || p.held_reasons.length ? "・要確認" : ""}</span>
         <span className="rounded border px-1 text-[10px]" data-testid="proposal-mode">{MODE[p.mode] ?? p.mode}</span>
         <span className="rounded border px-1 text-[10px]">{URL_STATUS[p.url_status] ?? p.url_status}</span>
         {p.review && (
@@ -78,7 +84,33 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
           未確認: {p.unknowns.map((u) => `${FIELD_LABEL[u.what] ?? u.what}（${u.why}）`).join("／")}
         </p>
       )}
+      {p.held_reasons.length > 0 && (
+        <p className="text-warn" data-testid="proposal-held">
+          検証の指摘: {p.held_reasons.map(heldLabel).join("／")}
+          {p.decision === "exclude" ? "（除外案は、人が確認するまで採用しない）" : ""}
+        </p>
+      )}
       {p.possibly_same.length > 0 && <p className="text-warn">同じ応募機会の可能性がある別の登録案が {p.possibly_same.length} 件あります（統合はしていません）</p>}
+      {p.reviewOutdated && p.reviewedVersion && (
+        <div className="rounded border border-warn p-1.5 text-warn" data-testid="proposal-diff">
+          <p className="font-medium">再評価で変わった点（前回レビューは v{p.reviewedVersion.version}・現行は v{p.version}）</p>
+          {(() => {
+            const d = diffProposal(p.reviewedVersion, p);
+            return d.length ? (
+              <ul className="list-disc pl-4">
+                {d.map((x) => (
+                  <li key={x.field}>
+                    {FIELD_LABEL[x.field] ?? x.field}: {x.field === "apply_unit" ? UNIT_LABEL[x.before] ?? x.before : x.before} → {x.field === "apply_unit" ? UNIT_LABEL[x.after] ?? x.after : x.after}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>主要な項目の値は同じです（根拠・未確認事項が変わった可能性があります）。</p>
+            );
+          })()}
+        </div>
+      )}
+      {MODE_HINT[p.mode] && <p className="text-[10px] text-muted-foreground">{MODE_HINT[p.mode]}{p.model_id ? `（${p.model_id}）` : ""}</p>}
       <p className="text-[10px] text-muted-foreground">
         {p.pages.map((g) => g.host).join("・") || "ページ未取得"}／費用 {p.cost_jpy ?? 0}円／{p.stop_reason ?? "—"}
       </p>
@@ -134,7 +166,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
   );
 }
 
-export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
+export function ProposalPreview({ proposals, shadow }: { proposals: ProposalView[]; /** 本番シャドー: 読み取りとレビューの記録だけ（登録案の作成ボタンを出さない） */ shadow?: boolean }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [msg, setMsg] = useState("");
@@ -148,7 +180,7 @@ export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
     <details className="rounded-lg border p-2" data-testid="proposal-preview" open={proposals.length > 0}>
       <summary className="cursor-pointer text-xs font-medium">新AIの登録案（プレビュー）{proposals.length > 0 ? `　${proposals.length}件` : ""}</summary>
       <div className="mt-2 space-y-2">
-        <p className="text-[11px] text-muted-foreground">開発用のプレビューです。承認は記録だけで、抽選は登録されません。</p>
+        <p className="text-[11px] text-muted-foreground">{shadow ? "並行稼働の試験結果です（現行の候補とは独立）。承認は記録だけで、抽選は登録されません。" : "開発用のプレビューです。承認は記録だけで、抽選は登録されません。"}</p>
         {proposals.length === 0 ? (
           <p className="text-muted-foreground" data-testid="proposal-empty">
             まだ登録案がありません。
@@ -160,13 +192,26 @@ export function ProposalPreview({ proposals }: { proposals: ProposalView[] }) {
             ))}
           </ul>
         )}
+        {!shadow && (
         <div className="flex items-center justify-end gap-2">
           {msg && <span className="text-[11px] text-muted-foreground" data-testid="proposal-gen-msg">{msg}</span>}
           <Button size="sm" variant="outline" onClick={generate} disabled={busy} data-testid="proposal-generate">
             登録案を作る（モック・費用0）
           </Button>
         </div>
+        )}
       </div>
     </details>
+  );
+}
+
+/** 新AIの登録案の集計（候補一覧の上に1行）。レビュー・修正・費用・解決率。人の修正は「AIの値と食い違った記録」で、モデルの学習ではない */
+export function ProposalSummaryLine({ proposals }: { proposals: Record<string, ProposalView[]> }) {
+  const all = Object.values(proposals).flat();
+  const s = summarizeProposals(all.map((p) => ({ candidate_id: p.candidate_id, mode: p.mode, cost_jpy: p.cost_jpy, review: p.review, reviewOutdated: p.reviewOutdated })));
+  return (
+    <p className="rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground" data-testid="proposal-summary">
+      新AIの登録案（開発用）: {s.candidates}候補・{s.proposals}件／レビュー済 {s.reviewed}件（修正あり {s.withHumanEdits}・却下 {s.reject}・保留 {s.hold}）／解決率 {s.resolutionRate === null ? "—" : Math.round(s.resolutionRate * 100) + "%"}／費用 {s.costJpy}円
+    </p>
   );
 }

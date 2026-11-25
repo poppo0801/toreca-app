@@ -68,6 +68,8 @@ const RISKY = [
 ];
 // 人が内容を確認済みの検出（誤検知）。ファイルの内容のハッシュに固定するため、ファイルが少しでも変われば無効になり、再び要確認になる
 const REVIEWED = {
+  "20270103000122_phase2_durable_fetch_control.sql": { sha: "0f15a8017b91", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: 取得制御のリース失効・phase2_retention_purge（新設表 evidence_*・link_recheck_tasks 等だけが対象。既存の表には触れない）" },
+  "20270104000123_phase3_shadow_cron.sql": { sha: "681dc588e728", labels: ["delete"], reason: "関数 invoke_shadow_worker の本体の delete のみ（移行の実行時には削除しない）: 自分の呼び出し記録（notification_cron_calls の job='shadow'）の14日超の掃除。他に、設定表へ NULL許容の列を追加し shadow_lease を置き換える（旧い呼び出しと互換）" },
   "20261218000100_stage8f4.sql": { sha: "55ff66c12dfe", labels: ["delete"], reason: "新規の空の表 lottery_source_snapshots の保持期間切れを消す関数の本文（既存の表・データには触れない）" },
   "20261226000108_stage10d_case_foundation.sql": { sha: "f8eb5634cddd", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: purge_test_households（case_judgments ほかを削除）" },
   "20261227000109_stage10k_shadow_queue.sql": { sha: "03566db4b2ca", labels: ["delete"], reason: "関数の本体の delete のみ（移行の実行時には削除しない）: shadow_purge（shadow_judgments ほかを削除）" },

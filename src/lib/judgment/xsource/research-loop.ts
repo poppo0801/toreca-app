@@ -34,19 +34,30 @@ export interface ResearchLimits {
   maxSearches: number;
   /** 検索1回あたりの費用の予約（円。検索料金＋結果を読むトークンの概算。費用が不明でもこの額を計上する） */
   searchReserveJpy: number;
+  /** 原文の参照（read）の回数の上限（ネットワークを使わない。AI呼び出しの費用だけが掛かる） */
+  maxReads: number;
+  /** 参照で見せる原文の合計字数の上限（AIの入力量の保護） */
+  maxReadChars: number;
 }
-export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = { maxTurns: 6, maxFetches: 6, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 3, judgeReserveJpy: 3, maxSearches: 2, searchReserveJpy: 3 };
+export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = { maxTurns: 6, maxFetches: 6, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 3, judgeReserveJpy: 3, maxSearches: 2, searchReserveJpy: 3, maxReads: 10, maxReadChars: 30_000 };
 
 export type FetchFailure = "blocked" | "robots" | "not_public" | "login_required" | "failed" | "timeout";
-export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string } | { ok: false; reason: FetchFailure };
+export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string; /** 取得元の制約の注記（例: 保存時の切り詰め）。観察としてAIに渡す（本文の一部にしない） */ notice?: string; /** 保存済みの整形後の全文（再解析用）。true なら html から本文を作り直さず、text と structure をそのまま使う */ cleaned?: boolean; structure?: ApplyPageStructure | null; textLoss?: string[] } | { ok: false; reason: FetchFailure };
 /** AIが使えるツール（読み取り専用）。公開ページの取得だけ。SSRF・robots・レート制限・サイズ・時間は実装側（既存の安全な取得）が担う */
 export interface SearchHitLite {
   title: string;
   url: string;
   snippet: string;
 }
+export interface ReadHintLite {
+  from: number;
+  to: number;
+  why: string;
+}
 export interface ResearchTools {
   fetchPage(url: string): Promise<FetchOutcome>;
+  /** （任意）過去の調査経験から、この本文で最初に見せる位置の提案（仮説）。本文の全文参照・目次・条件語の周辺は変わらない。検証済みの経験が不足なら空 */
+  readHints?(url: string, text: string): ReadHintLite[];
   now(): Date;
   /** （任意・読み取り専用）公開Webの検索。結果は**候補のURLと抜粋（データ）**で、証拠ではない（取得してページ構造・対応の検査を通して初めて証拠になる）。無い環境では検索できない */
   search?(query: string): Promise<{ ok: true; hits: SearchHitLite[]; costJpy: number | null } | { ok: false; reason: string }>;
@@ -67,6 +78,14 @@ export interface Evidence {
   scope?: EvidenceScope;
   /** 本文の取り出しで、構造として認識できた語（題名・受付枠・項目の値）が本文から欠けた（Stage 10Y）。あれば、このページを根拠にした観察は保留にする */
   textLoss?: string[];
+  /** 取得元の制約の注記（AIの観察に出す） */
+  notice?: string;
+  /** AIが read で参照した範囲（本文の字位置。重複・隣接は結合）。判断AIへも同じ範囲の原文を渡す */
+  reads?: { from: number; to: number }[];
+  /** 過去の調査経験に基づく「最初に見せる位置」（仮説）。位置の優先だけで、全文の参照可能性は変わらない。「ここに無い」ことは「記載なし」を意味しない */
+  hintSpans?: ReadHintLite[];
+  /** 収集時の文脈の注記（本文の切り詰め・画像から読み取った情報など）。**観察として渡し、引用の根拠にはしない**（本文ではないため） */
+  notes?: string[];
 }
 export interface EvidenceScope {
   /** 例: item_entity / parent_shared / parent_card / discovered */
@@ -90,7 +109,7 @@ export interface AgentUnknown {
   /** 追加調査が必要／不要と考える理由（被害・重要性・見込み・締切・費用の観点）。機械的な点数ではない */
   rationale: string;
 }
-export type NextAction = { kind: "fetch"; url: string; why: string } | { kind: "search"; query: string; why: string } | { kind: "stop"; reason: "sufficient" | "no_progress" | "unreachable" | "other"; why: string };
+export type NextAction = { kind: "read"; evidenceId: string; from: number; chars: number; why: string } | { kind: "fetch"; url: string; why: string } | { kind: "search"; query: string; why: string } | { kind: "stop"; reason: "sufficient" | "no_progress" | "unreachable" | "other"; why: string };
 export interface AgentView {
   id: string;
   kind: Evidence["kind"];
@@ -102,6 +121,18 @@ export interface AgentView {
   /** 構造化した観察（受付枠・関連イベント・フォーム設問・欠落）と原文の抜粋 */
   observations: string[];
   excerpt: string;
+  /** 抜粋（先頭）の外にある応募条件の記載（店舗選択・人数/回数の上限・店舗ごと 等）の周辺。位置つき。原文の一部であり、引用の検証は本文全体に対して行う */
+  extraWindows?: string[];
+  /** 過去の調査経験から「最初に見せる」と提案された位置の原文（仮説。位置の優先だけで、ここに無いことは「記載なし」を意味しない。全文は read で参照できる） */
+  hintWindows?: string[];
+  /** 本文の全字数 */
+  chars?: number;
+  /** 全文のうち、AIの入力に出ている範囲の説明（全文提示／一部のみ＋未確認の範囲）。「無い」ではなく「未確認」を区別するため */
+  coverage?: string;
+  /** 長い本文の目次（約1,200字ごとの位置と冒頭）。read で参照する位置を選ぶ手掛かり。全文を提示しているときは無い */
+  outline?: string[];
+  /** read で参照した範囲の原文 */
+  readSegments?: { from: number; to: number; text: string }[];
 }
 export interface AgentTurnInput {
   caseId: string;
@@ -149,6 +180,8 @@ export interface JudgeOutput {
   /** 更新の監視を続けるか（調査終了・登録可否とは独立） */
   monitor: { continue: boolean; why: string };
   costJpy: number | null;
+  /** 出力の扱いの注記（Phase 2）。fields_defaulted: fields が省略され、主張なし（空）として扱った＝「判断成功」と区別して数える */
+  outputNote?: "fields_defaulted";
 }
 export type RegistrationJudge = (input: JudgeInput) => Promise<JudgeOutput | null>;
 
@@ -172,7 +205,7 @@ export interface ResearchResult {
   investigation: { state: "ended"; reason: EndReason; turns: number };
   /** 登録判断の各ラウンド（最初の判断→限定的な再評価）の引用の分類。最終状態は registration（重複なし） */
   quoteAudit: { round: number; rows: QuoteAuditRow[] }[];
-  registration: { decision: JudgeOutput["decision"] | "none"; output: JudgeOutput | null; verified: boolean; held: { reasons: string[] } | null; proposals: FieldProposal[] };
+  registration: { /** AIの判断（自己申告。検証の結果で書き換えない） */ decision: JudgeOutput["decision"] | "none"; /** 最終の扱い: 検証を通らない本登録・除外は暫定（tentative）に下げる（根拠が無効な断定で自動登録を通さない）。AIの判断は decision に残る */ finalDecision: JudgeOutput["decision"] | "none"; output: JudgeOutput | null; verified: boolean; held: { reasons: string[] } | null; /** 任意項目の検証失敗（その項目だけ不採用。登録は止めない） */ warnings: string[]; proposals: FieldProposal[] };
   monitoring: { state: "active" | "ended"; why: string; reopenOn: ReopenTrigger[] };
   evidence: Evidence[];
   history: FetchRecord[];
@@ -180,6 +213,8 @@ export interface ResearchResult {
   budget: ReturnType<CallBudget["summary"]>;
   /** 実行した検索と、その結果（候補のURL。証拠ではない）。発見評価（B2）で「検索で見つけたURLか」を確認するのに使う */
   searches: { query: string; title: string; url: string; snippet: string }[];
+  /** 調査AIに検索が提示されたか（検索ツールがあり、上限が1以上）。P2 の不具合（検索ツールの消失）を、入力ログなしで確認できるようにする */
+  searchOffered: boolean;
 }
 export interface FieldProposal {
   field: string;
@@ -191,26 +226,135 @@ export interface FieldProposal {
 
 // ------------------------------------------------------------------ 補助
 const sha = (s: string): string => createHash("sha256").update(s.normalize("NFKC").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
+import { describeQuoteIssue, diagnoseQuote } from "./quote-diagnosis";
+import { dateTokens } from "./image-evidence";
+import { checkDeadlineRole, checkExcludeSemantics, checkUnitQuote, checkValueCorrespondence, type SemanticVerdict } from "./claim-semantics";
 const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
-export function seedEvidence(id: string, text: string, now: Date, url: string | null = null): Evidence {
-  return { id, kind: "seed", url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure: null, independent: true };
+export function seedEvidence(id: string, text: string, now: Date, url: string | null = null, notes: string[] = []): Evidence {
+  return { id, kind: "seed", url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure: null, independent: true, ...(notes.length ? { notes: notes.slice(0, 16) } : {}) };
 }
 
 function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: true }>, now: Date): Evidence {
+  if (o.cleaned) return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(o.text), text: o.text, structure: o.structure ?? null, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(o.textLoss?.length ? { textLoss: o.textLoss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
   const structure = parseApplyPage(o.html);
   // 本文は、取得側の粗いテキストではなくHTMLから作り直す（スクリプト・head・エンティティの除去）。AIの見る抜粋と、引用の検証が同じ本文になる
   const required = structure ? [structure.title ?? "", ...structure.slots.flatMap((s) => [s.title, ...s.details.map((d) => d.value)])] : [];
   const checked = o.html ? pageTextChecked(o.html, required) : null;
   const text = checked && checked.text.length >= 20 ? checked.text : o.text;
-  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
+  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
 }
 
-/** AIに渡す原文の抜粋の長さ（本文に整形したあと。実評価で、本文が見えず観察の要約を引用した失敗の是正） */
+/** 本文がこの字数以内なら、全文をそのままAIに渡す（品質優先。長文で条件が抜粋の外に出て消える失敗の根本対策）。これを超える長文は、先頭の抜粋＋目次＋条件語の周辺＋参照（read）で全文に到達できる */
+export const FULL_VIEW_CHARS = 12_000;
+/** 長文の先頭抜粋の長さ（索引・ヒント。網羅性の保証ではない） */
 export const EXCERPT_CHARS = 2500;
+export const READ_CHARS_MAX = 3000;
+export const OUTLINE_CHUNK = 1200;
+export const OUTLINE_MAX = 80;
 
+/** 応募条件に関わる語（意味判断ではなく、AIに見せる箇所を選ぶための目印。個別サイトの規則を持たない。網羅性は read で担保する） */
+const RULE_WORDS = /(店舗(を|の)?(選択|選んで|お選び|希望)|お?1人様|お一人様|1名様|ご?応募は[^。\n]{0,8}(1|一)(回|度|店舗)|1店舗(のみ|だけ)|各店舗|店舗ごと|店舗別|重複|1回(のみ|だけ|まで)|上限|禁止|不可|できません|ご注意|無効|複数口)/g;
+export const WINDOW_MAX = 12;
+export const WINDOW_CHARS = 3000;
+/** 先頭の抜粋（from まで）より後ろにある応募条件の記載の周辺の範囲（近いものは1つにまとめる。最大 WINDOW_MAX 箇所・合計 WINDOW_CHARS 字） */
+export function ruleSpans(text: string, from: number): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const m of text.matchAll(RULE_WORDS)) {
+    const at = m.index ?? 0;
+    if (at + m[0].length <= from) continue;
+    const a = Math.max(from, at - 60);
+    const b = Math.min(text.length, at + m[0].length + 100);
+    const last = spans[spans.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else spans.push([a, b]);
+  }
+  const out: [number, number][] = [];
+  let total = 0;
+  for (const [a, b] of spans) {
+    if (out.length >= WINDOW_MAX) break;
+    const e = Math.min(b, a + 400);
+    if (total + (e - a) > WINDOW_CHARS) break;
+    total += e - a;
+    out.push([a, e]);
+  }
+  return out;
+}
+export function ruleWindows(text: string, from: number): string[] {
+  return ruleSpans(text, from).map(([a, b]) => `（${a}字目〜）${text.slice(a, b).replace(/\n+/g, " / ")}`);
+}
+/** 範囲の結合（重複・隣接をまとめる） */
+export function mergeRanges(r: readonly { from: number; to: number }[]): { from: number; to: number }[] {
+  const sorted = [...r].sort((x, y) => x.from - y.from);
+  const out: { from: number; to: number }[] = [];
+  for (const x of sorted) {
+    const last = out[out.length - 1];
+    if (last && x.from <= last.to) last.to = Math.max(last.to, x.to);
+    else out.push({ ...x });
+  }
+  return out;
+}
+/** 長文の目次（位置と、その位置の冒頭の語）。見出し・注意書き・フォーム項目の場所を、全文を送らずに示す */
+export function outlineOf(text: string): string[] {
+  const out: string[] = [];
+  // 目次の粒度は、全文の末尾まで届くように広げる（旧: 1,200字×80＝96,000字までしか示さず、120,000字のページの末尾に目次が無かった。Phase 2 の上限監査で発見）
+  const step = Math.max(OUTLINE_CHUNK, Math.ceil(text.length / OUTLINE_MAX));
+  for (let at = 0; at < text.length && out.length < OUTLINE_MAX; at += step) {
+    const head = text.slice(at, at + 40).replace(/\s+/g, " ").trim();
+    out.push(`${at}: ${head}`);
+  }
+  return out;
+}
+const hintRanges = (e: Pick<Evidence, "text" | "hintSpans">): { from: number; to: number }[] => (e.hintSpans ?? []).map((h) => ({ from: Math.max(0, h.from), to: Math.min(e.text.length, h.to) })).filter((h) => h.to > h.from).slice(0, 4);
+
+/** この証拠のうち、AIの入力に出ている範囲（先頭の抜粋・条件語の周辺・参照した範囲） */
+export function shownRanges(e: Pick<Evidence, "text" | "reads" | "hintSpans">): { from: number; to: number }[] {
+  const n = e.text.length;
+  if (n <= FULL_VIEW_CHARS) return [{ from: 0, to: n }];
+  return mergeRanges([{ from: 0, to: EXCERPT_CHARS }, ...ruleSpans(e.text, EXCERPT_CHARS).map(([a, b]) => ({ from: a, to: b })), ...hintRanges(e), ...(e.reads ?? [])]);
+}
+const shownChars = (r: readonly { from: number; to: number }[]): number => r.reduce((t, x) => t + (x.to - x.from), 0);
+
+/**
+ * AIへ見せる本文だけ、互換文字（康熙部首「⼊」・全角英数・互換漢字など）を通常の字にそろえる。**1文字→1文字の場合だけ**（位置・read の範囲がずれない）。
+ * 原文（保存・証拠）は変えない。検証層は NFKC で照合するため、AIが見たとおりに写した引用が検証と一致する（Stage A で、稀な部首文字を別の記号に写し間違えた引用があった）。
+ */
+export function foldCompat(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const n = ch.normalize("NFKC");
+    out += [...n].length === 1 && n.length === ch.length ? n : ch;
+  }
+  return out;
+}
+/** 位置の見出し「（19765字目〜）」はそのまま、本文部分だけ統一する */
+const foldWindow = (w: string): string => {
+  const m = /^(（[^）]*）)([\s\S]*)$/.exec(w);
+  return m ? m[1] + foldCompat(m[2]) : foldCompat(w);
+};
+function foldView(v: AgentView): AgentView {
+  return { ...v, excerpt: foldCompat(v.excerpt), ...(v.extraWindows ? { extraWindows: v.extraWindows.map(foldWindow) } : {}), ...(v.hintWindows ? { hintWindows: v.hintWindows.map(foldWindow) } : {}), ...(v.readSegments ? { readSegments: v.readSegments.map((r) => ({ ...r, text: foldCompat(r.text) })) } : {}) };
+}
 export function toAgentView(e: Evidence): AgentView {
-  return { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: [...(e.textLoss?.length ? ["【注意】本文の取り出しで、構造として認識できた語が本文から欠けている（本文だけでは確認できない項目がある）"] : []), ...(e.structure ? structureToObservations(e.structure) : [])], excerpt: e.text.slice(0, EXCERPT_CHARS) };
+  return foldView(buildAgentView(e));
+}
+function buildAgentView(e: Evidence): AgentView {
+  const n = e.text.length;
+  const base = { id: e.id, kind: e.kind, url: e.url, fetchedAt: e.fetchedAt, independent: e.independent, scope: e.scope, observations: [...(e.notes ?? []).map((x) => `【収集時の注記】${x}`), ...(e.notice ? [`【注意】${e.notice}`] : []), ...(e.textLoss?.length ? ["【注意】本文の取り出しで、構造として認識できた語が本文から欠けている（本文だけでは確認できない項目がある）"] : []), ...(e.structure ? structureToObservations(e.structure) : [])], chars: n };
+  if (n <= FULL_VIEW_CHARS) return { ...base, excerpt: e.text, coverage: `全文${n}字をすべて提示している（全文確認済み）` };
+  const shown = shownRanges(e);
+  const reads = (e.reads ?? []).map((r) => ({ from: r.from, to: r.to, text: e.text.slice(r.from, r.to) }));
+  const w = ruleWindows(e.text, EXCERPT_CHARS);
+  const covered = shownChars(shown);
+  return {
+    ...base,
+    excerpt: e.text.slice(0, EXCERPT_CHARS),
+    ...(w.length ? { extraWindows: w } : {}),
+    ...(hintRanges(e).length ? { hintWindows: hintRanges(e).map((h, i) => `（${h.from}字目〜・過去の類似ページの経験からの仮説）${e.text.slice(h.from, h.to).replace(/\n+/g, " / ")}  ※${e.hintSpans?.[i]?.why ?? ""}`) } : {}),
+    outline: outlineOf(e.text),
+    ...(reads.length ? { readSegments: reads } : {}),
+    coverage: `全文${n}字のうち${covered}字（先頭抜粋・条件語の周辺・参照した範囲）を提示。残り${n - covered}字は未確認（「記載が無い」とは限らない）。read（位置・字数）で原文の任意の範囲を参照できる`,
+  };
 }
 
 /** 同じ内容（転載・同一ページの別URL）は独立した裏付けと数えない */
@@ -224,7 +368,7 @@ export interface QuoteAuditRow {
   field: string;
   kind: QuoteAuditKind;
   quoteChars: number;
-  /** 引用が、AIに見せた抜粋（先頭 EXCERPT_CHARS）の範囲にあるか。範囲外にあれば「見えていない原文からの引用」 */
+  /** 引用が、AIに見せた範囲（全文提示・先頭抜粋・条件語の周辺・参照した範囲）にあるか。範囲外にあれば「見えていない原文からの引用」 */
   inExcerpt: boolean | null;
 }
 /** observed 項目ごとの引用の実在を分類する（検証の合否は変えない。原因の追跡用。原文は記録しない） */
@@ -240,7 +384,7 @@ export function auditQuotes(output: JudgeOutput, evidence: readonly Evidence[]):
     if (!q) { rows.push({ ...base, kind: "no_quote", inExcerpt: null }); continue; }
     if (q.length < 3) { rows.push({ ...base, kind: "too_short", inExcerpt: null }); continue; }
     const text = norm(ev.text);
-    if (text.includes(q)) { rows.push({ ...base, kind: "ok", inExcerpt: norm(ev.text.slice(0, EXCERPT_CHARS)).includes(q) }); continue; }
+    if (text.includes(q)) { rows.push({ ...base, kind: "ok", inExcerpt: shownRanges(ev).some((r) => norm(ev.text.slice(r.from, r.to)).includes(q)) }); continue; }
     const obs = norm(toAgentView(ev).observations.join(" "));
     if (obs.includes(q)) { rows.push({ ...base, kind: "in_observations_only", inExcerpt: false }); continue; }
     const grams = new Set<string>();
@@ -255,10 +399,27 @@ export interface VerifyInput {
   output: JudgeOutput;
   evidence: readonly Evidence[];
   protectedFields: Record<string, string>;
+  /** true のとき、応募単位が未確定（unknown・値なし）のまま register（本登録案）とした出力を検証の指摘にする（登録案の経路。保留を増やすためではなく、未確定のままの本登録案を人の確認に回すため） */
+  registerRequiresUnit?: boolean;
+  /** 評価時点（意味検証で「締切を過ぎたか」を判定する）。無いと、日付による終了の判定は確認できない扱いで保留になる */
+  now?: Date;
 }
 /** 根拠の実在・不明値の扱い・人が確定した値の保護。問題の理由（AIへ返す文）を返す。結論は書き換えない */
-export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[] } {
+/** 本登録の可否を左右する項目。ここの検証失敗は本登録を止める。それ以外（任意項目）の失敗は、その項目の主張だけを採用せず不明として明示する（根拠のある別項目まで捨てない） */
+export const CRITICAL_FIELDS: ReadonlySet<string> = new Set(["store", "product", "deadline", "apply_unit"]);
+export const isBlockingIssue = (issue: string): boolean => {
+  const k = issue.indexOf(":");
+  return k < 0 || CRITICAL_FIELDS.has(issue.slice(k + 1));
+};
+
+export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[]; /** 本登録を止める指摘（重要項目・全体） */ blocking: string[]; /** 任意項目の指摘（その項目だけ不採用。登録は止めない） */ nonBlocking: string[]; /** AIへ返す訂正用の指摘文（原因・原文の近い箇所つき） */ details: string[]; /** 通ったが機械的には完全に確認できていない点（検証済みと称さない） */ unconfirmed: string[] } {
   const issues: string[] = [];
+  const reasonOf = new Map<string, string>();
+  const unconfirmed: string[] = [];
+  const sem = (code: string, v: SemanticVerdict, name: string): void => {
+    if (!v.ok) { issues.push(code); reasonOf.set(code, v.reason); }
+    else for (const u of v.unconfirmed ?? []) unconfirmed.push(`${name}: ${u}`);
+  };
   const proposals: FieldProposal[] = [];
   const byId = new Map(i.evidence.map((e) => [e.id, e]));
   for (const [name, f] of Object.entries(i.output.fields)) {
@@ -267,7 +428,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       proposals.push({ field: name, action: "set", value: null, basis: "unknown" });
       continue;
     }
-    if (f.basis === "observed") {
+    // 推論（inferred）でも、引用や証拠IDを付けたなら、実在・対象を確認する（実在しない引用を根拠として残さない）。引用の無い推論はそのまま（推論であり確定値ではない）
+    if (f.basis === "observed" || (f.basis === "inferred" && (f.quote || f.evidenceId))) {
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
       if (!ev) issues.push(`evidence_missing:${name}`);
       else if (!f.quote || !norm(ev.text).includes(norm(f.quote)) || norm(f.quote).length < 3) issues.push(`quote_not_found:${name}`);
@@ -275,6 +437,15 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       else if (ev.scope?.verdict === "mismatch") issues.push(`scope_mismatch:${name}`); // 別の店舗・商品・系列・開催回のページを根拠にしない
       else if (ev.scope?.verdict === "unknown" && ev.scope.origin.startsWith("parent")) issues.push(`shared_link_scope_unverified:${name}`); // 親投稿共通のリンクを、対応が確認されないまま根拠にしない
     }
+    // 値と引用の意味の対応（締切）: 引用が実在しても、値の日付が引用に書かれていなければ、別の箇所の日付を断定している（根拠にならない）
+    const grounded = (f.basis === "observed" || f.basis === "inferred") && !!f.value && !!f.quote && !issues.some((x) => x.endsWith(":" + name));
+    if (grounded && name === "deadline") {
+      const vd = dateTokens(f.value!);
+      const qd = dateTokens(f.quote!);
+      if (vd.length > 0 && !vd.some((d) => qd.includes(d))) issues.push("value_not_in_quote:" + name);
+      else sem("deadline_role_mismatch:" + name, checkDeadlineRole(f.value!, f.quote!), name); // 値の日付が、当選発表など別の事象の日付ではなく、応募の締切の記載にあること
+    } else if (grounded && (name === "store" || name === "product")) sem("value_not_in_quote:" + name, checkValueCorrespondence(f.value!, f.quote!), name);
+    else if (grounded && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);
     const prot = i.protectedFields[name];
     if (prot !== undefined && f.value !== null && norm(prot) !== norm(f.value)) {
       // 人が確定した値は変更しない。矛盾は人への確認に回す（自動で上書きしない）
@@ -284,7 +455,44 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     if (prot !== undefined) continue; // 同じ値: 変更なし
     proposals.push({ field: name, action: "set", value: f.value, basis: f.basis });
   }
-  return { issues, proposals };
+  // 本登録案なのに応募単位が未確定: 重複応募・応募漏れの被害が大きいため、検証の指摘にする（AIは根拠があれば確定、無ければ暫定にできる。結論は書き換えない）
+  if (i.registerRequiresUnit && i.output.decision === "register") {
+    const u = Object.entries(i.output.fields).find(([k]) => /apply_?unit|応募単位|applicationunit|^unit$/i.test(k))?.[1];
+    if (!u || u.basis === "unknown" || u.value === null || u.value.trim() === "") issues.push("register_unit_unresolved");
+  }
+  // 根拠のない「除外」は、応募の機会を失わせる被害が大きい。観察（引用つきで検証済み）の項目が1つも無いのに exclude としたものは、保留（検証の指摘）にする。AIの結論は書き換えない（再評価でAIが直す／人が確認する）
+  if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
+  // 取得したページ（応募先の公開ページ）の証拠が無いまま「除外」とするのは、取得できなかっただけの可能性があり、応募の機会を失わせる。人の確認に回す（投稿の原文だけで除外が妥当な場合も、人が確認する側に倒す）。AIの結論は書き換えない
+  if (i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page")) issues.push("exclude_without_page_evidence");
+  // 除外は、応募できない・対象外であることを示す根拠（exclude_reason・引用つき・検証済み）が要る。店舗や商品を観察できただけでは、除外の根拠にならない（応募の機会を失わせるため）
+  if (i.output.decision === "exclude") {
+    const r = i.output.fields["exclude_reason"];
+    const ev = r?.evidenceId ? byId.get(r.evidenceId) : undefined;
+    if (!r || r.basis !== "observed" || !r.value || !ev || !r.quote || !norm(ev.text).includes(norm(r.quote))) issues.push("exclude_reason_missing");
+    else {
+      // 引用が実在するだけでは除外の根拠にならない。理由の種類と引用の意味・評価時点の対応を検証し、支持されない・矛盾・判別不能なら保留にする（応募の機会を消さない）
+      const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
+      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others });
+      if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
+      else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
+    }
+  }
+  // 重要項目の失敗は本登録を止める。任意項目の失敗は、その項目の提案だけを採用しない
+  const blocking = issues.filter(isBlockingIssue);
+  const nonBlocking = issues.filter((x) => !isBlockingIssue(x));
+  const droppedFields = new Set(nonBlocking.map((x) => x.slice(x.indexOf(":") + 1)));
+  const kept = proposals.filter((p) => !droppedFields.has(p.field));
+  // 訂正用の指摘文: 引用が見つからないときは、原因と原文の実在する近い箇所を添える（引用の捏造を誘わず、写せないなら不明にさせる）
+  const details = issues.map((x) => {
+    if (reasonOf.has(x)) return `${x} — ${reasonOf.get(x)}。根拠にならないなら、値を null・basis を unknown にするか、exclude をやめて暫定にする`;
+    if (!x.startsWith("quote_not_found:")) return x;
+    const name = x.slice("quote_not_found:".length);
+    const f = i.output.fields[name];
+    const ev = f?.evidenceId ? byId.get(f.evidenceId) : undefined;
+    if (!f || !ev) return x;
+    return describeQuoteIssue(x, diagnoseQuote(f.quote, ev.text));
+  });
+  return { issues, proposals: kept, blocking, nonBlocking, details, unconfirmed };
 }
 
 // ------------------------------------------------------------------ 本体
@@ -298,6 +506,8 @@ export async function runResearch(args: {
   limits?: Partial<ResearchLimits>;
   /** 人が確定した項目（AIが自律的に変更しない） */
   protectedFields?: Record<string, string>;
+  /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
+  registerRequiresUnit?: boolean;
   /** 以前の取得履歴（再開時。同じURL・同じ内容の無益な再取得を避ける） */
   history?: FetchRecord[];
   evidence?: Evidence[];
@@ -321,8 +531,12 @@ export async function runResearch(args: {
   const searchLog: { query: string; title: string; url: string; snippet: string }[] = [];
   const queries = new Set<string>();
   let searches = 0;
+  let readCalls = 0;
+  let readChars = 0;
   const remaining = (): AgentTurnInput["remaining"] => ({ turns: L.maxTurns - turn, fetches: L.maxFetches - fetches, costJpy: args.budget.remainingJpy, elapsedMs: L.maxElapsedMs - elapsed(), searches: Math.max(0, L.maxSearches - searches) });
 
+  // 調査AIに検索が提示されたか（Phase 2: P2 で検索ツールが消えていたことを、入力ログなしでは確認できなかったため、事実として記録する）
+  const searchOffered = !!args.tools.search && L.maxSearches > 0;
   // 判断用の予算を先に確保して、調査で使い切らない
   while (end === null) {
     if (turn >= L.maxTurns) { end = "limit_turns"; break; }
@@ -342,8 +556,33 @@ export async function runResearch(args: {
     s.finish(out?.costJpy ?? null);
     if (!out) { trace.push({ turn, kind: "agent", detail: "agent_failed" }); end = "agent_failed"; break; }
     lastTurn = out;
-    trace.push({ turn, kind: "agent", detail: out.next.kind === "stop" ? `stop:${out.next.reason}` : out.next.kind === "search" ? "search" : `fetch:${out.next.url}` });
+    trace.push({ turn, kind: "agent", detail: out.next.kind === "stop" ? `stop:${out.next.reason}` : out.next.kind === "search" ? "search" : out.next.kind === "read" ? `read:${out.next.evidenceId}` : `fetch:${out.next.url}` });
     if (out.next.kind === "stop") { end = out.next.reason === "sufficient" ? "sufficient" : out.next.reason === "unreachable" ? "unreachable" : out.next.reason === "no_progress" ? "no_progress" : "agent_stopped"; break; }
+
+    if (out.next.kind === "read") {
+      // 原文の参照（読み取り専用・ネットワークなし）。取得済みの証拠の任意の範囲をAIが見られる。調査のターン数には数えず、回数と合計字数で縛る
+      turn--;
+      const nx = out.next;
+      const ev = evidence.find((e) => e.id === nx.evidenceId);
+      const from = Math.max(0, Math.floor(nx.from || 0));
+      const want = Math.min(READ_CHARS_MAX, Math.max(1, Math.floor(nx.chars || READ_CHARS_MAX)));
+      if (!ev || from >= ev.text.length || readCalls >= L.maxReads || readChars >= L.maxReadChars) {
+        trace.push({ turn, kind: "fetch", detail: !ev ? "read_unknown_evidence" : from >= ev.text.length ? "read_out_of_range" : "read_limit" });
+        noProgress++;
+      } else {
+        const to = Math.min(ev.text.length, from + want, from + Math.max(0, L.maxReadChars - readChars));
+        const before = shownRanges(ev);
+        const had = before.some((r) => r.from <= from && r.to >= to);
+        ev.reads = mergeRanges([...(ev.reads ?? []), { from, to }]);
+        readCalls++;
+        readChars += to - from;
+        trace.push({ turn, kind: "fetch", detail: `read_ok:${ev.id}:${from}-${to}${had ? ":already_shown" : ""}` });
+        if (had) noProgress++;
+        else noProgress = 0;
+      }
+      if (noProgress >= L.maxNoProgressTurns) { end = "no_progress"; break; }
+      continue;
+    }
 
     if (out.next.kind === "search") {
       // 検索（読み取り専用・上限つき）。同じ検索語の再実行・上限超過・ツール無しは実行せず進展なしとして数える。検索語は個人情報を除いて渡す（redact は呼び出し側のツールが担う）
@@ -405,6 +644,8 @@ export async function runResearch(args: {
           const pe = pageEvidence(evidence.length, url, r, args.tools.now());
           const sc = args.scoper?.(url, pe);
           if (sc) pe.scope = sc;
+          const hs = args.tools.readHints?.(url, pe.text);
+          if (hs?.length) pe.hintSpans = hs.slice(0, 4).map((h) => ({ from: h.from, to: h.to, why: h.why.slice(0, 200) }));
           evidence.push(pe);
           history.push({ key, host: cu.host, outcome: "ok", contentHash: hash, at, progress: true });
           trace.push({ turn, kind: "fetch", detail: `ok:${cu.host}` });
@@ -421,6 +662,7 @@ export async function runResearch(args: {
   let held: { reasons: string[] } | null = null;
   let proposals: FieldProposal[] = [];
   let issues: string[] | undefined;
+  let warnings: string[] = [];
   const quoteAudit: ResearchResult["quoteAudit"] = [];
   for (let rev = 0; rev <= L.maxRevisions; rev++) {
     const js = args.budget.start("registration_judge", L.judgeReserveJpy);
@@ -434,16 +676,18 @@ export async function runResearch(args: {
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
     quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
-    const v = verifyRegistration({ output, evidence, protectedFields });
+    const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now() });
     proposals = v.proposals;
-    if (v.issues.length === 0) { verified = true; held = null; break; }
+    warnings = [...v.nonBlocking, ...v.unconfirmed.map((u) => "unconfirmed:" + u)];
+    if (v.blocking.length === 0) { verified = true; held = null; if (v.nonBlocking.length) trace.push({ turn, kind: "verify", detail: `non_blocking:${v.nonBlocking.join(",")}` }); break; }
     trace.push({ turn, kind: "verify", detail: v.issues.join(",") });
-    issues = v.issues;
-    held = { reasons: v.issues }; // 限定的な再評価でも解消しなければ、実行不可として理由を残す（別の結論に置き換えない）
+    issues = v.details; // 原因と原文の近い箇所つきで、AIに訂正させる（回数は maxRevisions の範囲。無限に繰り返さない）
+    held = { reasons: v.blocking }; // 限定的な再評価でも解消しなければ、実行不可として理由を残す（AIの判断は書き換えず、最終の扱いは finalDecision で保留に下げる）
   }
   const decision = output ? output.decision : "none";
+  const finalDecision: JudgeOutput["decision"] | "none" = !output ? "none" : verified ? output.decision : "tentative";
   const monitoring: ResearchResult["monitoring"] = output ? { state: output.monitor.continue ? "active" : "ended", why: output.monitor.why, reopenOn: output.monitor.continue ? ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] : ["user_correction"] } : { state: "active", why: "登録判断が得られなかったため、監視は継続", reopenOn: ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] };
-  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, output, verified, held, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog };
+  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, finalDecision, output, verified, held, warnings, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog, searchOffered };
 }
 
 // ------------------------------------------------------------------ 再開（調査終了後の必要な部分だけの再評価）

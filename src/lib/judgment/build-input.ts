@@ -7,7 +7,7 @@
  */
 import { classifyEvidence } from "@/lib/case-model/evidence-status";
 import { redact } from "@/lib/case-model/redact";
-import type { StoredEvidence } from "@/lib/collector/evidence";
+import { MAX_LINKED_PAGES, type StoredEvidence } from "@/lib/collector/evidence";
 import { CONTRACT_VERSION, type CurrentCase, type EvidenceItem, type EvidenceStatus, type FailureRecord, type JudgmentInput, type MasterCandidate, type PriorJudgment, type RelatedOpportunity } from "./contract";
 
 export const MAX_EVIDENCE_TEXT = 3500;
@@ -50,8 +50,10 @@ export interface BuildInputArgs {
   feedback?: string[];
 }
 
+/** 判断入力に入れる証拠の最大件数。投稿本文・画像・保存ページ（最大 MAX_LINKED_PAGES）が揃っても無言で落とさないよう、ページ上限＋余裕に合わせる（Phase 2 の監査で、旧上限8が複数リンクを切ることを確認） */
+export const MAX_EVIDENCE_ITEMS = MAX_LINKED_PAGES + 4;
 export function toEvidenceItems(seeds: EvidenceSeed[]): EvidenceItem[] {
-  return seeds.slice(0, 8).map((s, i) => ({
+  return seeds.slice(0, MAX_EVIDENCE_ITEMS).map((s, i) => ({
     id: `E${i + 1}`,
     url: s.url.slice(0, 600),
     fetchedAt: s.fetchedAt ?? null,
@@ -107,7 +109,7 @@ export async function buildJudgmentInput(a: BuildInputArgs): Promise<JudgmentInp
  */
 export function seedsFromStored(url: string, stored: StoredEvidence | null, o: { parsedOk?: boolean; hostBlocked?: boolean; attempted?: boolean } = {}): EvidenceSeed[] {
   const main = seedFromStored(url, stored, o);
-  const linked: EvidenceSeed[] = (stored?.linkedPages ?? []).slice(0, 2).map((l) => ({ url: l.url, fetchedAt: l.fetchedAt, via: "web_fetch", origin: "unknown" as const, text: l.text, hash: null, status: "fetched" as const, reused: true, kind: "linked_page" as const }));
+  const linked: EvidenceSeed[] = (stored?.linkedPages ?? []).slice(0, MAX_LINKED_PAGES).map((l) => ({ url: l.url, fetchedAt: l.fetchedAt, via: "web_fetch", origin: "unknown" as const, text: l.text, hash: null, status: "fetched" as const, reused: true, kind: "linked_page" as const }));
   const reading = imageReadingSeed(stored);
   return [main, ...linked, ...(reading ? [reading] : [])];
 }

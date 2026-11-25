@@ -29,6 +29,13 @@ export interface SafeFetchOptions {
   noFollow?: boolean;
   /** テスト専用: ループバックのテストサーバーに接続するため検査を緩める。アプリ本体からは指定しない */
   testOnlyAllowLoopback?: boolean;
+  /**
+   * **実際のHTTPリクエスト（リダイレクトの各ホップ・robots.txt を含む）の直前**に呼ばれる。false を返すと、そのリクエストを送らずに中止する（総リクエスト数の上限を、付随リクエストまで含めて数えるため）。
+   * 例外は投げない。呼び出し側が数える（Phase 2: 実投稿の取得で、robots・リダイレクトの付随リクエストを数え漏らしていた）。
+   */
+  beforeRequest?: (url: URL) => boolean | void;
+  /** 応答を受け取った直後（本文のバイト数を数えるため） */
+  onResponse?: (info: { host: string; status: number; bytes: number }) => void;
 }
 
 export const USER_AGENT = "ToreCaApp/1.0 (personal-use lottery manager; contact: owner)";
@@ -250,12 +257,14 @@ function requestOnce(url: URL, o: Required<Pick<SafeFetchOptions, "timeoutMs" | 
   });
 }
 
+/** safeFetch の既定の本文サイズ上限（バイト）。超えた分は切れて truncated になり、台帳・抜粋の切れ目として記録される */
+export const SAFE_FETCH_DEFAULT_MAX_BYTES = 1_500_000;
 const DEFAULT_ACCEPT = ["text/html", "application/xhtml+xml", "text/plain"];
 
 /** 安全にURLを取得する。失敗は例外ではなく結果オブジェクトで返す（理由は利用者向けの日本語） */
 export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}): Promise<SafeFetchResult> {
   const timeoutMs = options.timeoutMs ?? 10_000;
-  const maxBytes = options.maxBytes ?? 1_500_000;
+  const maxBytes = options.maxBytes ?? SAFE_FETCH_DEFAULT_MAX_BYTES;
   const maxRedirects = options.maxRedirects ?? 4;
   const accept = options.accept ?? DEFAULT_ACCEPT;
   const allowLoopback = options.testOnlyAllowLoopback === true;
@@ -266,8 +275,10 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
     let r: Hop;
+    if (options.beforeRequest?.(url) === false) return { ok: false, code: "blocked", message: "リクエストの上限のため中止しました" };
     try {
       r = await requestOnce(url, { timeoutMs, maxBytes, accept: accept.join(","), allowLoopback, readBody: true });
+      options.onResponse?.({ host: url.hostname, status: r.status, bytes: r.body.length });
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === "EBLOCKED") return { ok: false, code: "blocked", message: "このアドレスは取得できません" };
@@ -306,6 +317,59 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
     const mime = contentType.split(";")[0].trim();
     if (!accept.includes(mime)) return { ok: false, code: "unsupported_type", message: "HTMLや文章以外のページは取得できません" };
     return { ok: true, finalUrl: url.toString(), status: r.status, contentType, body: decodeBody(r.body, contentType), truncated: r.truncated };
+  }
+  return { ok: false, code: "too_many_redirects", message: "リダイレクトが多すぎます" };
+}
+
+// ------------------------------------------------------------------ バイナリ（画像）の取得
+export type SafeBytesResult =
+  | { ok: true; finalUrl: string; status: number; contentType: string; bytes: Buffer; truncated: boolean }
+  | { ok: false; code: FetchErrorCode; message: string; status?: number; retryAfterMs?: number };
+
+/**
+ * 画像などのバイナリを、safeFetch と同じ防御（アドレス検査・リダイレクトごとの再検査・サイズ/時間の上限・圧縮なし・Cookie/認証なし）で取得する。
+ * Content-Type は呼び出し側が渡す許可リスト（既定は画像）。サイズ上限で切れた場合は truncated=true（呼び出し側は「大きすぎる」として扱う）。
+ * 429/503 の Retry-After（秒）は retryAfterMs として返す（ホスト別のバックオフに使う）。
+ */
+export async function safeFetchBytes(rawUrl: string, options: SafeFetchOptions & { accept: string[] }): Promise<SafeBytesResult> {
+  const timeoutMs = options.timeoutMs ?? 12_000;
+  const maxBytes = options.maxBytes ?? 5_000_000;
+  const maxRedirects = options.maxRedirects ?? 3;
+  const allowLoopback = options.testOnlyAllowLoopback === true;
+  const first = checkUrl(rawUrl, { testOnlyAllowLoopback: allowLoopback });
+  if (!first.ok) return first;
+  let url = first.url;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    let r: Hop;
+    if (options.beforeRequest?.(url) === false) return { ok: false, code: "blocked", message: "リクエストの上限のため中止しました" };
+    try {
+      r = await requestOnce(url, { timeoutMs, maxBytes, accept: options.accept.join(","), allowLoopback, readBody: true });
+      options.onResponse?.({ host: url.hostname, status: r.status, bytes: r.body.length });
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "EBLOCKED") return { ok: false, code: "blocked", message: "このアドレスは取得できません" };
+      if (code === "ETIMEDOUT_TOTAL" || code === "ETIMEDOUT" || code === "ECONNRESET") return { ok: false, code: "timeout", message: "取得がタイムアウトしました" };
+      return { ok: false, code: "network", message: "接続できませんでした" };
+    }
+    if (r.status >= 300 && r.status < 400 && r.headers.location) {
+      let next: URL;
+      try {
+        next = new URL(String(r.headers.location), url);
+      } catch {
+        return { ok: false, code: "invalid_url", message: "リダイレクト先のURLが正しくありません" };
+      }
+      const c = checkUrl(next.toString(), { testOnlyAllowLoopback: allowLoopback });
+      if (!c.ok) return { ok: false, code: "blocked", message: "リダイレクト先が取得できないアドレスでした" };
+      url = c.url;
+      continue;
+    }
+    if (r.status < 200 || r.status >= 300) {
+      const ra = Number(r.headers["retry-after"]);
+      return { ok: false, code: "http_error", status: r.status, message: `取得できませんでした（状態 ${r.status}）`, ...(Number.isFinite(ra) && ra > 0 ? { retryAfterMs: Math.min(ra, 120) * 1000 } : {}) };
+    }
+    const contentType = String(r.headers["content-type"] ?? "").toLowerCase();
+    if (!options.accept.includes(contentType.split(";")[0].trim())) return { ok: false, code: "unsupported_type", message: "許可されていない種類のデータです" };
+    return { ok: true, finalUrl: url.toString(), status: r.status, contentType, bytes: r.body, truncated: r.truncated };
   }
   return { ok: false, code: "too_many_redirects", message: "リダイレクトが多すぎます" };
 }

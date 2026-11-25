@@ -11,7 +11,7 @@ import { LotteryFormDialog } from "@/components/lottery-form";
 import { discardCandidateResumeFor } from "@/lib/lottery-resume";
 import { PageHeading } from "@/components/page-heading";
 import { ProductThumb } from "@/components/product-image";
-import { ProposalPreview } from "@/components/proposal-preview";
+import { ProposalPreview, ProposalSummaryLine } from "@/components/proposal-preview";
 import type { ProposalView } from "@/lib/server/proposals/store";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -43,7 +43,7 @@ async function post(body: Record<string, unknown>): Promise<{ ok: boolean; error
   }
 }
 
-export function CandidatesView({ candidates, proposals, proposalPreview }: { candidates: CandidateView[]; /** 新AIの登録案（プレビュー。開発専用・既定は無し） */ proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
+export function CandidatesView({ candidates, proposals, proposalPreview, proposalShadow }: { proposalShadow?: boolean; candidates: CandidateView[]; /** 新AIの登録案（プレビュー。開発専用・既定は無し） */ proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
   const { profile } = useApp();
   // 抽選候補の管理（登録・除外・ルール）は管理者のプロフィールのみ（Stage 7J）。判定はプロフィールID（isAdmin）。サーバー側の操作も同じ判定で拒否する
   if (profile.isAdmin !== true) {
@@ -59,7 +59,7 @@ export function CandidatesView({ candidates, proposals, proposalPreview }: { can
   }
   return (
     <UndoToastProvider>
-      <CandidatesInner candidates={candidates} proposals={proposals} proposalPreview={proposalPreview} />
+      <CandidatesInner candidates={candidates} proposals={proposals} proposalPreview={proposalPreview} proposalShadow={proposalShadow} />
     </UndoToastProvider>
   );
 }
@@ -68,7 +68,7 @@ export function CandidatesView({ candidates, proposals, proposalPreview }: { can
  * 抽選候補（Stage 7H）。自動収集の確認待ちを、抽選管理と同じカード形式で短時間に処理する。
  * 主要操作は「確認・登録」と「除外」の2つ。除外は理由を選ぶ（6種類）。処理した候補は一覧から外れ、件数が即時に更新される。
  */
-function CandidatesInner({ candidates, proposals, proposalPreview }: { candidates: CandidateView[]; proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
+function CandidatesInner({ candidates, proposals, proposalPreview, proposalShadow }: { proposalShadow?: boolean; candidates: CandidateView[]; proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
   const router = useRouter();
   const { data, now, profile } = useApp();
   const toast = useUndoToast();
@@ -213,6 +213,7 @@ function CandidatesInner({ candidates, proposals, proposalPreview }: { candidate
         </p>
       )}
 
+      {proposalPreview && proposals && Object.keys(proposals).length > 0 && <ProposalSummaryLine proposals={proposals} />}
       <ul className="space-y-2" data-testid="candidate-list">
         {visible.map((c) => {
           const f = candidateFacts(c);
@@ -282,7 +283,7 @@ function CandidatesInner({ candidates, proposals, proposalPreview }: { candidate
         </div>
       )}
 
-      {detail && <DetailSheet c={detail} proposals={proposalPreview ? proposals?.[detail.id] ?? [] : undefined} onClose={() => setDetail(null)} onRegister={() => { setEditing(detail); setDetail(null); }} onExclude={() => { setExcluding(detail); setDetail(null); }} />}
+      {detail && <DetailSheet c={detail} proposals={proposalPreview ? proposals?.[detail.id] ?? [] : undefined} shadow={proposalShadow} onClose={() => setDetail(null)} onRegister={() => { setEditing(detail); setDetail(null); }} onExclude={() => { setExcluding(detail); setDetail(null); }} />}
       {excluding && <ExcludeReasonSheet candidate={excluding} others={rows} onClose={() => setExcluding(null)} onDone={(r) => onExcluded(excluding, r)} />}
       {editing?.draft?.input && (
         <LotteryFormDialog
@@ -303,7 +304,7 @@ function CandidatesInner({ candidates, proposals, proposalPreview }: { candidate
 }
 
 /** 候補の詳細（確認・登録・除外の判断に使う項目と根拠） */
-function DetailSheet({ c, proposals, onClose, onRegister, onExclude }: { c: CandidateView; proposals?: ProposalView[]; onClose: () => void; onRegister: () => void; onExclude: () => void }) {
+function DetailSheet({ c, proposals, shadow, onClose, onRegister, onExclude }: { c: CandidateView; proposals?: ProposalView[]; shadow?: boolean; onClose: () => void; onRegister: () => void; onExclude: () => void }) {
   const f = candidateFacts(c);
   const uniqueReasons = [...new Set(c.reasons)];
   return (
@@ -349,7 +350,7 @@ function DetailSheet({ c, proposals, onClose, onRegister, onExclude }: { c: Cand
               元の情報を開く
             </a>
           )}
-          {proposals !== undefined && <ProposalPreview proposals={proposals} />}
+          {proposals !== undefined && <ProposalPreview proposals={proposals} shadow={shadow} />}
           <div className="flex justify-end gap-1.5">
             <Button size="sm" variant="outline" onClick={onExclude}>
               除外

@@ -52,6 +52,55 @@ export function parseOembedHtml(html: string): { text: string; links: string[]; 
   return { text, links, author };
 }
 
+/** 公開oEmbed経路で展開する短縮リンクの上限と時間（旧: 先頭3件だけを無言で展開し、4件目以降は消えていた。Phase 2 の調査で発見）。上限を超えた分・展開できなかった分は「展開できなかった短縮リンク」として本文に残る */
+export const OEMBED_EXPAND_MAX = 12;
+export const OEMBED_EXPAND_TOTAL_MS = 20_000;
+
+/**
+ * 短縮リンクの応答が 3xx ではなく HTML（meta refresh / location.replace）で宛先を返す場合の宛先。t.co は、ブラウザ風でないクライアントには 301 を返すが、
+ * HTML で返すことがある。宛先は http(s) のURLだけ（javascript: 等は無視）。見つからなければ null。
+ */
+export function extractMetaRefresh(html: string): string | null {
+  const m = /<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["']?\s*\d+\s*;\s*url=['"]?([^"'>\s]+)/i.exec(html) ?? /location\.replace\(["']([^"']+)["']\)/i.exec(html);
+  if (!m) return null;
+  const u = decodeEntities(m[1]).replace(/\\\//g, "/").trim();
+  return /^https?:\/\//i.test(u) ? u : null;
+}
+
+/**
+ * 投稿内のリンクを展開する（t.co は最初の Location だけを取得。本文は取得しない）。順序は元の順序を保つ。
+ * 展開できなかった（上限超過・時間切れ・失敗）短縮リンクは unexpanded に残し、**無言で捨てない**。
+ */
+export async function expandPostLinks(links: readonly string[], o: { max?: number; totalMs?: number; concurrency?: number; fetchImpl?: typeof safeFetch; now?: () => number } = {}): Promise<{ expanded: string[]; unexpanded: string[] }> {
+  const max = o.max ?? OEMBED_EXPAND_MAX;
+  const doFetch = o.fetchImpl ?? safeFetch;
+  const now = o.now ?? Date.now;
+  const deadline = now() + (o.totalMs ?? OEMBED_EXPAND_TOTAL_MS);
+  const uniq = [...new Set(links)];
+  const slots: (string | null)[] = uniq.map((l) => (/^https?:\/\/t\.co\//i.test(l) ? null : l));
+  const unexpanded: string[] = [];
+  const todo = uniq.map((l, i) => ({ l, i })).filter((x) => slots[x.i] === null);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const k = next++;
+      if (k >= todo.length) return;
+      const { l, i } = todo[k];
+      if (k >= max || now() >= deadline) {
+        unexpanded.push(l);
+        continue;
+      }
+      const r = await doFetch(l, { noFollow: true, timeoutMs: 4_000, accept: ["text/html", "text/plain"] }).catch(() => null);
+      const meta = r && r.ok && r.status === 200 ? extractMetaRefresh(r.body) : null;
+      if (r && r.ok && r.finalUrl && r.finalUrl !== l) slots[i] = r.finalUrl;
+      else if (meta) slots[i] = meta;
+      else unexpanded.push(l);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, o.concurrency ?? 3) }, worker));
+  return { expanded: [...new Set(slots.filter((x): x is string => !!x))], unexpanded };
+}
+
 export type XFetchResult = { ok: true; text: string; author: string; notice: string[]; postedOn: string } | { ok: false; message: string };
 
 export async function fetchXPost(rawUrl: string): Promise<XFetchResult> {
@@ -77,14 +126,8 @@ export async function fetchXPost(rawUrl: string): Promise<XFetchResult> {
   if (!post.text) return { ok: false, message: "投稿の本文を取得できませんでした。文章をコピーするか、スクリーンショットを読み取ってください" };
 
   // 短縮URL(t.co)は展開して、告知の本当の宛先をAIに伝える（リダイレクト先はURL文字列としてだけ使い、本文は取得しない）
-  const expanded: string[] = [];
-  for (const l of post.links.slice(0, 3)) {
-    if (/^https?:\/\/t\.co\//i.test(l)) {
-      const r = await safeFetch(l, { noFollow: true, timeoutMs: 4_000, accept: ["text/html", "text/plain"] });
-      if (r.ok && r.finalUrl && r.finalUrl !== l) expanded.push(r.finalUrl);
-    } else expanded.push(l);
-  }
+  const { expanded, unexpanded } = await expandPostLinks(post.links);
   const notice = ["Xの投稿に添付された画像は取得できません。告知が画像の場合は、スクリーンショットを読み取ってください"];
-  const text = [`【Xの投稿】${post.author ? `（${post.author}）` : ""}`, post.text, expanded.length ? `\n【投稿内のリンク】\n${expanded.join("\n")}` : ""].filter(Boolean).join("\n");
+  const text = [`【Xの投稿】${post.author ? `（${post.author}）` : ""}`, post.text, expanded.length ? `\n【投稿内のリンク】\n${expanded.join("\n")}` : "", unexpanded.length ? `\n【展開できなかった短縮リンク（${unexpanded.length}件）】\n${unexpanded.join("\n")}` : ""].filter(Boolean).join("\n");
   return { ok: true, text, author: post.author, notice, postedOn: parseOembedDate(html) };
 }
