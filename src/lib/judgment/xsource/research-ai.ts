@@ -73,7 +73,7 @@ const JUDGE_SCHEMA = {
   type: "object",
   properties: {
     decision: { type: "string", enum: ["register", "tentative", "exclude"] },
-    fields: { type: "object", additionalProperties: { type: "object", properties: { value: { type: ["string", "null"], maxLength: 160 }, basis: { type: "string", enum: ["observed", "inferred", "unknown"] }, evidenceId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 160 } }, required: ["value", "basis"] } },
+    fields: { type: "array", maxItems: 12, items: { type: "object", properties: { name: { type: "string", maxLength: 40 }, value: { type: ["string", "null"], maxLength: 160 }, basis: { type: "string", enum: ["observed", "inferred", "unknown"] }, evidenceId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 160 } }, required: ["name", "value", "basis"] } },
     rationale: { type: "string", maxLength: 300 },
     unresolvedImpact: { type: "string", enum: ["none", "minor", "material"] },
     monitor: { type: "object", properties: { continue: { type: "boolean" }, why: { type: "string", maxLength: 120 } }, required: ["continue", "why"] },
@@ -119,9 +119,84 @@ const apiReason = (e: unknown): string => {
   return `api_error:${typeof x?.status === "number" ? x.status : String(x?.name ?? "unknown").slice(0, 40)}`;
 };
 
-export function makeAnthropicResearchAgent(client: ClientLike, opts: { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void } = {}): ResearchAgent {
-  const model = opts.model ?? DEFAULT_AI_MODEL;
+/**
+ * 厳密なツール入力（strict）用のスキーマ変換。構造化出力が受け付けない制約（長さ・件数・数値の範囲）を除き、全てのオブジェクトを additionalProperties:false にし、
+ * 型の配列（["string","null"]）を anyOf にする。変換後は「形（型・必須・列挙）」だけを保証する（長さ等は従来どおりパーサーが切る）。
+ */
+export function strictifySchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(strictifySchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const o = schema as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (k === "maxLength" || k === "minLength" || k === "maxItems" || k === "minItems" || k === "minimum" || k === "maximum") continue;
+    out[k] = k === "properties" && v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([pk, pv]) => [pk, strictifySchema(pv)])) : strictifySchema(v);
+  }
+  if (Array.isArray(out.type)) {
+    const types = out.type as string[];
+    delete out.type;
+    out.anyOf = types.map((t) => ({ type: t }));
+  }
+  if (out.type === "object" && out.properties) out.additionalProperties = false;
+  return out;
+}
+
+/**
+ * messages.create を、厳密なツール入力（strict: true）で呼び、プロバイダがスキーマを受け付けない（400）ときだけ、通常のツール入力で1回だけ呼び直す（課金されない拒否）。
+ * 一度拒否されたら以降はこのクライアントでは通常のツール入力にする。拒否・採用はどちらも診断に残す（本番で実際に効いているかを確認できるように）。
+ */
+export function withStrictTools(client: ClientLike, role: AiDiagnostic["role"], onDiagnostic?: (d: AiDiagnostic) => void): ClientLike {
+  let strict = true;
+  return {
+    messages: {
+      create: (async (params: Anthropic.MessageCreateParamsNonStreaming, options?: Anthropic.RequestOptions) => {
+        if (!strict || !params.tools?.length) return client.messages.create(params, options);
+        const sp = { ...params, tools: params.tools.map((t) => ("input_schema" in t ? { ...t, strict: true, input_schema: strictifySchema(t.input_schema) } : t)) } as Anthropic.MessageCreateParamsNonStreaming;
+        try {
+          const r = await client.messages.create(sp, options);
+          return r;
+        } catch (e) {
+          if ((e as { status?: number })?.status === 400) {
+            strict = false;
+            onDiagnostic?.({ role, reason: "strict_rejected" });
+            return client.messages.create(params, options);
+          }
+          throw e;
+        }
+      }) as ClientLike["messages"]["create"],
+    },
+  } as ClientLike;
+}
+
+/** 出力の形の不備（API終了理由が途中切れ以外）のときだけ、同じ入力で1回だけ再試行する。再試行の費用は成功した出力に合算する */
+function withOneRetry<I, O extends { costJpy: number | null }>(role: AiDiagnostic["role"], once: (input: I) => Promise<O | null>, probe: { last: string }, onDiagnostic?: (d: AiDiagnostic) => void): (input: I) => Promise<O | null> {
   return async (input) => {
+    probe.last = "";
+    const a = await once(input);
+    if (a || !probe.last.startsWith("bad_output:") || probe.last.startsWith("bad_output:max_tokens")) return a;
+    onDiagnostic?.({ role, reason: "retry_bad_output" });
+    probe.last = "";
+    const b = await once(input);
+    onDiagnostic?.({ role, reason: b ? "retry_recovered" : "retry_failed" });
+    return b;
+  };
+}
+
+type AiOpts = { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void; strict?: boolean };
+/** 呼び出しの診断を、再試行の判断（直前の失敗の種類）にも使えるよう束ねる */
+function bindOpts(rawClient: ClientLike, role: AiDiagnostic["role"], o0: AiOpts): { client: ClientLike; opts: AiOpts & { onDiagnostic: (d: AiDiagnostic) => void }; probe: { last: string } } {
+  const probe = { last: "" };
+  const onDiagnostic = (d: AiDiagnostic): void => {
+    probe.last = d.reason;
+    o0.onDiagnostic?.(d);
+  };
+  return { client: o0.strict === false ? rawClient : withStrictTools(rawClient, role, onDiagnostic), opts: { ...o0, onDiagnostic }, probe };
+}
+
+export function makeAnthropicResearchAgent(rawClient: ClientLike, o0: AiOpts = {}): ResearchAgent {
+  const { client, opts, probe } = bindOpts(rawClient, "agent", o0);
+  const model = opts.model ?? DEFAULT_AI_MODEL;
+  return withOneRetry<AgentTurnInput, AgentTurnOutput>("agent", async (input) => {
     let res: Anthropic.Message;
     try {
       res = await client.messages.create(
@@ -136,18 +211,19 @@ export function makeAnthropicResearchAgent(client: ClientLike, opts: { model?: s
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === TURN_TOOL);
     const a = use?.input as { observed?: unknown; inferred?: unknown; unknown?: unknown; counterHypotheses?: unknown; next?: { kind?: string; url?: string; evidenceId?: string; from?: number; chars?: number; query?: string; reason?: string; why?: string } } | undefined;
     if (!a?.next || (a.next.kind !== "fetch" && a.next.kind !== "stop" && a.next.kind !== "search" && a.next.kind !== "read")) {
-      opts.onDiagnostic?.({ role: "agent", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? "invalid_next" : "no_tool_use"}` });
+      opts.onDiagnostic?.({ role: "agent", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? (a?.next ? `invalid_next_kind_${String(a.next.kind).slice(0, 12)}` : `invalid_next_${typeof (use.input as { next?: unknown })?.next}`) : "no_tool_use"}` });
       return null;
     }
     const next: AgentTurnOutput["next"] = a.next.kind === "read" && typeof a.next.evidenceId === "string" && Number.isFinite(a.next.from) ? { kind: "read", evidenceId: asString(a.next.evidenceId, 20), from: Math.max(0, Math.floor(Number(a.next.from))), chars: Math.min(3000, Math.max(1, Math.floor(Number(a.next.chars) || 3000))), why: asString(a.next.why, 300) } : a.next.kind === "search" && typeof a.next.query === "string" && a.next.query.trim() ? { kind: "search", query: asString(a.next.query, 120), why: asString(a.next.why, 300) } : a.next.kind === "fetch" && typeof a.next.url === "string" ? { kind: "fetch", url: a.next.url, why: asString(a.next.why, 300) } : { kind: "stop", reason: (["sufficient", "no_progress", "unreachable"].includes(String(a.next.reason)) ? a.next.reason : "other") as "sufficient" | "no_progress" | "unreachable" | "other", why: asString(a.next.why, 300) };
     const unknown = (Array.isArray(a.unknown) ? (a.unknown as AgentTurnOutput["unknown"]) : []).filter((u) => u && typeof u.what === "string").map((u) => ({ what: asString(u.what, 160), importance: (u.importance === "high" || u.importance === "medium" ? u.importance : "low") as "low" | "medium" | "high", harmIfWrong: Array.isArray(u.harmIfWrong) ? u.harmIfWrong.map((h) => asString(h, 60)) : [], expectedInfoGain: (["none", "low", "medium", "high"].includes(String(u.expectedInfoGain)) ? u.expectedInfoGain : "none") as AgentTurnOutput["unknown"][number]["expectedInfoGain"], rationale: asString(u.rationale, 300) }));
     return { observed: claims(a.observed), inferred: claims(a.inferred), unknown, counterHypotheses: (Array.isArray(a.counterHypotheses) ? (a.counterHypotheses as unknown[]) : []).map((s) => asString(s, 200)), next, costJpy: cost };
-  };
+  }, probe, o0.onDiagnostic);
 }
 
-export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void } = {}): RegistrationJudge {
+export function makeAnthropicRegistrationJudge(rawClient: ClientLike, o0: AiOpts = {}): RegistrationJudge {
+  const { client, opts, probe } = bindOpts(rawClient, "judge", o0);
   const model = opts.model ?? DEFAULT_AI_MODEL;
-  return async (input) => {
+  return withOneRetry<JudgeInput, JudgeOutput>("judge", async (input) => {
     let res: Anthropic.Message;
     try {
       res = await client.messages.create(
@@ -162,13 +238,13 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === JUDGE_TOOL);
     // モデルが入れ子のオブジェクト（fields）を JSON 文字列で返すことがある（形式の揺れ）。文字列なら一度だけ解釈する（内容の検証は従来どおり。解釈できなければ不備として型を記録）
     const rawIn = use?.input as Record<string, unknown> | undefined;
-    const parsedIn = rawIn && typeof rawIn.fields === "string" ? parseFieldsString(rawIn) : rawIn;
+    const parsedIn = rawIn ? normalizeFields(rawIn) : rawIn;
     const a = parsedIn as { decision?: string; fields?: Record<string, { value?: string | null; basis?: string; evidenceId?: string; quote?: string }>; rationale?: string; unresolvedImpact?: string; monitor?: { continue?: boolean; why?: string } } | undefined;
     // fields が省略された出力（証拠が少ないとき等）は、主張なし（空）として扱い、判断は採用する（実AIの試験で、証拠なしの項目の出力が項目の省略になり判断が失われた）。判断の種類が不正・fields が別の型のときは不備
     const fieldsMissing = !!a && a.fields === undefined && (a.decision === "register" || a.decision === "tentative" || a.decision === "exclude");
     if (fieldsMissing) opts.onDiagnostic?.({ role: "judge", reason: "fields_defaulted" });
     if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || (!fieldsMissing && (!a.fields || typeof a.fields !== "object" || Array.isArray(a.fields)))) {
-      opts.onDiagnostic?.({ role: "judge", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? badJudgeKind(a) : "no_tool_use"}` }); // 型だけを記録する（値・原文は含めない）
+      opts.onDiagnostic?.({ role: "judge", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? badJudgeKind(a, rawIn) : "no_tool_use"}` }); // 型だけを記録する（値・原文は含めない）
       return null;
     }
     const fields: Record<string, RegisteredField> = {};
@@ -179,22 +255,44 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
     }
     const out: JudgeOutput = { ...(fieldsMissing ? { outputNote: "fields_defaulted" as const } : {}), decision: a.decision, fields, rationale: asString(a.rationale, 500), unresolvedImpact: a.unresolvedImpact === "material" || a.unresolvedImpact === "minor" ? a.unresolvedImpact : "none", monitor: { continue: a.monitor?.continue !== false, why: asString(a.monitor?.why, 200) }, costJpy: cost };
     return out;
-  };
+  }, probe, o0.onDiagnostic);
 }
 
-/** fields が JSON 文字列で返されたときの解釈。オブジェクトに解釈できたときだけ置き換える（配列・解釈不能は元のまま＝不備として扱われる） */
-function parseFieldsString(raw: Record<string, unknown>): Record<string, unknown> {
-  try {
-    const p: unknown = JSON.parse(raw.fields as string);
-    return p && typeof p === "object" && !Array.isArray(p) ? { ...raw, fields: p } : raw;
-  } catch {
-    return raw;
+/**
+ * fields の形の揺れを一つの形（項目名→内容のオブジェクト）に正規化する。許す形: ①項目名をキーにしたオブジェクト（従来）②{name,...}の配列（現行のスキーマ）③それらをJSON文字列にしたもの。
+ * 解釈できないとき（壊れたJSON・別の型）は元のまま返す（＝不備として扱われる。恣意的に補完しない）。
+ */
+export function normalizeFields(raw: Record<string, unknown>): Record<string, unknown> {
+  let f: unknown = raw.fields;
+  if (typeof f === "string") {
+    try {
+      f = JSON.parse(f);
+    } catch {
+      return raw;
+    }
   }
+  if (Array.isArray(f)) {
+    const m: Record<string, unknown> = {};
+    for (const it of f) {
+      const e = it as { name?: unknown } | null;
+      if (!e || typeof e !== "object" || typeof e.name !== "string" || !e.name || Object.prototype.hasOwnProperty.call(m, e.name)) return raw; // 名前が無い・重複: 解釈しない（一方を黙って捨てない）
+      const { name, ...rest } = it as Record<string, unknown>;
+      m[String(name)] = rest;
+    }
+    return { ...raw, fields: m };
+  }
+  return f && typeof f === "object" ? { ...raw, fields: f } : raw;
 }
 
-/** 不正な判断出力の型の記録（原因の特定用。値・原文を含めない） */
-function badJudgeKind(a: { decision?: unknown; fields?: unknown } | undefined): string {
+/** 不正な判断出力の型の記録（原因の特定用。値・原文を含めない。型・長さの区分・先頭の文字の種類・入力のキー数だけ） */
+function badJudgeKind(a: { decision?: unknown; fields?: unknown } | undefined, rawIn?: Record<string, unknown>): string {
   if (!a) return "input_missing";
   if (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") return `decision_${a.decision === undefined ? "missing" : typeof a.decision}`;
-  return `fields_${Array.isArray(a.fields) ? "array" : a.fields === null ? "null" : typeof a.fields}`;
+  const f = rawIn?.fields ?? a.fields;
+  if (typeof f === "string") {
+    const t = f.trimStart();
+    const head = t[0] === "{" ? "obj" : t[0] === "[" ? "arr" : t[0] === "<" ? "tag" : t[0] === "`" ? "fence" : t.length === 0 ? "empty" : "text";
+    return `fields_string_${head}_L${f.length < 100 ? "S" : f.length < 800 ? "M" : "L"}_K${Object.keys(rawIn ?? {}).length}`;
+  }
+  return `fields_${Array.isArray(f) ? "array" : f === null ? "null" : typeof f}`;
 }

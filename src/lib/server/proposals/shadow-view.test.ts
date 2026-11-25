@@ -29,10 +29,10 @@ describe("本番シャドーの閲覧許可（読み取りとレビューの記�
 
 describe("本番シャドーの許可証", () => {
   const a = { model: "claude-haiku-5-5", totalCapJpy: 3, perCaseCapJpy: 3 };
-  it("本番ゲートが allowed のときだけ発行。上限は1件5円・総額1000円で頭打ち。不正なモデル名・予算なしは発行しない", () => {
+  it("本番ゲートが allowed のときだけ発行。上限は1件10円・総額1000円で頭打ち。不正なモデル名・予算なしは発行しない", () => {
     expect(issueProductionShadowTicket({ allowed: false }, a)).toMatchObject({ ok: false, reason: "prod_gate_denied" });
     const t = issueProductionShadowTicket({ allowed: true }, { model: "claude-haiku-5-5", totalCapJpy: 99999, perCaseCapJpy: 99 });
-    expect(t.ok && isRealRunTicket(t.ticket) && t.ticket.perCaseCapJpy === 5 && t.ticket.totalCapJpy === 1000 && t.ticket.origin === "prod_shadow").toBe(true);
+    expect(t.ok && isRealRunTicket(t.ticket) && t.ticket.perCaseCapJpy === 10 && t.ticket.totalCapJpy === 1000 && t.ticket.origin === "prod_shadow").toBe(true);
     expect(issueProductionShadowTicket({ allowed: true }, { ...a, totalCapJpy: 0 })).toMatchObject({ ok: false, reason: "no_budget" });
     expect(issueProductionShadowTicket({ allowed: true }, { ...a, model: "gpt-4; rm" })).toMatchObject({ ok: false, reason: "bad_model" });
   });
@@ -43,9 +43,10 @@ describe("本番シャドーの許可証", () => {
 
 describe("静的確認: 本番シャドーの登録案ジョブは読み取り専用の範囲に収まる", () => {
   const s = readFileSync("src/lib/server/shadow/proposal-job.ts", "utf8");
-  it("抽選・応募・購入・通知・履歴の表に書かない／検索を渡さない／実取得・画像解析は本番の許可を通した印つきの入口だけ／キーは専用キー（または明示スイッチの既存キー）だけ", () => {
+  it("抽選・応募・購入・通知・履歴の表に書かない／検索は印つきだけ／実取得・画像解析は本番の許可を通した印つきの入口だけ／キーは専用キー（または明示スイッチの既存キー）だけ", () => {
     expect(s).not.toMatch(/\.from\(["'](lotteries|applications|purchases|notification_deliveries|application_results|audit_logs)/);
-    expect(s).not.toMatch(/\bsearch\s*:\s*[a-zA-Z(]/); // 検索ツールを渡さない（提示しない理由は toolReport に記録。型の注記 search?: string は対象外）
+    expect(s).toContain("markShadowTool(makeSearchTool("); // 検索は評価入口と同じ makeSearchTool を通し、本番の印をつけたものだけ（印の無い検索は generate が拒否する）
+    expect(s).not.toMatch(/tools\.search\s*=(?!\s*markShadowTool)/);
     expect(s).toContain("makeShadowLivePublicFetch"); // 実取得は本番許可（SHADOW_LIVE_FETCH）を通した入口
     expect(s).toContain("markShadowTool"); // 画像解析は印つき
     expect(s).not.toMatch(/makeLivePublicFetch\(/); // 開発用の取得入口は使わない

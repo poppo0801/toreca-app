@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Stage 10U: AIアダプタの安全性（偽のクライアント。実AIは呼ばない）。ツールは「結果の提出」1つだけ・読み取り専用・命令はデータ・秘密を渡さない。 */
 import { describe, expect, it, vi } from "vitest";
-import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, JUDGE_SYSTEM, RESEARCH_SYSTEM, renderJudgeInput, renderTurnInput } from "./research-ai";
+import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, normalizeFields, strictifySchema, withStrictTools, JUDGE_SYSTEM, RESEARCH_SYSTEM, renderJudgeInput, renderTurnInput } from "./research-ai";
 
 vi.mock("server-only", () => ({}));
 
@@ -47,7 +47,7 @@ describe("失敗の理由の記録（Stage 10X）", () => {
     expect(await makeAnthropicResearchAgent(http, { onDiagnostic })(turnInput)).toBeNull();
     expect(await makeAnthropicRegistrationJudge(http, { onDiagnostic })({ caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient", protectedFields: {} })).toBeNull();
     expect(await makeAnthropicResearchAgent(fake({ nope: 1 }).client, { onDiagnostic })(turnInput)).toBeNull();
-    expect(seen.map((d) => d.reason)).toEqual(["api_error:429", "api_error:429", expect.stringMatching(/^bad_output:/)]);
+    expect(seen.map((d) => d.reason)).toEqual(["api_error:429", "api_error:429", expect.stringMatching(/^bad_output:/), "retry_bad_output", expect.stringMatching(/^bad_output:/), "retry_failed"]); // 形の不備は1回だけ再試行する
     expect(JSON.stringify(seen)).not.toContain("secret-ish");
     expect(JUDGE_SYSTEM).toContain("一字一句そのまま");
   });
@@ -95,7 +95,8 @@ describe("判断出力の形式の揺れ（Phase 3 RUNTIME_PARITY。本番で、
     const arr = await makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: [1] }).client, { onDiagnostic })(input);
     const dec = await makeAnthropicRegistrationJudge(fake({ decision: "maybe", fields: {} }).client, { onDiagnostic })(input);
     expect([bad, arr, dec]).toEqual([null, null, null]);
-    expect(seen.map((r) => r.replace(/^bad_output:[^:]*:/, ""))).toEqual(["fields_string", "fields_array", "decision_string"]);
+    expect(seen.filter((r) => r.startsWith("bad_output:")).map((r) => r.replace(/^bad_output:[^:]*:/, ""))).toEqual(["fields_string_text_LS_K2", "fields_string_text_LS_K2", "fields_array", "fields_array", "decision_string", "decision_string"]); // 各1回ずつ再試行（同じ不備）
+    expect(seen.filter((r) => r === "retry_failed")).toHaveLength(3);
   });
 });
 
@@ -120,5 +121,57 @@ describe("応募先の推定・店舗選択式の明記（Phase 3 THREE_CASE。A
     expect(JUDGE_SYSTEM).toContain("応募ボタン");
     expect(JUDGE_SYSTEM).toContain("応募先が推定できることは、応募単位の確定とは別");
     expect(RESEARCH_SYSTEM).toContain("応募先と推定してよい");
+  });
+});
+
+describe("出力の安定化（Phase 3 FOUNDATION_RECOVERY）", () => {
+  const input = { caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient" as const, protectedFields: {} };
+  const ok = { decision: "tentative", rationale: "x", unresolvedImpact: "minor", monitor: { continue: true, why: "w" } };
+  it("fields が {name,...} の配列（現行スキーマ）・配列を文字列にしたもの・従来のオブジェクトのいずれでも同じ結果になる。名前なし・重複は解釈しない", async () => {
+    const f = [{ name: "store", value: "A店", basis: "unknown" }];
+    const a = await makeAnthropicRegistrationJudge(fake({ ...ok, fields: f }).client)(input);
+    const b = await makeAnthropicRegistrationJudge(fake({ ...ok, fields: JSON.stringify(f) }).client)(input);
+    const c = await makeAnthropicRegistrationJudge(fake({ ...ok, fields: { store: { value: "A店", basis: "unknown" } } }).client)(input);
+    expect([a, b, c].map((x) => JSON.stringify(x?.fields))).toEqual([JSON.stringify(a?.fields), JSON.stringify(a?.fields), JSON.stringify(a?.fields)]);
+    expect(Object.keys(a?.fields ?? {})).toEqual(["store"]);
+    expect(normalizeFields({ fields: [{ value: "x" }] }).fields).toEqual([{ value: "x" }]);
+    expect(normalizeFields({ fields: [{ name: "s", value: "1" }, { name: "s", value: "2" }] }).fields).toEqual([{ name: "s", value: "1" }, { name: "s", value: "2" }]);
+  });
+  it("形の不備は同じ入力で1回だけ再試行し、成功すれば採用する（失敗した試行は記録する）。途中切れ（max_tokens）は再試行しない。壊れたJSONは補完しない", async () => {
+    const seen: string[] = [];
+    let n = 0;
+    const client = { messages: { create: vi.fn(async (req: { tool_choice: { name: string } }) => (n++ === 0 ? { stop_reason: "tool_use", content: [{ type: "tool_use", name: req.tool_choice.name, input: { ...ok, fields: "{broken" } }], usage: { input_tokens: 100, output_tokens: 10 } } : { stop_reason: "tool_use", content: [{ type: "tool_use", name: req.tool_choice.name, input: { ...ok, fields: [] } }], usage: { input_tokens: 100, output_tokens: 10 } })) } } as never;
+    const out = await makeAnthropicRegistrationJudge(client, { onDiagnostic: (d) => seen.push(d.reason) })(input);
+    expect(out?.decision).toBe("tentative");
+    expect(n).toBe(2);
+    expect(seen).toEqual(["bad_output:tool_use:fields_string_obj_LS_K5", "retry_bad_output", "retry_recovered"]);
+    let m = 0;
+    const cut = { messages: { create: vi.fn(async () => (m++, { stop_reason: "max_tokens", content: [{ type: "tool_use", name: "submit_registration_judgment", input: { decision: "maybe" } }], usage: { input_tokens: 1, output_tokens: 1 } })) } } as never;
+    expect(await makeAnthropicRegistrationJudge(cut, { strict: false })(input)).toBeNull();
+    expect(m).toBe(1);
+  });
+  it("厳密なツール入力（strict）で呼ぶ。プロバイダが400で拒否したら、通常のツール入力で呼び直し、以降は通常のまま。診断に残す", async () => {
+    const reqs: { tools: { strict?: boolean }[] }[] = [];
+    const seen: string[] = [];
+    const client = { messages: { create: vi.fn(async (req: { tools: { strict?: boolean }[]; tool_choice: { name: string } }) => { reqs.push(req); if (req.tools[0].strict) throw Object.assign(new Error("schema"), { status: 400 }); return { stop_reason: "tool_use", content: [{ type: "tool_use", name: req.tool_choice.name, input: { ...ok, fields: [] } }], usage: { input_tokens: 10, output_tokens: 5 } }; }) } } as never;
+    const judge = makeAnthropicRegistrationJudge(client, { onDiagnostic: (d) => seen.push(d.reason) });
+    expect((await judge(input))?.decision).toBe("tentative");
+    expect((await judge(input))?.decision).toBe("tentative");
+    expect(reqs.map((r) => !!r.tools[0].strict)).toEqual([true, false, false]);
+    expect(seen).toEqual(["strict_rejected"]);
+    const direct = fake({ ...ok, fields: [] });
+    await makeAnthropicRegistrationJudge(direct.client)(input);
+    expect((direct.calls[0] as { tools: { strict?: boolean }[] }).tools[0].strict).toBe(true);
+    expect(withStrictTools).toBeTypeOf("function");
+  });
+  it("strict用のスキーマ: 長さ・件数の制約を除き、全オブジェクトを additionalProperties:false にし、型の配列を anyOf にする。元のスキーマは壊さない", () => {
+    const src = { type: "object", properties: { a: { type: ["string", "null"], maxLength: 5 }, b: { type: "array", maxItems: 2, items: { type: "object", properties: { c: { type: "string" } }, required: ["c"] } } }, required: ["a"] };
+    const out = strictifySchema(src) as { additionalProperties: boolean; properties: { a: { anyOf: unknown[]; maxLength?: number }; b: { maxItems?: number; items: { additionalProperties: boolean } } } };
+    expect(out.additionalProperties).toBe(false);
+    expect(out.properties.a.anyOf).toEqual([{ type: "string" }, { type: "null" }]);
+    expect(out.properties.a.maxLength).toBeUndefined();
+    expect(out.properties.b.maxItems).toBeUndefined();
+    expect(out.properties.b.items.additionalProperties).toBe(false);
+    expect((src.properties.a as { maxLength: number }).maxLength).toBe(5);
   });
 });

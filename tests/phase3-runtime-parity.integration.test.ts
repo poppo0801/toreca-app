@@ -78,8 +78,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const r = await (u1 as unknown as { rpc: (n: string, a: object) => PromiseLike<{ data: unknown }> }).rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h });
     expect(r.data).toBe(true);
   };
-  const runShadow = (client: ReturnType<typeof scriptedAnthropic>["client"], env: Record<string, string>, fetchImpl = mkFetchImpl()) =>
-    runShadowWorker({ db: admin as unknown as Db, model: null, env: SHADOW_ENV, workerId: "w-par", limit: 3, proposalJob: (a) => runShadowProposalJob({ db: admin as unknown as Db, ...a, client: client as never, env, fetchHooks: { fetchImpl, sleep } }) });
+  const runShadow = (client: ReturnType<typeof scriptedAnthropic>["client"], env: Record<string, string>, fetchImpl = mkFetchImpl(), searchProvider?: { search: (q: string) => Promise<{ hits: { title: string; url: string; snippet: string }[]; costJpy: number }> }) =>
+    runShadowWorker({ db: admin as unknown as Db, model: null, env: SHADOW_ENV, workerId: "w-par", limit: 3, proposalJob: (a) => runShadowProposalJob({ db: admin as unknown as Db, ...a, client: client as never, env, ...(searchProvider ? { searchProvider } : {}), fetchHooks: { fetchImpl, sleep } }) });
   const rowsOf = async (id: string) => ((await admin.from("registration_proposals").select("*").eq("candidate_id", id).eq("mode", "real")).data ?? []) as Record<string, unknown>[];
   const clean = async () => {
     await admin.from("shadow_judgments").delete().eq("household_id", hid);
@@ -132,7 +132,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
       expect(rsr[0].url_status).toBe("url_missing"); // 応募先は未確定のまま（URLがあるだけで確定しない）
       // 本番の記録（shadow_judgments）に、道具の提示状況・取得結果・終了理由が残る
       const j = (await admin.from("shadow_judgments").select("record,cost_jpy").eq("candidate_id", cs.id)).data?.[0] as { record: { trace: { tools: Record<string, string>; fetches: { host: string; outcome: string }[]; endReasons: Record<string, number>; pages: number }; liveFetch: boolean; search: boolean }; cost_jpy: number };
-      expect(j.record.trace.tools).toMatchObject({ stored: "offered", liveFetch: "offered", search: "unavailable:budget_per_case", vision: "unavailable:no_images" });
+      expect(j.record.trace.tools).toMatchObject({ stored: "offered", liveFetch: "offered", search: "unavailable:no_provider", vision: "unavailable:no_images" });
       expect(j.record.trace.fetches).toEqual([{ host: FIXTURES[i].host, outcome: "ok" }]);
       expect(j.record.liveFetch).toBe(true);
       expect(j.record.search).toBe(false);
@@ -141,6 +141,26 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     }
   });
 
+  it("⑨検索は本番共通経路へ接続される: 1件上限（¥10）に最悪費用が収まるときだけ渡し、収まらない（¥3）・部品なし・実取得が許可されていないときは理由つきで渡さない（黙って能力を落とさない）", async () => {
+    const provider = { search: async () => ({ hits: [], costJpy: 1.5 }) };
+    const toolsOf = async (id: string) => ((await admin.from("shadow_judgments").select("record").eq("candidate_id", id)).data?.[0] as { record: { trace: { tools: Record<string, string> } } }).record.trace.tools.search;
+    const cases: { name: string; per: number; env: Record<string, string>; provider?: typeof provider; want: string }[] = [
+      { name: "ok", per: 10, env: {}, provider, want: "offered" },
+      { name: "cap3", per: 3, env: {}, provider, want: "unavailable:budget_per_case" },
+      { name: "nopv", per: 10, env: {}, want: "unavailable:no_provider" },
+      { name: "nolf", per: 10, env: { SHADOW_LIVE_FETCH: "" }, provider, want: "unavailable:live_fetch_not_permitted" },
+    ];
+    for (const [i, k] of cases.entries()) {
+      await clean();
+      await setSettings({ per_case_cap_jpy: k.per, daily_budget_jpy: 30, total_budget_jpy: 100, monthly_budget_jpy: 100 });
+      const c = await mkCandidate(i % 3, `srch-${k.name}`);
+      await enqueue(c);
+      const r = await runShadow(recording().client, shadowEnv(k.env), mkFetchImpl(), k.provider);
+      expect(r.done, k.name).toBe(1);
+      expect(await toolsOf(c.id), k.name).toBe(k.want);
+    }
+    await clean();
+  });
   it("②実取得が許可されていない（SHADOW_LIVE_FETCH なし）と、取得せず、理由つきで記録する（黙って能力を落とさない）。保存した取得元の文章は注記つきで読める", async () => {
     await clean();
     await setSettings();
@@ -178,7 +198,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     await setSettings();
     const c = await mkCandidate(2, "failcost");
     await enqueue(c);
-    const r = await runShadowWorker({ db: admin as unknown as Db, model: null, env: SHADOW_ENV, workerId: "w-fail", limit: 3, proposalJob: async () => ({ ok: false, reason: "generate:run_failed", costJpy: 0.42, trace: { tools: { stored: "offered", liveFetch: "offered", search: "unavailable:budget_per_case", vision: "unavailable:no_images" }, fetches: [], endReasons: {}, urlStatuses: {}, pages: 0, turns: 0 } }) });
+    const r = await runShadowWorker({ db: admin as unknown as Db, model: null, env: SHADOW_ENV, workerId: "w-fail", limit: 3, proposalJob: async () => ({ ok: false, reason: "generate:run_failed", costJpy: 0.42, trace: { tools: { stored: "offered", liveFetch: "offered", search: "unavailable:no_provider", vision: "unavailable:no_images" }, fetches: [], endReasons: {}, urlStatuses: {}, pages: 0, turns: 0 } }) });
     expect(r.spentJpy).toBeCloseTo(0.42, 4);
     const spent = (await (u1 as unknown as { rpc: (n: string, a: object) => PromiseLike<{ data: unknown }> }).rpc("shadow_spent", { p_household: hid, p_since: new Date(Date.now() - 3600_000).toISOString() })).data;
     expect(Number(spent)).toBeCloseTo(0.42, 4);

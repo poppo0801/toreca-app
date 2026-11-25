@@ -178,8 +178,8 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   const env = a.env ?? process.env;
   const shadowTicket = isRealRunTicket(a.deps?.ticket) && a.deps?.ticket.origin === "prod_shadow"; // 本番シャドーの許可証は、多重の本番ゲートを通した呼び出し側だけが持つ
   if (!proposalPreviewEnabled(env) && !shadowTicket) return { ok: false, reason: "disabled" };
-  // 本番シャドーの道具: 実取得・画像解析は、本番の許可（承認済みの入口）を通して作った印つきのものだけ。検索は予算の都合で本番シャドーには渡さない（1件¥3の枠に検索の予約が収まらない。Phase 3 RUNTIME_PARITY の差の表を参照）
-  if (shadowTicket && (a.deps?.search || (a.deps?.liveFetch && !isShadowTool(a.deps.liveFetch)) || (a.deps?.vision && !isShadowTool(a.deps.vision)))) return { ok: false, reason: "real_not_permitted" };
+  // 本番シャドーの道具: 実取得・画像解析は、本番の許可（承認済みの入口）を通して作った印つきのものだけ。検索も同じく、本番の入口が印をつけたもの（makeSearchTool を通した部品）だけ
+  if (shadowTicket && ((a.deps?.search && !isShadowTool(a.deps.search)) || (a.deps?.liveFetch && !isShadowTool(a.deps.liveFetch)) || (a.deps?.vision && !isShadowTool(a.deps.vision)))) return { ok: false, reason: "real_not_permitted" };
   const post0 = postFromCandidate(a.candidate);
   if (!post0) return { ok: false, reason: "no_evidence" };
   const deps = a.deps ?? mockDeps();
