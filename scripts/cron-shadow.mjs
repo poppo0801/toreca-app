@@ -1,12 +1,12 @@
 // 本番シャドーの定期実行（Supabase Cron）のセットアップ補助（Phase 3）。トレカ専用プロジェクト(リンク済み)にのみ作用する。
 //
-//   npm run cron:shadow -- --url https://<デプロイURL>/api/cron/shadow   URLを Vault に保存し、認証用の秘密(CRON_SECRET)が無ければ保存（スケジュールは登録しない）
+//   npm run cron:shadow -- --url https://<デプロイURL>/api/cron/shadow   URLを Vault に保存する（認証用の秘密 notify_job_secret は既存の自動収集のものを共用し、**このスクリプトは上書きしない**）（スケジュールは登録しない）
 //   npm run cron:shadow -- --enable [--schedule "*/5 * * * *"]            定期実行を有効化（既定: 30分おき。キューが空・停止中のときは何もせず終了する）
 //   npm run cron:shadow -- --test                                         今すぐ1回呼び出して応答を確認
 //   npm run cron:shadow -- --status                                       状態・直近の呼び出しを表示
 //   npm run cron:shadow -- --disable                                      定期実行を停止
 //
-// 秘密(CRON_SECRET)は .env.local から読み、画面・ログへは出さない。SQLは一時ファイル経由で渡し、実行後に削除する。
+// 秘密は扱わない（本番の notify_job_secret ＝ 本番の CRON_SECRET は既存。ローカルの .env.local の値で上書きしない）。SQLは一時ファイル経由で渡し、実行後に削除する。
 // 毎朝6:00（日本時間）の定期「収集」は、このジョブが5分おきに呼ばれ、収集条件で指定した時刻を過ぎていて今日まだ収集していなければ実行される
 // （Supabase Cron は UTC 基準で、実行時刻の保証は数分の揺れがある。時刻のずれはアプリ側が日本時間で吸収する）。
 import { spawnSync } from "node:child_process";
@@ -55,11 +55,6 @@ if (opt("url")) {
     console.error("URLは https://<ホスト>/api/cron/shadow の形式で指定してください。");
     process.exit(1);
   }
-  const secret = process.env.CRON_SECRET ?? "";
-  if (!/^[A-Za-z0-9_-]{32,}$/.test(secret)) {
-    console.error(".env.local の CRON_SECRET（32文字以上の英数字）が必要です。");
-    process.exit(1);
-  }
   sql(`
 do $$
 declare sid uuid;
@@ -67,12 +62,9 @@ begin
   select id into sid from vault.secrets where name = 'shadow_job_url';
   if sid is null then perform vault.create_secret('${url}', 'shadow_job_url', 'Vercel のシャドーワーカーURL');
   else perform vault.update_secret(sid, '${url}', 'shadow_job_url', 'Vercel のシャドーワーカーURL'); end if;
-  select id into sid from vault.secrets where name = 'notify_job_secret';
-  if sid is null then perform vault.create_secret('${secret}', 'notify_job_secret', '定期ジョブの認証用(CRON_SECRET)');
-  else perform vault.update_secret(sid, '${secret}', 'notify_job_secret', '定期ジョブの認証用(CRON_SECRET)'); end if;
 end $$;
 select 1 as ok;`);
-  console.log(`Vault に保存しました（URL: ${url} / 秘密: ****）。スケジュールはまだ登録していません。`);
+  console.log(`Vault に保存しました（URL: ${url}）。スケジュールはまだ登録していません。`);
 }
 
 if (flag("test")) {
