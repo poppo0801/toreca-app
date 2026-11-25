@@ -64,6 +64,19 @@ describe("UI-1: メニューボタン（通常タップと長押しの区別）"
     expect(q("quick-menu")).toBeNull();
     expect(push).not.toHaveBeenCalled();
   });
+  it("長押しの判定時間は従来（420ms）の半分（210ms）。150ms前後の通常のタップでは開かず、移動したときは長押しにならない", async () => {
+    const { LONG_PRESS_MS } = await import("@/lib/quick-menu");
+    expect(LONG_PRESS_MS).toBe(210);
+    await fire(btn(), "pointerdown");
+    await act(async () => void vi.advanceTimersByTime(LONG_PRESS_MS - 20)); // 190ms: まだ長押しではない
+    expect(q("quick-menu")).toBeNull();
+    await fire(btn(), "pointerup");
+    await act(async () => void vi.advanceTimersByTime(300)); // 離した後に時間が経っても開かない
+    expect(q("quick-menu")).toBeNull();
+    await fire(btn(), "pointerdown");
+    await act(async () => void vi.advanceTimersByTime(LONG_PRESS_MS + 10)); // 220ms: 長押し成立
+    expect(q("quick-menu")).not.toBeNull();
+  });
   it("長押し: ショートカットが上方向に展開される（項目はアイコン＋名称）。タッチ操作でスクロール・テキスト選択・コンテキストメニューを出さない設定", async () => {
     await longPress();
     const menu = q("quick-menu")!;

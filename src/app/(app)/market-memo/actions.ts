@@ -1,12 +1,13 @@
 "use server";
 
 import { z } from "zod";
-import { parsePriceInput, priceRow, toMarketCard, toMarketPrice, toMarketPurchase, type MarketCard, type MarketPrice, type MarketPurchase } from "@/lib/zukan/rows";
+import type { PriceEvent } from "@/lib/zukan/freshness";
+import { parsePriceInput, priceRow, toMarketCard, toPriceEvents, toMarketPrice, toMarketPurchase, type MarketCard, type MarketPrice, type MarketPurchase } from "@/lib/zukan/rows";
 import { matchCard, type PriceInput } from "@/lib/zukan/zukan";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * 相場調査メモの読み書き（Stage Collection-1）。ログイン必須・自世帯のみ（RLS）。**プロフィール単位**（profile_id で絞る）。
+ * 相場調査メモの読み書き（Stage Collection-1）。ログイン必須・自世帯のみ（RLS）。**世帯の全員で共通**（プロフィールでは絞らない。profile_id は作成者、updated_by_profile_id は更新者の内部履歴）。
  * 151図鑑の価格調査とは別の表。既存の購入記録・コレクション・支出には書き込まない（二重計上の防止）。
  * カードは、収録セット・カード番号・レアリティで同一性を判定し（カード名だけでは同一としない）、曖昧なときは利用者に確認する。
  */
@@ -36,19 +37,22 @@ export interface MarketData {
   cards: MarketCard[];
   prices: MarketPrice[];
   purchases: MarketPurchase[];
+  /** 販売情報の更新（確認）・完売の履歴（追記専用）。現在の状態の計算に使う */
+  events?: PriceEvent[];
 }
 
 export async function loadMarketAction(profileId: string): Promise<R<{ data: MarketData }>> {
   if (!uuid.safeParse(profileId).success) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const [c, p, b] = await Promise.all([
-    any(db).from("market_cards").select("*").eq("profile_id", profileId).order("created_at", { ascending: false }).limit(5000),
-    any(db).from("market_prices").select("*").eq("profile_id", profileId).order("surveyed_on", { ascending: false }).limit(20000),
-    any(db).from("market_purchases").select("*").eq("profile_id", profileId).limit(20000),
+  const [c, p, b, ev] = await Promise.all([
+    any(db).from("market_cards").select("*").order("created_at", { ascending: false }).limit(5000),
+    any(db).from("market_prices").select("*").order("surveyed_on", { ascending: false }).limit(20000),
+    any(db).from("market_purchases").select("*").limit(20000),
+    any(db).from("market_price_events").select("*").not("market_price_id", "is", null).order("created_at").limit(50000),
   ]);
-  if (c.error || p.error || b.error) return fail("読み込めませんでした");
-  return { ok: true, data: { cards: (c.data ?? []).map(toMarketCard), prices: (p.data ?? []).map(toMarketPrice), purchases: (b.data ?? []).map(toMarketPurchase) } };
+  if (c.error || p.error || b.error || ev.error) return fail("読み込めませんでした");
+  return { ok: true, data: { cards: (c.data ?? []).map(toMarketCard), prices: (p.data ?? []).map(toMarketPrice), purchases: (b.data ?? []).map(toMarketPurchase), events: toPriceEvents(ev.data ?? []) } };
 }
 
 const cardInput = z.object({
@@ -72,14 +76,22 @@ export async function createMarketCardAction(profileId: string, input: MarketCar
   if (!db) return fail("ログインが必要です");
   const hid = await householdOf(db);
   if (!hid) return fail("世帯が見つかりません");
-  const { data: rows, error: le } = await any(db).from("market_cards").select("*").eq("profile_id", profileId).limit(5000);
+  const { data: rows, error: le } = await any(db).from("market_cards").select("*").limit(5000);
   if (le) return fail("読み込めませんでした");
   const existing = (rows ?? []).map(toMarketCard);
   const m = matchCard<MarketCard>(existing, { name: p.data.name, setName: p.data.setName, cardNumber: p.data.cardNumber, rarity: p.data.rarity });
   if (m.kind === "same") return { ok: true, id: m.card.id, reused: true };
   if (m.kind === "ambiguous" && !allowAmbiguous) return { ok: false, error: "同じカードか判断できません。既存のカードを選ぶか、別のカードとして登録してください", ambiguous: m.candidates };
   const { data, error } = await any(db).from("market_cards").insert({ household_id: hid, profile_id: profileId, name: p.data.name, set_name: p.data.setName, card_number: p.data.cardNumber, rarity: p.data.rarity, note: p.data.note }).select("id").single();
-  if (error) return fail(mapError(error));
+  if (error) {
+    // 同時に別の利用者が同じカード（セット・番号・レアリティ）を登録した: 世帯で一意（DBの制約）なので、そのカードを使う
+    if (error.code === "23505") {
+      const { data: again } = await any(db).from("market_cards").select("*").limit(5000);
+      const m2 = matchCard<MarketCard>((again ?? []).map(toMarketCard), { name: p.data.name, setName: p.data.setName, cardNumber: p.data.cardNumber, rarity: p.data.rarity });
+      if (m2.kind === "same") return { ok: true, id: m2.card.id, reused: true };
+    }
+    return fail(mapError(error));
+  }
   return { ok: true, id: data.id as string, reused: false };
 }
 
@@ -89,7 +101,7 @@ export async function updateMarketCardAction(profileId: string, id: string, inpu
   if (!p.success) return fail(p.error.issues[0]?.message ?? "入力内容を確認してください");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("market_cards").update({ name: p.data.name, set_name: p.data.setName, card_number: p.data.cardNumber, rarity: p.data.rarity, note: p.data.note, updated_at: new Date().toISOString() }).eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("market_cards").update({ name: p.data.name, set_name: p.data.setName, card_number: p.data.cardNumber, rarity: p.data.rarity, note: p.data.note, updated_at: new Date().toISOString(), updated_by_profile_id: profileId }).eq("id", id).select("id");
   if (error) return fail(error.code === "23505" ? "同じセット・番号・レアリティのカードがすでにあります" : mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -99,7 +111,7 @@ export async function deleteMarketCardAction(profileId: string, id: string): Pro
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(id).success) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("market_cards").delete().eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("market_cards").delete().eq("id", id).select("id");
   if (error) return fail(error.code === "23503" ? "価格の履歴があるカードは削除できません" : mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -112,8 +124,8 @@ export async function addMarketPriceAction(profileId: string, cardId: string, in
   if (!db) return fail("ログインが必要です");
   const hid = await householdOf(db);
   if (!hid) return fail("世帯が見つかりません");
-  // 操作しているプロフィールのカードにだけ追加できる
-  const { data: card } = await any(db).from("market_cards").select("id").eq("id", cardId).eq("profile_id", profileId).maybeSingle();
+  // 世帯のカードにだけ追加できる（RLS）
+  const { data: card } = await any(db).from("market_cards").select("id").eq("id", cardId).maybeSingle();
   if (!card) return fail("対象のカードが見つかりません");
   const { data, error } = await any(db).from("market_prices").insert({ household_id: hid, profile_id: profileId, card_id: cardId, ...priceRow(price.data, "memo") }).select("id").single();
   if (error) return fail(mapError(error));
@@ -126,7 +138,7 @@ export async function updateMarketPriceAction(profileId: string, id: string, inp
   if (!price.success) return fail(price.error.issues[0]?.message ?? "入力内容を確認してください");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("market_prices").update({ ...priceRow(price.data, "memo"), updated_at: new Date().toISOString() }).eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("market_prices").update({ ...priceRow(price.data, "memo"), updated_at: new Date().toISOString(), updated_by_profile_id: profileId }).eq("id", id).select("id");
   if (error) return fail(mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -136,7 +148,7 @@ export async function deleteMarketPriceAction(profileId: string, id: string): Pr
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(id).success) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data, error } = await any(db).from("market_prices").delete().eq("id", id).eq("profile_id", profileId).select("id");
+  const { data, error } = await any(db).from("market_prices").delete().eq("id", id).select("id");
   if (error) return fail(error.code === "23503" ? "購入済みの価格記録は削除できません" : mapError(error));
   return data?.length === 1 ? { ok: true } : fail("対象が見つかりません");
 }
@@ -146,14 +158,14 @@ export async function buyMarketFromPriceAction(profileId: string, priceId: strin
   if (!uuid.safeParse(profileId).success || !uuid.safeParse(priceId).success || !/^\d{4}-\d{2}-\d{2}$/.test(purchasedOn)) return fail("リクエストが不正です");
   const db = await ctx();
   if (!db) return fail("ログインが必要です");
-  const { data: rec } = await any(db).from("market_prices").select("id").eq("id", priceId).eq("profile_id", profileId).maybeSingle();
+  const { data: rec } = await any(db).from("market_prices").select("id").eq("id", priceId).maybeSingle();
   if (!rec) return fail("対象が見つかりません");
-  const { data, error } = await any(db).rpc("market_buy_from_price_tx", { p_price: priceId, p_purchased_on: purchasedOn });
+  const { data, error } = await any(db).rpc("market_buy_from_price_tx", { p_price: priceId, p_purchased_on: purchasedOn, p_profile: profileId });
   if (error) return fail(error.code === "23505" ? "この価格の記録からは、すでに購入済みです" : mapError(error));
   return { ok: true, purchaseId: data as string };
 }
 
-/** バックアップ用: このプロフィールの相場調査メモ（カード・価格・購入）をJSONで返す */
+/** バックアップ用: 世帯共通の相場調査メモ（カード・価格・購入）をJSONで返す */
 export async function exportMarketAction(profileId: string): Promise<R<{ json: string }>> {
   const r = await loadMarketAction(profileId);
   if (!r.ok) return r;

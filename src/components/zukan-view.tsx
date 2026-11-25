@@ -1,18 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowDownAZ, ArrowDown01, Check, ChevronDown, Loader2, Plus } from "lucide-react";
-import { buyZukanFromPriceAction, addZukanPriceAction, deleteZukanCardAction, deleteZukanPriceAction, loadZukanAction, saveZukanCardAction, updateZukanPriceAction, type ZukanData } from "@/app/(app)/zukan/actions";
+import { buyZukanFromPriceAction, addZukanPriceAction, deleteZukanCardAction, deleteZukanPriceAction, loadZukanAction, saveZukanCardAction, updateZukanCardInfoAction, updateZukanPriceAction, type ZukanData } from "@/app/(app)/zukan/actions";
+import { recordEventAction } from "@/app/(app)/market-memo/daily-actions";
 import { useApp } from "@/components/app-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DexImage } from "@/components/dex-image";
-import { addPricesSequentially, jstToday, PriceForm, usePriceCandidates } from "@/components/price-form";
+import { useExpansionMasters } from "@/components/use-expansion-masters";
+import { CardIdentityFields } from "@/components/card-identity-fields";
+import { addPricesSequentially, jstToday, PriceForm, useStoreCandidates } from "@/components/price-form";
 import { PriceList, type PriceRow } from "@/components/price-list";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { cardKeyOf } from "@/lib/zukan/daily";
 import { dexLabel, pokemonOf } from "@/lib/zukan/pokemon151";
 import type { ZukanPriceRecord } from "@/lib/zukan/rows";
-import { ACQUIRE_LABEL, completeSetFromNumber, DEFAULT_RARITY, DEX_STATUS_LABEL, dexStatus, numberOptions, parseAmount, RANKS, resolveAcquire, setOptions, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type KnownCard, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
+import { ACQUIRE_LABEL, completeSetFromNumber, type PriceInput, DEFAULT_RARITY, DEX_STATUS_LABEL, dexStatus, numberOptions, parseAmount, RANKS, resolveAcquire, setOptions, zukanRows, zukanStats, type AcquireMethod, type DexStatus, type KnownCard, type ZukanCard, type ZukanFilter, type ZukanSort } from "@/lib/zukan/zukan";
 import { cn } from "@/lib/utils";
 
 /**
@@ -177,58 +182,45 @@ function CardNameField({ v, onChange }: { v: CardInfo; onChange: (v: CardInfo) =
   );
 }
 
-/** 収録セット・番号・レア（任意。必須項目の下）。セットと番号は相互補完（番号→セットは、その番号のセットが1種類だけのとき）。レアの初期値は AR */
+/** 収録セット・番号・レア（任意。必須項目の下）。番号・レアは候補から選べる（先頭1文字から絞り込み・選ぶとセットとレアを補完・自由入力も可）。レアの初期値は AR */
 function CardDetailFields({ v, onChange, known }: { v: CardInfo; onChange: (v: CardInfo) => void; known: KnownCard[] }) {
-  const onNumber = (val: string) => {
-    const guess = !v.setName.trim() ? completeSetFromNumber(known, val) : null;
-    onChange({ ...v, cardNumber: val, ...(guess ? { setName: guess } : {}) });
-  };
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      <label className="block text-sm">
-        <span className="text-[13px] font-medium">収録セット（任意）</span>
-        <input value={v.setName} onChange={(e) => onChange({ ...v, setName: e.target.value })} list="zukan-set-options" className={FIELD} maxLength={120} autoComplete="off" data-testid="price-card-set" />
-        <datalist id="zukan-set-options">
-          {setOptions(known).map((x) => (
-            <option key={x} value={x} />
-          ))}
-        </datalist>
-      </label>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block text-sm">
-          <span className="text-[13px] font-medium">番号</span>
-          <input value={v.cardNumber} onChange={(e) => onNumber(e.target.value)} list="zukan-number-options" className={FIELD} maxLength={20} autoComplete="off" data-testid="price-card-number" />
-          <datalist id="zukan-number-options">
-            {numberOptions(known, v.setName).map((x) => (
-              <option key={x} value={x} />
-            ))}
-          </datalist>
-        </label>
-        <label className="block text-sm">
-          <span className="text-[13px] font-medium">レア</span>
-          <input value={v.rarity} onChange={(e) => onChange({ ...v, rarity: e.target.value })} className={FIELD} maxLength={10} autoComplete="off" data-testid="price-card-rarity" />
-        </label>
-      </div>
-    </div>
-  );
+  const masters = useExpansionMasters();
+  return <CardIdentityFields v={v} onChange={(x) => onChange({ ...v, ...x })} known={known} masters={masters} ids={{ set: "price-card-set", number: "price-card-number", rarity: "price-card-rarity", setList: "zukan-set-options" }} />;
 }
 
 /** ポケモン1匹の詳細（収集カード・価格調査） */
-function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rareMissing, onToggleRare }: { no: number; data: ZukanData; profileId: string; today: string; reload: () => Promise<void>; onClose: () => void; status: DexStatus; rareMissing: boolean; onToggleRare: () => Promise<string | null> }) {
+function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rareMissing, onToggleRare, initialEditId }: { initialEditId?: string; no: number; data: ZukanData; profileId: string; today: string; reload: () => Promise<void>; onClose: () => void; status: DexStatus; rareMissing: boolean; onToggleRare: () => Promise<string | null> }) {
   const [flagError, setFlagError] = useState<string | null>(null);
   const p = pokemonOf(no)!;
   const cards = data.cards.filter((c) => c.dexNo === no);
   const prices = data.prices.filter((r) => r.dexNo === no);
+  const priceRows = prices.map((r) => ({ ...r, cardKey: cardKeyOf(r), cardLabel: [r.cardNumber, r.rarity].filter(Boolean).join(" ・ ") || r.setName }));
   const [editing, setEditing] = useState<{ id: string | null; form: CardForm } | null>(null);
-  const [pricing, setPricing] = useState<{ rec: ZukanPriceRecord | null } | null>(null);
+  const [pricing, setPricing] = useState<{ rec: ZukanPriceRecord | null } | null>(() => {
+    // 日別の調査結果の「編集」から開いたとき: その価格記録の編集フォームを直接開く
+    const rec = initialEditId ? data.prices.find((x) => x.id === initialEditId && x.dexNo === no) : undefined;
+    return rec ? { rec } : null;
+  });
   const [delCard, setDelCard] = useState<ZukanCard | null>(null);
   const [delPrice, setDelPrice] = useState<PriceRow | null>(null);
   const [buy, setBuy] = useState<PriceRow | null>(null);
   const bought = new Set(cards.map((c) => c.priceRecordId).filter((x): x is string => !!x));
-  const cand = usePriceCandidates(data.prices);
-  const known = useMemo<KnownCard[]>(() => [...data.prices, ...data.cards].map((x) => ({ setName: x.setName, cardNumber: x.cardNumber, rarity: x.rarity })), [data.prices, data.cards]);
-  const [info, setInfo] = useState<CardInfo>({ cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY });
+  const cand = useStoreCandidates();
+  const known = useMemo<KnownCard[]>(() => [...data.prices, ...data.cards].map((x) => ({ setName: x.setName, cardNumber: x.cardNumber, rarity: x.rarity, name: "cardName" in x ? x.cardName : "", usedAt: "createdAt" in x ? x.createdAt : "" })), [data.prices, data.cards]);
+  const [info, setInfo] = useState<CardInfo>(() => {
+    const rec = initialEditId ? data.prices.find((x) => x.id === initialEditId && x.dexNo === no) : undefined;
+    return rec ? { cardName: rec.cardName, setName: rec.setName, cardNumber: rec.cardNumber, rarity: rec.rarity } : { cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY };
+  });
 
+  /** 編集: 価格を更新し、カード情報（カード名・収録セット・番号・レア）が変わっていれば同じカードの価格記録すべてに反映する（履歴・購入との関連は変えない） */
+  const saveEdited = async (rec: ZukanPriceRecord, v: PriceInput) => {
+    const r = await updateZukanPriceAction(profileId, rec.id, v);
+    if (!r.ok) return r;
+    const same = info.cardName.trim() === rec.cardName && info.setName.trim() === rec.setName && info.cardNumber.trim() === rec.cardNumber && info.rarity.trim() === rec.rarity;
+    if (same) return r;
+    const c = await updateZukanCardInfoAction(profileId, rec.id, info);
+    return c.ok ? r : ({ ok: false, error: `価格は更新しました。カード情報は更新できませんでした: ${c.error}` } as const);
+  };
   const saveCard = async (f: CardForm): Promise<string | null> => {
     const amount = parseAmount(f.amount);
     const r = await saveZukanCardAction(profileId, editing?.id ?? null, {
@@ -322,7 +314,10 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
           <section aria-label="価格調査" className="space-y-1.5">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold">価格調査</h3>
-              <Button size="sm" variant="outline" className="min-h-9" onClick={() => setPricing({ rec: null })} data-testid="price-add">
+              <Button size="sm" variant="outline" className="min-h-9" onClick={() => {
+                  setInfo({ cardName: p.name, setName: "", cardNumber: "", rarity: DEFAULT_RARITY });
+                  setPricing({ rec: null });
+                }} data-testid="price-add">
                 <Plus className="size-4" aria-hidden="true" /> 価格を記録
               </Button>
             </div>
@@ -332,8 +327,8 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
                   initial={pricing.rec ? { storeName: pricing.rec.storeName, chainName: pricing.rec.chainName, surveyedOn: pricing.rec.surveyedOn, condition: pricing.rec.condition as never, price: String(pricing.rec.priceYen), note: pricing.rec.note } : undefined}
                   {...cand}
                   today={today}
-                  top={pricing.rec ? undefined : <CardNameField v={info} onChange={setInfo} />}
-                  optional={pricing.rec ? undefined : <CardDetailFields v={info} onChange={setInfo} known={known} />}
+                  top={<CardNameField v={info} onChange={setInfo} />}
+                  optional={<CardDetailFields v={info} onChange={setInfo} known={known} />}
                   submitLabel={pricing.rec ? "更新する" : "記録する"}
                   onCancel={() => setPricing(null)}
                   onSubmitBatch={async (items) => {
@@ -344,7 +339,7 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
                     return null;
                   }}
                   onSubmit={async (v) => {
-                    const r = pricing.rec ? await updateZukanPriceAction(profileId, pricing.rec.id, v) : await addZukanPriceAction(profileId, no, { cardName: info.cardName || p.name, setName: info.setName, cardNumber: info.cardNumber, rarity: info.rarity }, v);
+                    const r = pricing.rec ? await saveEdited(pricing.rec, v) : await addZukanPriceAction(profileId, no, { cardName: info.cardName || p.name, setName: info.setName, cardNumber: info.cardNumber, rarity: info.rarity }, v);
                     if (!r.ok) return r.error;
                     setPricing(null);
                     await reload();
@@ -353,7 +348,32 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
                 />
               </div>
             )}
-            <PriceList rows={prices} today={today} boughtIds={bought} onBuy={setBuy} onEdit={(r) => setPricing({ rec: prices.find((x) => x.id === r.id) ?? null })} onDelete={setDelPrice} />
+            <PriceList
+              rows={priceRows}
+              today={today}
+              boughtIds={bought}
+              events={data.events}
+              keyOf={(r) => `zukan:${r.id}`}
+              onBuy={setBuy}
+              onEdit={(r) => {
+                const rec = prices.find((x) => x.id === r.id) ?? null;
+                if (rec) setInfo({ cardName: rec.cardName, setName: rec.setName, cardNumber: rec.cardNumber, rarity: rec.rarity });
+                setPricing({ rec });
+              }}
+              onDelete={setDelPrice}
+              onConfirm={async (r) => {
+                const res = await recordEventAction(profileId, [{ source: "zukan", id: r.id }], "confirmed");
+                if (!res.ok) return res.error;
+                await reload();
+                return null;
+              }}
+              onSoldOut={async (r) => {
+                const res = await recordEventAction(profileId, [{ source: "zukan", id: r.id }], "sold_out");
+                if (!res.ok) return res.error;
+                await reload();
+                return null;
+              }}
+            />
           </section>
         </SheetBody>
       </SheetContent>
@@ -393,7 +413,7 @@ function PokemonSheet({ no, data, profileId, today, reload, onClose, status, rar
         <ConfirmDialog
           testId="buy"
           title="この価格で購入しますか？"
-          description={`${buy.storeName}で${yen(buy.priceYen)}（状態${buy.condition}）。図鑑の収集カードとして登録し、単品購入金額に加わります。価格調査の記録は残ります。`}
+          description={`${buy.storeName}で${yen(buy.priceYen)}（状態${buy.condition}）。図鑑の収集カードとして登録し、購入記録（シングルカード）・収支にも反映します（同じ日の購入は合算）。価格調査の記録は残ります。`}
           confirmLabel="購入して登録"
           onClose={() => setBuy(null)}
           onConfirm={async () => {
@@ -420,6 +440,10 @@ export function ZukanView() {
   const rareMissing = useMemo(() => new Set(settings.zukanRareMissing ?? []), [settings.zukanRareMissing]);
   const [open, setOpen] = useState<number | null>(null);
   const [detail, setDetail] = useState(false);
+  // 日別の調査結果の「編集」から来たとき（?edit=<価格記録のID>）: 該当のポケモンの詳細を開き、その価格の編集フォームを直接開く
+  const editParam = useSearchParams()?.get("edit") ?? null;
+  const [editId, setEditId] = useState<string | null>(null);
+  const editDone = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
     const r = await loadZukanAction(profileId);
@@ -433,6 +457,17 @@ export function ZukanView() {
     setData(null);
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!editParam || !data || editDone.current === editParam) return;
+    const rec = data.prices.find((x) => x.id === editParam);
+    editDone.current = editParam;
+    if (rec) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 読み込み完了後に1回だけ、対象のポケモンを開く
+      setEditId(rec.id);
+      setOpen(rec.dexNo);
+    }
+  }, [editParam, data]);
 
   const stats = useMemo(() => (data ? zukanStats(data.cards) : null), [data]);
   const rows = useMemo(() => (data ? zukanRows(data.cards, filter, { prices: data.prices, rareMissing, sort }) : []), [data, filter, rareMissing, sort]);
@@ -485,7 +520,8 @@ export function ZukanView() {
           </dl>
         )}
       </section>
-      <div className="flex items-center gap-1.5">
+      {/* 操作ヘッダー（絞り込み・並び替え）: スクロールしても画面上部に固定 */}
+      <div className="sticky top-[var(--header-h)] z-20 -mx-3 -mt-1 flex items-center gap-1.5 border-b bg-background px-3 pb-1.5 pt-1 md:-mx-6 md:px-6" data-testid="zukan-toolbar">
         <div role="radiogroup" aria-label="絞り込み" className="inline-flex flex-1 rounded-md border p-0.5 text-xs" data-testid="zukan-filter">
           {(
             [
@@ -546,7 +582,11 @@ export function ZukanView() {
           profileId={profileId}
           today={today}
           reload={reload}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null);
+            setEditId(null);
+          }}
+          initialEditId={editId ?? undefined}
           status={dexStatus({ owned: data.cards.some((c) => c.dexNo === open && c.quantity >= 1), hasPrice: data.prices.some((p) => p.dexNo === open), rareMissing: rareMissing.has(open) })}
           rareMissing={rareMissing.has(open)}
           onToggleRare={() => toggleRare(open)}

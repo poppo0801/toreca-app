@@ -1,6 +1,7 @@
 /**
  * DBの行 ⇄ アプリの型（Stage Collection-1・純関数）。151図鑑と相場調査メモの共通の変換。
  */
+import type { PriceEvent } from "@/lib/zukan/freshness";
 import type { AcquireMethod, ZukanCard, ZukanCardInput } from "@/lib/zukan/zukan";
 import { zukanCardInputSchema, type PriceInput } from "@/lib/zukan/zukan";
 import { priceInputSchema } from "@/lib/zukan/zukan";
@@ -24,6 +25,7 @@ export interface ZukanPriceRecord {
   priceYen: number;
   note: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export const toZukanCard = (r: Row): ZukanCard => ({
@@ -60,6 +62,7 @@ export const toZukanPrice = (r: Row): ZukanPriceRecord => ({
   priceYen: Number(r.price_yen),
   note: s(r.note),
   createdAt: s(r.created_at),
+  updatedAt: s(r.updated_at || r.created_at),
 });
 
 /** 検証済みの収集カード入力 → DBの列 */
@@ -88,6 +91,11 @@ export function priceRow(v: ReturnType<typeof priceInputSchema.parse>, memoKey: 
 }
 export const parsePriceInput = (input: PriceInput) => priceInputSchema.safeParse(input);
 
+/** 販売情報の事象（更新・完売）の行 → アプリの型 */
+export function toPriceEvents(rows: readonly Row[]): PriceEvent[] {
+  return rows.map((r) => ({ recordKey: r.zukan_price_id ? `zukan:${s(r.zukan_price_id)}` : `market:${s(r.market_price_id)}`, event: (r.event === "sold_out" ? "sold_out" : "confirmed") as PriceEvent["event"], happenedOn: s(r.happened_on), createdAt: s(r.created_at) }));
+}
+
 export interface MarketCard {
   id: string;
   profileId: string;
@@ -109,6 +117,7 @@ export interface MarketPrice {
   priceYen: number;
   note: string;
   createdAt: string;
+  updatedAt?: string;
 }
 export interface MarketPurchase {
   id: string;
@@ -120,5 +129,5 @@ export interface MarketPurchase {
   condition: string;
 }
 export const toMarketCard = (r: Row): MarketCard => ({ id: s(r.id), profileId: s(r.profile_id), name: s(r.name), setName: s(r.set_name), cardNumber: s(r.card_number), rarity: s(r.rarity), note: s(r.note), createdAt: s(r.created_at) });
-export const toMarketPrice = (r: Row): MarketPrice => ({ id: s(r.id), profileId: s(r.profile_id), cardId: s(r.card_id), storeName: s(r.store_name), chainName: s(r.chain_name), surveyedOn: s(r.surveyed_on), condition: s(r.condition), priceYen: Number(n(r.price_yen)), note: s(r.memo), createdAt: s(r.created_at) });
+export const toMarketPrice = (r: Row): MarketPrice => ({ id: s(r.id), profileId: s(r.profile_id), cardId: s(r.card_id), storeName: s(r.store_name), chainName: s(r.chain_name), surveyedOn: s(r.surveyed_on), condition: s(r.condition), priceYen: Number(n(r.price_yen)), note: s(r.memo), createdAt: s(r.created_at), updatedAt: s(r.updated_at || r.created_at) });
 export const toMarketPurchase = (r: Row): MarketPurchase => ({ id: s(r.id), cardId: s(r.card_id), priceId: s(r.price_id), purchasedOn: s(r.purchased_on), storeName: s(r.store_name), priceYen: Number(n(r.price_yen)), condition: s(r.condition) });

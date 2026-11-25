@@ -59,7 +59,7 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     // 範囲外・不正
     expect((await ins(u1, "zukan_cards", zc({ dex_no: 152 }))).error).not.toBeNull();
     expect((await ins(u1, "zukan_cards", zc({ dex_no: 0 }))).error).not.toBeNull();
-    expect((await ins(u1, "zukan_cards", zc({ condition: "S" }))).error).not.toBeNull();
+    expect((await ins(u1, "zukan_cards", zc({ condition: "A+" }))).error).not.toBeNull();
     expect((await ins(u1, "zukan_cards", zc({ quantity: 0 }))).error).not.toBeNull();
   });
 
@@ -112,10 +112,10 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     expect(kept.price_record_id).toBeNull();
     expect(kept.purchase_amount_yen).toBe(1500);
     // 他の世帯の価格記録は購入できない
-    const foreign = await ins(u2, "zukan_price_records", { household_id: hid2, profile_id: pOther, dex_no: 1, card_name: "フシギダネ", store_name: "他店", condition: "B", price_yen: 100 });
+    const foreign = await ins(u2, "zukan_price_records", { household_id: hid2, profile_id: pOther, dex_no: 1, card_name: "フシギダネ", store_name: "他店", condition: "C", price_yen: 100 });
     expect((await u1.rpc("zukan_buy_from_price_tx", { p_price: foreign.data!.id as string, p_acquired_on: "2026-11-11" })).error).not.toBeNull();
     // 状態ランク・価格の制約
-    expect((await ins(u1, "zukan_price_records", { household_id: hid, profile_id: pA, dex_no: 6, card_name: "x", store_name: "s", condition: "D", price_yen: 1 })).error).not.toBeNull();
+    expect((await ins(u1, "zukan_price_records", { household_id: hid, profile_id: pA, dex_no: 6, card_name: "x", store_name: "s", condition: "A+", price_yen: 1 })).error).not.toBeNull();
     expect((await ins(u1, "zukan_price_records", { household_id: hid, profile_id: pA, dex_no: 6, card_name: "x", store_name: "s", condition: "A", price_yen: -1 })).error).not.toBeNull();
   });
 
@@ -125,19 +125,19 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     const cid = card.data!.id as string;
     const dup = await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "リザードンex（別名）", set_name: "スカーレットex", card_number: "006/078", rarity: "SR" });
     expect(dup.error?.code).toBe("23505"); // 同一カードは重複作成できない
-    // 別のプロフィールは同じカードを別に持てる（分離）
-    expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pB, name: "リザードンex", set_name: "スカーレットex", card_number: "006/078", rarity: "SR" })).error).toBeNull();
+    // 別のプロフィールも同じカードを重複して持てない（UI改修: 相場管理データは世帯の全員で共通。一意制約は世帯単位）
+    expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pB, name: "リザードンex", set_name: "スカーレットex", card_number: "006/078", rarity: "SR" })).error?.code).toBe("23505");
     // 番号が無いカードは識別の一意制約の対象外（名前だけで同一とみなさない・確認はアプリ側）
     expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "ピカチュウ" })).error).toBeNull();
     expect((await ins(u1, "market_cards", { household_id: hid, profile_id: pA, name: "ピカチュウ" })).error).toBeNull();
     const mk = (store: string, cond: string, price: number, day: string) => ins(u1, "market_prices", { household_id: hid, profile_id: pA, card_id: cid, store_name: store, surveyed_on: day, condition: cond, price_yen: price });
-    const a = await mk("A店", "B", 800, "2026-11-01");
-    await mk("B店", "A+", 1500, "2026-11-02");
+    const a = await mk("A店", "C", 800, "2026-11-01");
+    await mk("B店", "S", 1500, "2026-11-02");
     await mk("A店", "A", 1000, "2026-11-08"); // 同じ店舗の再調査（履歴として残る）
     await mk("C店", "A", 900, "2026-11-09");
     const prices = ((await u1.from("market_prices").select("*").eq("card_id", cid)).data ?? []).map((r: Record<string, unknown>) => toMarketPrice(r));
     expect(prices).toHaveLength(4);
-    expect(sortPrices(prices, "condition").map((p) => `${p.condition}:${p.priceYen}`)).toEqual(["A+:1500", "A:900", "A:1000", "B:800"]);
+    expect(sortPrices(prices, "condition").map((p) => `${p.condition}:${p.priceYen}`)).toEqual(["S:1500", "A:900", "A:1000", "C:800"]);
     expect(sortPrices(prices, "price").map((p) => p.priceYen)).toEqual([800, 900, 1000, 1500]);
     expect(prices.filter((p: { storeName: string }) => p.storeName === "A店")).toHaveLength(2);
     // 価格の制約
@@ -148,7 +148,7 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     const buy = await u1.rpc("market_buy_from_price_tx", { p_price: a.data!.id as string, p_purchased_on: "2026-11-10" });
     expect(buy.error).toBeNull();
     const pur = (await u1.from("market_purchases").select("*").eq("id", buy.data as string).single()).data as Record<string, unknown>;
-    expect(pur).toMatchObject({ card_id: cid, price_id: a.data!.id, purchased_on: "2026-11-10", store_name: "A店", price_yen: 800, condition: "B" });
+    expect(pur).toMatchObject({ card_id: cid, price_id: a.data!.id, purchased_on: "2026-11-10", store_name: "A店", price_yen: 800, condition: "C" });
     expect((await u1.rpc("market_buy_from_price_tx", { p_price: a.data!.id as string, p_purchased_on: "2026-11-11" })).error?.code).toBe("23505");
     expect(((await u1.from("market_purchases").select("id").eq("price_id", a.data!.id as string)).data ?? []).length).toBe(1);
     expect((await u1.from("market_prices").delete().eq("id", a.data!.id as string)).error?.code).toBe("23503"); // 購入済みの価格記録は削除不可
@@ -161,8 +161,10 @@ describe.skipIf(!dbTestsEnabled)("Stage Collection-1: 151図鑑・相場調査�
     expect(((await u2.from("market_prices").select("id")).data ?? []).length).toBe(0);
     const anyPrice = (await u1.from("market_prices").select("id").limit(1)).data as { id: string }[];
     expect((await u2.rpc("market_buy_from_price_tx", { p_price: anyPrice[0].id, p_purchased_on: "2026-11-10" })).error).not.toBeNull();
-    // 二重計上防止: 既存の購入記録・コレクションの表は、この機能では増えない
-    expect(((await u1.from("purchases").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
+    // 個別購入は購入記録（シングルカード）へ反映される（同じ購入者・購入日は合算。この世帯の購入は日付の違う2件の購入記録のみ）。コレクション・カードマスターは増えない
+    const pur = ((await u1.from("purchases").select("category").eq("household_id", hid)).data ?? []) as { category: string }[];
+    expect(pur.length).toBe(2);
+    expect(pur.every((p) => p.category === "single_card")).toBe(true);
     expect(((await u1.from("card_holdings").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
     expect(((await u1.from("card_masters").select("id").eq("household_id", hid)).data ?? []).length).toBe(0);
   });
