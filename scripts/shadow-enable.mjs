@@ -3,6 +3,8 @@
 //   npm run prod -- scripts/shadow-enable.mjs --household-out=<ファイル> --yes-production … 世帯IDを（表示せず）ファイルへ書く（環境変数の設定に使う）
 //   npm run prod -- scripts/shadow-enable.mjs --execute --yes-production               … shadow_settings の1行を、承認された初回稼働の条件で書く
 //   npm run prod -- scripts/shadow-enable.mjs --disable --execute --yes-production     … 停止（enabled=false・enqueue_enabled=false。設定は残す）
+//   npm run prod -- scripts/shadow-enable.mjs --cron-enable[="*/30 * * * *"] --yes-production … 定期実行を登録（RPC shadow_cron_enable。既定30分おき）。--cron-disable で解除、--cron-test で1回呼び出し、--status で状態
+// 定期実行のURLは既存の自動収集のURLから導く（移行124）。秘密は既存の notify_job_secret（上書きしない）。
 // 承認された初回稼働の条件（既定値）: 日次¥15・通算¥45（月次も¥45）・1件¥3・1回3件・試行期間3日（valid_until）。世帯は1つだけ（複数なら中止）。
 // 書き込み先は shadow_settings の1行だけ。世帯IDは画面・ログに出さない（短いハッシュだけ）。キー・秘密は扱わない。
 import { createHash } from "node:crypto";
@@ -46,6 +48,80 @@ if (cur.error) {
   process.exit(1);
 }
 console.log("現在の設定:", cur.data ?? "なし");
+
+const sinceH = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+if (flag("status")) {
+  const st = await db.rpc("shadow_stats", { p_household: hid, p_hours: 24 });
+  console.log("shadow_stats(24h):", JSON.stringify(st.data ?? st.error?.message));
+  const calls = await db.from("notification_cron_calls").select("called_at,status_code,error_msg").eq("job", "shadow").order("id", { ascending: false }).limit(6);
+  console.log("直近の呼び出し:", JSON.stringify(calls.data));
+  const sp = await db.rpc("shadow_spent", { p_household: hid, p_since: cur.data?.total_since ?? sinceH(72) });
+  console.log("通算の使用額（円）:", sp.data);
+  const props = await db.from("registration_proposals").select("*", { count: "exact", head: true }).eq("household_id", hid).eq("mode", "real");
+  console.log("実AIの登録案:", props.count);
+  // 集計のみ（原文・値・URLは出さない）: 判断×検証×現行の候補の状態、停止理由、判断出力の不正の型、費用
+  const rows = (await db.from("registration_proposals").select("decision,verified,stop_reason,cost_jpy,held_reasons,candidate_id").eq("household_id", hid).eq("mode", "real").is("superseded_at", null)).data ?? [];
+  const cs = (await db.from("collection_candidates").select("id,status").in("id", [...new Set(rows.map((r) => r.candidate_id))])).data ?? [];
+  const stMap = new Map(cs.map((c) => [c.id, c.status]));
+  const tally = {};
+  for (const r of rows) {
+    const k = `現行=${stMap.get(r.candidate_id) ?? "?"} / AI=${r.decision} / 検証=${r.verified ? "済" : "未"}`;
+    tally[k] = (tally[k] ?? 0) + 1;
+  }
+  console.log("判断の突き合わせ:", JSON.stringify(tally));
+  const rev = rows.filter((r) => /rev:d/.test(r.stop_reason ?? ""));
+  console.log(`自己修正: 訂正あり ${rev.length}件（うち検証済み ${rev.filter((r) => r.verified).length}件）／保留理由: ${JSON.stringify(rows.flatMap((r) => r.held_reasons ?? []).reduce((m, x) => ((m[x] = (m[x] ?? 0) + 1), m), {}))}`);
+  const js = (await db.from("shadow_judgments").select("status,cost_jpy,record").eq("household_id", hid).gte("created_at", cur.data?.total_since ?? sinceH(72))).data ?? [];
+  const diag = {};
+  for (const j of js) for (const [k, v] of Object.entries(j.record?.diagnostics ?? {})) diag[k] = (diag[k] ?? 0) + v;
+  console.log(`判断出力・APIの診断: ${JSON.stringify(diag)}／1ジョブ最大費用: ${Math.max(0, ...js.map((j) => Number(j.cost_jpy ?? 0)))}円／平均: ${js.length ? (js.reduce((a, j) => a + Number(j.cost_jpy ?? 0), 0) / js.length).toFixed(3) : 0}円`);
+  process.exit(0);
+}
+const cronOpt = args.find((a) => a.startsWith("--cron-enable"));
+if (cronOpt) {
+  const schedule = cronOpt.includes("=") ? cronOpt.slice(cronOpt.indexOf("=") + 1) : "*/30 * * * *";
+  if (!/^[0-9*/ ,-]+$/.test(schedule)) {
+    console.error("スケジュールの形式が不正です");
+    process.exit(1);
+  }
+  const r = await db.rpc("shadow_cron_enable", { p_schedule: schedule });
+  console.log(r.error ? `登録に失敗: ${r.error.message}` : `定期実行を登録しました（job ${r.data} / ${schedule}）`);
+  process.exit(r.error ? 1 : 0);
+}
+const seedOpt = args.find((a) => a.startsWith("--seed="));
+if (seedOpt) {
+  // 初回の確認用: 最近の収集済み候補（保存原文あり）をキューへ投入する（shadow_enqueue。冪等。費用は日次・通算の上限の範囲でしか使われない）
+  const n = Math.max(1, Math.min(10, Number(seedOpt.slice(7)) || 3));
+  const { data: cands, error } = await db.from("collection_candidates").select("id,last_good,created_at").eq("household_id", hid).order("created_at", { ascending: false }).limit(60);
+  if (error) {
+    console.error("候補の読み取りに失敗しました");
+    process.exit(1);
+  }
+  let ok = 0;
+  for (const c of cands ?? []) {
+    const h = c.last_good?.evidence?.hash;
+    if (typeof h !== "string" || h.length < 32) continue;
+    const r = await db.rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h.slice(0, 32) });
+    if (r.data === true) ok++;
+    if (ok >= n) break;
+  }
+  console.log(`投入しました: ${ok}件（最近の収集済み候補）`);
+  process.exit(0);
+}
+if (flag("cron-disable")) {
+  const r = await db.rpc("shadow_cron_disable");
+  console.log(r.error ? `解除に失敗: ${r.error.message}` : r.data ? "定期実行を解除しました" : "定期実行は登録されていません");
+  process.exit(r.error ? 1 : 0);
+}
+if (flag("cron-test")) {
+  const a = await db.rpc("invoke_shadow_worker");
+  console.log("呼び出し:", a.error ? a.error.message : a.data === null ? "送信なし（稼働中の世帯が無い・未設定）" : "送信しました");
+  await new Promise((r) => setTimeout(r, 20_000));
+  await db.rpc("invoke_shadow_worker"); // 応答の収集
+  const calls = await db.from("notification_cron_calls").select("called_at,status_code,error_msg").eq("job", "shadow").order("id", { ascending: false }).limit(3);
+  console.log("結果:", JSON.stringify(calls.data));
+  process.exit(0);
+}
 
 if (!flag("execute")) {
   console.log("dry-run: 何も書いていません。書き込みは --execute。");
