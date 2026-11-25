@@ -110,6 +110,15 @@ describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクラ
   });
   it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
     const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
-    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-6");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-7");
+  });
+});
+
+describe("応募先の推定・店舗選択式の明記（Phase 3 THREE_CASE。AIへの指示の契約）", () => {
+  it("判断の指示は、店舗選択式の明記と、応募ボタンの遷移先として取得された取得元ページの応募先推定を、基準として持つ。調査の指示も同じ例外を持つ", () => {
+    expect(JUDGE_SYSTEM).toContain("対象店舗の中から1店舗のみ応募可能");
+    expect(JUDGE_SYSTEM).toContain("応募ボタン");
+    expect(JUDGE_SYSTEM).toContain("応募先が推定できることは、応募単位の確定とは別");
+    expect(RESEARCH_SYSTEM).toContain("応募先と推定してよい");
   });
 });
