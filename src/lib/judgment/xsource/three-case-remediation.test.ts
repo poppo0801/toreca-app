@@ -153,3 +153,17 @@ describe("案2: 地域外の店舗限定。『対象地域外』を理由とす�
     expect(none.registration.verified).toBe(false); // 設定が分からなければ、地域を理由に除外しない
   });
 });
+
+describe("取得時刻: ページの取得時刻は実際に取得した時刻。評価の基準時刻（収集時刻）で上書きしない（本番の保存全文で、取得時刻が基準時刻のラベルになっていた欠陥）", () => {
+  it("取得結果の fetchedAt が証拠にそのまま残る。無ければ従来どおり基準時刻", async () => {
+    const url = "https://shop.example.invalid/items/9";
+    const page = "<h1>商品Z 1BOX</h1><p>応募期間：2026年11月24日 20:00 〜 2026年11月27日 10:00</p>";
+    const mk = (fetchedAt?: string): ResearchTools => ({ now: () => NOW, fetchPage: async () => ({ ok: true, finalUrl: url, html: html(page), text: "", ...(fetchedAt ? { fetchedAt } : {}) }) });
+    const judge: RegistrationJudge = async () => out({ decision: "tentative", fields: {} });
+    const actual = await runResearch({ caseId: "t1", seed: SEED("seed"), agent: agent(url), judge, tools: mk("2026-11-25T10:00:00.000Z"), budget: budget(), registerRequiresUnit: true });
+    expect(actual.evidence.find((e) => e.kind === "page")?.fetchedAt).toBe("2026-11-25T10:00:00.000Z");
+    expect(actual.evidence.find((e) => e.kind === "seed")?.fetchedAt).toBe(NOW.toISOString()); // 基準時刻は seed のまま
+    const legacy = await runResearch({ caseId: "t2", seed: SEED("seed"), agent: agent(url), judge, tools: mk(), budget: budget(), registerRequiresUnit: true });
+    expect(legacy.evidence.find((e) => e.kind === "page")?.fetchedAt).toMatch(/^2026-11-24T21:05/);
+  });
+});

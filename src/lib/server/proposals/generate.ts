@@ -118,7 +118,7 @@ export function postFromCandidate(c: CandidateRow): StoredXPost | null {
 }
 
 /** 保存済みの全文（整形後）から取得結果を作る。HTMLは保存しないため、本文と構造化の観察をそのまま使う */
-const fromDocument = (d: StoredDocument): Extract<FetchOutcome, { ok: true }> => ({ ok: true, finalUrl: d.url, html: "", text: d.text, cleaned: true, structure: d.structure, ...(refineTextLoss(d.textLoss ?? undefined, d.text).length ? { textLoss: refineTextLoss(d.textLoss ?? undefined, d.text) } : {}), ...(d.truncated ? { notice: `保存済みの本文も切り詰められている（${d.truncatedReason ?? "上限"}）。後半は確認できない` } : {}) });
+const fromDocument = (d: StoredDocument): Extract<FetchOutcome, { ok: true }> => ({ ok: true, finalUrl: d.url, fetchedAt: d.fetchedAt, html: "", text: d.text, cleaned: true, structure: d.structure, ...(refineTextLoss(d.textLoss ?? undefined, d.text).length ? { textLoss: refineTextLoss(d.textLoss ?? undefined, d.text) } : {}), ...(d.truncated ? { notice: `保存済みの本文も切り詰められている（${d.truncatedReason ?? "上限"}）。後半は確認できない` } : {}) });
 
 const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -240,11 +240,11 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       // 抜粋が全文より短い（収集時に fullChars を記録）ページは切り詰め。記録が無い古い保存は、抜粋の上限に達していれば切り詰めとみなす
       const truncated = !!hit && (hit.truncated === true || (hit.fullChars !== undefined && hit.fullChars > hit.text.length) || (hit.fullChars === undefined && hit.text.length >= 3000));
       if (hit && !truncated) return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
-      // 取得元ページ（収集時に取得したページ）: 収集時に保存した**全文**（取得時刻つき）を最優先で使う。収集の判断と同じ時点の証拠で、再取得より確実（ページの変化・消失・終了表示に左右されない）で、外部アクセスも要らない。
-      // 保存が無い・切り詰められているときだけ、実取得へ進む。現在の状態の確認が必要なら、保存全文のあとで別に実取得できる（同じURLの再取得はしない規則のため、現在状態の確認は別の機会に行う）
+      // 取得元ページ: すでに保存した全文（取得時刻つき）があれば、それを最優先で使う。再取得より確実（ページの変化・消失・終了表示に左右されず、同じ証拠で比較・再現できる）で、外部アクセスも要らない。
+      // 取得時刻は**実際に取得した時刻**で、評価の基準時刻（収集時刻）とは別。由来も区別する（収集時に取得／以前の調査で取得）。現在の状態ではない。保存が無い・切り詰められているときだけ、実取得へ進む。
       if (!hit && post0.sourcePage && canonUrl(u).key === canonUrl(post0.sourcePage.url).key) {
         const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
-        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0)) return { ...fromDocument(saved), notice: `収集時（${saved.fetchedAt}）に保存されたページ全文（${saved.textChars}字）。現在の状態ではない` };
+        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0)) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。現在の状態ではない` };
       }
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);

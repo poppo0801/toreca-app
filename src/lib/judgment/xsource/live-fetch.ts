@@ -125,7 +125,7 @@ export function makeLivePublicFetch(opts: LiveFetchOptions & { gateKind?: "dev" 
       fails.set(host, 0);
       log.push({ host, outcome: "ok", endedPage: ENDED.test(text), redirects });
       // 取得サイズの上限で本文が途中で切れた場合は、成功として黙って渡さず、切れた事実をAIの観察に残す（後半の条件が無いのではなく未確認）
-      return { ok: true, finalUrl: r.finalUrl, html: r.body, text, ...(r.truncated ? { notice: "取得サイズの上限（1,000,000バイト）でページの後半が切れており、後半は確認できない" } : {}) };
+      return { ok: true, finalUrl: r.finalUrl, html: r.body, text, fetchedAt: new Date(nowFn()).toISOString(), ...(r.truncated ? { notice: "取得サイズの上限（1,000,000バイト）でページの後半が切れており、後半は確認できない" } : {}) };
     }
     fails.set(host, (fails.get(host) ?? 0) + 1);
     return fail({ host, outcome: "http_error", redirects }, "failed");
