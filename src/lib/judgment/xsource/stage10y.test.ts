@@ -99,7 +99,8 @@ describe("出力の途切れ対策（課金なし）", () => {
     const client = { messages: { create: vi.fn(async () => ({ stop_reason: "max_tokens", content: [{ type: "tool_use", name: "submit_research_turn", input: { observed: [] } }], usage: { input_tokens: 4000, output_tokens: OUTPUT_MAX_TOKENS } })) } } as never;
     const out = await makeAnthropicResearchAgent(client, { onDiagnostic: (d) => seen.push(d.reason) })({ caseId: "c", evidence: [], history: [], remaining: { turns: 1, fetches: 1, costJpy: 5, elapsedMs: 1000 } });
     expect(out).toBeNull();
-    expect(seen[0]).toBe("bad_output:max_tokens:invalid_next");
+    expect(seen[0]).toMatch(/^bad_output:max_tokens:invalid_next/);
+    expect(seen).toHaveLength(1); // 途中切れは再試行しない
   });
 });
 

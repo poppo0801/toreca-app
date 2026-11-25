@@ -19,6 +19,7 @@ import { worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
 import { makeSearchTool, type SearchProviderLike } from "@/lib/judgment/xsource/research-search";
 import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, type CandidateRow } from "./generate";
+import { prefetchSourcePage } from "./source-prefetch";
 import { issueRealRunTicket, type RealRunTicket } from "./real-gate";
 import { assembleGenerateDeps, basisClock, researchLimits } from "./pipeline";
 
@@ -162,6 +163,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       if (fatal) return finish(fatal);
       if (budget.remainingJpy < limits.agentReserveJpy + limits.judgeReserveJpy) return finish("budget_exhausted");
       diagsThisCandidate = 0;
+      if (o.liveFetch) await prefetchSourcePage({ db: o.db, householdId: o.householdId, candidate: c, fetchPage: o.liveFetch, ...(o.now ? { now: o.now } : {}) }); // 本番シャドーと同じ事前取得・保存（共通の前処理）
       const r = await generateProposalsForCandidate({
         db: o.db,
         householdId: o.householdId,

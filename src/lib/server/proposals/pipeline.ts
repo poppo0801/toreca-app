@@ -40,12 +40,14 @@ export function assembleGenerateDeps(a: {
   now?: () => Date;
   shouldStop?: () => boolean;
   learn?: boolean;
+  /** 記録するモデルの識別（調査と判断で別のモデルを使うときは両方）。省略時は許可証のモデル */
+  modelId?: string;
 }): GenerateDeps {
   return {
     agent: a.agent,
     judge: a.judge,
     mode: "real",
-    modelId: a.ticket.model,
+    modelId: a.modelId ?? a.ticket.model,
     ticket: a.ticket,
     budget: a.budget,
     perItemCapJpy: a.perItemCapJpy,

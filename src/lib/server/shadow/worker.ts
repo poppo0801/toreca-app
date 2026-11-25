@@ -50,6 +50,8 @@ export interface ShadowSettingsRow {
   /** 通算の費用上限（円）と集計の開始日時（NULL=通算上限なし） */
   total_budget_jpy?: number | null;
   total_since?: string | null;
+  /** 登録判断だけに使うモデル（NULL=調査と同じ）。比較・切り戻し用に、DBの設定で切り替える（env変更なし） */
+  judge_model?: string | null;
 }
 
 export interface ShadowWorkerDeps {
@@ -117,7 +119,7 @@ const nextJstMonth = (now: Date): Date => {
 };
 
 export async function loadShadowSettings(db: Db, householdId: string): Promise<ShadowSettingsRow | null> {
-  const { data } = await table(db, "shadow_settings").select("enabled,enqueue_enabled,daily_budget_jpy,monthly_budget_jpy,per_case_cap_jpy,max_jobs_per_run,retention_days,valid_until,total_budget_jpy,total_since").eq("household_id", householdId).maybeSingle();
+  const { data } = await table(db, "shadow_settings").select("enabled,enqueue_enabled,daily_budget_jpy,monthly_budget_jpy,per_case_cap_jpy,max_jobs_per_run,retention_days,valid_until,total_budget_jpy,total_since,judge_model").eq("household_id", householdId).maybeSingle();
   if (!data) return null;
   return { ...data, daily_budget_jpy: Number(data.daily_budget_jpy), monthly_budget_jpy: Number(data.monthly_budget_jpy), per_case_cap_jpy: Number(data.per_case_cap_jpy), total_budget_jpy: data.total_budget_jpy === null || data.total_budget_jpy === undefined ? null : Number(data.total_budget_jpy) };
 }

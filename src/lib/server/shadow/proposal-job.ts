@@ -10,9 +10,12 @@
 import { absorbBudget, CallBudget } from "@/lib/judgment/call-budget";
 import type { Db } from "@/lib/server/lottery-service";
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
-import { preflightRun } from "@/lib/judgment/xsource/cost-preflight";
+import { MODEL_PRICES } from "@/lib/ai-cost";
+import { preflightRun, worstCaseCallJpy } from "@/lib/judgment/xsource/cost-preflight";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, OUTPUT_MAX_TOKENS, type AiDiagnostic } from "@/lib/judgment/xsource/research-ai";
 import type { ResearchLimits } from "@/lib/judgment/xsource/research-loop";
+import { prefetchSourcePage } from "@/lib/server/proposals/source-prefetch";
+import { makeSearchTool, type SearchProviderLike } from "@/lib/judgment/xsource/research-search";
 import { makeShadowLivePublicFetch, shadowLiveFetchAllowed, type LiveRecord } from "@/lib/judgment/xsource/live-fetch";
 import { makeRealVisionClient, worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
 import { markShadowTool } from "@/lib/judgment/xsource/shadow-tool-mark";
@@ -31,12 +34,20 @@ type Client = Parameters<typeof makeAnthropicResearchAgent>[0];
 const otherKeyValues = (env: Env): string[] => Object.entries(env).filter(([k, v]) => !!v && k !== "SHADOW_ANTHROPIC_API_KEY" && /(ANTHROPIC.*KEY|FALLBACK_KEY)/.test(k)).map(([, v]) => v as string).filter((v) => v !== env.SHADOW_ANTHROPIC_API_KEY);
 
 /** 調査の上限。評価入口（real-run）と同じ共通値（pipeline.ts）。違いは1実行の経過時間（Vercelの制限に合わせて60秒）と、検索を渡さないこと（1件¥3の枠に検索の予約が収まらない）だけ */
-export const SHADOW_PROPOSAL_LIMITS: ResearchLimits = researchLimits({ maxElapsedMs: 60_000 });
+/** 検索を渡すときの最悪費用（円）: 検索1回 ≒ ¥1.5（1,000回$10）＋結果を読むトークン。1件の上限（¥10）に収まるときだけ検索を渡す */
+export const SHADOW_SEARCH_WORST_JPY = 3.7;
+/** 判断の呼び出し1回の予約（円）。調査用の既定（¥0.6）か、判断モデルの実測に近い想定（入力9,000・出力1,500トークン）の大きい方 */
+export const judgeReserveFor = (model: string): number => Math.max(0.6, Math.round(worstCaseCallJpy(model, 9_000, 1_500) * 100) / 100);
+export const shadowProposalLimits = (search: boolean, judgeModel?: string): ResearchLimits => researchLimits({ maxElapsedMs: 60_000, search, searchReserveJpy: SHADOW_SEARCH_WORST_JPY, ...(judgeModel ? { judgeReserveJpy: judgeReserveFor(judgeModel) } : {}) });
+export const SHADOW_PROPOSAL_LIMITS: ResearchLimits = shadowProposalLimits(false);
+
 
 export interface ProposalJobSettings {
   enabled: boolean;
   daily_budget_jpy: number;
   per_case_cap_jpy: number;
+  /** 登録判断だけのモデル（DBの設定。NULL=調査と同じ）。料金が分かるモデルだけ採用する */
+  judge_model?: string | null;
 }
 
 /** 実行の痕跡（件数・ホスト名・理由コードだけ。URL全体・原文・秘密を含めない） */
@@ -50,6 +61,8 @@ export interface ProposalTrace {
   pages: number;
   turns: number;
   images?: Record<string, number>;
+  /** 取得元ページの事前取得（none=取得元なし／saved_recent=24時間以内に保存済み／stored=今回保存／failed:理由）。AIの費用は掛からない */
+  prefetch?: string;
 }
 
 export type ProposalJobResult =
@@ -71,6 +84,8 @@ export async function runShadowProposalJob(a: {
   env?: Env;
   runBudget?: CallBudget;
   now?: () => Date;
+  /** 検索の部品（本番の入口が渡す）。評価入口と同じ makeSearchTool を通し、本番の許可の印をつけて渡す。実取得が許可されているときだけ使う */
+  searchProvider?: SearchProviderLike;
   /** テスト用: 取得の下位部品（safe-fetch）の差し替え。外部アクセスをモックしても、本番と同じ入口・許可・道具の契約を通る */
   fetchHooks?: Pick<NonNullable<Parameters<typeof makeShadowLivePublicFetch>[0]>, "fetchImpl" | "sleep" | "now">;
 }): Promise<ProposalJobResult> {
@@ -85,7 +100,8 @@ export async function runShadowProposalJob(a: {
     otherKeys: k?.source === "dedicated" ? otherKeyValues(env) : [], // 専用キーの場合だけ、他機能のキーとの共用を拒否。既存キーの再利用は明示承認済み
   });
   if (!decision.allowed) return { ok: false, reason: `gate:${decision.reasons[0] ?? "denied"}` };
-  const caseCap = Math.min(a.settings.per_case_cap_jpy, 5, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
+  const judgeModel = a.settings.judge_model && MODEL_PRICES[a.settings.judge_model] ? a.settings.judge_model : null; // 料金が分からないモデルは採用しない（費用を保証できない）
+  const caseCap = Math.min(a.settings.per_case_cap_jpy, 10, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
   const t = issueProductionShadowTicket(decision, { model: env.SHADOW_PROPOSAL_MODEL?.trim() || "claude-haiku-5-5", totalCapJpy: caseCap, perCaseCapJpy: caseCap });
   if (!t.ok) return { ok: false, reason: `ticket:${t.reason}` };
   if (a.runBudget && a.runBudget.remainingCalls < 8) return { ok: false, reason: "run_call_limit" };
@@ -93,7 +109,7 @@ export async function runShadowProposalJob(a: {
   // ---- 道具（共通経路 pipeline.ts と同じ契約）。実取得・画像は本番の許可を通した印つきのものだけ。検索は予算の都合で渡さない（理由を明示して記録）
   const stored = evidenceFromLastGood(a.candidate.last_good);
   const tools: PipelineTools = {};
-  const why: { liveFetch?: string; search?: string; vision?: string } = { search: "budget_per_case" }; // 検索の予約（¥2.5）＋調査・判断の予約（¥1.2）が、1件上限（¥3）に収まらない
+  const why: { liveFetch?: string; search?: string; vision?: string } = { search: a.searchProvider ? undefined : "no_provider" };
   let fetchLog: LiveRecord[] = [];
   const lfAllowed = shadowLiveFetchAllowed(env);
   if (lfAllowed.ok) {
@@ -101,11 +117,23 @@ export async function runShadowProposalJob(a: {
     tools.liveFetch = lf.fetchPage;
     fetchLog = lf.log;
   } else why.liveFetch = "not_permitted";
+  // 検索（評価入口と同じ makeSearchTool）。実取得が許可され、最悪費用が1件上限に収まるときだけ。収まらなければ理由つきで渡さない（無断で上限を超えない）
+  let useSearch = !!a.searchProvider && lfAllowed.ok;
+  if (a.searchProvider && !lfAllowed.ok) why.search = "live_fetch_not_permitted";
+  if (useSearch) {
+    const spf = preflightRun({ model: judgeModel ?? t.ticket.model, totalJpy: caseCap, perCaseJpy: caseCap, cases: 1, limits: shadowProposalLimits(true, judgeModel ?? undefined), maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, searchWorstJpy: SHADOW_SEARCH_WORST_JPY });
+    if (!spf.ok) {
+      useSearch = false;
+      why.search = "budget_per_case";
+    }
+  }
+  if (useSearch && a.searchProvider) tools.search = markShadowTool(makeSearchTool(a.searchProvider));
+  const limits = shadowProposalLimits(useSearch, judgeModel ?? undefined);
 
   // ---- 実行前の最悪費用の検査（通らなければ1回も呼ばない）。画像解析を渡すときは、その最悪費用も予約に含める
   const imageWorst = worstCaseVisionCallJpy(t.ticket.model, [{ width: 1200, height: 1600 }]);
   const wantVision = (stored?.imageRefs?.length ?? 0) > 0;
-  const pfOf = (withImage: boolean) => preflightRun({ model: t.ticket.model, totalJpy: caseCap, perCaseJpy: caseCap, cases: 1, limits: SHADOW_PROPOSAL_LIMITS, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(withImage ? { images: { perCaseCount: 1, worstJpyEach: imageWorst } } : {}) });
+  const pfOf = (withImage: boolean) => preflightRun({ model: judgeModel ?? t.ticket.model, totalJpy: caseCap, perCaseJpy: caseCap, cases: 1, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(withImage ? { images: { perCaseCount: 1, worstJpyEach: imageWorst } } : {}) });
   let useVision = wantVision;
   let pf = pfOf(useVision);
   if (useVision && (!pf.ok || pf.warnings.some((w) => w.startsWith("per_case_cannot_afford_image")))) {
@@ -116,6 +144,12 @@ export async function runShadowProposalJob(a: {
   if (!pf.ok) return { ok: false, reason: "budget" };
   if (!wantVision) why.vision = "no_images";
 
+  // 取得元ページの事前取得・保存（AIの費用なし・現行の収集とは独立）。保存した全文は、調査（generate の fetchPage）が最優先で読む。失敗しても調査は続く
+  let prefetch = "not_permitted";
+  if (lfAllowed.ok) {
+    const pre = makeShadowLivePublicFetch({ env, maxFetches: 1, minIntervalMs: 1000, ...(a.fetchHooks ?? {}) });
+    prefetch = (await prefetchSourcePage({ db: a.db, householdId: a.householdId, candidate: a.candidate, fetchPage: pre.fetchPage, ...(a.now ? { now: a.now } : {}) })).status;
+  }
   const diagnostics: Record<string, number> = {};
   const state: { fatal: "auth_error" | "rate_limited" | null } = { fatal: null };
   const onDiagnostic = (d: AiDiagnostic): void => {
@@ -127,7 +161,7 @@ export async function runShadowProposalJob(a: {
   };
   const basisAt = stored?.fetchedAt ?? null; // 収集時刻（評価の基準時刻）
   const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, onDiagnostic });
-  const judge = makeAnthropicRegistrationJudge(a.client, { model: t.ticket.model, onDiagnostic });
+  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic });
   const budget = new CallBudget({ maxCalls: 24, maxCostJpy: caseCap });
   if (useVision) {
     // 画像解析も同じ予算（budget）を共有する。1件あたり最大1枚。取得は既存の安全な画像取得（SSRF・サイズ・時間の検査）
@@ -140,14 +174,14 @@ export async function runShadowProposalJob(a: {
     householdId: a.householdId,
     candidate: a.candidate,
     env,
-    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits: SHADOW_PROPOSAL_LIMITS, perItemCapJpy: Math.min(caseCap, 3), tools, now: clock, learn: true, shouldStop: () => state.fatal !== null }),
+    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
   });
   if (a.runBudget) absorbBudget(a.runBudget, budget);
   const spent = Math.round(budget.costJpy * 10_000) / 10_000;
   const bump = (m: Record<string, number>, k: string): void => {
     m[k] = (m[k] ?? 0) + 1;
   };
-  const trace: ProposalTrace = { tools: toolReport(tools, why), fetches: fetchLog.slice(0, 12).map((x) => ({ host: x.host, outcome: x.outcome })), endReasons: {}, urlStatuses: {}, pages: 0, turns: 0 };
+  const trace: ProposalTrace = { tools: toolReport(tools, why), fetches: fetchLog.slice(0, 12).map((x) => ({ host: x.host, outcome: x.outcome })), endReasons: {}, urlStatuses: {}, pages: 0, turns: 0, prefetch };
   if (!r.ok) return { ok: false, reason: `generate:${r.reason}`, costJpy: spent, trace, ...(state.fatal ? { fatal: state.fatal } : {}) };
   const decisions: Record<string, number> = {};
   const rev = { rounds: 0, verified: 0, held: 0 };

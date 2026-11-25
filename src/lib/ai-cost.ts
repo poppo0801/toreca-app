@@ -16,6 +16,9 @@ export interface ModelPrice {
 export const MODEL_PRICES: Record<string, ModelPrice> = {
   "claude-haiku-5-5": { input: 0.1, output: 0.5 },
   "claude-sonnet-5-5": { input: 2, output: 10 },
+  // 2026-11-26 に公式の料金ページで確認（標準・プロンプト長による段階なし）。判断モデルの比較用（高額: 1件の上限内に収まるかは呼び出し側が検査する）
+  "claude-opus-5-5": { input: 4, output: 20 },
+  "claude-fable-5-2": { input: 8, output: 40 },
 };
 
 /** 標準のモデル（費用を抑えるため Haiku）。実際のAI解析での精度は未検証 */

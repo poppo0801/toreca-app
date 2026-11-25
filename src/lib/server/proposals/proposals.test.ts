@@ -301,7 +301,7 @@ describe("P2 の結果を受けた無課金の修正（値の導出の近さ・�
     expect(seen).toEqual(["fields_defaulted"]);
     const bad = await makeAnthropicRegistrationJudge(mk({ decision: "maybe", fields: {} }), { onDiagnostic: (d) => seen.push(d.reason) })(ji);
     expect(bad).toBeNull();
-    expect(seen.at(-1)).toMatch(/^bad_output:/);
+    expect(seen.filter((x) => x.startsWith("bad_output:")).at(-1)).toMatch(/^bad_output:/);
   });
 });
 

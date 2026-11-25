@@ -163,6 +163,33 @@ if (!flag("execute")) {
   console.log("dry-run: 何も書いていません。書き込みは --execute。");
   process.exit(0);
 }
+if (opt("set-judge-model") !== undefined) {
+  // 登録判断だけのモデルの切り替え（比較・切り戻し用）。default でNULL（調査と同じモデル）に戻す。許可するモデルは料金を確認済みのものだけ
+  const ALLOWED = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"];
+  const m = opt("set-judge-model");
+  const v = m === "default" ? null : m;
+  if (v !== null && !ALLOWED.includes(v)) {
+    console.error("許可されていないモデルです");
+    process.exit(1);
+  }
+  const r = await db.from("shadow_settings").update({ judge_model: v }).eq("household_id", hid);
+  console.log(r.error ? `変更に失敗しました（${r.error.code ?? ""}。移行125が未適用の可能性）` : `判断モデルを ${v ?? "既定（調査と同じ）"} にしました（予算・期限は変更なし）`);
+  process.exit(r.error ? 1 : 0);
+}
+if (flag("set-budget")) {
+  // 承認された予算（利用者の明示承認: 1件10円・日次30円・通算100円）。per_case・daily・monthly・total だけを変える。期限（valid_until）・通算の起点（total_since）・世帯・キーは変えない。上限を超える値は拒否する
+  const per = Number(opt("per-case") ?? 10);
+  const daily = Number(opt("daily") ?? 30);
+  const total = Number(opt("total") ?? 100);
+  const bad = (v, max) => !Number.isFinite(v) || v <= 0 || v > max;
+  if (bad(per, 10) || bad(daily, 30) || bad(total, 100)) {
+    console.error("承認された範囲（1件10円・日次30円・通算100円）を超えています");
+    process.exit(1);
+  }
+  const r = await db.from("shadow_settings").update({ per_case_cap_jpy: per, daily_budget_jpy: daily, monthly_budget_jpy: total, total_budget_jpy: total }).eq("household_id", hid);
+  console.log(r.error ? `変更に失敗しました（${r.error.code ?? ""}。移行125が未適用の可能性）` : `予算を設定しました: 1件${per}円・日次${daily}円・通算${total}円（期限 ${cur.data?.valid_until}・通算の起点 ${cur.data?.total_since} は変更なし）`);
+  process.exit(r.error ? 1 : 0);
+}
 const dailyOpt = opt("set-daily");
 if (dailyOpt !== undefined) {
   // 承認された日次上限の変更（利用者の明示承認: 15→30円）。daily_budget_jpy だけを変える。通算・月次・期限・世帯・キーは変えない。上限は30円まで
