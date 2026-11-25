@@ -155,12 +155,15 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
     }
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === JUDGE_TOOL);
-    const a = use?.input as { decision?: string; fields?: Record<string, { value?: string | null; basis?: string; evidenceId?: string; quote?: string }>; rationale?: string; unresolvedImpact?: string; monitor?: { continue?: boolean; why?: string } } | undefined;
+    // モデルが入れ子のオブジェクト（fields）を JSON 文字列で返すことがある（形式の揺れ）。文字列なら一度だけ解釈する（内容の検証は従来どおり。解釈できなければ不備として型を記録）
+    const rawIn = use?.input as Record<string, unknown> | undefined;
+    const parsedIn = rawIn && typeof rawIn.fields === "string" ? parseFieldsString(rawIn) : rawIn;
+    const a = parsedIn as { decision?: string; fields?: Record<string, { value?: string | null; basis?: string; evidenceId?: string; quote?: string }>; rationale?: string; unresolvedImpact?: string; monitor?: { continue?: boolean; why?: string } } | undefined;
     // fields が省略された出力（証拠が少ないとき等）は、主張なし（空）として扱い、判断は採用する（実AIの試験で、証拠なしの項目の出力が項目の省略になり判断が失われた）。判断の種類が不正・fields が別の型のときは不備
     const fieldsMissing = !!a && a.fields === undefined && (a.decision === "register" || a.decision === "tentative" || a.decision === "exclude");
     if (fieldsMissing) opts.onDiagnostic?.({ role: "judge", reason: "fields_defaulted" });
-    if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || (!fieldsMissing && (!a.fields || typeof a.fields !== "object"))) {
-      opts.onDiagnostic?.({ role: "judge", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? "invalid_fields" : "no_tool_use"}` });
+    if (!a || (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") || (!fieldsMissing && (!a.fields || typeof a.fields !== "object" || Array.isArray(a.fields)))) {
+      opts.onDiagnostic?.({ role: "judge", reason: `bad_output:${res.stop_reason ?? "none"}:${use ? badJudgeKind(a) : "no_tool_use"}` }); // 型だけを記録する（値・原文は含めない）
       return null;
     }
     const fields: Record<string, RegisteredField> = {};
@@ -172,4 +175,21 @@ export function makeAnthropicRegistrationJudge(client: ClientLike, opts: { model
     const out: JudgeOutput = { ...(fieldsMissing ? { outputNote: "fields_defaulted" as const } : {}), decision: a.decision, fields, rationale: asString(a.rationale, 500), unresolvedImpact: a.unresolvedImpact === "material" || a.unresolvedImpact === "minor" ? a.unresolvedImpact : "none", monitor: { continue: a.monitor?.continue !== false, why: asString(a.monitor?.why, 200) }, costJpy: cost };
     return out;
   };
+}
+
+/** fields が JSON 文字列で返されたときの解釈。オブジェクトに解釈できたときだけ置き換える（配列・解釈不能は元のまま＝不備として扱われる） */
+function parseFieldsString(raw: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const p: unknown = JSON.parse(raw.fields as string);
+    return p && typeof p === "object" && !Array.isArray(p) ? { ...raw, fields: p } : raw;
+  } catch {
+    return raw;
+  }
+}
+
+/** 不正な判断出力の型の記録（原因の特定用。値・原文を含めない） */
+function badJudgeKind(a: { decision?: unknown; fields?: unknown } | undefined): string {
+  if (!a) return "input_missing";
+  if (a.decision !== "register" && a.decision !== "tentative" && a.decision !== "exclude") return `decision_${a.decision === undefined ? "missing" : typeof a.decision}`;
+  return `fields_${Array.isArray(a.fields) ? "array" : a.fields === null ? "null" : typeof a.fields}`;
 }

@@ -81,3 +81,20 @@ describe("判断のAI: 項目数の上限", () => {
     expect(diags).toContain("fields_truncated");
   });
 });
+
+describe("判断出力の形式の揺れ（Phase 3 RUNTIME_PARITY。本番で、ページを読んだ後に fields が文字列で返る不備を確認した場合に備える）", () => {
+  const input = { caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient" as const, protectedFields: {} };
+  it("fields が JSON 文字列で返されたときは一度だけ解釈して採用する（内容の検証は従来どおり）。解釈できない・配列は不備として、型だけを記録する", async () => {
+    const seen: string[] = [];
+    const onDiagnostic = (d: { role: string; reason: string }) => seen.push(d.reason);
+    const ok = await makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: JSON.stringify({ store: { value: "A店", basis: "unknown" } }), rationale: "x", unresolvedImpact: "minor", monitor: { continue: true, why: "w" } }).client, { onDiagnostic })(input);
+    expect(ok?.decision).toBe("tentative");
+    expect(Object.keys(ok?.fields ?? {})).toEqual(["store"]);
+    expect(seen).toEqual([]);
+    const bad = await makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: "not json {" }).client, { onDiagnostic })(input);
+    const arr = await makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: [1] }).client, { onDiagnostic })(input);
+    const dec = await makeAnthropicRegistrationJudge(fake({ decision: "maybe", fields: {} }).client, { onDiagnostic })(input);
+    expect([bad, arr, dec]).toEqual([null, null, null]);
+    expect(seen.map((r) => r.replace(/^bad_output:[^:]*:/, ""))).toEqual(["fields_string", "fields_array", "decision_string"]);
+  });
+});
