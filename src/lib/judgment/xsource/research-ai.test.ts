@@ -96,6 +96,8 @@ describe("判断出力の形式の揺れ（Phase 3 RUNTIME_PARITY。本番で、
     const dec = await makeAnthropicRegistrationJudge(fake({ decision: "maybe", fields: {} }).client, { onDiagnostic })(input);
     expect([bad, arr, dec]).toEqual([null, null, null]);
     expect(seen.map((r) => r.replace(/^bad_output:[^:]*:/, ""))).toEqual(["fields_string", "fields_array", "decision_string"]);
+  });
+});
 
 describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクライアントでは検出できない、AIへの指示そのものの契約）", () => {
   it("調査AIの指示は、『収集時の取得元ページ』を、応募先URLとは別の手掛かりとして、検索の可否にかかわらず先に取得して確認してよいと明示する。取得元ページだけで応募先・応募単位を確定しない", () => {
