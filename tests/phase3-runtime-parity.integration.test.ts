@@ -277,7 +277,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     for (const p of [e.prompts, s2.prompts]) {
       expect(p.length).toBeGreaterThanOrEqual(2);
       expect(p[1]).toContain("収集時に保存された全文にだけある記載"); // 2ターン目の入力に、保存全文が証拠として入る
-      expect(p[1]).toContain("収集時（2026-11-24"); // 取得時刻つきの注記（現在の状態ではない旨）
+      expect(p[1]).toContain("取得時刻 2026-11-24"); // 実際の取得時刻つきの注記。現在の状態ではない旨
+      expect(p[1]).toContain("以前の調査で取得");
     }
     await clean();
   });

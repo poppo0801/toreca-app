@@ -42,7 +42,7 @@ export interface ResearchLimits {
 export const DEFAULT_RESEARCH_LIMITS: ResearchLimits = { maxTurns: 6, maxFetches: 6, maxElapsedMs: 180_000, maxConsecutiveFailuresPerHost: 2, maxNoProgressTurns: 2, maxRevisions: 1, agentReserveJpy: 3, judgeReserveJpy: 3, maxSearches: 2, searchReserveJpy: 3, maxReads: 10, maxReadChars: 30_000 };
 
 export type FetchFailure = "blocked" | "robots" | "not_public" | "login_required" | "failed" | "timeout";
-export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string; /** 取得元の制約の注記（例: 保存時の切り詰め）。観察としてAIに渡す（本文の一部にしない） */ notice?: string; /** 保存済みの整形後の全文（再解析用）。true なら html から本文を作り直さず、text と structure をそのまま使う */ cleaned?: boolean; structure?: ApplyPageStructure | null; textLoss?: string[] } | { ok: false; reason: FetchFailure };
+export type FetchOutcome = { ok: true; finalUrl: string; html: string; text: string; /** 取得元の制約の注記（例: 保存時の切り詰め）。観察としてAIに渡す（本文の一部にしない） */ notice?: string; /** 保存済みの整形後の全文（再解析用）。true なら html から本文を作り直さず、text と structure をそのまま使う */ cleaned?: boolean; structure?: ApplyPageStructure | null; textLoss?: string[]; /** このページを実際に取得した（保存した）時刻（ISO）。評価の基準時刻（収集時刻）とは別。無ければ基準時刻（従来の動作） */ fetchedAt?: string } | { ok: false; reason: FetchFailure };
 /** AIが使えるツール（読み取り専用）。公開ページの取得だけ。SSRF・robots・レート制限・サイズ・時間は実装側（既存の安全な取得）が担う */
 export interface SearchHitLite {
   title: string;
@@ -236,13 +236,13 @@ export function seedEvidence(id: string, text: string, now: Date, url: string | 
 }
 
 function pageEvidence(n: number, url: string, o: Extract<FetchOutcome, { ok: true }>, now: Date): Evidence {
-  if (o.cleaned) return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(o.text), text: o.text, structure: o.structure ?? null, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(o.textLoss?.length ? { textLoss: o.textLoss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
+  if (o.cleaned) return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: o.fetchedAt ?? now.toISOString(), contentHash: sha(o.text), text: o.text, structure: o.structure ?? null, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(o.textLoss?.length ? { textLoss: o.textLoss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
   const structure = parseApplyPage(o.html);
   // 本文は、取得側の粗いテキストではなくHTMLから作り直す（スクリプト・head・エンティティの除去）。AIの見る抜粋と、引用の検証が同じ本文になる
   const required = structure ? [structure.title ?? "", ...structure.slots.flatMap((s) => [s.title, ...s.details.map((d) => d.value)])] : [];
   const checked = o.html ? pageTextChecked(o.html, required) : null;
   const text = checked && checked.text.length >= 20 ? checked.text : o.text;
-  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
+  return { id: `p${n}`, kind: "page", url: o.finalUrl || url, fetchedAt: o.fetchedAt ?? now.toISOString(), contentHash: sha(text), text, structure, independent: true, ...(o.notice ? { notice: o.notice.slice(0, 120) } : {}), ...(checked && checked.loss.length ? { textLoss: checked.loss.slice(0, 10).map((x) => x.slice(0, 40)) } : {}) };
 }
 
 /** 本文がこの字数以内なら、全文をそのままAIに渡す（品質優先。長文で条件が抜粋の外に出て消える失敗の根本対策）。これを超える長文は、先頭の抜粋＋目次＋条件語の周辺＋参照（read）で全文に到達できる */
