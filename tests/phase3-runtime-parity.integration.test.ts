@@ -133,7 +133,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
       // 本番の記録（shadow_judgments）に、道具の提示状況・取得結果・終了理由が残る
       const j = (await admin.from("shadow_judgments").select("record,cost_jpy").eq("candidate_id", cs.id)).data?.[0] as { record: { trace: { tools: Record<string, string>; fetches: { host: string; outcome: string }[]; endReasons: Record<string, number>; pages: number }; liveFetch: boolean; search: boolean }; cost_jpy: number };
       expect(j.record.trace.tools).toMatchObject({ stored: "offered", liveFetch: "offered", search: "unavailable:no_provider", vision: "unavailable:no_images" });
-      expect(j.record.trace.fetches).toEqual([{ host: FIXTURES[i].host, outcome: "ok" }]);
+      expect(j.record.trace.fetches).toEqual([]); // 取得元ページは調査の前に事前取得・保存済み（調査の取得は保存全文で満たされ、再取得しない）
+      expect((j.record.trace as { prefetch?: string }).prefetch).toBe("stored");
       expect(j.record.liveFetch).toBe(true);
       expect(j.record.search).toBe(false);
       expect(Number(j.cost_jpy)).toBeLessThanOrEqual(3); // 1件上限
@@ -203,6 +204,37 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     await runShadow(recording().client, shadowEnv({ SHADOW_LIVE_FETCH: "" }));
     expect(await prefetchOf(c4.id)).toBe("not_permitted");
     expect(fetched.length).toBe(t2);
+    await clean();
+  });
+  it("⑪判断モデルはDBの設定（judge_model）で調査と別にできる。調査は従来のモデルのまま・判断だけが指定モデル・記録に両方・料金不明のモデルは採用しない（切り戻しはNULL）", async () => {
+    const run = async (judge: string | null, tag: string) => {
+      await clean();
+      await setSettings({ judge_model: judge, per_case_cap_jpy: 10, daily_budget_jpy: 30, total_budget_jpy: 100, monthly_budget_jpy: 100 });
+      const c = await mkCandidate(0, tag);
+      await enqueue(c);
+      const s = recording();
+      const models: Record<string, string[]> = {};
+      const orig = s.client.messages.create;
+      s.client.messages.create = (async (req: { model: string; tools?: { name: string }[] }, o?: unknown) => {
+        const k = req.tools?.[0]?.name ?? "none";
+        (models[k] ??= []).push(req.model);
+        return orig(req as never, o);
+      }) as typeof orig;
+      const r = await runShadow(s.client, shadowEnv());
+      expect(r.done).toBe(1);
+      const row = (await rowsOf(c.id))[0] as { model_id: string; input_hash: string };
+      return { models, modelId: row.model_id, hash: row.input_hash };
+    };
+    const a = await run("claude-sonnet-5-5", "jm-a");
+    expect(new Set(a.models.submit_research_turn)).toEqual(new Set(["claude-haiku-5-5"]));
+    expect(new Set(a.models.submit_registration_judgment)).toEqual(new Set(["claude-sonnet-5-5"]));
+    expect(a.modelId).toBe("claude-haiku-5-5+judge:claude-sonnet-5-5");
+    const b = await run(null, "jm-b");
+    expect(new Set(b.models.submit_registration_judgment)).toEqual(new Set(["claude-haiku-5-5"]));
+    expect(b.modelId).toBe("claude-haiku-5-5");
+    expect(b.hash).not.toBe(a.hash); // モデルを変えた比較は別の版として残る（同じ入力でも捨てられない）
+    const c = await run("claude-unknown-9-9", "jm-c");
+    expect(new Set(c.models.submit_registration_judgment)).toEqual(new Set(["claude-haiku-5-5"])); // 料金が分からないモデルは使わない
     await clean();
   });
   it("②実取得が許可されていない（SHADOW_LIVE_FETCH なし）と、取得せず、理由つきで記録する（黙って能力を落とさない）。保存した取得元の文章は注記つきで読める", async () => {

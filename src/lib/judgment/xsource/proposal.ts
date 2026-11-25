@@ -80,12 +80,12 @@ export function itemFingerprint(plan: Pick<ItemPlan, "groupLabel" | "itemText">)
 export const proposalKey = (candidateId: string, postId: string | null, itemNo: number): string => sha(`${candidateId}|${postId ?? ""}|${itemNo}`).slice(0, 24);
 
 /** 入力（項目の原文・リンクの出所・取得したページの内容）のハッシュ。同じなら再評価しても新しい版を作らない */
-export function inputHash(plan: ItemPlan, evidence: readonly Evidence[], protectedValues?: Record<string, string>): string {
+export function inputHash(plan: ItemPlan, evidence: readonly Evidence[], protectedValues?: Record<string, string>, modelId?: string | null): string {
   const pages = evidence.filter((e) => e.kind === "page").map((e) => e.contentHash).sort();
   // 人が確定した値（レビューの修正）も入力の一部: 修正が変わったら再評価の結果が変わりうるため、新しい版にする（古い版・レビューは残る）
   const prot = protectedValues ? Object.entries(protectedValues).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(";") : "";
   // プロンプト版も入力の一部: 版を上げた再評価は、同じ原文・同じページでも新しい版として残す（版別に比較でき、費用をかけた結果が「変更なし」で捨てられない）
-  return sha(`${plan.seedText}|${(plan.notes ?? []).join("¦")}|${pages.join(",")}|${evidence.filter((e) => e.kind === "page").map((e) => e.notice ?? "").sort().join("¦")}|${prot}|${PROPOSAL_PROMPT_VERSION}`).slice(0, 16);
+  return sha(`${plan.seedText}|${(plan.notes ?? []).join("¦")}|${pages.join(",")}|${evidence.filter((e) => e.kind === "page").map((e) => e.notice ?? "").sort().join("¦")}|${prot}|${PROPOSAL_PROMPT_VERSION}${modelId ? `|${modelId}` : ""}`).slice(0, 16); // 判断モデルも入力の一部: モデルを変えた比較は、同じ原文・同じページでも別の版として残す
 }
 
 /** 値が引用・本文から導けるかの機械的な分類（正しさの判定ではない）。日付・数字は書式の違い（11/27・11月27日・2026年11月27日）を吸収して照合する */
@@ -203,7 +203,7 @@ export function toProposalRecords(a: {
     return {
       candidateId: a.candidateId,
       proposalKey: proposalKey(a.candidateId, a.post.postId, plan.itemNo),
-      inputHash: inputHash(plan, result.evidence, a.protectedFor?.(plan.itemNo, plan)),
+      inputHash: inputHash(plan, result.evidence, a.protectedFor?.(plan.itemNo, plan), a.modelId),
       postId: a.post.postId.slice(0, 40),
       itemNo: plan.itemNo,
       itemLabel: plan.groupLabel.slice(0, 120),

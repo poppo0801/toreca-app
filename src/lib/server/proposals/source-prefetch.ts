@@ -8,7 +8,7 @@
 import { redact } from "@/lib/case-model/redact";
 import { pageEvidenceFromFetch, type FetchOutcome } from "@/lib/judgment/xsource/research-loop";
 import { documentFromEvidence, loadBestDocument, saveDocuments } from "@/lib/server/proposals/evidence-store";
-import { postFromCandidate, type CandidateRow } from "@/lib/server/proposals/generate";
+import { postFromCandidate, type CandidateRow } from "./generate";
 import type { Db } from "@/lib/server/lottery-service";
 import { createHash } from "node:crypto";
 
