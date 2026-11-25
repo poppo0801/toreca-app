@@ -81,3 +81,18 @@ describe("判断のAI: 項目数の上限", () => {
     expect(diags).toContain("fields_truncated");
   });
 });
+
+describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクライアントでは検出できない、AIへの指示そのものの契約）", () => {
+  it("調査AIの指示は、『収集時の取得元ページ』を、応募先URLとは別の手掛かりとして、検索の可否にかかわらず先に取得して確認してよいと明示する。取得元ページだけで応募先・応募単位を確定しない", () => {
+    expect(RESEARCH_SYSTEM).toContain("収集時の取得元ページ");
+    expect(RESEARCH_SYSTEM).toContain("応募先URLとは別の意味");
+    expect(RESEARCH_SYSTEM).toContain("検索の可否にかかわらず、まずそのページを取得して確認してよい");
+    expect(RESEARCH_SYSTEM).toContain("取得元ページがあることだけで、応募先や応募単位を確定しない");
+    // 「検索が使えないときだけ到達不能」の規則は、取得元ページがある場合の例外を持つ（取得元ページがあるのに取得せず終了しない）
+    expect(RESEARCH_SYSTEM).toContain("3dの「収集時の取得元ページ」が与えられているときは、先にそれを取得して確認する");
+  });
+  it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
+    const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-4");
+  });
+});
