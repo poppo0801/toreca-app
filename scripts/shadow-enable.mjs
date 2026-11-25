@@ -127,17 +127,19 @@ const reseedOpt = args.find((a) => a.startsWith("--reseed="));
 if (reseedOpt) {
   // 再評価: すでに実AIの登録案がある候補を、別のジョブ識別（原文ハッシュの先頭24桁。通常は32桁）でキューへ入れる。過去の登録案・判断は保持され、入力が変わった分は新しい版になる（版別に比較できる）。
   const n = Math.max(1, Math.min(10, Number(reseedOpt.slice(9)) || 3));
+  const HL = Math.max(8, Math.min(32, Number(opt("hash-len")) || 24)); // 再評価のたびに別のジョブ識別にする（24→20→16…。通常は32桁）
+  const only = (opt("candidates") ?? "").split(",").filter(Boolean); // 候補IDの先頭（短縮）で絞る（省略時は、実AIの登録案がある古い順）
   const ps = (await db.from("registration_proposals").select("candidate_id,created_at").eq("household_id", hid).eq("mode", "real").order("created_at", { ascending: true })).data ?? [];
-  const ids = [...new Set(ps.map((p) => p.candidate_id))].slice(0, n);
+  const ids = [...new Set(ps.map((p) => p.candidate_id))].filter((id) => only.length === 0 || only.some((o) => id.startsWith(o))).slice(0, n);
   let ok = 0;
   for (const id of ids) {
     const c = (await db.from("collection_candidates").select("id,last_good").eq("id", id).maybeSingle()).data;
     const h = c?.last_good?.evidence?.hash;
     if (typeof h !== "string" || h.length < 32) continue;
-    const r = await db.rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h.slice(0, 24) });
+    const r = await db.rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h.slice(0, HL) });
     if (r.data === true) ok++;
     // 再評価の候補を先に処理する（キューの並びだけを変える。ジョブの状態・回数は変えない）
-    await db.from("shadow_jobs").update({ next_run_at: "2000-01-01T00:00:00Z" }).eq("household_id", hid).eq("candidate_id", c.id).eq("evidence_hash", h.slice(0, 24)).eq("status", "queued");
+    await db.from("shadow_jobs").update({ next_run_at: "2000-01-01T00:00:00Z" }).eq("household_id", hid).eq("candidate_id", c.id).eq("evidence_hash", h.slice(0, HL)).eq("status", "queued");
   }
   console.log(`再評価として投入しました: ${ok}件（既存の登録案がある候補。過去の登録案は保持）`);
   process.exit(0);

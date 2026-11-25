@@ -12,6 +12,8 @@ import { CallBudget, CaseBudget } from "@/lib/judgment/call-budget";
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import { canonUrl } from "@/lib/judgment/xsource/normalize";
 import { isShadowTool } from "@/lib/judgment/xsource/shadow-tool-mark";
+import type { UserRegion } from "@/lib/judgment/xsource/claim-semantics";
+import { refineTextLoss } from "@/lib/judgment/xsource/html-text";
 import { itemFingerprint, proposalKey, toProposalRecords, type ProposalMode, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { mockRegistrationJudge, mockResearchAgent } from "@/lib/judgment/xsource/proposal-mock";
 import type { FetchOutcome, RegistrationJudge, ResearchAgent, ResearchLimits, ResearchTools } from "@/lib/judgment/xsource/research-loop";
@@ -82,18 +84,28 @@ export function contextNotes(e: NonNullable<ReturnType<typeof evidenceFromLastGo
 }
 
 /**
- * 利用者の対象地域の条件（既存の収集設定: 都道府県・オンライン可否）を、AIへの観察として渡す注記にする。設定の読み取りに失敗・未設定なら注記なし（推測で補わない）。
- * 「応募機会が実在するか」（登録案の判断）と「利用者に適合するか」（地域）は別の軸。地域外だけを理由に除外させず、適合は fit_region に根拠つきで記録させる。
+ * 利用者の対象地域（既存の収集設定: 都道府県・オンライン可否）。固定の店名・県名のルールではなく、設定から読む。読み取りに失敗・未設定なら null（推測で補わない）。
  */
-export async function regionFitNote(db: Db, householdId: string): Promise<string | null> {
+export async function loadUserRegion(db: Db, householdId: string): Promise<UserRegion | null> {
   try {
     const { data } = await (db as unknown as { from: (n: string) => { select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { prefectures?: string[] | null; include_online?: boolean | null } | null }> } } } }).from("collection_settings").select("prefectures,include_online").eq("household_id", householdId).maybeSingle();
     if (!data) return null;
-    const prefs = (data.prefectures ?? []).filter((p) => typeof p === "string" && p.length <= 8).slice(0, 47);
-    return `利用者の対象地域の設定（既存の収集設定）: ${prefs.length ? prefs.join("・") : "都道府県の指定なし"}／オンライン抽選: ${data.include_online ? "対象" : "対象外"}。これは応募機会が実在するかの判断とは別の軸（適合）。地域が合わないことだけを理由に除外しない。適合は fit_region 項目に、適合・不適合・不明のいずれかと根拠（basis）を書く`.slice(0, 380);
+    return { prefectures: (data.prefectures ?? []).filter((p) => typeof p === "string" && p.length <= 8).slice(0, 47), includeOnline: !!data.include_online };
   } catch {
     return null;
   }
+}
+
+/**
+ * 地域の設定を、AIへの観察として渡す注記にする。「応募機会が実在するか」と「利用者に適合するか」は別の軸:
+ *  - 適合は fit_region に（適合・不適合・不明と根拠）。実在は他の項目と判断に。
+ *  - 店舗の所在地が設定の地域外で、通販・発送・オンライン応募などで応募・受取できる記載が無いと根拠で確認できたときは、利用者向けの除外（exclude）にしてよい。
+ *    exclude_reason に「対象地域外」と、所在地が書かれた原文の引用（証拠IDつき）を書く。このとき応募機会の実在は別に記録する（除外は実在の否定ではない）。曖昧・未確認なら、追加調査か暫定。
+ */
+export function regionFitNote(region: UserRegion | null): string | null {
+  if (!region) return null;
+  const prefs = region.prefectures;
+  return `利用者の対象地域の設定（既存の収集設定）: ${prefs.length ? prefs.join("・") : "都道府県の指定なし（全国）"}／オンライン抽選: ${region.includeOnline ? "対象" : "対象外"}。応募機会の実在と利用者への適合は別の軸。適合は fit_region に適合・不適合・不明と根拠を書く。店舗の所在地が設定の地域外で、通販・発送・オンライン応募など地域外から応募・受取できる記載が無いと根拠で確認できたときは exclude とし、exclude_reason に「対象地域外」と所在地が書かれた原文の引用を書き、応募機会の実在は別に記録する。地域の表示だけで機会の実在を否定しない。曖昧・未確認なら追加で調べるか暫定`.slice(0, 700);
 }
 
 export function postFromCandidate(c: CandidateRow): StoredXPost | null {
@@ -106,7 +118,7 @@ export function postFromCandidate(c: CandidateRow): StoredXPost | null {
 }
 
 /** 保存済みの全文（整形後）から取得結果を作る。HTMLは保存しないため、本文と構造化の観察をそのまま使う */
-const fromDocument = (d: StoredDocument): FetchOutcome => ({ ok: true, finalUrl: d.url, html: "", text: d.text, cleaned: true, structure: d.structure, ...(d.textLoss?.length ? { textLoss: d.textLoss } : {}), ...(d.truncated ? { notice: `保存済みの本文も切り詰められている（${d.truncatedReason ?? "上限"}）。後半は確認できない` } : {}) });
+const fromDocument = (d: StoredDocument): Extract<FetchOutcome, { ok: true }> => ({ ok: true, finalUrl: d.url, html: "", text: d.text, cleaned: true, structure: d.structure, ...(refineTextLoss(d.textLoss ?? undefined, d.text).length ? { textLoss: refineTextLoss(d.textLoss ?? undefined, d.text) } : {}), ...(d.truncated ? { notice: `保存済みの本文も切り詰められている（${d.truncatedReason ?? "上限"}）。後半は確認できない` } : {}) });
 
 const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -202,7 +214,8 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
     ? { ...post0, notes: [...(post0.notes ?? []).filter((n) => !n.startsWith("収集時のAIが画像から読み取った情報") && n !== NOTE_IMAGE_UNREAD), ...imageAnalysis.notes].slice(0, 16) }
     : post0;
   // 利用者の対象地域（既存の収集設定）: 「応募機会の実在」とは別軸の「適合」として渡す。地域が合わないことだけを除外の根拠にしない
-  const fitNote = await regionFitNote(a.db, a.householdId);
+  const userRegion = await loadUserRegion(a.db, a.householdId);
+  const fitNote = regionFitNote(userRegion);
   const post = fitNote ? { ...post1, notes: [...(post1.notes ?? []), fitNote].slice(0, 16) } : post1;
   // 調査経験: 類似ページの検証済みの経験があれば、最初に見せる位置の提案（仮説）を作る。位置の優先だけで、全文の参照可能性は変わらない
   const experiences = deps.learn === false ? [] : await loadExperiences(a.db, a.householdId);
@@ -227,6 +240,12 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       // 抜粋が全文より短い（収集時に fullChars を記録）ページは切り詰め。記録が無い古い保存は、抜粋の上限に達していれば切り詰めとみなす
       const truncated = !!hit && (hit.truncated === true || (hit.fullChars !== undefined && hit.fullChars > hit.text.length) || (hit.fullChars === undefined && hit.text.length >= 3000));
       if (hit && !truncated) return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
+      // 取得元ページ（収集時に取得したページ）: 収集時に保存した**全文**（取得時刻つき）を最優先で使う。収集の判断と同じ時点の証拠で、再取得より確実（ページの変化・消失・終了表示に左右されない）で、外部アクセスも要らない。
+      // 保存が無い・切り詰められているときだけ、実取得へ進む。現在の状態の確認が必要なら、保存全文のあとで別に実取得できる（同じURLの再取得はしない規則のため、現在状態の確認は別の機会に行う）
+      if (!hit && post0.sourcePage && canonUrl(u).key === canonUrl(post0.sourcePage.url).key) {
+        const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
+        if (saved && !saved.truncated && saved.text.length > (stored?.text.length ?? 0)) return { ...fromDocument(saved), notice: `収集時（${saved.fetchedAt}）に保存されたページ全文（${saved.textChars}字）。現在の状態ではない` };
+      }
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);
         if (live && live.ok) return live;
@@ -272,6 +291,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       now: clock(),
       shouldStop: deps.shouldStop,
       registerRequiresUnit: true,
+      ...(userRegion ? { userRegion } : {}),
       protectedFor,
       ...(deps.perItemCapJpy ? { budgetFor: () => new CaseBudget(budget, deps.perItemCapJpy!) } : {}),
     });
