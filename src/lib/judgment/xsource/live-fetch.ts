@@ -11,6 +11,7 @@ import "server-only";
 import { fetchRespectingRobots, type SafeFetchOptions, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { precheckFetchTarget } from "../fetch-safety";
 import { pageText } from "./html-text";
+import { markShadowTool } from "./shadow-tool-mark";
 import type { FetchOutcome } from "./research-loop";
 
 export type LiveOutcome = "ok" | "ended_http" | "robots" | "auth_required" | "login_page" | "denied_target" | "suppressed_host" | "limit" | "timeout" | "network" | "unsupported" | "http_error";
@@ -46,8 +47,26 @@ export function liveFetchAllowed(env: Record<string, string | undefined>): { ok:
   return { ok: true };
 }
 
-export function makeLivePublicFetch(opts: LiveFetchOptions): { fetchPage: (url: string) => Promise<FetchOutcome>; log: LiveRecord[]; fetchCount: () => number } {
-  const gate = liveFetchAllowed(opts.env);
+/**
+ * 本番シャドー（Phase 3）の実ページ取得の許可。開発の許可（liveFetchAllowed）とは独立。
+ * 本番（VERCEL_ENV=production）かつ 明示許可（SHADOW_LIVE_FETCH=allow）のときだけ。取得部品は開発と同じ（SSRF・リダイレクトごとの検査・robots・サイズ/時間・Cookieなし）。
+ * 多重の本番ゲート（productionPreviewPermission＝承認・世帯・停止・予算）は呼び出し側（shadow/proposal-job）が先に通す。
+ */
+export function shadowLiveFetchAllowed(env: Record<string, string | undefined>): { ok: true } | { ok: false; reason: string } {
+  if (env.VERCEL_ENV !== "production") return { ok: false, reason: "本番の実行環境でのみ使えます" };
+  if (env.SHADOW_LIVE_FETCH !== "allow") return { ok: false, reason: "シャドーの実ページ取得は許可されていません（SHADOW_LIVE_FETCH=allow が必要）" };
+  return { ok: true };
+}
+
+/** 本番シャドーの許可を通して作る取得関数（印つき。偽造防止: 印の無い関数は、本番シャドーの許可証つきの生成に渡せない） */
+export function makeShadowLivePublicFetch(opts: LiveFetchOptions): ReturnType<typeof makeLivePublicFetch> {
+  const r = makeLivePublicFetch({ ...opts, gateKind: "shadow" });
+  markShadowTool(r.fetchPage);
+  return r;
+}
+
+export function makeLivePublicFetch(opts: LiveFetchOptions & { gateKind?: "dev" | "shadow" }): { fetchPage: (url: string) => Promise<FetchOutcome>; log: LiveRecord[]; fetchCount: () => number } {
+  const gate = opts.gateKind === "shadow" ? shadowLiveFetchAllowed(opts.env) : liveFetchAllowed(opts.env);
   if (!gate.ok) throw new Error(gate.reason);
   const interval = opts.minIntervalMs ?? 1500;
   const maxFetches = opts.maxFetches ?? 40;

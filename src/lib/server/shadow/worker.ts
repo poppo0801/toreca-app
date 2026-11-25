@@ -129,6 +129,31 @@ class CaptureSink implements ShadowSink {
   }
 }
 
+/**
+ * 未確定費用の引当（円）。この実行で確保したジョブ以外で、開始した試行の数（attempts）が記録（shadow_judgments）の数を上回るぶん×1件上限。
+ * 実行が途中で打ち切られた（Vercelの停止・クラッシュ）試行は、費用が記録されないことがあるため、記録が追いつくまでは使ったものとして扱う（過少計上で上限を超えない）。
+ * 読み取りに失敗したら、保守的に1件上限ぶんを引く。
+ */
+async function unconfirmedReserveInner(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[]): Promise<number> {
+  const jobs = await table(db, "shadow_jobs").select("id,attempts,status").eq("household_id", householdId).gt("attempts", 0).in("status", ["queued", "leased", "failed", "done"]).limit(500);
+  const rec = await table(db, "shadow_judgments").select("job_id").eq("household_id", householdId).not("job_id", "is", null).limit(2000);
+  if (jobs.error || rec.error) return perCaseCapJpy;
+  const recorded = new Map<string, number>();
+  for (const r of (rec.data ?? []) as { job_id: string }[]) recorded.set(r.job_id, (recorded.get(r.job_id) ?? 0) + 1);
+  let n = 0;
+  const running = new Set(exceptJobIds);
+  // この実行で確保したジョブは、いま実行中の試行（今回ぶん）を除いた「以前の試行」だけを数える
+  for (const j of (jobs.data ?? []) as { id: string; attempts: number }[]) n += Math.max(0, j.attempts - (running.has(j.id) ? 1 : 0) - (recorded.get(j.id) ?? 0));
+  return Math.round(n * perCaseCapJpy * 100) / 100;
+}
+export async function unconfirmedReserveJpy(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[]): Promise<number> {
+  try {
+    return await unconfirmedReserveInner(db, householdId, perCaseCapJpy, exceptJobIds);
+  } catch {
+    return perCaseCapJpy; // 読み取りの例外でも止めず、保守的に1件上限ぶんを引き当てる
+  }
+}
+
 export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWorkerResult> {
   const { db, workerId } = deps;
   // 判断モデルの全ての呼び出し（再試行・再評価を含む）を、共通のハード上限で数える
@@ -228,6 +253,12 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           if (tot.error) totalErr = true;
           else left1 = Math.min(left1, st.total_budget_jpy - Number(tot.data ?? 0)); // 通算の上限
         }
+        // 未確定費用の保守的な引当: 開始した試行（attempts）より記録（shadow_judgments）が少ないジョブ＝実行が途中で打ち切られ、費用が記録されていない可能性。1試行あたり1件上限を残額から差し引く
+        let unconfirmed = 0;
+        if (!totalErr) {
+          unconfirmed = await unconfirmedReserveJpy(db, j.household_id, st.per_case_cap_jpy, jobs.map((x) => x.id)); // この実行で確保したジョブは対象外（実行中）
+          left1 -= unconfirmed;
+        }
         if (day1.error || month1.error || totalErr || !(left1 > 0.5)) {
           await requeue(j, day1.error || month1.error || totalErr ? new Date(d1.getTime() + 10 * 60_000) : nextJstDay(d1), "budget", false);
           bump(res.byReason, "budget");
@@ -237,6 +268,19 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
         const pr = await deps.proposalJob({ householdId: j.household_id, candidate: { id: cand.id, x_post_id: cand.x_post_id ?? null, source_url: cand.source_url ?? null, last_good: cand.last_good }, settings: st, spentTodayJpy: spentDay, remainingJpy: left1 });
         if (!pr.ok) {
           bump(res.byReason, pr.reason.slice(0, 40));
+          // 失敗でも、すでにかかった費用・実行の痕跡は記録する（記録しないと予算から漏れる）。AIを呼んでいない失敗（費用0）は記録しない
+          if ((pr.costJpy ?? 0) > 0) {
+            const failRow = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: "error", attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: 0, record: { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: "error", reason: pr.reason.slice(0, 40), costJpy: pr.costJpy, ...(pr.trace ? { trace: pr.trace } : {}) } };
+            let insF = await table(db, "shadow_judgments").insert(failRow);
+            for (let k = 0; k < 2 && insF.error; k++) insF = await table(db, "shadow_judgments").insert(failRow);
+            if (insF.error) {
+              await table(db, "shadow_settings").update({ enabled: false }).eq("household_id", j.household_id).then(() => undefined, () => undefined);
+              for (const r of jobs.slice(n)) await requeue(r, new Date(now().getTime() + 60 * 60_000), "record_failed", false);
+              bump(res.byReason, "record_failed");
+              return { ...res, stoppedBy: "record_failed" };
+            }
+            res.spentJpy += pr.costJpy ?? 0;
+          }
           if (pr.fatal) {
             // 認証・利用上限: 以降を呼ばない。このジョブと残りは罰なしで戻す（再試行の連打をしない）
             for (const r of jobs.slice(n)) await requeue(r, new Date(now().getTime() + 60 * 60_000), pr.fatal, false);
@@ -249,7 +293,7 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           else await requeue(j, new Date(now().getTime() + Math.min(60, 2 ** j.attempts) * 60_000), pr.reason.slice(0, 60), true);
           continue;
         }
-        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: false, liveFetch: false };
+        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace };
         const rowP = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: pr.status, attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: pr.decisions.register ?? 0, record: recP };
         // 費用の記録は予算の根拠。失敗したら再試行し、それでも記録できなければ、この世帯のシャドーを停止して実行を止める（記録できない費用を重ねない）
         let insP = await table(db, "shadow_judgments").insert(rowP);

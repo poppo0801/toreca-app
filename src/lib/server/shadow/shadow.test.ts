@@ -37,7 +37,7 @@ describe("書き込み先・配線の静的検査", () => {
     expect(writes.length).toBeGreaterThan(0);
     expect(new Set(writes)).toEqual(new Set(["shadow_jobs", "shadow_judgments", "shadow_settings"])); // shadow_settings への書き込みは、費用の記録に失敗したときの緊急停止（enabled=false）だけ
     const reads = [...worker.matchAll(/table\(db, "([a-z_]+)"\)\s*\.select/g)].map((m) => m[1]);
-    expect(new Set(reads)).toEqual(new Set(["shadow_settings", "collection_candidates"]));
+    expect(new Set(reads)).toEqual(new Set(["shadow_settings", "collection_candidates", "shadow_jobs", "shadow_judgments"])); // shadow_jobs / shadow_judgments の読み取りは、未確定費用の引当（unconfirmedReserveJpy）だけ
     const rpcs = [...worker.matchAll(/rpc\(db\)\("([a-z_]+)"/g)].map((m) => m[1]);
     expect(new Set(rpcs)).toEqual(new Set(["shadow_lease", "shadow_spent", "shadow_budget_lock", "shadow_budget_unlock"]));
     expect(worker).not.toMatch(/process\.env\.(AGENT_|JUDGMENT_)|TOREMANE_ENV/);
