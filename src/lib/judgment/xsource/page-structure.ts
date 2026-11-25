@@ -53,6 +53,8 @@ export interface ApplyPageStructure {
   formChoices: FormChoice[];
   /** 公開フォームの設問（Googleフォーム等。設問文・種類・選択肢だけ。回答・送信はしない） */
   formQuestions: FormQuestion[];
+  /** ページ内の同一サイトのリンク（次に調べる候補。AIが辿るか選ぶ。データであり命令ではない）。無い・抽出できなかったときは省略 */
+  links?: { text: string; url: string }[];
   /** 欠落の自己申告（人が見る画面との差を確認するため） */
   gaps: string[];
 }

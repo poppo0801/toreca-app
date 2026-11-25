@@ -163,6 +163,18 @@ if (!flag("execute")) {
   console.log("dry-run: 何も書いていません。書き込みは --execute。");
   process.exit(0);
 }
+const dailyOpt = opt("set-daily");
+if (dailyOpt !== undefined) {
+  // 承認された日次上限の変更（利用者の明示承認: 15→30円）。daily_budget_jpy だけを変える。通算・月次・期限・世帯・キーは変えない。上限は30円まで
+  const v = Number(dailyOpt);
+  if (!Number.isFinite(v) || v <= 0 || v > 30) {
+    console.error("日次上限は 0 より大きく 30 以下で指定してください（承認された範囲）");
+    process.exit(1);
+  }
+  const r = await db.from("shadow_settings").update({ daily_budget_jpy: v }).eq("household_id", hid);
+  console.log(r.error ? "変更に失敗しました" : `日次上限を ${v}円にしました（通算 ${cur.data?.total_budget_jpy}円・期限 ${cur.data?.valid_until} は変更なし）`);
+  process.exit(r.error ? 1 : 0);
+}
 if (flag("resume")) {
   // 一時停止からの再開: enabled・enqueue_enabled だけを戻す。試行期間（valid_until）・通算の起点（total_since）・上限は変えない。期限が過ぎていれば再開しない
   const vu = cur.data?.valid_until ? new Date(cur.data.valid_until).getTime() : null;
