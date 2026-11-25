@@ -74,6 +74,21 @@ if (flag("status")) {
   const js = (await db.from("shadow_judgments").select("status,cost_jpy,record").eq("household_id", hid).gte("created_at", cur.data?.total_since ?? sinceH(72))).data ?? [];
   const diag = {};
   for (const j of js) for (const [k, v] of Object.entries(j.record?.diagnostics ?? {})) diag[k] = (diag[k] ?? 0) + v;
+  const tr = { tools: {}, fetches: {}, endReasons: {}, urlStatuses: {}, pages: 0, turns: 0, n: 0 };
+  for (const j of js) {
+    const t = j.record?.trace;
+    if (!t) continue;
+    tr.n++;
+    for (const [k, v] of Object.entries(t.tools ?? {})) tr.tools[`${k}=${v}`] = (tr.tools[`${k}=${v}`] ?? 0) + 1;
+    for (const x of t.fetches ?? []) tr.fetches[x.outcome] = (tr.fetches[x.outcome] ?? 0) + 1;
+    for (const [k, v] of Object.entries(t.endReasons ?? {})) tr.endReasons[k] = (tr.endReasons[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(t.urlStatuses ?? {})) tr.urlStatuses[k] = (tr.urlStatuses[k] ?? 0) + v;
+    tr.pages += t.pages ?? 0;
+    tr.turns += t.turns ?? 0;
+  }
+  console.log("実行トレース（道具の提示・取得の結果・終了理由・URL状態。件数のみ）:", JSON.stringify(tr));
+  const ver = (await db.from("registration_proposals").select("candidate_id,version,decision,verified,superseded_at,created_at,cost_jpy").eq("household_id", hid).eq("mode", "real").order("created_at", { ascending: true })).data ?? [];
+  console.log("登録案の版（過去の版も保持）:", JSON.stringify(ver.map((p) => ({ c: short(p.candidate_id), v: p.version, d: p.decision, ok: p.verified, cur: !p.superseded_at, yen: Number(p.cost_jpy) }))));
   console.log(`判断出力・APIの診断: ${JSON.stringify(diag)}／1ジョブ最大費用: ${Math.max(0, ...js.map((j) => Number(j.cost_jpy ?? 0)))}円／平均: ${js.length ? (js.reduce((a, j) => a + Number(j.cost_jpy ?? 0), 0) / js.length).toFixed(3) : 0}円`);
   process.exit(0);
 }
@@ -106,6 +121,23 @@ if (seedOpt) {
     if (ok >= n) break;
   }
   console.log(`投入しました: ${ok}件（最近の収集済み候補）`);
+  process.exit(0);
+}
+const reseedOpt = args.find((a) => a.startsWith("--reseed="));
+if (reseedOpt) {
+  // 再評価: すでに実AIの登録案がある候補を、別のジョブ識別（原文ハッシュの先頭24桁。通常は32桁）でキューへ入れる。過去の登録案・判断は保持され、入力が変わった分は新しい版になる（版別に比較できる）。
+  const n = Math.max(1, Math.min(10, Number(reseedOpt.slice(9)) || 3));
+  const ps = (await db.from("registration_proposals").select("candidate_id,created_at").eq("household_id", hid).eq("mode", "real").order("created_at", { ascending: true })).data ?? [];
+  const ids = [...new Set(ps.map((p) => p.candidate_id))].slice(0, n);
+  let ok = 0;
+  for (const id of ids) {
+    const c = (await db.from("collection_candidates").select("id,last_good").eq("id", id).maybeSingle()).data;
+    const h = c?.last_good?.evidence?.hash;
+    if (typeof h !== "string" || h.length < 32) continue;
+    const r = await db.rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h.slice(0, 24) });
+    if (r.data === true) ok++;
+  }
+  console.log(`再評価として投入しました: ${ok}件（既存の登録案がある候補。過去の登録案は保持）`);
   process.exit(0);
 }
 if (flag("cron-disable")) {
