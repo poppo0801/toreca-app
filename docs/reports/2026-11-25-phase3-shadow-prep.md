@@ -2,6 +2,7 @@
 
 作成: 2026-11-25／指示書: `docs/implementation/PHASE_3_PRODUCTION_SHADOW_ROLLOUT.md`（文書PR #132）／統合ブランチ: `integration/phase3-shadow-prep`（#131 の head `40fc6b3` ＋ main `94f5a7a` を取り込み）
 **今回やっていないこと（すべて未実施）**: AI実装の main へのマージ／本番DBへの移行適用／本番の環境変数・ジョブ・cron の設定／有料APIの実行（費用 0円）／既存goldの変更／本番データの書き込み。本番DBに触れたのは、`release-db.mjs plan`（読み取り専用の差分確認）の1回だけ。
+**統合PR**: #133（base=`main`・head=`integration/phase3-shadow-prep`・**未マージ**）／GitHub Actions `check`: **成功**（head `6758e13` 時点。以降は本報告書のみの追記）
 **状態**: 実装済み・ローカルでテスト済み（下記）／PRマージなし／本番反映なし／実データ検証なし（実AIで本番の候補を処理した実績は 0）。
 
 ## 1. 結論（先に）
