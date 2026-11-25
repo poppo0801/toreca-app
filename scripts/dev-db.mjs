@@ -80,6 +80,9 @@ if (cmd === "up") {
     process.exit(1);
   }
   // db reset はこの作業フォルダのローカルDBだけに作用する（--local 固定。--linked は使わない）
+  // 有料試験の出力・gold・費用台帳が保全されていなければ中止する（db reset はローカルDBの全データを消す）
+  const { guardEvalData } = await import("./lib/eval-guard.mjs");
+  await guardEvalData("db:reset", { NEXT_PUBLIC_SUPABASE_URL: env.API_URL, SUPABASE_SERVICE_ROLE_KEY: env.SERVICE_ROLE_KEY });
   const r = sb(["db", "reset", "--local"]);
   if (r.status !== 0) process.exit(r.status ?? 1);
   console.log("初期化しました。テストデータは npm run db:seed");

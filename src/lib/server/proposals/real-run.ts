@@ -30,7 +30,7 @@ export type RunEvent =
   | { kind: "candidate_failed"; candidate: string; reason: string }
   | { kind: "run_stop"; reason: StopReason; processed: number; costJpy: number };
 
-export type StopReason = "completed" | "cancelled" | "auth_error" | "rate_limited" | "consecutive_failures" | "budget_exhausted" | "preflight_failed" | "locked" | "not_permitted";
+export type StopReason = "completed" | "cancelled" | "auth_error" | "rate_limited" | "consecutive_failures" | "budget_exhausted" | "preflight_failed" | "locked" | "not_permitted" | "persist_failed";
 
 export interface RealRunSummary {
   stopReason: StopReason;
@@ -75,6 +75,11 @@ export interface RealRunOptions {
   maxConsecutiveFailures?: number;
   shouldStop?: () => boolean;
   onEvent?: (e: RunEvent) => void;
+  /**
+   * 候補1件の処理が終わるたびに（実行の終了を待たず）呼ばれ、結果を耐障害的に保存する。完了を待つ。
+   * 保存に失敗したら、以降の有料呼び出しを止める（保存できない結果に費用をかけ続けない。stopReason=persist_failed）。
+   */
+  afterCandidate?: (a: { candidate: CandidateRow; ok: boolean; costJpy: number; reason?: string }) => Promise<void>;
   lockPath?: string;
   now?: () => Date;
 }
@@ -194,6 +199,13 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         consecutive = diagsThisCandidate > 0 && r.records.every((x) => x.decision === "none") ? consecutive + 1 : 0;
       }
       base.costJpy = Math.round(budget.costJpy * 10_000) / 10_000;
+      if (o.afterCandidate) {
+        try {
+          await o.afterCandidate({ candidate: c, ok: r.ok, costJpy: r.ok ? r.costJpy : 0, ...(r.ok ? {} : { reason: r.reason }) });
+        } catch {
+          return finish("persist_failed");
+        }
+      }
       if (consecutive >= maxConsecutive) return finish("consecutive_failures");
     }
     return finish("completed");

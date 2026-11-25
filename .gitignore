@@ -54,3 +54,5 @@ eval/phase2-compare/*-backups/
 eval/phase2-compare/*.local.md
 e2e/.gold-review
 e2e/.gold-fixture
+
+eval/phase2-compare/preserved/
