@@ -135,7 +135,7 @@ class CaptureSink implements ShadowSink {
  * 読み取りに失敗したら、保守的に1件上限ぶんを引く。
  */
 async function unconfirmedReserveInner(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[]): Promise<number> {
-  const jobs = await table(db, "shadow_jobs").select("id,attempts,status").eq("household_id", householdId).gt("attempts", 0).in("status", ["queued", "leased", "failed", "done"]).limit(500);
+  const jobs = await table(db, "shadow_jobs").select("id,attempts,status,lease_until").eq("household_id", householdId).gt("attempts", 0).in("status", ["queued", "leased", "failed", "done"]).limit(500);
   const rec = await table(db, "shadow_judgments").select("job_id").eq("household_id", householdId).not("job_id", "is", null).limit(2000);
   if (jobs.error || rec.error) return perCaseCapJpy;
   const recorded = new Map<string, number>();
@@ -143,7 +143,12 @@ async function unconfirmedReserveInner(db: Db, householdId: string, perCaseCapJp
   let n = 0;
   const running = new Set(exceptJobIds);
   // この実行で確保したジョブは、いま実行中の試行（今回ぶん）を除いた「以前の試行」だけを数える
-  for (const j of (jobs.data ?? []) as { id: string; attempts: number }[]) n += Math.max(0, j.attempts - (running.has(j.id) ? 1 : 0) - (recorded.get(j.id) ?? 0));
+  const nowMs = Date.now();
+  for (const j of (jobs.data ?? []) as { id: string; attempts: number; status: string; lease_until: string | null }[]) {
+    // 別の実行が**いま**リース中のジョブ（期限内）は、その実行が完了時に費用を記録する（費用判断はロックで直列化済み）。引き当てるのは、期限が切れても記録がない＝打ち切られた試行だけ
+    if (j.status === "leased" && j.lease_until && new Date(j.lease_until).getTime() > nowMs && !running.has(j.id)) continue;
+    n += Math.max(0, j.attempts - (running.has(j.id) ? 1 : 0) - (recorded.get(j.id) ?? 0));
+  }
   return Math.round(n * perCaseCapJpy * 100) / 100;
 }
 export async function unconfirmedReserveJpy(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[]): Promise<number> {
