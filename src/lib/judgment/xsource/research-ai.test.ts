@@ -111,7 +111,7 @@ describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクラ
   });
   it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
     const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
-    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-7");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-8");
   });
 });
 
@@ -173,5 +173,15 @@ describe("出力の安定化（Phase 3 FOUNDATION_RECOVERY）", () => {
     expect(out.properties.b.maxItems).toBeUndefined();
     expect(out.properties.b.items.additionalProperties).toBe(false);
     expect((src.properties.a as { maxLength: number }).maxLength).toBe(5);
+  });
+});
+
+describe("応募単位とお1人様の上限の分離（Phase 3 FOUNDATION_RECOVERY）", () => {
+  it("判断の指示は、応募単位（受付枠の構造）とお1人様の上限（口数）を別の事実として扱い、上限が書かれていないことを理由に暫定にしない・値を捏造しない・未記載を『上限なし』としない", () => {
+    expect(JUDGE_SYSTEM).toContain("応募単位は「応募の機会の構造」");
+    expect(JUDGE_SYSTEM).toContain("per_person_limit");
+    expect(JUDGE_SYSTEM).toContain("書かれていないことは「上限なし」ではない");
+    expect(JUDGE_SYSTEM).toContain("それだけを理由に暫定にしない");
+    expect(JUDGE_SYSTEM).toContain("受付枠が複数ある・構造が読み取れない場合は従来どおり");
   });
 });
