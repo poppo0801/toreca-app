@@ -684,6 +684,7 @@ export async function runResearch(args: {
       output = null; // 例外でも予約額を計上して解放し、実行不可として扱う
     }
     js.finish(output?.costJpy ?? null);
+    if (!output && advisoryPrev) { output = advisoryPrev.output; proposals = advisoryPrev.proposals; warnings = advisoryPrev.warnings; verified = true; held = null; trace.push({ turn, kind: "verify", detail: "unit_recheck_failed_reverted" }); break; } // 再確認の呼び出しが失敗（不正出力・例外）したら、最初の検証済みの出力に戻す（再確認で判断を失わない）
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
     quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
