@@ -95,10 +95,10 @@ export async function saveDocuments(db: Db, householdId: string, candidateId: st
 export async function loadBestDocument(db: Db, householdId: string, candidateId: string, url: string): Promise<StoredDocument | null> {
   try {
     const key = canonUrl(url).key.slice(0, 300);
-    const r = (await t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key).order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
+    const r = (await t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,created_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key).order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
     const x = r.data?.[0];
     if (!x) return null;
-    return { url: String(x.url), urlKey: String(x.url_key), origin: String(x.origin), contentHash: String(x.content_hash), fetchedAt: String(x.fetched_at), text: String(x.text), textChars: Number(x.text_chars), sourceChars: x.source_chars === null ? null : Number(x.source_chars), truncated: !!x.truncated, truncatedReason: (x.truncated_reason as string | null) ?? null, structure: (x.structure as ApplyPageStructure | null) ?? null, textLoss: (x.text_loss as string[] | null) ?? null };
+    return { url: String(x.url), urlKey: String(x.url_key), origin: String(x.origin), contentHash: String(x.content_hash), fetchedAt: actualFetchedAt(String(x.origin), String(x.fetched_at), x.created_at as string | undefined), text: String(x.text), textChars: Number(x.text_chars), sourceChars: x.source_chars === null ? null : Number(x.source_chars), truncated: !!x.truncated, truncatedReason: (x.truncated_reason as string | null) ?? null, structure: (x.structure as ApplyPageStructure | null) ?? null, textLoss: (x.text_loss as string[] | null) ?? null };
   } catch {
     return null;
   }
@@ -187,4 +187,15 @@ export async function loadCoverageSummary(db: Db, householdId: string, minRuns =
   } catch {
     return [];
   }
+}
+
+/**
+ * 保存文書の実際の取得時刻。AIの実取得（origin=discovered）の文書は、以前の版では評価の基準時刻（収集時刻）で記録されていた（実取得は保存の直前）。
+ * 保存時刻（created_at）が記録の取得時刻より10分以上あとなら、実取得の直後に保存された保存時刻を取得時刻として使う（収集由来は収集時刻のまま）。
+ */
+export function actualFetchedAt(origin: string, fetchedAt: string, createdAt: string | undefined): string {
+  if (origin.startsWith("collector") || !createdAt) return fetchedAt;
+  const f = new Date(fetchedAt).getTime();
+  const c = new Date(createdAt).getTime();
+  return Number.isFinite(f) && Number.isFinite(c) && c - f > 10 * 60_000 ? new Date(c).toISOString() : fetchedAt;
 }

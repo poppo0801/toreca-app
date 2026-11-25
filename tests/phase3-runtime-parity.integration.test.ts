@@ -260,7 +260,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const prep = async (tag: string) => {
       const c = await mkCandidate(1, tag);
       const ev = (c.last_good as { evidence: { url: string } }).evidence;
-      const r = await saveDocuments(admin as unknown as Db, hid, c.id, [{ kind: "page", url: ev.url, urlKey: ev.url.slice(8), origin: "discovered", contentHash: "a".repeat(32), fetchedAt: FETCHED, text: FULL, textChars: FULL.length, sourceChars: FULL.length, truncated: false, truncatedReason: null, structure: null, textLoss: null }]);
+      const r = await saveDocuments(admin as unknown as Db, hid, c.id, [{ kind: "page", url: ev.url, urlKey: ev.url.slice(8), origin: "discovered", contentHash: "a".repeat(32), fetchedAt: FETCHED, text: FULL, textChars: FULL.length, sourceChars: FULL.length, truncated: false, truncatedReason: null, structure: { recognized: true, siteKind: "generic", title: null, pageNotes: [], slots: [], relatedEvents: [], formChoices: [], formQuestions: [], gaps: [], links: [] } as never, textLoss: null }]);
       expect(r.failed).toBe(0);
       return c;
     };
@@ -277,7 +277,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     for (const p of [e.prompts, s2.prompts]) {
       expect(p.length).toBeGreaterThanOrEqual(2);
       expect(p[1]).toContain("収集時に保存された全文にだけある記載"); // 2ターン目の入力に、保存全文が証拠として入る
-      expect(p[1]).toContain("取得時刻 2026-11-24"); // 実際の取得時刻つきの注記。現在の状態ではない旨
+      expect(p[1]).toContain("取得時刻 2026-"); // 実際の取得時刻（古い記録は保存時刻で補正。evidence-store の actualFetchedAt） // 実際の取得時刻つきの注記。現在の状態ではない旨
       expect(p[1]).toContain("以前の調査で取得");
     }
     await clean();

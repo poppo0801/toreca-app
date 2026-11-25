@@ -247,3 +247,22 @@ export function uncoveredParts(value: string, quote: string): string[] {
   const q = k(quote);
   return value.split(/[（()）、,，。・／\/]/).map((c) => c.trim()).filter((c) => k(c).length >= 2 && !q.includes(k(c))).slice(0, 4).map((c) => c.slice(0, 40));
 }
+
+/** 応募単位の記載の手掛かり（人数・回数・店舗・選択・重複を述べる語） */
+const UNIT_WORDS = /(お?一人様|お?1人様|お?ひとり様|1人1回|一人一回|1店舗|１店舗|一店舗|店舗を選|店舗選択|対象店舗の中から|各店舗|店舗ごと|店舗別|重複|複数(回|店舗|アカウント)|1アカウント|1口|一口)/;
+
+/**
+ * 応募単位が未確定の暫定判断のときの再確認用に、証拠の中で応募単位に関わる記載の箇所を取り出す（最大3つ・各120字）。
+ * **判断はしない**（どの単位かはAIが決める）。AIの注意を、証拠にある関連箇所へ向けるための検索補助。AIが確定できないなら unknown のままでよい。
+ */
+export function unitPassages(evidence: readonly { id: string; text: string }[]): { id: string; text: string }[] {
+  const out: { id: string; text: string }[] = [];
+  for (const e of evidence) {
+    for (const line of e.text.split(String.fromCharCode(10))) {
+      const t = line.replace(/\s+/g, " ").trim();
+      if (t.length >= 6 && UNIT_WORDS.test(nf(t)) && !out.some((o) => o.text === t.slice(0, 120))) out.push({ id: e.id, text: t.slice(0, 120) });
+      if (out.length >= 3) return out;
+    }
+  }
+  return out;
+}

@@ -167,3 +167,90 @@ describe("取得時刻: ページの取得時刻は実際に取得した時刻�
     expect(legacy.evidence.find((e) => e.kind === "page")?.fetchedAt).toMatch(/^2026-11-24T21:05/);
   });
 });
+
+describe("ページ内リンクの候補（案3: FAQ・規約などへ自律的に到達できなかった）", () => {
+  const base = "https://shop.example.invalid/items/1";
+  const h = `<a href="/faq">よくある質問</a><a href="https://shop.example.invalid/guide/lottery?x=1#top">抽選のご案内</a><a href="/login">ログイン</a><a href="/cart">カート</a><a href="https://other.example.invalid/x">別サイト</a><a href="mailto:a@b.c">連絡</a><a href="#top">上へ</a><a href="/faq">重複</a><a href="https://x.com/foo">X</a><a href="/items/1">自分自身</a><a href="/img"><img src="a.png"></a>`;
+  it("同一サイトの公開リンクだけを、重複なしで抽出する（ログイン・カート・別サイト・mailto・アンカー・X・自分自身・文言なしは除く）", async () => {
+    const { extractPageLinks } = await import("./page-links");
+    const l = extractPageLinks(h, base);
+    expect(l.map((x) => x.url)).toEqual(["https://shop.example.invalid/faq", "https://shop.example.invalid/guide/lottery?x=1"]);
+    expect(extractPageLinks(h, "not a url")).toEqual([]);
+    expect(extractPageLinks(Array.from({ length: 40 }, (_, i) => `<a href="/p${i}">ページ${i}</a>`).join(""), base)).toHaveLength(25);
+  });
+  it("取得したページのリンク候補が、AIへの観察に出る（次に調べる先をAIが選べる）", async () => {
+    const { toAgentView } = await import("./research-loop");
+    const url = base;
+    const tools: ResearchTools = { now: () => NOW, fetchPage: async () => ({ ok: true, finalUrl: url, html: html(`<h1>商品Z 1BOX</h1>${h}`), text: "" }) };
+    const judge: RegistrationJudge = async () => out({ decision: "tentative", fields: {} });
+    const r = await runResearch({ caseId: "l1", seed: SEED("seed"), agent: agent(url), judge, tools, budget: budget(), registerRequiresUnit: true });
+    const p = r.evidence.find((e) => e.kind === "page")!;
+    expect(p.structure?.links?.length).toBe(2);
+    expect(toAgentView(p).observations.join(" ")).toContain("ページ内リンク");
+    expect(toAgentView(p).observations.join(" ")).toContain("https://shop.example.invalid/faq");
+  });
+});
+
+describe("応募単位が未確定の暫定: 証拠にある関連記載を読み直す再確認（1回。AIの判断は書き換えない）", () => {
+  const url = "https://pocket.example.invalid/e/x1";
+  const tent = (unit: { value: string | null; basis: "observed" | "inferred" | "unknown" }, bad = false): JudgeOutput => out({ decision: unit.value ? "register" : "tentative", fields: {
+    store: { value: "チェーンX", basis: "observed", evidenceId: "p1", quote: bad ? "存在しない引用文字列です" : "チェーンX「商品Z」抽選販売" },
+    product: { value: "商品Z", basis: "observed", evidenceId: "p1", quote: "チェーンX「商品Z」抽選販売" },
+    deadline: { value: "2026年11月26日(木) 23:59", basis: "observed", evidenceId: "p1", quote: "■応募期間：2026年11月24日(火)12：00～11月26日(木)23：59まで" },
+    apply_unit: unit.value ? { value: unit.value, basis: unit.basis, evidenceId: "p1", quote: "お一人様につき対象店舗の中から１店舗のみご応募が可能です。" } : { value: null, basis: "unknown" },
+  } });
+  it("1回目が単位未確定の暫定で、証拠に応募単位の記載があるとき、その記載を添えて再確認し、2回目で確定できれば採用する", async () => {
+    const seen: string[][] = [];
+    let n = 0;
+    const judge: RegistrationJudge = async (i) => { seen.push(i.verificationIssues ?? []); return n++ === 0 ? tent({ value: null, basis: "unknown" }) : tent({ value: "store_select", basis: "observed" }); };
+    const r = await runResearch({ caseId: "u1", seed: SEED("seed"), agent: agent(url), judge, tools: toolsFor(url, MULTI_STORE_PAGE), budget: budget(), registerRequiresUnit: true });
+    expect(seen).toHaveLength(2);
+    expect(seen[1].join(" ")).toContain("unit_recheck");
+    expect(seen[1].join(" ")).toContain("対象店舗の中から");
+    expect(r.registration).toMatchObject({ decision: "register", verified: true });
+  });
+  it("再確認の出力が検証に通らなければ、最初の検証済みの出力（暫定）へ戻す。AIが unknown のままにするのも自由（強制しない）", async () => {
+    let n = 0;
+    const bad: RegistrationJudge = async () => (n++ === 0 ? tent({ value: null, basis: "unknown" }) : tent({ value: "store_select", basis: "observed" }, true));
+    const r = await runResearch({ caseId: "u2", seed: SEED("seed"), agent: agent(url), judge: bad, tools: toolsFor(url, MULTI_STORE_PAGE), budget: budget(), registerRequiresUnit: true });
+    expect(r.registration).toMatchObject({ decision: "tentative", verified: true });
+    expect(r.trace.some((t) => t.detail === "unit_recheck_reverted")).toBe(true);
+    let m = 0;
+    const keep: RegistrationJudge = async () => (m++, tent({ value: null, basis: "unknown" }));
+    const k = await runResearch({ caseId: "u3", seed: SEED("seed"), agent: agent(url), judge: keep, tools: toolsFor(url, MULTI_STORE_PAGE), budget: budget(), registerRequiresUnit: true });
+    expect(k.registration).toMatchObject({ decision: "tentative", verified: true });
+    expect(m).toBe(2); // 再確認は1回だけ
+  });
+  it("関連記載が証拠に無ければ、再確認は行わない（余計な呼び出し・費用なし）", async () => {
+    let n = 0;
+    const j: RegistrationJudge = async () => (n++, out({ decision: "tentative", fields: {} }));
+    await runResearch({ caseId: "u4", seed: SEED("seed"), agent: agent(url), judge: j, tools: toolsFor(url, "<h1>商品Z</h1><p>抽選販売</p>"), budget: budget(), registerRequiresUnit: true });
+    expect(n).toBe(1);
+  });
+});
+
+describe("案2: 所在地は投稿・カードの文（証拠s1）の引用でもよい。店頭限定の記載は、除外の根拠になる", () => {
+  it("カード文の所在地（県名）を引用した地域外の除外が、検証済みになる", async () => {
+    const url = "https://shop-s.example.invalid/archives/1";
+    const page = "<h1>商品Z 抽選販売 受付開始</h1><p>【抽選期間】11/22 10:00〜11/26 18:00</p><p>【応募方法】店頭掲示のQRコードからご応募ください。</p>";
+    const seedText = "店頭受取・来店 商品Z 抽選 店頭で受け取る（佐賀県）・ 店舗S 店頭・佐賀県 受付中 11/26(木) 18:00 まで";
+    const judge: RegistrationJudge = async () => out({ decision: "exclude", fields: {
+      store: { value: "店舗S", basis: "observed", evidenceId: "s1", quote: "店舗S" },
+      product: { value: "商品Z", basis: "observed", evidenceId: "p1", quote: "商品Z 抽選販売" },
+      deadline: { value: "11/26 18:00", basis: "observed", evidenceId: "p1", quote: "【抽選期間】11/22 10:00〜11/26 18:00" },
+      exclude_reason: { value: "対象地域外（佐賀県の店舗。応募・受取は店頭のみで通販・発送の記載なし）", basis: "observed", evidenceId: "s1", quote: "店頭で受け取る（佐賀県）" },
+    } });
+    const r = await runResearch({ caseId: "k2b", seed: SEED(seedText), agent: agent(url), judge, tools: toolsFor(url, page), budget: budget(), registerRequiresUnit: true, userRegion: { prefectures: ["兵庫県", "大阪府", "京都府"], includeOnline: false } });
+    expect(r.registration).toMatchObject({ decision: "exclude", finalDecision: "exclude", verified: true });
+  });
+});
+
+describe("保存文書の実際の取得時刻（基準時刻で記録された古い記録の補正）", () => {
+  it("AIの実取得の文書は、保存時刻が記録の取得時刻より10分以上あとなら保存時刻を使う。収集由来は変えない", async () => {
+    const { actualFetchedAt } = await import("@/lib/server/proposals/evidence-store");
+    expect(actualFetchedAt("discovered", "2026-11-24T21:05:01.670Z", "2026-11-25T10:00:04.420Z")).toBe("2026-11-25T10:00:04.420Z");
+    expect(actualFetchedAt("discovered", "2026-11-25T10:00:00.000Z", "2026-11-25T10:00:04.420Z")).toBe("2026-11-25T10:00:00.000Z");
+    expect(actualFetchedAt("collector_followed", "2026-11-24T21:05:01.670Z", "2026-11-25T10:00:04.420Z")).toBe("2026-11-24T21:05:01.670Z");
+    expect(actualFetchedAt("discovered", "2026-11-24T21:05:01.670Z", undefined)).toBe("2026-11-24T21:05:01.670Z");
+  });
+});
