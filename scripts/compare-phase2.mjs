@@ -35,7 +35,8 @@ if (cmd === "export-cases") start({ PHASE2_CMP_MODE: "export-cases", ...(arg("fr
 if (cmd === "real-posts-scan") start({ PHASE2_CMP_MODE: "real-posts-scan" });
 if (cmd === "real-posts-expand") start({ PHASE2_CMP_MODE: "real-posts-expand", ...(flag("allow-network") ? { PHASE2_REAL_EXPAND: "allow" } : {}), ...(arg("max-requests") ? { PHASE2_REAL_EXPAND_MAX: arg("max-requests") } : {}) });
 if (cmd === "readiness") start({ PHASE2_CMP_MODE: "readiness", PHASE2_CMP_EXPERIMENTS: arg("experiments") ?? "links" });
-if (cmd === "rescore") start({ PHASE2_CMP_MODE: "rescore", PHASE2_CMP_EXPERIMENTS: arg("experiments") ?? "links" });
+if (cmd === "unit-audit") start({ PHASE2_CMP_MODE: "unit-audit" }); // 応募単位の再評価（無課金）。goldは変更せず、変更候補を別ファイルに出す
+if (cmd === "rescore") start({ PHASE2_CMP_MODE: "rescore", PHASE2_CMP_EXPERIMENTS: arg("experiments") ?? "links", ...(arg("journal") ? { PHASE2_RESCORE_JOURNAL: arg("journal") } : {}) }); // --journal=<実行ID>: 保存済みジャーナルからDBなしで再採点
 if (cmd === "real-validate") start({ PHASE2_CMP_MODE: "real-validate" });
 if (cmd === "r1-worksheet") start({ PHASE2_CMP_MODE: "r1-worksheet" });
 if (cmd === "r1-build") start({ PHASE2_CMP_MODE: "r1-build", ...(arg("cases") ? { PHASE2_CMP_R1_CASES: arg("cases") } : {}) });

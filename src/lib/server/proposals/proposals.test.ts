@@ -206,7 +206,7 @@ describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server 
   it("画像の実解析（vision-real）・比較試験の実行部（compare-run）は、評価入口（real-run・compare-real）以外の非テストのコードから読み込まれない。収集・画面・server action は画像取得の本体（image-fetch）も読み込まない", () => {
     expect(importers(/xsource\/vision-real|\.\/vision-real/, ["src/lib/judgment/xsource/vision-real.ts", "src/lib/server/proposals/real-run.ts"])).toEqual([]);
     expect(importers(/proposals\/compare-run|\.\/compare-run/, ["src/lib/server/proposals/compare-run.ts"])).toEqual([]);
-    expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/judgment/xsource/r1-worksheet.ts", "src/lib/server/proposals/compare-run.ts", "src/lib/server/proposals/real-post-capture.ts", "src/lib/server/gold-review/store.ts"])).toEqual([]);
+    expect(importers(/compare-eval/, ["src/lib/judgment/xsource/compare-eval.ts", "src/lib/judgment/xsource/r1-worksheet.ts", "src/lib/judgment/xsource/eval-layers.ts", "src/lib/server/proposals/compare-run.ts", "src/lib/server/proposals/real-post-capture.ts", "src/lib/server/gold-review/store.ts"])).toEqual([]);
     expect(importers(/images\/image-fetch|\.\/image-fetch/,["src/lib/server/images/image-fetch.ts", "src/lib/server/images/split-adapter.ts", "src/lib/judgment/xsource/vision-real.ts", "src/lib/judgment/xsource/vision-mock.ts", "src/lib/server/collector/image-intake.ts"])).toEqual([]);
     for (const f of ["src/lib/server/collector/run.ts", "src/lib/server/collector/x-rich.ts", "src/lib/server/collector/proposal-hook.ts", "src/lib/server/proposals/generate.ts", "src/app/(app)/lotteries/candidates/proposal-actions.ts"]) {
       expect(readFileSync(f, "utf8"), f).not.toMatch(/vision-real|images\/image-fetch|makeRealVisionClient|fetchPublicImage/);
@@ -308,13 +308,15 @@ describe("P2 の結果を受けた無課金の修正（値の導出の近さ・�
 describe("根拠のない除外は検証の指摘にする（P2: 取得できないまま exclude とした事例）", () => {
   it("観察（検証済みの引用つき）の項目が1つも無い exclude は exclude_without_evidence。観察があれば指摘しない。結論は書き換えない", async () => {
     const { verifyRegistration } = await import("@/lib/judgment/xsource/research-loop");
-    const ev = [{ id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "【A店】拡張パック 抽選 11/30まで", structure: null, independent: true }] as never;
+    const ev = [{ id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "【A店】拡張パック 抽選 11/30まで 会員限定のため対象外", structure: null, independent: true }] as never;
     const out = (fields: Record<string, unknown>, decision = "exclude") => ({ decision, fields, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
     expect(verifyRegistration({ output: out({ product: { value: null, basis: "unknown" } }), evidence: ev, protectedFields: {} }).issues).toContain("exclude_without_evidence");
     expect(verifyRegistration({ output: out({}), evidence: ev, protectedFields: {} }).issues).toContain("exclude_without_evidence");
     // 除外には、応募できない・対象外を示す根拠（exclude_reason・引用つき）が要る。店舗を観察できただけでは除外できない（Stage A: 応募できる機会を除外した例）
     expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_missing"]);
-    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "会員限定のため対象外" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
+    // 引用が実在しても、除外の理由を支えない（11/30までは対象外の根拠でも、受付終了の根拠でもない）なら、保留にする
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_unsupported"]);
     expect(verifyRegistration({ output: out({}, "tentative"), evidence: ev, protectedFields: {} }).issues).toEqual([]); // 暫定は対象外
   });
 });

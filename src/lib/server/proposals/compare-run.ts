@@ -9,6 +9,7 @@
 import { buildEvidence } from "@/lib/collector/evidence";
 import { armsOf, assertNoGoldLeak, classifyReadStage, datasetClaim, type DatasetKind, compareArms, scoreCase, summarizeReadAudit, type ReadAuditSummary, type ReadStage, type Arm, type CaseScore, type CompareCase, type Comparison, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
 import { effectiveDecision, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
+import { layeredReport, type LayeredReport } from "@/lib/judgment/xsource/eval-layers";
 import { rememberFullPages } from "@/lib/server/collector/collected-docs";
 import type { Db } from "@/lib/server/lottery-service";
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
@@ -29,12 +30,16 @@ export interface ArmCandidate {
 }
 
 /** 比較対象のアームごとに、案件の入力を加工した候補を作る（全文を保存するアームは evidence_documents にも保存する） */
-export async function prepareArmCandidates(a: { db: Db; householdId: string; experiment: ExperimentId; cases: readonly CompareCase[]; now: string }): Promise<ArmCandidate[]> {
+/**
+ * namespace: 候補の識別（dedupe_key・URL）の名前空間。mock は "mock" を使い、実AI（既定）の候補・登録案と**混ざらない**ようにする。
+ * 以前は同じ候補を共有していたため、実行後のモックが保存済みの実AI出力を再利用して「成功」と見える恐れがあった（モックの独立性）。
+ */
+export async function prepareArmCandidates(a: { db: Db; householdId: string; experiment: ExperimentId; cases: readonly CompareCase[]; now: string; namespace?: "mock" }): Promise<ArmCandidate[]> {
   const out: ArmCandidate[] = [];
   for (const base of a.cases) {
     for (const arm of armsOf(a.experiment)) {
       const c = arm.transform(base);
-      const url = `${CMP_HOST}/${a.experiment}/${c.caseId}/${arm.id}`;
+      const url = `${CMP_HOST}/${a.namespace ? a.namespace + "/" : ""}${a.experiment}/${c.caseId}/${arm.id}`;
       const ev = buildEvidence(
         {
           url,
@@ -49,7 +54,7 @@ export async function prepareArmCandidates(a: { db: Db; householdId: string; exp
       if (!ev) throw new Error(`候補の証拠を作れません: ${c.caseId}`);
       const { data, error } = await a.db
         .from("collection_candidates")
-        .upsert({ household_id: a.householdId, dedupe_key: url, source_url: url, x_post_id: null, title: `cmp ${a.experiment} ${c.caseId} ${arm.role}`, status: "pending", job_state: "review", reasons: [], last_good: { evidence: ev } as never, draft: {} as never }, { onConflict: "household_id,dedupe_key" })
+        .upsert({ household_id: a.householdId, dedupe_key: url, source_url: url, x_post_id: null, title: `cmp ${a.namespace ? a.namespace + " " : ""}${a.experiment} ${c.caseId} ${arm.role}`, status: "pending", job_state: "review", reasons: [], last_good: { evidence: ev } as never, draft: {} as never }, { onConflict: "household_id,dedupe_key" })
         .select("id,x_post_id,source_url,last_good")
         .single();
       if (error || !data) throw new Error(`候補を作れません: ${error?.message}`);
@@ -67,7 +72,13 @@ export async function prepareArmCandidates(a: { db: Db; householdId: string; exp
 /** 登録案の行（DB）→ 採点用の記録 */
 export async function readProposalRecords(db: Db, candidateId: string): Promise<ProposalRecord[]> {
   const { data } = await (db as unknown as { from: (n: string) => any }).from("registration_proposals").select("proposal_key,source_urls,decision,verified,held_reasons,apply_unit,cost_jpy,turns,fields").eq("candidate_id", candidateId).is("superseded_at", null).order("item_no");
-  return ((data ?? []) as Record<string, any>[]).map((r) => ({ proposalKey: r.proposal_key, sourceUrls: r.source_urls ?? [], decision: effectiveDecision({ decision: r.decision, verified: r.verified !== false }), aiDecision: r.decision, verified: r.verified !== false, heldReasons: r.held_reasons ?? [], applyUnit: r.apply_unit, costJpy: r.cost_jpy, turns: r.turns ?? 0, fields: r.fields ?? {} }) as unknown as ProposalRecord);
+  return ((data ?? []) as Record<string, any>[]).map(recordFromRow);
+}
+
+/** 登録案の行（DBの行・保存したジャーナルの行）→ 採点用の記録。DBなしの再採点（ジャーナルから）でも同じ変換を使う */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function recordFromRow(r: Record<string, any>): ProposalRecord {
+  return { proposalKey: r.proposal_key, sourceUrls: r.source_urls ?? [], decision: effectiveDecision({ decision: r.decision, verified: r.verified !== false }), aiDecision: r.decision, verified: r.verified !== false, heldReasons: r.held_reasons ?? [], applyUnit: r.apply_unit, costJpy: r.cost_jpy, turns: r.turns ?? 0, fields: r.fields ?? {} } as unknown as ProposalRecord;
 }
 
 export interface ExperimentOutcome {
@@ -76,6 +87,8 @@ export interface ExperimentOutcome {
   /** データセットの種類（合成と実投稿は別の結果。合成は精度として主張しない） */
   dataset: DatasetKind;
   scores: { baseline: CaseScore[]; treatment: CaseScore[] };
+  /** 評価の3層（発見・抽出・運用）の分離と、分母・goldの限界・応募単位の食い違いの内訳。既存の指標・閾値は変えない（比較用に保持） */
+  layered: Record<"baseline" | "treatment", LayeredReport>;
   /** AIへ渡した入力に gold の合言葉が混ざっていないこと */
   goldLeak: { ok: boolean; leaks: string[] };
   /** 上限・切り詰めの監査（毎回記録する）。記録の無い欠落があれば level=fail（結果の信頼性に関わるため、報告で明示する） */
@@ -89,12 +102,14 @@ export async function scoreExperiment(a: { dataset?: DatasetKind; householdId?: 
   const goldBy = new Map(a.gold.map((g) => [g.caseId, g]));
   const scores = { baseline: [] as CaseScore[], treatment: [] as CaseScore[] };
   const stages: Record<"baseline" | "treatment", { stage: ReadStage }[]> = { baseline: [], treatment: [] };
+  const recs: Record<"baseline" | "treatment", Map<string, ProposalRecord[]>> = { baseline: new Map(), treatment: new Map() };
   for (const p of a.prepared) {
     const g = goldBy.get(p.caseId);
     if (!g) continue; // gold の無い案件は採点しない（精度に数えない）
     const records = await readProposalRecords(a.db, p.candidate.id);
     const sc = scoreCase(g, records, { postText: p.postText, pages: p.pages });
     scores[p.arm.role].push(sc);
+    recs[p.arm.role].set(p.caseId, records);
     // 読み飛ばしの切り分け（gold の引用ごと）
     if (a.householdId) {
       const stats = ((await (a.db as unknown as { from: (n: string) => any }).from("evidence_coverage_stats").select("proposal_key,url_hash,shown_ranges,read_ranges").in("proposal_key", records.map((r) => r.proposalKey))).data ?? []) as { proposal_key: string; url_hash: string | null; shown_ranges: number[][]; read_ranges: number[][] }[];  
@@ -112,13 +127,13 @@ export async function scoreExperiment(a: { dataset?: DatasetKind; householdId?: 
   }
   const visible = a.prepared.flatMap((p) => [p.postText, ...p.pages.map((x) => x.text), JSON.stringify((p.candidate.last_good as { evidence?: unknown } | null)?.evidence ?? {})]);
   const audit = coverageReport(a.prepared.map((p) => ({ ev: evidenceFromLastGood(p.candidate.last_good), texts: p.pages })));
-  return { readAudit: { baseline: summarizeReadAudit(stages.baseline), treatment: summarizeReadAudit(stages.treatment) }, limitAudit: { report: audit, ...evaluateCoverage(audit) }, comparison: compareArms(a.experiment, scores.baseline, scores.treatment, a.required !== undefined ? { required: a.required } : {}), claim: datasetClaim(a.dataset ?? "real_post", a.modes), dataset: a.dataset ?? "real_post", scores, goldLeak: assertNoGoldLeak(visible, a.gold) };
+  return { readAudit: { baseline: summarizeReadAudit(stages.baseline), treatment: summarizeReadAudit(stages.treatment) }, limitAudit: { report: audit, ...evaluateCoverage(audit) }, comparison: compareArms(a.experiment, scores.baseline, scores.treatment, a.required !== undefined ? { required: a.required } : {}), claim: datasetClaim(a.dataset ?? "real_post", a.modes), dataset: a.dataset ?? "real_post", scores, layered: { baseline: layeredReport({ scores: scores.baseline, gold: a.gold, recordsByCase: recs.baseline }), treatment: layeredReport({ scores: scores.treatment, gold: a.gold, recordsByCase: recs.treatment }) }, goldLeak: assertNoGoldLeak(visible, a.gold) };
 }
 
 /** モック（費用0・台本のAI）で、候補の作成 → 登録案の生成 → 採点 → 比較の全経路を通す。**結果は精度ではなく、試験の仕組みの確認**（claim=pipeline_check_only） */
 export async function runExperimentMock(a: { db: Db; householdId: string; experiment: ExperimentId; cases: readonly CompareCase[]; gold: readonly GoldCase[]; dataset?: DatasetKind; env: Record<string, string | undefined>; now?: string; extraDeps?: (arm: Arm) => Partial<GenerateDeps>; required?: number }): Promise<ExperimentOutcome & { prepared: ArmCandidate[] }> {
   const now = a.now ?? new Date().toISOString();
-  const prepared = await prepareArmCandidates({ db: a.db, householdId: a.householdId, experiment: a.experiment, cases: a.cases, now });
+  const prepared = await prepareArmCandidates({ db: a.db, householdId: a.householdId, experiment: a.experiment, cases: a.cases, now, namespace: "mock" });
   for (const p of prepared) {
     const r = await generateProposalsForCandidate({ db: a.db, householdId: a.householdId, candidate: p.candidate, env: a.env, deps: mockDeps({ learn: p.arm.learn, ...(a.extraDeps?.(p.arm) ?? {}) }) });
     if (!r.ok) throw new Error(`登録案の生成に失敗: ${r.reason}`);

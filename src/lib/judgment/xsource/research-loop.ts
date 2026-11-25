@@ -228,6 +228,7 @@ export interface FieldProposal {
 const sha = (s: string): string => createHash("sha256").update(s.normalize("NFKC").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
 import { describeQuoteIssue, diagnoseQuote } from "./quote-diagnosis";
 import { dateTokens } from "./image-evidence";
+import { checkDeadlineRole, checkExcludeSemantics, checkUnitQuote, checkValueCorrespondence, type SemanticVerdict } from "./claim-semantics";
 const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
 export function seedEvidence(id: string, text: string, now: Date, url: string | null = null, notes: string[] = []): Evidence {
@@ -400,6 +401,8 @@ export interface VerifyInput {
   protectedFields: Record<string, string>;
   /** true のとき、応募単位が未確定（unknown・値なし）のまま register（本登録案）とした出力を検証の指摘にする（登録案の経路。保留を増やすためではなく、未確定のままの本登録案を人の確認に回すため） */
   registerRequiresUnit?: boolean;
+  /** 評価時点（意味検証で「締切を過ぎたか」を判定する）。無いと、日付による終了の判定は確認できない扱いで保留になる */
+  now?: Date;
 }
 /** 根拠の実在・不明値の扱い・人が確定した値の保護。問題の理由（AIへ返す文）を返す。結論は書き換えない */
 /** 本登録の可否を左右する項目。ここの検証失敗は本登録を止める。それ以外（任意項目）の失敗は、その項目の主張だけを採用せず不明として明示する（根拠のある別項目まで捨てない） */
@@ -409,8 +412,14 @@ export const isBlockingIssue = (issue: string): boolean => {
   return k < 0 || CRITICAL_FIELDS.has(issue.slice(k + 1));
 };
 
-export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[]; /** 本登録を止める指摘（重要項目・全体） */ blocking: string[]; /** 任意項目の指摘（その項目だけ不採用。登録は止めない） */ nonBlocking: string[]; /** AIへ返す訂正用の指摘文（原因・原文の近い箇所つき） */ details: string[] } {
+export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[]; /** 本登録を止める指摘（重要項目・全体） */ blocking: string[]; /** 任意項目の指摘（その項目だけ不採用。登録は止めない） */ nonBlocking: string[]; /** AIへ返す訂正用の指摘文（原因・原文の近い箇所つき） */ details: string[]; /** 通ったが機械的には完全に確認できていない点（検証済みと称さない） */ unconfirmed: string[] } {
   const issues: string[] = [];
+  const reasonOf = new Map<string, string>();
+  const unconfirmed: string[] = [];
+  const sem = (code: string, v: SemanticVerdict, name: string): void => {
+    if (!v.ok) { issues.push(code); reasonOf.set(code, v.reason); }
+    else for (const u of v.unconfirmed ?? []) unconfirmed.push(`${name}: ${u}`);
+  };
   const proposals: FieldProposal[] = [];
   const byId = new Map(i.evidence.map((e) => [e.id, e]));
   for (const [name, f] of Object.entries(i.output.fields)) {
@@ -419,7 +428,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       proposals.push({ field: name, action: "set", value: null, basis: "unknown" });
       continue;
     }
-    if (f.basis === "observed") {
+    // 推論（inferred）でも、引用や証拠IDを付けたなら、実在・対象を確認する（実在しない引用を根拠として残さない）。引用の無い推論はそのまま（推論であり確定値ではない）
+    if (f.basis === "observed" || (f.basis === "inferred" && (f.quote || f.evidenceId))) {
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
       if (!ev) issues.push(`evidence_missing:${name}`);
       else if (!f.quote || !norm(ev.text).includes(norm(f.quote)) || norm(f.quote).length < 3) issues.push(`quote_not_found:${name}`);
@@ -428,11 +438,14 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       else if (ev.scope?.verdict === "unknown" && ev.scope.origin.startsWith("parent")) issues.push(`shared_link_scope_unverified:${name}`); // 親投稿共通のリンクを、対応が確認されないまま根拠にしない
     }
     // 値と引用の意味の対応（締切）: 引用が実在しても、値の日付が引用に書かれていなければ、別の箇所の日付を断定している（根拠にならない）
-    if (f.basis === "observed" && name === "deadline" && f.value && f.quote && !issues.some((x) => x.endsWith(":" + name))) {
-      const vd = dateTokens(f.value);
-      const qd = dateTokens(f.quote);
+    const grounded = (f.basis === "observed" || f.basis === "inferred") && !!f.value && !!f.quote && !issues.some((x) => x.endsWith(":" + name));
+    if (grounded && name === "deadline") {
+      const vd = dateTokens(f.value!);
+      const qd = dateTokens(f.quote!);
       if (vd.length > 0 && !vd.some((d) => qd.includes(d))) issues.push("value_not_in_quote:" + name);
-    }
+      else sem("deadline_role_mismatch:" + name, checkDeadlineRole(f.value!, f.quote!), name); // 値の日付が、当選発表など別の事象の日付ではなく、応募の締切の記載にあること
+    } else if (grounded && (name === "store" || name === "product")) sem("value_not_in_quote:" + name, checkValueCorrespondence(f.value!, f.quote!), name);
+    else if (grounded && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);
     const prot = i.protectedFields[name];
     if (prot !== undefined && f.value !== null && norm(prot) !== norm(f.value)) {
       // 人が確定した値は変更しない。矛盾は人への確認に回す（自動で上書きしない）
@@ -456,6 +469,13 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     const r = i.output.fields["exclude_reason"];
     const ev = r?.evidenceId ? byId.get(r.evidenceId) : undefined;
     if (!r || r.basis !== "observed" || !r.value || !ev || !r.quote || !norm(ev.text).includes(norm(r.quote))) issues.push("exclude_reason_missing");
+    else {
+      // 引用が実在するだけでは除外の根拠にならない。理由の種類と引用の意味・評価時点の対応を検証し、支持されない・矛盾・判別不能なら保留にする（応募の機会を消さない）
+      const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
+      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others });
+      if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
+      else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
+    }
   }
   // 重要項目の失敗は本登録を止める。任意項目の失敗は、その項目の提案だけを採用しない
   const blocking = issues.filter(isBlockingIssue);
@@ -464,6 +484,7 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   const kept = proposals.filter((p) => !droppedFields.has(p.field));
   // 訂正用の指摘文: 引用が見つからないときは、原因と原文の実在する近い箇所を添える（引用の捏造を誘わず、写せないなら不明にさせる）
   const details = issues.map((x) => {
+    if (reasonOf.has(x)) return `${x} — ${reasonOf.get(x)}。根拠にならないなら、値を null・basis を unknown にするか、exclude をやめて暫定にする`;
     if (!x.startsWith("quote_not_found:")) return x;
     const name = x.slice("quote_not_found:".length);
     const f = i.output.fields[name];
@@ -471,7 +492,7 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     if (!f || !ev) return x;
     return describeQuoteIssue(x, diagnoseQuote(f.quote, ev.text));
   });
-  return { issues, proposals: kept, blocking, nonBlocking, details };
+  return { issues, proposals: kept, blocking, nonBlocking, details, unconfirmed };
 }
 
 // ------------------------------------------------------------------ 本体
@@ -655,9 +676,9 @@ export async function runResearch(args: {
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
     quoteAudit.push({ round: rev, rows: auditQuotes(output, evidence) });
-    const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit });
+    const v = verifyRegistration({ output, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now() });
     proposals = v.proposals;
-    warnings = v.nonBlocking;
+    warnings = [...v.nonBlocking, ...v.unconfirmed.map((u) => "unconfirmed:" + u)];
     if (v.blocking.length === 0) { verified = true; held = null; if (v.nonBlocking.length) trace.push({ turn, kind: "verify", detail: `non_blocking:${v.nonBlocking.join(",")}` }); break; }
     trace.push({ turn, kind: "verify", detail: v.issues.join(",") });
     issues = v.details; // 原因と原文の近い箇所つきで、AIに訂正させる（回数は maxRevisions の範囲。無限に繰り返さない）

@@ -126,8 +126,8 @@ describe("P2 原因: ページ証拠なしの除外（r10:2）は人の確認に
     const { verifyRegistration } = await import("./research-loop");
     const seed = { id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "・拡張パック抽選 11/22(日)22:00〆", structure: null, independent: true };
     const pageEv = { id: "p1", kind: "page", url: "https://a.example.invalid/e", fetchedAt: "x", contentHash: "h2", text: "受付は終了しました 拡張パック", structure: null, independent: true };
-    const out = (ev: string) => ({ decision: "exclude", fields: { product: { value: "拡張パック", basis: "observed", evidenceId: ev, quote: ev === "s1" ? "拡張パック抽選" : "受付は終了しました" }, exclude_reason: { value: "受付終了", basis: "observed", evidenceId: ev, quote: ev === "s1" ? "拡張パック抽選" : "受付は終了しました" } }, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
-    const v = (o: never, evs: unknown[], flag = true) => verifyRegistration({ output: o, evidence: evs as never, protectedFields: {}, registerRequiresUnit: flag }).issues;
+    const out = (ev: string) => ({ decision: "exclude", fields: { product: { value: "拡張パック", basis: "observed", evidenceId: ev, quote: "拡張パック" }, exclude_reason: { value: "受付終了", basis: "observed", evidenceId: ev, quote: ev === "s1" ? "11/22(日)22:00〆" : "受付は終了しました" } }, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
+    const v = (o: never, evs: unknown[], flag = true) => verifyRegistration({ output: o, evidence: evs as never, protectedFields: {}, registerRequiresUnit: flag, now: new Date("2026-11-25T03:00:00Z") }).issues;
     expect(v(out("s1"), [seed])).toEqual(["exclude_without_page_evidence"]); // P2 の r10:2: 原文の項目は観察できたが、応募先のページが無い
     expect(v(out("p1"), [seed, pageEv])).toEqual([]); // 受付終了のページを確認して除外
     expect(v(out("s1"), [seed], false)).toEqual([]); // 従来の経路は変えない

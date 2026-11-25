@@ -14,21 +14,29 @@ import { createClient } from "@supabase/supabase-js";
 import { checkJudgmentRealRun } from "@/lib/judgment/real-gate";
 import { progressOf, type ReviewState } from "@/lib/gold-review/model";
 import { composeR1Cases, pageCandidate, validatePageGold, worksheetMarkdown, type R1PageGold } from "@/lib/judgment/xsource/r1-worksheet";
-import { assertNoGoldLeak, type DatasetKind, type RealPostCase, validateRealPostCases, armsOf, EXPERIMENTS, planComparison, splitCalibration, validateGold, type CompareCase, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
+import { assertNoGoldLeak, compareArms, scoreCase, type CaseScore, type DatasetKind, type RealPostCase, validateRealPostCases, armsOf, EXPERIMENTS, planComparison, splitCalibration, validateGold, type CompareCase, type ExperimentId, type GoldCase } from "@/lib/judgment/xsource/compare-eval";
 import { HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
 import { makeRealVisionClient, worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
 import { fetchPublicImage } from "@/lib/server/images/image-fetch";
 import { splitPublicImage } from "@/lib/server/images/split-adapter";
 import type { Db } from "@/lib/server/lottery-service";
+import { assessApplyScope, APPLY_SCOPE_VERSION } from "@/lib/judgment/xsource/apply-scope";
+import { createHash } from "node:crypto";
+import { layeredReport } from "@/lib/judgment/xsource/eval-layers";
+import type { ProposalRecord } from "@/lib/judgment/xsource/proposal";
+import { appendUnit, closeJournal, doneUnits, findUnfinished, journalPath, journalRows, readJournal, startJournal, unitKey } from "@/lib/judgment/xsource/run-journal";
 import { checkLedger, committedOf, finishRun, startRun, stageKeyOf, type Ledger } from "@/lib/judgment/xsource/spend-ledger";
 import { preflightRun } from "@/lib/judgment/xsource/cost-preflight";
 import { OUTPUT_MAX_TOKENS } from "@/lib/judgment/xsource/research-ai";
+import { DEFAULT_RESEARCH_LIMITS } from "@/lib/judgment/xsource/research-loop";
 import { buildMetricsSnapshot, renderMetrics } from "@/lib/judgment/xsource/measured-metrics";
 import { captureRealPosts, type CaptureRow } from "./real-post-capture";
-import { casesFromCandidates, CMP_HOST, goldTemplate, prepareArmCandidates, runExperimentMock, scoreExperiment, seedGoldExperiences } from "./compare-run";
+import { casesFromCandidates, CMP_HOST, goldTemplate, prepareArmCandidates, recordFromRow, runExperimentMock, scoreExperiment, seedGoldExperiences } from "./compare-run";
 import type { CandidateRow } from "./generate";
 import { runRealProposals, type RunEvent } from "./real-run";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RawDb = { from: (n: string) => any };
 vi.mock("server-only", () => ({}));
 const env = process.env;
 const MODE = env.PHASE2_CMP_MODE;
@@ -92,13 +100,15 @@ const planOf = (cases: CompareCase[], gold: GoldCase[], model = "claude-haiku-5-
   return planComparison({ experiments: experiments(), cases: cases.length, itemsPerCase: avgItems, imagesPerCase: Math.round(avgImages * 10) / 10, model, avgJpy: { agentTurn: 0.163, judge: 0.148, image: Number.isFinite(image) ? image : 0.15 }, turnsPerItem: 2, judgesPerItem: 1.3, caps: CAPS(), goldCases: gold.length });
 };
 
-describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "real-validate", "real-posts-scan", "real-posts-expand", "readiness", "rescore", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
+describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet", "r1-build", "real-validate", "real-posts-scan", "real-posts-expand", "readiness", "rescore", "unit-audit", "run"].includes(MODE ?? "") || env.PHASE2_COMPARE !== "1")("Phase 2 同条件比較試験（評価入口）", () => {
   it("plan: 実行前の計画（無課金）", () => {
     if (MODE !== "plan") return;
     const { cases, gold, sample } = load();
     const v = validateGold(gold);
     const p = planOf(cases, gold);
     const feas = feasibilityOf(p.runs, p.expectedJpy, cases, gold);
+    // 意味検証・保全は、AIを呼ばない固定の検査（追加の呼び出し0）。費用が増えうるのは、検証失敗時の限定的な再評価（判断の再呼び出し）だけで、回数は maxRevisions の範囲＝既存の「判断2回」の最大予約に含まれる
+    const verification = { semanticChecksAiCalls: 0, journalAndPreservationAiCalls: 0, maxRevisionsPerRun: DEFAULT_RESEARCH_LIMITS.maxRevisions, maxJudgeCallsPerRun: 1 + DEFAULT_RESEARCH_LIMITS.maxRevisions, countedInMaxReservation: true, additionalMaxJpy: 0, note: "追加の検証で上限は増えない。再評価が増えると期待費用は上がりうるが、最大予約額（1回3.6円）・案件上限・総額上限の範囲に収まる" };
     const led = read<Ledger>(`${DIR}/spend-ledger.local.json`) ?? { runs: [] };
     const ledgerInfo = { runs: led.runs.length, ...committedOf(led), note: "通算上限は実行時に --program-cap-jpy で利用者が指定。台帳は実行ごとの承認額・実費を記録し、上限超過・同じ段階の二重実行・未終了の実行を開始前に拒否する" };
     const goldOpps = gold.flatMap((g) => g.opportunities);
@@ -112,7 +122,7 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
       metrics: ["応募機会の見落とし（再現率）", "誤登録（goldで登録しない機会を登録・gold以外の登録案の混入は適合率で測る）", "異店舗・別抽選の混同（誤統合・誤分割・他の機会のページの引用の混入）", "根拠（引用の実在・混入・読み飛ばし段階）", "締切（日付・時刻・年）", "応募単位・URL・登録の判断"],
       limits: ["gold の登録しない例（decision≠register）が" + goldOpps.filter((o) => o.decision !== "register").length + "件のため、誤登録率は『goldで登録すべきでない機会を登録した』形では測れない。gold以外の登録案は適合率（unmatched）で見る", "製品と無関係なページ（SNS・短縮・危険ドメイン等）は取得段階で除外済み。評価用ページにはいずれも抽選の語がある（無関係ページへの耐性は未測定）"],
     };
-    console.log("PLAN", JSON.stringify({ evaluation, feasibility: feas, ledger: ledgerInfo, input: sample ? "架空のサンプル（仕組みの確認用。実AIの実行には使えない）" : "ローカルの実データ", experiments: experiments(), cases: cases.length, goldCases: gold.length, goldValid: v.ok, goldErrors: v.errors.slice(0, 5), arms: experiments().flatMap((e) => armsOf(e).map((a) => `${a.id}（${a.label}）`)), questions: Object.fromEntries(experiments().map((e) => [e, EXPERIMENTS[e].question])), plan: p }));
+    console.log("PLAN", JSON.stringify({ evaluation, feasibility: feas, verification, ledger: ledgerInfo, input: sample ? "架空のサンプル（仕組みの確認用。実AIの実行には使えない）" : "ローカルの実データ", experiments: experiments(), cases: cases.length, goldCases: gold.length, goldValid: v.ok, goldErrors: v.errors.slice(0, 5), arms: experiments().flatMap((e) => armsOf(e).map((a) => `${a.id}（${a.label}）`)), questions: Object.fromEntries(experiments().map((e) => [e, EXPERIMENTS[e].question])), plan: p }));
     expect(cases.length).toBeGreaterThan(0);
   });
 
@@ -277,9 +287,50 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     expect(Object.keys(out)).toHaveLength(experiments().length);
   }, 600_000);
 
+  it("unit-audit: 【無課金・読み取りだけ】既存goldの応募単位を、版付きの定義（apply-scope）で再評価し、変更候補を別ファイルに出す。goldは変更しない・承認なしに適用しない", () => {
+    if (MODE !== "unit-audit") return;
+    const { gold } = load();
+    const goldFile = `${DIR}/${FILES.gold}`;
+    const rows = gold.flatMap((g) =>
+      g.opportunities.map((o) => {
+        const a = assessApplyScope({ legacyUnit: o.applyUnit, quotes: o.evidence.map((e) => e.quote) });
+        const needsReview = o.applyUnit !== null && a.confidence !== "confirmed";
+        return { caseId: g.caseId, oppId: o.oppId, current: { applyUnit: o.applyUnit }, assessed: { entry: a.entry, limit: a.limit, multiApply: a.multiApply, confidence: a.confidence, notes: a.notes }, proposal: needsReview ? "needs_human_review" : "keep", why: needsReview ? "gold の根拠の引用が、応募の構造・制限の範囲を明示していない（列挙値は人の判断。ページ単位か投稿単位かで読みが変わりうる）" : "根拠の引用が構造と制限を明示している" };
+      }),
+    );
+    const out = { version: APPLY_SCOPE_VERSION, status: "proposal_only_not_applied", base: { file: FILES.gold, sha256: createHash("sha256").update(readFileSync(goldFile)).digest("hex") }, note: "既存goldは変更していない。人が承認した場合だけ、別の版（gold.*.v2）として作る。閾値・解釈をgoldに合わせて後付けで変えない", counts: { opportunities: rows.length, keep: rows.filter((r) => r.proposal === "keep").length, needs_human_review: rows.filter((r) => r.proposal === "needs_human_review").length }, candidates: rows };
+    writeFileSync(`${DIR}/gold-proposal.apply-scope.${DATASET === "real_post" ? "real" : "synthetic"}.v2.local.json`, JSON.stringify(out, null, 1));
+    console.log("UNIT_AUDIT", JSON.stringify({ dataset: DATASET, version: APPLY_SCOPE_VERSION, ...out.counts, byCurrentUnit: Object.fromEntries(["one_form_one", "store_select", "per_store", "per_product"].map((u) => [u, rows.filter((r) => r.current.applyUnit === u).length])) }));
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
   it("rescore: 【無課金・読み取りだけ】保存済みの実行結果（ローカルDBの登録案）を、現在の採点で採点し直す。AI・ネットワークは呼ばない。修正前後の採点の比較用", async () => {
     if (MODE !== "rescore") return;
     const { cases, gold } = load();
+    // 保存済みのジャーナル（実行ごとの耐障害的な保存）から、ローカルDBを使わずに再採点する。DBのテスト・初期化の影響を受けない
+    if (env.PHASE2_RESCORE_JOURNAL) {
+      const { entries } = readJournal(journalPath(DIR, env.PHASE2_RESCORE_JOURNAL));
+      const rows = journalRows(entries);
+      const e0 = experiments()[0];
+      const sc = { baseline: [] as CaseScore[], treatment: [] as CaseScore[] };
+      const recs = { baseline: new Map<string, ProposalRecord[]>(), treatment: new Map<string, ProposalRecord[]>() };
+      for (const base of cases) {
+        const g = gold.find((x) => x.caseId === base.caseId);
+        if (!g) continue;
+        for (const arm of armsOf(e0)) {
+          const r = rows.get(unitKey({ experiment: e0, caseId: base.caseId, arm: arm.id }));
+          if (!r) continue;
+          const c = arm.transform(base);
+          const records = r.map(recordFromRow);
+          sc[arm.role].push(scoreCase(g, records, { postText: c.postText, pages: c.pages }));
+          recs[arm.role].set(base.caseId, records);
+        }
+      }
+      const cmp = compareArms(e0, sc.baseline, sc.treatment, {});
+      console.log("RESCORE_JOURNAL", JSON.stringify({ runId: env.PHASE2_RESCORE_JOURNAL, torn: readJournal(journalPath(DIR, env.PHASE2_RESCORE_JOURNAL)).torn, units: rows.size, verdict: cmp.verdict, reasons: cmp.reasons, layered: { baseline: layeredReport({ scores: sc.baseline, gold, recordsByCase: recs.baseline }), treatment: layeredReport({ scores: sc.treatment, gold, recordsByCase: recs.treatment }) } }));
+      expect(rows.size).toBeGreaterThan(0);
+      return;
+    }
     const db = admin();
     const { data: hh } = await db.from("households").select("id").limit(1).maybeSingle();
     const exp = experiments()[0];
@@ -294,7 +345,7 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
       }
     }
     const r = await scoreExperiment({ dataset: DATASET, householdId: hh!.id as string, db: db as unknown as Db, experiment: exp, prepared, gold, modes: ["real"] });
-    console.log("RESCORE", JSON.stringify({ candidates: prepared.length, verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, paired: r.comparison.paired, deltas: Object.fromEntries(r.comparison.deltas.map((d) => [d.metric, { baseline: d.baseline, treatment: d.treatment }])), readAudit: r.readAudit }));
+    console.log("RESCORE", JSON.stringify({ candidates: prepared.length, verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, paired: r.comparison.paired, deltas: Object.fromEntries(r.comparison.deltas.map((d) => [d.metric, { baseline: d.baseline, treatment: d.treatment }])), readAudit: r.readAudit, layered: r.layered }));
     expect(prepared.length).toBeGreaterThan(0);
   }, 300_000);
 
@@ -322,6 +373,15 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     if (!lc.ok) throw new Error(`実行しません（費用の通算台帳）: ${lc.errors.join(" / ")}`);
     const runId = `run-${Date.now()}`;
     mkdirSync(DIR, { recursive: true });
+    // 二重実行の防止: 終了していない実行（実行中・異常終了）のジャーナルがあれば、再開を明示しない限り新しい有料実行を始めない
+    const resumeId = env.PHASE2_RESUME_RUN || null;
+    const unfinished = findUnfinished(DIR).filter((u) => u.runId !== resumeId);
+    if (unfinished.length) throw new Error(`実行しません: 終了していない実行のジャーナルがあります（${unfinished.map((u) => u.runId).join(", ")}）。保存済みの結果を確認し、再開する場合は PHASE2_RESUME_RUN=<実行ID> を指定してください`);
+    const alreadyDone = resumeId ? doneUnits(readJournal(journalPath(DIR, resumeId)).entries) : new Set<string>();
+    // 取得できた時点ごとの耐障害的な保存の準備（開始できなければ、費用をかける前に止める）
+    const jr = startJournal(DIR, runId, { stageKey: `${DATASET}|${experiments().join(",")}`, approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY), resumeOf: resumeId });
+    if (!jr.ok) throw new Error(`実行しません: 結果の保存（ジャーナル）を開始できません: ${jr.reason}`);
+    const jpath = jr.path;
     writeFileSync(ledgerPath, JSON.stringify(startRun(ledger0, { id: runId, stageKey, startedAt: new Date().toISOString(), approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY) }), null, 1));
     const db = admin();
     const { data: hh } = await db.from("households").select("id").limit(1).maybeSingle();
@@ -331,12 +391,14 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     // hints: 経験の元は校正用の案件の gold だけ。評価用の案件で比較する
     const split = exps.includes("hints") ? splitCalibration(cases) : null;
     if (split) await seedGoldExperiences({ db: db as unknown as Db, householdId: hid, cases: split.calibration, gold, at: now });
-    const prepared = [];
+    const prepared: Awaited<ReturnType<typeof prepareArmCandidates>> = [];
     for (const e of exps) prepared.push(...(await prepareArmCandidates({ db: db as unknown as Db, householdId: hid, experiment: e, cases: e === "hints" && split ? split.evaluation : cases, now })));
     // 案件ごとにアーム（baseline/treatment）を隣り合わせて実行する（予算が尽きても、片方のアームだけが多く評価されない）
     const armOf = new Map(prepared.map((p) => [p.candidate.id, p.arm]));
     const rank = new Map(cases.map((c, i) => [c.caseId, i]));
-    const order = [...prepared].sort((a, b) => (rank.get(a.caseId) ?? 0) - (rank.get(b.caseId) ?? 0) || a.arm.experiment.localeCompare(b.arm.experiment) || a.arm.role.localeCompare(b.arm.role));
+    const unitOf = (p: (typeof prepared)[number]) => ({ experiment: p.arm.experiment, caseId: p.caseId, arm: p.arm.id, role: p.arm.role });
+    const byCand = new Map(prepared.map((p) => [p.candidate.id, p]));
+    const order = [...prepared].filter((p) => !alreadyDone.has(unitKey(unitOf(p)))).sort((a, b) => (rank.get(a.caseId) ?? 0) - (rank.get(b.caseId) ?? 0) || a.arm.experiment.localeCompare(b.arm.experiment) || a.arm.role.localeCompare(b.arm.role));
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: gate.apiKey, maxRetries: 0 });
     await client.models.retrieve(gate.model); // モデルの利用可否（無課金）
@@ -370,12 +432,25 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
         : {}),
       lockPath: `${DIR}/.compare.lock`,
       onEvent,
+      // 案件×アーム1件が終わるたびに、生の出力（登録案の全項目・判断・引用・検証・費用）を追記保存する。保存できなければ以降の有料呼び出しを止める
+      afterCandidate: async (x) => {
+        const p = byCand.get(x.candidate.id);
+        if (!p) return;
+        const { data } = await (db as unknown as RawDb).from("registration_proposals").select("*").eq("candidate_id", p.candidate.id).is("superseded_at", null).order("item_no");
+        const w = appendUnit(jpath, { runId, unit: unitOf(p), state: x.ok ? "done" : "failed", costJpy: x.costJpy, ...(x.reason ? { reason: x.reason } : {}), proposals: (data ?? []) as Record<string, unknown>[] });
+        if (!w.written && w.reason !== "duplicate_unit") throw new Error(`journal: ${w.reason}`);
+      },
     });
+    try {
+      closeJournal(jpath, runId, "run_end", { stopReason: summary.stopReason, processed: summary.processed, costJpy: summary.costJpy });
+    } catch {
+      /* 閉じられなくても、書き終えた単位は残る（終了していない実行として検出される） */
+    }
     // 有料の実行の生の出力（登録案の全項目・判断・保留理由・未確認事項）を、DBとは別のローカルファイルに保全する（ローカルDBの初期化・テスト用データの削除で失われないように。Git管理外）
     try {
       const keep = [] as unknown[];
       for (const p of prepared) {
-        const { data } = await (db as unknown as { from: (n: string) => any }).from("registration_proposals").select("*").eq("candidate_id", p.candidate.id).is("superseded_at", null).order("item_no");
+        const { data } = await (db as unknown as RawDb).from("registration_proposals").select("*").eq("candidate_id", p.candidate.id).is("superseded_at", null).order("item_no");
         keep.push({ caseId: p.caseId, arm: p.arm.id, role: p.arm.role, candidateId: p.candidate.id, proposals: data ?? [] });
       }
       mkdirSync(`${DIR}/run-exports`, { recursive: true });
@@ -388,7 +463,7 @@ describe.skipIf(!["plan", "mock", "export-cases", "gold-template", "r1-worksheet
     const results: Record<string, unknown> = {};
     for (const e of exps) {
       const r = await scoreExperiment({ dataset: DATASET, householdId: hid, db: db as unknown as Db, experiment: e, prepared: prepared.filter((p) => p.arm.experiment === e), gold, modes: ["real"] });
-      results[e] = { dataset: r.dataset, verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, deltas: r.comparison.deltas, paired: r.comparison.paired, cases: r.comparison.cases, required: r.comparison.required, goldLeak: r.goldLeak, readAudit: r.readAudit, limitAudit: { level: r.limitAudit.level, messages: r.limitAudit.messages, candidates: r.limitAudit.report.candidates, pages: r.limitAudit.report.pages, hitCandidates: r.limitAudit.report.hitCandidates, notes: r.limitAudit.report.notes } };
+      results[e] = { dataset: r.dataset, verdict: r.comparison.verdict, claim: r.claim, reasons: r.comparison.reasons, deltas: r.comparison.deltas, paired: r.comparison.paired, cases: r.comparison.cases, required: r.comparison.required, goldLeak: r.goldLeak, readAudit: r.readAudit, layered: r.layered, limitAudit: { level: r.limitAudit.level, messages: r.limitAudit.messages, candidates: r.limitAudit.report.candidates, pages: r.limitAudit.report.pages, hitCandidates: r.limitAudit.report.hitCandidates, notes: r.limitAudit.report.notes } };
     }
     writeFileSync(`${DIR}/result.local.json`, JSON.stringify({ at: new Date().toISOString(), summary, vision: typeof visionStats === "function" ? (visionStats as () => unknown)() : null, results }, null, 1));
     console.log("RESULT", JSON.stringify({ stopReason: summary.stopReason, processed: summary.processed, costJpy: summary.costJpy, overruns: summary.overruns, verdicts: Object.fromEntries(Object.entries(results).map(([k, x]) => [k, (x as { verdict: string }).verdict])) }));

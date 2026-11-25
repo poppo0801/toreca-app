@@ -153,4 +153,29 @@ ${"ナビゲーション ".repeat(1800)}
     expect(hintsBy["hints.on"] ?? 0).toBeGreaterThan(0);
     expect(r.claim).toBe("pipeline_check_only");
   });
+  it("⑤モックの独立性: モックは実AIの候補・保存済みの登録案を再利用せず、別の名前空間の候補で動く。実の登録案はモックの実行で変わらない", async () => {
+    const cases = [mkCase(50)];
+    const gold = [mkGold(50)];
+    // 「実AIの実行」を模して、実の名前空間（既定）の候補に登録案を保存し、人が見て分かる目印（exclude）に変える
+    const real = await prepareArmCandidates({ db: db(), householdId: hid, experiment: "links", cases, now: new Date().toISOString() });
+    const { generateProposalsForCandidate, mockDeps } = await import("@/lib/server/proposals/generate");
+    for (const p of real) await generateProposalsForCandidate({ db: db(), householdId: hid, candidate: p.candidate, env: ENV, deps: mockDeps({ learn: p.arm.learn }) });
+    const ids = real.map((p) => p.candidate.id);
+    await admin.from("registration_proposals").update({ decision: "exclude", held_reasons: ["REAL_AI_MARKER"] }).in("candidate_id", ids).is("superseded_at", null);
+    const before = (await admin.from("registration_proposals").select("candidate_id,proposal_key,decision,held_reasons").in("candidate_id", ids).is("superseded_at", null).order("candidate_id").order("item_no")).data ?? [];
+    expect(before.length).toBeGreaterThan(0);
+    // モックを実行する
+    const m = await runExperimentMock({ db: db(), householdId: hid, experiment: "links", cases, gold, env: ENV });
+    // モックの候補は、実の候補と別（候補ID・URLの名前空間が違う）
+    expect(m.prepared.map((p) => p.candidate.id).filter((id) => ids.includes(id))).toEqual([]);
+    expect(m.prepared.every((p) => String(p.candidate.source_url).includes("/mock/"))).toBe(true);
+    // 実の登録案は、モックの実行で書き換わらない（上書き・再利用されない）
+    const after = (await admin.from("registration_proposals").select("candidate_id,proposal_key,decision,held_reasons").in("candidate_id", ids).is("superseded_at", null).order("candidate_id").order("item_no")).data ?? [];
+    expect(after).toEqual(before);
+    // モックの採点は、実の「exclude」の目印を読まない（台本のAIの出力だけで採点される）
+    const mockRows = (await admin.from("registration_proposals").select("held_reasons,decision").in("candidate_id", m.prepared.map((p) => p.candidate.id)).is("superseded_at", null)).data ?? [];
+    expect(mockRows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(mockRows)).not.toContain("REAL_AI_MARKER");
+    expect(m.claim).toBe("pipeline_check_only"); // モックの成功は実AIの精度ではない
+  });
 });

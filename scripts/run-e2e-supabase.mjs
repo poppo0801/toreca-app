@@ -17,6 +17,8 @@ try {
   /* .env.local が無い環境（CI など）や、環境変数で設定済みの場合。接続先は次の assertLocalTarget が必ず検査し、未設定・本番なら停止する */
 }
 assertLocalTarget("test:e2e:supabase"); // 開発用ローカルDBのみ（Stage 8C。npm run prod 経由でも本番では実行しない）
+const { guardEvalData } = await import("./lib/eval-guard.mjs");
+await guardEvalData("test:e2e:supabase"); // 評価データの保全を確認してから、テスト用データを削除する
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
