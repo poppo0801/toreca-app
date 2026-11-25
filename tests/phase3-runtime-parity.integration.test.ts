@@ -236,4 +236,18 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     expect(s2.prompts[0]).toBe(e.prompts[0]);
     await clean();
   });
+
+  it("⑦別の実行がいまリース中（期限内）のジョブは引き当てない（完了時に記録される）。期限が切れても記録がない試行だけ引き当てる", async () => {
+    await clean();
+    await setSettings();
+    const c = await mkCandidate(0, "lease");
+    await enqueue(c);
+    const { data: job } = await admin.from("shadow_jobs").select("id").eq("candidate_id", c.id).single();
+    const future = new Date(Date.now() + 120_000).toISOString();
+    await admin.from("shadow_jobs").update({ attempts: 1, status: "leased", locked_by: "other", lease_until: future }).eq("id", job!.id);
+    expect(await unconfirmedReserveJpy(admin as unknown as Db, hid, 3, [])).toBe(0); // 実行中
+    await admin.from("shadow_jobs").update({ lease_until: new Date(Date.now() - 1000).toISOString() }).eq("id", job!.id);
+    expect(await unconfirmedReserveJpy(admin as unknown as Db, hid, 3, [])).toBe(3); // 期限切れで記録なし＝打ち切りの疑い
+    await clean();
+  });
 });
