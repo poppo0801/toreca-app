@@ -15,6 +15,7 @@ import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, OUTPUT_MAX_
 import { DEFAULT_RESEARCH_LIMITS, type ResearchLimits } from "@/lib/judgment/xsource/research-loop";
 import { generateProposalsForCandidate, type CandidateRow } from "@/lib/server/proposals/generate";
 import { productionPreviewPermission } from "@/lib/server/proposals/prod-gate";
+import { shadowApiKey } from "./allow";
 import { issueProductionShadowTicket } from "@/lib/server/proposals/real-gate";
 
 type Env = Record<string, string | undefined>;
@@ -54,12 +55,13 @@ export async function runShadowProposalJob(a: {
 }): Promise<ProposalJobResult> {
   const env = a.env ?? process.env;
   // ---- 多重の本番ゲート。専用キーは既存のシャドー専用キー（SHADOW_ANTHROPIC_API_KEY）。予算はDBの shadow_settings（日次）に合わせる
+  const k = shadowApiKey(env); // 専用キー、または明示スイッチ（SHADOW_REUSE_EXISTING_KEY=allow）で既存キー。費用の安全はDBの予算が担う
   const decision = productionPreviewPermission({
-    env: { ...env, PROPOSAL_DAILY_BUDGET_JPY: String(a.settings.daily_budget_jpy), PROPOSAL_ANTHROPIC_API_KEY: env.SHADOW_ANTHROPIC_API_KEY },
+    env: { ...env, PROPOSAL_DAILY_BUDGET_JPY: String(a.settings.daily_budget_jpy), PROPOSAL_ANTHROPIC_API_KEY: k?.key },
     householdId: a.householdId,
     settings: { enabled: a.settings.enabled, kill: false }, // 停止は環境変数（PROPOSAL_KILL・SHADOW_WORKER_KILL）と enabled=false の両方で効く
     usage: { todayJpy: a.spentTodayJpy },
-    otherKeys: otherKeyValues(env),
+    otherKeys: k?.source === "dedicated" ? otherKeyValues(env) : [], // 専用キーの場合だけ、他機能のキーとの共用を拒否。既存キーの再利用は明示承認済み
   });
   if (!decision.allowed) return { ok: false, reason: `gate:${decision.reasons[0] ?? "denied"}` };
   const caseCap = Math.min(a.settings.per_case_cap_jpy, 5, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);

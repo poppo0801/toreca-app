@@ -38,7 +38,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3: 本番シャドーの登録案ジョ�
     ...extra,
   });
   const setSettings = async (over: Record<string, unknown> = {}) => {
-    const { error } = await admin.from("shadow_settings").upsert({ household_id: hid, enabled: true, enqueue_enabled: true, daily_budget_jpy: 10, monthly_budget_jpy: 100, per_case_cap_jpy: 3, max_jobs_per_run: 3, retention_days: 30, ...over });
+    const { error } = await admin.from("shadow_settings").upsert({ household_id: hid, enabled: true, enqueue_enabled: true, daily_budget_jpy: 10, monthly_budget_jpy: 100, per_case_cap_jpy: 3, max_jobs_per_run: 3, retention_days: 30, valid_until: null, total_budget_jpy: null, total_since: null, run_lock_by: null, run_lock_until: null, ...over });
     expect(error).toBeNull();
   };
   const addCandidate = async (): Promise<{ row: CandidateRow; hash: string; draft: unknown; lastGood: unknown }> => {
@@ -205,5 +205,91 @@ describe.skipIf(!dbTestsEnabled)("Phase 3: 本番シャドーの登録案ジョ�
     const cand = await addCandidate();
     await run(scriptedAnthropic().client, envOn());
     for (const p of await proposalsOf(cand.row.id)) expect(String(p.stop_reason)).not.toMatch(/rev:\d/);
+  });
+
+  it("⑧並列実行: 同じ世帯の費用判断は直列化される（ロック中は呼ばず罰なしで戻す）。ロックは終了で外れ、期限切れでも外れる", async () => {
+    await clean();
+    await setSettings();
+    const cand = await addCandidate();
+    const rpcA = admin as unknown as { rpc: (n: string, a: object) => PromiseLike<{ data: unknown }> };
+    expect((await rpcA.rpc("shadow_budget_lock", { p_household: hid, p_worker: "other-run", p_seconds: 60 })).data).toBe(true);
+    const { client, calls } = scriptedAnthropic();
+    const r = await run(client, envOn());
+    expect(calls).toHaveLength(0);
+    expect(r.byReason.budget_locked).toBe(1);
+    expect(await proposalsOf(cand.row.id)).toHaveLength(0);
+    await rpcA.rpc("shadow_budget_unlock", { p_household: hid, p_worker: "other-run" });
+    await admin.from("shadow_jobs").update({ next_run_at: new Date(Date.now() - 1000).toISOString() }).eq("household_id", hid);
+    const r2 = await run(scriptedAnthropic().client, envOn());
+    expect(r2.done).toBe(1);
+    const st = (await admin.from("shadow_settings").select("run_lock_by,run_lock_until").eq("household_id", hid).single()).data as { run_lock_by: string | null; run_lock_until: string | null };
+    expect(st.run_lock_by).toBeNull(); // 終了で必ず外れる
+  });
+
+  it("⑨通算上限と試行期間: 通算の残りが無ければ呼ばない。試行期間を過ぎたらジョブを確保しない（自動停止）", async () => {
+    await clean();
+    await setSettings({ total_budget_jpy: 0.3, total_since: new Date(Date.now() - 3600_000).toISOString() });
+    await addCandidate();
+    const a = scriptedAnthropic();
+    const r = await run(a.client, envOn());
+    expect(a.calls).toHaveLength(0);
+    expect(r.byReason.budget).toBe(1);
+    await clean();
+    await setSettings({ valid_until: new Date(Date.now() - 1000).toISOString() });
+    await addCandidate();
+    const b = scriptedAnthropic();
+    const r2 = await run(b.client, envOn());
+    expect(b.calls).toHaveLength(0);
+    expect(r2.leased).toBe(0); // DBのリースが期限切れの世帯を確保しない
+  });
+
+  it("⑩費用の記録に失敗したら、その世帯のシャドーを停止して実行を止める（記録できない費用を重ねない）", async () => {
+    await clean();
+    await setSettings();
+    await addCandidate();
+    await addCandidate();
+    const failing = new Proxy(admin as object, {
+      get: (t, p) => {
+        if (p === "from") return (name: string) => (name === "shadow_judgments" ? { insert: async () => ({ error: { message: "simulated" } }) } : (t as { from: (n: string) => unknown }).from(name));
+        const v = (t as Record<string | symbol, unknown>)[p];
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+      },
+    });
+    const { client, calls } = scriptedAnthropic();
+    const r = await runShadowWorker({ db: failing as unknown as Db, model: null, env: WORKER_ENV, workerId: "w-fail", limit: 3, proposalJob: (a) => runShadowProposalJob({ db: admin as unknown as Db, ...a, client: client as never, env: envOn() }) });
+    expect(r.stoppedBy).toBe("record_failed");
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.length).toBeLessThanOrEqual(6); // 1件目だけ。2件目は呼ばない
+    expect((await admin.from("shadow_settings").select("enabled").eq("household_id", hid).single()).data).toMatchObject({ enabled: false });
+  });
+
+  it("⑪既存キーの再利用は明示スイッチ（SHADOW_REUSE_EXISTING_KEY=allow）があるときだけ。無ければ専用キーなしで拒否", async () => {
+    await clean();
+    await setSettings();
+    await addCandidate();
+    const noKey = envOn({ SHADOW_ANTHROPIC_API_KEY: "", ANTHROPIC_API_KEY: "existing-prod-key-not-real-00000" });
+    const a = scriptedAnthropic();
+    const r = await run(a.client, noKey);
+    expect(a.calls).toHaveLength(0);
+    expect(Object.keys(r.byReason).join(",")).toContain("no_dedicated_key");
+    await clean();
+    await setSettings();
+    const cand = await addCandidate();
+    const b = scriptedAnthropic();
+    const r2 = await run(b.client, { ...noKey, SHADOW_REUSE_EXISTING_KEY: "allow" });
+    expect(r2.done).toBe(1);
+    expect((await proposalsOf(cand.row.id)).length).toBeGreaterThan(0);
+  });
+
+  it("⑫1件上限と最大予約の整合: 最大のトークン使用量でも、1件の費用は1件上限＋予約超過分に収まる（上限3円・最大予約3.6円）", async () => {
+    await clean();
+    await setSettings({ daily_budget_jpy: 15, per_case_cap_jpy: 3 });
+    await addCandidate();
+    const { client } = scriptedAnthropic({ usage: { input_tokens: 24_000, output_tokens: 3_000 } });
+    const r = await run(client, envOn());
+    const j = ((await admin.from("shadow_judgments").select("cost_jpy").eq("household_id", hid)).data ?? []) as { cost_jpy: number }[];
+    expect(j.length).toBeLessThanOrEqual(1);
+    for (const x of j) expect(Number(x.cost_jpy)).toBeLessThanOrEqual(3.6);
+    expect(r.spentJpy).toBeLessThanOrEqual(3.6);
   });
 });

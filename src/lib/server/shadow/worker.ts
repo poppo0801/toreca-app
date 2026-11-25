@@ -45,6 +45,11 @@ export interface ShadowSettingsRow {
   per_case_cap_jpy: number;
   max_jobs_per_run: number;
   retention_days: number;
+  /** 試行期間の終了（過ぎるとジョブを確保しない。NULL=期限なし） */
+  valid_until?: string | null;
+  /** 通算の費用上限（円）と集計の開始日時（NULL=通算上限なし） */
+  total_budget_jpy?: number | null;
+  total_since?: string | null;
 }
 
 export interface ShadowWorkerDeps {
@@ -77,7 +82,7 @@ export interface ShadowWorkerDeps {
 }
 
 export interface ShadowWorkerResult {
-  stoppedBy: "not_allowed" | "no_model" | "no_jobs" | "time" | "completed" | "lease_error" | "provider_error";
+  stoppedBy: "not_allowed" | "no_model" | "no_jobs" | "time" | "completed" | "lease_error" | "provider_error" | "record_failed";
   notAllowedReason?: string;
   leased: number;
   done: number;
@@ -112,9 +117,9 @@ const nextJstMonth = (now: Date): Date => {
 };
 
 export async function loadShadowSettings(db: Db, householdId: string): Promise<ShadowSettingsRow | null> {
-  const { data } = await table(db, "shadow_settings").select("enabled,enqueue_enabled,daily_budget_jpy,monthly_budget_jpy,per_case_cap_jpy,max_jobs_per_run,retention_days").eq("household_id", householdId).maybeSingle();
+  const { data } = await table(db, "shadow_settings").select("enabled,enqueue_enabled,daily_budget_jpy,monthly_budget_jpy,per_case_cap_jpy,max_jobs_per_run,retention_days,valid_until,total_budget_jpy,total_since").eq("household_id", householdId).maybeSingle();
   if (!data) return null;
-  return { ...data, daily_budget_jpy: Number(data.daily_budget_jpy), monthly_budget_jpy: Number(data.monthly_budget_jpy), per_case_cap_jpy: Number(data.per_case_cap_jpy) };
+  return { ...data, daily_budget_jpy: Number(data.daily_budget_jpy), monthly_budget_jpy: Number(data.monthly_budget_jpy), per_case_cap_jpy: Number(data.per_case_cap_jpy), total_budget_jpy: data.total_budget_jpy === null || data.total_budget_jpy === undefined ? null : Number(data.total_budget_jpy) };
 }
 
 class CaptureSink implements ShadowSink {
@@ -200,12 +205,31 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
 
       // Phase 3: 本番シャドーの登録案ジョブ。予算（DBの日次・月次・1件）を確認してから、収集済みの保存データだけで調査・判断・検証する
       if (deps.proposalJob) {
+        if (st.valid_until && now().getTime() >= new Date(st.valid_until).getTime()) {
+          await requeue(j, new Date(now().getTime() + 6 * 60 * 60_000), "expired", false); // 試行期間が過ぎた（以降のジョブはDB側で確保されない）
+          bump(res.byReason, "expired");
+          continue;
+        }
+        // 費用判断の直列化（並列実行で同じ残額を二重に使わない）。取れなければ罰なしで少し後に
+        const lock = await rpc(db)("shadow_budget_lock", { p_household: j.household_id, p_worker: workerId, p_seconds: 150 });
+        if (lock.error || lock.data !== true) {
+          await requeue(j, new Date(now().getTime() + 3 * 60_000), "budget_locked", false);
+          bump(res.byReason, "budget_locked");
+          continue;
+        }
+        try {
         const d1 = now();
         const [day1, month1] = await Promise.all([rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstDayStart(d1).toISOString() }), rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstMonthStart(d1).toISOString() })]);
         const spentDay = Number(day1.data ?? 0);
-        const left1 = Math.min(st.daily_budget_jpy - spentDay, st.monthly_budget_jpy - Number(month1.data ?? 0));
-        if (day1.error || month1.error || !(left1 > 0.5)) {
-          await requeue(j, day1.error || month1.error ? new Date(d1.getTime() + 10 * 60_000) : nextJstDay(d1), "budget", false);
+        let left1 = Math.min(st.daily_budget_jpy - spentDay, st.monthly_budget_jpy - Number(month1.data ?? 0));
+        let totalErr = false;
+        if (st.total_budget_jpy !== null && st.total_budget_jpy !== undefined) {
+          const tot = await rpc(db)("shadow_spent", { p_household: j.household_id, p_since: st.total_since ?? "1970-01-01T00:00:00Z" });
+          if (tot.error) totalErr = true;
+          else left1 = Math.min(left1, st.total_budget_jpy - Number(tot.data ?? 0)); // 通算の上限
+        }
+        if (day1.error || month1.error || totalErr || !(left1 > 0.5)) {
+          await requeue(j, day1.error || month1.error || totalErr ? new Date(d1.getTime() + 10 * 60_000) : nextJstDay(d1), "budget", false);
           bump(res.byReason, "budget");
           continue;
         }
@@ -226,10 +250,16 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           continue;
         }
         const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: false, liveFetch: false };
-        const insP = await table(db, "shadow_judgments").insert({ household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: pr.status, attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: pr.decisions.register ?? 0, record: recP });
+        const rowP = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: pr.status, attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: pr.decisions.register ?? 0, record: recP };
+        // 費用の記録は予算の根拠。失敗したら再試行し、それでも記録できなければ、この世帯のシャドーを停止して実行を止める（記録できない費用を重ねない）
+        let insP = await table(db, "shadow_judgments").insert(rowP);
+        for (let k = 0; k < 2 && insP.error; k++) insP = await table(db, "shadow_judgments").insert(rowP);
         if (insP.error) {
-          await requeue(j, new Date(now().getTime() + 10 * 60_000), "record_failed", true);
-          continue;
+          res.spentJpy += pr.costJpy;
+          await table(db, "shadow_settings").update({ enabled: false }).eq("household_id", j.household_id).then(() => undefined, () => undefined);
+          for (const r of jobs.slice(n)) await requeue(r, new Date(now().getTime() + 60 * 60_000), "record_failed", false);
+          bump(res.byReason, "record_failed");
+          return { ...res, stoppedBy: "record_failed" };
         }
         res.spentJpy += pr.costJpy;
         bump(res.byStatus, pr.status);
@@ -243,6 +273,9 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           if (j.attempts >= j.max_attempts) await finish(j, "failed", "proposal_error");
           else await requeue(j, new Date(now().getTime() + Math.min(60, 2 ** j.attempts) * 60_000), "proposal_error", true);
         } else await finish(j, "done", null);
+        } finally {
+          await rpc(db)("shadow_budget_unlock", { p_household: j.household_id, p_worker: workerId }).then(() => undefined, () => undefined);
+        }
         continue;
       }
 

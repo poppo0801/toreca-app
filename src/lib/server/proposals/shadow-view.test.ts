@@ -55,3 +55,16 @@ describe("静的確認: 本番シャドーの登録案ジョブは読み取り�
     expect(r).toContain("proposalMode ?");
   });
 });
+
+describe("シャドーのAPIキー（専用キー優先・既存キーの再利用は明示スイッチのみ）", () => {
+  it("専用キー → 明示スイッチつきの既存キー → null。スイッチが無ければ既存キーがあっても使わない", async () => {
+    const { shadowApiKey } = await import("@/lib/server/shadow/allow");
+    const ded = "d".repeat(30);
+    const ex = "e".repeat(30);
+    expect(shadowApiKey({ SHADOW_ANTHROPIC_API_KEY: ded, ANTHROPIC_API_KEY: ex })).toMatchObject({ key: ded, source: "dedicated" });
+    expect(shadowApiKey({ ANTHROPIC_API_KEY: ex })).toBeNull();
+    expect(shadowApiKey({ ANTHROPIC_API_KEY: ex, SHADOW_REUSE_EXISTING_KEY: "yes" })).toBeNull();
+    expect(shadowApiKey({ ANTHROPIC_API_KEY: ex, SHADOW_REUSE_EXISTING_KEY: "allow" })).toMatchObject({ key: ex, source: "existing" });
+    expect(shadowApiKey({ SHADOW_REUSE_EXISTING_KEY: "allow", ANTHROPIC_API_KEY: "short" })).toBeNull();
+  });
+});
