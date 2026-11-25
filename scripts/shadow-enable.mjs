@@ -136,6 +136,8 @@ if (reseedOpt) {
     if (typeof h !== "string" || h.length < 32) continue;
     const r = await db.rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h.slice(0, 24) });
     if (r.data === true) ok++;
+    // 再評価の候補を先に処理する（キューの並びだけを変える。ジョブの状態・回数は変えない）
+    await db.from("shadow_jobs").update({ next_run_at: "2000-01-01T00:00:00Z" }).eq("household_id", hid).eq("candidate_id", c.id).eq("evidence_hash", h.slice(0, 24)).eq("status", "queued");
   }
   console.log(`再評価として投入しました: ${ok}件（既存の登録案がある候補。過去の登録案は保持）`);
   process.exit(0);
