@@ -496,7 +496,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       if (vd.length > 0 && !vd.some((d) => qd.includes(d))) issues.push("value_not_in_quote:" + name);
       else sem("deadline_role_mismatch:" + name, checkDeadlineRole(f.value!, f.quote!), name); // 値の日付が、当選発表など別の事象の日付ではなく、応募の締切の記載にあること
     } else if (grounded && (name === "store" || name === "product")) sem("value_not_in_quote:" + name, checkValueCorrespondence(f.value!, f.quote!), name);
-    else if (grounded && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);
+    // 応募単位: 観察（observed）は、引用が応募の権利の単位（人数・回数・店舗・フォーム等）を述べていること。推定（inferred）は、受付枠・応募ボタンなど構造からの推定で、確定値として扱わない（登録案でも推定と表示される）ため、引用の実在と対応の検査だけにする（RUNTIME_CORRECTNESS: 単一の受付枠からの推定が、語の正規表現で一律に拒否されていた）
+    else if (grounded && f.basis === "observed" && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);
     const prot = i.protectedFields[name];
     if (prot !== undefined && f.value !== null && norm(prot) !== norm(f.value)) {
       // 人が確定した値は変更しない。矛盾は人への確認に回す（自動で上書きしない）
