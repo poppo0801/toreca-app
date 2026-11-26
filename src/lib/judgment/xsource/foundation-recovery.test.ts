@@ -150,3 +150,24 @@ describe("F4 判断から調査へ戻る（重大な不足のときだけ1回）
     expect(rc.registration.verified).toBe(true);
   });
 });
+
+describe("RUNTIME_CORRECTNESS: AIへの提示の欠落の是正", () => {
+  it("受付枠が13件以上でも、13件目以降の名称を省略せず提示する（店舗・地域の判断に必要）", async () => {
+    const { structureToObservations } = await import("./page-structure");
+    const slots = Array.from({ length: 28 }, (_, i) => ({ title: `店舗${i + 1}`, statusTags: [], details: [], notes: [] }));
+    const obs = structureToObservations({ recognized: true, siteKind: "livepocket_like", title: "t", pageNotes: [], slots, relatedEvents: [], formChoices: [], formQuestions: [], gaps: [] } as never);
+    const line = obs.find((o) => o.startsWith("受付枠13〜28の名称"));
+    expect(line).toContain("28「店舗28」");
+    expect(obs.join("\n")).not.toContain("省略）");
+  });
+  it("調査AIの道具: 取得を選ぶときのURLは必須（空のURLの取得は停止として扱い、その事実を記録する）", async () => {
+    const { makeAnthropicResearchAgent } = await import("./research-ai");
+    const seen: string[] = [];
+    const reqs: { tools: { input_schema: { properties: { next: { required: string[] } } } }[] }[] = [];
+    const client = { messages: { create: async (req: never) => (reqs.push(req), { stop_reason: "tool_use", content: [{ type: "tool_use", name: "submit_research_turn", input: { observed: [], unknown: [], next: { kind: "fetch", url: "", why: "w" } } }], usage: { input_tokens: 1, output_tokens: 1 } }) } } as never;
+    const out = await makeAnthropicResearchAgent(client, { onDiagnostic: (d) => seen.push(d.reason) })({ caseId: "c", evidence: [], history: [], remaining: { turns: 1, fetches: 1, costJpy: 1, elapsedMs: 1 } });
+    expect(out?.next.kind).toBe("stop");
+    expect(seen).toContain("next:stop:other:fetch_without_url");
+    expect(reqs[0].tools[0].input_schema.properties.next.required).toContain("url");
+  });
+});
