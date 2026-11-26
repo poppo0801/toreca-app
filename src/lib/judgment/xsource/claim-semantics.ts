@@ -15,7 +15,8 @@ const nf = (s: string): string => s.normalize("NFKC");
 
 /** 除外理由（AIの自由文）の種類。語彙に当てはまらないものは unknown（機械的に支持できない → 保留） */
 export function claimClassOf(value: string): ClaimClass {
-  const v = nf(value);
+  // 「AではなくB」は B が理由（否定された A で分類しない。INTENSIVE_EVALUATION: 「抽選ではない…ではなく、受付終了」を抽選でないと誤分類した）
+  const v = nf(value).split("ではなく").pop() ?? nf(value);
   // 抽選の応募機会ではない（先着・通常販売・予約・商品情報・複数の抽選のまとめ・件数の集計）。INTENSIVE_EVALUATION: 投稿そのものが根拠になる除外
   if (/抽選(販売)?(では|で)?ない|抽選の(告知|応募機会)ではない|応募機会ではない|先着|通常販売|一般販売|予約販売|商品情報|まとめ|件数|集計|一覧の投稿/.test(v)) return "not_lottery";
   if (/完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売/.test(v)) return "sold_out";
@@ -154,7 +155,7 @@ function closedSupport(quote: string, now: Date | undefined): SemanticVerdict & 
  * - sold_out / ineligible: 引用にその状態を表す語があること
  * - unknown（語彙に無い理由）: 機械的に支持できない
  */
-export function checkExcludeSemantics(a: { claim: string; quote: string; now?: Date; otherDeadlines?: readonly string[]; userRegion?: UserRegion }): SemanticVerdict {
+export function checkExcludeSemantics(a: { claim: string; quote: string; now?: Date; otherDeadlines?: readonly string[]; userRegion?: UserRegion; /** 検証を通った締切の項目の引用（受付終了の根拠の日付が、理由の引用ではなく締切の項目にある場合に使う） */ deadlineQuote?: string }): SemanticVerdict {
   const cls = claimClassOf(a.claim);
   const q = nf(a.quote);
   if (cls === "out_of_area") return checkRegionExclusion(a.quote, a.userRegion);
@@ -166,7 +167,9 @@ export function checkExcludeSemantics(a: { claim: string; quote: string; now?: D
   if (cls === "unknown") return { ok: false, code: "unverifiable", reason: "除外理由の種類を機械的に判別できず、引用が支持するか確認できない（人が確認するまで保留）" };
   if (cls === "sold_out") return /完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売|終了/.test(q) ? { ok: true, reason: "引用に売り切れ・終了を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、売り切れ・終了を表す記述が無い" };
   if (cls === "ineligible") return /対象外|非対象|限定|不可|できません|お受けできません|対象となりません|ご利用いただけません|対象でない|対象外となり/.test(q) ? { ok: true, reason: "引用に対象外・制限を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、対象外・応募不可を表す記述が無い" };
-  const s = closedSupport(a.quote, a.now);
+  let s = closedSupport(a.quote, a.now);
+  // 理由の引用に日付が無いときは、検証を通った締切の項目の引用で、締切が評価時点より前かを確かめる（日付の役割の検査は同じ）
+  if (!s.ok && s.code === "unsupported" && a.deadlineQuote) s = closedSupport(a.deadlineQuote, a.now);
   if (!s.ok) return s;
   // 別の項目に、評価時点より先の締切があれば矛盾（応募の機会を消さない）
   if (a.now) {

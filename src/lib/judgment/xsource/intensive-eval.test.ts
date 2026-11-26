@@ -46,6 +46,15 @@ describe("INTENSIVE_EVALUATION: 抽選ではない投稿の除外", () => {
     expect(checkExcludeSemantics({ claim: "抽選ではない（まとめ・件数）", quote: "全国の受付中の抽選 | 11/20(金)09:00時点 - 60件" }).ok).toBe(true);
     expect(checkExcludeSemantics({ claim: "抽選ではない", quote: "抽選販売のお知らせ 応募期間 11/20〜11/26" }).ok).toBe(false);
   });
+  it("「AではなくB」は否定された A で分類しない（受付終了を抽選でないと誤分類しない）", () => {
+    expect(claimClassOf("抽選ではない（先着販売）ではなく、抽選応募受付期間が終了している（締切済み）")).toBe("closed");
+  });
+  it("受付終了の理由の引用に日付が無くても、検証を通った締切の項目の引用で締切が評価時点より前と確かめられれば支持する", () => {
+    const now = new Date("2026-11-22T15:15:00Z");
+    expect(checkExcludeSemantics({ claim: "受付終了（締切済み）", quote: "抽選応募受け付け期間", now }).ok).toBe(false);
+    expect(checkExcludeSemantics({ claim: "受付終了（締切済み）", quote: "抽選応募受け付け期間", now, deadlineQuote: "応募期間 11月6日(金)16時00分~11月10日(火)16時59分まで" }).ok).toBe(true);
+    expect(checkExcludeSemantics({ claim: "受付終了", quote: "抽選応募受け付け期間", now, deadlineQuote: "応募期間 11月30日(月)まで" }).ok).toBe(false); // 締切が先なら終了ではない
+  });
   it("抽選ではない除外は、応募先のページの証拠が無くても投稿を根拠にできる（他の理由は従来どおりページが必要）", () => {
     const seed = ev("s1", "【ポケカ販売情報】ポケモンセンターオンラインで販売開始⚡ 一人1点まで購入可能！", "seed");
     const ok = verifyRegistration({ output: out({ decision: "exclude", fields: { exclude_reason: { value: "抽選ではない（先着販売）", basis: "observed", evidenceId: "s1", quote: "販売開始⚡ 一人1点まで購入可能！" } } }), evidence: [seed], protectedFields: {}, registerRequiresUnit: true });

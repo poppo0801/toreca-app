@@ -593,7 +593,7 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     else {
       // 引用が実在するだけでは除外の根拠にならない。理由の種類と引用の意味・評価時点の対応を検証し、支持されない・矛盾・判別不能なら保留にする（応募の機会を消さない）
       const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
-      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others, ...(i.userRegion ? { userRegion: i.userRegion } : {}) });
+      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others, ...(i.userRegion ? { userRegion: i.userRegion } : {}), ...(() => { const d = i.output.fields["deadline"]; const dev = d?.evidenceId ? byId.get(d.evidenceId) : undefined; return d && d.basis === "observed" && d.quote && dev && norm(dev.text).includes(norm(d.quote)) ? { deadlineQuote: d.quote } : {}; })() });
       if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
       else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
     }
