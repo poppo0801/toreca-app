@@ -17,6 +17,8 @@ export interface SaveSummary {
   failed: number;
 }
 
+/** キーの順序に依らない比較用の JSON（DBの jsonb はキーの順序を保たない） */
+const stableJson = (x: unknown): string => JSON.stringify(x, (_k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, (v as Record<string, unknown>)[k]])) : v));
 const rowOf = (householdId: string, r: ProposalRecord, version: number) => ({
   household_id: householdId,
   candidate_id: r.candidateId,
@@ -53,13 +55,16 @@ export async function saveProposals(db: Db, householdId: string, records: Propos
   const s: SaveSummary = { inserted: 0, unchanged: 0, superseded: 0, failed: 0 };
   for (const r of records) {
     try {
-      const cur = (await t(db, "registration_proposals").select("id,version,input_hash").eq("household_id", householdId).eq("proposal_key", r.proposalKey).is("superseded_at", null).maybeSingle()) as Rows;
+      const cur = (await t(db, "registration_proposals").select("id,version,input_hash,decision,verified,apply_unit,apply_unit_basis,held_reasons,fields").eq("household_id", householdId).eq("proposal_key", r.proposalKey).is("superseded_at", null).maybeSingle()) as Rows;
       if (cur.error) {
         s.failed++;
         continue;
       }
-      const c = cur.data as { id: string; version: number; input_hash: string } | null;
-      if (c && c.input_hash === r.inputHash) {
+      const c = cur.data as { id: string; version: number; input_hash: string; decision?: string; verified?: boolean; apply_unit?: string; apply_unit_basis?: string; held_reasons?: unknown; fields?: unknown } | null;
+      // 同じ入力でも、結果（判断・検証・応募単位・保留理由・項目）が変わったら新しい版として残す（RUNTIME_CORRECTNESS: 検証の修正後の再評価が「変更なし」で捨てられた）。結果まで同じなら重複を作らない
+      const row = rowOf(householdId, r, 0) as Record<string, unknown>;
+      const sameResult = !!c && c.decision === row.decision && c.verified === row.verified && c.apply_unit === row.apply_unit && c.apply_unit_basis === row.apply_unit_basis && stableJson(c.held_reasons ?? null) === stableJson(row.held_reasons ?? null) && stableJson(c.fields ?? null) === stableJson(row.fields ?? null);
+      if (c && c.input_hash === r.inputHash && sameResult) {
         s.unchanged++;
         continue;
       }
