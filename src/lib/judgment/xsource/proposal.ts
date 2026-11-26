@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import type { ItemPlan, StoredXPost } from "./x-origin";
 import { FULL_VIEW_CHARS, shownRanges, type Evidence, type ResearchResult } from "./research-loop";
 import { canonUrl } from "./normalize";
+import { redact } from "@/lib/case-model/redact";
 
 /**
  * 最終の扱い（登録境界）。AIの判断（register/exclude）が検証を通っていないときは、暫定（tentative）として扱う。
@@ -18,7 +19,7 @@ export function effectiveDecision(r: { decision: ProposalRecord["decision"]; ver
   return (r.decision === "register" || r.decision === "exclude") && !r.verified ? "tentative" : r.decision;
 }
 
-export const PROPOSAL_PROMPT_VERSION = "10z-8";
+export const PROPOSAL_PROMPT_VERSION = "10z-9";
 export type ProposalMode = "mock" | "replay" | "real";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product" | "unknown";
 /** near_match: 言い換え・書式・括弧の違いを除くと、値の語が本文にほぼ含まれる（数字は完全一致が条件）。enum_value: 応募単位のような**列挙値**（語の一致では確認できない。人が確認する） */
@@ -190,7 +191,7 @@ export function toProposalRecords(a: {
     for (const n of plan.notes ?? []) if (n.startsWith("この投稿の本文は") || n.startsWith("投稿に画像があるが")) cov.push({ what: n.startsWith("この投稿") ? "投稿の欠落" : "画像の内容", why: n.slice(0, 80) });
     for (const e of result.evidence) {
       if (e.kind !== "page") continue;
-      if (e.notice) cov.push({ what: "ページの一部", why: e.notice.slice(0, 80) });
+      if (e.notice && /切り詰め|全文ではない/.test(e.notice)) cov.push({ what: "ページの一部", why: e.notice.slice(0, 80) });
       if (e.text.length > FULL_VIEW_CHARS) {
         const shown = shownRanges(e).reduce((t, r) => t + (r.to - r.from), 0);
         if (shown < e.text.length) cov.push({ what: "ページの未確認範囲", why: `本文${e.text.length}字のうち${e.text.length - shown}字はAIに提示・参照されていない（記載が無いとは限らない）` });
@@ -218,7 +219,7 @@ export function toProposalRecords(a: {
       fields,
       applyUnit: unit,
       applyUnitBasis: basis,
-      unknowns: [...cov, ...unknowns].slice(0, 12), // 切断・未確認範囲・人の修正の未適用は、他より先に残す（情報なしと区別する）
+      unknowns: [...cov, ...unknowns, ...(result.agentStopWhy ? [{ what: "調査を終えた理由（調査AI）", why: redact(result.agentStopWhy) }] : [])].slice(0, 12), // 切断・未確認範囲・人の修正の未適用は、他より先に残す（情報なしと区別する）
       pages: pages.slice(0, 8),
       possiblySame: [],
       mode: a.mode,

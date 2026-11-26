@@ -32,7 +32,7 @@ async function handle(req: NextRequest) {
   const model = new AnthropicJudgmentModel(client, {});
   // 画像根拠の検証（元画像の独立した書き起こしとの照合）。取得は既存の部品（pbs.twimg.com のみ・https・リダイレクト禁止）。シャドー専用キーで、画像1枚につき最大1回
   // 1回の実行のハード上限（回数・費用）。判断の再試行・再評価・画像の書き起こし・一覧の項目判断をすべて合算して数える
-  const callBudget = new CallBudget({ maxCalls: 60, maxCostJpy: 30 }); // 1実行の上限。日次30円・1件10円の承認に合わせる（実際の上限はDBの設定が先に効く）
+  const callBudget = new CallBudget({ maxCalls: 60, maxCostJpy: 60 }); // 1実行の上限。日次60円・1件25円の承認（2026-11-26）に合わせる（実際の上限はDBの設定が先に効く）
   const imageVerify = (a: Parameters<typeof verifyImageReadings>[1]) => verifyImageReadings({ db, fetchImage: fetchXImage, transcribe: withCallBudgetTranscriber(makeAnthropicTranscriber(client), callBudget) }, a);
   // Phase 3: 本番シャドーの登録案ジョブ。PROPOSAL_PROD_PREVIEW=on のときだけ（既定OFF）。以降の本番ゲート（承認スイッチ・世帯の許可リスト・専用予算・停止）は runShadowProposalJob が毎ジョブ確認する
   const proposalMode = ["on", "1", "yes"].includes(process.env.PROPOSAL_PROD_PREVIEW ?? "");

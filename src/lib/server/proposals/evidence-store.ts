@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import { canonUrl } from "@/lib/judgment/xsource/normalize";
-import type { ApplyPageStructure } from "@/lib/judgment/xsource/page-structure";
+import { normalizeStructure, type ApplyPageStructure } from "@/lib/judgment/xsource/page-structure";
 import { FULL_VIEW_CHARS, shownRanges, type Evidence, type ResearchResult } from "@/lib/judgment/xsource/research-loop";
 import type { Db } from "@/lib/server/lottery-service";
 
@@ -98,7 +98,7 @@ export async function loadBestDocument(db: Db, householdId: string, candidateId:
     const r = (await t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,created_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key).order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
     const x = r.data?.[0];
     if (!x) return null;
-    return { url: String(x.url), urlKey: String(x.url_key), origin: String(x.origin), contentHash: String(x.content_hash), fetchedAt: actualFetchedAt(String(x.origin), String(x.fetched_at), x.created_at as string | undefined), text: String(x.text), textChars: Number(x.text_chars), sourceChars: x.source_chars === null ? null : Number(x.source_chars), truncated: !!x.truncated, truncatedReason: (x.truncated_reason as string | null) ?? null, structure: (x.structure as ApplyPageStructure | null) ?? null, textLoss: (x.text_loss as string[] | null) ?? null };
+    return { url: String(x.url), urlKey: String(x.url_key), origin: String(x.origin), contentHash: String(x.content_hash), fetchedAt: actualFetchedAt(String(x.origin), String(x.fetched_at), x.created_at as string | undefined), text: String(x.text), textChars: Number(x.text_chars), sourceChars: x.source_chars === null ? null : Number(x.source_chars), truncated: !!x.truncated, truncatedReason: (x.truncated_reason as string | null) ?? null, structure: normalizeStructure(x.structure), textLoss: (x.text_loss as string[] | null) ?? null };
   } catch {
     return null;
   }

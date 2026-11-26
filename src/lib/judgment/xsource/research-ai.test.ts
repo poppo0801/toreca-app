@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Stage 10U: AIアダプタの安全性（偽のクライアント。実AIは呼ばない）。ツールは「結果の提出」1つだけ・読み取り専用・命令はデータ・秘密を渡さない。 */
 import { describe, expect, it, vi } from "vitest";
-import { wasNotBilled } from "./research-loop";
+import { lastCallOf, wasNotBilled } from "./research-loop";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, normalizeFields, strictifySchema, withStrictTools, JUDGE_SYSTEM, RESEARCH_SYSTEM, renderJudgeInput, renderTurnInput } from "./research-ai";
 
 vi.mock("server-only", () => ({}));
@@ -48,7 +48,7 @@ describe("失敗の理由の記録（Stage 10X）", () => {
     expect(await makeAnthropicResearchAgent(http, { onDiagnostic })(turnInput)).toBeNull();
     expect(await makeAnthropicRegistrationJudge(http, { onDiagnostic })({ caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient", protectedFields: {} })).toBeNull();
     expect(await makeAnthropicResearchAgent(fake({ nope: 1 }).client, { onDiagnostic })(turnInput)).toBeNull();
-    expect(seen.map((d) => d.reason)).toEqual(["api_error:429", "api_error:429", expect.stringMatching(/^bad_output:/), "retry_bad_output", expect.stringMatching(/^bad_output:/), "retry_failed"]); // 形の不備は1回だけ再試行する
+    expect(seen.map((d) => d.reason)).toEqual(["api_error:429", "api_error:429", expect.stringMatching(/^bad_output:/)]); // 部品は1回だけ呼ぶ（再試行は調査ループが予約を取って行う） // 形の不備は1回だけ再試行する
     expect(JSON.stringify(seen)).not.toContain("secret-ish");
     expect(JUDGE_SYSTEM).toContain("一字一句そのまま");
   });
@@ -96,8 +96,7 @@ describe("判断出力の形式の揺れ（Phase 3 RUNTIME_PARITY。本番で、
     const arr = await makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: [1] }).client, { onDiagnostic })(input);
     const dec = await makeAnthropicRegistrationJudge(fake({ decision: "maybe", fields: {} }).client, { onDiagnostic })(input);
     expect([bad, arr, dec]).toEqual([null, null, null]);
-    expect(seen.filter((r) => r.startsWith("bad_output:")).map((r) => r.replace(/^bad_output:[^:]*:/, ""))).toEqual(["fields_string_text_LS_K2", "fields_string_text_LS_K2", "fields_array", "fields_array", "decision_string", "decision_string"]); // 各1回ずつ再試行（同じ不備）
-    expect(seen.filter((r) => r === "retry_failed")).toHaveLength(3);
+    expect(seen.filter((r) => r.startsWith("bad_output:")).map((r) => r.replace(/^bad_output:[^:]*:/, ""))).toEqual(["fields_string_text_LS_K2", "fields_array", "decision_string"]);
   });
 });
 
@@ -112,7 +111,7 @@ describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクラ
   });
   it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
     const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
-    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-8");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-9");
   });
 });
 
@@ -142,10 +141,13 @@ describe("出力の安定化（Phase 3 FOUNDATION_RECOVERY）", () => {
     const seen: string[] = [];
     let n = 0;
     const client = { messages: { create: vi.fn(async (req: { tool_choice: { name: string } }) => (n++ === 0 ? { stop_reason: "tool_use", content: [{ type: "tool_use", name: req.tool_choice.name, input: { ...ok, fields: "{broken" } }], usage: { input_tokens: 100, output_tokens: 10 } } : { stop_reason: "tool_use", content: [{ type: "tool_use", name: req.tool_choice.name, input: { ...ok, fields: [] } }], usage: { input_tokens: 100, output_tokens: 10 } })) } } as never;
-    const out = await makeAnthropicRegistrationJudge(client, { onDiagnostic: (d) => seen.push(d.reason) })(input);
-    expect(out?.decision).toBe("tentative");
-    expect(n).toBe(2);
-    expect(seen).toEqual(["bad_output:tool_use:fields_string_obj_LS_K5", "retry_bad_output", "retry_recovered"]);
+    const judge = makeAnthropicRegistrationJudge(client, { onDiagnostic: (d) => seen.push(d.reason) });
+    expect(await judge(input)).toBeNull(); // 部品は1回だけ（再試行しない）
+    expect(n).toBe(1);
+    expect(lastCallOf(judge)).toEqual({ retryable: true, costJpy: expect.any(Number) }); // 不備の出力も課金あり（実費を記録）
+    expect(lastCallOf(judge)!.costJpy!).toBeGreaterThan(0);
+    expect((await judge(input))?.decision).toBe("tentative"); // 2回目は正しい出力
+    expect(seen).toEqual(["bad_output:tool_use:fields_string_obj_LS_K5"]);
     let m = 0;
     const cut = { messages: { create: vi.fn(async () => (m++, { stop_reason: "max_tokens", content: [{ type: "tool_use", name: "submit_registration_judgment", input: { decision: "maybe" } }], usage: { input_tokens: 1, output_tokens: 1 } })) } } as never;
     expect(await makeAnthropicRegistrationJudge(cut, { strict: false })(input)).toBeNull();
@@ -203,5 +205,43 @@ describe("要求の拒否は課金されない（Phase 3 FOUNDATION_RECOVERY）"
     const jok = makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: [], rationale: "x", unresolvedImpact: "none", monitor: { continue: true, why: "w" } }).client);
     expect((await jok(input))?.decision).toBe("tentative");
     expect(wasNotBilled(jok)).toBe(false);
+  });
+});
+
+describe("F3 API互換性（Phase 3 RUNTIME_CORRECTNESS）", () => {
+  const input = { caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient" as const, protectedFields: {} };
+  const okIn = { decision: "tentative", fields: [], rationale: "x", unresolvedImpact: "none", monitor: { continue: true, why: "w" } };
+  it("強制ツール選択を受け付けないモデル（Sonnet 5.5・Opus 5.5）は tool_choice=auto＋厳密入力で呼ぶ。Haiku は従来どおり強制", async () => {
+    for (const [model, want] of [["claude-sonnet-5-5", "auto"], ["claude-opus-5-5", "auto"], ["claude-haiku-5-5", "tool"]] as const) {
+      const calls: Record<string, unknown>[] = [];
+      const client = { messages: { create: vi.fn(async (req: { tools: { name: string }[] }) => (calls.push(req as never), { stop_reason: "tool_use", content: [{ type: "tool_use", name: req.tools[0].name, input: okIn }], usage: { input_tokens: 10, output_tokens: 5 } })) } } as never;
+      expect((await makeAnthropicRegistrationJudge(client, { model })(input))?.decision).toBe("tentative");
+      const req = calls[0] as { tool_choice: { type: string }; tools: { strict?: boolean }[] };
+      expect(req.tool_choice.type, model).toBe(want);
+      expect(req.tools[0].strict).toBe(true);
+    }
+  });
+  it("未知のモデルが tool_choice を理由に400で拒否したら auto に切り替える（厳密入力は外さない）。tool_choice 以外の400だけが厳密入力を外す", async () => {
+    const reqs: { tool_choice: { type: string }; tools: { strict?: boolean }[] }[] = [];
+    const seen: string[] = [];
+    const client = { messages: { create: vi.fn(async (req: { tool_choice: { type: string; name?: string }; tools: { strict?: boolean }[] }) => { reqs.push(req); if (req.tool_choice.type === "tool") throw Object.assign(new Error('400 tool_choice: type "tool" and "any" are not supported for this model.'), { status: 400 }); return { stop_reason: "tool_use", content: [{ type: "tool_use", name: "submit_registration_judgment", input: okIn }], usage: { input_tokens: 10, output_tokens: 5 } }; }) } } as never;
+    const j = makeAnthropicRegistrationJudge(client, { model: "claude-future-9-9", onDiagnostic: (d) => seen.push(d.reason) });
+    expect((await j(input))?.decision).toBe("tentative");
+    expect(reqs.map((r) => `${r.tool_choice.type}/${!!r.tools[0].strict}`)).toEqual(["tool/true", "auto/true"]);
+    expect(seen).toEqual(["forced_tool_choice_rejected"]);
+  });
+  it("auto のとき道具を使わない応答は、形の不備（再試行してよい）として課金つきで記録する", async () => {
+    const client = { messages: { create: vi.fn(async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "..." }], usage: { input_tokens: 1000, output_tokens: 100 } })) } } as never;
+    const j = makeAnthropicRegistrationJudge(client, { model: "claude-sonnet-5-5" });
+    expect(await j(input)).toBeNull();
+    expect(lastCallOf(j)?.retryable).toBe(true);
+    expect(lastCallOf(j)?.costJpy).toBeGreaterThan(0);
+  });
+  it("400 の拒否理由は、鍵の形を伏せて160字まで残す", async () => {
+    const seen: string[] = [];
+    const client = { messages: { create: vi.fn(async () => { throw Object.assign(new Error("bad key sk-ant-abc123XYZ and some long explanation"), { status: 400 }); }) } } as never;
+    await makeAnthropicRegistrationJudge(client, { strict: false, onDiagnostic: (d) => seen.push(d.reason) })(input);
+    expect(seen[0]).toContain("***");
+    expect(seen[0]).not.toContain("abc123");
   });
 });

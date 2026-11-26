@@ -21,7 +21,7 @@ import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, type CandidateRow } from "./generate";
 import { prefetchSourcePage } from "./source-prefetch";
 import { issueRealRunTicket, type RealRunTicket } from "./real-gate";
-import { assembleGenerateDeps, basisClock, researchLimits } from "./pipeline";
+import { assembleGenerateDeps, basisClock, researchLimits, RESEARCH_WINDOW_MS } from "./pipeline";
 
 type Client = Parameters<typeof makeAnthropicResearchAgent>[0];
 
@@ -172,7 +172,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         deps: (() => {
           const dd = o.depsFor?.(c);
           // 共通の組み立て（pipeline.ts）。本番シャドーと同じ形の依存を作る
-          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, perItemCapJpy: ticket.perCaseCapJpy, tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
+          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, researchDeadlineMs: Date.now() + RESEARCH_WINDOW_MS, perItemCapJpy: ticket.perCaseCapJpy, tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
         })(),
       });
       base.processed++;

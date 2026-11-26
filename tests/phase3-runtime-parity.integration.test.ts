@@ -54,7 +54,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const prompts: string[] = [];
     const orig = s.client.messages.create;
     s.client.messages.create = (async (req: { tools?: { name: string }[]; messages?: { content: unknown }[] }, o?: unknown) => {
-      if (req.tools?.[0]?.name === "submit_research_turn") prompts.push(String(req.messages?.[0]?.content ?? "").replace(/p3par-[a-z0-9]+/g, "<ID>").replace(/(取得:|取得時刻 )\d{4}-\d\d-\d\dT[\d:.]+\+00:00/g, "$1<T>")); // ページを実際に取得した時刻（実行ごとに異なる）は除いて比べる
+      if (req.tools?.[0]?.name === "submit_research_turn") prompts.push(String(req.messages?.[0]?.content ?? "").replace(/p3par-[a-z0-9]+/g, "<ID>").replace(/(取得:|取得時刻 )\d{4}-\d\d-\d\dT[\d:.]+\+00:00/g, "$1<T>").replace(/時間\d+秒/g, "時間<S>秒")); // 残り時間（実時刻で進む。F1）と、ページを実際に取得した時刻（実行ごとに異なる）は除いて比べる
       return orig(req as never, o);
     }) as typeof orig;
     return { ...s, prompts };

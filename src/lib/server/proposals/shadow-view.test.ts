@@ -29,10 +29,10 @@ describe("本番シャドーの閲覧許可（読み取りとレビューの記�
 
 describe("本番シャドーの許可証", () => {
   const a = { model: "claude-haiku-5-5", totalCapJpy: 3, perCaseCapJpy: 3 };
-  it("本番ゲートが allowed のときだけ発行。上限は1件10円・総額1000円で頭打ち。不正なモデル名・予算なしは発行しない", () => {
+  it("本番ゲートが allowed のときだけ発行。上限は1件25円・総額1000円で頭打ち。不正なモデル名・予算なしは発行しない", () => {
     expect(issueProductionShadowTicket({ allowed: false }, a)).toMatchObject({ ok: false, reason: "prod_gate_denied" });
     const t = issueProductionShadowTicket({ allowed: true }, { model: "claude-haiku-5-5", totalCapJpy: 99999, perCaseCapJpy: 99 });
-    expect(t.ok && isRealRunTicket(t.ticket) && t.ticket.perCaseCapJpy === 10 && t.ticket.totalCapJpy === 1000 && t.ticket.origin === "prod_shadow").toBe(true);
+    expect(t.ok && isRealRunTicket(t.ticket) && t.ticket.perCaseCapJpy === 25 && t.ticket.totalCapJpy === 1000 && t.ticket.origin === "prod_shadow").toBe(true);
     expect(issueProductionShadowTicket({ allowed: true }, { ...a, totalCapJpy: 0 })).toMatchObject({ ok: false, reason: "no_budget" });
     expect(issueProductionShadowTicket({ allowed: true }, { ...a, model: "gpt-4; rm" })).toMatchObject({ ok: false, reason: "bad_model" });
   });
