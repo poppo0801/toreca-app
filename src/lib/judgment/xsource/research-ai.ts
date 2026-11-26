@@ -116,8 +116,10 @@ export const researchTurnReserveJpy = (model: string = DEFAULT_AI_MODEL, rate = 
 /** 失敗の理由（原文・鍵を含まない短い分類）。実評価で「通信の失敗」か「出力の形式不備」かを区別するために記録する */
 export type AiDiagnostic = { role: "agent" | "judge"; reason: string };
 const apiReason = (e: unknown): string => {
-  const x = e as { status?: number; name?: string };
-  return `api_error:${typeof x?.status === "number" ? x.status : String(x?.name ?? "unknown").slice(0, 40)}`;
+  const x = e as { status?: number; name?: string; message?: string };
+  // 400（要求の形式の拒否）だけ、拒否理由の先頭を短く記録する（プロバイダのエラー文。入力の原文・鍵は含まれない。英数字と基本記号だけ・40字）。モデルや設定の不適合を実測で特定するため
+  const why = x?.status === 400 ? `:${String(x.message ?? "").replace(/[^A-Za-z0-9 _.,:'()-]/g, "").trim().slice(0, 40)}` : "";
+  return `api_error:${typeof x?.status === "number" ? x.status : String(x?.name ?? "unknown").slice(0, 40)}${why}`;
 };
 
 /**
