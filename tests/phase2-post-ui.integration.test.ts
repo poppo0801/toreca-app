@@ -16,7 +16,7 @@ import { rememberFullPages } from "@/lib/server/collector/collected-docs";
 import { loadBestDocument } from "@/lib/server/proposals/evidence-store";
 import { loadExperiences } from "@/lib/server/proposals/experience-store";
 import { generateProposalsForCandidate, mockDeps, type CandidateRow } from "@/lib/server/proposals/generate";
-import { recordReview } from "@/lib/server/proposals/review";
+import { recordReview, recordTruth } from "@/lib/server/proposals/review";
 import { adminClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
 const ENV = { TOREMANE_ENV: "local", PROPOSAL_PREVIEW: "on", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:55321" };
@@ -167,9 +167,11 @@ describe.skipIf(!dbTestsEnabled)("Phase 2（UI改修後）: 全経路", () => {
     for (let i = 0; i < 6; i++) await admin.from("investigation_experiences").insert({ household_id: hid, host: "shop-a.example.invalid", features: ai[0]?.features ?? ["host:shop-a.example.invalid"], doc_chars: 14000, found_buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], verification: "ai_unverified", source: "proposal_run", mode: "mock", recorded_at: new Date().toISOString() });
     await generateProposalsForCandidate({ db: admin as unknown as Db, householdId: hid, candidate: c0, env: ENV, deps: mockDeps({ agent }) });
     expect(hints).toHaveLength(0);
-    // 人の確認の経験（検証済み）が積み上がる: レビューは利用者のセッションで記録できる（approve_with_edits）
+    // 人の確認の経験（検証済み）が積み上がる: 利用者のセッションで、正解の記録（正しい＝全項目を確認）をしたときだけ（ADAPTIVE_REVIEW: 修正して承認は未編集の項目を確認したとは限らないため経験にしない）
     const rows = await proposals(c0.id);
     for (const row of rows) await recordReview({ db: u1, householdId: hid, proposalId: row.id, decision: "approve_with_edits", edits: {}, note: "確認", env: ENV });
+    expect(((await admin.from("investigation_experiences").select("id").eq("household_id", hid).eq("verification", "human")).data ?? []).length).toBe(0);
+    for (const row of rows) expect(await recordTruth({ db: u1, householdId: hid, proposalId: row.id, verdict: "correct", env: ENV })).toMatchObject({ ok: true });
     const human = (await admin.from("investigation_experiences").select("*").eq("household_id", hid).eq("verification", "human")).data ?? [];
     expect(human.length).toBeGreaterThanOrEqual(1);
     expect(human[0].source).toBe("human_review");

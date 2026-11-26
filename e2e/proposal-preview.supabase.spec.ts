@@ -116,23 +116,36 @@ test("収集候補 → 登録案を作る（モック・費用0）→ 保留／�
   await expect(panel.getByTestId("proposal-gen-msg")).toContainText("変更なし 2");
   await expect(panel.getByTestId("proposal-card")).toHaveCount(2);
 
-  // 保留 → 修正して承認 → 却下
-  await first.getByTestId("proposal-hold").click();
-  await expect(first.getByTestId("proposal-review-state")).toHaveText("保留");
-  await second.getByTestId("proposal-edit-open").click();
-  await second.getByTestId("proposal-edit-store").fill("渋谷西口店（本館）");
-  await second.getByTestId("proposal-edit-apply_unit").selectOption("per_store");
-  await second.getByTestId("proposal-note").fill("店舗ページで確認");
-  await second.getByTestId("proposal-approve").click();
-  await expect(second.getByTestId("proposal-review-state")).toContainText("修正して承認（レビュー記録）");
-  await expect(second.getByTestId("proposal-edit").first()).toContainText("渋谷西口店（本館）");
-  await first.getByTestId("proposal-reject").click();
-  await expect(first.getByTestId("proposal-review-state")).toHaveText("却下");
+  // 正解の記録（ADAPTIVE_REVIEW）: 後で確認 → 正解を修正（変える項目だけ）→ 正しい。入力欄は自動で開かない・自動フォーカスしない
+  await first.getByTestId("truth-later").click();
+  await expect(first.getByTestId("proposal-truth-state")).toContainText("後で確認");
+  await second.getByTestId("truth-edit-open").click();
+  await expect(second.getByTestId("truth-edit-store")).not.toBeFocused();
+  await second.getByTestId("truth-decision").selectOption("register");
+  await second.getByTestId("truth-edit-store").fill("渋谷西口店（本館）");
+  await second.getByTestId("truth-edit-apply_unit").selectOption("per_store");
+  await second.getByTestId("truth-unknown-per_person_limit").check();
+  await second.getByTestId("truth-note").fill("店舗ページで確認");
+  await page.screenshot({ path: "test-results/ar-truth-form-390.png" });
+  await second.getByTestId("truth-save").click();
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("正解を修正（登録）");
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("店舗=渋谷西口店（本館）");
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("不明: 口数");
+  await first.getByTestId("truth-correct").click();
+  await expect(first.getByTestId("proposal-truth-state")).toContainText("正しい（変更なし）");
+  // 取りこぼしの記録（登録案に無い応募機会）
+  await panel.getByTestId("missed-open").click();
+  await panel.getByTestId("missed-note").fill("3店舗目（池袋店）の受付が登録案に無い");
+  await panel.getByTestId("missed-save").click();
+  await expect(panel.getByTestId("missed-form")).toContainText("記録しました");
 
-  // DB: レビューは追記で3件・AIの値は不変・既存の記録は不変
-  const reviews = (await a.from("registration_proposal_reviews").select("decision,edits,note").eq("household_id", hid).order("created_at")).data!;
-  expect(reviews.map((r) => r.decision)).toEqual(["hold", "approve_with_edits", "reject"]);
-  expect(reviews[1].edits).toMatchObject({ store: "渋谷西口店（本館）", apply_unit: "per_store" });
+  // DB: 正解は追記で記録（AIの出力の写しつき）・AIの値は不変・既存の記録は不変
+  const reviews = (await a.from("registration_proposal_reviews").select("kind,decision,verdict,truth_decision,edits,unknown_fields,note,ai_snapshot").eq("household_id", hid).order("created_at")).data!;
+  expect(reviews.map((r) => `${r.kind}:${r.verdict ?? ""}`)).toEqual(["truth:unknown_later", "truth:corrected", "truth:correct", "missed:"]);
+  expect(reviews[1]).toMatchObject({ truth_decision: "register", edits: { store: "渋谷西口店（本館）", apply_unit: "per_store" }, unknown_fields: ["per_person_limit"] });
+  expect(reviews[2].truth_decision).toBe("hold"); // 正しい: AIの判断（暫定=保留）をそのまま正解とする
+  expect((reviews[1].ai_snapshot as { decision: string }).decision).toBeTruthy(); // 記録時点のAIの出力が残る
+  expect(reviews[3].note).toContain("池袋店");
   const props = (await a.from("registration_proposals").select("item_no,fields,apply_unit,version").eq("candidate_id", candidateId).order("item_no")).data!;
   expect(props.map((p) => [p.item_no, p.version, p.apply_unit])).toEqual([[1, 1, "unknown"], [2, 1, "unknown"]]); // 人の修正でAIの値は書き換わらない
   expect((props[1].fields as { store: { value: string } }).store.value).toBe("渋谷西口店");

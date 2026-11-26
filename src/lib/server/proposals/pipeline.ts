@@ -43,6 +43,7 @@ export function assembleGenerateDeps(a: {
   now?: () => Date;
   shouldStop?: () => boolean;
   learn?: boolean;
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
   /** 記録するモデルの識別（調査と判断で別のモデルを使うときは両方）。省略時は許可証のモデル */
   modelId?: string;
   researchDeadlineMs?: number;
@@ -52,6 +53,7 @@ export function assembleGenerateDeps(a: {
     judge: a.judge,
     mode: "real",
     modelId: a.modelId ?? a.ticket.model,
+    ...(a.escalation ? { escalation: a.escalation } : {}),
     ...(a.researchDeadlineMs !== undefined ? { researchDeadlineMs: a.researchDeadlineMs } : {}),
     ticket: a.ticket,
     budget: a.budget,

@@ -68,6 +68,17 @@ export function CandidatesView({ candidates, proposals, proposalPreview, proposa
  * 抽選候補（Stage 7H）。自動収集の確認待ちを、抽選管理と同じカード形式で短時間に処理する。
  * 主要操作は「確認・登録」と「除外」の2つ。除外は理由を選ぶ（6種類）。処理した候補は一覧から外れ、件数が即時に更新される。
  */
+/** 候補のAI評価の確認状態（登録案が無い候補は対象外＝all でだけ出る） */
+function aiState(ps: ProposalView[] | undefined): "review" | "confirmed" | "none" {
+  if (!ps?.length) return "none";
+  return ps.every((p) => p.truth && !p.truthOutdated && p.truth.verdict !== "unknown_later") ? "confirmed" : "review";
+}
+/** 確認の優先度（大きいほど先）: 判断なし・検証に通らない・保留 ＞ 登録・除外。締切は一覧の並び順に任せる */
+function aiUncertainty(ps: ProposalView[] | undefined): number {
+  if (!ps?.length) return 0;
+  return Math.max(...ps.map((p) => (p.decision === "none" ? 3 : !p.verified ? 2 : p.decision === "tentative" ? 1 : 0)));
+}
+
 function CandidatesInner({ candidates, proposals, proposalPreview, proposalShadow }: { proposalShadow?: boolean; candidates: CandidateView[]; proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
   const router = useRouter();
   const { data, now, profile } = useApp();
@@ -76,6 +87,8 @@ function CandidatesInner({ candidates, proposals, proposalPreview, proposalShado
   const [sortKey, setSortKey] = useState<SortKey>("new");
   const [rank, setRank] = useState<"all" | Rank>("all");
   const [stateFilter, setStateFilter] = useState<"all" | CandidateState>("all");
+  // AI評価の確認（ADAPTIVE_REVIEW）: 要確認＝正解が未記録・後で確認・再評価で版が変わったもの。AIが保留・判断なし・検証に通らなかったものを先に並べる
+  const [aiFilter, setAiFilter] = useState<"all" | "review" | "confirmed">("all");
   const [limit, setLimit] = useState(PAGE);
   const [filterOpen, setFilterOpen] = useState(false);
   const [editing, setEditing] = useState<CandidateView | null>(null);
@@ -102,8 +115,10 @@ function CandidatesInner({ candidates, proposals, proposalPreview, proposalShado
     () =>
       sortRows(filterRows(sortable.map((x) => x.row), rank), sortKey)
         .map((r) => byId.get(r.id)!)
-        .filter((c) => stateFilter === "all" || states.get(c.id)?.has(stateFilter)),
-    [sortable, rank, sortKey, byId, stateFilter, states],
+        .filter((c) => stateFilter === "all" || states.get(c.id)?.has(stateFilter))
+        .filter((c) => aiFilter === "all" || aiState(proposals?.[c.id]) === aiFilter)
+        .sort((a, b) => (aiFilter === "review" ? aiUncertainty(proposals?.[b.id]) - aiUncertainty(proposals?.[a.id]) : 0)),
+    [sortable, rank, sortKey, byId, stateFilter, states, aiFilter, proposals],
   );
   const visible = shown.slice(0, limit);
   // 既定（全状態・すべて・新着順）から変えている項目の数（ボタンのバッジ）
@@ -213,7 +228,18 @@ function CandidatesInner({ candidates, proposals, proposalPreview, proposalShado
         </p>
       )}
 
-      {proposalPreview && proposals && Object.keys(proposals).length > 0 && <ProposalSummaryLine proposals={proposals} />}
+      {proposalPreview && proposals && Object.keys(proposals).length > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <ProposalSummaryLine proposals={proposals} />
+          </div>
+          <select value={aiFilter} onChange={(e) => setAiFilter(e.target.value as typeof aiFilter)} aria-label="AI評価の絞り込み" className="h-8 shrink-0 rounded-md border bg-input px-1 text-[11px]" data-testid="ai-review-filter">
+            <option value="all">AI評価: すべて</option>
+            <option value="review">AI評価: 要確認</option>
+            <option value="confirmed">AI評価: 確認済み</option>
+          </select>
+        </div>
+      )}
       <ul className="space-y-2" data-testid="candidate-list">
         {visible.map((c) => {
           const f = candidateFacts(c);
@@ -350,7 +376,7 @@ function DetailSheet({ c, proposals, shadow, onClose, onRegister, onExclude }: {
               元の情報を開く
             </a>
           )}
-          {proposals !== undefined && <ProposalPreview proposals={proposals} shadow={shadow} />}
+          {proposals !== undefined && <ProposalPreview proposals={proposals} shadow={shadow} candidateId={c.id} />}
           <div className="flex justify-end gap-1.5">
             <Button size="sm" variant="outline" onClick={onExclude}>
               除外

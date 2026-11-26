@@ -58,7 +58,7 @@ export function scriptedAnthropic(opts: ScriptedOptions = {}): { client: { messa
         store: id && store ? { value: store, basis: "observed", evidenceId: id, quote: `【${store}】` } : { value: null, basis: "unknown" },
         product: id && first.length >= 8 ? { value: first.replace(/^【[^】]*】/, "").slice(0, 80), basis: "observed", evidenceId: id, quote: first.slice(0, 120) } : { value: null, basis: "unknown" },
         deadline: { value: null, basis: "unknown" },
-        apply_unit: opts.judgeUnit ? { value: opts.judgeUnit, basis: "inferred" } : { value: null, basis: "unknown" },
+        apply_unit: opts.judgeUnit ? { value: opts.judgeUnit, basis: "inferred", ...(id && first.length >= 8 ? { evidenceId: id, quote: first.slice(0, 120) } : {}) } : { value: null, basis: "unknown" }, // 推定にも構造の根拠（証拠と引用）を付ける
       };
       // 人が確定した値が渡されているときは、その値をそのまま使う（変更しない）
       for (const m of t.matchAll(/^- ([a-z_]+): (.+)$/gm)) fields[m[1]] = { value: m[2], basis: "inferred" };

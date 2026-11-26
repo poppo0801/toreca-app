@@ -189,6 +189,8 @@ export async function runXPostReplay(a: {
   budgetFor?: (itemNo: number) => CallBudget;
   /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
   registerRequiresUnit?: boolean;
+  /** 適応型判断（同じ証拠で上位モデルに判断させる条件つきの2段目） */
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
   /** 利用者の対象地域（既存の収集設定）。検証層が、地域外を理由とする除外の事実を確認する */
   userRegion?: import("./claim-semantics").UserRegion;
 }): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean }> {
@@ -202,7 +204,7 @@ export async function runXPostReplay(a: {
       break;
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && plan.scopedUrls.length === 0 ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && plan.scopedUrls.length === 0 ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({

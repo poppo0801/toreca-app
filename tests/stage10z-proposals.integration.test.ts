@@ -10,7 +10,7 @@ import { buildEvidence } from "@/lib/collector/evidence";
 import type { AgentTurnOutput, JudgeOutput, RegistrationJudge, ResearchAgent } from "@/lib/judgment/xsource/research-loop";
 import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, mockDeps } from "@/lib/server/proposals/generate";
-import { recordReview } from "@/lib/server/proposals/review";
+import { recordMissed, recordReview, recordTruth } from "@/lib/server/proposals/review";
 import { loadProposals, saveProposals } from "@/lib/server/proposals/store";
 import { adminClient, anonClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
@@ -30,6 +30,8 @@ describe.skipIf(!dbTestsEnabled)("Stage 10Z: 収集候補 → 新AI → 登録�
   let hidA: string;
   let hidB: string;
   let n = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = (d: Db) => d as unknown as { from: (t: string) => any }; // 生成型に無い表（移行127の列）を読むため
 
   const addCandidate = async (text: string, opts: { links?: string[]; linkMap?: { short: string; url: string }[]; pages?: { url: string; text: string }[]; postId?: string } = {}) => {
     n++;
@@ -86,6 +88,39 @@ describe.skipIf(!dbTestsEnabled)("Stage 10Z: 収集候補 → 新AI → 登録�
     expect((await admin.from("collection_candidates").select("status,job_state,draft,lottery_id").eq("id", cand.id).single()).data).toEqual(candBefore);
   });
 
+  it("②c 正解の記録（ADAPTIVE_REVIEW）: 利用者のセッションで追記できる（正しい・修正・後で確認・取りこぼし）。AIの値・抽選は変わらない。別世帯からは読めず書けない。形の不正は拒否", async () => {
+    const cand = await addCandidate(LIST, { linkMap: [{ short: "https://t.co/ddd444", url: "https://shop-d.example.invalid/e/4" }], pages: [] } as never);
+    const g = await gen(cand);
+    expect(g.ok).toBe(true);
+    const before = await counts();
+    const prop = (await rowsOf(cand.id))[0] as { id: string; decision: string; fields: unknown };
+    expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "corrected", truthDecision: "register", edits: { store: "D店（本館）" }, unknownFields: ["per_person_limit"], env: ON })).toMatchObject({ ok: true });
+    expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "corrected", env: ON })).toMatchObject({ ok: false, reason: "invalid" }); // 何も変えない修正は拒否
+    expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "unknown_later", env: ON })).toMatchObject({ ok: true });
+    expect(await recordMissed({ db: u1, householdId: hidA, candidateId: cand.id, note: "2つ目の受付が無い", env: ON })).toMatchObject({ ok: true });
+    expect(await recordMissed({ db: u1, householdId: hidA, candidateId: cand.id, note: " ", env: ON })).toMatchObject({ ok: false });
+    const rows = (await admin.from("registration_proposal_reviews").select("kind,verdict,truth_decision,edits,unknown_fields,ai_snapshot").eq("candidate_id", cand.id).order("created_at")).data ?? [];
+    expect(rows.map((r) => `${r.kind}:${r.verdict ?? ""}`)).toEqual(["truth:corrected", "truth:unknown_later", "missed:"]);
+    expect(rows[0]).toMatchObject({ truth_decision: "register", edits: { store: "D店（本館）" }, unknown_fields: ["per_person_limit"] });
+    expect((rows[0].ai_snapshot as { decision: string }).decision).toBe(prop.decision);
+    expect(((await rowsOf(cand.id))[0] as { fields: unknown }).fields).toEqual(prop.fields); // AIの値は不変
+    expect(await counts()).toEqual(before); // 抽選・応募・購入・通知は作られない
+    // 別世帯: 読めない・書けない
+    expect(((await raw(u2).from("registration_proposal_reviews").select("id").eq("candidate_id", cand.id)).data ?? []).length).toBe(0);
+    expect(await recordTruth({ db: u2, householdId: hidB, proposalId: prop.id, verdict: "correct", env: ON })).toMatchObject({ ok: false });
+    expect((await raw(u2).from("registration_proposal_reviews").insert({ household_id: hidA, kind: "missed", decision: "missed", candidate_id: cand.id, note: "x" })).error).not.toBeNull();
+    // 形の不正（正解の記録なのに判定が無い）は DB でも拒否
+    expect((await raw(u1).from("registration_proposal_reviews").insert({ household_id: hidA, kind: "truth", decision: "truth", proposal_key: (await rowsOf(cand.id))[0].proposal_key, proposal_id: prop.id })).error).not.toBeNull();
+  });
+  it("②d 版の置き換えは1つのトランザクション: 置き換えの途中で失敗しても現行の版が残る（関数）", async () => {
+    const cand = await addCandidate(LIST, { linkMap: [{ short: "https://t.co/eee555", url: "https://shop-e.example.invalid/e/5" }], pages: [] } as never);
+    await gen(cand);
+    const cur = (await rowsOf(cand.id)).filter((r) => r.superseded_at === null);
+    const bad = await admin.rpc("registration_proposal_replace", { p_old: cur[0].id, p_row: { household_id: hidA, candidate_id: cand.id, proposal_key: cur[0].proposal_key, version: 2, input_hash: "zz", item_no: 1, url_status: "url_missing", decision: "register", mode: "mock" } });
+    expect(bad.error).not.toBeNull(); // 入力ハッシュの形が不正 → 追加に失敗
+    const after = (await rowsOf(cand.id)).filter((r) => r.superseded_at === null);
+    expect(after.map((r) => r.id)).toEqual(cur.map((r) => r.id)); // 古い版の superseded は巻き戻り、現行の版が無くならない
+  });
   it("②b 同じ入力でも結果（判断・検証）が変わった再評価は、新しい版として残る（検証の修正後の再評価が『変更なし』で捨てられた本番事例の回帰）。結果まで同じなら増えない", async () => {
     const cand = await addCandidate(LIST, { linkMap: [{ short: "https://t.co/ccc333", url: "https://shop-c.example.invalid/e/3" }], pages: [] } as never);
     const first = await gen(cand);

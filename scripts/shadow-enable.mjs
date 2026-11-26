@@ -170,6 +170,17 @@ if (opt("enqueue") !== undefined) {
   console.log(r.error ? "変更に失敗しました" : `新規の投入を ${on ? "再開" : "停止"}しました（キューの既存ジョブ・予算・期限は変更なし）`);
   process.exit(r.error ? 1 : 0);
 }
+if (opt("set-judge-mode") !== undefined) {
+  // 判断モデルの使い方（single=1段／adaptive=既定のモデルで判断し、必要なときだけ judge_model で判断し直す）。切り戻しは single
+  const m = opt("set-judge-mode");
+  if (m !== "single" && m !== "adaptive") {
+    console.error("single または adaptive を指定してください");
+    process.exit(1);
+  }
+  const r = await db.from("shadow_settings").update({ judge_mode: m }).eq("household_id", hid);
+  console.log(r.error ? `変更に失敗しました（${r.error.code ?? ""}。移行127が未適用の可能性）` : `判断の方式を ${m} にしました（予算・期限・判断モデルは変更なし）`);
+  process.exit(r.error ? 1 : 0);
+}
 if (opt("set-judge-model") !== undefined) {
   // 登録判断だけのモデルの切り替え（比較・切り戻し用）。default でNULL（調査と同じモデル）に戻す。許可するモデルは料金を確認済みのものだけ
   const ALLOWED = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"];
