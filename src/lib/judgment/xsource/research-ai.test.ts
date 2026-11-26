@@ -1,6 +1,7 @@
 // @vitest-environment node
 /** Stage 10U: AIアダプタの安全性（偽のクライアント。実AIは呼ばない）。ツールは「結果の提出」1つだけ・読み取り専用・命令はデータ・秘密を渡さない。 */
 import { describe, expect, it, vi } from "vitest";
+import { wasNotBilled } from "./research-loop";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, normalizeFields, strictifySchema, withStrictTools, JUDGE_SYSTEM, RESEARCH_SYSTEM, renderJudgeInput, renderTurnInput } from "./research-ai";
 
 vi.mock("server-only", () => ({}));
@@ -183,5 +184,24 @@ describe("応募単位とお1人様の上限の分離（Phase 3 FOUNDATION_RECOV
     expect(JUDGE_SYSTEM).toContain("書かれていないことは「上限なし」ではない");
     expect(JUDGE_SYSTEM).toContain("それだけを理由に暫定にしない");
     expect(JUDGE_SYSTEM).toContain("受付枠が複数ある・構造が読み取れない場合は従来どおり");
+  });
+});
+
+describe("要求の拒否は課金されない（Phase 3 FOUNDATION_RECOVERY）", () => {
+  it("400番台（429を除く）の拒否だけで終わった呼び出しは「課金なし」と印がつく。出力を受け取った不備・429・成功は印なし（予約の満額を計上する）", async () => {
+    const input = { caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient" as const, protectedFields: {} };
+    const rej = (status: number) => ({ messages: { create: vi.fn(async () => { throw Object.assign(new Error("x"), { status }); }) } }) as never;
+    const j400 = makeAnthropicRegistrationJudge(rej(400));
+    expect(await j400(input)).toBeNull();
+    expect(wasNotBilled(j400)).toBe(true);
+    const j429 = makeAnthropicRegistrationJudge(rej(429));
+    await j429(input);
+    expect(wasNotBilled(j429)).toBe(false);
+    const jbad = makeAnthropicRegistrationJudge(fake({ decision: "maybe" }).client);
+    await jbad(input);
+    expect(wasNotBilled(jbad)).toBe(false);
+    const jok = makeAnthropicRegistrationJudge(fake({ decision: "tentative", fields: [], rationale: "x", unresolvedImpact: "none", monitor: { continue: true, why: "w" } }).client);
+    expect((await jok(input))?.decision).toBe("tentative");
+    expect(wasNotBilled(jok)).toBe(false);
   });
 });

@@ -172,8 +172,17 @@ export function withStrictTools(client: ClientLike, role: AiDiagnostic["role"], 
 }
 
 /** 出力の形の不備（API終了理由が途中切れ以外）のときだけ、同じ入力で1回だけ再試行する。再試行の費用は成功した出力に合算する */
-function withOneRetry<I, O extends { costJpy: number | null }>(role: AiDiagnostic["role"], once: (input: I) => Promise<O | null>, probe: { last: string }, onDiagnostic?: (d: AiDiagnostic) => void): (input: I) => Promise<O | null> {
-  return async (input) => {
+function withOneRetry<I, O extends { costJpy: number | null }>(role: AiDiagnostic["role"], once: (input: I) => Promise<O | null>, probe: { last: string; rejected?: boolean; billed?: boolean }, onDiagnostic?: (d: AiDiagnostic) => void): (input: I) => Promise<O | null> {
+  const f = async (input: I): Promise<O | null> => {
+    probe.rejected = false;
+    probe.billed = false;
+    try {
+      return await inner(input);
+    } finally {
+      (f as { lastNotBilled?: boolean }).lastNotBilled = !!probe.rejected && !probe.billed;
+    }
+  };
+  const inner = async (input: I): Promise<O | null> => {
     probe.last = "";
     const a = await once(input);
     if (a || !probe.last.startsWith("bad_output:") || probe.last.startsWith("bad_output:max_tokens")) return a;
@@ -183,14 +192,17 @@ function withOneRetry<I, O extends { costJpy: number | null }>(role: AiDiagnosti
     onDiagnostic?.({ role, reason: b ? "retry_recovered" : "retry_failed" });
     return b;
   };
+  return f;
 }
 
 type AiOpts = { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void; strict?: boolean };
 /** 呼び出しの診断を、再試行の判断（直前の失敗の種類）にも使えるよう束ねる */
-function bindOpts(rawClient: ClientLike, role: AiDiagnostic["role"], o0: AiOpts): { client: ClientLike; opts: AiOpts & { onDiagnostic: (d: AiDiagnostic) => void }; probe: { last: string } } {
-  const probe = { last: "" };
+function bindOpts(rawClient: ClientLike, role: AiDiagnostic["role"], o0: AiOpts): { client: ClientLike; opts: AiOpts & { onDiagnostic: (d: AiDiagnostic) => void }; probe: { last: string; rejected?: boolean; billed?: boolean } } {
+  const probe: { last: string; rejected?: boolean; billed?: boolean } = { last: "" };
   const onDiagnostic = (d: AiDiagnostic): void => {
     probe.last = d.reason;
+    if (d.reason.startsWith("bad_output:")) probe.billed = true; // 出力を受け取った（課金あり）
+    else if (/^api_error:4(?!29)\d\d/.test(d.reason)) probe.rejected = true; // 要求の拒否（課金なし）
     o0.onDiagnostic?.(d);
   };
   return { client: o0.strict === false ? rawClient : withStrictTools(rawClient, role, onDiagnostic), opts: { ...o0, onDiagnostic }, probe };
