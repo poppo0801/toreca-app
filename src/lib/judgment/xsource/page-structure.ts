@@ -247,7 +247,8 @@ export function structureToObservations(st: ApplyPageStructure, opts: { maxSlots
       const bits = [`受付枠${i + 1}「${cap(s.title, 100)}」`, s.statusTags.length ? `状態:${s.statusTags.join("/")}` : "", s.details.map((d) => `${d.label}:${d.value}`).join("、"), s.notes.join("／"), s.description ? `説明:${cap(s.description, 220)}` : ""].filter(Boolean);
       out.push(bits.join(" ・ "));
     });
-    if (st.slots.length > maxSlots) out.push(`（受付枠は他に ${st.slots.length - maxSlots} 件。省略）`);
+    // 13件目以降も、名称（店舗名など）と状態だけは省略せず並べる（地域・店舗の適合の判断に必要。詳細は本文で読める）。RUNTIME_CORRECTNESS で、28件中16件が「省略」でAIが所在地を確認できなかったことへの是正
+    if (st.slots.length > maxSlots) out.push(`受付枠${maxSlots + 1}〜${Math.min(st.slots.length, 80)}の名称: ${st.slots.slice(maxSlots, 80).map((s, i) => `${maxSlots + i + 1}「${cap(s.title, 60)}」${s.statusTags.length ? `(${s.statusTags.join("/")})` : ""}`).join(" ／ ")}${st.slots.length > 80 ? `（他に ${st.slots.length - 80} 件）` : ""}`);
     if (st.pageNotes.length) out.push(`ページ全体の注意書き（適用範囲の解釈は別途）: ${st.pageNotes.join(" / ")}`);
     const rel = observeRelated(st);
     out.push(`「同じ販売元のイベント」（このページとは別のイベント。応募可否の根拠にはならない）: ${rel.length}件`);
