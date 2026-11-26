@@ -54,7 +54,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const prompts: string[] = [];
     const orig = s.client.messages.create;
     s.client.messages.create = (async (req: { tools?: { name: string }[]; messages?: { content: unknown }[] }, o?: unknown) => {
-      if (req.tools?.[0]?.name === "submit_research_turn") prompts.push(String(req.messages?.[0]?.content ?? "").replace(/p3par-[a-z0-9]+/g, "<ID>"));
+      if (req.tools?.[0]?.name === "submit_research_turn") prompts.push(String(req.messages?.[0]?.content ?? "").replace(/p3par-[a-z0-9]+/g, "<ID>").replace(/(取得:|取得時刻 )\d{4}-\d\d-\d\dT[\d:.]+\+00:00/g, "$1<T>")); // ページを実際に取得した時刻（実行ごとに異なる）は除いて比べる
       return orig(req as never, o);
     }) as typeof orig;
     return { ...s, prompts };
@@ -318,7 +318,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     expect(up.error).toBeNull();
     const ce = await mkCandidate(1, "regE");
     const e = recording();
-    await runRealProposals({ db: admin as unknown as Db, householdId: hid, candidates: [ce], client: e.client as never, gate: checkJudgmentRealRun({ env: EVAL_GATE_ENV, confirm: true, approvedTotalJpy: 25, approvedPerCaseJpy: 3 }), env: { TOREMANE_ENV: "local", PROPOSAL_PREVIEW: "on", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:55321" }, limits: { maxElapsedMs: 60_000 } });
+    await runRealProposals({ db: admin as unknown as Db, householdId: hid, candidates: [ce], client: e.client as never, liveFetch: makeLivePublicFetch({ env: { TOREMANE_ENV: "local", JUDGMENT_LIVE_FETCH: "allow" }, fetchImpl: mkFetchImpl(), sleep }).fetchPage, gate: checkJudgmentRealRun({ env: EVAL_GATE_ENV, confirm: true, approvedTotalJpy: 25, approvedPerCaseJpy: 3 }), env: { TOREMANE_ENV: "local", PROPOSAL_PREVIEW: "on", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:55321" }, limits: { maxElapsedMs: 60_000 } });
     const cs = await mkCandidate(1, "regS");
     await enqueue(cs);
     const s2 = recording();
@@ -371,11 +371,11 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     await runShadow(s2.client, shadowEnv());
     expect(fetched.length).toBe(before); // 保存全文があるので、外部アクセスをしない
     for (const p of [e.prompts, s2.prompts]) {
-      expect(p.length).toBeGreaterThanOrEqual(2);
-      expect(p[1]).toContain("収集時に保存された全文にだけある記載"); // 2ターン目の入力に、保存全文が証拠として入る
-      expect(p[1]).toContain("取得時刻 2026-"); // 実際の取得時刻（古い記録は保存時刻で補正。evidence-store の actualFetchedAt） // 実際の取得時刻つきの注記。現在の状態ではない旨
-      expect(p[1]).toContain("以前の調査で取得");
-      expect(p[1]).toContain("この取得時刻の時点のページの内容");
+      expect(p.length).toBeGreaterThanOrEqual(1);
+      expect(p[0]).toContain("収集時に保存された全文にだけある記載"); // 最初のターンの入力に、保存全文が証拠として入る（AIが取得を選ばなくても見える。取りこぼさない）
+      expect(p[0]).toContain("取得時刻 2026-"); // 実際の取得時刻（古い記録は保存時刻で補正。evidence-store の actualFetchedAt） // 実際の取得時刻つきの注記。現在の状態ではない旨
+      expect(p[0]).toContain("以前の調査で取得");
+      expect(p[0]).toContain("この取得時刻の時点のページの内容");
     }
     await clean();
   });

@@ -69,7 +69,7 @@ if (flag("status")) {
     tally[k] = (tally[k] ?? 0) + 1;
   }
   console.log("判断の突き合わせ:", JSON.stringify(tally));
-  const rev = rows.filter((r) => /rev:d/.test(r.stop_reason ?? ""));
+  const rev = rows.filter((r) => /rev:\d/.test(r.stop_reason ?? ""));
   console.log(`自己修正: 訂正あり ${rev.length}件（うち検証済み ${rev.filter((r) => r.verified).length}件）／保留理由: ${JSON.stringify(rows.flatMap((r) => r.held_reasons ?? []).reduce((m, x) => ((m[x] = (m[x] ?? 0) + 1), m), {}))}`);
   const js = (await db.from("shadow_judgments").select("status,cost_jpy,record").eq("household_id", hid).gte("created_at", cur.data?.total_since ?? sinceH(72))).data ?? [];
   const diag = {};
@@ -162,6 +162,13 @@ if (flag("cron-test")) {
 if (!flag("execute")) {
   console.log("dry-run: 何も書いていません。書き込みは --execute。");
   process.exit(0);
+}
+if (opt("enqueue") !== undefined) {
+  // 通常の収集からシャドーへの新規投入だけを止める／再開する（評価中の予算を守るため。キューにある既存のジョブ・期限・予算は変えない）
+  const on = opt("enqueue") === "on";
+  const r = await db.from("shadow_settings").update({ enqueue_enabled: on }).eq("household_id", hid);
+  console.log(r.error ? "変更に失敗しました" : `新規の投入を ${on ? "再開" : "停止"}しました（キューの既存ジョブ・予算・期限は変更なし）`);
+  process.exit(r.error ? 1 : 0);
 }
 if (opt("set-judge-model") !== undefined) {
   // 登録判断だけのモデルの切り替え（比較・切り戻し用）。default でNULL（調査と同じモデル）に戻す。許可するモデルは料金を確認済みのものだけ
