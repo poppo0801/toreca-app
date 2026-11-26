@@ -13,6 +13,10 @@
 import { createHash } from "node:crypto";
 import { CallBudget } from "../call-budget";
 import { canonUrl } from "./normalize";
+
+/** 直前の呼び出しが「要求の拒否（400番台。429を除く）だけ」で終わり、トークンが課金されていないとき true。呼び出し側は、不明な費用（予約の満額）ではなく0円で計上できる（誤計上で予算が枯れた不具合の是正） */
+export const wasNotBilled = (fn: unknown): boolean => !!(fn as { lastNotBilled?: boolean } | null)?.lastNotBilled;
+
 import { pageTextChecked } from "./html-text";
 import { parseApplyPage, structureToObservations, type ApplyPageStructure } from "./page-structure";
 
@@ -589,7 +593,7 @@ export async function runResearch(args: {
     } catch {
       out = null; // 呼び出しが例外で終わっても、予約額を計上して（0円にしない）予約を解放し、停止する
     }
-    s.finish(out?.costJpy ?? null);
+    s.finish(out?.costJpy ?? (wasNotBilled(args.agent) ? 0 : null));
     if (!out) { trace.push({ turn, kind: "agent", detail: "agent_failed" }); end = "agent_failed"; break; }
     lastTurn = out;
     trace.push({ turn, kind: "agent", detail: out.next.kind === "stop" ? `stop:${out.next.reason}` : out.next.kind === "search" ? "search" : out.next.kind === "read" ? `read:${out.next.evidenceId}` : `fetch:${out.next.url}` });
@@ -710,7 +714,7 @@ export async function runResearch(args: {
     } catch {
       output = null; // 例外でも予約額を計上して解放し、実行不可として扱う
     }
-    js.finish(output?.costJpy ?? null);
+    js.finish(output?.costJpy ?? (wasNotBilled(args.judge) ? 0 : null));
     if (!output && advisoryPrev) { output = advisoryPrev.output; proposals = advisoryPrev.proposals; warnings = advisoryPrev.warnings; verified = true; held = null; trace.push({ turn, kind: "verify", detail: "unit_recheck_failed_reverted" }); break; } // 再確認の呼び出しが失敗（不正出力・例外）したら、最初の検証済みの出力に戻す（再確認で判断を失わない）
     if (!output) { held = { reasons: ["judge_failed"] }; trace.push({ turn, kind: "judge", detail: "judge_failed" }); break; }
     trace.push({ turn, kind: "judge", detail: `decision:${output.decision}` });
