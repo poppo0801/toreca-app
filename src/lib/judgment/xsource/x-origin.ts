@@ -29,6 +29,11 @@ export interface StoredXPost {
    * AIには出所つき（「収集時の取得元ページ」）で渡し、ページ内の記載を読んで判断させる。無ければ従来どおり。
    */
   sourcePage?: { url: string; via?: string; fetchedAt?: string | null };
+  /**
+   * 取得元ページが、この候補の告知ページそのものか（PRODUCTION_PARITY）。X投稿ではなく、まとめサイトの一覧が示す告知ページ・直接取得したページが原文の候補（本番シャドーの大半）。
+   * 以前はこの場合も「URLなし（応募先は不明）・応募単位は未確認」とAIへ伝えており、告知ページの記載で決められる応募先・応募単位まで未確認として扱わせていた。
+   */
+  sourceIsAnnouncement?: boolean;
   /** 収集時の文脈の注記（本文の切り詰め・画像から読み取った情報など）。全項目の観察として渡す（引用の根拠にはしない） */
   notes?: string[];
 }
@@ -67,14 +72,20 @@ export function planXPost(post: StoredXPost): { isList: boolean; header: string;
   const derived = deriveLinkMap(post);
   const linkMap = buildItemLinks({ items, linkMap: derived.linkMap.length ? derived.linkMap : undefined, parentLinks: post.links, recordedAt: post.recordedAt });
   const evidence = buildLinkEvidence(post, items, derived.methods, derived.linkMap);
+  // 単一の告知（一覧ではない）で、原文が取得元ページ（告知ページ）そのものなら、そのページをこの項目自身のリンクとして渡す（応募先・応募単位はページの記載で判断する）
+  const ownPage = !parsed.isList && post.sourceIsAnnouncement && post.sourcePage ? post.sourcePage : null;
   const plans = items.map((it): ItemPlan => {
-    const links = linkMap.get(it.no) ?? [];
+    const base = linkMap.get(it.no) ?? [];
+    const links: ItemLink[] = ownPage && !base.some((l) => canonUrl(l.url).key === canonUrl(ownPage.url).key) ? [{ url: ownPage.url, origin: "item_entity", recordedAt: ownPage.fetchedAt ?? post.recordedAt }, ...base] : base;
     const scoped = itemScopedUrls(links);
     const status: ItemUrlStatus = scoped.length ? "url_from_item" : links.some((l) => l.origin === "item_text_short_unexpanded") ? "short_unexpanded" : links.some((l) => l.origin === "parent_shared" || l.origin === "parent_card") ? "shared_only_unverified" : "url_missing";
-    const lines = [`【この項目の原文】${it.text}`, `【リンクの出所】${STATUS_LINE[status]}`];
+    // 一覧の見出し（🏬店舗名・《店舗（県）》など）は、項目の本文の外にある。以前はAIへ渡しておらず、まとめ投稿の項目で店舗が常に不明だった（PRODUCTION_PARITY: 51項目すべて店舗なし）
+    const lines = [...(parsed.isList && it.groupLabel.trim() ? [`【この項目の見出し（項目が属する店舗・区分。本文の外にある一覧の見出し）】${it.groupLabel.trim().slice(0, 200)}`] : []), `【この項目の原文】${it.text}`, `【リンクの出所】${STATUS_LINE[status]}`];
     // 収集時の取得元ページ: 応募先URLとは別の意味で渡す（応募先とは限らない・これだけで応募機会や応募単位を確定しない。ページ内の記載を読んで判断する）
-    if (post.sourcePage) lines.push(`【収集時の取得元ページ（応募先とは限らない。応募先URLとは別）${parsed.isList ? "・投稿全体の取得元で、この項目との対応は未確認" : ""}${post.sourcePage.via ? `・取得方法: ${post.sourcePage.via}` : ""}】 ${post.sourcePage.url}`);
+    if (ownPage) lines.push(`【この告知の取得元ページ（まとめサイトの一覧が示す告知ページ・または直接取得したページ）。応募先・応募方法・応募単位は、このページの記載で判断する${ownPage.via ? `・取得方法: ${ownPage.via}` : ""}】 ${ownPage.url}`);
+    else if (post.sourcePage) lines.push(`【収集時の取得元ページ（応募先とは限らない。応募先URLとは別）${parsed.isList ? "・投稿全体の取得元で、この項目との対応は未確認" : ""}${post.sourcePage.via ? `・取得方法: ${post.sourcePage.via}` : ""}】 ${post.sourcePage.url}`);
     for (const l of links) {
+      if (ownPage && l.url === ownPage.url) continue; // 上の行で示した
       const host = canonUrl(l.url).host;
       lines.push(l.origin === "item_entity" ? `- この項目自身のリンク: ${l.url}` : l.origin === "item_text_short_unexpanded" ? `- 短縮URL（未展開・追跡しない）: ${host}` : `- 親投稿に共通のリンク（対応未確認）: ${l.url}`);
     }
@@ -204,7 +215,7 @@ export async function runXPostReplay(a: {
       break;
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && plan.scopedUrls.length === 0 ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && (plan.scopedUrls.length === 0 || (a.post.sourceIsAnnouncement && plan.scopedUrls.includes(a.post.sourcePage.url))) ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({

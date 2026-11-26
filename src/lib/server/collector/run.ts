@@ -19,10 +19,10 @@ import { loadAppData, saveLottery, type Db } from "@/lib/server/lottery-service"
 import { fetchXPost } from "@/lib/server/x-source";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
-import { enrichXPost, makeXRichFetcher, type FetchControl } from "@/lib/server/collector/x-rich";
+import { enrichXPost, LINKED_PAGE_MAX_CHARS, makeXRichFetcher, type FetchControl } from "@/lib/server/collector/x-rich";
 import { DEFAULT_RUN_LIMITS, HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
-import { rememberFullPages, toQueuedPage } from "@/lib/server/collector/collected-docs";
-import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
+import { addFullPage, carryFullPages, rememberFullPages, toQueuedPage } from "@/lib/server/collector/collected-docs";
+import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, normalizeForHash, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
 import { saveCandidateRows } from "@/lib/server/collector/save-rows";
 import { excludedChainReason, matchExcludedChain, type ExcludedChain } from "@/lib/collector/chain-exclusion";
@@ -529,6 +529,14 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
       q.post = inner.post;
       q.imageStats = inner.imageStats;
       q.xVia = inner.xVia;
+      // 取り直しで得たリンク先・台帳・全文も元の項目へ戻す（以前は捨てられ、保存処理・証拠に届かなかった）
+      if (inner.linkedPages?.length) q.linkedPages = inner.linkedPages;
+      if (inner.linkLedger?.length) q.linkLedger = inner.linkLedger;
+      if (inner.evidenceText && !q.evidenceText) {
+        q.evidenceText = inner.evidenceText;
+        q.evidenceVia = inner.evidenceVia;
+      }
+      carryFullPages(inner, q);
       return r;
     }
     // 画像が情報の中心の投稿で、画像を1枚も取得できなかったときは、本文だけで有料のAI解析をしない（後で再試行する）
@@ -574,16 +582,21 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
       }
       return r;
     };
-    // 解析で実際に取得できたページの本文を、原文として保存するために控える（取得の挙動は変えない）
-    const rawFetch = deps.fetchPage;
-    const fetchPageCap: typeof deps.fetchPage = rawFetch && (async (u) => {
+    // 解析で実際に取得できたページの本文を、原文として保存するために控える（取得の挙動は変えない）。
+    // 本番（cron）は fetchPage を注入しないため、以前は控えの包みも作られず、取得したページ本文が一度も保存されていなかった（PRODUCTION_PARITY の監査で発見: 本番の Web 候補の原文は全件が一覧カード）。
+    // 既定の取得（runExtraction の既定と同じ fetchRespectingRobots）を明示して包む
+    const rawFetch: NonNullable<typeof deps.fetchPage> = deps.fetchPage ?? ((u: string) => fetchRespectingRobots(u));
+    const fetchPageCap: typeof deps.fetchPage = (async (u) => {
       const r = await rawFetch(u);
       if (r.ok && !q.evidenceText) {
         try {
-          const t = extractPageText(r.body, r.finalUrl).text;
+          // 全文（保存用。リンク先と同じ上限）。候補の行には先頭だけ（buildEvidence の上限）を載せ、全文は evidence_documents へ（取得元ページ・取得時刻つき）
+          const ex = extractPageText(r.body, r.finalUrl, LINKED_PAGE_MAX_CHARS);
+          const t = ex.text;
           if (t.trim().length >= 8) {
             q.evidenceText = t;
             q.evidenceVia = "web_fetch";
+            if (t.length >= 30) addFullPage(q, { url: u.slice(0, 500), finalUrl: r.finalUrl.slice(0, 500), title: ex.title.slice(0, 200), text: t, truncated: r.truncated || ex.truncated, fetchedAt: deps.now.toISOString(), depth: 0, origins: ["post"] });
           }
         } catch {
           /* 保存用の控えに失敗しても解析は続ける */
@@ -677,11 +690,15 @@ async function fillStorePrefecture(db: Db, lotteryId: string, pref: string): Pro
  * Stage 9Z: 初回収集で取得できた原文（投稿本文・一覧のカード）を、last_good.evidence に保存する（AIの抽出結果とは別。取得日時・取得方法つき）。
  * 取得できなかった・原文が無い場合は何も足さない（保存済みとして扱わない）。保存に失敗しても収集は止めない。
  */
-function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { evidence?: StoredEvidence } {
+export function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string, prior: StoredEvidence | null, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { evidence?: StoredEvidence } {
   try {
     const st = q.imageStats;
     const ev = buildEvidence({ url, kind: q.kind, ...(q.card ? { card: q.card } : {}), context: q.context, ...(q.post ? { post: q.post } : {}), ...(q.xVia ? { xVia: q.xVia } : {}), ...(q.viaList ? { viaList: true } : {}), ...(q.evidenceText ? { fetchedText: q.evidenceText, fetchedVia: q.evidenceVia ?? "web_fetch" } : {}), ...(q.linkedPages?.length ? { linkedPages: q.linkedPages } : {}), ...(q.linkLedger?.length ? { linkLedger: q.linkLedger } : {}), ...imageEvidence(q, nowIso, extraction), ...(st ? { imageStatus: st.found === 0 ? "none" : st.fetched === 0 ? "not_fetched" : st.fetched < st.found ? "partial" : "fetched" } : {}) }, nowIso);
-    return ev ? { evidence: carryOverRechecked(ev, prior) } : prior ? { evidence: prior } : {};
+    if (!ev) return prior ? { evidence: prior } : {};
+    // 本文が正規化（残り日数・閲覧数・受付中の表示など）の範囲でしか変わっていなければ、前回の本文・ハッシュを保つ。
+    // 以前は一覧カードの表示の小さな変化で毎回ハッシュが変わり、本番シャドーが同じ候補を1日に何度も有料で再評価していた（PRODUCTION_PARITY: 3候補で14〜19回・約86円）
+    const same = prior && prior.text && normalizeForHash(prior.text) === normalizeForHash(ev.text) ? { text: prior.text, hash: prior.hash, truncated: prior.truncated } : {};
+    return { evidence: carryOverRechecked({ ...ev, ...same }, prior) };
   } catch {
     return prior ? { evidence: prior } : {};
   }
@@ -691,7 +708,9 @@ function evidenceFields(url: string, q: QueuedPayload["queued"], nowIso: string,
 function imageEvidence(q: QueuedPayload["queued"], nowIso: string, extraction?: Parameters<typeof imageReadingsFromExtraction>[0]): { imageReadings?: ReturnType<typeof imageReadingsFromExtraction>; imageRefs?: string[] } {
   const imageReadings = imageReadingsFromExtraction(extraction, nowIso);
   const refs = [...(q.post?.images ?? []), ...(q.post?.quoted?.images ?? [])].filter((u) => typeof u === "string" && u.startsWith("https://"));
-  return { ...(imageReadings.length ? { imageReadings } : {}), ...(imageReadings.length && refs.length ? { imageRefs: refs.slice(0, MAX_IMAGE_REFS) } : {}) };
+  // 画像への参照（公開URLだけ。画像そのものは保存しない）は、収集時の解析が画像から読み取れたかに関係なく残す。
+  // 以前は読み取りがあるときだけ保存しており、本番では参照が1件も残らず、新AIの画像の道具が常に「画像なし」だった（PRODUCTION_PARITY の監査で発見: 画像つき91件・参照0件）
+  return { ...(imageReadings.length ? { imageReadings } : {}), ...(refs.length ? { imageRefs: refs.slice(0, MAX_IMAGE_REFS) } : {}) };
 }
 
 /** 読み取り結果の判定と記録。処理状態(job_state)・試行回数・次回実行時刻・エラーをDBに残す */
@@ -704,7 +723,8 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const originHost = hostOf(c.source_url ?? q.url);
   // Phase 2: 取得した全文（投稿本文・リンク先の全ページ）を evidence_documents へ保存する（新AI機能が有効な開発環境だけ。失敗しても収集は止めない）
   {
-    const postText = q.post?.text ? [q.post.text, q.post.quoted?.text ? `（引用元）${q.post.quoted.text}` : ""].filter(Boolean).join("\n") : (q.evidenceText ?? null);
+    // 投稿本文だけを post として保存する。Web候補の取得したページ本文は、取得元ページ（page・URL・取得時刻つき）として控えた全文から保存する（投稿と混同しない）
+    const postText = q.post?.text ? [q.post.text, q.post.quoted?.text ? `（引用元）${q.post.quoted.text}` : ""].filter(Boolean).join("\n") : q.evidenceVia === "x_oembed" ? (q.evidenceText ?? null) : null;
     await storeCollectedEvidence({ db, householdId: deps.householdId, candidateId: c.id, queued: q, postUrl: c.source_url ?? q.url, postText, nowIso });
     // 時間・予算・ホスト制限で取得しなかったリンクは、耐久的な再調査タスクとして残す（開発限定。別の実行で再取得して候補の証拠へ戻す）
     // 公開画像の安全な取得・検査（解析はしない＝費用0。開発限定・IMAGE_INTAKE=on のときだけ）。新AIの調査へ「取得・検査済み／未解析の理由」を受け渡す
@@ -713,7 +733,10 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   }
   // 以前に保存した原文は、今回の取得で原文が得られなくても消さない（再確認・再解析で last_good が上書きされるため）
   const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
-  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence, result.ok ? result.extraction : undefined) } };
+  const evSaved = evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence, result.ok ? result.extraction : undefined);
+  // シャドーの投入は、保存した証拠のハッシュで行う（前回から実質的に変わっていなければ同じハッシュ＝二重に投入されない）
+  if (evSaved.evidence?.hash) (q as { savedEvidenceHash?: string }).savedEvidenceHash = evSaved.evidence.hash;
+  const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evSaved } };
   // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
   let acct: Record<string, unknown> = { ...trace };
   // 完了(completed/skipped/review)の記録。結果(status)は従来どおり別に持つ
@@ -1795,7 +1818,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
       // 新AIシャドーのキューへの投入（Stage 10K。既定OFF）。1回のDB呼び出しだけで、AIは呼ばない。失敗しても旧方式は変わらない
       if (deps.shadowEnqueue) {
         try {
-          const evH = evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence?.hash;
+          const evH = (it.q as { savedEvidenceHash?: string }).savedEvidenceHash ?? evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence?.hash;
           if (evH) await Promise.race([deps.shadowEnqueue(it.c.id, evH), new Promise<void>((res) => setTimeout(res, 1500))]); // 1.5秒を超えて待たない（投入口が止まっても収集を遅らせない）
         } catch {
           /* 投入の失敗は無視する */

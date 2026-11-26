@@ -13,15 +13,32 @@ export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
 export type ReviewResult = { ok: true } | { ok: false; reason: "disabled" | "invalid" | "not_current" | "failed" };
 
 const EDIT_FIELDS = /^[\p{L}\p{N}_ ]{1,40}$/u;
+/** 修正できる項目数（抽選管理の全20項目＋判断・機会の補助。以前は12/16件で、超えた分を黙って捨てていた）・値の字数（条件・応募方法の長い記載を落とさない）。DBの上限（edits 4,000バイト・unknown_fields 16件）を超えるときは黙って捨てず「invalid」で返す */
+export const MAX_EDIT_FIELDS = 30;
+export const MAX_EDIT_CHARS = 400;
+export const MAX_UNKNOWN_FIELDS = 16;
+const EDITS_MAX_BYTES = 3900;
+const bytes = (o: unknown): number => new TextEncoder().encode(JSON.stringify(o)).length;
+/** 記録時点のAIの出力（全項目。値は DB の上限 4,000バイトに収まるよう、必要なときだけ短くする。完全な値は版として登録案の行に残る） */
+export function aiSnapshotOf(p: { decision: string; verified: boolean; model_id: string | null; prompt_version: string | null; input_hash: string; version: number; mode: string; apply_unit: string; fields: Record<string, { value?: string | null; basis?: string; absence?: string }> }): Record<string, unknown> {
+  const entries = Object.entries(p.fields ?? {}).filter(([k]) => k !== "_rationale" && k !== "_ask_human");
+  for (const cap of [160, 100, 60, 30, 12]) {
+    const s = { decision: p.decision, verified: p.verified, model_id: p.model_id, prompt_version: p.prompt_version, input_hash: p.input_hash, version: p.version, mode: p.mode, apply_unit: p.apply_unit, fields: Object.fromEntries(entries.map(([k, f]) => [k, { value: String(f?.value ?? "").slice(0, cap), basis: f?.basis ?? "unknown", ...(f?.absence ? { absence: f.absence } : {}) }])), ...(cap < 160 ? { valuesShortened: cap } : {}) };
+    if (bytes(s) <= 3900) return s;
+  }
+  return { decision: p.decision, verified: p.verified, model_id: p.model_id, prompt_version: p.prompt_version, input_hash: p.input_hash, version: p.version, mode: p.mode, apply_unit: p.apply_unit, fields: {}, valuesShortened: 0 };
+}
 
 export async function recordReview(a: { db: Db; householdId: string; proposalId: string; decision: string; edits?: Record<string, unknown>; note?: string; env?: Record<string, string | undefined> }): Promise<ReviewResult> {
   if (!proposalSurfaceEnabled(a.env ?? process.env)) return { ok: false, reason: "disabled" };
   if (!(REVIEW_DECISIONS as readonly string[]).includes(a.decision)) return { ok: false, reason: "invalid" };
   const edits: Record<string, string> = {};
-  for (const [k, v] of Object.entries(a.edits ?? {}).slice(0, 12)) {
-    if (!EDIT_FIELDS.test(k) || typeof v !== "string" || v.length > 200) return { ok: false, reason: "invalid" };
+  if (Object.keys(a.edits ?? {}).length > MAX_EDIT_FIELDS) return { ok: false, reason: "invalid" };
+  for (const [k, v] of Object.entries(a.edits ?? {})) {
+    if (!EDIT_FIELDS.test(k) || typeof v !== "string" || v.length > MAX_EDIT_CHARS) return { ok: false, reason: "invalid" };
     edits[k] = v.trim();
   }
+  if (bytes(edits) > EDITS_MAX_BYTES) return { ok: false, reason: "invalid" };
   if (a.decision === "approve_with_edits" && a.edits === undefined) return { ok: false, reason: "invalid" };
   const note = String(a.note ?? "").slice(0, 300);
   const db = a.db as unknown as { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -58,11 +75,14 @@ export async function recordTruth(a: { db: Db; householdId: string; proposalId: 
   if (a.opportunity !== undefined && a.opportunity !== "" && !inList(OPPORTUNITY, a.opportunity)) return { ok: false, reason: "invalid" };
   if (a.userFit !== undefined && a.userFit !== "" && !inList(USER_FIT, a.userFit)) return { ok: false, reason: "invalid" };
   const edits: Record<string, string> = {};
-  for (const [k, v] of Object.entries(a.edits ?? {}).slice(0, 16)) {
-    if (!EDIT_FIELDS.test(k) || typeof v !== "string" || v.length > 200) return { ok: false, reason: "invalid" };
+  if (Object.keys(a.edits ?? {}).length > MAX_EDIT_FIELDS) return { ok: false, reason: "invalid" };
+  for (const [k, v] of Object.entries(a.edits ?? {})) {
+    if (!EDIT_FIELDS.test(k) || typeof v !== "string" || v.length > MAX_EDIT_CHARS) return { ok: false, reason: "invalid" };
     if (v.trim()) edits[k] = v.trim();
   }
-  const unknownFields = [...(a.unknownFields ?? []).filter((k) => EDIT_FIELDS.test(k)), ...(a.notStatedFields ?? []).filter((k) => EDIT_FIELDS.test(k) && k.length <= 34).map((k) => `${k}__none`)].slice(0, 16);
+  if (bytes(edits) > EDITS_MAX_BYTES) return { ok: false, reason: "invalid" };
+  const unknownFields = [...new Set([...(a.unknownFields ?? []).filter((k) => EDIT_FIELDS.test(k)), ...(a.notStatedFields ?? []).filter((k) => EDIT_FIELDS.test(k) && k.length <= 34).map((k) => `${k}__none`)])];
+  if (unknownFields.length > MAX_UNKNOWN_FIELDS) return { ok: false, reason: "invalid" }; // 黙って捨てない（DBの上限16件）
   if (a.verdict === "corrected" && !Object.keys(edits).length && !unknownFields.length && !a.truthDecision && !a.opportunity && !a.userFit) return { ok: false, reason: "invalid" }; // 修正なのに何も変えていない
   const db = a.db as unknown as { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
   const cur = (await db.from("registration_proposals").select("id,proposal_key,candidate_id,superseded_at,decision,verified,model_id,prompt_version,input_hash,version,mode,apply_unit,fields").eq("id", a.proposalId).eq("household_id", a.householdId).maybeSingle()) as { data: { id: string; proposal_key: string; candidate_id: string; superseded_at: string | null; decision: string; verified: boolean; model_id: string | null; prompt_version: string | null; input_hash: string; version: number; mode: string; apply_unit: string; fields: Record<string, { value?: string | null; basis?: string }> } | null };
@@ -71,7 +91,7 @@ export async function recordTruth(a: { db: Db; householdId: string; proposalId: 
   if (p.superseded_at) return { ok: false, reason: "not_current" };
   const aiDecision = p.verified ? (p.decision === "tentative" ? "hold" : p.decision === "none" ? "hold" : p.decision) : "hold";
   const truthDecision = a.verdict === "correct" ? aiDecision : a.verdict === "corrected" ? a.truthDecision || null : null;
-  const snapshot = { decision: p.decision, verified: p.verified, model_id: p.model_id, prompt_version: p.prompt_version, input_hash: p.input_hash, version: p.version, mode: p.mode, apply_unit: p.apply_unit, fields: Object.fromEntries(Object.entries(p.fields ?? {}).filter(([k]) => k !== "_rationale").slice(0, 16).map(([k, f]) => [k, { value: String(f?.value ?? "").slice(0, 80), basis: f?.basis ?? "unknown" }])) };
+  const snapshot = aiSnapshotOf(p);
   const ins = (await db.from("registration_proposal_reviews").insert({ household_id: a.householdId, kind: "truth", decision: "truth", proposal_key: p.proposal_key, proposal_id: p.id, candidate_id: p.candidate_id, verdict: a.verdict, truth_decision: truthDecision, opportunity: a.verdict === "unknown_later" ? null : a.opportunity || null, user_fit: a.verdict === "unknown_later" ? null : a.userFit || null, edits: a.verdict === "corrected" ? edits : {}, unknown_fields: a.verdict === "corrected" ? unknownFields : [], note: String(a.note ?? "").slice(0, 300), ai_snapshot: snapshot })) as { error: unknown };
   if (ins.error) return { ok: false, reason: "failed" };
   let experience = 0;

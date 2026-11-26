@@ -92,7 +92,9 @@ describe("出力の途切れ対策（課金なし）", () => {
     expect(JUDGE_MAX_FIELDS).toBeLessThanOrEqual(28); // INTENSIVE_EVALUATION: 抽選管理の全項目（20＋判断用2）を落とさない上限。判断の出力上限は別に JUDGE_MAX_TOKENS で引き上げ
     const src = readFileSync("src/lib/judgment/xsource/research-ai.ts", "utf8");
     expect(src).not.toContain("max_tokens: 1800");
-    expect(src).toContain("max_tokens: OUTPUT_MAX_TOKENS");
+    // PRODUCTION_PARITY: 推論の度合い（effort）に応じて出力上限を広げる（low は従来どおり OUTPUT_MAX_TOKENS）
+    expect(src).toContain("const agentMax = OUTPUT_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort]");
+    expect(src).toContain("max_tokens: agentMax");
   });
   it("stop_reason=max_tokens で出力が途切れても、失敗として理由を記録し、費用は実費（使用トークン）で計上される形にする", async () => {
     const seen: string[] = [];

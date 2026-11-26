@@ -41,6 +41,11 @@ if (!(total > 0) || !(per > 0) || confirm !== `APPROVE INTENSIVE ${total}JPY`) {
 start({
   INTENSIVE_MODE: "run",
   INTENSIVE_JUDGE: arg("judge") ?? "adaptive",
+  // PRODUCTION_PARITY: 調査モデル（--agent=haiku|sonnet）・推論の度合い（--agent-effort / --judge-effort = low|medium|high）の比較
+  AGENT_MODEL: arg("agent") === "sonnet" ? "claude-sonnet-5-5" : "claude-haiku-5-5",
+  INTENSIVE_AGENT_EFFORT: arg("agent-effort") ?? "",
+  INTENSIVE_JUDGE_EFFORT: arg("judge-effort") ?? "",
+  INTENSIVE_MAX_SEARCHES: arg("searches") ?? "",
   JUDGMENT_REAL_EVAL: "allow",
   JUDGMENT_REUSE_EXISTING_KEY: "allow",
   JUDGMENT_REUSE_FALLBACK_KEY: process.env.AGENT_ANTHROPIC_API_KEY ?? "",

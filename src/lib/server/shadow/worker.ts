@@ -104,6 +104,8 @@ const rpc = (db: Db): Rpc => (n, a) => (db as unknown as { rpc: Rpc }).rpc(n, a)
 const table = (db: Db, t: string): any => (db as unknown as { from: (t: string) => unknown }).from(t);
 
 const H = 3_600_000;
+/** 同じ候補の登録案を有料で作り直す最短の間隔（PRODUCTION_PARITY） */
+export const REEVAL_MIN_INTERVAL_MS = 12 * H;
 /** 日本時間の日・月の開始（UTCの時刻） */
 export function jstDayStart(now: Date): Date {
   const j = new Date(now.getTime() + 9 * H);
@@ -238,6 +240,15 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
 
       // Phase 3: 本番シャドーの登録案ジョブ。予算（DBの日次・月次・1件）を確認してから、収集済みの保存データだけで調査・判断・検証する
       if (deps.proposalJob) {
+        // 同じ候補の再評価の間隔（PRODUCTION_PARITY: 証拠の小さな変化のたびに有料で再評価し、3候補で予算の半分を使っていた）。
+        // 直近 REEVAL_MIN_INTERVAL_MS 以内に同じ候補のジョブが完了していれば、このジョブ（最新の証拠）はその間隔のあとへ回す（捨てない＝最新の証拠は必ず評価される）
+        const recent = await table(db, "shadow_jobs").select("updated_at").eq("household_id", j.household_id).eq("candidate_id", j.candidate_id).eq("status", "done").neq("id", j.id).gte("updated_at", new Date(now().getTime() - REEVAL_MIN_INTERVAL_MS).toISOString()).order("updated_at", { ascending: false }).limit(1);
+        const lastDone = (recent.data as { updated_at: string }[] | null)?.[0]?.updated_at;
+        if (lastDone) {
+          await requeue(j, new Date(new Date(lastDone).getTime() + REEVAL_MIN_INTERVAL_MS), "reeval_interval", false);
+          bump(res.byReason, "reeval_interval");
+          continue;
+        }
         if (st.valid_until && now().getTime() >= new Date(st.valid_until).getTime()) {
           await requeue(j, new Date(now().getTime() + 6 * 60 * 60_000), "expired", false); // 試行期間が過ぎた（以降のジョブはDB側で確保されない）
           bump(res.byReason, "expired");

@@ -1,31 +1,51 @@
-// Phase 3 INTENSIVE_EVALUATION: 集中評価の採点（無課金・ローカルファイルだけ）。
-//   node scripts/intensive-score.mjs --run=<名前>[,<名前>] [--json]
+// Phase 3 集中評価の採点（無課金・ローカルファイルだけ）。PRODUCTION_PARITY §5 で採点の欠陥を修正した版（v2）。
+//   node scripts/intensive-score.mjs --run=<名前>[,<名前>] [--json] [--sets=dev,unseen]
 // 入力: eval/intensive/runs/<run>.local.jsonl（評価入口の全試行の記録）と eval/intensive/gold.local.json（独立正解。AIには渡さない）。
 // 出力: 件数・率・内訳だけ（原文・URL・値は出さない）。
-//  - 判断: AIの最終の扱い（検証を通らない登録/除外は暫定）を、正解が許す扱い（allowed）と照合。確度 undetermined は分母に入れない。
-//  - 項目: 正解の原文に記載がある項目（stated・secondary）を分母に、正しい／一部（日付は合うが時刻なし等）／誤り／取得なし。記載なし（not_stated）にAIが観察として値を出したら「捏造」。
-//  - 費用・時間・上位モデルの使用・採用は記録の実測から。
+// v1 からの修正（§5）:
+//  - 項目名: 正規の20項目（lottery-fields.ts）を優先し、別名は正規の名前でないときだけ使う（v1 は result_end が無く、receive_start/end が receive_method に吸収されていた）。正解の apply_end は正規の deadline として扱う。
+//  - 日付: 8項目（受付開始・締切・発表開始/終了・購入開始/終了・受取開始/終了）。年の無い日付は固定の2026年ではなく、候補の収集時刻（基準時刻）から最も近い年に解く。期間の値は、開始の項目は前、終了の項目は後ろの日付で照合。
+//  - 記載なし: 正解が記載なしの項目に、観察の値＝捏造、推定の値＝根拠のない推定、記載なしの判定＝正しい記載なし、を分けて数える。正解に記載がある項目にAIが「記載なし」と判定＝誤り（記載の見落とし）。
+//  - 文字の項目: 正解の語をすべて含むだけでなく、正解より極端に長い値（別の店舗・商品を並べた等）は「一部」とし、部分一致だけで正解にしない。
+//  - 代表1件（登録を優先）の採点を廃止。正解の応募機会（opportunities。無ければ1件）とAIの項目（records）を店舗・商品の語で対応付け、機会ごとに判断・項目を採点し、漏れ・余分（誤分割）を数える。候補単位の判断（最も対応する項目）も併記。
+//  - 費用: 同じ案件の全試行（失敗を含む）の合計。v1 は最後の試行だけだった。
 import { existsSync, readFileSync } from "node:fs";
 
 const arg = (n) => process.argv.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
 const runs = (arg("run") ?? "").split(",").filter(Boolean);
+const onlySets = (arg("sets") ?? "").split(",").filter(Boolean);
 if (!runs.length) {
   console.error("--run=<名前> が必要です");
   process.exit(2);
 }
-const gold = JSON.parse(readFileSync("eval/intensive/gold.local.json", "utf8")).cases;
+const goldFile = JSON.parse(readFileSync("eval/intensive/gold.local.json", "utf8"));
+const gold = goldFile.cases;
+const basisOf = (() => {
+  try {
+    const rows = JSON.parse(readFileSync("eval/intensive/cases.local.json", "utf8")).rows;
+    const m = new Map(rows.map((r) => [String(r.id).slice(0, 8), r.fetchedAt ?? r.createdAt]));
+    return (id) => m.get(id) ?? null;
+  } catch {
+    return () => null;
+  }
+})();
 
-/** AIの項目名 → 正解の項目名（現行の版は自由な名前を使うため、名前の揺れを吸収する。値の意味判断はしない） */
+export const CANON = ["store", "store_location", "product", "price", "apply_start", "deadline", "result_at", "result_end", "result_method", "purchase_start", "purchase_end", "receive_start", "receive_end", "receive_method", "receive_place", "apply_url", "apply_method", "conditions", "apply_unit", "per_person_limit"];
+const GOLD_KEY = { apply_end: "deadline" };
+/** 正規の名前でないAIの項目名 → 正規の名前（旧版・自由な名前の揺れを吸収。値の意味判断はしない） */
 export const FIELD_ALIASES = [
   ["store_location", /location|所在地|prefecture|都道府県|^region$|store_region|address/i],
   ["result_method", /result_method|announce(ment)?_method|発表方法|notify|通知方法/i],
-  ["result_at", /^result(_at|_date|_start)?$|announce(ment)?(_at|_date)?$|winner|当選発表|lottery_result|draw_date|抽選日/i],
+  ["result_end", /^result_end$|announce(ment)?_end|発表終了/i],
+  ["result_at", /^result(_at|_date|_start)?$|announce(ment)?(_at|_date|_start)?$|winner|当選発表|lottery_result|draw_date|抽選日/i],
   ["purchase_start", /purchase_start|購入開始|payment_start|販売開始|sale_start/i],
   ["purchase_end", /purchase_(end|deadline)|購入期限|購入終了|payment_(end|deadline)|procedure_deadline/i],
+  ["receive_start", /(receive|pickup)_start|受取開始/i],
+  ["receive_end", /(receive|pickup)_(end|deadline)|受取期限|受取終了/i],
   ["receive_place", /receive_place|pickup_place|受取場所|お渡し場所/i],
-  ["receive_method", /receive_method|receive|pickup|delivery|受取|shipping|配送/i],
+  ["receive_method", /receive_method|^receive$|pickup|delivery|受取方法|shipping|配送/i],
   ["apply_start", /apply_start|start_at|application_start|受付開始|応募開始|^start$|open_at/i],
-  ["apply_end", /^deadline$|apply_end|apply_deadline|application_end|締切|end_at/i],
+  ["deadline", /^deadline$|apply_end|apply_deadline|application_end|締切|end_at/i],
   ["apply_url", /apply_url|application_url|応募先|url/i],
   ["apply_method", /apply_method|application_method|応募方法|method/i],
   ["conditions", /condition|条件|requirement|eligib/i],
@@ -35,27 +55,45 @@ export const FIELD_ALIASES = [
   ["product", /product|商品|item/i],
   ["store", /^store$|^shop$|店舗$|store_name|retailer/i],
 ];
-const canon = (k) => FIELD_ALIASES.find(([, re]) => re.test(k))?.[0] ?? null;
+export const canon = (k) => (CANON.includes(k) ? k : (FIELD_ALIASES.find(([, re]) => re.test(k))?.[0] ?? null));
 const nf = (s) => String(s ?? "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
-const DATE_KEYS = new Set(["apply_start", "apply_end", "result_at", "purchase_start", "purchase_end"]);
-function parseDate(s, year, last = false) {
+export const DATE_KEYS = new Set(["apply_start", "deadline", "result_at", "result_end", "purchase_start", "purchase_end", "receive_start", "receive_end"]);
+const END_KEYS = new Set(["deadline", "result_end", "purchase_end", "receive_end"]);
+
+/** 年の無い日付は、基準時刻に最も近い年に解く（11月の基準で「1/10」は翌年） */
+export function resolveYear(mo, d, basis) {
+  const b = basis ? new Date(basis) : null;
+  if (!b || Number.isNaN(b.getTime())) return null;
+  let best = null;
+  for (const y of [b.getUTCFullYear() - 1, b.getUTCFullYear(), b.getUTCFullYear() + 1]) {
+    const diff = Math.abs(Date.UTC(y, mo - 1, d) - b.getTime());
+    if (!best || diff < best.diff) best = { y, diff };
+  }
+  return best.y;
+}
+export function parseDate(s, basis, part = "start") {
   let t = String(s ?? "").normalize("NFKC");
-  // 期間（「A〜B」）が値に書かれたとき、終わりの項目は後ろの日付で照合する（値の書式の揺れで正解を誤りにしない）
-  if (last && /[~〜～]|から|ー/.test(t)) t = t.split(/[~〜～]|から/).pop() ?? t;
+  const pieces = t.split(/[~〜～]|から/).map((x) => x.trim()).filter(Boolean);
+  if (pieces.length > 1) t = part === "end" ? pieces[pieces.length - 1] : pieces[0];
   const m = /(?:(\d{4})[年/.-])?\s*(\d{1,2})[月/.-](\d{1,2})日?(?:[^\d]{0,12}?(\d{1,2})[:時](\d{2})?)?/.exec(t);
   if (!m) return null;
-  return { y: m[1] ? Number(m[1]) : year, mo: Number(m[2]), d: Number(m[3]), h: m[4] !== undefined ? Number(m[4]) : null, mi: m[4] !== undefined ? Number(m[5] ?? 0) : null };
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  return { y: m[1] ? Number(m[1]) : resolveYear(mo, d, basis), mo, d, h: m[4] !== undefined ? Number(m[4]) : null, mi: m[4] !== undefined ? Number(m[5] ?? 0) : null };
 }
 const recvOf = (v) => (/either|両方|どちらか/.test(v) ? "either" : /ship|発送|配送|郵送|宅配|通販|お届け/.test(v) ? "shipping" : /store|店頭|店舗|来店|受取|お渡し/.test(v) ? "store" : null);
-/** 1項目の採点: correct / partial / wrong / missing（AIに値が無い・不明） */
-export function scoreField(key, g, ai, year) {
+
+/** 1項目の採点（正解に記載がある項目）: correct / partial / wrong / missing / wrong_absent（記載があるのにAIが記載なしと判定） */
+export function scoreField(key, g, ai, basis) {
+  if (ai?.absence) return "wrong_absent";
   const v = ai?.value;
   if (v === null || v === undefined || String(v).trim() === "" || ai?.basis === "unknown") return "missing";
   if (DATE_KEYS.has(key)) {
-    const gd = parseDate(g.v, year);
-    const ad = parseDate(v, year, /_end$/.test(key));
+    const part = END_KEYS.has(key) ? "end" : "start";
+    const gd = parseDate(g.v, basis, part);
+    const ad = parseDate(v, basis, part);
     if (!gd || !ad) return "wrong";
-    if (gd.y !== ad.y || gd.mo !== ad.mo || gd.d !== ad.d) return "wrong";
+    if ((gd.y !== null && ad.y !== null && gd.y !== ad.y) || gd.mo !== ad.mo || gd.d !== ad.d) return "wrong";
     if (gd.h === null) return "correct";
     if (ad.h === null) return "partial";
     return gd.h === ad.h && gd.mi === ad.mi ? "correct" : "wrong";
@@ -67,10 +105,57 @@ export function scoreField(key, g, ai, year) {
   }
   if (key === "apply_unit") return nf(v).startsWith(g.v) ? "correct" : "wrong";
   const toks = g.t ?? [g.v];
-  return toks.every((t) => nf(v).includes(nf(t))) ? "correct" : "wrong";
+  if (!toks.every((t) => nf(v).includes(nf(t)))) return "wrong";
+  const gl = nf(toks.join("")).length;
+  return nf(v).length > Math.max(60, gl * 4) ? "partial" : "correct";
 }
 const finalOf = (r) => (r.decision === "register" || r.decision === "exclude" ? (r.verified ? r.decision : "hold") : "hold");
-const rank = { register: 3, exclude: 2, hold: 1 };
+
+/** AIの項目（record）の正規化した項目 */
+function aiFieldsOf(rec) {
+  const out = {};
+  for (const [k, f] of Object.entries(rec?.fields ?? {})) {
+    if (k.startsWith("_")) continue;
+    const c = canon(k);
+    if (c && (!out[c] || (CANON.includes(k) && !CANON.includes(out[c]._k)))) out[c] = { ...f, _k: k };
+  }
+  return out;
+}
+/** 正解の応募機会（無ければ案件の決定・項目を1件の機会として） */
+function goldOpps(g) {
+  const norm = (fields) => Object.fromEntries(Object.entries(fields ?? {}).map(([k, v]) => [GOLD_KEY[k] ?? k, v]));
+  if (Array.isArray(g.opportunities) && g.opportunities.length) return g.opportunities.map((o, i) => ({ id: o.id ?? String(i + 1), match: o.match ?? null, decision: o.decision ?? g.decision, fields: norm(o.fields) }));
+  return [{ id: "1", match: null, decision: g.decision, fields: norm(g.fields) }];
+}
+const tokensOf = (o) => o.match ?? [...(o.fields.store?.t ?? (o.fields.store?.v ? [o.fields.store.v] : [])), ...(o.fields.product?.t ?? [])];
+function matchScore(o, rec) {
+  const toks = tokensOf(o);
+  if (!toks.length) return 0;
+  const f = aiFieldsOf(rec);
+  const hay = nf([f.store?.value, f.product?.value, rec.label, rec.itemLabel].filter(Boolean).join(" "));
+  return toks.filter((t) => hay.includes(nf(t))).length / toks.length;
+}
+/** 正解の機会とAIの項目の対応（貪欲・語の一致率の高い順）。単一機会の案件は最も一致する1件（同率なら項目番号の小さい方） */
+function align(opps, recs) {
+  const pairs = [];
+  for (const o of opps) for (const [ri, r] of recs.entries()) pairs.push({ o, ri, s: matchScore(o, r) });
+  pairs.sort((a, b) => b.s - a.s || a.ri - b.ri);
+  const usedO = new Set();
+  const usedR = new Set();
+  const out = [];
+  const single = opps.length === 1;
+  for (const p of pairs) {
+    if (usedO.has(p.o.id) || usedR.has(p.ri)) continue;
+    if (!single && p.s < 1) continue; // 複数機会は語がすべて一致したものだけ対応させる
+    usedO.add(p.o.id);
+    usedR.add(p.ri);
+    out.push({ o: p.o, rec: recs[p.ri] });
+  }
+  // 対応しなかった項目のうち、対応済みの機会と語がすべて一致するもの＝同じ機会を商品ごとに分けた項目（誤分割とは別に数える）
+  const rest = recs.filter((_, i) => !usedR.has(i));
+  const sameOpp = single ? [] : rest.filter((r) => opps.some((o) => usedO.has(o.id) && matchScore(o, r) >= 1));
+  return { matched: out, missedOpps: opps.filter((o) => !usedO.has(o.id)), extraRecs: rest.filter((r) => !sameOpp.includes(r)), sameOppRecs: sameOpp };
+}
 
 const report = {};
 for (const run of runs) {
@@ -79,83 +164,105 @@ for (const run of runs) {
     report[run] = { error: "記録なし" };
     continue;
   }
-  const lines = readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  // 同じ案件の複数試行は、最後の試行を主（初回は別に数える）
+  const lines = readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((l) => !onlySets.length || onlySets.includes(l.set));
   const byCase = new Map();
+  const costAll = {};
   const attempts = {};
   for (const l of lines) {
     attempts[l.caseId] = (attempts[l.caseId] ?? 0) + 1;
-    byCase.set(l.caseId, l);
+    costAll[l.caseId] = (costAll[l.caseId] ?? 0) + (l.costJpy ?? 0);
+    byCase.set(l.caseId, l); // 判断・項目は最後の試行（全試行の費用は合計）
   }
-  const out = { 案件: 0, 試行: lines.length, 呼出し: {}, 判断: { 分母: 0, 正解: 0, 誤登録: 0, 誤除外: 0, 不要な保留: 0, その他: 0, 確定不能で除外: 0, 判断なし: 0 }, 組別: {}, 項目: {}, 項目_公式のみ: {}, 捏造: 0, 捏造の項目: {}, 重要項目: { 分母: 0, 正しい: 0 }, 費用_円: 0, 時間_秒: [], 上位: { 使用: 0, 採用: 0, 理由: {} }, 案件別: [] };
+  const z = () => ({ 分母: 0, 正解: 0, 誤登録: 0, 誤除外: 0, 不要な保留: 0 });
+  const out = { 案件: 0, 試行: lines.length, 失敗した試行: lines.filter((l) => !l.ok).length, 費用_円: 0, 時間_秒: [], 候補単位: { ...z(), 確定不能: 0 }, 機会単位: { ...z(), 確定不能: 0, 正解の機会: 0, 対応: 0, 漏れ: 0, 余分: 0 }, 組別: {}, 項目: {}, 項目_公式のみ: {}, 記載なし: { 正しい記載なし: 0, 捏造_観察: 0, 根拠のない推定: 0, 未判定: 0, 捏造の項目: {} }, 重要項目: { 分母: 0, 正しい: 0 }, 段別: {}, 上位: { 使用: 0, 採用: 0, 理由: {} }, 案件別: [] };
+  const tally = (m, allowed, ai) => {
+    m.分母++;
+    if (allowed.includes(ai)) m.正解++;
+    else if (ai === "register") m.誤登録++;
+    else if (ai === "exclude") m.誤除外++;
+    else m.不要な保留++;
+  };
   for (const [caseId, l] of byCase) {
     const g = gold[caseId];
     if (!g) continue;
     out.案件++;
-    out.費用_円 += l.costJpy ?? 0;
+    out.費用_円 += costAll[caseId];
     out.時間_秒.push(Math.round((l.ms ?? 0) / 1000));
-    for (const [k, v] of Object.entries(l.diagnostics ?? {})) if (/^(agent|judge|upper:judge|upper):/.test(k) && !/next:/.test(k)) out.呼出し[k.slice(0, 60)] = (out.呼出し[k.slice(0, 60)] ?? 0) + v;
-    const recs = l.records ?? [];
-    const main = [...recs].sort((a, b) => rank[finalOf(b)] - rank[finalOf(a)])[0];
-    const set = (out.組別[l.set] ??= { 分母: 0, 正解: 0, 項目正: 0, 項目分母: 0 });
-    let verdict = "判断なし";
-    if (!main || main.decision === "none") out.判断.判断なし++;
-    const ai = main ? finalOf(main) : "hold";
-    if (g.decision.conf === "undetermined") {
-      out.判断.確定不能で除外++;
-      verdict = "確定不能";
-    } else {
-      out.判断.分母++;
-      set.分母++;
-      if (g.decision.allowed.includes(ai)) {
-        out.判断.正解++;
-        set.正解++;
-        verdict = "正解";
-      } else if (ai === "register") (out.判断.誤登録++, (verdict = "誤登録"));
-      else if (ai === "exclude") (out.判断.誤除外++, (verdict = "誤除外"));
-      else if (ai === "hold") (out.判断.不要な保留++, (verdict = "不要な保留"));
-      else out.判断.その他++;
+    const basis = basisOf(caseId) ?? goldFile.at;
+    const recs = (l.records ?? []).filter((r) => r.decision !== undefined);
+    const opps = goldOpps(g);
+    const { matched, missedOpps, extraRecs, sameOppRecs } = align(opps, recs);
+    out.機会単位.商品別の分割 = (out.機会単位.商品別の分割 ?? 0) + sameOppRecs.length;
+    // 判断の段別（同じ証拠での既定モデルと上位モデル。dual・適応型の記録から）。最終の規則とは別に、各段の判断そのものを正解と照合する
+    for (const { o, rec } of matched) {
+      if (o.decision.conf === "undetermined") continue;
+      for (const s of rec.judgeTrail ?? []) {
+        const k = `${s.stage}:${s.model ?? "?"}`;
+        const m = (out.段別[k] ??= z());
+        const d = s.decision === "register" || s.decision === "exclude" ? (s.verified ? s.decision : "hold") : "hold";
+        tally(m, o.decision.allowed, d);
+      }
+    }
+    const set = (out.組別[l.set] ??= { 候補: z(), 機会: z(), 項目正: 0, 項目分母: 0 });
+    // 候補単位: 案件の決定と、最も対応するAIの項目
+    const main = matched.find((m) => m.o.id === opps[0].id)?.rec ?? recs[0];
+    const aiMain = main && main.decision !== "none" ? finalOf(main) : "hold";
+    let verdict = "確定不能";
+    if (g.decision.conf === "undetermined") out.候補単位.確定不能++;
+    else {
+      tally(out.候補単位, g.decision.allowed, aiMain);
+      tally(set.候補, g.decision.allowed, aiMain);
+      verdict = g.decision.allowed.includes(aiMain) ? "正解" : aiMain === "register" ? "誤登録" : aiMain === "exclude" ? "誤除外" : "不要な保留";
+    }
+    // 機会単位
+    out.機会単位.正解の機会 += opps.length;
+    out.機会単位.対応 += matched.length;
+    out.機会単位.漏れ += missedOpps.length;
+    out.機会単位.余分 += extraRecs.length;
+    for (const o of missedOpps) if (o.decision.conf !== "undetermined" && !o.decision.allowed.includes("exclude")) tally(out.機会単位, o.decision.allowed, "hold"); // 漏れた機会（除外が正しいものは漏れても実害なし）
+    const fieldRes = {};
+    for (const { o, rec } of matched) {
+      const ai = rec.decision !== "none" ? finalOf(rec) : "hold";
+      if (o.decision.conf === "undetermined") out.機会単位.確定不能++;
+      else {
+        tally(out.機会単位, o.decision.allowed, ai);
+        tally(set.機会, o.decision.allowed, ai);
+      }
+      const aiF = aiFieldsOf(rec);
+      for (const [k, gf] of Object.entries(o.fields)) {
+        const a = aiF[k];
+        if (gf.s === "not_stated") {
+          if (a?.absence) out.記載なし.正しい記載なし++;
+          else if (a && a.value && a.basis === "observed") {
+            out.記載なし.捏造_観察++;
+            out.記載なし.捏造の項目[k] = (out.記載なし.捏造の項目[k] ?? 0) + 1;
+            fieldRes[k] = "捏造";
+          } else if (a && a.value && a.basis === "inferred") out.記載なし.根拠のない推定++;
+          else out.記載なし.未判定++;
+          continue;
+        }
+        const r = scoreField(k, gf, a, basis);
+        if (opps.length === 1) fieldRes[k] = r;
+        const bucket = (m) => ((m[k] ??= { 分母: 0, correct: 0, partial: 0, wrong: 0, wrong_absent: 0, missing: 0 }), m[k].分母++, m[k][r]++);
+        bucket(out.項目);
+        if (gf.src === "official" || gf.src === "post") bucket(out.項目_公式のみ);
+        set.項目分母++;
+        if (r === "correct") set.項目正++;
+        if (["store", "product", "deadline"].includes(k)) {
+          out.重要項目.分母++;
+          if (r === "correct") out.重要項目.正しい++;
+        }
+      }
     }
     const trail = main?.judgeTrail ?? [];
     const esc = trail.filter((s) => s.stage === "escalated");
     if (esc.length) {
       out.上位.使用++;
       for (const s of esc) out.上位.理由[s.reason ?? "?"] = (out.上位.理由[s.reason ?? "?"] ?? 0) + 1;
-      // 採用: 段に adopted があればそれ（新しい記録）。無い旧い記録は、検証を通り、食い違いでもなく、最終の判断と一致したものだけ
       if (esc.some((s) => (s.adopted !== undefined ? s.adopted : s.verified && s.note !== "disagreement" && s.decision === main.decision))) out.上位.採用++;
     }
-    // 項目
-    const aiFields = {};
-    for (const [k, f] of Object.entries(main?.fields ?? {})) {
-      if (k.startsWith("_")) continue;
-      const c = canon(k);
-      if (c && !aiFields[c]) aiFields[c] = f;
-    }
-    const year = 2026;
-    const fieldRes = {};
-    for (const [k, gf] of Object.entries(g.fields ?? {})) {
-      if (gf.s === "not_stated") {
-        const a = aiFields[k];
-        if (a && a.basis === "observed" && a.value) {
-          out.捏造++;
-          out.捏造の項目[k] = (out.捏造の項目[k] ?? 0) + 1;
-          fieldRes[k] = "捏造";
-        }
-        continue;
-      }
-      const r = scoreField(k, gf, aiFields[k], year);
-      fieldRes[k] = r;
-      const bucket = (m) => ((m[k] ??= { 分母: 0, correct: 0, partial: 0, wrong: 0, missing: 0 }), m[k].分母++, m[k][r]++);
-      bucket(out.項目);
-      if (gf.src === "official" || gf.src === "post") bucket(out.項目_公式のみ);
-      set.項目分母++;
-      if (r === "correct") set.項目正++;
-      if (["store", "product", "apply_end"].includes(k)) {
-        out.重要項目.分母++;
-        if (r === "correct") out.重要項目.正しい++;
-      }
-    }
-    out.案件別.push({ caseId, set: l.set, ai, aiDecision: main?.decision ?? "none", verified: main?.verified ?? false, allowed: g.decision.allowed.join("|"), verdict, 試行: attempts[caseId], 円: Math.round((l.costJpy ?? 0) * 100) / 100, 秒: Math.round((l.ms ?? 0) / 1000), 上位: esc.map((s) => s.reason).join(","), 項目: Object.entries(fieldRes).map(([k, r]) => `${k}:${r === "correct" ? "○" : r === "partial" ? "△" : r === "missing" ? "－" : r === "捏造" ? "捏" : "×"}`).join(" ") });
+    const mark = (r) => (r === "correct" ? "○" : r === "partial" ? "△" : r === "missing" ? "－" : r === "wrong_absent" ? "無" : r === "捏造" ? "捏" : "×");
+    out.案件別.push({ caseId, set: l.set, verdict, ai: aiMain, aiDecision: main?.decision ?? "none", verified: main?.verified ?? false, allowed: g.decision.allowed.join("|"), 機会: `${matched.length}/${opps.length}${extraRecs.length ? `+余分${extraRecs.length}` : ""}`, 試行: attempts[caseId], 円: Math.round(costAll[caseId] * 100) / 100, 秒: Math.round((l.ms ?? 0) / 1000), 上位: esc.map((s) => s.reason).join(","), 項目: Object.entries(fieldRes).map(([k, r]) => `${k}:${mark(r)}`).join(" ") });
   }
   out.費用_円 = Math.round(out.費用_円 * 100) / 100;
   const ts = [...out.時間_秒].sort((a, b) => a - b);
@@ -167,7 +274,9 @@ for (const run of runs) {
     fd += v.分母;
   }
   out.項目_全体 = { 分母: fd, 正しい: fc, 率: fd ? Math.round((fc / fd) * 1000) / 10 : null };
-  out.判断.率 = out.判断.分母 ? Math.round((out.判断.正解 / out.判断.分母) * 1000) / 10 : null;
+  const rate = (m) => (m.分母 ? Math.round((m.正解 / m.分母) * 1000) / 10 : null);
+  out.候補単位.率 = rate(out.候補単位);
+  out.機会単位.率 = rate(out.機会単位);
   report[run] = out;
 }
 if (process.argv.includes("--json")) console.log(JSON.stringify(report, null, 1));
@@ -177,10 +286,12 @@ else
       console.log(run, o.error);
       continue;
     }
-    console.log(`\n=== ${run}: 案件${o.案件}・試行${o.試行}・費用¥${o.費用_円}・時間p50 ${o.時間_秒.p50}s`);
-    console.log("判断", JSON.stringify(o.判断), "組別", JSON.stringify(o.組別));
-    console.log("項目全体", JSON.stringify(o.項目_全体), "重要項目", JSON.stringify(o.重要項目), "捏造", o.捏造, JSON.stringify(o.捏造の項目));
-    for (const [k, v] of Object.entries(o.項目)) console.log(`  ${k.padEnd(16)} n=${v.分母} ○${v.correct} △${v.partial} ×${v.wrong} －${v.missing}`);
-    console.log("上位", JSON.stringify(o.上位));
-    for (const c of o.案件別) console.log(`  ${c.caseId} [${c.set}] ${c.verdict} ai=${c.ai}(${c.aiDecision}${c.verified ? "" : ",未検証"}) 許容=${c.allowed} ¥${c.円} ${c.秒}s ${c.上位 ? "上位:" + c.上位 : ""} | ${c.項目}`);
+    console.log(`\n=== ${run}: 案件${o.案件}・試行${o.試行}（失敗${o.失敗した試行}）・費用¥${o.費用_円}（全試行）・時間p50 ${o.時間_秒.p50}s`);
+    console.log("候補単位", JSON.stringify(o.候補単位));
+    console.log("機会単位", JSON.stringify(o.機会単位));
+    console.log("組別", JSON.stringify(o.組別));
+    console.log("項目全体", JSON.stringify(o.項目_全体), "重要項目", JSON.stringify(o.重要項目), "記載なし", JSON.stringify(o.記載なし));
+    for (const [k, v] of Object.entries(o.項目)) console.log(`  ${k.padEnd(16)} n=${v.分母} ○${v.correct} △${v.partial} ×${v.wrong} 無${v.wrong_absent} －${v.missing}`);
+    console.log("上位", JSON.stringify(o.上位), "段別", JSON.stringify(o.段別));
+    for (const c of o.案件別) console.log(`  ${c.caseId} [${c.set}] ${c.verdict} ai=${c.ai}(${c.aiDecision}${c.verified ? "" : ",未検証"}) 許容=${c.allowed} 機会${c.機会} ¥${c.円} ${c.秒}s ${c.上位 ? "上位:" + c.上位 : ""} | ${c.項目}`);
   }

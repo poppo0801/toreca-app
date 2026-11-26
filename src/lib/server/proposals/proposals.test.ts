@@ -58,7 +58,9 @@ describe("フラグ: 既定OFF・本番では常に無効", () => {
     const db = { from: () => { throw new Error("must not reach db"); } } as never;
     expect(await recordReview({ db, householdId: "h", proposalId: "p", decision: "approve", env })).toEqual({ ok: false, reason: "invalid" });
     expect(await recordReview({ db, householdId: "h", proposalId: "p", decision: "approve_with_edits", edits: { "store; drop table": "x" }, env })).toEqual({ ok: false, reason: "invalid" });
-    expect(await recordReview({ db, householdId: "h", proposalId: "p", decision: "approve_with_edits", edits: { store: "x".repeat(201) }, env })).toEqual({ ok: false, reason: "invalid" });
+    expect(await recordReview({ db, householdId: "h", proposalId: "p", decision: "approve_with_edits", edits: { store: "x".repeat(401) }, env })).toEqual({ ok: false, reason: "invalid" }); // PRODUCTION_PARITY: 上限 200→400字（条件・応募方法の長い記載）
+    // 項目数の上限を超えたら、黙って捨てずに拒否する（以前は12件を超えた分を捨てていた）
+    expect(await recordReview({ db, householdId: "h", proposalId: "p", decision: "approve_with_edits", edits: Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`f${i}`, "x"])), env })).toEqual({ ok: false, reason: "invalid" });
     expect(await recordReview({ db, householdId: "h", proposalId: "p", decision: "approve_with_edits", env })).toEqual({ ok: false, reason: "invalid" }); // 修正が無い承認は不可（edits 必須）
   });
 });
@@ -318,5 +320,17 @@ describe("根拠のない除外は検証の指摘にする（P2: 取得できな
     // 引用が実在しても、除外の理由を支えない（11/30までは対象外の根拠でも、受付終了の根拠でもない）なら、保留にする
     expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_unsupported"]);
     expect(verifyRegistration({ output: out({}, "tentative"), evidence: ev, protectedFields: {} }).issues).toEqual([]); // 暫定は対象外
+  });
+});
+
+import { aiSnapshotOf } from "./review";
+describe("正解の記録の AI の写し（PRODUCTION_PARITY: 以前は16項目・80字で切っていた）", () => {
+  it("全20項目と記載の状態を残し、DBの上限（4,000バイト）に収める", () => {
+    const fields = Object.fromEntries(Array.from({ length: 22 }, (_, i) => [`k${i}`, { value: "あ".repeat(150), basis: "observed" }]));
+    (fields as Record<string, unknown>).k3 = { value: null, basis: "unknown", absence: "not_stated" };
+    const s = aiSnapshotOf({ decision: "register", verified: true, model_id: "m", prompt_version: "v", input_hash: "h", version: 1, mode: "real", apply_unit: "one_form_one", fields }) as { fields: Record<string, { absence?: string }> };
+    expect(Object.keys(s.fields)).toHaveLength(22);
+    expect(s.fields.k3.absence).toBe("not_stated");
+    expect(new TextEncoder().encode(JSON.stringify(s)).length).toBeLessThanOrEqual(4000);
   });
 });

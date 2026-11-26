@@ -330,6 +330,13 @@ import { DATE_FIELDS } from "./lottery-fields";
 import { extractPageLinks } from "./page-links";
 import { claimClassOf, checkDeadlineRole, checkExcludeSemantics, checkUnitQuote, checkValueCorrespondence, type SemanticVerdict, type UserRegion, unitPassages } from "./claim-semantics";
 const norm = (s: string): string => s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+/** 締切以外の日付の項目の用途の語（固定の店舗ルールではなく、日付の意味の一般語。通らなければ未確認として残すだけ） */
+const DATE_ROLE_WORDS: Record<string, { re: RegExp; label: string }> = {
+  apply: { re: /受付|受け付|応募|申込|申し込|エントリー|抽選|開始|から|より|[~〜～]/, label: "応募・受付" },
+  result: { re: /当選|落選|発表|結果|抽選日|抽選は|連絡|通知|メール|ご案内/, label: "当選発表" },
+  purchase: { re: /購入|お支払|支払|決済|販売|引換|引き換|会計|注文|お渡し/, label: "購入" },
+  receive: { re: /受取|受け取|お渡し|引き渡|引渡|発送|お届け|配送|来店|引換|引き換/, label: "受取" },
+};
 
 export function seedEvidence(id: string, text: string, now: Date, url: string | null = null, notes: string[] = []): Evidence {
   return { id, kind: "seed", url, fetchedAt: now.toISOString(), contentHash: sha(text), text, structure: null, independent: true, ...(notes.length ? { notes: notes.slice(0, 16) } : {}) };
@@ -558,6 +565,11 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       const q = f.quote!.normalize("NFKC");
       const rangeHit = vd.some((d) => { const [mo, dd] = d.split("/"); return qd.some((x) => x.startsWith(mo + "/")) && new RegExp("(?<!\\d)" + dd + "\\s*日").test(q); });
       if (vd.length > 0 && !vd.some((d) => qd.includes(d)) && !rangeHit) issues.push("value_not_in_quote:" + name);
+      else {
+        // 日付の用途（PRODUCTION_PARITY §5: 日付が引用にあるだけでは、当選発表の日付を購入期間に入れた等の取り違えを見分けられない）。用途の語が引用に無いときは「未確認」として残す（任意項目なので不採用にはしない）
+        const role = DATE_ROLE_WORDS[name.replace(/_(start|end|at)$/, "")];
+        if (role && !role.re.test(q)) unconfirmed.push(`${name}: 日付の用途（${role.label}）を引用の語から確認できていない`);
+      }
     } else if (grounded && (name === "store" || name === "product")) sem("value_not_in_quote:" + name, checkValueCorrespondence(f.value!, f.quote!), name);
     // 応募単位: 観察（observed）は、引用が応募の権利の単位（人数・回数・店舗・フォーム等）を述べていること。推定（inferred）は、受付枠・応募ボタンなど構造からの推定で、確定値として扱わない（登録案でも推定と表示される）ため、引用の実在と対応の検査だけにする（RUNTIME_CORRECTNESS: 単一の受付枠からの推定が、語の正規表現で一律に拒否されていた）
     else if (grounded && f.basis === "observed" && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);

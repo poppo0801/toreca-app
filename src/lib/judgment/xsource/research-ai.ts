@@ -49,6 +49,7 @@ export const JUDGE_SYSTEM = `あなたは、調査が終わった時点の証拠
 - 店舗が1つ（または通販の1サイト）で商品が1つの抽選は、応募の機会が1つと読めるので、応募ページを読めなくても apply_unit を one_form_one と推定してよい（basis=inferred、引用はその店舗・商品・受付の記載）。複数の店舗・商品・受付枠がある場合は、この推定をしない。
 - ページを取得した時刻（基準時刻より後）に「応募期間が終了しました」等と表示されていても、ページの応募期間が基準時刻を含むなら、基準時刻では受付中として扱う（取得時の終了表示だけで暫定にしない）。
 - 応募の方法がアプリ・公式LINE・DM・店頭のQRコード・店頭の掲示など、URLで示されない方法のときは、応募先URLが無いこと自体は不足ではない（応募方法として書く）。
+- **本登録案（register）に要るもの**は、応募の機会の実在・基準時刻での受付中・利用者の地域/受取への適合・店舗・商品・締切、と応募単位（確定または上の推定）だけ。口数の上限・応募条件の細目・当選発表・購入/受取の期間・応募ページの中身などの**任意の項目が不明・未確認であることは、暫定にする理由にならない**（不明は absent に書き、登録案にする）。応募ページがログイン必須で読めなくても、告知（店舗の公式・まとめの告知）に抽選・商品・締切が書かれていれば、機会は実在と扱い、会員が必要なことは conditions に書く。暫定は、上の必要なものが確認できない・矛盾するときにする。
 - 同じページに、期間・日時の記載が複数あり食い違うとき（古い回の記載の残りなど）は、受付の仕組みの表示（応募ボタンの近くの期間など）と新しい記載を優先して値にし、食い違いを rationale に書く。
 - **人の確認が必要か（askHuman）**: 公開された情報を調べても確定できず、利用者が自分で確かめると確定できること（LINEのトーク・会員ページ・アプリ内だけにある情報、店頭の掲示、利用者の方針＝カード以外のグッズを管理対象にするか等）が判断や重要項目を左右するときだけ、needed=true とし、理由（why）と対象の項目（fields）を短く書く。調べれば分かることは人に頼まず、調査の不足として書く。
 - 応募単位（apply_unit）の意味（「複数の受付枠がある」「URLが1つ」「表示カードが複数」とは別。**実際のフォーム上の、応募できる権利の単位**）:
@@ -247,7 +248,10 @@ function withCallRecord<I, O extends { costJpy: number | null }>(once: (input: I
   return f;
 }
 
-type AiOpts = { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void; strict?: boolean };
+/** 推論の度合い（output_config.effort。公式: low/medium/high/xhigh/max。思考の有無に関わらず全出力に効く）。既定は従来どおり low（PRODUCTION_PARITY で比較）。思考は max_tokens に含まれるため、度合いに応じて出力上限と費用の予約を広げる */
+export type AiEffort = "low" | "medium" | "high";
+export const EFFORT_MAX_TOKENS_SCALE: Record<AiEffort, number> = { low: 1, medium: 2, high: 4 };
+type AiOpts = { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void; strict?: boolean; effort?: AiEffort };
 /** 呼び出しの診断を、再試行の判断（直前の失敗の種類）にも使えるよう束ねる */
 function bindOpts(rawClient: ClientLike, role: AiDiagnostic["role"], o0: AiOpts): { client: ClientLike; opts: AiOpts & { onDiagnostic: (d: AiDiagnostic) => void }; probe: Probe } {
   const probe: Probe = { last: "" };
@@ -263,11 +267,13 @@ function bindOpts(rawClient: ClientLike, role: AiDiagnostic["role"], o0: AiOpts)
 export function makeAnthropicResearchAgent(rawClient: ClientLike, o0: AiOpts = {}): ResearchAgent {
   const { client, opts, probe } = bindOpts(rawClient, "agent", o0);
   const model = opts.model ?? DEFAULT_AI_MODEL;
+  const effort: AiEffort = opts.effort ?? "low";
+  const agentMax = OUTPUT_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort];
   return withCallRecord<AgentTurnInput, AgentTurnOutput>(async (input) => {
     let res: Anthropic.Message;
     try {
       res = await client.messages.create(
-        { model, max_tokens: OUTPUT_MAX_TOKENS, system: RESEARCH_SYSTEM, messages: [{ role: "user", content: `${renderTurnInput(input)}\n\n調査の結果を提出してください。` }], output_config: { effort: "low" }, tools: [{ name: TURN_TOOL, description: "調査の整理と次の行動を提出する", input_schema: TURN_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: TURN_TOOL } },
+        { model, max_tokens: agentMax, system: RESEARCH_SYSTEM, messages: [{ role: "user", content: `${renderTurnInput(input)}\n\n調査の結果を提出してください。` }], output_config: { effort }, tools: [{ name: TURN_TOOL, description: "調査の整理と次の行動を提出する", input_schema: TURN_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: TURN_TOOL } },
         { timeout: 60_000, maxRetries: 0 },
       );
     } catch (e) {
@@ -287,17 +293,19 @@ export function makeAnthropicResearchAgent(rawClient: ClientLike, o0: AiOpts = {
     opts.onDiagnostic({ role: "agent", reason: `next:${next.kind}${next.kind === "stop" ? `:${next.reason}` : ""}${a.next.kind === "fetch" && (typeof a.next.url !== "string" || a.next.url.trim() === "") ? ":fetch_without_url" : ""}` });
     const unknown = (Array.isArray(a.unknown) ? (a.unknown as AgentTurnOutput["unknown"]) : []).filter((u) => u && typeof u.what === "string").map((u) => ({ what: asString(u.what, 160), importance: (u.importance === "high" || u.importance === "medium" ? u.importance : "low") as "low" | "medium" | "high", harmIfWrong: Array.isArray(u.harmIfWrong) ? u.harmIfWrong.map((h) => asString(h, 60)) : [], expectedInfoGain: (["none", "low", "medium", "high"].includes(String(u.expectedInfoGain)) ? u.expectedInfoGain : "none") as AgentTurnOutput["unknown"][number]["expectedInfoGain"], rationale: asString(u.rationale, 300) }));
     return { observed: claims(a.observed), inferred: claims(a.inferred), unknown, counterHypotheses: (Array.isArray(a.counterHypotheses) ? (a.counterHypotheses as unknown[]) : []).map((s) => asString(s, 200)), next, costJpy: cost };
-  }, probe, (input) => worstCallJpy(model, RESEARCH_SYSTEM.length + renderTurnInput(input).length, opts.rate));
+  }, probe, (input) => worstCallJpy(model, RESEARCH_SYSTEM.length + renderTurnInput(input).length, opts.rate, agentMax));
 }
 
 export function makeAnthropicRegistrationJudge(rawClient: ClientLike, o0: AiOpts = {}): RegistrationJudge {
   const { client, opts, probe } = bindOpts(rawClient, "judge", o0);
   const model = opts.model ?? DEFAULT_AI_MODEL;
+  const effort: AiEffort = opts.effort ?? "low";
+  const judgeMax = JUDGE_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort];
   return withCallRecord<JudgeInput, JudgeOutput>(async (input) => {
     let res: Anthropic.Message;
     try {
       res = await client.messages.create(
-        { model, max_tokens: JUDGE_MAX_TOKENS, system: JUDGE_SYSTEM, messages: [{ role: "user", content: `${renderJudgeInput(input)}\n\n登録判断を提出してください。` }], output_config: { effort: "low" }, tools: [{ name: JUDGE_TOOL, description: "登録判断を提出する", input_schema: JUDGE_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: JUDGE_TOOL } },
+        { model, max_tokens: judgeMax, system: JUDGE_SYSTEM, messages: [{ role: "user", content: `${renderJudgeInput(input)}\n\n登録判断を提出してください。` }], output_config: { effort }, tools: [{ name: JUDGE_TOOL, description: "登録判断を提出する", input_schema: JUDGE_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: JUDGE_TOOL } },
         { timeout: 60_000, maxRetries: 0 },
       );
     } catch (e) {
@@ -331,7 +339,7 @@ export function makeAnthropicRegistrationJudge(rawClient: ClientLike, o0: AiOpts
     const askHuman = ah && ah.needed === true && typeof ah.why === "string" && ah.why.trim() ? { why: asString(ah.why, 160), fields: Array.isArray(ah.fields) ? (ah.fields as unknown[]).map((f) => asString(f, 40)).slice(0, 6) : [] } : undefined;
     const out: JudgeOutput = { ...(fieldsMissing ? { outputNote: "fields_defaulted" as const } : {}), ...(Object.keys(absent).length ? { absent } : {}), ...(askHuman ? { askHuman } : {}), decision: a.decision, fields, rationale: asString(a.rationale, 500), unresolvedImpact: a.unresolvedImpact === "material" || a.unresolvedImpact === "minor" ? a.unresolvedImpact : "none", monitor: { continue: a.monitor?.continue !== false, why: asString(a.monitor?.why, 200) }, costJpy: cost };
     return out;
-  }, probe, (input) => worstCallJpy(model, JUDGE_SYSTEM.length + renderJudgeInput(input).length, opts.rate, JUDGE_MAX_TOKENS));
+  }, probe, (input) => worstCallJpy(model, JUDGE_SYSTEM.length + renderJudgeInput(input).length, opts.rate, judgeMax));
 }
 
 /**

@@ -117,8 +117,9 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
       expect(rs.done).toBe(1);
       // 入力: AIへ渡った最初の入力が同一（取得元ページが応募先URLとは別の行で含まれる）
       expect(s.prompts[0]).toBe(e.prompts[0]);
-      expect(s.prompts[0]).toMatch(/【収集時の取得元ページ.応募先とは限らない。応募先URLとは別.[^】]*】 https:\/\//);
-      expect(s.prompts[0]).toContain("URLなし(応募先は不明)"); // プロンプトはNFKC正規化される // 取得元ページがあっても、応募先URLは確定しない
+      // PRODUCTION_PARITY: 原文がX投稿でない（告知ページ・まとめの一覧カード）候補は、取得元ページがこの告知のページそのもの。項目自身のリンクとして渡し、「URLなし（応募先は不明）」と伝えない（以前は本番の全89件で URLなし）
+      expect(s.prompts[0]).toMatch(/【この告知の取得元ページ[^】]*】 https:\/\//);
+      expect(s.prompts[0]).not.toContain("URLなし(応募先は不明)"); // プロンプトはNFKC正規化される
       // 道具・実行: 同じ呼び出しの列・同じ取得（取得元ページを実取得した）
       expect(s.calls.map((c) => c.kind)).toEqual(e.calls.map((c) => c.kind));
       expect(s.calls.length).toBeGreaterThanOrEqual(3); // 調査（取得）→調査（停止）→判断。1ターン即停止ではない
@@ -129,7 +130,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
       expect(rsr).toHaveLength(1);
       expect(key(rsr[0]), `fixture ${i}`).toEqual(key(re[0]));
       expect((rsr[0].pages as unknown[]).length).toBe(1); // 取得元ページを読んだ（初回の本番は0だった）
-      expect(rsr[0].url_status).toBe("url_missing"); // 応募先は未確定のまま（URLがあるだけで確定しない）
+      expect(rsr[0].url_status).toBe("url_from_item"); // 告知ページそのもの（応募単位・応募先の確定は、ページの記載と判断・検証による）
       // 本番の記録（shadow_judgments）に、道具の提示状況・取得結果・終了理由が残る
       const j = (await admin.from("shadow_judgments").select("record,cost_jpy").eq("candidate_id", cs.id)).data?.[0] as { record: { trace: { tools: Record<string, string>; fetches: { host: string; outcome: string }[]; endReasons: Record<string, number>; pages: number }; liveFetch: boolean; search: boolean }; cost_jpy: number };
       expect(j.record.trace.tools).toMatchObject({ stored: "offered", liveFetch: "offered", search: "unavailable:no_provider", vision: "unavailable:no_images" });

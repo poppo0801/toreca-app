@@ -118,7 +118,9 @@ export function postFromCandidate(c: CandidateRow): StoredXPost | null {
   // 取得元ページ（収集時に取得したページ）。応募先URLとは別の意味で渡す。公開の http(s) のみ。X・短縮URLは対象外（追跡しない既存方針）
   const src = e.url ?? c.source_url ?? null;
   const sourcePage = src && /^https?:\/\//i.test(src) && !/^https?:\/\/(?:[^/]*\.)?(?:x\.com|twitter\.com|t\.co)(?:[/:?#]|$)/i.test(src) ? { url: src.slice(0, 500), via: e.via, fetchedAt: e.fetchedAt } : null;
-  return { postId: (c.x_post_id ?? e.hash).slice(0, 40), text: e.text, links: e.links ?? [], ...(e.linkMap?.length ? { linkMap: e.linkMap } : {}), recordedAt: e.fetchedAt, ...(sourcePage ? { sourcePage } : {}), ...(contextNotes(e).length ? { notes: contextNotes(e) } : {}) };
+  // 原文がX投稿でない（告知ページの本文・まとめサイトの一覧カード）なら、取得元ページはこの候補の告知ページそのもの
+  const announcement = !!sourcePage && e.via !== "x_api" && e.via !== "x_oembed" && !c.x_post_id;
+  return { postId: (c.x_post_id ?? e.hash).slice(0, 40), text: e.text, links: e.links ?? [], ...(e.linkMap?.length ? { linkMap: e.linkMap } : {}), recordedAt: e.fetchedAt, ...(sourcePage ? { sourcePage } : {}), ...(announcement ? { sourceIsAnnouncement: true } : {}), ...(contextNotes(e).length ? { notes: contextNotes(e) } : {}) };
 }
 
 /** 保存済みの全文（整形後）から取得結果を作る。HTMLは保存しないため、本文と構造化の観察をそのまま使う */
@@ -252,7 +254,8 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
         const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
         // ページ内リンク（次に調べる候補）を持たない旧い保存文書は、実取得できるなら取得し直して、リンクつきで保存し直す（実取得が無ければ保存全文を使う）
         const hasLinks = saved?.structure?.links !== undefined;
-        if (saved && !saved.truncated && (saved.origin === "prefetch" || saved.text.length > (stored?.text.length ?? 0)) && (hasLinks || !deps.liveFetch || saved.origin === "prefetch")) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : saved.origin === "prefetch" ? "調査の前に事前取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。この取得時刻の時点のページの内容。評価の基準時刻（収集時刻）での状態は、このページの記載（受付期間・受付中の表示）と基準時刻を照らして判断する` };
+        // 収集時に取得したページ全文（origin=collector。PRODUCTION_PARITY で本番でも保存）は、候補の行の抜粋と同じ長さでも全文であることが確認できるので採用する
+        if (saved && !saved.truncated && (saved.origin === "prefetch" || saved.origin.startsWith("collector") || saved.text.length > (stored?.text.length ?? 0)) && (hasLinks || !deps.liveFetch || saved.origin === "prefetch")) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : saved.origin === "prefetch" ? "調査の前に事前取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。この取得時刻の時点のページの内容。評価の基準時刻（収集時刻）での状態は、このページの記載（受付期間・受付中の表示）と基準時刻を照らして判断する` };
       }
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);

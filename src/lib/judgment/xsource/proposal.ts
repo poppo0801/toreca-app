@@ -19,7 +19,7 @@ export function effectiveDecision(r: { decision: ProposalRecord["decision"]; ver
   return (r.decision === "register" || r.decision === "exclude") && !r.verified ? "tentative" : r.decision;
 }
 
-export const PROPOSAL_PROMPT_VERSION = "10z-11"; // INTENSIVE_EVALUATION: 全項目・記載の状態・基準時刻・人の確認・条件・抽選でない投稿
+export const PROPOSAL_PROMPT_VERSION = "10z-13"; // PRODUCTION_PARITY（13: 本登録に要るものと任意項目の不明の扱いを明示／12）: 一覧の見出し（店舗）を種へ・告知ページそのものの取得元を項目のリンクに・受付期間の見出しと日付の照合（10z-11: 全項目・記載の状態・基準時刻・人の確認・条件・抽選でない投稿）
 export type ProposalMode = "mock" | "replay" | "real";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product" | "unknown";
 /** near_match: 言い換え・書式・括弧の違いを除くと、値の語が本文にほぼ含まれる（数字は完全一致が条件）。enum_value: 応募単位のような**列挙値**（語の一致では確認できない。人が確認する） */
@@ -57,7 +57,7 @@ export interface ProposalRecord {
   unknowns: { what: string; why: string }[];
   /** viaSearch: そのページのURLが、AIの検索結果に含まれていた（検索で見つけた候補を取得した）。URLが最初から与えられたものと区別する（B2の自律発見の観測用） */
   /** hash: 根拠にしたページの内容ハッシュの先頭16桁、url: そのページのURL（人の確認を同じ版に結び付ける。旧い行には無い） */
-  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch: boolean; hash?: string; url?: string }[];
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch: boolean; hash?: string; url?: string; /** そのページを取得した時刻（PRODUCTION_PARITY: 根拠の版・時点を画面で確認できるように） */ at?: string }[];
   possiblySame: string[];
   mode: ProposalMode;
   modelId: string | null;
@@ -210,7 +210,7 @@ export function toProposalRecords(a: {
     if (!out) unknowns.push({ what: "AIの判断", why: "判断が得られなかった（調査は保持）" });
     else if (out.outputNote === "fields_defaulted") unknowns.push({ what: "AIの判断", why: "項目の出力が省略された（主張なしとして扱った。判断の成功とは数えない）" });
     const searched = new Set(result.searches.map((s) => canonUrl(s.url).key));
-    const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length, viaSearch: !!e.url && searched.has(canonUrl(e.url).key), /* 保存した全文（evidence_documents.content_hash＝本文の sha256）と同じ計算の先頭16桁 */ hash: sha(e.text).slice(0, 16), ...(e.url ? { url: e.url.slice(0, 300) } : {}) }));
+    const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length, viaSearch: !!e.url && searched.has(canonUrl(e.url).key), /* 保存した全文（evidence_documents.content_hash＝本文の sha256）と同じ計算の先頭16桁 */ hash: sha(e.text).slice(0, 16), ...(e.url ? { url: e.url.slice(0, 300) } : {}), ...(e.fetchedAt ? { at: e.fetchedAt } : {}) }));
     return {
       candidateId: a.candidateId,
       proposalKey: proposalKey(a.candidateId, a.post.postId, plan.itemNo),
