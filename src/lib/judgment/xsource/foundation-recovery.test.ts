@@ -206,7 +206,7 @@ describe("ADAPTIVE_REVIEW 適応型判断", () => {
     expect(r.judgeTrail?.[1]).toMatchObject({ stage: "escalated", decision: "none", note: "failed" });
   });
   it("検証済みの登録・除外は上げない（監査の抽出の割合が0のとき）。監査で両方検証済みかつ結論が食い違えば、どちらも正解扱いせず保留にする", async () => {
-    const reg = jo({ decision: "register", unresolvedImpact: "none" });
+    const reg = jo({ decision: "register", unresolvedImpact: "none", fields: { fit_region: { value: "適合", basis: "observed", evidenceId: "p1", quote: "応募期間 11月24日〜11月26日" } } });
     const a = await run(reg, [jo({})]);
     expect(a.calls.upper).toBe(0);
     const b = await run(reg, [jo({ decision: "tentative", unresolvedImpact: "minor" })], { auditRate: 1 });
@@ -218,6 +218,14 @@ describe("ADAPTIVE_REVIEW 適応型判断", () => {
     const { r } = await run(jo({ decision: "tentative" }), [jo({ decision: "exclude", unresolvedImpact: "none", fields: { exclude_reason: { value: "対象地域外", basis: "observed", evidenceId: "p1", quote: "応募期間 11月24日〜11月26日" } } })]);
     expect(r.registration.held?.reasons ?? []).not.toContain("model_disagreement");
     expect(r.judgeTrail?.[1]?.stage).toBe("escalated");
+  });
+  it("登録なのに地域の適合が観察で確認されていなければ上位で確かめる（fit_unconfirmed）。観察で適合なら上げない", async () => {
+    const { escalationReason } = await import("./research-loop");
+    const ev = [{ id: "p1", kind: "page" as const, url: URL1, fetchedAt: "x", contentHash: "h", text: "t", structure: null, independent: true }];
+    const reg = (fit?: { value: string; basis: "observed" | "inferred" | "unknown" }) => jo({ decision: "register", unresolvedImpact: "none", fields: fit ? { fit_region: fit } : {} });
+    expect(escalationReason({ output: reg(), verified: true, evidence: ev, caseId: "c", auditRate: 0 })).toBe("fit_unconfirmed");
+    expect(escalationReason({ output: reg({ value: "不明", basis: "unknown" }), verified: true, evidence: ev, caseId: "c", auditRate: 0 })).toBe("fit_unconfirmed");
+    expect(escalationReason({ output: reg({ value: "適合", basis: "observed" }), verified: true, evidence: ev, caseId: "c", auditRate: 0 })).toBeNull();
   });
   it("根拠のページが1つも無い暫定は上げない（情報が無いときはモデルを変えても解決しない）", async () => {
     const { calls } = await run(jo({}), [jo({ decision: "register" })], { autoFetch: false });

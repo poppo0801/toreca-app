@@ -28,6 +28,7 @@ export interface JudgeStep {
  * 上位のモデルで判断し直すべきか（一般の条件。結果の理由コードを返す。不要なら null）。
  *  - primary_failed: 既定の判断が得られなかった ／ verification_failed: 検証に通らなかった
  *  - material_unknown: 暫定で、判断に重大な影響がある不明が残る ／ complex_structure: 受付枠が複数あるページで、暫定、または応募単位を観察で確定できていない
+ *  - fit_unconfirmed: 登録なのに利用者への適合（地域）が観察で確認されていない
  *  - audit_sample: 検証済みの登録・除外から一定の割合を抽出して監査する（保留だけを見る偏りを防ぐ）
  * 情報そのものが無い（取得できない）場合はモデルを変えても解決しないため、根拠のページが1つも無い暫定は上げない。
  */
@@ -44,6 +45,9 @@ export function escalationReason(a: { output: JudgeOutput | null; verified: bool
     return null;
   }
   if (multiSlot && a.output.decision === "register" && unit?.basis !== "observed") return "complex_structure";
+  // 登録なのに利用者への適合（地域）が根拠で確認されていない（不明・不適合・項目なし）: 誤登録の被害が大きいため上位で確かめる（本番で、県外の店頭受取限定を登録とした事例）
+  const fit = Object.entries(a.output.fields).find(([k]) => /fit_?region|地域/i.test(k))?.[1];
+  if (a.output.decision === "register" && (!fit || fit.basis !== "observed" || /不適合|対象外|unfit/i.test(String(fit.value ?? "")))) return "fit_unconfirmed";
   if (a.auditRate > 0) {
     const h = parseInt(createHash("sha256").update(a.caseId).digest("hex").slice(0, 8), 16) / 0xffffffff;
     if (h < a.auditRate) return "audit_sample";
