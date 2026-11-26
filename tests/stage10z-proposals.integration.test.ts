@@ -11,7 +11,7 @@ import type { AgentTurnOutput, JudgeOutput, RegistrationJudge, ResearchAgent } f
 import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, mockDeps } from "@/lib/server/proposals/generate";
 import { recordReview } from "@/lib/server/proposals/review";
-import { loadProposals } from "@/lib/server/proposals/store";
+import { loadProposals, saveProposals } from "@/lib/server/proposals/store";
 import { adminClient, anonClient, cleanupTestUsers, dbTestsEnabled, signInTestUser } from "./helpers/db";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,6 +86,18 @@ describe.skipIf(!dbTestsEnabled)("Stage 10Z: 収集候補 → 新AI → 登録�
     expect((await admin.from("collection_candidates").select("status,job_state,draft,lottery_id").eq("id", cand.id).single()).data).toEqual(candBefore);
   });
 
+  it("②b 同じ入力でも結果（判断・検証）が変わった再評価は、新しい版として残る（検証の修正後の再評価が『変更なし』で捨てられた本番事例の回帰）。結果まで同じなら増えない", async () => {
+    const cand = await addCandidate(LIST, { linkMap: [{ short: "https://t.co/ccc333", url: "https://shop-c.example.invalid/e/3" }], pages: [] } as never);
+    const first = await gen(cand);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const recs = first.records;
+    const same = await saveProposals(admin as unknown as Db, hidA, recs);
+    expect(same).toMatchObject({ inserted: 0, unchanged: recs.length });
+    const changed = recs.map((r, i) => (i === 0 ? { ...r, decision: r.decision === "register" ? ("tentative" as const) : ("register" as const) } : r));
+    const s2 = await saveProposals(admin as unknown as Db, hidA, changed);
+    expect(s2).toMatchObject({ inserted: 1, superseded: 1, unchanged: recs.length - 1 });
+  });
   it("②冪等: 同じ入力で再生成しても増えない。入力（取得したページ）が変わったときだけ新しい版が追加され、古い版は superseded になる（現行は項目ごとに1つ）", async () => {
     const cand = await addCandidate(LIST, { linkMap: [{ short: "https://t.co/aaa111", url: "https://shop-a.example.invalid/e/1" }, { short: "https://t.co/bbb222", url: "https://shop-b.example.invalid/e/2" }], pages: [{ url: "https://shop-a.example.invalid/e/1", text: page("新宿本店") }, { url: "https://shop-b.example.invalid/e/2", text: page("渋谷西口店") }] });
     await gen(cand);
