@@ -855,8 +855,9 @@ export async function runResearch(args: {
         quoteAudit.push({ round: 10 + r, rows: auditQuotes(er.out, evidence) });
         if (v.blocking.length === 0) {
           judgeTrail.push({ stage: "escalated", model: args.escalation.model, reason: why, decision: er.out.decision, verified: true });
-          // 両方とも検証済みで結論が食い違う（監査の抽出など）: どちらも正解扱いせず、保留にして人の確認へ回す
-          if (verified && output && output.decision !== er.out.decision) { disagreement = true; trace.push({ turn, kind: "verify", detail: `model_disagreement:${output.decision}/${er.out.decision}` }); break; }
+          // 既定の判断が登録・除外と決めていた（監査の抽出・複雑な構造の登録）のに、上位が別の結論で検証を通った: どちらも正解扱いせず、保留にして人の確認へ回す。
+          // 既定の判断が暫定（決めきれなかった）のときは、上位が根拠つきで決めた結論（検証済み）を採用する（それが上位を使う目的。本番の初回評価で、暫定→除外を食い違いとして保留にしていた不具合を是正）
+          if (verified && output && output.decision !== "tentative" && output.decision !== er.out.decision) { disagreement = true; trace.push({ turn, kind: "verify", detail: `model_disagreement:${output.decision}/${er.out.decision}` }); break; }
           output = er.out; verified = true; held = null; proposals = v.proposals; warnings = [...v.nonBlocking, ...v.unconfirmed.map((u) => "unconfirmed:" + u)];
           adopted = true;
           break;
