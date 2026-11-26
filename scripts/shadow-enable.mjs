@@ -184,13 +184,13 @@ if (opt("set-judge-model") !== undefined) {
   process.exit(r.error ? 1 : 0);
 }
 if (flag("set-budget")) {
-  // 承認された予算（利用者の明示承認 2026-11-26: 1件25円・日次60円・通算130円。既定は従来の10/30/100）。per_case・daily・monthly・total だけを変える。期限（valid_until）・通算の起点（total_since）・世帯・キーは変えない。上限を超える値は拒否する
+  // 承認された予算（利用者の明示承認 2026-11-26: 1件25円・日次85円（60円から再承認）・通算130円。既定は従来の10/30/100）。per_case・daily・monthly・total だけを変える。期限（valid_until）・通算の起点（total_since）・世帯・キーは変えない。上限を超える値は拒否する
   const per = Number(opt("per-case") ?? 10);
   const daily = Number(opt("daily") ?? 30);
   const total = Number(opt("total") ?? 100);
   const bad = (v, max) => !Number.isFinite(v) || v <= 0 || v > max;
-  if (bad(per, 25) || bad(daily, 60) || bad(total, 130)) {
-    console.error("承認された範囲（1件25円・日次60円・通算130円）を超えています");
+  if (bad(per, 25) || bad(daily, 85) || bad(total, 130)) {
+    console.error("承認された範囲（1件25円・日次85円・通算130円）を超えています");
     process.exit(1);
   }
   const r = await db.from("shadow_settings").update({ per_case_cap_jpy: per, daily_budget_jpy: daily, monthly_budget_jpy: total, total_budget_jpy: total }).eq("household_id", hid);

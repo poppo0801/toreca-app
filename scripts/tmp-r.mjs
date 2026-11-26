@@ -1,0 +1,5 @@
+import { createClient } from "@supabase/supabase-js";
+const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+const since = process.argv.find((a) => a.startsWith("--since="))?.slice(8);
+const ps = (await db.from("registration_proposals").select("candidate_id,version,decision,verified,apply_unit,apply_unit_basis,cost_jpy,fields,pages,model_id,stop_reason,unknowns,turns").eq("mode","real").gte("created_at", since).order("created_at")).data ?? [];
+for (const p of ps) { console.log(p.candidate_id.slice(0,8),"v"+p.version,p.decision,p.verified,p.apply_unit+"/"+p.apply_unit_basis,p.model_id,"pages",(p.pages??[]).length,"turns",p.turns,"¥"+p.cost_jpy,p.stop_reason); console.log("  R:",String(p.fields?._rationale?.value??"").slice(0,500)); const s=(p.unknowns??[]).find(u=>u.what.startsWith("調査を終えた")); if(s) console.log("  STOP:",s.why); console.log("  F:",JSON.stringify(Object.fromEntries(Object.entries(p.fields??{}).filter(([k])=>k!=="_rationale").map(([k,v])=>[k,`${v.basis}:${String(v.value??"").slice(0,40)}`])))); }

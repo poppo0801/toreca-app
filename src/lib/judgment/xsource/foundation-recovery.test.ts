@@ -168,6 +168,6 @@ describe("RUNTIME_CORRECTNESS: AIへの提示の欠落の是正", () => {
     const out = await makeAnthropicResearchAgent(client, { onDiagnostic: (d) => seen.push(d.reason) })({ caseId: "c", evidence: [], history: [], remaining: { turns: 1, fetches: 1, costJpy: 1, elapsedMs: 1 } });
     expect(out?.next.kind).toBe("stop");
     expect(seen).toContain("next:stop:other:fetch_without_url");
-    expect(reqs[0].tools[0].input_schema.properties.next.required).toContain("url");
+    expect(reqs[0].tools[0].input_schema.properties.next.required).toEqual(expect.arrayContaining(["url", "reason"])); // 終了理由も必須（本番で、理由の欄が省かれ why に JSON の断片が混ざり「other」になった）
   });
 });
