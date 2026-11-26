@@ -89,7 +89,7 @@ describe("実費が予約を超えたとき・1件の上限に達したとき（
 describe("出力の途切れ対策（課金なし）", () => {
   it("max_tokens を引き上げ、スキーマの上限を絞った（実AIで直ったとは主張しない）。判断の項目数は上限で切る", () => {
     expect(OUTPUT_MAX_TOKENS).toBeGreaterThan(1800);
-    expect(JUDGE_MAX_FIELDS).toBeLessThanOrEqual(12);
+    expect(JUDGE_MAX_FIELDS).toBeLessThanOrEqual(28); // INTENSIVE_EVALUATION: 抽選管理の全項目（20＋判断用2）を落とさない上限。判断の出力上限は別に JUDGE_MAX_TOKENS で引き上げ
     const src = readFileSync("src/lib/judgment/xsource/research-ai.ts", "utf8");
     expect(src).not.toContain("max_tokens: 1800");
     expect(src).toContain("max_tokens: OUTPUT_MAX_TOKENS");

@@ -81,7 +81,13 @@ export interface RealRunOptions {
    * 候補1件の処理が終わるたびに（実行の終了を待たず）呼ばれ、結果を耐障害的に保存する。完了を待つ。
    * 保存に失敗したら、以降の有料呼び出しを止める（保存できない結果に費用をかけ続けない。stopReason=persist_failed）。
    */
-  afterCandidate?: (a: { candidate: CandidateRow; ok: boolean; costJpy: number; reason?: string }) => Promise<void>;
+  afterCandidate?: (a: { candidate: CandidateRow; ok: boolean; costJpy: number; reason?: string; /** この実行で作った登録案（保存の省略に関わらず、この試行の結果。評価記録用） */ records?: import("@/lib/judgment/xsource/proposal").ProposalRecord[]; ms?: number; diagnostics?: Record<string, number> }) => Promise<void>;
+  /** 適応型判断（本番シャドーと同じ方式）: 既定のモデルで判断し、必要なときだけ同じ証拠で上位モデルに判断させる。評価で本番と同じ判断構成を測るため */
+  escalation?: { model: string; auditRate: number };
+  /** 判断だけ別のモデル（1段）。本番シャドーの judge_mode=single・judge_model と同じ構成を測るため */
+  judgeModel?: string;
+  /** 関門の1件上限（関門 checkJudgmentRealRun に渡した caps と同じ値。既定は従来の候補上限） */
+  gatePerCaseCapJpy?: number;
   lockPath?: string;
   now?: () => Date;
 }
@@ -134,7 +140,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
   if (!releaseLock) return stop("locked");
   try {
     const limits: ResearchLimits = researchLimits({ search: !!o.search, ...(o.search?.reserveJpy !== undefined ? { searchReserveJpy: o.search.reserveJpy } : {}), ...o.limits }); // 本番シャドーと共通の調査上限（pipeline.ts）
-    const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), ...(o.vision || o.visionFactory ? { images: { perCaseCount: o.maxImagesPerCase ?? 4, worstJpyEach: worstCaseVisionCallJpy(ticket.model, [{ width: 1200, height: 1600 }]) } } : {}), gatePerCaseCapJpy: CANDIDATE_CAP_PER_CASE_JPY });
+    const pf = preflightRun({ model: ticket.model, totalJpy: ticket.totalCapJpy, perCaseJpy: ticket.perCaseCapJpy, cases: o.candidates.length, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(o.search ? { searchWorstJpy: o.search.worstJpy } : {}), ...(o.vision || o.visionFactory ? { images: { perCaseCount: o.maxImagesPerCase ?? 4, worstJpyEach: worstCaseVisionCallJpy(ticket.model, [{ width: 1200, height: 1600 }]) } } : {}), gatePerCaseCapJpy: o.gatePerCaseCapJpy ?? CANDIDATE_CAP_PER_CASE_JPY });
     base.preflight = pf;
     emit({ kind: "preflight", ok: pf.ok, errors: pf.errors, warnings: pf.warnings, minPerCaseJpy: pf.minPerCaseJpy, maxReservedPerCaseJpy: pf.maxReservedPerCaseJpy, reservationCoversWorstCase: pf.reservationCoversWorstCase });
     if (!pf.ok) return stop("preflight_failed"); // 1回もAIを呼ばない
@@ -153,7 +159,8 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       else if (c === "rate") fatal = "rate_limited"; // 利用上限に当たったら、叩き続けない
     };
     const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic });
-    const judge = makeAnthropicRegistrationJudge(o.client, { model: ticket.model, onDiagnostic });
+    const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic });
+    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }) }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate } : undefined;
     const searchTool = o.search ? makeSearchTool(o.search.provider) : undefined;
     const visionHandle = o.visionFactory ? o.visionFactory({ ticket, budget }) : o.vision ? { vision: o.vision } : undefined;
     const maxConsecutive = o.maxConsecutiveFailures ?? 3;
@@ -163,6 +170,8 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       if (fatal) return finish(fatal);
       if (budget.remainingJpy < limits.agentReserveJpy + limits.judgeReserveJpy) return finish("budget_exhausted");
       diagsThisCandidate = 0;
+      const startedMs = Date.now();
+      const diagBefore = { ...base.diagnostics };
       if (o.liveFetch) await prefetchSourcePage({ db: o.db, householdId: o.householdId, candidate: c, fetchPage: o.liveFetch, ...(o.now ? { now: o.now } : {}) }); // 本番シャドーと同じ事前取得・保存（共通の前処理）
       const r = await generateProposalsForCandidate({
         db: o.db,
@@ -172,7 +181,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         deps: (() => {
           const dd = o.depsFor?.(c);
           // 共通の組み立て（pipeline.ts）。本番シャドーと同じ形の依存を作る
-          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, researchDeadlineMs: Date.now() + RESEARCH_WINDOW_MS, perItemCapJpy: ticket.perCaseCapJpy, tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
+          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, researchDeadlineMs: Date.now() + RESEARCH_WINDOW_MS, perItemCapJpy: ticket.perCaseCapJpy, ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
         })(),
       });
       base.processed++;
@@ -205,7 +214,9 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       base.costJpy = Math.round(budget.costJpy * 10_000) / 10_000;
       if (o.afterCandidate) {
         try {
-          await o.afterCandidate({ candidate: c, ok: r.ok, costJpy: r.ok ? r.costJpy : 0, ...(r.ok ? {} : { reason: r.reason }) });
+          const diag: Record<string, number> = {};
+          for (const [k, v] of Object.entries(base.diagnostics)) if (v - (diagBefore[k] ?? 0) > 0) diag[k] = v - (diagBefore[k] ?? 0);
+          await o.afterCandidate({ candidate: c, ok: r.ok, costJpy: r.ok ? r.costJpy : 0, ...(r.ok ? { records: r.records } : { reason: r.reason }), ms: Date.now() - startedMs, diagnostics: diag });
         } catch {
           return finish("persist_failed");
         }

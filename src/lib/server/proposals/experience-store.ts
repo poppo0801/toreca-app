@@ -27,9 +27,16 @@ export interface ExperienceRow extends ExperienceRecord {
 }
 
 /** 直近の経験（新しい順）。提案の材料。最大 limit 件（古い経験は重みも小さい） */
-export async function loadExperiences(db: Db, householdId: string, limit = 400): Promise<ExperienceRecord[]> {
+/**
+ * mode を渡すと、そのモードの経験だけを返す（INTENSIVE_EVALUATION §1: モック・再生の経験や、旧経路で mock として保存された人の確認を、実AIの調査の材料にしない＝隔離）。
+ * 実AI（real）の調査には real の経験と、評価用の正解から作った経験（gold）を使う。
+ */
+export async function loadExperiences(db: Db, householdId: string, limit = 400, mode?: ExperienceMode): Promise<ExperienceRecord[]> {
   try {
-    const r = (await t(db, "investigation_experiences").select("id,features,doc_chars,found_buckets,verification,recorded_at,failed_fields,experience_version").eq("household_id", householdId).order("recorded_at", { ascending: false }).limit(limit)) as { data: Record<string, unknown>[] | null };
+    let q = t(db, "investigation_experiences").select("id,features,doc_chars,found_buckets,verification,recorded_at,failed_fields,experience_version,mode,source").eq("household_id", householdId);
+    if (mode === "real") q = q.or("mode.eq.real,source.eq.gold_eval");
+    else if (mode) q = q.eq("mode", mode);
+    const r = (await q.order("recorded_at", { ascending: false }).limit(limit)) as { data: Record<string, unknown>[] | null };
     return (r.data ?? []).map((x) => ({ id: String(x.id), features: (x.features as string[]) ?? [], docChars: Number(x.doc_chars), foundBuckets: (x.found_buckets as number[]) ?? [], verification: x.verification as Verification, at: String(x.recorded_at), failedFields: (x.failed_fields as string[]) ?? [], version: Number(x.experience_version ?? EXPERIENCE_VERSION) }));
   } catch {
     return [];
@@ -96,14 +103,19 @@ export function experiencesFromResult(a: { result: ResearchResult; candidateId: 
  */
 export async function recordHumanExperience(a: { db: Db; householdId: string; proposalId: string; edits: Record<string, string>; at: string; mode?: ExperienceMode }): Promise<{ saved: number }> {
   try {
-    const r = (await t(a.db, "registration_proposals").select("candidate_id,proposal_key,fields,source_urls").eq("id", a.proposalId).eq("household_id", a.householdId).maybeSingle()) as { data: { candidate_id: string; proposal_key: string; fields: Record<string, { quote: string | null; support: string; evidence?: string | null }>; source_urls: string[] } | null };
+    const r = (await t(a.db, "registration_proposals").select("candidate_id,proposal_key,fields,source_urls,pages").eq("id", a.proposalId).eq("household_id", a.householdId).maybeSingle()) as { data: { candidate_id: string; proposal_key: string; fields: Record<string, { quote: string | null; support: string; basis?: string; evidence?: string | null }>; source_urls: string[]; pages?: { url?: string; hash?: string }[] } | null };
     const p = r.data;
     if (!p) return { saved: 0 };
     const edited = new Set(Object.keys(a.edits).filter((k) => a.edits[k] !== undefined));
-    const quotes = Object.entries(p.fields ?? {}).filter(([k, f]) => !edited.has(k) && f.quote && (f.support === "literal_in_quote" || f.support === "normalized_match")).map(([, f]) => f.quote as string);
+    // 原文に引用で確認した項目（observed）だけを「正しい位置」にする。推定（inferred）・不明は、人が正しいとしても位置の根拠にならない（INTENSIVE_EVALUATION §1）
+    const quotes = Object.entries(p.fields ?? {}).filter(([k, f]) => !k.startsWith("_") && !edited.has(k) && f.basis === "observed" && f.quote && (f.support === "literal_in_quote" || f.support === "normalized_match")).map(([, f]) => f.quote as string);
+    if (!quotes.length) return { saved: 0 };
+    // 登録案が根拠にしたページの版（内容ハッシュ）に結び付ける。版の記録がある行は同じ版だけを使い、無い旧い行は従来どおり最良の保存版
+    const versioned = (p.pages ?? []).filter((x) => x.url && x.hash);
+    const targets: { url: string; hash?: string }[] = versioned.length ? versioned.slice(0, 4).map((x) => ({ url: x.url!, hash: x.hash })) : (p.source_urls ?? []).slice(0, 4).map((url) => ({ url }));
     let saved = 0;
-    for (const url of (p.source_urls ?? []).slice(0, 4)) {
-      const doc = await loadBestDocument(a.db, a.householdId, p.candidate_id, url);
+    for (const { url, hash } of targets) {
+      const doc = await loadBestDocument(a.db, a.householdId, p.candidate_id, url, hash);
       if (!doc) continue;
       const exp = buildExperience({ features: discoverFeatures({ url: doc.url, text: doc.text, slots: doc.structure?.slots.length, relatedEvents: doc.structure?.relatedEvents.length }), text: doc.text, quotes, verification: "human", at: a.at, failedFields: [...edited] });
       if (!exp) continue;

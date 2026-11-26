@@ -73,12 +73,12 @@ describe("登録判断のAI（アダプタ）", () => {
 });
 
 describe("判断のAI: 項目数の上限", () => {
-  it("上限（12項目）を超えた項目は保存されず、黙って捨てずに診断（fields_truncated）へ記録する", async () => {
-    const fields = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`f${i}`, { value: `v${i}`, basis: "inferred" }]));
+  it("上限（JUDGE_MAX_FIELDS。INTENSIVE_EVALUATION で全項目のため28）を超えた項目は保存されず、黙って捨てずに診断（fields_truncated）へ記録する", async () => {
+    const fields = Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`f${i}`, { value: `v${i}`, basis: "inferred" }]));
     const { client } = fake({ decision: "tentative", fields, rationale: "r", unresolvedImpact: "minor", monitor: { continue: true, why: "w" } });
     const diags: string[] = [];
     const out = await makeAnthropicRegistrationJudge(client, { onDiagnostic: (d) => diags.push(d.reason) })({ caseId: "c1", evidence: [view], lastTurn: null, investigationEnd: "sufficient", protectedFields: {} });
-    expect(Object.keys(out?.fields ?? {})).toHaveLength(12);
+    expect(Object.keys(out?.fields ?? {})).toHaveLength(28);
     expect(diags).toContain("fields_truncated");
   });
 });

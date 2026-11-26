@@ -17,11 +17,21 @@
  */
 export const CANDIDATE_CAP_TOTAL_JPY = 60;
 export const CANDIDATE_CAP_PER_CASE_JPY = 5;
+const CANDIDATE_CAP_TOTAL_JPY_DEFAULT = CANDIDATE_CAP_TOTAL_JPY;
+const CANDIDATE_CAP_PER_CASE_JPY_DEFAULT = CANDIDATE_CAP_PER_CASE_JPY;
 
 export type KeySource = "dedicated" | "existing" | "existing_dev_fallback";
 export type JudgmentRealGate = { ok: true; apiKey: string; keySource: KeySource; model: string; totalCapJpy: number; perCaseCapJpy: number } | { ok: false; reason: string };
 
-export function checkJudgmentRealRun(input: { env: Record<string, string | undefined>; confirm: boolean; approvedTotalJpy: number; approvedPerCaseJpy: number }): JudgmentRealGate {
+/**
+ * 実案件の集中評価（Phase 3 INTENSIVE_EVALUATION）の候補上限。本番シャドーと同じ判断構成（適応型: 必要時だけ上位モデル）を測るため、1件の上限は利用者が承認した1件¥25（2026-11-26）に合わせる。
+ * 1回の実行の総額は従来どおり60円まで（小さなバッチに分けて実行し、通算は利用者の承認額の範囲に収める）。この上限は集中評価の入口（intensive-eval.real.test.ts）だけが渡す。
+ */
+export const INTENSIVE_CAPS = { totalJpy: 60, perCaseJpy: 25 } as const;
+
+export function checkJudgmentRealRun(input: { env: Record<string, string | undefined>; confirm: boolean; approvedTotalJpy: number; approvedPerCaseJpy: number; caps?: { totalJpy: number; perCaseJpy: number } }): JudgmentRealGate {
+  const CANDIDATE_CAP_TOTAL_JPY = input.caps?.totalJpy ?? CANDIDATE_CAP_TOTAL_JPY_DEFAULT;
+  const CANDIDATE_CAP_PER_CASE_JPY = input.caps?.perCaseJpy ?? CANDIDATE_CAP_PER_CASE_JPY_DEFAULT;
   const e = input.env;
   if (e.TOREMANE_ENV !== "local") return { ok: false, reason: "実AI評価は開発環境（TOREMANE_ENV=local）でのみ実行できます" };
   if (e.VERCEL || e.VERCEL_ENV || e.NODE_ENV === "production") return { ok: false, reason: "Vercel・本番の実行環境では実行できません" };

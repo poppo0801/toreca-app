@@ -120,17 +120,30 @@ test("収集候補 → 登録案を作る（モック・費用0）→ 保留／�
   await first.getByTestId("truth-later").click();
   await expect(first.getByTestId("proposal-truth-state")).toContainText("後で確認");
   await second.getByTestId("truth-edit-open").click();
-  await expect(second.getByTestId("truth-edit-store")).not.toBeFocused();
+  // INTENSIVE_EVALUATION: 直す項目だけを選んで行を足す（全項目の入力欄を並べない）。日付は日付・時刻の入力欄。記載なし・不明を区別
+  await expect(second.getByTestId("truth-add-field")).not.toBeFocused();
+  await expect(second.getByTestId("truth-row-store")).toHaveCount(0);
   await second.getByTestId("truth-decision").selectOption("register");
+  await second.getByTestId("truth-count").selectOption("split");
+  await second.getByTestId("truth-add-field").selectOption("store");
   await second.getByTestId("truth-edit-store").fill("渋谷西口店（本館）");
+  await second.getByTestId("truth-add-field").selectOption("apply_unit");
   await second.getByTestId("truth-edit-apply_unit").selectOption("per_store");
-  await second.getByTestId("truth-unknown-per_person_limit").check();
+  await second.getByTestId("truth-add-field").selectOption("result_at");
+  await second.getByTestId("truth-edit-result_at").fill("2026-12-11");
+  await second.getByTestId("truth-add-field").selectOption("per_person_limit");
+  await second.getByTestId("truth-status-per_person_limit").selectOption("unknown");
+  await second.getByTestId("truth-add-field").selectOption("purchase_end");
+  await second.getByTestId("truth-status-purchase_end").selectOption("none");
   await second.getByTestId("truth-note").fill("店舗ページで確認");
   await page.screenshot({ path: "test-results/ar-truth-form-390.png" });
   await second.getByTestId("truth-save").click();
   await expect(second.getByTestId("proposal-truth-state")).toContainText("正解を修正（登録）");
   await expect(second.getByTestId("proposal-truth-state")).toContainText("店舗=渋谷西口店（本館）");
-  await expect(second.getByTestId("proposal-truth-state")).toContainText("不明: 口数");
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("当選発表=2026-12-11");
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("口数");
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("購入期限（記載なし）");
+  await expect(second.getByTestId("proposal-truth-state")).toContainText("分けるべき");
   await first.getByTestId("truth-correct").click();
   await expect(first.getByTestId("proposal-truth-state")).toContainText("正しい（変更なし）");
   // 取りこぼしの記録（登録案に無い応募機会）
@@ -142,7 +155,7 @@ test("収集候補 → 登録案を作る（モック・費用0）→ 保留／�
   // DB: 正解は追記で記録（AIの出力の写しつき）・AIの値は不変・既存の記録は不変
   const reviews = (await a.from("registration_proposal_reviews").select("kind,decision,verdict,truth_decision,edits,unknown_fields,note,ai_snapshot").eq("household_id", hid).order("created_at")).data!;
   expect(reviews.map((r) => `${r.kind}:${r.verdict ?? ""}`)).toEqual(["truth:unknown_later", "truth:corrected", "truth:correct", "missed:"]);
-  expect(reviews[1]).toMatchObject({ truth_decision: "register", edits: { store: "渋谷西口店（本館）", apply_unit: "per_store" }, unknown_fields: ["per_person_limit"] });
+  expect(reviews[1]).toMatchObject({ truth_decision: "register", edits: { store: "渋谷西口店（本館）", apply_unit: "per_store", result_at: "2026-12-11", _opportunities: "split" }, unknown_fields: ["per_person_limit", "purchase_end__none"] });
   expect(reviews[2].truth_decision).toBe("hold"); // 正しい: AIの判断（暫定=保留）をそのまま正解とする
   expect((reviews[1].ai_snapshot as { decision: string }).decision).toBeTruthy(); // 記録時点のAIの出力が残る
   expect(reviews[3].note).toContain("池袋店");

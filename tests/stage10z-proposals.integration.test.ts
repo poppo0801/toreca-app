@@ -94,14 +94,14 @@ describe.skipIf(!dbTestsEnabled)("Stage 10Z: 収集候補 → 新AI → 登録�
     expect(g.ok).toBe(true);
     const before = await counts();
     const prop = (await rowsOf(cand.id))[0] as { id: string; decision: string; fields: unknown };
-    expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "corrected", truthDecision: "register", edits: { store: "D店（本館）" }, unknownFields: ["per_person_limit"], env: ON })).toMatchObject({ ok: true });
+    expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "corrected", truthDecision: "register", edits: { store: "D店（本館）", result_at: "2026-12-11", _opportunities: "split" }, unknownFields: ["per_person_limit"], notStatedFields: ["purchase_end"], env: ON })).toMatchObject({ ok: true });
     expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "corrected", env: ON })).toMatchObject({ ok: false, reason: "invalid" }); // 何も変えない修正は拒否
     expect(await recordTruth({ db: u1, householdId: hidA, proposalId: prop.id, verdict: "unknown_later", env: ON })).toMatchObject({ ok: true });
     expect(await recordMissed({ db: u1, householdId: hidA, candidateId: cand.id, note: "2つ目の受付が無い", env: ON })).toMatchObject({ ok: true });
     expect(await recordMissed({ db: u1, householdId: hidA, candidateId: cand.id, note: " ", env: ON })).toMatchObject({ ok: false });
     const rows = (await admin.from("registration_proposal_reviews").select("kind,verdict,truth_decision,edits,unknown_fields,ai_snapshot").eq("candidate_id", cand.id).order("created_at")).data ?? [];
     expect(rows.map((r) => `${r.kind}:${r.verdict ?? ""}`)).toEqual(["truth:corrected", "truth:unknown_later", "missed:"]);
-    expect(rows[0]).toMatchObject({ truth_decision: "register", edits: { store: "D店（本館）" }, unknown_fields: ["per_person_limit"] });
+    expect(rows[0]).toMatchObject({ truth_decision: "register", edits: { store: "D店（本館）", result_at: "2026-12-11", _opportunities: "split" }, unknown_fields: ["per_person_limit", "purchase_end__none"] }); // 記載なしは明示的な不明と区別して残る（INTENSIVE_EVALUATION）
     expect((rows[0].ai_snapshot as { decision: string }).decision).toBe(prop.decision);
     expect(((await rowsOf(cand.id))[0] as { fields: unknown }).fields).toEqual(prop.fields); // AIの値は不変
     expect(await counts()).toEqual(before); // 抽選・応募・購入・通知は作られない

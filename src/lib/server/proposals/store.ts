@@ -121,8 +121,10 @@ export interface StoredProposal {
   apply_unit: string;
   apply_unit_basis: string;
   unknowns: { what: string; why: string }[];
-  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch?: boolean }[];
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch?: boolean; hash?: string; url?: string }[];
   possibly_same: string[];
+  /** 判断の各段（適応型判断。旧い行・1段の行は空） */
+  judge_trail?: { stage: string; model: string | null; reason: string | null; decision: string; verified: boolean; adopted?: boolean; note?: string }[];
   mode: string;
   model_id: string | null;
   cost_jpy: number | null;
@@ -164,7 +166,7 @@ export interface ProposalView extends StoredProposal {
   reviewOutdated: boolean;
 }
 
-const COLS = "id,candidate_id,proposal_key,version,item_no,item_label,url_status,source_urls,link_hosts,decision,verified,held_reasons,end_reason,fields,apply_unit,apply_unit_basis,unknowns,pages,possibly_same,mode,model_id,cost_jpy,turns,stop_reason,judged_at";
+const COLS = "id,candidate_id,proposal_key,version,item_no,item_label,url_status,source_urls,link_hosts,decision,verified,held_reasons,end_reason,fields,apply_unit,apply_unit_basis,unknowns,pages,possibly_same,mode,model_id,cost_jpy,turns,stop_reason,judged_at,judge_trail";
 
 /** 候補ごとの現行の登録案と最新のレビュー（RLS: 世帯の構成員だけが読める。利用者のセッションのクライアントでも呼べる） */
 export async function loadProposals(db: Db, candidateIds: string[]): Promise<Record<string, ProposalView[]>> {

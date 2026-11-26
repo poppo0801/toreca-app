@@ -222,7 +222,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   const fitNote = regionFitNote(userRegion);
   const post = fitNote ? { ...post1, notes: [...(post1.notes ?? []), fitNote].slice(0, 16) } : post1;
   // 調査経験: 類似ページの検証済みの経験があれば、最初に見せる位置の提案（仮説）を作る。位置の優先だけで、全文の参照可能性は変わらない
-  const experiences = deps.learn === false ? [] : await loadExperiences(a.db, a.householdId);
+  const experiences = deps.learn === false ? [] : await loadExperiences(a.db, a.householdId, 400, deps.mode); // 同じモードの経験だけ（モック・旧経路の経験を実AIの材料にしない）
   const hintsByUrl = new Map<string, ReadHint[]>();
   const linked = new Map((stored?.linkedPages ?? []).map((l) => [canonUrl(l.url).key, l]));
   const clock = deps.now ?? (() => new Date());

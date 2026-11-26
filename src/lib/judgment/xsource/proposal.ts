@@ -31,6 +31,8 @@ export interface ProposalField {
   quote: string | null;
   evidence: string | null;
   support: SupportKind;
+  /** 値が無い理由（記載なし・未発表・随時・取得できない）。AIが申告したとき・取得できなかったとき */
+  absence?: "not_stated" | "not_announced" | "anytime" | "unreadable";
 }
 
 export interface ProposalRecord {
@@ -54,7 +56,8 @@ export interface ProposalRecord {
   applyUnitBasis: "observed" | "inferred" | "unknown";
   unknowns: { what: string; why: string }[];
   /** viaSearch: そのページのURLが、AIの検索結果に含まれていた（検索で見つけた候補を取得した）。URLが最初から与えられたものと区別する（B2の自律発見の観測用） */
-  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch: boolean }[];
+  /** hash: 根拠にしたページの内容ハッシュの先頭16桁、url: そのページのURL（人の確認を同じ版に結び付ける。旧い行には無い） */
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch: boolean; hash?: string; url?: string }[];
   possiblySame: string[];
   mode: ProposalMode;
   modelId: string | null;
@@ -63,7 +66,7 @@ export interface ProposalRecord {
   turns: number;
   stopReason: string;
   /** 判断の各段（適応型判断） */
-  judgeTrail?: { stage: string; model: string | null; reason: string | null; decision: string; verified: boolean; note?: string }[];
+  judgeTrail?: { stage: string; model: string | null; reason: string | null; decision: string; verified: boolean; adopted?: boolean; note?: string }[];
   fetchedAt: string | null;
 }
 
@@ -167,7 +170,7 @@ export function toProposalRecords(a: {
     const pageText = result.evidence.filter((e) => e.kind === "page").map((e) => e.text).join("\n") + "\n" + result.evidence.filter((e) => e.kind === "seed").map((e) => e.text).join("\n");
     const byId = new Map(result.evidence.map((e) => [e.id, e]));
     const fields: Record<string, ProposalField> = {};
-    for (const [k, f] of Object.entries(out?.fields ?? {}).slice(0, 12)) {
+    for (const [k, f] of Object.entries(out?.fields ?? {}).slice(0, 28)) {
       const ev = f.evidenceId ? byId.get(f.evidenceId) : undefined;
       const isUnitField = /apply_?unit|応募単位|applicationunit|^unit$/i.test(k);
       const unitToken = f.value ? /^[a-z_]+/.exec(f.value.trim())?.[0] : undefined;
@@ -176,12 +179,17 @@ export function toProposalRecords(a: {
     }
     // 判断の理由（AIの記述。次の分析のために保存する。項目ではなく、予約キー _rationale として持つ。画面の項目には出さない）
     if (out?.rationale) fields._rationale = { value: out.rationale.slice(0, 300), basis: "inferred", quote: null, evidence: null, support: "no_value" };
+    // 値が無い項目の記載の状態（記載なし・未発表など）。値を作らず、状態だけを残す
+    for (const [k, st] of Object.entries(out?.absent ?? {})) if (!fields[k]) fields[k.slice(0, 40)] = { value: null, basis: "unknown", quote: null, evidence: null, support: "no_value", absence: st };
+    if (out?.askHuman) fields._ask_human = { value: `${out.askHuman.why}${out.askHuman.fields.length ? `（${out.askHuman.fields.join("・")}）` : ""}`.slice(0, 200), basis: "inferred", quote: null, evidence: null, support: "no_value" };
+    // 保存の上限（fields 16,000バイト）に収める: 大きいときは任意項目の引用から短くする（値・根拠の種類は残す）
+    for (let cut = 100; JSON.stringify(fields).length * 3 > 15_000 && cut >= 20; cut -= 40) for (const [k, f] of Object.entries(fields)) if (f.quote && !["store", "product", "deadline", "apply_unit", "exclude_reason"].includes(k)) f.quote = f.quote.slice(0, cut);
     const { unit, basis } = unitOf(fields);
     const unknowns: ProposalRecord["unknowns"] = [];
     if (plan.status === "url_missing") unknowns.push({ what: "応募先URL", why: "この項目にURLが無い（応募単位は未確認）" });
     if (plan.status === "short_unexpanded") unknowns.push({ what: "応募先URL", why: "短縮URLの展開結果が無く追跡していない" });
     if (plan.status === "shared_only_unverified") unknowns.push({ what: "応募先URL", why: "親投稿共通のリンクだけで、この項目への対応が未確認" });
-    for (const [k, f] of Object.entries(fields)) if (f.basis === "unknown") unknowns.push({ what: k, why: "AIが不明と判断（根拠なし）" });
+    for (const [k, f] of Object.entries(fields)) if (f.basis === "unknown" && !f.absence && !k.startsWith("_")) unknowns.push({ what: k, why: "AIが不明と判断（根拠なし）" });
     for (const h of result.registration.held?.reasons ?? []) unknowns.push({ what: "検証", why: h.slice(0, 80) });
     // 任意項目の検証失敗: その項目の主張は採用しない（不明として明示。ほかの根拠のある項目は残す）
     for (const w of result.registration.warnings ?? []) unknowns.push({ what: `任意項目の根拠が未確認: ${w.slice(w.indexOf(":") + 1)}`.slice(0, 40), why: w.slice(0, 80) });
@@ -202,7 +210,7 @@ export function toProposalRecords(a: {
     if (!out) unknowns.push({ what: "AIの判断", why: "判断が得られなかった（調査は保持）" });
     else if (out.outputNote === "fields_defaulted") unknowns.push({ what: "AIの判断", why: "項目の出力が省略された（主張なしとして扱った。判断の成功とは数えない）" });
     const searched = new Set(result.searches.map((s) => canonUrl(s.url).key));
-    const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length, viaSearch: !!e.url && searched.has(canonUrl(e.url).key) }));
+    const pages = result.evidence.filter((e) => e.kind === "page").map((e) => ({ host: e.url ? hostOfUrl(e.url) : "", scope: e.scope ? `${e.scope.origin}/${e.scope.verdict}` : null, slots: e.structure?.slots.length ?? 0, textLoss: !!e.textLoss?.length, viaSearch: !!e.url && searched.has(canonUrl(e.url).key), /* 保存した全文（evidence_documents.content_hash＝本文の sha256）と同じ計算の先頭16桁 */ hash: sha(e.text).slice(0, 16), ...(e.url ? { url: e.url.slice(0, 300) } : {}) }));
     return {
       candidateId: a.candidateId,
       proposalKey: proposalKey(a.candidateId, a.post.postId, plan.itemNo),

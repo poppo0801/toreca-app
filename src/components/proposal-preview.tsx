@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { generateProposalsAction, missedOpportunityAction, truthProposalAction } from "@/app/(app)/lotteries/candidates/proposal-actions";
 import { Button } from "@/components/ui/button";
+import { ABSENCE_LABELS, DATE_FIELDS, FIELD_LABELS, LOTTERY_FIELDS } from "@/lib/judgment/xsource/lottery-fields";
 import { diffProposal, summarizeProposals } from "@/lib/judgment/xsource/proposal-summary";
 import type { ProposalView } from "@/lib/server/proposals/store";
 
@@ -11,6 +12,7 @@ import type { ProposalView } from "@/lib/server/proposals/store";
  * 新AIの登録案（プレビュー）。候補の詳細の中に、折りたたみで表示する（Stage 10Z・開発専用。PROPOSAL_PREVIEW=on のローカル環境だけ）。
  * **「承認」は新方式の登録案へのレビュー記録で、抽選は登録されない**（lotteries・応募・購入・通知には書かない）。実際の登録は、従来どおり下の「確認・登録」で行う。
  * 一覧には出さない（詳細だけ）。未確認・根拠不足の項目も省略せず、「確認できていない」ことが分かる形で残す。
+ * INTENSIVE_EVALUATION: 抽選管理の全項目（応募開始・発表・購入・受取など）を表示し、根拠（引用・ページの版・判断の段）は折りたたみで確認できる。正解の修正は、直す項目だけを選んで入力する。
  */
 const BASIS: Record<string, string> = { observed: "観察", inferred: "推論", unknown: "不明" };
 const MODE: Record<string, string> = { mock: "モック（実AIではない）", replay: "再生", real: "実AI" };
@@ -18,15 +20,16 @@ const MODE_HINT: Record<string, string> = { real: "実AIが作成した登録案
 const URL_STATUS: Record<string, string> = { url_from_item: "項目自身のリンク", short_unexpanded: "短縮URL未展開", shared_only_unverified: "共通リンクのみ（未確認）", url_missing: "URLなし" };
 const REVIEW: Record<string, string> = { hold: "保留", approve_with_edits: "修正して承認（レビュー記録）", reject: "却下" };
 const DECISION: Record<string, string> = { register: "本登録案", tentative: "暫定", exclude: "除外案", none: "判断なし" };
-const HELD: Record<string, string> = { exclude_without_evidence: "根拠（引用）のある観察が無いまま除外としている", exclude_without_page_evidence: "応募先のページを確認できないまま除外としている", register_unit_unresolved: "本登録案なのに応募単位が未確定", judge_failed: "AIの判断が得られなかった", page_text_loss: "ページの本文の取り出しに欠落の疑い" };
+const HELD: Record<string, string> = { exclude_without_evidence: "根拠（引用）のある観察が無いまま除外としている", exclude_without_page_evidence: "応募先のページを確認できないまま除外としている", register_unit_unresolved: "本登録案なのに応募単位が未確定", judge_failed: "AIの判断が得られなかった", page_text_loss: "ページの本文の取り出しに欠落の疑い", model_disagreement: "判断のモデル間で結論が食い違った" };
 const heldLabel = (r: string): string => HELD[r] ?? (r.startsWith("quote_not_found") ? "引用が原文に見つからない（" + r.split(":")[1] + "）" : r.startsWith("scope_mismatch") ? "別の店舗・商品のページを根拠にしている" : r.startsWith("field_unknown_has_value") ? "不明のはずの項目に値がある" : r);
+/** 一覧の行に常に出す項目（値が無くても「未確認」と出す）。それ以外は値があるときだけ出し、無いものは1行にまとめる */
 const KEY_FIELDS = ["store", "product", "deadline", "apply_unit"] as const;
-/** 正解の修正で入力できる項目（既存の抽選の項目名に合わせる。変える項目だけ入力する） */
-const TRUTH_FIELDS = ["store", "product", "deadline", "apply_unit", "apply_url", "per_person_limit", "conditions"] as const;
 const TRUTH: Record<string, string> = { correct: "正しい（変更なし）", corrected: "正解を修正", unknown_later: "後で確認" };
 const TRUTH_DECISION: Record<string, string> = { register: "登録", exclude: "除外", hold: "保留" };
 const OPPORTUNITY: Record<string, string> = { exists: "ある", absent: "無い", unknown: "不明" };
 const USER_FIT: Record<string, string> = { fit: "適合", unfit: "対象外", unknown: "不明" };
+const OPP_COUNT: Record<string, string> = { ok: "数は正しい", split: "分けるべき（誤統合）", merge: "まとめるべき（誤分割）", missing: "機会が足りない" };
+const ROW_STATUS: Record<string, string> = { value: "正しい値", none: "記載なし", unknown: "不明" };
 function Pick({ label, value, set, options, testid }: { label: string; value: string; set: (v: string) => void; options: Record<string, string>; testid: string }) {
   return (
     <label className="flex min-w-0 flex-col gap-0.5 text-[10px]">
@@ -42,8 +45,11 @@ function Pick({ label, value, set, options, testid }: { label: string; value: st
     </label>
   );
 }
-const FIELD_LABEL: Record<string, string> = { store: "店舗", product: "商品", deadline: "締切", apply_unit: "応募単位", apply_url: "応募先URL", per_person_limit: "口数", conditions: "応募条件" };
+const FIELD_LABEL: Record<string, string> = { ...FIELD_LABELS, per_person_limit: "口数" };
 const UNIT_LABEL: Record<string, string> = { one_form_one: "1フォーム1応募", store_select: "店舗選択式", per_store: "店舗別に独立", per_product: "商品別", unknown: "不明" };
+const RECV_LABEL: Record<string, string> = { store: "店頭", shipping: "発送", either: "店頭か発送" };
+const showValue = (k: string, v: string | null | undefined): string => (!v ? "" : k === "apply_unit" ? UNIT_LABEL[v] ?? v : k === "receive_method" ? RECV_LABEL[v] ?? v : v);
+const truthFieldLabel = (k: string): string => (k.endsWith("__none") ? `${FIELD_LABEL[k.slice(0, -6)] ?? k.slice(0, -6)}（記載なし）` : FIELD_LABEL[k] ?? k);
 
 function SupportMark({ support, basis }: { support: string; basis: string }) {
   if (basis !== "observed" || support === "literal_in_quote" || support === "no_value") return null;
@@ -54,27 +60,105 @@ function SupportMark({ support, basis }: { support: string; basis: string }) {
   );
 }
 
+/** 根拠（折りたたみ）: 項目ごとの引用・証拠、根拠にしたページ（ホスト・版）、判断の段（モデル・理由・採用）、AIの判断理由 */
+function Evidence({ p }: { p: ProposalView }) {
+  const quoted = Object.entries(p.fields).filter(([k, f]) => !k.startsWith("_") && f.quote);
+  const trail = p.judge_trail ?? [];
+  return (
+    <details className="text-[11px]" data-testid="proposal-evidence">
+      <summary className="cursor-pointer text-muted-foreground">根拠を見る（引用・ページ・判断の段）</summary>
+      <div className="mt-1 space-y-1">
+        {quoted.length > 0 && (
+          <ul className="space-y-0.5">
+            {quoted.map(([k, f]) => (
+              <li key={k} className="break-words">
+                <span className="font-medium">{FIELD_LABEL[k] ?? k}</span>
+                <span className="text-muted-foreground">［{f.evidence ?? "—"}・{BASIS[f.basis] ?? f.basis}］</span>「{f.quote}」
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="break-words text-muted-foreground">ページ: {p.pages.map((g) => `${g.host}${g.viaSearch ? "（検索で発見）" : ""}${g.hash ? `#${g.hash.slice(0, 6)}` : ""}`).join("・") || "未取得"}／取得元: {URL_STATUS[p.url_status] ?? p.url_status}</p>
+        {trail.length > 0 && (
+          <p className="break-words text-muted-foreground" data-testid="proposal-trail">
+            判断の段: {trail.map((s) => `${s.stage === "primary" ? "既定" : "上位"}（${(s.model ?? "").replace(/^claude-/, "") || "—"}${s.reason ? "・" + s.reason : ""}）→${DECISION[s.decision] ?? s.decision}${s.verified ? "・検証済" : "・未検証"}${s.adopted === false ? "・不採用" : s.adopted ? "・採用" : ""}`).join(" ／ ")}
+          </p>
+        )}
+        {p.fields._rationale?.value && <p className="break-words text-muted-foreground">AIの理由: {p.fields._rationale.value}</p>}
+        <p className="text-muted-foreground">判断の時点: {p.judged_at?.slice(0, 16).replace("T", " ")}／費用 {p.cost_jpy ?? 0}円／{p.stop_reason ?? "—"}</p>
+      </div>
+    </details>
+  );
+}
+
+type Row = { key: string; value: string; status: "value" | "none" | "unknown" };
+/** 正解の修正: 直す項目だけを選んで行を足す（正しい項目は再入力しない）。日付の項目は日付と時刻の入力欄 */
+function TruthRow({ r, onChange, onRemove, current }: { r: Row; onChange: (r: Row) => void; onRemove: () => void; current: string }) {
+  const def = LOTTERY_FIELDS.find((f) => f.key === r.key);
+  const [d, t] = r.value.split(" ");
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded border p-1" data-testid={`truth-row-${r.key}`}>
+      <span className="w-16 shrink-0 text-[11px] font-medium">{FIELD_LABEL[r.key] ?? r.key}</span>
+      <select value={r.status} onChange={(e) => onChange({ ...r, status: e.target.value as Row["status"] })} className="h-9 rounded-md border bg-input px-1 text-xs" data-testid={`truth-status-${r.key}`}>
+        {Object.entries(ROW_STATUS).map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+      {r.status === "value" &&
+        (def?.kind === "enum" ? (
+          <select value={r.value} onChange={(e) => onChange({ ...r, value: e.target.value })} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-1 text-xs" data-testid={`truth-edit-${r.key}`}>
+            <option value="">（選択）</option>
+            {(def.values ?? []).map((v) => (
+              <option key={v} value={v}>
+                {showValue(r.key, v)}
+              </option>
+            ))}
+          </select>
+        ) : DATE_FIELDS.has(r.key) ? (
+          <span className="order-last flex w-full min-w-0 gap-1">
+            <input type="date" aria-label={`${FIELD_LABEL[r.key]}の日付`} value={d ?? ""} onChange={(e) => onChange({ ...r, value: [e.target.value, t].filter(Boolean).join(" ") })} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-1 text-xs" data-testid={`truth-edit-${r.key}`} />
+            <input type="time" aria-label={`${FIELD_LABEL[r.key]}の時刻（任意）`} value={t ?? ""} onChange={(e) => onChange({ ...r, value: [d, e.target.value].filter(Boolean).join(" ") })} className="h-9 w-24 rounded-md border bg-input px-1 text-xs" />
+          </span>
+        ) : (
+          <input value={r.value} onChange={(e) => onChange({ ...r, value: e.target.value })} maxLength={200} placeholder={current || "正しい値"} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`truth-edit-${r.key}`} />
+        ))}
+      <button type="button" onClick={onRemove} className="px-1 text-[11px] text-muted-foreground" aria-label={`${FIELD_LABEL[r.key]}の修正をやめる`}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
 function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState("");
-  const [vals, setVals] = useState<Record<string, string>>({});
+  const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
   const [td, setTd] = useState("");
   const [opp, setOpp] = useState("");
   const [fit, setFit] = useState("");
-  const [unk, setUnk] = useState<string[]>([]);
-  const changed = Object.fromEntries(Object.entries(vals).filter(([k, v]) => v.trim() !== "" && v.trim() !== (k === "apply_unit" ? p.apply_unit : p.fields[k]?.value ?? "")));
+  const [count, setCount] = useState("");
+  const cur = (k: string): string => (k === "apply_unit" ? p.apply_unit : p.fields[k]?.value ?? "");
   const sendTruth = (verdict: "correct" | "corrected" | "unknown_later") =>
     start(async () => {
       setErr("");
-      const r = await truthProposalAction({ proposalId: p.id, verdict, ...(verdict === "corrected" ? { truthDecision: td, opportunity: opp, userFit: fit, edits: changed, unknownFields: unk } : {}), note });
+      const edits: Record<string, string> = Object.fromEntries(rows.filter((r) => r.status === "value" && r.value.trim() && r.value.trim() !== cur(r.key)).map((r) => [r.key, r.value.trim()]));
+      if (count) edits._opportunities = count;
+      const r = await truthProposalAction({ proposalId: p.id, verdict, ...(verdict === "corrected" ? { truthDecision: td, opportunity: opp, userFit: fit, edits, unknownFields: rows.filter((x) => x.status === "unknown").map((x) => x.key), notStatedFields: rows.filter((x) => x.status === "none").map((x) => x.key) } : {}), note });
       if (!r.ok) setErr(r.error);
       else {
         setEditing(false);
+        setRows([]);
         onDone();
       }
     });
+  const extra = LOTTERY_FIELDS.filter((f) => !(KEY_FIELDS as readonly string[]).includes(f.key));
+  const shown = extra.filter((f) => p.fields[f.key]?.value);
+  const missing = extra.filter((f) => !p.fields[f.key]?.value);
+  const askHuman = p.fields._ask_human?.value;
   return (
     <li className="space-y-1.5 rounded-lg border bg-muted/30 p-2" data-testid="proposal-card" data-item={p.item_no}>
       <div className="flex flex-wrap items-center gap-1">
@@ -89,21 +173,35 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
           </span>
         )}
       </div>
+      {askHuman && (
+        <p className="rounded border border-info px-1.5 py-1 text-[11px] text-info" data-testid="proposal-ask-human">
+          確認のお願い: {askHuman}
+        </p>
+      )}
       <ul className="space-y-0.5" data-testid="proposal-fields">
-        {KEY_FIELDS.map((k) => {
+        {[...KEY_FIELDS.map((k) => ({ key: k as string })), ...shown].map(({ key: k }) => {
           const f = p.fields[k];
-          const v = k === "apply_unit" ? UNIT_LABEL[p.apply_unit] : f?.value;
+          const v = k === "apply_unit" ? UNIT_LABEL[p.apply_unit] : showValue(k, f?.value);
           const basis = k === "apply_unit" ? p.apply_unit_basis : f?.basis ?? "unknown";
           return (
             <li key={k}>
-              <span className="font-medium">{FIELD_LABEL[k]}</span>: {v || "未確認"}
+              <span className="font-medium">{FIELD_LABEL[k] ?? k}</span>: {v || "未確認"}
               <span className="text-muted-foreground"> [{BASIS[basis] ?? basis}]</span>
               {f && <SupportMark support={f.support} basis={f.basis} />}
-              {p.review?.edits?.[k] !== undefined && <span className="ml-1 text-info" data-testid="proposal-edit">→ 人の修正: {k === "apply_unit" ? UNIT_LABEL[p.review.edits[k]] ?? p.review.edits[k] : p.review.edits[k]}</span>}
+              {p.review?.edits?.[k] !== undefined && <span className="ml-1 text-info" data-testid="proposal-edit">→ 人の修正: {showValue(k, p.review.edits[k])}</span>}
             </li>
           );
         })}
       </ul>
+      {missing.length > 0 && (
+        <p className="text-[11px] text-muted-foreground" data-testid="proposal-missing">
+          {(["unreadable", "not_stated", "not_announced", "anytime", ""] as const)
+            .map((st) => [st, missing.filter((f) => ((p.fields[f.key] as { absence?: string } | undefined)?.absence ?? "") === st)] as const)
+            .filter(([, fs]) => fs.length)
+            .map(([st, fs]) => `${st ? ABSENCE_LABELS[st] : "未取得"}: ${fs.map((f) => f.label).join("・")}`)
+            .join("／")}
+        </p>
+      )}
       {p.unknowns.length > 0 && (
         <p className="text-warn" data-testid="proposal-unknowns">
           未確認: {p.unknowns.map((u) => `${FIELD_LABEL[u.what] ?? u.what}（${u.why}）`).join("／")}
@@ -125,7 +223,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
               <ul className="list-disc pl-4">
                 {d.map((x) => (
                   <li key={x.field}>
-                    {FIELD_LABEL[x.field] ?? x.field}: {x.field === "apply_unit" ? UNIT_LABEL[x.before] ?? x.before : x.before} → {x.field === "apply_unit" ? UNIT_LABEL[x.after] ?? x.after : x.after}
+                    {FIELD_LABEL[x.field] ?? x.field}: {showValue(x.field, x.before)} → {showValue(x.field, x.after)}
                   </li>
                 ))}
               </ul>
@@ -136,48 +234,44 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
         </div>
       )}
       {MODE_HINT[p.mode] && <p className="text-[10px] text-muted-foreground">{MODE_HINT[p.mode]}{p.model_id ? `（${p.model_id}）` : ""}</p>}
-      <p className="text-[10px] text-muted-foreground">
-        {p.pages.map((g) => g.host).join("・") || "ページ未取得"}／費用 {p.cost_jpy ?? 0}円／{p.stop_reason ?? "—"}
-      </p>
+      <Evidence p={p} />
       {p.review?.note && <p className="text-muted-foreground">メモ: {p.review.note}</p>}
       {p.truth && (
         <p className="text-[11px] text-info" data-testid="proposal-truth-state">
           正解の記録: {TRUTH[p.truth.verdict]}
           {p.truth.truth_decision ? `（${TRUTH_DECISION[p.truth.truth_decision]}）` : ""}
-          {Object.keys(p.truth.edits ?? {}).length ? ` 修正: ${Object.entries(p.truth.edits).map(([k, v]) => `${FIELD_LABEL[k] ?? k}=${k === "apply_unit" ? UNIT_LABEL[v] ?? v : v}`).join("・")}` : ""}
-          {p.truth.unknown_fields?.length ? ` 不明: ${p.truth.unknown_fields.map((k) => FIELD_LABEL[k] ?? k).join("・")}` : ""}
+          {Object.keys(p.truth.edits ?? {}).filter((k) => k !== "_opportunities").length ? ` 修正: ${Object.entries(p.truth.edits).filter(([k]) => k !== "_opportunities").map(([k, v]) => `${FIELD_LABEL[k] ?? k}=${showValue(k, v)}`).join("・")}` : ""}
+          {p.truth.edits?._opportunities ? ` 機会: ${OPP_COUNT[p.truth.edits._opportunities] ?? p.truth.edits._opportunities}` : ""}
+          {p.truth.unknown_fields?.length ? ` 不明・記載なし: ${p.truth.unknown_fields.map(truthFieldLabel).join("・")}` : ""}
           {p.truthOutdated ? "（再評価で版が変わりました。再確認してください）" : ""}
         </p>
       )}
       {editing ? (
         <div className="space-y-1.5" data-testid="proposal-truth-form">
-          <p className="text-[11px] text-muted-foreground">変わる点だけ入力してください（正しい項目は空のまま）。</p>
-          <div className="grid grid-cols-3 gap-1.5">
+          <p className="text-[11px] text-muted-foreground">直す点だけ入力してください（入力しない項目は「未確認」のまま残ります）。</p>
+          <div className="grid grid-cols-2 gap-1.5">
             <Pick label="正しい判断" value={td} set={setTd} options={TRUTH_DECISION} testid="truth-decision" />
             <Pick label="応募機会" value={opp} set={setOpp} options={OPPORTUNITY} testid="truth-opportunity" />
             <Pick label="利用者に" value={fit} set={setFit} options={USER_FIT} testid="truth-fit" />
+            <Pick label="機会の数" value={count} set={setCount} options={OPP_COUNT} testid="truth-count" />
           </div>
-          {TRUTH_FIELDS.map((k) => (
-            <label key={k} className="flex items-center gap-1.5">
-              <span className="w-14 shrink-0">{FIELD_LABEL[k]}</span>
-              {k === "apply_unit" ? (
-                <select value={vals[k] ?? ""} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`truth-edit-${k}`}>
-                  <option value="">（変更なし）</option>
-                  {Object.entries(UNIT_LABEL).filter(([v]) => v !== "unknown").map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input value={vals[k] ?? ""} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} maxLength={200} placeholder={p.fields[k]?.value ?? "（変更なし）"} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`truth-edit-${k}`} />
-              )}
-              <label className="flex shrink-0 items-center gap-0.5 text-[10px]">
-                <input type="checkbox" checked={unk.includes(k)} onChange={(e) => setUnk(e.target.checked ? [...unk, k] : unk.filter((x) => x !== k))} data-testid={`truth-unknown-${k}`} />
-                不明
-              </label>
-            </label>
+          {rows.map((r, i) => (
+            <TruthRow key={r.key} r={r} current={showValue(r.key, cur(r.key))} onChange={(x) => setRows(rows.map((y, j) => (j === i ? x : y)))} onRemove={() => setRows(rows.filter((_, j) => j !== i))} />
           ))}
+          <select
+            value=""
+            onChange={(e) => e.target.value && setRows([...rows, { key: e.target.value, value: "", status: "value" }])}
+            className="h-9 w-full rounded-md border bg-input px-1 text-xs"
+            data-testid="truth-add-field"
+            aria-label="直す項目を追加"
+          >
+            <option value="">＋直す項目を追加</option>
+            {LOTTERY_FIELDS.filter((f) => !rows.some((r) => r.key === f.key)).map((f) => (
+              <option key={f.key} value={f.key}>
+                {f.label}
+              </option>
+            ))}
+          </select>
           <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="補足（任意。確認した根拠など）" className="h-9 w-full rounded-md border bg-input px-2 text-xs" data-testid="truth-note" />
           <p className="text-[10px] text-muted-foreground">記録だけです。抽選の登録・削除・通知は行いません。</p>
           <div className="flex justify-end gap-1.5">
@@ -239,12 +333,12 @@ export function ProposalPreview({ proposals, shadow, candidateId }: { proposals:
         )}
         {candidateId && <MissedForm candidateId={candidateId} onDone={() => router.refresh()} />}
         {!shadow && (
-        <div className="flex items-center justify-end gap-2">
-          {msg && <span className="text-[11px] text-muted-foreground" data-testid="proposal-gen-msg">{msg}</span>}
-          <Button size="sm" variant="outline" onClick={generate} disabled={busy} data-testid="proposal-generate">
-            登録案を作る（モック・費用0）
-          </Button>
-        </div>
+          <div className="flex items-center justify-end gap-2">
+            {msg && <span className="text-[11px] text-muted-foreground" data-testid="proposal-gen-msg">{msg}</span>}
+            <Button size="sm" variant="outline" onClick={generate} disabled={busy} data-testid="proposal-generate">
+              登録案を作る（モック・費用0）
+            </Button>
+          </div>
         )}
       </div>
     </details>
