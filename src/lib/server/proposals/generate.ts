@@ -55,6 +55,8 @@ export interface GenerateDeps {
   vision?: VisionClient;
   /** 調査経験の反映と蓄積（既定 true）。false で、経験を読まず・書かない（比較実験の対照群） */
   learn?: boolean;
+  /** 適応型判断の2段目（上位モデルの判断）。無ければ1段 */
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
 }
 
 /** 費用ゼロのモード（既定）。実AIではない */
@@ -297,6 +299,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       now: clock(),
       shouldStop: deps.shouldStop,
       registerRequiresUnit: true,
+      ...(deps.escalation ? { escalation: deps.escalation } : {}),
       ...(userRegion ? { userRegion } : {}),
       protectedFor,
       ...(deps.perItemCapJpy ? { budgetFor: () => new CaseBudget(budget, deps.perItemCapJpy!) } : {}),

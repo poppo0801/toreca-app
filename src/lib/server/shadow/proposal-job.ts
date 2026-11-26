@@ -36,6 +36,8 @@ const otherKeyValues = (env: Env): string[] => Object.entries(env).filter(([k, v
 /** 調査の上限。評価入口（real-run）と同じ共通値（pipeline.ts）。違いは1実行の経過時間（Vercelの制限に合わせて60秒）と、検索を渡さないこと（1件¥3の枠に検索の予約が収まらない）だけ */
 /** 検索を渡すときの最悪費用（円）: 検索1回 ≒ ¥1.5（1,000回$10）＋結果を読むトークン。1件の上限（¥10）に収まるときだけ検索を渡す */
 export const SHADOW_SEARCH_WORST_JPY = 3.7;
+/** 適応型判断で、検証済みの登録・除外から上位モデルで監査する割合（保留だけを見る偏りを防ぐ。候補ごとに固定の抽出） */
+export const SHADOW_AUDIT_RATE = 0.2;
 export { RESEARCH_WINDOW_MS as SHADOW_RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 import { RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 /** 判断の呼び出し1回の予約（円）。調査用の既定（¥0.6）か、判断モデルの実測に近い想定（入力9,000・出力1,500トークン）の大きい方 */
@@ -50,6 +52,8 @@ export interface ProposalJobSettings {
   per_case_cap_jpy: number;
   /** 登録判断だけのモデル（DBの設定。NULL=調査と同じ）。料金が分かるモデルだけ採用する */
   judge_model?: string | null;
+  /** single=judge_model（無ければ調査と同じ）の1段／adaptive=調査と同じモデルで判断し、必要なときだけ judge_model で判断し直す（ADAPTIVE_REVIEW） */
+  judge_mode?: string | null;
 }
 
 /** 実行の痕跡（件数・ホスト名・理由コードだけ。URL全体・原文・秘密を含めない） */
@@ -103,7 +107,9 @@ export async function runShadowProposalJob(a: {
     otherKeys: k?.source === "dedicated" ? otherKeyValues(env) : [], // 専用キーの場合だけ、他機能のキーとの共用を拒否。既存キーの再利用は明示承認済み
   });
   if (!decision.allowed) return { ok: false, reason: `gate:${decision.reasons[0] ?? "denied"}` };
-  const judgeModel = a.settings.judge_model && MODEL_PRICES[a.settings.judge_model] ? a.settings.judge_model : null; // 料金が分からないモデルは採用しない（費用を保証できない）
+  const upperModel = a.settings.judge_model && MODEL_PRICES[a.settings.judge_model] ? a.settings.judge_model : null; // 料金が分からないモデルは採用しない（費用を保証できない）
+  const adaptive = a.settings.judge_mode === "adaptive" && !!upperModel;
+  const judgeModel = adaptive ? null : upperModel; // 適応型: 1段目は調査と同じ（安価な）モデル、上位は必要なときだけ
   const caseCap = Math.min(a.settings.per_case_cap_jpy, 25, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
   const t = issueProductionShadowTicket(decision, { model: env.SHADOW_PROPOSAL_MODEL?.trim() || "claude-haiku-5-5", totalCapJpy: caseCap, perCaseCapJpy: caseCap });
   if (!t.ok) return { ok: false, reason: `ticket:${t.reason}` };
@@ -165,6 +171,7 @@ export async function runShadowProposalJob(a: {
   const basisAt = stored?.fetchedAt ?? null; // 収集時刻（評価の基準時刻）
   const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, onDiagnostic });
   const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic });
+  const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }) }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
   const budget = new CallBudget({ maxCalls: 24, maxCostJpy: caseCap });
   if (useVision) {
     // 画像解析も同じ予算（budget）を共有する。1件あたり最大1枚。取得は既存の安全な画像取得（SSRF・サイズ・時間の検査）
@@ -177,7 +184,7 @@ export async function runShadowProposalJob(a: {
     householdId: a.householdId,
     candidate: a.candidate,
     env,
-    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, researchDeadlineMs: jobStartMs + RESEARCH_WINDOW_MS, ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
+    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, researchDeadlineMs: jobStartMs + RESEARCH_WINDOW_MS, ...(escalation ? { escalation, modelId: `${t.ticket.model}+adaptive:${upperModel}` } : {}), ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
   });
   if (a.runBudget) absorbBudget(a.runBudget, budget);
   const spent = Math.round(budget.costJpy * 10_000) / 10_000;

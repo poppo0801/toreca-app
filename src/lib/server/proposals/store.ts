@@ -49,6 +49,7 @@ const rowOf = (householdId: string, r: ProposalRecord, version: number) => ({
   turns: r.turns,
   stop_reason: r.stopReason,
   fetched_at: r.fetchedAt,
+  ...(r.judgeTrail?.length ? { judge_trail: r.judgeTrail } : {}),
 });
 
 export async function saveProposals(db: Db, householdId: string, records: ProposalRecord[]): Promise<SaveSummary> {
@@ -66,6 +67,17 @@ export async function saveProposals(db: Db, householdId: string, records: Propos
       const sameResult = !!c && c.decision === row.decision && c.verified === row.verified && c.apply_unit === row.apply_unit && c.apply_unit_basis === row.apply_unit_basis && stableJson(c.held_reasons ?? null) === stableJson(row.held_reasons ?? null) && stableJson(c.fields ?? null) === stableJson(row.fields ?? null);
       if (c && c.input_hash === r.inputHash && sameResult) {
         s.unchanged++;
+        continue;
+      }
+      // 置き換えは1つのトランザクションで行う（移行127の関数。途中の失敗・中断・同時実行で現行の版が無くならない）。関数が使えない環境（権限・未適用）だけ従来の2段階
+      const rp = (await (db as unknown as { rpc: (n: string, a: object) => PromiseLike<{ error: { code?: string; message?: string } | null }> }).rpc("registration_proposal_replace", { p_old: c?.id ?? null, p_row: rowOf(householdId, r, (c?.version ?? 0) + 1) })) as { error: { code?: string; message?: string } | null };
+      if (!rp.error) {
+        if (c) s.superseded++;
+        s.inserted++;
+        continue;
+      }
+      if (!/42883|42501|PGRST202|permission|does not exist|Could not find/i.test(`${rp.error.code ?? ""} ${rp.error.message ?? ""}`)) {
+        s.failed++; // 関数はあるが失敗した（同時の置き換え等）: 何も変わっていない（トランザクション）
         continue;
       }
       if (c) {
@@ -127,9 +139,25 @@ export interface StoredReview {
   note: string;
   created_at: string;
 }
+export interface StoredTruth {
+  id: string;
+  proposal_key: string;
+  proposal_id: string;
+  verdict: "correct" | "corrected" | "unknown_later";
+  truth_decision: "register" | "exclude" | "hold" | null;
+  opportunity: "exists" | "absent" | "unknown" | null;
+  user_fit: "fit" | "unfit" | "unknown" | null;
+  edits: Record<string, string>;
+  unknown_fields: string[];
+  note: string;
+  created_at: string;
+}
 export interface ProposalView extends StoredProposal {
   /** この登録案（現行の版）への最新のレビュー。無ければ null */
   review: StoredReview | null;
+  /** 人が記録した最新の正解（ADAPTIVE_REVIEW）。無ければ null。truthOutdated=記録した版と現行の版が違う（再確認の対象） */
+  truth?: StoredTruth | null;
+  truthOutdated?: boolean;
   /** レビューした版が現行と違うとき、その版の内容（差分の表示用。AIの値）。無ければ null */
   reviewedVersion: { version: number; fields: StoredProposal["fields"]; apply_unit: string } | null;
   /** レビューした版が現行の版と違う（再評価で内容が変わった）。人のレビューは残るが、再確認が必要 */
@@ -144,9 +172,14 @@ export async function loadProposals(db: Db, candidateIds: string[]): Promise<Rec
   const p = (await t(db, "registration_proposals").select(COLS).in("candidate_id", candidateIds).is("superseded_at", null).order("item_no", { ascending: true })) as Rows;
   const list = ((p.data as StoredProposal[] | null) ?? []).filter(Boolean);
   if (!list.length) return {};
-  const rv = (await t(db, "registration_proposal_reviews").select("id,proposal_key,proposal_id,decision,edits,note,created_at").in("proposal_key", list.map((x) => x.proposal_key)).order("created_at", { ascending: false })) as Rows;
+  const rv = (await t(db, "registration_proposal_reviews").select("*").in("proposal_key", list.map((x) => x.proposal_key)).order("created_at", { ascending: false })) as Rows;
   const latest = new Map<string, StoredReview>();
-  for (const r of ((rv.data as StoredReview[] | null) ?? [])) if (!latest.has(r.proposal_key)) latest.set(r.proposal_key, r);
+  const truths = new Map<string, StoredTruth>();
+  for (const r of ((rv.data as (StoredReview & Partial<StoredTruth> & { kind?: string })[] | null) ?? [])) {
+    if ((r.kind ?? "review") === "truth") {
+      if (!truths.has(r.proposal_key)) truths.set(r.proposal_key, r as unknown as StoredTruth);
+    } else if ((r.kind ?? "review") === "review" && !latest.has(r.proposal_key)) latest.set(r.proposal_key, r);
+  }
   // 再評価で版が変わったとき、レビューした版の内容を読む（差分の表示用）
   const oldIds = [...new Set([...latest.values()].filter((r) => !list.some((x) => x.id === r.proposal_id)).map((r) => r.proposal_id))];
   const prev = new Map<string, { version: number; fields: StoredProposal["fields"]; apply_unit: string }>();
@@ -158,7 +191,8 @@ export async function loadProposals(db: Db, candidateIds: string[]): Promise<Rec
   for (const x of list) {
     const review = latest.get(x.proposal_key) ?? null;
     const outdated = !!review && review.proposal_id !== x.id;
-    (out[x.candidate_id] ??= []).push({ ...x, review, reviewOutdated: outdated, reviewedVersion: outdated && review ? prev.get(review.proposal_id) ?? null : null });
+    const truth = truths.get(x.proposal_key) ?? null;
+    (out[x.candidate_id] ??= []).push({ ...x, review, reviewOutdated: outdated, reviewedVersion: outdated && review ? prev.get(review.proposal_id) ?? null : null, truth, truthOutdated: !!truth && truth.proposal_id !== x.id });
   }
   return out;
 }

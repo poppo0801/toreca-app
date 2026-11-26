@@ -181,3 +181,48 @@ describe("RUNTIME_CORRECTNESS: 応募単位の推定（inferred）の検証", ()
     expect(verifyRegistration({ output: out("observed"), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues).toContain("unit_quote_unsupported:apply_unit");
   });
 });
+
+describe("ADAPTIVE_REVIEW 適応型判断", () => {
+  const limits = { maxTurns: 1, maxFetches: 1, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxRevisions: 0, maxSearches: 0, searchReserveJpy: 0 } as never;
+  const page = { ok: true as const, finalUrl: URL1, html, text: pageTextChecked(html, []).text };
+  const jo = (o: Partial<JudgeOutput>): JudgeOutput => ({ decision: "tentative", fields: {}, rationale: "r", unresolvedImpact: "material", monitor: { continue: true, why: "w" }, costJpy: 0.1, ...o });
+  const run = (primary: JudgeOutput | null, upper: (JudgeOutput | null)[], o: { auditRate?: number; autoFetch?: boolean } = {}) => {
+    let u = 0;
+    const calls = { upper: 0 };
+    const upperJ: RegistrationJudge = async () => (calls.upper++, upper[Math.min(u++, upper.length - 1)]);
+    const r = runResearch({ caseId: "case-x", seed: seedEvidence("s1", "投稿", NOW), agent: async () => turn({ kind: "stop", reason: "sufficient", why: "w" }), judge: async () => primary, escalation: { judge: upperJ, model: "claude-sonnet-5-5", primaryModel: "claude-haiku-5-5", auditRate: o.auditRate ?? 0 }, tools: { now: () => NOW, fetchPage: async () => page }, budget: new CallBudget({ maxCalls: 30, maxCostJpy: 100 }), limits, ...(o.autoFetch === false ? {} : { autoFetch: [URL1] }) });
+    return r.then((x) => ({ r: x, calls }));
+  };
+  it("既定の判断が重大な不明で暫定なら、同じ証拠で上位モデルに判断させ、検証に通れば採用する（調査はやり直さない）。段・理由を記録", async () => {
+    const { r, calls } = await run(jo({}), [jo({ decision: "exclude", unresolvedImpact: "none", fields: { exclude_reason: { value: "受付終了", basis: "observed", evidenceId: "p1", quote: "応募期間 11月24日〜11月26日" } } })]);
+    expect(calls.upper).toBeGreaterThanOrEqual(1);
+    expect(r.judgeTrail?.map((s) => `${s.stage}:${s.model ?? ""}:${s.reason ?? ""}`)[0]).toBe("primary:claude-haiku-5-5:");
+    expect(r.judgeTrail?.[1]).toMatchObject({ stage: "escalated", model: "claude-sonnet-5-5", reason: "material_unknown" });
+  });
+  it("上位の判断が失敗・検証不通過なら、既定の検証済みの判断を消さない", async () => {
+    const { r } = await run(jo({ decision: "tentative" }), [null]);
+    expect(r.registration.output?.decision).toBe("tentative");
+    expect(r.registration.verified).toBe(true);
+    expect(r.judgeTrail?.[1]).toMatchObject({ stage: "escalated", decision: "none", note: "failed" });
+  });
+  it("検証済みの登録・除外は上げない（監査の抽出の割合が0のとき）。監査で両方検証済みかつ結論が食い違えば、どちらも正解扱いせず保留にする", async () => {
+    const reg = jo({ decision: "register", unresolvedImpact: "none" });
+    const a = await run(reg, [jo({})]);
+    expect(a.calls.upper).toBe(0);
+    const b = await run(reg, [jo({ decision: "tentative", unresolvedImpact: "minor" })], { auditRate: 1 });
+    expect(b.calls.upper).toBe(1);
+    expect(b.r.registration.finalDecision).toBe("tentative");
+    expect(b.r.registration.held?.reasons).toContain("model_disagreement");
+  });
+  it("根拠のページが1つも無い暫定は上げない（情報が無いときはモデルを変えても解決しない）", async () => {
+    const { calls } = await run(jo({}), [jo({ decision: "register" })], { autoFetch: false });
+    expect(calls.upper).toBe(0);
+  });
+  it("応募単位の推定: 本登録案で引用の無い推定・受付枠が複数のページを根拠にした単一応募の推定は、検証で止める", async () => {
+    const { verifyRegistration } = await import("./research-loop");
+    const ev = { id: "p1", kind: "page" as const, url: URL1, fetchedAt: NOW.toISOString(), contentHash: "h", text: "抽選に応募する 受付枠A 受付枠B", structure: { recognized: true, siteKind: "livepocket_like", title: null, pageNotes: [], slots: [{ title: "A" }, { title: "B" }], relatedEvents: [], formChoices: [], formQuestions: [], gaps: [] } as never, independent: true };
+    const o = (f: Record<string, unknown>) => ({ decision: "register" as const, fields: { apply_unit: { value: "one_form_one", basis: "inferred", ...f } as never }, rationale: "r", unresolvedImpact: "minor" as const, monitor: { continue: true, why: "w" }, costJpy: 0 });
+    expect(verifyRegistration({ output: o({}), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues).toContain("unit_inferred_without_quote:apply_unit");
+    expect(verifyRegistration({ output: o({ evidenceId: "p1", quote: "抽選に応募する" }), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues).toContain("unit_inferred_conflicts_structure:apply_unit");
+  });
+});

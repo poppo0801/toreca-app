@@ -94,7 +94,8 @@ describe("P2 原因: 応募単位の保存（列挙値の注釈）・未確定�
     const v = (o: never, flag = true) => verifyRegistration({ output: o, evidence: ev, protectedFields: {}, registerRequiresUnit: flag }).issues;
     expect(v(out({ value: null, basis: "unknown" }))).toEqual(["register_unit_unresolved"]);
     expect(v(out(undefined))).toEqual(["register_unit_unresolved"]);
-    expect(v(out({ value: "one_form_one", basis: "inferred" }))).toEqual([]);
+    expect(v(out({ value: "one_form_one", basis: "inferred" }))).toEqual(["unit_inferred_without_quote:apply_unit"]); // ADAPTIVE_REVIEW: 本登録案の応募単位の推定には、構造の根拠（証拠と引用）が要る
+    expect(v(out({ value: "one_form_one", basis: "inferred", evidenceId: "s1", quote: "【A店】拡張パック 抽選" }))).toEqual([]);
     expect(v(out({ value: "per_store", basis: "observed", evidenceId: "s1", quote: "お1人様1回" }))).toEqual([]);
     expect(v(out({ value: null, basis: "unknown" }, "tentative"))).toEqual([]);
     expect(v(out({ value: null, basis: "unknown" }), false)).toEqual([]); // 従来の経路は変えない

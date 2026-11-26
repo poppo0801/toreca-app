@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { generateProposalsAction, reviewProposalAction } from "@/app/(app)/lotteries/candidates/proposal-actions";
+import { generateProposalsAction, missedOpportunityAction, truthProposalAction } from "@/app/(app)/lotteries/candidates/proposal-actions";
 import { Button } from "@/components/ui/button";
 import { diffProposal, summarizeProposals } from "@/lib/judgment/xsource/proposal-summary";
 import type { ProposalView } from "@/lib/server/proposals/store";
@@ -21,7 +21,28 @@ const DECISION: Record<string, string> = { register: "本登録案", tentative: 
 const HELD: Record<string, string> = { exclude_without_evidence: "根拠（引用）のある観察が無いまま除外としている", exclude_without_page_evidence: "応募先のページを確認できないまま除外としている", register_unit_unresolved: "本登録案なのに応募単位が未確定", judge_failed: "AIの判断が得られなかった", page_text_loss: "ページの本文の取り出しに欠落の疑い" };
 const heldLabel = (r: string): string => HELD[r] ?? (r.startsWith("quote_not_found") ? "引用が原文に見つからない（" + r.split(":")[1] + "）" : r.startsWith("scope_mismatch") ? "別の店舗・商品のページを根拠にしている" : r.startsWith("field_unknown_has_value") ? "不明のはずの項目に値がある" : r);
 const KEY_FIELDS = ["store", "product", "deadline", "apply_unit"] as const;
-const FIELD_LABEL: Record<string, string> = { store: "店舗", product: "商品", deadline: "締切", apply_unit: "応募単位" };
+/** 正解の修正で入力できる項目（既存の抽選の項目名に合わせる。変える項目だけ入力する） */
+const TRUTH_FIELDS = ["store", "product", "deadline", "apply_unit", "apply_url", "per_person_limit", "conditions"] as const;
+const TRUTH: Record<string, string> = { correct: "正しい（変更なし）", corrected: "正解を修正", unknown_later: "後で確認" };
+const TRUTH_DECISION: Record<string, string> = { register: "登録", exclude: "除外", hold: "保留" };
+const OPPORTUNITY: Record<string, string> = { exists: "ある", absent: "無い", unknown: "不明" };
+const USER_FIT: Record<string, string> = { fit: "適合", unfit: "対象外", unknown: "不明" };
+function Pick({ label, value, set, options, testid }: { label: string; value: string; set: (v: string) => void; options: Record<string, string>; testid: string }) {
+  return (
+    <label className="flex min-w-0 flex-col gap-0.5 text-[10px]">
+      <span className="text-muted-foreground">{label}</span>
+      <select value={value} onChange={(e) => set(e.target.value)} className="h-9 min-w-0 rounded-md border bg-input px-1 text-xs" data-testid={testid}>
+        <option value="">（変更なし）</option>
+        {Object.entries(options).map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+const FIELD_LABEL: Record<string, string> = { store: "店舗", product: "商品", deadline: "締切", apply_unit: "応募単位", apply_url: "応募先URL", per_person_limit: "口数", conditions: "応募条件" };
 const UNIT_LABEL: Record<string, string> = { one_form_one: "1フォーム1応募", store_select: "店舗選択式", per_store: "店舗別に独立", per_product: "商品別", unknown: "不明" };
 
 function SupportMark({ support, basis }: { support: string; basis: string }) {
@@ -36,20 +57,24 @@ function SupportMark({ support, basis }: { support: string; basis: string }) {
 function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState("");
-  const [vals, setVals] = useState<Record<string, string>>(() => Object.fromEntries(KEY_FIELDS.map((k) => [k, k === "apply_unit" ? p.apply_unit : p.fields[k]?.value ?? ""])));
+  const [vals, setVals] = useState<Record<string, string>>({});
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
-  const send = (decision: string, edits?: Record<string, string>) =>
+  const [td, setTd] = useState("");
+  const [opp, setOpp] = useState("");
+  const [fit, setFit] = useState("");
+  const [unk, setUnk] = useState<string[]>([]);
+  const changed = Object.fromEntries(Object.entries(vals).filter(([k, v]) => v.trim() !== "" && v.trim() !== (k === "apply_unit" ? p.apply_unit : p.fields[k]?.value ?? "")));
+  const sendTruth = (verdict: "correct" | "corrected" | "unknown_later") =>
     start(async () => {
       setErr("");
-      const r = await reviewProposalAction({ proposalId: p.id, decision, edits, note });
+      const r = await truthProposalAction({ proposalId: p.id, verdict, ...(verdict === "corrected" ? { truthDecision: td, opportunity: opp, userFit: fit, edits: changed, unknownFields: unk } : {}), note });
       if (!r.ok) setErr(r.error);
       else {
         setEditing(false);
         onDone();
       }
     });
-  const changed = Object.fromEntries(Object.entries(vals).filter(([k, v]) => v.trim() !== (k === "apply_unit" ? p.apply_unit : p.fields[k]?.value ?? "")));
   return (
     <li className="space-y-1.5 rounded-lg border bg-muted/30 p-2" data-testid="proposal-card" data-item={p.item_no}>
       <div className="flex flex-wrap items-center gap-1">
@@ -115,45 +140,65 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
         {p.pages.map((g) => g.host).join("・") || "ページ未取得"}／費用 {p.cost_jpy ?? 0}円／{p.stop_reason ?? "—"}
       </p>
       {p.review?.note && <p className="text-muted-foreground">メモ: {p.review.note}</p>}
+      {p.truth && (
+        <p className="text-[11px] text-info" data-testid="proposal-truth-state">
+          正解の記録: {TRUTH[p.truth.verdict]}
+          {p.truth.truth_decision ? `（${TRUTH_DECISION[p.truth.truth_decision]}）` : ""}
+          {Object.keys(p.truth.edits ?? {}).length ? ` 修正: ${Object.entries(p.truth.edits).map(([k, v]) => `${FIELD_LABEL[k] ?? k}=${k === "apply_unit" ? UNIT_LABEL[v] ?? v : v}`).join("・")}` : ""}
+          {p.truth.unknown_fields?.length ? ` 不明: ${p.truth.unknown_fields.map((k) => FIELD_LABEL[k] ?? k).join("・")}` : ""}
+          {p.truthOutdated ? "（再評価で版が変わりました。再確認してください）" : ""}
+        </p>
+      )}
       {editing ? (
-        <div className="space-y-1.5" data-testid="proposal-edit-form">
-          {KEY_FIELDS.map((k) => (
+        <div className="space-y-1.5" data-testid="proposal-truth-form">
+          <p className="text-[11px] text-muted-foreground">変わる点だけ入力してください（正しい項目は空のまま）。</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            <Pick label="正しい判断" value={td} set={setTd} options={TRUTH_DECISION} testid="truth-decision" />
+            <Pick label="応募機会" value={opp} set={setOpp} options={OPPORTUNITY} testid="truth-opportunity" />
+            <Pick label="利用者に" value={fit} set={setFit} options={USER_FIT} testid="truth-fit" />
+          </div>
+          {TRUTH_FIELDS.map((k) => (
             <label key={k} className="flex items-center gap-1.5">
               <span className="w-14 shrink-0">{FIELD_LABEL[k]}</span>
               {k === "apply_unit" ? (
-                <select value={vals[k]} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`proposal-edit-${k}`}>
-                  {Object.entries(UNIT_LABEL).map(([v, l]) => (
+                <select value={vals[k] ?? ""} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`truth-edit-${k}`}>
+                  <option value="">（変更なし）</option>
+                  {Object.entries(UNIT_LABEL).filter(([v]) => v !== "unknown").map(([v, l]) => (
                     <option key={v} value={v}>
                       {l}
                     </option>
                   ))}
                 </select>
               ) : (
-                <input value={vals[k]} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} maxLength={200} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`proposal-edit-${k}`} />
+                <input value={vals[k] ?? ""} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} maxLength={200} placeholder={p.fields[k]?.value ?? "（変更なし）"} className="h-9 min-w-0 flex-1 rounded-md border bg-input px-2 text-xs" data-testid={`truth-edit-${k}`} />
               )}
+              <label className="flex shrink-0 items-center gap-0.5 text-[10px]">
+                <input type="checkbox" checked={unk.includes(k)} onChange={(e) => setUnk(e.target.checked ? [...unk, k] : unk.filter((x) => x !== k))} data-testid={`truth-unknown-${k}`} />
+                不明
+              </label>
             </label>
           ))}
-          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="メモ（確認した根拠など）" className="h-9 w-full rounded-md border bg-input px-2 text-xs" data-testid="proposal-note" />
-          <p className="text-[10px] text-muted-foreground">承認はレビューの記録です。抽選は登録されません。</p>
+          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="補足（任意。確認した根拠など）" className="h-9 w-full rounded-md border bg-input px-2 text-xs" data-testid="truth-note" />
+          <p className="text-[10px] text-muted-foreground">記録だけです。抽選の登録・削除・通知は行いません。</p>
           <div className="flex justify-end gap-1.5">
             <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
               戻る
             </Button>
-            <Button size="sm" onClick={() => send("approve_with_edits", changed)} disabled={pending} data-testid="proposal-approve">
-              修正して承認
+            <Button size="sm" onClick={() => sendTruth("corrected")} disabled={pending} data-testid="truth-save">
+              正解を保存
             </Button>
           </div>
         </div>
       ) : (
         <div className="flex justify-end gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => send("hold")} disabled={pending} data-testid="proposal-hold">
-            保留
+          <Button size="sm" variant="outline" onClick={() => sendTruth("correct")} disabled={pending} data-testid="truth-correct">
+            正しい
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={pending} data-testid="proposal-edit-open">
-            修正して承認
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={pending} data-testid="truth-edit-open">
+            正解を修正
           </Button>
-          <Button size="sm" variant="outline" onClick={() => send("reject")} disabled={pending} data-testid="proposal-reject">
-            却下
+          <Button size="sm" variant="outline" onClick={() => sendTruth("unknown_later")} disabled={pending} data-testid="truth-later">
+            後で確認
           </Button>
         </div>
       )}
@@ -166,7 +211,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
   );
 }
 
-export function ProposalPreview({ proposals, shadow }: { proposals: ProposalView[]; /** 本番シャドー: 読み取りとレビューの記録だけ（登録案の作成ボタンを出さない） */ shadow?: boolean }) {
+export function ProposalPreview({ proposals, shadow, candidateId }: { proposals: ProposalView[]; /** 本番シャドー: 読み取りとレビューの記録だけ（登録案の作成ボタンを出さない） */ shadow?: boolean; /** 取りこぼしの記録先の候補 */ candidateId?: string }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [msg, setMsg] = useState("");
@@ -192,6 +237,7 @@ export function ProposalPreview({ proposals, shadow }: { proposals: ProposalView
             ))}
           </ul>
         )}
+        {candidateId && <MissedForm candidateId={candidateId} onDone={() => router.refresh()} />}
         {!shadow && (
         <div className="flex items-center justify-end gap-2">
           {msg && <span className="text-[11px] text-muted-foreground" data-testid="proposal-gen-msg">{msg}</span>}
@@ -202,6 +248,50 @@ export function ProposalPreview({ proposals, shadow }: { proposals: ProposalView
         )}
       </div>
     </details>
+  );
+}
+
+/** 登録案に無い応募機会（取りこぼし）の記録。現行が見つけた候補に対する比較で、AI独自の発見ではない。記録だけ（抽選は登録しない） */
+function MissedForm({ candidateId, onDone }: { candidateId: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [msg, setMsg] = useState("");
+  const [pending, start] = useTransition();
+  if (!open)
+    return (
+      <div className="flex justify-end">
+        <button type="button" className="text-[11px] text-muted-foreground underline" onClick={() => setOpen(true)} data-testid="missed-open">
+          登録案に無い応募機会を記録
+        </button>
+      </div>
+    );
+  return (
+    <div className="space-y-1.5 rounded border border-dashed p-2" data-testid="missed-form">
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} rows={2} placeholder="例: 2店舗目（〇〇店）の受付が登録案に無い" className="w-full rounded-md border bg-input px-2 py-1 text-xs" data-testid="missed-note" />
+      <div className="flex items-center justify-end gap-1.5">
+        {msg && <span className="text-[11px] text-muted-foreground">{msg}</span>}
+        <Button size="sm" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+          閉じる
+        </Button>
+        <Button
+          size="sm"
+          disabled={pending || !note.trim()}
+          data-testid="missed-save"
+          onClick={() =>
+            start(async () => {
+              const r = await missedOpportunityAction({ candidateId, note });
+              setMsg(r.ok ? "記録しました" : r.error);
+              if (r.ok) {
+                setNote("");
+                onDone();
+              }
+            })
+          }
+        >
+          記録
+        </Button>
+      </div>
+    </div>
   );
 }
 

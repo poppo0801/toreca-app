@@ -14,6 +14,43 @@ import { createHash } from "node:crypto";
 import { CallBudget } from "../call-budget";
 import { canonUrl } from "./normalize";
 
+export interface JudgeStep {
+  stage: "primary" | "escalated";
+  model: string | null;
+  /** 上位の判断を選んだ理由（一般の条件。店舗固有の規則ではない） */
+  reason: string | null;
+  decision: JudgeOutput["decision"] | "none";
+  verified: boolean;
+  note?: string;
+}
+
+/**
+ * 上位のモデルで判断し直すべきか（一般の条件。結果の理由コードを返す。不要なら null）。
+ *  - primary_failed: 既定の判断が得られなかった ／ verification_failed: 検証に通らなかった
+ *  - material_unknown: 暫定で、判断に重大な影響がある不明が残る ／ complex_structure: 受付枠が複数あるページで、暫定、または応募単位を観察で確定できていない
+ *  - audit_sample: 検証済みの登録・除外から一定の割合を抽出して監査する（保留だけを見る偏りを防ぐ）
+ * 情報そのものが無い（取得できない）場合はモデルを変えても解決しないため、根拠のページが1つも無い暫定は上げない。
+ */
+export function escalationReason(a: { output: JudgeOutput | null; verified: boolean; evidence: readonly Evidence[]; caseId: string; auditRate: number }): string | null {
+  const pages = a.evidence.filter((e) => e.kind === "page");
+  if (!a.output) return pages.length ? "primary_failed" : null;
+  if (!a.verified) return "verification_failed";
+  const unit = Object.entries(a.output.fields).find(([k]) => /apply_?unit|応募単位/i.test(k))?.[1];
+  const multiSlot = pages.some((e) => (e.structure?.slots?.length ?? 0) >= 2);
+  if (a.output.decision === "tentative") {
+    if (pages.length === 0) return null;
+    if (a.output.unresolvedImpact === "material") return "material_unknown";
+    if (multiSlot) return "complex_structure";
+    return null;
+  }
+  if (multiSlot && a.output.decision === "register" && unit?.basis !== "observed") return "complex_structure";
+  if (a.auditRate > 0) {
+    const h = parseInt(createHash("sha256").update(a.caseId).digest("hex").slice(0, 8), 16) / 0xffffffff;
+    if (h < a.auditRate) return "audit_sample";
+  }
+  return null;
+}
+
 /** 直前の失敗した呼び出しの記録（費用と再試行の可否）。実APIの部品（research-ai）が付ける。無い部品（台本・旧部品）は、費用不明（予約で計上）・再試行しない */
 export const lastCallOf = (fn: unknown): { retryable: boolean; costJpy: number | null } | undefined => (fn as { lastCall?: { retryable: boolean; costJpy: number | null } } | null)?.lastCall;
 /** 直前の呼び出しが課金されない拒否だけで終わったとき true（互換） */
@@ -259,6 +296,8 @@ export interface ResearchResult {
   searchOffered: boolean;
   /** 調査AIが調査を終えたときに書いた理由（AIの文章。原文の引用ではない・個人情報は伏せ字）。調査が早く終わった原因の確認用 */
   agentStopWhy?: string;
+  /** 判断の各段（適応型判断。段・モデル・選んだ理由・判断・検証）。上位の判断が無ければ1段だけ */
+  judgeTrail?: JudgeStep[];
 }
 export interface FieldProposal {
   field: string;
@@ -498,6 +537,11 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     } else if (grounded && (name === "store" || name === "product")) sem("value_not_in_quote:" + name, checkValueCorrespondence(f.value!, f.quote!), name);
     // 応募単位: 観察（observed）は、引用が応募の権利の単位（人数・回数・店舗・フォーム等）を述べていること。推定（inferred）は、受付枠・応募ボタンなど構造からの推定で、確定値として扱わない（登録案でも推定と表示される）ため、引用の実在と対応の検査だけにする（RUNTIME_CORRECTNESS: 単一の受付枠からの推定が、語の正規表現で一律に拒否されていた）
     else if (grounded && f.basis === "observed" && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);
+    // 推定の応募単位にも構造の根拠を要する（ADAPTIVE_REVIEW のレビュー）: 引用・証拠が無い推定は根拠にならない／単一応募（one_form_one）の推定が、受付枠が複数あるページを根拠にしていれば構造と矛盾する
+    if (/apply_?unit|応募単位/i.test(name) && f.basis === "inferred" && f.value) {
+      if (!f.quote || !f.evidenceId) { if (i.registerRequiresUnit && i.output.decision === "register") issues.push("unit_inferred_without_quote:" + name); } // 本登録案の根拠にするときだけ（暫定・従来の経路の推論は推論のまま残す）
+      else if (f.value === "one_form_one" && (i.evidence.find((e) => e.id === f.evidenceId)?.structure?.slots?.length ?? 0) >= 2) issues.push("unit_inferred_conflicts_structure:" + name);
+    }
     const prot = i.protectedFields[name];
     if (prot !== undefined && f.value !== null && norm(prot) !== norm(f.value)) {
       // 人が確定した値は変更しない。矛盾は人への確認に回す（自動で上書きしない）
@@ -555,6 +599,8 @@ export async function runResearch(args: {
   seed: Evidence;
   agent: ResearchAgent;
   judge: RegistrationJudge;
+  /** 適応型判断（ADAPTIVE_REVIEW）: 既定の判断で根拠が足りない・検証に通らない・応募構造が複雑などのとき、同じ証拠で上位のモデルに判断させる（調査はやり直さない）。無ければ従来どおり1段 */
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
   tools: ResearchTools;
   budget: CallBudget;
   limits?: Partial<ResearchLimits>;
@@ -794,10 +840,38 @@ export async function runResearch(args: {
   noProgress = 0;
   output = null; verified = false; held = null; proposals = []; warnings = [];
   }
+  // ---- 適応型判断（ADAPTIVE_REVIEW）。上位の判断は同じ証拠で行い、調査・取得・検索をやり直さない（再課金しない）。上位が失敗・予算不足・検証に通らないときは、既定の判断（検証済みならそのまま）を消さない
+  const judgeTrail: JudgeStep[] = [{ stage: "primary", model: args.escalation?.primaryModel ?? null, reason: null, decision: output ? output.decision : "none", verified }];
+  let disagreement = false;
+  if (args.escalation) {
+    const why = escalationReason({ output, verified, evidence, caseId: args.caseId, auditRate: args.escalation.auditRate ?? 0 });
+    if (why) {
+      let eIssues: string[] | undefined;
+      let adopted = false;
+      for (let r = 0; r <= 1; r++) {
+        const er = await callAi(args.budget, "registration_judge_escalated", L.judgeReserveJpy, args.escalation.judge, { caseId: args.caseId, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: eIssues });
+        if (er.noBudget || !er.out) { judgeTrail.push({ stage: "escalated", model: args.escalation.model, reason: why, decision: "none", verified: false, note: er.noBudget ? `no_budget:${er.noBudget}` : "failed" }); break; }
+        const v = verifyRegistration({ output: er.out, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now(), ...(args.userRegion ? { userRegion: args.userRegion } : {}) });
+        quoteAudit.push({ round: 10 + r, rows: auditQuotes(er.out, evidence) });
+        if (v.blocking.length === 0) {
+          judgeTrail.push({ stage: "escalated", model: args.escalation.model, reason: why, decision: er.out.decision, verified: true });
+          // 両方とも検証済みで結論が食い違う（監査の抽出など）: どちらも正解扱いせず、保留にして人の確認へ回す
+          if (verified && output && output.decision !== er.out.decision) { disagreement = true; trace.push({ turn, kind: "verify", detail: `model_disagreement:${output.decision}/${er.out.decision}` }); break; }
+          output = er.out; verified = true; held = null; proposals = v.proposals; warnings = [...v.nonBlocking, ...v.unconfirmed.map((u) => "unconfirmed:" + u)];
+          adopted = true;
+          break;
+        }
+        if (r === 1) judgeTrail.push({ stage: "escalated", model: args.escalation.model, reason: why, decision: er.out.decision, verified: false, note: v.blocking.slice(0, 3).join(",") });
+        eIssues = v.details;
+      }
+      trace.push({ turn, kind: "judge", detail: `escalated:${why}:${adopted ? "adopted" : disagreement ? "disagreement" : "kept_primary"}` });
+    }
+  }
+  if (disagreement) held = { reasons: ["model_disagreement"] };
   const decision = output ? output.decision : "none";
-  const finalDecision: JudgeOutput["decision"] | "none" = !output ? "none" : verified ? output.decision : "tentative";
+  const finalDecision: JudgeOutput["decision"] | "none" = !output ? "none" : verified && !disagreement ? output.decision : "tentative";
   const monitoring: ResearchResult["monitoring"] = output ? { state: output.monitor.continue ? "active" : "ended", why: output.monitor.why, reopenOn: output.monitor.continue ? ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] : ["user_correction"] } : { state: "active", why: "登録判断が得られなかったため、監視は継続", reopenOn: ["new_official_url", "page_updated", "user_correction", "deadline_approaching"] };
-  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, finalDecision, output, verified, held, warnings, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog, searchOffered, ...(lastTurn && lastTurn.next.kind === "stop" && lastTurn.next.why ? { agentStopWhy: lastTurn.next.why.slice(0, 160) } : {}) };
+  return { investigation: { state: "ended", reason: end ?? "no_action", turns: turn }, quoteAudit, registration: { decision, finalDecision, output, verified, held, warnings, proposals: verified ? proposals : [] }, monitoring, evidence, history, trace, budget: args.budget.summary(), searches: searchLog, searchOffered, judgeTrail, ...(lastTurn && lastTurn.next.kind === "stop" && lastTurn.next.why ? { agentStopWhy: lastTurn.next.why.slice(0, 160) } : {}) };
 }
 
 // ------------------------------------------------------------------ 再開（調査終了後の必要な部分だけの再評価）
