@@ -171,3 +171,13 @@ describe("RUNTIME_CORRECTNESS: AIへの提示の欠落の是正", () => {
     expect(reqs[0].tools[0].input_schema.properties.next.required).toEqual(expect.arrayContaining(["url", "reason"])); // 終了理由も必須（本番で、理由の欄が省かれ why に JSON の断片が混ざり「other」になった）
   });
 });
+
+describe("RUNTIME_CORRECTNESS: 応募単位の推定（inferred）の検証", () => {
+  it("単一の受付枠からの推定（inferred・one_form_one）は、引用が実在すれば語の正規表現で拒否しない。観察（observed）と称するなら単位を述べる引用が要る（従来どおり）", async () => {
+    const { verifyRegistration } = await import("./research-loop");
+    const ev = { id: "p1", kind: "page" as const, url: "https://shop.example/i", fetchedAt: NOW.toISOString(), contentHash: "h", text: "商品A 抽選販売 応募期間 11月24日〜11月27日 抽選に応募する", structure: null, independent: true };
+    const out = (basis: "observed" | "inferred") => ({ decision: "register" as const, fields: { apply_unit: { value: "one_form_one", basis, evidenceId: "p1", quote: "抽選に応募する" } }, rationale: "r", unresolvedImpact: "minor" as const, monitor: { continue: true, why: "w" }, costJpy: 0 });
+    expect(verifyRegistration({ output: out("inferred"), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues.filter((x) => x.includes("apply_unit"))).toEqual([]);
+    expect(verifyRegistration({ output: out("observed"), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues).toContain("unit_quote_unsupported:apply_unit");
+  });
+});
