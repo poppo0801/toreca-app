@@ -71,8 +71,31 @@ export interface ProposalTrace {
   prefetch?: string;
 }
 
+/**
+ * 1試行の項目ごとの要約（INTENSIVE_EVALUATION §1: 同じ入力・同じ結果の版は保存を省略するため、全試行の判断・採用・証拠の版・費用を実行台帳から追えるようにする）。
+ * 原文・値・URLは含めない（判断・検証・段・入力のハッシュ・ページの内容ハッシュの先頭・費用・ターン数・終了理由だけ）。実行台帳の行の大きさ（8,000バイト）に収まるよう切り詰める。
+ */
+export interface TrialItem {
+  k: string;
+  d: string;
+  v: boolean;
+  ih: string;
+  /** 判断の段（モデル・理由・判断・検証・採用） */
+  t: { s: string; m: string | null; r: string | null; d: string; v: boolean; a?: boolean }[];
+  /** 登録・除外の根拠に使ったページの内容（ホスト）。証拠の版の追跡 */
+  p: string[];
+  c: number | null;
+  n: number;
+  e: string;
+  /** 観察（原文に引用）として値を出した項目名 */
+  o: string[];
+}
+export function trialItems(records: readonly { proposalKey: string; decision: string; verified: boolean; inputHash: string; judgeTrail?: { stage: string; model: string | null; reason: string | null; decision: string; verified: boolean; adopted?: boolean }[]; pages: { host: string }[]; costJpy: number | null; turns: number; endReason: string; fields: Record<string, { basis: string; value: string | null }> }[]): TrialItem[] {
+  return records.slice(0, 6).map((r) => ({ k: r.proposalKey.slice(0, 12), d: r.decision, v: r.verified, ih: r.inputHash.slice(0, 12), t: (r.judgeTrail ?? []).slice(0, 3).map((s) => ({ s: s.stage, m: s.model ? s.model.replace(/^claude-/, "").slice(0, 16) : null, r: s.reason ? s.reason.slice(0, 24) : null, d: s.decision, v: s.verified, ...(s.adopted !== undefined ? { a: s.adopted } : {}) })), p: r.pages.slice(0, 4).map((p) => p.host.slice(0, 40)), c: r.costJpy === null ? null : Math.round(r.costJpy * 1000) / 1000, n: r.turns, e: r.endReason.slice(0, 20), o: Object.entries(r.fields).filter(([k, f]) => !k.startsWith("_") && f.basis === "observed" && f.value).map(([k]) => k.slice(0, 24)).slice(0, 24) }));
+}
+
 export type ProposalJobResult =
-  | { ok: true; fatal?: "auth_error" | "rate_limited"; status: "accepted" | "partial" | "error"; proposals: number; inserted: number; costJpy: number; stopped: boolean; diagnostics: Record<string, number>; revisions: { rounds: number; verified: number; held: number }; basisAt: string | null; decisions: Record<string, number>; trace: ProposalTrace }
+  | { ok: true; fatal?: "auth_error" | "rate_limited"; status: "accepted" | "partial" | "error"; proposals: number; inserted: number; costJpy: number; stopped: boolean; diagnostics: Record<string, number>; revisions: { rounds: number; verified: number; held: number }; basisAt: string | null; decisions: Record<string, number>; trace: ProposalTrace; items: TrialItem[] }
   | { ok: false; reason: string; fatal?: "auth_error" | "rate_limited"; /** 失敗でも、すでにかかった費用（円）。記録して予算から差し引く */ costJpy?: number; trace?: ProposalTrace };
 
 const classify = (reason: string): "auth" | "rate" | "other" => (/api_error:(401|403)\b/.test(reason) ? "auth" : /api_error:429\b/.test(reason) ? "rate" : "other");
@@ -222,6 +245,7 @@ export async function runShadowProposalJob(a: {
     basisAt,
     decisions,
     trace,
+    items: trialItems(r.records),
     ...(state.fatal ? { fatal: state.fatal } : {}),
   };
 }

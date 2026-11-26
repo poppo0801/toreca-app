@@ -301,7 +301,9 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           else await requeue(j, new Date(now().getTime() + Math.min(60, 2 ** j.attempts) * 60_000), pr.reason.slice(0, 60), true);
           continue;
         }
-        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace };
+        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace, ...(pr.items?.length ? { items: pr.items } : {}) };
+        // 実行台帳の行の上限（8,000バイト）を超えるときは、試行の要約を減らす（費用の記録自体は失わない）
+        while (JSON.stringify(recP).length > 7000 && (recP as { items?: unknown[] }).items?.length) (recP as { items?: unknown[] }).items!.pop();
         const rowP = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: pr.status, attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: pr.decisions.register ?? 0, record: recP };
         // 費用の記録は予算の根拠。失敗したら再試行し、それでも記録できなければ、この世帯のシャドーを停止して実行を止める（記録できない費用を重ねない）
         let insP = await table(db, "shadow_judgments").insert(rowP);

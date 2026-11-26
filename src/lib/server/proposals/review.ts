@@ -51,7 +51,7 @@ export type TruthResult = { ok: true; experience: number } | { ok: false; reason
  *  - unknown_later（まだ不明・後で確認）: 正解とも不正解とも数えない
  * 人が全項目を確認した「正しい」のときだけ、その引用を人の確認済みの調査経験として残す（未確認の項目を人の確認とみなさない）。経験は登録案と同じモード（mock/real）で保存する。
  */
-export async function recordTruth(a: { db: Db; householdId: string; proposalId: string; verdict: string; truthDecision?: string; opportunity?: string; userFit?: string; edits?: Record<string, unknown>; unknownFields?: string[]; note?: string; env?: Record<string, string | undefined> }): Promise<TruthResult> {
+export async function recordTruth(a: { db: Db; householdId: string; proposalId: string; verdict: string; truthDecision?: string; opportunity?: string; userFit?: string; edits?: Record<string, unknown>; unknownFields?: string[]; /** 原文を確認したが記載が無い項目（INTENSIVE_EVALUATION）。unknown_fields に `<項目>__none` として残す（明示的な不明と区別） */ notStatedFields?: string[]; note?: string; env?: Record<string, string | undefined> }): Promise<TruthResult> {
   if (!proposalSurfaceEnabled(a.env ?? process.env)) return { ok: false, reason: "disabled" };
   if (!inList(TRUTH_VERDICTS, a.verdict)) return { ok: false, reason: "invalid" };
   if (a.truthDecision !== undefined && a.truthDecision !== "" && !inList(TRUTH_DECISIONS, a.truthDecision)) return { ok: false, reason: "invalid" };
@@ -62,7 +62,7 @@ export async function recordTruth(a: { db: Db; householdId: string; proposalId: 
     if (!EDIT_FIELDS.test(k) || typeof v !== "string" || v.length > 200) return { ok: false, reason: "invalid" };
     if (v.trim()) edits[k] = v.trim();
   }
-  const unknownFields = (a.unknownFields ?? []).filter((k) => EDIT_FIELDS.test(k)).slice(0, 16);
+  const unknownFields = [...(a.unknownFields ?? []).filter((k) => EDIT_FIELDS.test(k)), ...(a.notStatedFields ?? []).filter((k) => EDIT_FIELDS.test(k) && k.length <= 34).map((k) => `${k}__none`)].slice(0, 16);
   if (a.verdict === "corrected" && !Object.keys(edits).length && !unknownFields.length && !a.truthDecision && !a.opportunity && !a.userFit) return { ok: false, reason: "invalid" }; // 修正なのに何も変えていない
   const db = a.db as unknown as { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
   const cur = (await db.from("registration_proposals").select("id,proposal_key,candidate_id,superseded_at,decision,verified,model_id,prompt_version,input_hash,version,mode,apply_unit,fields").eq("id", a.proposalId).eq("household_id", a.householdId).maybeSingle()) as { data: { id: string; proposal_key: string; candidate_id: string; superseded_at: string | null; decision: string; verified: boolean; model_id: string | null; prompt_version: string | null; input_hash: string; version: number; mode: string; apply_unit: string; fields: Record<string, { value?: string | null; basis?: string }> } | null };

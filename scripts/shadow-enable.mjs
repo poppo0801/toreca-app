@@ -208,6 +208,19 @@ if (flag("set-budget")) {
   console.log(r.error ? `変更に失敗しました（${r.error.code ?? ""}。移行125が未適用の可能性）` : `予算を設定しました: 1件${per}円・日次${daily}円・通算${total}円（期限 ${cur.data?.valid_until}・通算の起点 ${cur.data?.total_since} は変更なし）`);
   process.exit(r.error ? 1 : 0);
 }
+const vuOpt = opt("set-valid-until");
+if (vuOpt !== undefined) {
+  // 試行期限の延長（利用者の明示承認 2026-11-26 INTENSIVE_EVALUATION: 12/3 23:59 JST まで）。valid_until だけを変える。予算・通算の起点・世帯・キーは変えない。承認の日時を超える値は拒否する
+  const MAX = Date.parse("2026-12-03T14:59:59Z");
+  const v = Date.parse(vuOpt);
+  if (!Number.isFinite(v) || v > MAX || v <= Date.now()) {
+    console.error("承認された期限（2026-12-03 23:59 JST）以内の未来の日時を指定してください");
+    process.exit(1);
+  }
+  const r = await db.from("shadow_settings").update({ valid_until: new Date(v).toISOString() }).eq("household_id", hid);
+  console.log(r.error ? "変更に失敗しました" : `試行期限を ${new Date(v).toISOString()} にしました（予算・通算の起点 ${cur.data?.total_since} は変更なし）`);
+  process.exit(r.error ? 1 : 0);
+}
 const dailyOpt = opt("set-daily");
 if (dailyOpt !== undefined) {
   // 承認された日次上限の変更（利用者の明示承認: 15→30円）。daily_budget_jpy だけを変える。通算・月次・期限・世帯・キーは変えない。上限は30円まで

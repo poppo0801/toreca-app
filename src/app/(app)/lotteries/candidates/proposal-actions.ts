@@ -51,11 +51,11 @@ export async function reviewProposalAction(input: { proposalId: string; decision
 }
 
 /** 登録案の正解の記録（正しい／正解を修正／後で確認）。抽選の登録・削除・通知はしない（記録だけ） */
-export async function truthProposalAction(input: { proposalId: string; verdict: string; truthDecision?: string; opportunity?: string; userFit?: string; edits?: Record<string, string>; unknownFields?: string[]; note?: string }): Promise<R> {
+export async function truthProposalAction(input: { proposalId: string; verdict: string; truthDecision?: string; opportunity?: string; userFit?: string; edits?: Record<string, string>; unknownFields?: string[]; notStatedFields?: string[]; note?: string }): Promise<R> {
   if (!proposalSurfaceEnabled()) return { ok: false, error: "この機能は有効になっていません" };
   const c = await ctx();
   if (!c) return { ok: false, error: "ログインが必要です" };
-  const r = await recordTruth({ db: c.db, householdId: c.householdId, proposalId: String(input.proposalId), verdict: String(input.verdict), ...(input.truthDecision ? { truthDecision: String(input.truthDecision) } : {}), ...(input.opportunity ? { opportunity: String(input.opportunity) } : {}), ...(input.userFit ? { userFit: String(input.userFit) } : {}), edits: input.edits, unknownFields: input.unknownFields, note: input.note });
+  const r = await recordTruth({ db: c.db, householdId: c.householdId, proposalId: String(input.proposalId), verdict: String(input.verdict), ...(input.truthDecision ? { truthDecision: String(input.truthDecision) } : {}), ...(input.opportunity ? { opportunity: String(input.opportunity) } : {}), ...(input.userFit ? { userFit: String(input.userFit) } : {}), edits: input.edits, unknownFields: input.unknownFields, notStatedFields: input.notStatedFields, note: input.note });
   if (!r.ok) return { ok: false, error: r.reason === "not_current" ? "再評価で新しい版になりました。画面を更新してください" : r.reason === "invalid" ? "入力が正しくありません（修正する項目を選んでください）" : "保存できませんでした" };
   revalidatePath("/lotteries/candidates");
   return { ok: true };

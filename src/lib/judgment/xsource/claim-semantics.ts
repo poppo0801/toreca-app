@@ -9,13 +9,15 @@
  * 判別できないもの（未知の理由・役割が読み取れない引用）は「支持されていない／確認できない」として呼び出し側が保留にする。**検証済みと称さない**。
  */
 
-export type ClaimClass = "closed" | "sold_out" | "ineligible" | "out_of_area" | "unknown";
+export type ClaimClass = "closed" | "sold_out" | "ineligible" | "out_of_area" | "not_lottery" | "unknown";
 
 const nf = (s: string): string => s.normalize("NFKC");
 
 /** 除外理由（AIの自由文）の種類。語彙に当てはまらないものは unknown（機械的に支持できない → 保留） */
 export function claimClassOf(value: string): ClaimClass {
   const v = nf(value);
+  // 抽選の応募機会ではない（先着・通常販売・予約・商品情報・複数の抽選のまとめ・件数の集計）。INTENSIVE_EVALUATION: 投稿そのものが根拠になる除外
+  if (/抽選(販売)?(では|で)?ない|抽選の(告知|応募機会)ではない|応募機会ではない|先着|通常販売|一般販売|予約販売|商品情報|まとめ|件数|集計|一覧の投稿/.test(v)) return "not_lottery";
   if (/完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売/.test(v)) return "sold_out";
   if (/受付終了|応募終了|募集終了|締め?切|〆切|期限切れ|期間外|終了/.test(v)) return "closed";
   if (/地域外|対象地域|エリア外|県外|圏外|所在地|地域.{0,6}(不適合|合わな|外)|適合しない/.test(v)) return "out_of_area";
@@ -156,6 +158,11 @@ export function checkExcludeSemantics(a: { claim: string; quote: string; now?: D
   const cls = claimClassOf(a.claim);
   const q = nf(a.quote);
   if (cls === "out_of_area") return checkRegionExclusion(a.quote, a.userRegion);
+  // 抽選ではない: 引用が販売の方式（先着・販売開始・在庫・予約・発売）か、複数の抽選のまとめ・件数を述べていること。引用が1件の抽選の受付（応募期間・応募方法）を述べていれば矛盾
+  if (cls === "not_lottery") {
+    if (/応募期間|抽選受付|応募受付|応募方法|ご応募|抽選販売の(お知らせ|ご案内)/.test(q) && !/まとめ|一覧|\d+件/.test(q)) return { ok: false, code: "contradicted", reason: "引用が抽選の受付を述べており、抽選ではないという理由と矛盾する" };
+    return /先着|販売開始|発売|在庫|予約開始|販売中|購入可能|まとめ|一覧|\d+件|件数/.test(q) ? { ok: true, reason: "引用が販売の方式・まとめを述べている" } : { ok: false, code: "unsupported", reason: "引用に、抽選ではないこと（先着・販売開始・まとめ等）を示す記述が無い" };
+  }
   if (cls === "unknown") return { ok: false, code: "unverifiable", reason: "除外理由の種類を機械的に判別できず、引用が支持するか確認できない（人が確認するまで保留）" };
   if (cls === "sold_out") return /完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売|終了/.test(q) ? { ok: true, reason: "引用に売り切れ・終了を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、売り切れ・終了を表す記述が無い" };
   if (cls === "ineligible") return /対象外|非対象|限定|不可|できません|お受けできません|対象となりません|ご利用いただけません|対象でない|対象外となり/.test(q) ? { ok: true, reason: "引用に対象外・制限を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、対象外・応募不可を表す記述が無い" };

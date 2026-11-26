@@ -43,7 +43,7 @@ async function post(body: Record<string, unknown>): Promise<{ ok: boolean; error
   }
 }
 
-export function CandidatesView({ candidates, proposals, proposalPreview, proposalShadow }: { proposalShadow?: boolean; candidates: CandidateView[]; /** 新AIの登録案（プレビュー。開発専用・既定は無し） */ proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
+export function CandidatesView({ candidates, proposals, proposalPreview, proposalShadow, evalScope }: { /** 管理用の評価の範囲（処理済み・失敗・登録案なしも含む） */ evalScope?: boolean; proposalShadow?: boolean; candidates: CandidateView[]; /** 新AIの登録案（プレビュー。開発専用・既定は無し） */ proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
   const { profile } = useApp();
   // 抽選候補の管理（登録・除外・ルール）は管理者のプロフィールのみ（Stage 7J）。判定はプロフィールID（isAdmin）。サーバー側の操作も同じ判定で拒否する
   if (profile.isAdmin !== true) {
@@ -59,7 +59,7 @@ export function CandidatesView({ candidates, proposals, proposalPreview, proposa
   }
   return (
     <UndoToastProvider>
-      <CandidatesInner candidates={candidates} proposals={proposals} proposalPreview={proposalPreview} proposalShadow={proposalShadow} />
+      <CandidatesInner candidates={candidates} proposals={proposals} proposalPreview={proposalPreview} proposalShadow={proposalShadow} evalScope={evalScope} />
     </UndoToastProvider>
   );
 }
@@ -76,10 +76,11 @@ function aiState(ps: ProposalView[] | undefined): "review" | "confirmed" | "none
 /** 確認の優先度（大きいほど先）: 判断なし・検証に通らない・保留 ＞ 登録・除外。締切は一覧の並び順に任せる */
 function aiUncertainty(ps: ProposalView[] | undefined): number {
   if (!ps?.length) return 0;
-  return Math.max(...ps.map((p) => (p.decision === "none" ? 3 : !p.verified ? 2 : p.decision === "tentative" ? 1 : 0)));
+  // 人の確認が必要（AIが調べても確定できず、利用者が確かめれば確定できる）を最優先に並べる（INTENSIVE_EVALUATION §4）
+  return Math.max(...ps.map((p) => (p.fields._ask_human?.value ? 4 : p.decision === "none" ? 3 : !p.verified ? 2 : p.decision === "tentative" ? 1 : 0)));
 }
 
-function CandidatesInner({ candidates, proposals, proposalPreview, proposalShadow }: { proposalShadow?: boolean; candidates: CandidateView[]; proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
+function CandidatesInner({ candidates, proposals, proposalPreview, proposalShadow, evalScope }: { evalScope?: boolean; proposalShadow?: boolean; candidates: CandidateView[]; proposals?: Record<string, ProposalView[]>; proposalPreview?: boolean }) {
   const router = useRouter();
   const { data, now, profile } = useApp();
   const toast = useUndoToast();
@@ -233,10 +234,22 @@ function CandidatesInner({ candidates, proposals, proposalPreview, proposalShado
           <div className="min-w-0 flex-1">
             <ProposalSummaryLine proposals={proposals} />
           </div>
-          <select value={aiFilter} onChange={(e) => setAiFilter(e.target.value as typeof aiFilter)} aria-label="AI評価の絞り込み" className="h-8 shrink-0 rounded-md border bg-input px-1 text-[11px]" data-testid="ai-review-filter">
+          <select
+            value={aiFilter}
+            onChange={(e) => {
+              const v = e.target.value;
+              // 評価の範囲の切り替え（処理済み・失敗・登録案なしも含む管理用の一覧）は、同じ選択の中で行う（操作を増やさない）
+              if (v === "scope_eval" || v === "scope_normal") router.push(v === "scope_eval" ? "/lotteries/candidates?scope=eval" : "/lotteries/candidates");
+              else setAiFilter(v as typeof aiFilter);
+            }}
+            aria-label="AI評価の絞り込み"
+            className="h-8 shrink-0 rounded-md border bg-input px-1 text-[11px]"
+            data-testid="ai-review-filter"
+          >
             <option value="all">AI評価: すべて</option>
             <option value="review">AI評価: 要確認</option>
             <option value="confirmed">AI評価: 確認済み</option>
+            {evalScope ? <option value="scope_normal">範囲: 確認待ちだけに戻す</option> : <option value="scope_eval">範囲: 処理済み・失敗も含む</option>}
           </select>
         </div>
       )}

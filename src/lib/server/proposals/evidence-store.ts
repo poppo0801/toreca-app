@@ -92,10 +92,13 @@ export async function saveDocuments(db: Db, householdId: string, candidateId: st
 }
 
 /** 候補に保存された、そのURLの最も完全な本文（切り詰めのないもの・字数が多いもの・新しいものを優先）。無ければ null */
-export async function loadBestDocument(db: Db, householdId: string, candidateId: string, url: string): Promise<StoredDocument | null> {
+/** contentHash を渡すと、その内容の版だけを返す（人の確認を、登録案が実際に根拠にした版に結び付けるため。無ければ null） */
+export async function loadBestDocument(db: Db, householdId: string, candidateId: string, url: string, contentHash?: string): Promise<StoredDocument | null> {
   try {
     const key = canonUrl(url).key.slice(0, 300);
-    const r = (await t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,created_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key).order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
+    let q = t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,created_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key);
+    if (contentHash) q = q.like("content_hash", `${contentHash}%`);
+    const r = (await q.order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
     const x = r.data?.[0];
     if (!x) return null;
     return { url: String(x.url), urlKey: String(x.url_key), origin: String(x.origin), contentHash: String(x.content_hash), fetchedAt: actualFetchedAt(String(x.origin), String(x.fetched_at), x.created_at as string | undefined), text: String(x.text), textChars: Number(x.text_chars), sourceChars: x.source_chars === null ? null : Number(x.source_chars), truncated: !!x.truncated, truncatedReason: (x.truncated_reason as string | null) ?? null, structure: normalizeStructure(x.structure), textLoss: (x.text_loss as string[] | null) ?? null };

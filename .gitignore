@@ -56,3 +56,9 @@ e2e/.gold-review
 e2e/.gold-fixture
 
 eval/phase2-compare/preserved/
+
+# Phase 3 INTENSIVE_EVALUATION: 実案件の原文・正解・実行記録（Git管理外）
+eval/intensive/*.local.json
+eval/intensive/*.local.jsonl
+eval/intensive/*.local.md
+eval/intensive/runs/
