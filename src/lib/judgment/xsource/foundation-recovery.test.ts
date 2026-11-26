@@ -214,6 +214,11 @@ describe("ADAPTIVE_REVIEW 適応型判断", () => {
     expect(b.r.registration.finalDecision).toBe("tentative");
     expect(b.r.registration.held?.reasons).toContain("model_disagreement");
   });
+  it("既定が暫定で、上位が根拠つきで除外・登録と決めて検証を通れば、食い違いではなく採用する（本番の回帰）", async () => {
+    const { r } = await run(jo({ decision: "tentative" }), [jo({ decision: "exclude", unresolvedImpact: "none", fields: { exclude_reason: { value: "対象地域外", basis: "observed", evidenceId: "p1", quote: "応募期間 11月24日〜11月26日" } } })]);
+    expect(r.registration.held?.reasons ?? []).not.toContain("model_disagreement");
+    expect(r.judgeTrail?.[1]?.stage).toBe("escalated");
+  });
   it("根拠のページが1つも無い暫定は上げない（情報が無いときはモデルを変えても解決しない）", async () => {
     const { calls } = await run(jo({}), [jo({ decision: "register" })], { autoFetch: false });
     expect(calls.upper).toBe(0);
