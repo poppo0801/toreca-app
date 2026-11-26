@@ -191,7 +191,7 @@ export async function runShadowProposalJob(a: {
     bump(trace.urlStatuses, x.urlStatus);
     trace.pages += x.pages.length;
     trace.turns += x.turns;
-    const m = /|rev:(d+)/.exec(x.stopReason);
+    const m = /\|rev:(\d+)/.exec(x.stopReason);
     if (m) {
       rev.rounds += Number(m[1]);
       if (x.verified) rev.verified++;

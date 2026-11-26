@@ -522,6 +522,8 @@ export async function runResearch(args: {
   /** 以前の取得履歴（再開時。同じURL・同じ内容の無益な再取得を避ける） */
   history?: FetchRecord[];
   evidence?: Evidence[];
+  /** 調査AIの最初の行動の前に、ループ自身が取得しておく公開ページ（収集時の取得元ページ。応募先が未確定の項目のとき）。AIが既に取得できる情報を見ずに終えることを防ぐ前処理。取得は通常の取得と同じ経路（安全検査・履歴・証拠・回数の計上）を通り、AIの判断は変えない */
+  autoFetch?: string[];
   /** 取得したページの出所・対応の検査（X起点の接続で、項目ごとのリンクの出所と10Sの link-scope を使う）。未指定なら検査なし */
   scoper?: (url: string, page: Evidence) => EvidenceScope | undefined;
 }): Promise<ResearchResult> {
@@ -549,6 +551,29 @@ export async function runResearch(args: {
   // 調査AIに検索が提示されたか（Phase 2: P2 で検索ツールが消えていたことを、入力ログなしでは確認できなかったため、事実として記録する）
   const searchOffered = !!args.tools.search && L.maxSearches > 0;
   // 判断用の予算を先に確保して、調査で使い切らない
+  for (const au of (args.autoFetch ?? []).slice(0, 1)) {
+    const cu = canonUrl(au);
+    if (cu.cls === "invalid" || !au.startsWith("https://") || fetches >= L.maxFetches || history.some((h) => h.key === cu.key && h.outcome === "ok")) continue;
+    fetches++;
+    const r = await args.tools.fetchPage(au);
+    const at = args.tools.now().toISOString();
+    if (!r.ok) {
+      hostFail.set(cu.host, (hostFail.get(cu.host) ?? 0) + 1);
+      history.push({ key: cu.key, host: cu.host, outcome: r.reason, at, progress: false });
+      trace.push({ turn: 0, kind: "fetch", detail: `auto_failed:${r.reason}:${cu.host}` });
+    } else {
+      const hash = sha(r.text);
+      if (evidence.some((e) => e.contentHash === hash)) continue;
+      const pe = pageEvidence(evidence.length, au, r, args.tools.now());
+      const sc = args.scoper?.(au, pe);
+      if (sc) pe.scope = sc;
+      const hs = args.tools.readHints?.(au, pe.text);
+      if (hs?.length) pe.hintSpans = hs.slice(0, 4).map((h) => ({ from: h.from, to: h.to, why: h.why.slice(0, 200) }));
+      evidence.push(pe);
+      history.push({ key: cu.key, host: cu.host, outcome: "ok", contentHash: hash, at, progress: true });
+      trace.push({ turn: 0, kind: "fetch", detail: `auto_ok:${cu.host}` });
+    }
+  }
   while (end === null) {
     if (turn >= L.maxTurns) { end = "limit_turns"; break; }
     if (elapsed() >= L.maxElapsedMs) { end = "limit_time"; break; }
