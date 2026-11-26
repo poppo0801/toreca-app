@@ -1,3 +1,4 @@
+// 本番シャドーの登録案・判断の要約（読み取りのみ。値・原文・URLは出さない）。npm run prod -- scripts/shadow-cases.mjs --since=<ISO> --yes-production
 import { createClient } from "@supabase/supabase-js";
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const since = process.argv.find((a) => a.startsWith("--since="))?.slice(8) ?? "2026-11-26T00:00:00Z";
