@@ -13,6 +13,9 @@ import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import type { RealRunTicket } from "./real-gate";
 import type { GenerateDeps } from "./generate";
 
+/** 1候補の調査に使える実時間（ミリ秒）。評価入口と本番で同じ（F1）。残りを判断・自己修正に残し、本番の関数の実行上限（120秒）とワーカーの時間枠（100秒・開始は残り75秒以上）を越えない */
+export const RESEARCH_WINDOW_MS = 45_000;
+
 /** 共通の調査上限。評価（real-run）と本番シャドーで同じ値。違うのは search の有無・1実行の経過時間（運用の境界）だけ */
 export function researchLimits(o: { search?: boolean; searchReserveJpy?: number; maxElapsedMs?: number } & Partial<ResearchLimits> = {}): ResearchLimits {
   const { search, searchReserveJpy, maxElapsedMs, ...rest } = o;
@@ -42,12 +45,14 @@ export function assembleGenerateDeps(a: {
   learn?: boolean;
   /** 記録するモデルの識別（調査と判断で別のモデルを使うときは両方）。省略時は許可証のモデル */
   modelId?: string;
+  researchDeadlineMs?: number;
 }): GenerateDeps {
   return {
     agent: a.agent,
     judge: a.judge,
     mode: "real",
     modelId: a.modelId ?? a.ticket.model,
+    ...(a.researchDeadlineMs !== undefined ? { researchDeadlineMs: a.researchDeadlineMs } : {}),
     ticket: a.ticket,
     budget: a.budget,
     perItemCapJpy: a.perItemCapJpy,

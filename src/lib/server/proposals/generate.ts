@@ -44,6 +44,8 @@ export interface GenerateDeps {
   /** 全体の予算と、項目ごとの上限（円）。real では必須（予算なしの実AIは実行しない） */
   budget?: CallBudget;
   perItemCapJpy?: number;
+  /** この候補の調査を打ち切る実時刻（エポックミリ秒）。判断の時間を残し、サーバーの実行上限を越えないため（F1） */
+  researchDeadlineMs?: number;
   /** 協調的な中止（true で、以降の項目を処理しない） */
   shouldStop?: () => boolean;
   /**
@@ -224,6 +226,8 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   const clock = deps.now ?? (() => new Date());
   const tools: ResearchTools = {
     now: clock,
+    wallNow: () => new Date(), // 経過時間・取得時刻は実際の時刻（基準時刻 clock は収集時刻に固定されうる）
+    ...(deps.researchDeadlineMs !== undefined ? { researchDeadlineMs: deps.researchDeadlineMs } : {}),
     ...(experiences.length > 0
       ? {
           readHints: (url: string, text: string) => {

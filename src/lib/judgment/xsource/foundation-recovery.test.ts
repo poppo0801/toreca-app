@@ -56,3 +56,97 @@ describe("調査ループの事前取得（autoFetch）", () => {
     void s3;
   });
 });
+
+describe("F1 時計の分離（Phase 3 RUNTIME_CORRECTNESS）", () => {
+  const limits = { maxTurns: 5, maxFetches: 3, maxElapsedMs: 60_000, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxRevisions: 0, maxSearches: 0, searchReserveJpy: 0 } as never;
+  it("基準時刻（now）が収集時刻に固定されていても、経過時間は実時刻（wallNow）で進み、時間切れ・残り時間・取得時刻が正しい", async () => {
+    let wall = Date.parse("2026-11-26T01:00:00Z");
+    const inputs: AgentTurnInput[] = [];
+    const agent: ResearchAgent = async (i) => { inputs.push(i); wall += 40_000; return turn({ kind: "fetch", url: `https://shop.example/p${inputs.length}`, why: "w" }); };
+    const r = await runResearch({ caseId: "c", seed: seedEvidence("s1", "x", NOW), agent, judge, tools: { now: () => NOW, wallNow: () => new Date(wall), fetchPage: async (u) => ({ ok: true, finalUrl: u, html: `<html><body><h1>${u}</h1></body></html>`, text: u }) }, budget: new CallBudget({ maxCalls: 30, maxCostJpy: 100 }), limits });
+    expect(r.investigation.reason).toBe("limit_time"); // 旧実装: 固定の基準時刻で経過0のまま、時間切れにならない
+    expect(inputs[0].remaining.elapsedMs).toBe(60_000);
+    expect(inputs[1].remaining.elapsedMs).toBe(20_000);
+    expect(r.evidence.find((e) => e.kind === "page")?.fetchedAt).toBe("2026-11-26T01:00:40.000Z"); // 取得時刻は実時刻（基準時刻ではない）
+  });
+  it("呼び出し全体の打ち切り時刻（researchDeadlineMs）を過ぎたら調査を終えて判断へ進む", async () => {
+    let wall = 1_000_000;
+    let judged = 0;
+    let k = 0;
+    const agent: ResearchAgent = async () => { wall += 30_000; return turn({ kind: "fetch", url: `https://shop.example/q${++k}`, why: "w" }); };
+    const r = await runResearch({ caseId: "c", seed: seedEvidence("s1", "x", NOW), agent, judge: async (i) => (judged++, judge(i)), tools: { now: () => NOW, wallNow: () => new Date(wall), researchDeadlineMs: 1_000_000 + 45_000, fetchPage: async (u) => ({ ok: true, finalUrl: u, html: `<html><body><h1>${u}</h1></body></html>`, text: u }) }, budget: new CallBudget({ maxCalls: 30, maxCostJpy: 100 }), limits });
+    expect(r.investigation.reason).toBe("limit_time");
+    expect(r.investigation.turns).toBe(2);
+    expect(judged).toBe(1);
+  });
+});
+
+describe("F2 費用の正確性（呼び出しごとの予約・実費の計上・再試行の予約）", () => {
+  const limits = { maxTurns: 1, maxFetches: 0, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxRevisions: 0, maxSearches: 0, searchReserveJpy: 0 } as never;
+  const mk = (seq: ({ out: JudgeOutput | null; rec?: { retryable: boolean; costJpy: number | null } })[]) => {
+    let i = 0;
+    const f = (async () => { const x = seq[Math.min(i++, seq.length - 1)]; (f as unknown as { lastCall?: unknown }).lastCall = x.rec; return x.out; }) as unknown as RegistrationJudge;
+    return { f, calls: () => i };
+  };
+  const ok = { decision: "tentative", fields: {}, rationale: "r", unresolvedImpact: "minor", monitor: { continue: true, why: "w" }, costJpy: 0.2 } as JudgeOutput;
+  const stop: ResearchAgent = async () => turn({ kind: "stop", reason: "sufficient", why: "w" });
+  const run = (j: RegistrationJudge) => { const b = new CallBudget({ maxCalls: 30, maxCostJpy: 100 }); return runResearch({ caseId: "c", seed: seedEvidence("s1", "x", NOW), agent: stop, judge: j, tools: { now: () => NOW, fetchPage: async () => ({ ok: false, reason: "not_public" as const }) }, budget: b, limits }).then((r) => ({ r, b })); };
+  it("形の不備（課金あり）→再試行で成功: 2回とも予約を取り、不備の実費と成功の実費を両方計上する", async () => {
+    const j = mk([{ out: null, rec: { retryable: true, costJpy: 0.3 } }, { out: ok }]);
+    const { r, b } = await run(j.f);
+    expect(j.calls()).toBe(2);
+    expect(r.registration.finalDecision).toBe("tentative");
+    expect(b.byKind.registration_judge).toEqual({ calls: 2, costJpy: expect.closeTo(0.5, 6) });
+    expect(r.trace.some((t) => t.detail === "retry_recovered")).toBe(true);
+  });
+  it("課金なしの拒否は0円・費用不明（例外等）は予約額・再試行しない種類は1回だけ", async () => {
+    const rej = mk([{ out: null, rec: { retryable: false, costJpy: 0 } }]);
+    const a = await run(rej.f);
+    expect(rej.calls()).toBe(1);
+    expect(a.b.byKind.registration_judge.costJpy).toBe(0);
+    const unk = mk([{ out: null }]);
+    const c = await run(unk.f);
+    expect(c.b.byKind.registration_judge.costJpy).toBeCloseTo(0.6, 6); // 不明は保守的に予約額
+    const bad2 = mk([{ out: null, rec: { retryable: true, costJpy: 0.3 } }, { out: null, rec: { retryable: true, costJpy: 0.25 } }]);
+    const d = await run(bad2.f);
+    expect(bad2.calls()).toBe(2); // 再試行は1回まで
+    expect(d.b.byKind.registration_judge.costJpy).toBeCloseTo(0.55, 6);
+    expect(d.r.trace.some((t) => t.detail === "retry_failed")).toBe(true);
+  });
+});
+
+describe("F4 判断から調査へ戻る（重大な不足のときだけ1回）", () => {
+  const limits = { maxTurns: 4, maxFetches: 3, agentReserveJpy: 0.6, judgeReserveJpy: 0.6, maxRevisions: 0, maxSearches: 0, searchReserveJpy: 0 } as never;
+  const j = (o: Partial<JudgeOutput>): JudgeOutput => ({ decision: "tentative", fields: {}, rationale: "応募先のページが未確認", unresolvedImpact: "material", monitor: { continue: true, why: "w" }, costJpy: 0.1, ...o });
+  const setupR = (judges: (JudgeOutput | null)[]) => {
+    const inputs: AgentTurnInput[] = [];
+    let k = 0;
+    const agent: ResearchAgent = async (i) => (inputs.push(i), turn({ kind: "stop", reason: "sufficient", why: "w" }));
+    const judge: RegistrationJudge = async () => judges[Math.min(k++, judges.length - 1)];
+    const run = () => runResearch({ caseId: "c", seed: seedEvidence("s1", "x", NOW), agent, judge, tools: { now: () => NOW, fetchPage: async () => ({ ok: false, reason: "not_public" as const }) }, budget: new CallBudget({ maxCalls: 30, maxCostJpy: 100 }), limits });
+    return { inputs, run, judged: () => k };
+  };
+  it("判断が重大な不足で暫定にしたら、その不足を調査AIに渡して1回だけ戻り、戻った後の判断を採用する", async () => {
+    const s = setupR([j({}), j({ decision: "tentative", unresolvedImpact: "minor", rationale: "再調査後" })]);
+    const r = await s.run();
+    expect(s.inputs).toHaveLength(2);
+    expect(s.inputs[0].judgeFeedback).toBeUndefined();
+    expect(s.inputs[1].judgeFeedback).toContain("応募先のページが未確認");
+    expect(s.judged()).toBe(2);
+    expect(r.registration.output?.rationale).toBe("再調査後");
+    expect(r.trace.some((t) => t.detail === "resume_research")).toBe(true);
+  });
+  it("軽微な不足・登録・除外では戻らない。戻った後の判断が得られなければ最初の判断を使う", async () => {
+    const a = setupR([j({ unresolvedImpact: "minor" })]);
+    await a.run();
+    expect(a.inputs).toHaveLength(1);
+    const b = setupR([j({ decision: "register", unresolvedImpact: "material" })]);
+    await b.run();
+    expect(b.inputs).toHaveLength(1);
+    const c = setupR([j({}), null]);
+    const rc = await c.run();
+    expect(c.judged()).toBe(2);
+    expect(rc.registration.output?.rationale).toBe("応募先のページが未確認");
+    expect(rc.registration.verified).toBe(true);
+  });
+});

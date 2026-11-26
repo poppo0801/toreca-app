@@ -98,6 +98,8 @@ export function cachedTools(tools: ResearchTools): ResearchTools & { hits: numbe
     searchHits: 0,
     searched: [] as string[],
     now: () => tools.now(),
+    ...(tools.wallNow ? { wallNow: () => tools.wallNow!() } : {}),
+    ...(tools.researchDeadlineMs !== undefined ? { researchDeadlineMs: tools.researchDeadlineMs } : {}),
     ...(tools.readHints ? { readHints: (url: string, text: string) => tools.readHints!(url, text) } : {}),
     fetchPage: (url: string): Promise<FetchOutcome> => {
       const k = canonUrl(url).key;

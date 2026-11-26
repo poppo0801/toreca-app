@@ -40,6 +40,17 @@ export interface FormQuestion {
   options: string[];
 }
 
+/**
+ * 保存済みの構造（DBのJSON。旧い版・一部の項目だけのもの）を、現在の形に補う（欠けた配列は空・種類は generic）。壊れた形のまま本文の整形に渡して、候補の調査全体が例外で失敗するのを防ぐ（RUNTIME_CORRECTNESS で発見）。
+ * 形でないもの（null・配列・文字列）は null（構造なし）。値の意味は変えない。
+ */
+export function normalizeStructure(x: unknown): ApplyPageStructure | null {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x as Partial<ApplyPageStructure>;
+  const arr = <T,>(v: T[] | undefined): T[] => (Array.isArray(v) ? v : []);
+  return { ...o, recognized: o.recognized === true, siteKind: o.siteKind ?? "generic", title: typeof o.title === "string" ? o.title : null, pageNotes: arr(o.pageNotes), slots: arr(o.slots), relatedEvents: arr(o.relatedEvents), formChoices: arr(o.formChoices), formQuestions: arr(o.formQuestions), gaps: arr(o.gaps) } as ApplyPageStructure;
+}
+
 export interface ApplyPageStructure {
   /** 想定の構造（受付枠のカード等）を認識できたか。false のときは欠落を意味し、「無い」とは言えない */
   recognized: boolean;

@@ -36,6 +36,8 @@ const otherKeyValues = (env: Env): string[] => Object.entries(env).filter(([k, v
 /** 調査の上限。評価入口（real-run）と同じ共通値（pipeline.ts）。違いは1実行の経過時間（Vercelの制限に合わせて60秒）と、検索を渡さないこと（1件¥3の枠に検索の予約が収まらない）だけ */
 /** 検索を渡すときの最悪費用（円）: 検索1回 ≒ ¥1.5（1,000回$10）＋結果を読むトークン。1件の上限（¥10）に収まるときだけ検索を渡す */
 export const SHADOW_SEARCH_WORST_JPY = 3.7;
+export { RESEARCH_WINDOW_MS as SHADOW_RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
+import { RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 /** 判断の呼び出し1回の予約（円）。調査用の既定（¥0.6）か、判断モデルの実測に近い想定（入力9,000・出力1,500トークン）の大きい方 */
 export const judgeReserveFor = (model: string): number => Math.max(0.6, Math.round(worstCaseCallJpy(model, 9_000, 1_500) * 100) / 100);
 export const shadowProposalLimits = (search: boolean, judgeModel?: string): ResearchLimits => researchLimits({ maxElapsedMs: 60_000, search, searchReserveJpy: SHADOW_SEARCH_WORST_JPY, ...(judgeModel ? { judgeReserveJpy: judgeReserveFor(judgeModel) } : {}) });
@@ -90,6 +92,7 @@ export async function runShadowProposalJob(a: {
   fetchHooks?: Pick<NonNullable<Parameters<typeof makeShadowLivePublicFetch>[0]>, "fetchImpl" | "sleep" | "now">;
 }): Promise<ProposalJobResult> {
   const env = a.env ?? process.env;
+  const jobStartMs = Date.now(); // 実際の時刻（基準時刻とは別）
   // ---- 多重の本番ゲート。専用キーは既存のシャドー専用キー（SHADOW_ANTHROPIC_API_KEY）。予算はDBの shadow_settings（日次）に合わせる
   const k = shadowApiKey(env); // 専用キー、または明示スイッチ（SHADOW_REUSE_EXISTING_KEY=allow）で既存キー。費用の安全はDBの予算が担う
   const decision = productionPreviewPermission({
@@ -101,7 +104,7 @@ export async function runShadowProposalJob(a: {
   });
   if (!decision.allowed) return { ok: false, reason: `gate:${decision.reasons[0] ?? "denied"}` };
   const judgeModel = a.settings.judge_model && MODEL_PRICES[a.settings.judge_model] ? a.settings.judge_model : null; // 料金が分からないモデルは採用しない（費用を保証できない）
-  const caseCap = Math.min(a.settings.per_case_cap_jpy, 10, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
+  const caseCap = Math.min(a.settings.per_case_cap_jpy, 25, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
   const t = issueProductionShadowTicket(decision, { model: env.SHADOW_PROPOSAL_MODEL?.trim() || "claude-haiku-5-5", totalCapJpy: caseCap, perCaseCapJpy: caseCap });
   if (!t.ok) return { ok: false, reason: `ticket:${t.reason}` };
   if (a.runBudget && a.runBudget.remainingCalls < 8) return { ok: false, reason: "run_call_limit" };
@@ -153,7 +156,7 @@ export async function runShadowProposalJob(a: {
   const diagnostics: Record<string, number> = {};
   const state: { fatal: "auth_error" | "rate_limited" | null } = { fatal: null };
   const onDiagnostic = (d: AiDiagnostic): void => {
-    const key = `${d.role}:${d.reason}`.slice(0, 80);
+    const key = `${d.role}:${d.reason}`.slice(0, d.reason.startsWith("api_error:400") ? 200 : 80);
     diagnostics[key] = (diagnostics[key] ?? 0) + 1;
     const c = classify(d.reason);
     if (c === "auth") state.fatal = "auth_error";
@@ -174,7 +177,7 @@ export async function runShadowProposalJob(a: {
     householdId: a.householdId,
     candidate: a.candidate,
     env,
-    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
+    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, researchDeadlineMs: jobStartMs + RESEARCH_WINDOW_MS, ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
   });
   if (a.runBudget) absorbBudget(a.runBudget, budget);
   const spent = Math.round(budget.costJpy * 10_000) / 10_000;
