@@ -25,9 +25,10 @@ export type JudgmentRealGate = { ok: true; apiKey: string; keySource: KeySource;
 
 /**
  * 実案件の集中評価（Phase 3 INTENSIVE_EVALUATION）の候補上限。本番シャドーと同じ判断構成（適応型: 必要時だけ上位モデル）を測るため、1件の上限は利用者が承認した1件¥25（2026-11-26）に合わせる。
- * 1回の実行の総額は従来どおり60円まで（小さなバッチに分けて実行し、通算は利用者の承認額の範囲に収める）。この上限は集中評価の入口（intensive-eval.real.test.ts）だけが渡す。
+ * 1回の実行の総額は250円まで（PRODUCTION_PARITY: 利用者が評価枠 +800円・日次400円を承認 2026-11-26。モデル・推論設定の比較を同じ母数で行うため。以前は60円で、最終評価の後半が未実行になった）。
+ * 通算・日次は利用者の承認額の範囲に収める（起動側で管理）。この上限は集中評価の入口（intensive-eval.real.test.ts）だけが渡す。
  */
-export const INTENSIVE_CAPS = { totalJpy: 60, perCaseJpy: 25 } as const;
+export const INTENSIVE_CAPS = { totalJpy: 250, perCaseJpy: 25 } as const;
 
 export function checkJudgmentRealRun(input: { env: Record<string, string | undefined>; confirm: boolean; approvedTotalJpy: number; approvedPerCaseJpy: number; caps?: { totalJpy: number; perCaseJpy: number } }): JudgmentRealGate {
   const CANDIDATE_CAP_TOTAL_JPY = input.caps?.totalJpy ?? CANDIDATE_CAP_TOTAL_JPY_DEFAULT;

@@ -77,7 +77,9 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
   it("run: 実AI（有料・承認後）", async () => {
     if (MODE !== "run") return;
     const run = env.INTENSIVE_RUN!;
-    const judgeMode = env.INTENSIVE_JUDGE || "adaptive"; // adaptive=本番と同じ（Haiku→必要時Sonnet）／haiku=Haikuだけ／sonnet=判断だけSonnet
+    const judgeMode = env.INTENSIVE_JUDGE || "adaptive"; // adaptive=本番と同じ（既定→必要時Sonnet）／haiku（single）=調査と同じモデルだけ／sonnet=判断だけSonnet／dual=全件で同じ証拠を既定とSonnetの両方で判断（判断モデルの比較。最終は適応型と同じ規則）
+    const effortOf = (v: string | undefined): "low" | "medium" | "high" | undefined => (v === "medium" || v === "high" || v === "low" ? v : undefined);
+    const effort = { ...(effortOf(env.INTENSIVE_AGENT_EFFORT) ? { agent: effortOf(env.INTENSIVE_AGENT_EFFORT) } : {}), ...(effortOf(env.INTENSIVE_JUDGE_EFFORT) ? { judge: effortOf(env.INTENSIVE_JUDGE_EFFORT) } : {}) };
     const upper = "claude-sonnet-5-5";
     const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY), caps: INTENSIVE_CAPS });
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
@@ -104,15 +106,16 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
       gate,
       gatePerCaseCapJpy: INTENSIVE_CAPS.perCaseJpy,
       env: { ...env, PROPOSAL_PREVIEW: "on" },
-      limits: shadowProposalLimits(true, judgeMode === "haiku" ? undefined : upper), // 本番シャドーと同じ上限（判断の予約は上位モデルに合わせる）
+      limits: shadowProposalLimits(true, judgeMode === "haiku" || judgeMode === "single" ? undefined : upper, Number(env.INTENSIVE_MAX_SEARCHES) || undefined), // 本番シャドーと同じ上限（判断の予約は上位モデルに合わせる）
       search: { provider: makeWebSearchProvider(client as never, "claude-haiku-5-5"), worstJpy: SHADOW_SEARCH_WORST_JPY, reserveJpy: SHADOW_SEARCH_WORST_JPY },
       ...(lf ? { liveFetch: lf.fetchPage } : {}),
-      ...(judgeMode === "adaptive" ? { escalation: { model: upper, auditRate: SHADOW_AUDIT_RATE } } : judgeMode === "sonnet" ? { judgeModel: upper } : {}),
+      ...(judgeMode === "adaptive" ? { escalation: { model: upper, auditRate: SHADOW_AUDIT_RATE } } : judgeMode === "dual" ? { escalation: { model: upper, auditRate: 1 } } : judgeMode === "sonnet" ? { judgeModel: upper } : {}),
+      ...(Object.keys(effort).length ? { effort } : {}),
       lockPath: `${DIR}/runs/.intensive.lock`,
       onEvent,
       afterCandidate: async ({ candidate, ok, costJpy, reason, records, ms, diagnostics }) => {
         const s = caseOf.get(candidate.id)!;
-        appendFileSync(journal, JSON.stringify({ run, judgeMode, at: new Date().toISOString(), caseId: s.caseId, set: s.set, ok, reason: reason ?? null, costJpy, ms, diagnostics, records: (records ?? []).map((r) => ({ itemNo: r.itemNo, decision: r.decision, verified: r.verified, heldReasons: r.heldReasons, fields: r.fields, applyUnit: r.applyUnit, applyUnitBasis: r.applyUnitBasis, judgeTrail: r.judgeTrail ?? null, modelId: r.modelId, promptVersion: r.promptVersion, costJpy: r.costJpy, turns: r.turns, stopReason: r.stopReason, endReason: r.endReason, urlStatus: r.urlStatus, pages: r.pages, unknowns: r.unknowns, inputHash: r.inputHash })) }) + "\n");
+        appendFileSync(journal, JSON.stringify({ run, judgeMode, agentModel: gate.model, effort, maxSearches: Number(env.INTENSIVE_MAX_SEARCHES) || 1, at: new Date().toISOString(), caseId: s.caseId, set: s.set, ok, reason: reason ?? null, costJpy, ms, diagnostics, records: (records ?? []).map((r) => ({ itemNo: r.itemNo, itemLabel: r.itemLabel, decision: r.decision, verified: r.verified, heldReasons: r.heldReasons, fields: r.fields, applyUnit: r.applyUnit, applyUnitBasis: r.applyUnitBasis, judgeTrail: r.judgeTrail ?? null, modelId: r.modelId, promptVersion: r.promptVersion, costJpy: r.costJpy, turns: r.turns, stopReason: r.stopReason, endReason: r.endReason, urlStatus: r.urlStatus, pages: r.pages, unknowns: r.unknowns, inputHash: r.inputHash })) }) + "\n");
       },
     });
     console.log("RESULT", JSON.stringify({ run, judgeMode, stopReason: summary.stopReason, processed: summary.processed, proposals: summary.proposals, costJpy: summary.costJpy, overruns: summary.overruns, searchJpyEach: Math.round(WEB_SEARCH_JPY_PER_SEARCH * 100) / 100, journal: createHash("sha256").update(journal).digest("hex").slice(0, 6) }));

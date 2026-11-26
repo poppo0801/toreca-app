@@ -16,3 +16,13 @@ describe("実行台帳の試行の要約（INTENSIVE_EVALUATION §1）", () => {
     expect(JSON.stringify(xs).length).toBeLessThan(7000);
   });
 });
+
+describe("台帳の試行の要約の優先（PRODUCTION_PARITY）", () => {
+  it("7件目以降の失敗・未検証も、先頭の暫定より優先して残す", () => {
+    const base = { proposalKey: "k".repeat(24), inputHash: "h".repeat(16), pages: [], costJpy: 0, turns: 1, endReason: "x", fields: {} };
+    const recs = [...Array.from({ length: 7 }, () => ({ ...base, decision: "tentative", verified: true })), { ...base, decision: "none", verified: false }];
+    const t = trialItems(recs as never);
+    expect(t).toHaveLength(6);
+    expect(t.some((x) => x.d === "none")).toBe(true);
+  });
+});

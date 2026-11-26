@@ -3,7 +3,7 @@ import type { HostGate, RunFetchBudget } from "@/lib/collector/fetch-control";
 import { fetchPublicImage, type ImageFetchResult } from "@/lib/server/images/image-fetch";
 import type { Db } from "@/lib/server/lottery-service";
 import { loadIntakeObservations, PERSISTENT_FAILURES, saveIntakeObservation } from "@/lib/server/proposals/experience-store";
-import { proposalPreviewEnabled } from "@/lib/server/proposals/flag";
+import { productionEvidenceEnabled, proposalPreviewEnabled } from "@/lib/server/proposals/flag";
 
 /**
  * 収集時の公開画像の取得・検査（Phase 2・開発限定・**AIの解析はしない＝費用0**）。通常の収集の経路で、画像を次の順に処理する:
@@ -12,7 +12,9 @@ import { proposalPreviewEnabled } from "@/lib/server/proposals/flag";
  * 有料の画像解析は、通常の収集（cron・API）からは起動しない。承認済みの関門を通った評価入口だけが、同じ取得の経路で解析する（vision-real）。
  * 既定OFF（IMAGE_INTAKE=on かつ新AI機能が有効な開発環境のときだけ）。本番では常に何もしない。
  */
-export const imageIntakeEnabled = (env: Record<string, string | undefined> = process.env): boolean => proposalPreviewEnabled(env) && env.IMAGE_INTAKE === "on";
+/** 開発（新AI機能が有効・IMAGE_INTAKE=on）、または本番の証拠保存の許可（PRODUCTION_PARITY。IMAGE_INTAKE=off で止められる）。取得・検査・記録だけで解析はしない（費用0） */
+export const imageIntakeEnabled = (env: Record<string, string | undefined> = process.env, householdId?: string): boolean =>
+  (proposalPreviewEnabled(env) && env.IMAGE_INTAKE === "on") || (productionEvidenceEnabled(env, householdId) && env.IMAGE_INTAKE !== "off");
 export const MAX_INTAKE_PER_CANDIDATE = 8;
 
 export async function intakeCollectedImages(a: {
@@ -28,7 +30,7 @@ export async function intakeCollectedImages(a: {
   fetchImage?: (url: string) => Promise<ImageFetchResult>;
   env?: Record<string, string | undefined>;
 }): Promise<{ fetched: number; failed: number; skipped: number; existing: number } | null> {
-  if (!imageIntakeEnabled(a.env ?? process.env)) return null;
+  if (!imageIntakeEnabled(a.env ?? process.env, a.householdId)) return null;
   const out = { fetched: 0, failed: 0, skipped: 0, existing: 0 };
   try {
     const known = await loadIntakeObservations(a.db, a.householdId, a.candidateId);

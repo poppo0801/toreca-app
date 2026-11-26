@@ -25,7 +25,7 @@ const warn = (code: string): void => {
  * 失敗しても収集は止めず、件数だけ返す。
  */
 export async function storeCollectedEvidence(a: { db: Db; householdId: string; candidateId: string; queued: object; postUrl: string; postText: string | null; nowIso: string; env?: Record<string, string | undefined> }): Promise<{ saved: number; existing: number; failed: number } | null> {
-  if (!evidenceCollectStoreEnabled(a.env ?? process.env)) return null;
+  if (!evidenceCollectStoreEnabled(a.env ?? process.env, a.householdId)) return null;
   try {
     return await persistCollectedDocuments(a.db, a.householdId, a.candidateId, a.queued, { postUrl: a.postUrl, postText: a.postText, nowIso: a.nowIso });
   } catch {

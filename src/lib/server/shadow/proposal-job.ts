@@ -38,11 +38,14 @@ const otherKeyValues = (env: Env): string[] => Object.entries(env).filter(([k, v
 export const SHADOW_SEARCH_WORST_JPY = 3.7;
 /** 適応型判断で、検証済みの登録・除外から上位モデルで監査する割合（保留だけを見る偏りを防ぐ。候補ごとに固定の抽出） */
 export const SHADOW_AUDIT_RATE = 0.2;
+/** 判断（既定・上位とも）の推論の度合い（PRODUCTION_PARITY の比較で決める。評価入口と同じ値を使う） */
+export const SHADOW_JUDGE_EFFORT: import("@/lib/judgment/xsource/research-ai").AiEffort = "low";
 export { RESEARCH_WINDOW_MS as SHADOW_RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 import { RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 /** 判断の呼び出し1回の予約（円）。調査用の既定（¥0.6）か、判断モデルの実測に近い想定（入力9,000・出力1,500トークン）の大きい方 */
 export const judgeReserveFor = (model: string): number => Math.max(0.6, Math.round(worstCaseCallJpy(model, 9_000, 1_500) * 100) / 100);
-export const shadowProposalLimits = (search: boolean, judgeModel?: string): ResearchLimits => researchLimits({ maxElapsedMs: 60_000, search, searchReserveJpy: SHADOW_SEARCH_WORST_JPY, ...(judgeModel ? { judgeReserveJpy: judgeReserveFor(judgeModel) } : {}) });
+/** maxSearches: 検索の回数（既定1。PRODUCTION_PARITY で比較。評価と本番で同じ値を使う） */
+export const shadowProposalLimits = (search: boolean, judgeModel?: string, maxSearches?: number): ResearchLimits => researchLimits({ maxElapsedMs: 60_000, search, searchReserveJpy: SHADOW_SEARCH_WORST_JPY, ...(judgeModel ? { judgeReserveJpy: judgeReserveFor(judgeModel) } : {}), ...(search && maxSearches ? { maxSearches } : {}) });
 export const SHADOW_PROPOSAL_LIMITS: ResearchLimits = shadowProposalLimits(false);
 
 
@@ -91,7 +94,10 @@ export interface TrialItem {
   o: string[];
 }
 export function trialItems(records: readonly { proposalKey: string; decision: string; verified: boolean; inputHash: string; judgeTrail?: { stage: string; model: string | null; reason: string | null; decision: string; verified: boolean; adopted?: boolean }[]; pages: { host: string }[]; costJpy: number | null; turns: number; endReason: string; fields: Record<string, { basis: string; value: string | null }> }[]): TrialItem[] {
-  return records.slice(0, 6).map((r) => ({ k: r.proposalKey.slice(0, 12), d: r.decision, v: r.verified, ih: r.inputHash.slice(0, 12), t: (r.judgeTrail ?? []).slice(0, 3).map((s) => ({ s: s.stage, m: s.model ? s.model.replace(/^claude-/, "").slice(0, 16) : null, r: s.reason ? s.reason.slice(0, 24) : null, d: s.decision, v: s.verified, ...(s.adopted !== undefined ? { a: s.adopted } : {}) })), p: r.pages.slice(0, 4).map((p) => p.host.slice(0, 40)), c: r.costJpy === null ? null : Math.round(r.costJpy * 1000) / 1000, n: r.turns, e: r.endReason.slice(0, 20), o: Object.entries(r.fields).filter(([k, f]) => !k.startsWith("_") && f.basis === "observed" && f.value).map(([k]) => k.slice(0, 24)).slice(0, 24) }));
+  // 行の大きさの都合で6件までに絞るとき、失敗・未検証・登録・除外を先に残す（PRODUCTION_PARITY: 先頭6件だけでは、7件目以降の重要な失敗が台帳から消えていた。件数の内訳は record.decisions に全件ある）
+  const pri = (r: (typeof records)[number]): number => (r.decision === "none" ? 0 : !r.verified ? 1 : r.decision === "register" || r.decision === "exclude" ? 2 : 3);
+  const kept = records.map((r, i) => ({ r, i })).sort((a, b) => pri(a.r) - pri(b.r) || a.i - b.i).slice(0, 6).sort((a, b) => a.i - b.i).map((x) => x.r);
+  return kept.map((r) => ({ k: r.proposalKey.slice(0, 12), d: r.decision, v: r.verified, ih: r.inputHash.slice(0, 12), t: (r.judgeTrail ?? []).slice(0, 3).map((s) => ({ s: s.stage, m: s.model ? s.model.replace(/^claude-/, "").slice(0, 16) : null, r: s.reason ? s.reason.slice(0, 24) : null, d: s.decision, v: s.verified, ...(s.adopted !== undefined ? { a: s.adopted } : {}) })), p: r.pages.slice(0, 4).map((p) => p.host.slice(0, 40)), c: r.costJpy === null ? null : Math.round(r.costJpy * 1000) / 1000, n: r.turns, e: r.endReason.slice(0, 20), o: Object.entries(r.fields).filter(([k, f]) => !k.startsWith("_") && f.basis === "observed" && f.value).map(([k]) => k.slice(0, 24)).slice(0, 24) }));
 }
 
 export type ProposalJobResult =
@@ -193,8 +199,8 @@ export async function runShadowProposalJob(a: {
   };
   const basisAt = stored?.fetchedAt ?? null; // 収集時刻（評価の基準時刻）
   const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, onDiagnostic });
-  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic });
-  const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }) }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
+  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic, effort: SHADOW_JUDGE_EFFORT });
+  const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), effort: SHADOW_JUDGE_EFFORT }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
   const budget = new CallBudget({ maxCalls: 24, maxCostJpy: caseCap });
   if (useVision) {
     // 画像解析も同じ予算（budget）を共有する。1件あたり最大1枚。取得は既存の安全な画像取得（SSRF・サイズ・時間の検査）

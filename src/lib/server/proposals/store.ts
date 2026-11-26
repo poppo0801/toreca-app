@@ -121,7 +121,7 @@ export interface StoredProposal {
   apply_unit: string;
   apply_unit_basis: string;
   unknowns: { what: string; why: string }[];
-  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch?: boolean; hash?: string; url?: string }[];
+  pages: { host: string; scope: string | null; slots: number; textLoss: boolean; viaSearch?: boolean; hash?: string; url?: string; at?: string }[];
   possibly_same: string[];
   /** 判断の各段（適応型判断。旧い行・1段の行は空） */
   judge_trail?: { stage: string; model: string | null; reason: string | null; decision: string; verified: boolean; adopted?: boolean; note?: string }[];

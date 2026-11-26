@@ -190,7 +190,7 @@ test("実AIの登録案の表示（モード・費用）・再評価後の差分
 
   // 再評価: 新しい版（店舗が変わる）。古い版は superseded。人のレビューは残る
   await a.from("registration_proposals").update({ superseded_at: new Date().toISOString() }).eq("id", v1.data!.id);
-  const v2 = await a.from("registration_proposals").insert({ ...base, version: 2, input_hash: "2222222222222222", fields: f("新宿西口店") as never }).select("id").single();
+  const v2 = await a.from("registration_proposals").insert({ ...base, version: 2, input_hash: "2222222222222222", fields: f("新宿西口店") as never, pages: [{ host: "shop.example.invalid", scope: "item_entity/confirmed", slots: 1, textLoss: false, viaSearch: false, hash: "abcdef0123456789", url: "https://shop.example.invalid/e/1", at: "2026-11-20T10:00:00.000Z" }] as never }).select("id").single();
   expect(v2.error).toBeNull();
   await page.goto("/lotteries/candidates");
   await page.getByTestId("candidate-card").first().getByRole("button").first().click();
@@ -200,6 +200,11 @@ test("実AIの登録案の表示（モード・費用）・再評価後の差分
   await expect(p2.getByTestId("proposal-diff")).toContainText("前回レビューは v1・現行は v2");
   await expect(p2.getByTestId("proposal-edit").first()).toContainText("11/30"); // 人の修正は残り、AIの値は別に表示
   await page.screenshot({ path: "test-results/phase2-proposal-real-diff-390.png" });
+  // PRODUCTION_PARITY: 根拠のページは出典URLへのリンクと取得時刻を表示する（該当版の原文・時点を確認できる）
+  await p2.getByTestId("proposal-evidence").first().locator("summary").click();
+  const pageLink = p2.getByTestId("proposal-evidence").first().getByRole("link", { name: /shop\.example\.invalid.*取得 11-20 19:00/ }); // 日本時間
+  await expect(pageLink).toHaveAttribute("href", "https://shop.example.invalid/e/1");
+  await page.screenshot({ path: "test-results/parity-evidence-390.png" });
   await page.keyboard.press("Escape");
   const sum = page.getByTestId("proposal-summary");
   await expect(sum).toContainText("1候補・1件");

@@ -176,7 +176,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 2（UI改修後）: 全経路", () => {
     expect(human.length).toBeGreaterThanOrEqual(1);
     expect(human[0].source).toBe("human_review");
     // 同じ構造のページの経験を検証済みとして補い（独立した確認の積み上げの代わり）、次の調査への反映を確かめる
-    for (let i = 0; i < 6; i++) await admin.from("investigation_experiences").insert({ household_id: hid, host: "shop-a.example.invalid", features: human[0].features, doc_chars: 14000, found_buckets: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0], verification: i % 2 ? "human" : "gold", source: i % 2 ? "human_review" : "gold_eval", mode: "mock", recorded_at: new Date().toISOString() });
+    for (let i = 0; i < 6; i++) await admin.from("investigation_experiences").insert({ household_id: hid, host: "shop-a.example.invalid", features: (human.find((h) => h.host === "shop-a.example.invalid") ?? human[0]).features /* 長いページ（shop-a）の経験。select の順序に依存しない */, doc_chars: 14000, found_buckets: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0], verification: i % 2 ? "human" : "gold", source: i % 2 ? "human_review" : "gold_eval", mode: "mock", recorded_at: new Date().toISOString() });
     expect((await loadExperiences(admin as unknown as Db, hid)).length).toBeGreaterThan(10);
     const c1 = await mkc("新宿本店");
     await generateProposalsForCandidate({ db: admin as unknown as Db, householdId: hid, candidate: c1, env: ENV, deps: mockDeps({ agent }) });

@@ -27,7 +27,8 @@ export function claimClassOf(value: string): ClaimClass {
 }
 
 // 応募・受付の締切の役割を示す語 / 別の事象（当選発表・発送・販売・来店など）の役割を示す語
-const DEADLINE_ROLE = /(締め?切|〆切|〆|期限|応募期間|受付期間|応募受付|エントリー期間|抽選期間|申込期間|応募終了|受付終了|まで|迄)/;
+// 送り仮名の揺れ（受付／受け付け／受付け）を同じ語として扱う（PRODUCTION_PARITY: 「抽選応募受け付け期間」を締切の役割と読めなかった）
+const DEADLINE_ROLE = /(締め?切|〆切|〆|期限|応募期間|受け?付け?期間|応募受け?付け?|エントリー期間|抽選期間|申し?込み?期間|応募終了|受け?付け?終了|まで|迄)/;
 const OTHER_ROLE = /(当選発表|当選者|結果発表|発表日|発表|発送|お届け|配送|引換|引き換え|受取|受け取り|お渡し|購入期間|販売期間|販売開始|発売|開催|来店|店頭|営業時間|受付時間|開店|開場|入金|支払)/;
 const OTHER_ROLE_G = new RegExp(OTHER_ROLE.source, "g");
 /** 別の事象の語の直前で行を分ける（語の途中では分けない: 「当選発表」を「当選」と「発表」に割らない） */
@@ -170,6 +171,8 @@ export function checkExcludeSemantics(a: { claim: string; quote: string; now?: D
   let s = closedSupport(a.quote, a.now);
   // 理由の引用に日付が無いときは、検証を通った締切の項目の引用で、締切が評価時点より前かを確かめる（日付の役割の検査は同じ）
   if (!s.ok && s.code === "unsupported" && a.deadlineQuote) s = closedSupport(a.deadlineQuote, a.now);
+  // 理由の引用が受付期間の見出しだけ（例「抽選応募受け付け期間」）で、日付は締切の項目の引用（例「11月6日〜11月10日」。役割の語が無い）にあるときは、見出しと日付を続けて読む（PRODUCTION_PARITY: 基準時刻より前に終わった抽選の除外が、役割の語の分離だけで保留になっていた）
+  if (!s.ok && s.code === "unsupported" && a.deadlineQuote) s = closedSupport(`${a.quote} ${a.deadlineQuote}`, a.now);
   if (!s.ok) return s;
   // 別の項目に、評価時点より先の締切があれば矛盾（応募の機会を消さない）
   if (a.now) {

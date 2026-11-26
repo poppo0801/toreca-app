@@ -78,7 +78,27 @@ function Evidence({ p }: { p: ProposalView }) {
             ))}
           </ul>
         )}
-        <p className="break-words text-muted-foreground">ページ: {p.pages.map((g) => `${g.host}${g.viaSearch ? "（検索で発見）" : ""}${g.hash ? `#${g.hash.slice(0, 6)}` : ""}`).join("・") || "未取得"}／取得元: {URL_STATUS[p.url_status] ?? p.url_status}</p>
+        <p className="break-words text-muted-foreground">
+          ページ:{" "}
+          {p.pages.length === 0
+            ? "未取得"
+            : p.pages.map((g, i) => {
+                const label = `${g.host}${g.viaSearch ? "（検索で発見）" : ""}${g.hash ? `#${g.hash.slice(0, 6)}` : ""}${g.at && Number.isFinite(Date.parse(g.at)) ? `・取得 ${new Date(Date.parse(g.at) + 9 * 3600_000).toISOString().slice(5, 16).replace("T", " ")}` : ""}`; // 取得時刻は日本時間
+                return (
+                  <span key={i}>
+                    {i > 0 && "・"}
+                    {g.url && /^https?:\/\//.test(g.url) ? (
+                      <a href={g.url} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2">
+                        {label}
+                      </a>
+                    ) : (
+                      label
+                    )}
+                  </span>
+                );
+              })}
+          ／取得元: {URL_STATUS[p.url_status] ?? p.url_status}
+        </p>
         {trail.length > 0 && (
           <p className="break-words text-muted-foreground" data-testid="proposal-trail">
             判断の段: {trail.map((s) => `${s.stage === "primary" ? "既定" : "上位"}（${(s.model ?? "").replace(/^claude-/, "") || "—"}${s.reason ? "・" + s.reason : ""}）→${DECISION[s.decision] ?? s.decision}${s.verified ? "・検証済" : "・未検証"}${s.adopted === false ? "・不採用" : s.adopted ? "・採用" : ""}`).join(" ／ ")}

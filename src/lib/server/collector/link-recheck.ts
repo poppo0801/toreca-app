@@ -188,7 +188,7 @@ export async function runLinkRechecks(a: {
 
 /** 収集の接続口: 新AI機能が有効な開発環境だけ、未取得リンクを再調査タスクとして記録する。失敗しても収集は止めない */
 export async function maybeEnqueueLinkRechecks(a: { db: Db; householdId: string; candidateId: string; ledger: readonly LinkLedgerEntry[] | undefined; now: Date; env?: Record<string, string | undefined> }): Promise<void> {
-  if (!a.ledger?.length || !linkRecheckEnabled(a.env ?? process.env)) return;
+  if (!a.ledger?.length || !linkRecheckEnabled(a.env ?? process.env, a.householdId)) return;
   try {
     await enqueueLinkRechecks({ db: a.db, householdId: a.householdId, candidateId: a.candidateId, ledger: a.ledger, now: a.now });
   } catch {
@@ -198,7 +198,7 @@ export async function maybeEnqueueLinkRechecks(a: { db: Db; householdId: string;
 
 /** 収集ワーカーの空き時間の再調査（開発限定）。残り時間が十分あるときだけ、少数のタスクを処理する。失敗しても収集は止めない */
 export async function maybeRunLinkRechecks(a: { db: Db; householdId: string; gate: HostGate; timeLeft: () => number; env?: Record<string, string | undefined> }): Promise<RecheckSummary | null> {
-  if (!linkRecheckEnabled(a.env ?? process.env) || a.timeLeft() < 20_000) return null;
+  if (!linkRecheckEnabled(a.env ?? process.env, a.householdId) || a.timeLeft() < 20_000) return null;
   try {
     return await runLinkRechecks({ db: a.db, householdId: a.householdId, gate: a.gate, limit: 3, timeLeft: a.timeLeft });
   } catch {

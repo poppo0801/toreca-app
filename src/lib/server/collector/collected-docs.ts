@@ -16,6 +16,14 @@ export function rememberFullPages(q: object, pages: readonly FetchedLinkPage[]):
 export function takeFullPages(q: object): FetchedLinkPage[] {
   return full.get(q) ?? [];
 }
+/** 既に控えたページに1件を足す（同じURLは新しい方で置き換え）。Web候補の取得元ページ（解析で実際に取得したページ）の全文に使う */
+export function addFullPage(q: object, page: FetchedLinkPage): void {
+  full.set(q, [...takeFullPages(q).filter((p) => p.url !== page.url), page]);
+}
+/** 再取得（内側の別オブジェクト）で控えた全文を、元のキュー項目へ引き継ぐ（PRODUCTION_PARITY: X投稿の取り直しの経路で全文が保存処理へ届かなかった） */
+export function carryFullPages(from: object, to: object): void {
+  for (const p of takeFullPages(from)) addFullPage(to, p);
+}
 
 /** キュー（jsonb）に載せる抜粋。全文の字数と、抜粋で切れているか（後半は未確認）を残す */
 export function toQueuedPage(p: FetchedLinkPage): { url: string; text: string; fullChars: number; truncated: boolean; depth: 0 | 1; fromUrl?: string; origins: string[]; shortUrl?: string } {

@@ -111,7 +111,7 @@ describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクラ
   });
   it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
     const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
-    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-11");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-13");
   });
 });
 

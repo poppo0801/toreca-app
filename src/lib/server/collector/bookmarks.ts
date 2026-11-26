@@ -211,7 +211,7 @@ export async function runBookmarkSync(deps: BookmarkSyncDeps): Promise<BookmarkS
   } finally {
     // 利用量の記録（既存の月額集計 collection_runs.x_posts に含まれる）。読み取りが無かった呼び出しは記録しない
     if (calls > 0) {
-      await db.from("collection_runs").insert({ household_id: householdId, trigger: deps.trigger, phase: "bookmark", status: "done", started_at: now.toISOString(), finished_at: new Date().toISOString(), x_posts: res.billed, x_calls: calls, new_count: res.added, summary: [{ source: BOOKMARK_SOURCE_NAME, fetched: res.fetched, known: res.known, irrelevant: res.irrelevant, added: res.added }] } as never);
+      await db.from("collection_runs").insert({ household_id: householdId, trigger: deps.trigger, phase: "bookmark", status: "done", started_at: now.toISOString(), finished_at: new Date().toISOString(), x_posts: res.billed, x_calls: calls, new_count: res.added, summary: [{ source: BOOKMARK_SOURCE_NAME, fetched: res.fetched, known: res.known, irrelevant: res.irrelevant, added: res.added, ...(failure ? { status: "error", message: failure.slice(0, 200) } : {}) }], ...(failure ? { error_count: 1 } : {}) } as never);
     }
     const line = failure ? "" : `読み取り${res.fetched}件・新しい候補${res.added}件（既知${res.known}件・対象外${res.irrelevant}件）`;
     await tbl(db, "x_bookmark_links")
@@ -231,11 +231,16 @@ export async function runBookmarkSync(deps: BookmarkSyncDeps): Promise<BookmarkS
 export async function runBookmarkCron(db: Db, now = new Date(), deps: Partial<BookmarkSyncDeps> = {}): Promise<{ synced: number; skipped: number }> {
   if (!oauthConfig() && deps.cfg === undefined) return { synced: 0, skipped: 0 };
   const since = new Date(now.getTime() - BOOKMARK_MIN_INTERVAL_MS).toISOString();
-  const { data } = await tbl(db, "x_bookmark_links").select("household_id").eq("auto_sync", true).eq("status", "active").or(`last_synced_at.is.null,last_synced_at.lt.${since}`).limit(2);
+  const { data } = await tbl(db, "x_bookmark_links").select("household_id,last_error,updated_at").eq("auto_sync", true).eq("status", "active").or(`last_synced_at.is.null,last_synced_at.lt.${since}`).limit(2);
   let synced = 0;
-  for (const l of (data ?? []) as { household_id: string }[]) {
+  // 失敗した同期は、成功時刻（last_synced_at）が進まないため、以前は定期ワーカーの毎回（5分ごと）に再試行していた（本番: X APIの残高切れで1日288回）。
+  // 失敗の直後は BOOKMARK_FAILURE_BACKOFF_MS だけ待つ（失敗の記録＝last_error と updated_at）。手動の同期は対象外
+  const due = ((data ?? []) as { household_id: string; last_error?: string | null; updated_at?: string | null }[]).filter((l) => !l.last_error || !l.updated_at || now.getTime() - new Date(l.updated_at).getTime() >= BOOKMARK_FAILURE_BACKOFF_MS);
+  for (const l of due) {
     const r = await runBookmarkSync({ ...deps, db, householdId: l.household_id, trigger: "cron", now }).catch(() => null);
     if (r?.ok) synced++;
   }
   return { synced, skipped: ((data ?? []) as unknown[]).length - synced };
 }
+/** 自動同期が失敗したあと、次に試すまでの間隔 */
+export const BOOKMARK_FAILURE_BACKOFF_MS = 60 * 60_000;

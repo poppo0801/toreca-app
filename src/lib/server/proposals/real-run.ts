@@ -86,6 +86,8 @@ export interface RealRunOptions {
   escalation?: { model: string; auditRate: number };
   /** 判断だけ別のモデル（1段）。本番シャドーの judge_mode=single・judge_model と同じ構成を測るため */
   judgeModel?: string;
+  /** 推論の度合い（調査・判断。既定 low）。PRODUCTION_PARITY の比較用。上位モデルの判断にも judge を使う */
+  effort?: { agent?: import("@/lib/judgment/xsource/research-ai").AiEffort; judge?: import("@/lib/judgment/xsource/research-ai").AiEffort };
   /** 関門の1件上限（関門 checkJudgmentRealRun に渡した caps と同じ値。既定は従来の候補上限） */
   gatePerCaseCapJpy?: number;
   lockPath?: string;
@@ -158,9 +160,9 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       if (c === "auth") fatal = "auth_error"; // 認証・権限エラーは再試行しない
       else if (c === "rate") fatal = "rate_limited"; // 利用上限に当たったら、叩き続けない
     };
-    const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic });
-    const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic });
-    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }) }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate } : undefined;
+    const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic, ...(o.effort?.agent ? { effort: o.effort.agent } : {}) });
+    const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic, ...(o.effort?.judge ? { effort: o.effort.judge } : {}) });
+    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(o.effort?.judge ? { effort: o.effort.judge } : {}) }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate } : undefined;
     const searchTool = o.search ? makeSearchTool(o.search.provider) : undefined;
     const visionHandle = o.visionFactory ? o.visionFactory({ ticket, budget }) : o.vision ? { vision: o.vision } : undefined;
     const maxConsecutive = o.maxConsecutiveFailures ?? 3;
@@ -171,6 +173,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       if (budget.remainingJpy < limits.agentReserveJpy + limits.judgeReserveJpy) return finish("budget_exhausted");
       diagsThisCandidate = 0;
       const startedMs = Date.now();
+      const costBefore = budget.costJpy; // 失敗した試行でも、すでにかかった費用を記録する（以前は失敗時0円として記録され、評価の費用から漏れていた）
       const diagBefore = { ...base.diagnostics };
       if (o.liveFetch) await prefetchSourcePage({ db: o.db, householdId: o.householdId, candidate: c, fetchPage: o.liveFetch, ...(o.now ? { now: o.now } : {}) }); // 本番シャドーと同じ事前取得・保存（共通の前処理）
       const r = await generateProposalsForCandidate({
@@ -189,7 +192,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       if (vh === "auth_error") fatal = "auth_error";
       else if (vh === "rate_limited") fatal = "rate_limited"; // 画像解析の認証・利用上限エラーも、以降を止める
       if (!r.ok) {
-        base.rows.push({ candidate: short(c.id), status: "failed", proposals: 0, costJpy: 0, reason: r.reason });
+        base.rows.push({ candidate: short(c.id), status: "failed", proposals: 0, costJpy: Math.round((budget.costJpy - costBefore) * 10_000) / 10_000, reason: r.reason });
         emit({ kind: "candidate_failed", candidate: short(c.id), reason: r.reason });
         consecutive++;
       } else {
@@ -216,7 +219,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         try {
           const diag: Record<string, number> = {};
           for (const [k, v] of Object.entries(base.diagnostics)) if (v - (diagBefore[k] ?? 0) > 0) diag[k] = v - (diagBefore[k] ?? 0);
-          await o.afterCandidate({ candidate: c, ok: r.ok, costJpy: r.ok ? r.costJpy : 0, ...(r.ok ? { records: r.records } : { reason: r.reason }), ms: Date.now() - startedMs, diagnostics: diag });
+          await o.afterCandidate({ candidate: c, ok: r.ok, costJpy: r.ok ? r.costJpy : Math.round((budget.costJpy - costBefore) * 10_000) / 10_000, ...(r.ok ? { records: r.records } : { reason: r.reason }), ms: Date.now() - startedMs, diagnostics: diag });
         } catch {
           return finish("persist_failed");
         }
