@@ -634,8 +634,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   // 根拠のない「除外」は、応募の機会を失わせる被害が大きい。観察（引用つきで検証済み）の項目が1つも無いのに exclude としたものは、保留（検証の指摘）にする。AIの結論は書き換えない（再評価でAIが直す／人が確認する）
   if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
   // 取得したページ（応募先の公開ページ）の証拠が無いまま「除外」とするのは、取得できなかっただけの可能性があり、応募の機会を失わせる。人の確認に回す（投稿の原文だけで除外が妥当な場合も、人が確認する側に倒す）。AIの結論は書き換えない
-  // ただし「抽選の応募機会ではない」（先着・通常販売・まとめ等）は、投稿そのものが根拠になる（応募先のページが無いのが普通）
-  if (i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page") && claimClassOf(String(i.output.fields["exclude_reason"]?.value ?? "")) !== "not_lottery") issues.push("exclude_without_page_evidence");
+  // ただし「抽選の応募機会ではない」（先着・通常販売・まとめ等）と「他のTCGだけ」（引用が他のTCGの名称を明示。意味検証は下で行う）は、投稿そのものが根拠になる（応募先のページが無いのが普通）
+  if (i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page") && !["not_lottery", "other_tcg"].includes(claimClassOf(String(i.output.fields["exclude_reason"]?.value ?? "")))) issues.push("exclude_without_page_evidence");
   // 除外は、応募できない・対象外であることを示す根拠（exclude_reason・引用つき・検証済み）が要る。店舗や商品を観察できただけでは、除外の根拠にならない（応募の機会を失わせるため）
   if (i.output.decision === "exclude") {
     const r = i.output.fields["exclude_reason"];

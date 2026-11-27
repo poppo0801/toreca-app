@@ -46,7 +46,9 @@ const wk = {};
 for (const c of web) {
   const ev = c.last_good.evidence;
   const ds = (docBy.get(c.id) ?? []).filter((d) => d.origin.startsWith("collector"));
-  bump(wk, `via=${ev.via}/${ds.length ? "全文あり" : "全文なし"}`);
+  // 期間内に新しい版が無くても、同じ本文の版が以前から保存されていれば重複を作らない（期間外の版も確かめる）
+  const older = ds.length ? [] : ((await db.from("evidence_documents").select("origin,structure,created_at").eq("candidate_id", c.id).like("origin", "collector%").limit(5)).data ?? []);
+  bump(wk, `via=${ev.via}/${ds.length ? "全文あり" : older.length ? `全文あり(期間前の版${older.some((d) => d.structure) ? "・構造あり" : "・構造なし"})` : "全文なし"}/取得=${ev.page?.ok === false ? "失敗" : ev.page ? "成功" : "記録なし"}`);
 }
 p("Web候補の全文保存", { Web候補: web.length, ...wk });
 // 解析（取得）まで進んだWeb候補だけ（一覧の再確認だけの候補は取得しないので全文は作られない）

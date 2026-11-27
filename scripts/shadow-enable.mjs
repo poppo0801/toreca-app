@@ -195,13 +195,13 @@ if (opt("set-judge-model") !== undefined) {
   process.exit(r.error ? 1 : 0);
 }
 if (flag("set-budget")) {
-  // 承認された予算（利用者の明示承認 2026-11-26: 1件25円・日次140円・通算180円（ADAPTIVE_REVIEW で再承認）→ PRODUCTION_PARITY で通算380円（+200円）→ EVIDENCE_UTILIZATION（2026-11-27）で通算680円（+300円）に再承認。既定は従来の10/30/100）。per_case・daily・monthly・total だけを変える。期限（valid_until）・通算の起点（total_since）・世帯・キーは変えない。上限を超える値は拒否する
+  // 承認された予算（利用者の明示承認 2026-11-26: 1件25円・日次140円・通算180円（ADAPTIVE_REVIEW で再承認）→ PRODUCTION_PARITY で通算380円（+200円）→ EVIDENCE_UTILIZATION（2026-11-27）で通算680円（+300円）に再承認→ 同日、日次200円・通算1,250円（+570円）に再承認。既定は従来の10/30/100）。per_case・daily・monthly・total だけを変える。期限（valid_until）・通算の起点（total_since）・世帯・キーは変えない。上限を超える値は拒否する
   const per = Number(opt("per-case") ?? 10);
   const daily = Number(opt("daily") ?? 30);
   const total = Number(opt("total") ?? 100);
   const bad = (v, max) => !Number.isFinite(v) || v <= 0 || v > max;
-  if (bad(per, 25) || bad(daily, 140) || bad(total, 680)) {
-    console.error("承認された範囲（1件25円・日次140円・通算680円）を超えています");
+  if (bad(per, 25) || bad(daily, 200) || bad(total, 1250)) {
+    console.error("承認された範囲（1件25円・日次200円・通算1,250円）を超えています");
     process.exit(1);
   }
   const r = await db.from("shadow_settings").update({ per_case_cap_jpy: per, daily_budget_jpy: daily, monthly_budget_jpy: total, total_budget_jpy: total }).eq("household_id", hid);
