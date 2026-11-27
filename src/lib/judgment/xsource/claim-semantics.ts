@@ -9,7 +9,15 @@
  * 判別できないもの（未知の理由・役割が読み取れない引用）は「支持されていない／確認できない」として呼び出し側が保留にする。**検証済みと称さない**。
  */
 
-export type ClaimClass = "closed" | "sold_out" | "ineligible" | "out_of_area" | "not_lottery" | "unknown";
+export type ClaimClass = "closed" | "sold_out" | "ineligible" | "out_of_area" | "not_lottery" | "other_tcg" | "unknown";
+
+/**
+ * 管理の対象外（他のTCGだけ）の検証に使う、他のTCGの名称（EVIDENCE_UTILIZATION: 判断AIが「対象外の商品（他のTCG）」と正しく除外しても、
+ * 理由の種類が無く「対象外の語が引用に無い」として保留になっていた）。引用が他のTCGの名称を**明示**し、ポケモンカードの語を含まないときだけ支持する。
+ * 商品名だけ（例「拡張パック ○○」）はポケモンカードの可能性があるため支持しない（保留のまま）。
+ */
+const OTHER_TCG = /ワンピース|ONE ?PIECE|遊戯王|デュエル・?マスターズ|デュエマ|ヴァイス ?シュヴァルツ|Weiss ?Schwarz|マジック[:：・ ]?ザ[・ ]?ギャザリング|\bMTG\b|ドラゴンボール|ユニオン ?アリーナ|UNION ?ARENA|ヴァンガード|ロルカナ|Lorcana|シャドウバース|バトル ?スピリッツ|バトスピ|デジモンカード|ガンダム ?カード|ウィクロス|WIXOSS|ビルディバイド|ゼクス|Z\/X|hololive OFFICIAL CARD|ホロライブ ?(オフィシャル )?カード/i;
+const POKEMON = /ポケモン|ポケカ|ポケットモンスター|pok[eé]mon/i;
 
 const nf = (s: string): string => s.normalize("NFKC");
 
@@ -19,6 +27,8 @@ export function claimClassOf(value: string): ClaimClass {
   const v = nf(value).split("ではなく").pop() ?? nf(value);
   // 抽選の応募機会ではない（先着・通常販売・予約・商品情報・複数の抽選のまとめ・件数の集計）。INTENSIVE_EVALUATION: 投稿そのものが根拠になる除外
   if (/抽選(販売)?(では|で)?ない|抽選の(告知|応募機会)ではない|応募機会ではない|先着|通常販売|一般販売|予約販売|商品情報|まとめ|件数|集計|一覧の投稿/.test(v)) return "not_lottery";
+  // 管理の対象外（他のTCGだけ）。判断AIへの方針の書き方「対象外の商品（他のTCG）」と、その言い換え
+  if (/他の ?TCG|別の ?TCG|他の(トレーディング)?カードゲーム|ポケモンカード(では|で)?(ない|なく)|管理(の)?対象外/.test(v)) return "other_tcg";
   if (/完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売/.test(v)) return "sold_out";
   if (/受付終了|応募終了|募集終了|締め?切|〆切|期限切れ|期間外|終了/.test(v)) return "closed";
   if (/地域外|対象地域|エリア外|県外|圏外|所在地|地域.{0,6}(不適合|合わな|外)|適合しない/.test(v)) return "out_of_area";
@@ -165,6 +175,8 @@ export function checkExcludeSemantics(a: { claim: string; quote: string; now?: D
     if (/応募期間|抽選受付|応募受付|応募方法|ご応募|抽選販売の(お知らせ|ご案内)/.test(q) && !/まとめ|一覧|\d+件/.test(q)) return { ok: false, code: "contradicted", reason: "引用が抽選の受付を述べており、抽選ではないという理由と矛盾する" };
     return /先着|販売開始|発売|在庫|予約開始|販売中|購入可能|まとめ|一覧|\d+件|件数/.test(q) ? { ok: true, reason: "引用が販売の方式・まとめを述べている" } : { ok: false, code: "unsupported", reason: "引用に、抽選ではないこと（先着・販売開始・まとめ等）を示す記述が無い" };
   }
+  // 他のTCGだけ: 引用が他のTCGの名称を明示し、ポケモンカードの語を含まないこと（混在・商品名だけは支持しない）
+  if (cls === "other_tcg") return OTHER_TCG.test(q) && !POKEMON.test(q) ? { ok: true, reason: "引用が他のTCGの商品を明示している" } : { ok: false, code: "unsupported", reason: "引用に他のTCGの名称が明示されていない、またはポケモンカードの語を含む（対象の商品の可能性がある）" };
   if (cls === "unknown") return { ok: false, code: "unverifiable", reason: "除外理由の種類を機械的に判別できず、引用が支持するか確認できない（人が確認するまで保留）" };
   if (cls === "sold_out") return /完売|売り?切れ|売切|在庫(なし|無し|切れ)|品切れ|販売終了|終売|終了/.test(q) ? { ok: true, reason: "引用に売り切れ・終了を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、売り切れ・終了を表す記述が無い" };
   if (cls === "ineligible") return /対象外|非対象|限定|不可|できません|お受けできません|対象となりません|ご利用いただけません|対象でない|対象外となり/.test(q) ? { ok: true, reason: "引用に対象外・制限を表す語がある" } : { ok: false, code: "unsupported", reason: "引用に、対象外・応募不可を表す記述が無い" };

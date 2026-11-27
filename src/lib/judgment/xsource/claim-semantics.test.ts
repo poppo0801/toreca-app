@@ -22,6 +22,22 @@ const sequence = (outs: JudgeOutput[]): RegistrationJudge & { inputs: unknown[] 
 };
 const ex = (claim: string, quote: string, extra: Partial<Parameters<typeof checkExcludeSemantics>[0]> = {}) => checkExcludeSemantics({ claim, quote, now: NOW, ...extra });
 
+describe("除外理由: 他のTCGだけ（EVIDENCE_UTILIZATION の未見で、正しい除外が保留になっていた）", () => {
+  it("引用が他のTCGの名称を明示すれば支持。商品名だけ・ポケモンカードとの混在は支持しない", () => {
+    expect(claimClassOf("対象外の商品（他のTCG）")).toBe("other_tcg");
+    expect(ex("対象外の商品（他のTCG）", "ワンピースカードゲーム ブースターパック 架空の海")).toMatchObject({ ok: true });
+    expect(ex("対象外の商品（他のTCG）", "拡張パック 架空の名前")).toMatchObject({ ok: false, code: "unsupported" });
+    expect(ex("対象外の商品（他のTCG）", "遊戯王・ポケモンカード 同時抽選")).toMatchObject({ ok: false, code: "unsupported" });
+  });
+  it("応募先のページが無くても、投稿の引用で他のTCGが明示されていれば exclude_without_page_evidence にしない", () => {
+    const seed = { id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "・ONE PIECEカードゲーム 架空パック 抽選 12/1〆", structure: null, independent: true };
+    const o = out({ fields: { product: { value: "ONE PIECEカードゲーム 架空パック", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" } } });
+    expect(verifyRegistration({ output: o, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).issues).toEqual([]);
+    const pk = out({ fields: { product: { value: "拡張パック 架空", basis: "observed", evidenceId: "s1", quote: "架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "架空パック 抽選" } } });
+    expect(verifyRegistration({ output: pk, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("exclude_reason_unsupported");
+  });
+});
+
 describe("除外理由: 引用が実在するだけでは通らない（出典・対象・時点・意味の対応）", () => {
   it("当選発表・発送など別の事象の日時は、受付終了の根拠にならない（実在しても保留）", () => {
     expect(ex("受付終了", "当選発表： 11月24日(火)予定")).toMatchObject({ ok: false, code: "unsupported" });
