@@ -41,19 +41,19 @@ export const SHADOW_AUDIT_RATE = 0.2;
 /** 判断（既定・上位とも）の推論の度合い（PRODUCTION_PARITY の比較で決める。評価入口と同じ値を使う） */
 export const SHADOW_JUDGE_EFFORT: import("@/lib/judgment/xsource/research-ai").AiEffort = "low";
 /**
- * CAPABILITY_CEILING（利用者承認 2026-11-27: 本番シャドーで Haiku の思考を有効にする）。調査と既定の判断（Haiku）は effort medium＋思考。
- * 関数の実行時間（ジョブ70秒・呼び出し全体100秒）に収めるため、ジョブの開始から SHADOW_THINKING_WINDOW_MS を過ぎた呼び出しは思考しない（実行時の外枠。意味の判断ではない）。
- * 上位（Sonnet）の判断は従来どおり。停止: 環境変数 SHADOW_THINKING=off
+ * 思考（利用者承認 2026-11-27）。調査・既定の判断・上位の調査と判断は、effort medium＋適応型の思考。停止: 環境変数 SHADOW_THINKING=off。
+ * AUTONOMY_RESTORATION（V22）: 以前の「ジョブ開始から35秒を過ぎた呼び出しは思考しない」時間窓（後半の項目・判断だけ思考を削る設計）は撤廃した。
+ * 関数の時間枠は、呼び出しの待ち時間を実行の終わりに合わせることと、間に合わない項目を次の実行へ回す（再開）ことで守る
  */
 export const SHADOW_THINKING_EFFORT: import("@/lib/judgment/xsource/research-ai").AiEffort = "medium";
-export const SHADOW_THINKING_WINDOW_MS = 35_000;
 export const shadowThinkingEnabled = (env: Record<string, string | undefined> = process.env): boolean => env.SHADOW_THINKING !== "off";
+/** 1候補の再開の上限（暴走防止）。これを超えたら未完了の項目を残したまま完了にする（理由を記録） */
+export const SHADOW_MAX_RESUMES = 8;
 export { RESEARCH_WINDOW_MS as SHADOW_RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
-import { RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 /** 判断の呼び出し1回の予約（円）。調査用の既定（¥0.6）か、判断モデルの実測に近い想定（入力9,000・出力1,500トークン）の大きい方 */
 export const judgeReserveFor = (model: string): number => Math.max(0.6, Math.round(worstCaseCallJpy(model, 9_000, 1_500) * 100) / 100);
 /** maxSearches: 検索の回数（既定1。PRODUCTION_PARITY で比較。評価と本番で同じ値を使う） */
-export const shadowProposalLimits = (search: boolean, judgeModel?: string, maxSearches?: number): ResearchLimits => researchLimits({ maxElapsedMs: 60_000, search, searchReserveJpy: SHADOW_SEARCH_WORST_JPY, ...(judgeModel ? { judgeReserveJpy: judgeReserveFor(judgeModel) } : {}), ...(search && maxSearches ? { maxSearches } : {}) });
+export const shadowProposalLimits = (search: boolean, judgeModel?: string, maxSearches?: number): ResearchLimits => researchLimits({ search, searchReserveJpy: SHADOW_SEARCH_WORST_JPY, ...(judgeModel ? { judgeReserveJpy: judgeReserveFor(judgeModel) } : {}), ...(search && maxSearches ? { maxSearches } : {}) });
 export const SHADOW_PROPOSAL_LIMITS: ResearchLimits = shadowProposalLimits(false);
 
 
@@ -109,7 +109,7 @@ export function trialItems(records: readonly { proposalKey: string; decision: st
 }
 
 export type ProposalJobResult =
-  | { ok: true; fatal?: "auth_error" | "rate_limited"; status: "accepted" | "partial" | "error"; proposals: number; inserted: number; costJpy: number; stopped: boolean; diagnostics: Record<string, number>; revisions: { rounds: number; verified: number; held: number }; basisAt: string | null; decisions: Record<string, number>; trace: ProposalTrace; items: TrialItem[] }
+  | { ok: true; fatal?: "auth_error" | "rate_limited"; status: "accepted" | "partial" | "error"; proposals: number; inserted: number; costJpy: number; stopped: boolean; diagnostics: Record<string, number>; revisions: { rounds: number; verified: number; held: number }; basisAt: string | null; decisions: Record<string, number>; trace: ProposalTrace; items: TrialItem[]; /** 再開用（AUTONOMY_RESTORATION）: この実行で調べた項目・まだ調べていない項目・項目の総数 */ doneItems?: number[]; pendingItems?: number[]; totalItems?: number }
   | { ok: false; reason: string; fatal?: "auth_error" | "rate_limited"; /** 失敗でも、すでにかかった費用（円）。記録して予算から差し引く */ costJpy?: number; trace?: ProposalTrace };
 
 const classify = (reason: string): "auth" | "rate" | "other" => (/api_error:(401|403)\b/.test(reason) ? "auth" : /api_error:429\b/.test(reason) ? "rate" : "other");
@@ -131,6 +131,12 @@ export async function runShadowProposalJob(a: {
   searchProvider?: SearchProviderLike;
   /** テスト用: 取得の下位部品（safe-fetch）の差し替え。外部アクセスをモックしても、本番と同じ入口・許可・道具の契約を通る */
   fetchHooks?: Pick<NonNullable<Parameters<typeof makeShadowLivePublicFetch>[0]>, "fetchImpl" | "sleep" | "now">;
+  /** AUTONOMY_RESTORATION（再開）: 1回の実行を安全に終えるべき時刻（関数の時間枠）。無ければ時間枠なし */
+  runDeadlineMs?: number;
+  /** 同じジョブの以前の実行で完了した項目（この実行では調べない） */
+  doneItems?: readonly number[];
+  /** 同じジョブの以前の実行で使った費用（円）。1候補の上限は再開をまたいで合算する */
+  spentOnJobJpy?: number;
 }): Promise<ProposalJobResult> {
   const env = a.env ?? process.env;
   const jobStartMs = Date.now(); // 実際の時刻（基準時刻とは別）
@@ -147,7 +153,9 @@ export async function runShadowProposalJob(a: {
   const upperModel = a.settings.judge_model && MODEL_PRICES[a.settings.judge_model] ? a.settings.judge_model : null; // 料金が分からないモデルは採用しない（費用を保証できない）
   const adaptive = a.settings.judge_mode === "adaptive" && !!upperModel;
   const judgeModel = adaptive ? null : upperModel; // 適応型: 1段目は調査と同じ（安価な）モデル、上位は必要なときだけ
-  const caseCap = Math.min(a.settings.per_case_cap_jpy, 25, a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
+  // 1候補の上限（承認額）は、再開をまたいで合算する（再開で上限を回避しない）
+  const caseCap = Math.min(a.settings.per_case_cap_jpy - (a.spentOnJobJpy ?? 0), 25 - (a.spentOnJobJpy ?? 0), a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
+  if (!(caseCap > 0.5)) return { ok: false, reason: "budget_per_case_exhausted" };
   const t = issueProductionShadowTicket(decision, { model: env.SHADOW_PROPOSAL_MODEL?.trim() || "claude-haiku-5-5", totalCapJpy: caseCap, perCaseCapJpy: caseCap });
   if (!t.ok) return { ok: false, reason: `ticket:${t.reason}` };
   if (a.runBudget && a.runBudget.remainingCalls < 8) return { ok: false, reason: "run_call_limit" };
@@ -178,7 +186,9 @@ export async function runShadowProposalJob(a: {
 
   // ---- 実行前の最悪費用の検査（通らなければ1回も呼ばない）。画像解析を渡すときは、その最悪費用も予約に含める
   const imageWorst = worstCaseVisionCallJpy(t.ticket.model, [{ width: 1200, height: 1600 }]);
-  const wantVision = (stored?.imageRefs?.length ?? 0) > 0;
+  // 画像の解析（利用者承認 2026-11-28: 本番シャドーでの画像の解析を承認）。停止: 環境変数 SHADOW_VISION=off
+  const visionOff = env.SHADOW_VISION === "off";
+  const wantVision = (stored?.imageRefs?.length ?? 0) > 0 && !visionOff;
   const pfOf = (withImage: boolean) => preflightRun({ model: judgeModel ?? t.ticket.model, totalJpy: caseCap, perCaseJpy: caseCap, cases: 1, limits, maxInputTokens: 24_000, maxOutputTokens: OUTPUT_MAX_TOKENS, ...(withImage ? { images: { perCaseCount: 1, worstJpyEach: imageWorst } } : {}) });
   let useVision = wantVision;
   let pf = pfOf(useVision);
@@ -188,7 +198,7 @@ export async function runShadowProposalJob(a: {
     pf = pfOf(false);
   }
   if (!pf.ok) return { ok: false, reason: "budget" };
-  if (!wantVision) why.vision = "no_images";
+  if (!wantVision) why.vision = visionOff ? "disabled" : "no_images";
 
   // 取得元ページの事前取得・保存（AIの費用なし・現行の収集とは独立）。保存した全文は、調査（generate の fetchPage）が最優先で読む。失敗しても調査は続く
   let prefetch = "not_permitted";
@@ -206,12 +216,16 @@ export async function runShadowProposalJob(a: {
     else if (c === "rate") state.fatal = "rate_limited";
   };
   const basisAt = stored?.fetchedAt ?? null; // 収集時刻（評価の基準時刻）
-  // 思考（CAPABILITY_CEILING）: 調査と、調査と同じモデルでの既定の判断だけ。ジョブ開始から一定時間内の呼び出しだけ思考する（実行時間の外枠）
-  const think = shadowThinkingEnabled(env) ? (): boolean => Date.now() - jobStartMs < SHADOW_THINKING_WINDOW_MS : null;
-  const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, onDiagnostic, ...(think ? { thinking: think, effort: SHADOW_THINKING_EFFORT } : {}) });
-  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic, ...(think && !judgeModel ? { thinking: think, effort: SHADOW_THINKING_EFFORT } : { effort: SHADOW_JUDGE_EFFORT }) });
-  const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), effort: SHADOW_JUDGE_EFFORT }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
-  const budget = new CallBudget({ maxCalls: 24, maxCostJpy: caseCap });
+  // 思考: 調査・既定の判断・上位の調査と判断のすべて（後半だけ削らない）。呼び出しの待ち時間は実行の終わりに合わせる
+  const think = shadowThinkingEnabled(env);
+  const callDeadline = a.runDeadlineMs !== undefined ? (): number => a.runDeadlineMs! : undefined;
+  const ai = (extra: { reason?: (d: AiDiagnostic) => AiDiagnostic } = {}) => ({ onDiagnostic: (d: AiDiagnostic) => onDiagnostic(extra.reason ? extra.reason(d) : d), ...(think ? { thinking: true, effort: SHADOW_THINKING_EFFORT } : { effort: SHADOW_JUDGE_EFFORT }), ...(callDeadline ? { callDeadlineMs: callDeadline } : {}) });
+  const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, ...ai() });
+  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, ...ai() });
+  // 上位: 判断だけでなく、自ら検索・取得・原文の読み戻しをする調査AIも持つ（AUTONOMY_RESTORATION）。上げるかは固定の条件でなく、検証の矛盾・重大な不明・AI自身の要求で決まる
+  const upperTag = { reason: (d: AiDiagnostic): AiDiagnostic => ({ ...d, reason: `upper:${d.reason}` }) };
+  const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, ...ai(upperTag) }), agent: makeAnthropicResearchAgent(a.client, { model: upperModel, ...ai(upperTag) }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
+  const budget = new CallBudget({ maxCalls: 60, maxCostJpy: caseCap }); // 呼び出しの回数は暴走防止の外枠（費用は caseCap が縛る）
   if (useVision) {
     // 画像解析も同じ予算（budget）を共有する。1件あたり最大1枚。取得は既存の安全な画像取得（SSRF・サイズ・時間の検査）
     const v = makeRealVisionClient({ client: a.client as never, ticket: t.ticket, budget, fetchImage: (u) => fetchPublicImage(u), splitImage: splitPublicImage, model: t.ticket.model, maxImages: 1 });
@@ -223,7 +237,7 @@ export async function runShadowProposalJob(a: {
     householdId: a.householdId,
     candidate: a.candidate,
     env,
-    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, researchDeadlineMs: jobStartMs + RESEARCH_WINDOW_MS, ...(escalation ? { escalation, modelId: `${t.ticket.model}+adaptive:${upperModel}` } : {}), ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
+    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, ...(a.runDeadlineMs !== undefined ? { runDeadlineMs: a.runDeadlineMs } : {}), ...(a.doneItems?.length ? { skipItems: new Set(a.doneItems) } : {}), ...(escalation ? { escalation, modelId: `${t.ticket.model}+adaptive:${upperModel}` } : {}), ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
   });
   if (a.runBudget) absorbBudget(a.runBudget, budget);
   const spent = Math.round(budget.costJpy * 10_000) / 10_000;
@@ -249,9 +263,14 @@ export async function runShadowProposalJob(a: {
   }
   if (r.storage.images) trace.images = { ...r.storage.images } as unknown as Record<string, number>;
   const failedAll = r.records.length > 0 && r.records.every((x) => x.decision === "none");
+  const pendingItems = r.pendingItems ?? [];
   return {
     ok: true,
-    status: failedAll ? "error" : r.stopped ? "partial" : "accepted",
+    // partial = 時間・中止で調べていない項目が残る（次の実行で再開する。保留・除外ではない）
+    status: failedAll ? "error" : r.stopped || pendingItems.length ? "partial" : "accepted",
+    doneItems: [...(a.doneItems ?? []), ...(r.processedItems ?? [])],
+    pendingItems,
+    ...(r.totalItems !== undefined ? { totalItems: r.totalItems } : {}),
     proposals: r.records.length,
     inserted: r.save.inserted,
     costJpy: spent,

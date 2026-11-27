@@ -77,7 +77,7 @@ describe("最終の登録境界: 根拠が無効な断定を本登録・除外�
     const r = await runResearch({ caseId: "c", seed, agent, judge, tools: tools(), budget: budget() });
     expect(r.registration).toMatchObject({ decision: "register", finalDecision: "tentative", verified: false, proposals: [] });
     expect(r.registration.held?.reasons).toEqual(["quote_not_found:deadline"]);
-    expect(judge.inputs).toHaveLength(2); // 1回だけ再評価（無限に繰り返さない）
+    expect(judge.inputs).toHaveLength(4); // 再評価1回のあと、調査へ1回だけ戻ってもう一度（AUTONOMY_RESTORATION）。無限に繰り返さない
     expect(effectiveDecision({ decision: "register", verified: false })).toBe("tentative");
     expect(effectiveDecision({ decision: "exclude", verified: false })).toBe("tentative");
     expect(effectiveDecision({ decision: "register", verified: true })).toBe("register");

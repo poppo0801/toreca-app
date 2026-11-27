@@ -150,7 +150,9 @@ describe("検証層: 根拠の実在・不明値・人が確定した値の保�
   it("検証に失敗したら理由をAIに返して限定的に再評価し（1回）、解消しなければ実行不可（held）として理由を示す。別の結論に置き換えない", async () => {
     const judge = judgeOf({ fields: { deadline: { value: "11/24", basis: "observed", evidenceId: "s1", quote: "存在しない引用" } } });
     const r = await runResearch({ caseId: "c1", seed, agent: scripted([turn({ kind: "stop", reason: "sufficient", why: "" })]), judge, tools: tools({}), budget: budget() });
-    expect(judge.inputs).toHaveLength(2); // 初回＋限定的な再評価（1回）
+    // 初回＋限定的な再評価（1回）。解消しないので調査へ戻り（AUTONOMY_RESTORATION）、もう一度 初回＋再評価。回数は外枠の範囲で有限
+    expect(judge.inputs).toHaveLength(4);
+    expect(JSON.stringify(r.trace)).toContain("resume_research");
     const vi = (judge.inputs[1] as { verificationIssues: string[] }).verificationIssues;
     expect(vi).toHaveLength(1);
     expect(vi[0]).toContain("quote_not_found:deadline"); // 原因（原文に見当たらない）と、写せないときの対処つき

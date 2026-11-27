@@ -43,13 +43,18 @@ describe("除外理由: 他のTCGだけ（EVIDENCE_UTILIZATION の未見で、�
     const seed = { id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "・ONE PIECEカードゲーム 架空パック 抽選 12/1〆", structure: null, independent: true };
     const o = out({ fields: { product: { value: "ONE PIECEカードゲーム 架空パック", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" } } });
     expect(verifyRegistration({ output: o, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).issues).toEqual([]);
-    const pk = out({ fields: { product: { value: "拡張パック 架空", basis: "observed", evidenceId: "s1", quote: "架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "架空パック 抽選" } } });
-    expect(verifyRegistration({ output: pk, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("exclude_reason_unsupported");
+    // AUTONOMY_RESTORATION: 他のTCGかどうか（商品の意味）は語彙で検査しない。AIの申告（excludeKind・productKind）どうしの矛盾だけを止める
+    const pk = out({ excludeKind: "not_managed_product", productKind: "pokemon_card", fields: { product: { value: "拡張パック 架空", basis: "observed", evidenceId: "s1", quote: "架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "架空パック 抽選" } } });
+    expect(verifyRegistration({ output: pk, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("exclude_kind_conflicts_product");
   });
-  it("引用は他のTCGでも、同じ証拠にポケモンカードの記載があれば混在として保留（局所の引用で混在の告知を除外しない）", () => {
+  it("混在の告知は、単語の有無で止めない（AUTONOMY_RESTORATION: 混在かどうか・別々の機会かはAIが判断する）。本登録案で商品の種類を対象外・不明と申告していれば止める", () => {
     const mixed = { id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "・ONE PIECEカードゲーム 架空パック 抽選 12/1〆\n・ポケモンカードゲーム 架空BOX 抽選 12/1〆", structure: null, independent: true };
-    const o = out({ fields: { product: { value: "ONE PIECEカードゲーム 架空パック", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" } } });
-    expect(verifyRegistration({ output: o, evidence: [mixed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("exclude_reason_mixed_products");
+    const o = out({ excludeKind: "not_managed_product", productKind: "other_tcg", fields: { product: { value: "ONE PIECEカードゲーム 架空パック", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" } } });
+    expect(verifyRegistration({ output: o, evidence: [mixed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toEqual([]);
+    const fig = out({ decision: "register", productKind: "non_card_goods", fields: { product: { value: "架空フィギュア", basis: "observed", evidenceId: "s1", quote: "ポケモンカードゲーム 架空BOX" } } });
+    expect(verifyRegistration({ output: fig, evidence: [mixed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("register_product_not_managed");
+    const unk = out({ decision: "register", productKind: "unknown", fields: {} });
+    expect(verifyRegistration({ output: unk, evidence: [mixed as never], protectedFields: {}, now: NOW }).blocking).toContain("register_product_unknown");
   });
 });
 
@@ -141,10 +146,19 @@ describe("検証層への接続（実在と意味を別に扱い、安全側に�
     expect(v(out({ decision: "register", fields: { deadline: F("2026-11-30 22:59", "11月30 日(月)22：59まで") } })).blocking).not.toContain("register_deadline_passed");
     expect(v(out({ decision: "tentative", fields: { deadline: F("2026-11-30 22:59", "11月30 日(月)22：59まで") } }), late).blocking).not.toContain("register_deadline_passed");
   });
-  it("締切の値が当選発表の日付なら本登録を止める（deadline は重要項目）", () => {
+  it("締切の値が当選発表の日付に見えるときは、止めずにAIへ確かめ直しを求める（AUTONOMY_RESTORATION: 日付の役割は意味の判断。語で止めない）", () => {
     const r = v(out({ decision: "register", fields: { deadline: F("2026-12-02", "当選発表： 12月2日(水)予定") } }));
-    expect(r.blocking).toEqual(["deadline_role_mismatch:deadline"]);
-    expect(r.details[0]).toContain("別の事象");
+    expect(r.blocking).toEqual([]);
+    expect(r.advisories.join(" ")).toContain("deadline_role_doubt:deadline");
+    expect(r.unconfirmed.join(" ")).toContain("別の事象");
+  });
+  it("確かめ直しは一度だけ。AIが根拠をもって維持すれば、そのまま採用する（同じ証拠の機械的な保留にしない）", async () => {
+    const o = out({ decision: "register", fields: { deadline: F("2026-12-02", "当選発表： 12月2日(水)予定") } });
+    const judge = sequence([o, o]);
+    const r = await runResearch({ caseId: "c", seed: seedEvidence("s1", "当選発表： 12月2日(水)予定", NOW), agent, judge, tools: tools(), budget: new CallBudget({ maxCalls: 30, maxCostJpy: 100 }) });
+    expect(judge.inputs.length).toBe(2);
+    expect(JSON.stringify((judge.inputs[1] as { verificationIssues: string[] }).verificationIssues)).toContain("確認の指摘");
+    expect(r.registration.finalDecision).toBe("register");
   });
   it("推論（inferred）の引用も実在を検証する。無効な引用は確定根拠にならない（重要項目は止め、任意項目はその項目だけ不採用）", () => {
     const r = v(out({ decision: "register", fields: { apply_unit: F("per_store", "店舗ごとに1回の応募", "inferred"), memo: F("特記", "存在しない備考", "inferred"), store: F("架空店", "【架空店】拡張パック") } }));
@@ -169,7 +183,8 @@ describe("検証層への接続（実在と意味を別に扱い、安全側に�
     const r = await runResearch({ caseId: "c", seed, agent, judge, tools: tools(), budget: new CallBudget({ maxCalls: 30, maxCostJpy: 100 }) });
     expect(r.registration).toMatchObject({ decision: "exclude", finalDecision: "tentative", verified: false });
     expect(r.registration.held?.reasons).toEqual(["exclude_reason_unsupported"]);
-    expect(judge.inputs.length).toBe(2); // 1回の判断＋maxRevisions(1)回の再評価。増えない
+    // 1回の判断＋maxRevisions(1)回の再評価のあと、検証で矛盾が残るので調査へ戻り（AUTONOMY_RESTORATION）、もう一度判断＋再評価。それでも通らなければ暫定（応募の機会を消さない）。上限を超えて増えない
+    expect(judge.inputs.length).toBe(4);
     expect(JSON.stringify((judge.inputs[1] as { verificationIssues: string[] }).verificationIssues)).toContain("別の事象");
   });
   it("正しい除外は維持される（誤って保留にしない）", async () => {

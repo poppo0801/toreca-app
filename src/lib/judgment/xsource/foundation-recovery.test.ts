@@ -178,7 +178,10 @@ describe("RUNTIME_CORRECTNESS: 応募単位の推定（inferred）の検証", ()
     const ev = { id: "p1", kind: "page" as const, url: "https://shop.example/i", fetchedAt: NOW.toISOString(), contentHash: "h", text: "商品A 抽選販売 応募期間 11月24日〜11月27日 抽選に応募する", structure: null, independent: true };
     const out = (basis: "observed" | "inferred") => ({ decision: "register" as const, fields: { apply_unit: { value: "one_form_one", basis, evidenceId: "p1", quote: "抽選に応募する" } }, rationale: "r", unresolvedImpact: "minor" as const, monitor: { continue: true, why: "w" }, costJpy: 0 });
     expect(verifyRegistration({ output: out("inferred"), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues.filter((x) => x.includes("apply_unit"))).toEqual([]);
-    expect(verifyRegistration({ output: out("observed"), evidence: [ev], protectedFields: {}, registerRequiresUnit: true }).issues).toContain("unit_quote_unsupported:apply_unit");
+    // AUTONOMY_RESTORATION: 引用が応募単位を述べているかは意味の判断。止めずに、AIへ一度だけ確かめ直しを求める
+    const vo = verifyRegistration({ output: out("observed"), evidence: [ev], protectedFields: {}, registerRequiresUnit: true });
+    expect(vo.blocking).toEqual([]);
+    expect(vo.advisories.join(" ")).toContain("unit_quote_doubt:apply_unit");
   });
 });
 
@@ -227,9 +230,9 @@ describe("ADAPTIVE_REVIEW 適応型判断", () => {
     expect(escalationReason({ output: reg({ value: "不明", basis: "unknown" }), verified: true, evidence: ev, caseId: "c", auditRate: 0 })).toBe("fit_unconfirmed");
     expect(escalationReason({ output: reg({ value: "適合", basis: "observed" }), verified: true, evidence: ev, caseId: "c", auditRate: 0 })).toBeNull();
   });
-  it("根拠のページが1つも無い暫定は上げない（情報が無いときはモデルを変えても解決しない）", async () => {
+  it("根拠のページが無い暫定でも、重大な不明なら上位に上げる（AUTONOMY_RESTORATION: 上位は追加の調査もできるため、ページの有無で決めない）", async () => {
     const { calls } = await run(jo({}), [jo({ decision: "register" })], { autoFetch: false });
-    expect(calls.upper).toBe(0);
+    expect(calls.upper).toBe(1);
   });
   it("応募単位の推定: 本登録案で引用の無い推定・受付枠が複数のページを根拠にした単一応募の推定は、検証で止める", async () => {
     const { verifyRegistration } = await import("./research-loop");

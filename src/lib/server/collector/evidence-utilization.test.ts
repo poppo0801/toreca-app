@@ -162,15 +162,28 @@ describe("配線（本番の経路）", () => {
   });
 });
 
-describe("本番シャドーの思考（CAPABILITY_CEILING・利用者承認 2026-11-27）", () => {
-  it("既定で有効・SHADOW_THINKING=off で停止。調査と既定の判断だけ、ジョブ開始から一定時間内の呼び出しだけ思考する（実行時間の外枠）", async () => {
-    const { shadowThinkingEnabled, SHADOW_THINKING_WINDOW_MS, SHADOW_THINKING_EFFORT } = await import("@/lib/server/shadow/proposal-job");
+describe("本番シャドーの思考と再開（AUTONOMY_RESTORATION・V22）", () => {
+  it("思考は既定で有効（SHADOW_THINKING=off で停止）。後半だけ思考を削る時間窓は撤廃し、上位も調査AIを持つ。項目の時間は1回の実行の外枠で、間に合わない項目は次の実行へ回す", async () => {
+    const { shadowThinkingEnabled, SHADOW_THINKING_EFFORT, SHADOW_MAX_RESUMES } = await import("@/lib/server/shadow/proposal-job");
+    const { itemTiming, MIN_ITEM_START_MS, JUDGE_RESERVE_MS, researchLimits } = await import("@/lib/server/proposals/pipeline");
     expect(shadowThinkingEnabled({})).toBe(true);
     expect(shadowThinkingEnabled({ SHADOW_THINKING: "off" })).toBe(false);
     expect(SHADOW_THINKING_EFFORT).toBe("medium");
-    expect(SHADOW_THINKING_WINDOW_MS).toBeLessThan(45_000);
+    expect(SHADOW_MAX_RESUMES).toBeGreaterThan(1);
     const src = readFileSync("src/lib/server/shadow/proposal-job.ts", "utf8");
-    expect(src).toMatch(/Date\.now\(\) - jobStartMs < SHADOW_THINKING_WINDOW_MS/);
-    expect(src).toMatch(/think && !judgeModel \? \{ thinking: think/); // 上位・別モデルの判断には付けない
+    expect(src).not.toMatch(/SHADOW_THINKING_WINDOW_MS/);
+    expect(src).toMatch(/agent: makeAnthropicResearchAgent\(a\.client, \{ model: upperModel/); // 上位の調査AI
+    // 項目の時間: 実行の終わりまで判断の時間を残す。足りなければ始めない
+    let now = 1_000_000;
+    const t = itemTiming(now + 200_000, () => now);
+    expect(t.canStartItem()).toBe(true); // 最初の項目
+    expect(t.itemDeadline()).toBe(now + 200_000 - JUDGE_RESERVE_MS);
+    now += 200_000 - MIN_ITEM_START_MS + 1;
+    expect(t.canStartItem()).toBe(false); // 2件目以降: 調査と判断の両方の時間が残らない
+    const t2 = itemTiming(now + JUDGE_RESERVE_MS + 20_000, () => now);
+    expect(t2.canStartItem()).toBe(true); // どの実行でも最初の1件は、判断の時間が残れば始める（空回りしない）
+    expect(itemTiming(undefined, () => now).canStartItem()).toBe(true); // 隔離評価: 実行の時間枠なし
+    // 回数の上限は暴走防止の外枠（以前のターン4・取得3・検索1・修正1は能力を抑えていた）
+    expect(researchLimits({ search: true })).toMatchObject({ maxTurns: 10, maxFetches: 8, maxSearches: 4, maxRevisions: 2, maxReads: 16 });
   });
 });

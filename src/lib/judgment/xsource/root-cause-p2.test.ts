@@ -92,8 +92,10 @@ describe("P2 原因: 応募単位の保存（列挙値の注釈）・未確定�
     const ev = [{ id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "【A店】拡張パック 抽選 お1人様1回", structure: null, independent: true }] as never;
     const out = (unit: unknown, decision = "register") => ({ decision, fields: { store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, ...(unit === undefined ? {} : { apply_unit: unit }) }, rationale: "", unresolvedImpact: "minor", monitor: { continue: true, why: "" }, costJpy: 0 }) as never;
     const v = (o: never, flag = true) => verifyRegistration({ output: o, evidence: ev, protectedFields: {}, registerRequiresUnit: flag }).issues;
-    expect(v(out({ value: null, basis: "unknown" }))).toEqual(["register_unit_unresolved"]);
-    expect(v(out(undefined))).toEqual(["register_unit_unresolved"]);
+    // AUTONOMY_RESTORATION: 応募単位の形式を本登録の必須条件にしない（未確定は確認事項として示す。登録案は人が確認する）
+    expect(v(out({ value: null, basis: "unknown" }))).toEqual([]);
+    expect(v(out(undefined))).toEqual([]);
+    expect(verifyRegistration({ output: out(undefined), evidence: ev, protectedFields: {}, registerRequiresUnit: true }).unconfirmed.join(" ")).toContain("応募単位が未確定");
     expect(v(out({ value: "one_form_one", basis: "inferred" }))).toEqual(["unit_inferred_without_quote:apply_unit"]); // ADAPTIVE_REVIEW: 本登録案の応募単位の推定には、構造の根拠（証拠と引用）が要る
     expect(v(out({ value: "one_form_one", basis: "inferred", evidenceId: "s1", quote: "【A店】拡張パック 抽選" }))).toEqual([]);
     expect(v(out({ value: "per_store", basis: "observed", evidenceId: "s1", quote: "お1人様1回" }))).toEqual([]);
@@ -118,7 +120,7 @@ describe("P2 原因: 応募単位の保存（列挙値の注釈）・未確定�
     const { JUDGE_SYSTEM, RESEARCH_SYSTEM } = await import("./research-ai");
     for (const t of ["one_form_one:", "store_select:", "per_store:", "per_product:", "実際のフォーム上の、応募できる権利の単位", "確定できないなら暫定（tentative）"]) expect(JUDGE_SYSTEM, t).toContain(t);
     expect(RESEARCH_SYSTEM).toContain("検索しない（そのページを取得して確認する）");
-    expect(JUDGE_SYSTEM.length).toBeLessThan(8400); // EVIDENCE_UTILIZATION で管理の対象の方針・除外/暫定でも全項目（約700字）を追加 →8400 // INTENSIVE_EVALUATION で全項目の定義・記載の状態・人の確認・条件・抽選でない投稿（約2,000字）を追加 →7600 // 入力の増加は小さい（費用への影響は §対照で試算）。Phase 3 基盤立て直しで応募単位と上限の分離（約430字）を追加し、4000→4600、RUNTIME_CORRECTNESS で地域適合・受付時刻の根拠（約350字）を追加し→5200
+    expect(JUDGE_SYSTEM.length).toBeLessThan(9000); // AUTONOMY_RESTORATION で商品の種類・除外の種類・追加の検討の申告（約400字）を追加 →9000（性能優先。指示の長さの削減は利用者の方針で後回し） // EVIDENCE_UTILIZATION で管理の対象の方針・除外/暫定でも全項目（約700字）を追加 →8400 // INTENSIVE_EVALUATION で全項目の定義・記載の状態・人の確認・条件・抽選でない投稿（約2,000字）を追加 →7600 // 入力の増加は小さい（費用への影響は §対照で試算）。Phase 3 基盤立て直しで応募単位と上限の分離（約430字）を追加し、4000→4600、RUNTIME_CORRECTNESS で地域適合・受付時刻の根拠（約350字）を追加し→5200
   });
 });
 
@@ -131,9 +133,9 @@ describe("P2 原因: ページ証拠なしの除外（r10:2）は人の確認に
     const v = (o: never, evs: unknown[], flag = true) => verifyRegistration({ output: o, evidence: evs as never, protectedFields: {}, registerRequiresUnit: flag, now: new Date("2026-11-25T03:00:00Z") }).issues;
     // CAPABILITY_CEILING（利用者の決定 2026-11-27）: 受付終了は、締切の役割・評価時点より前・矛盾なしの客観的な整合を通れば、応募先のページが無くても止めない（AIが投稿元・延長の有無も踏まえて判断する）
     expect(v(out("s1"), [seed])).toEqual([]);
-    // 受付終了以外（例: 対象外の条件）は、従来どおりページ証拠が無ければ人の確認へ
+    // AUTONOMY_RESTORATION（V22）: 応募先のページの有無で除外を止める規則は撤廃した（どの理由でも、意味の判断はAI。引用の実在と申告に応じた客観的な整合だけを確かめる）
     const inel = { ...(out("s1") as unknown as Record<string, unknown>), fields: { product: { value: "拡張パック", basis: "observed", evidenceId: "s1", quote: "拡張パック" }, exclude_reason: { value: "対象外（会員限定）", basis: "observed", evidenceId: "s1", quote: "拡張パック抽選" } } } as never;
-    expect(v(inel, [seed])).toContain("exclude_without_page_evidence");
+    expect(v(inel, [seed])).not.toContain("exclude_without_page_evidence");
     expect(v(out("p1"), [seed, pageEv])).toEqual([]); // 受付終了のページを確認して除外
     expect(v(out("s1"), [seed], false)).toEqual([]); // 従来の経路は変えない
   });

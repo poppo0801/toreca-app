@@ -49,6 +49,8 @@ start({
   // CAPABILITY_CEILING: --profile=relaxed（調査の上限を広げる）・--thinking=agent,judge|all（思考を使う）・--page-view=full|related|legacy
   INTENSIVE_PROFILE: arg("profile") ?? "",
   INTENSIVE_THINKING: arg("thinking") ?? "",
+  // AUTONOMY_RESTORATION: --run-window=<ミリ秒> で本番の1回の実行の時間枠を再現（間に合わない項目は再開）。--thinking=none で思考なし（比較用。既定は本番と同じ思考あり）
+  INTENSIVE_RUN_WINDOW_MS: arg("run-window") ?? "",
   ...(arg("page-view") ? { PAGE_VIEW_MODE: arg("page-view") } : {}),
   JUDGMENT_REAL_EVAL: "allow",
   JUDGMENT_REUSE_EXISTING_KEY: "allow",

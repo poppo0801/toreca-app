@@ -55,8 +55,14 @@ export interface GenerateDeps {
   vision?: VisionClient;
   /** 調査経験の反映と蓄積（既定 true）。false で、経験を読まず・書かない（比較実験の対照群） */
   learn?: boolean;
-  /** 適応型判断の2段目（上位モデルの判断）。無ければ1段 */
-  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
+  /** 適応型判断の2段目（上位モデルの判断）。agent があれば上位が追加の調査もする（AUTONOMY_RESTORATION）。無ければ1段 */
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean; agent?: import("@/lib/judgment/xsource/research-loop").ResearchAgent };
+  /** AUTONOMY_RESTORATION（再開可能な実行）: 以前の実行で完了した項目番号（この実行では調べない） */
+  skipItems?: ReadonlySet<number>;
+  /** 次の項目を始めてよいか（1回の実行の残り時間）。false なら以降の項目は次の実行へ（未完了） */
+  canStartItem?: () => boolean;
+  /** 項目ごとの調査の締切（項目を始めるときに評価） */
+  itemDeadline?: () => number | undefined;
 }
 
 /** 費用ゼロのモード（既定）。実AIではない */
@@ -149,7 +155,7 @@ const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g,
 
 /** 失敗の分類（内容・機密を含めない）。無言で握りつぶさず、呼び出し側が記録できる */
 export type FailReason = "disabled" | "no_evidence" | "run_failed" | "real_not_permitted" | "no_budget" | "save_failed";
-export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSummary; storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number }; experiences?: { saved: number; hinted: number }; images?: ImageAnalysisResult["counts"] }; stopped: boolean; costJpy: number } | { ok: false; reason: FailReason };
+export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSummary; storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number }; experiences?: { saved: number; hinted: number }; images?: ImageAnalysisResult["counts"] }; stopped: boolean; costJpy: number; /** この実行で調べた項目・まだ調べていない項目（再開用）・項目の総数 */ processedItems?: number[]; pendingItems?: number[]; totalItems?: number } | { ok: false; reason: FailReason };
 
 type Loose = { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -338,6 +344,9 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       ...(userRegion ? { userRegion } : {}),
       protectedFor,
       ...(deps.perItemCapJpy ? { budgetFor: () => new CaseBudget(budget, deps.perItemCapJpy!) } : {}),
+      ...(deps.skipItems ? { skipItems: deps.skipItems } : {}),
+      ...(deps.canStartItem ? { canStartItem: deps.canStartItem } : {}),
+      ...(deps.itemDeadline ? { itemDeadline: deps.itemDeadline } : {}),
     });
     const records = toProposalRecords({ candidateId: a.candidate.id, post, run, mode: deps.mode, modelId: deps.modelId, fetchedAt: stored?.fetchedAt ?? null, protectedFor, correctionSkipped });
     const save = a.persist === false ? { inserted: 0, unchanged: 0, superseded: 0, failed: 0 } : await saveProposals(a.db, a.householdId, records);
@@ -365,7 +374,7 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
         storage.experiences = { saved, hinted };
       }
     }
-    return { ok: true, records, save, storage, stopped: run.stopped, costJpy: Math.round((budget.costJpy - before) * 10_000) / 10_000 };
+    return { ok: true, records, save, storage, stopped: run.stopped, costJpy: Math.round((budget.costJpy - before) * 10_000) / 10_000, processedItems: run.results.map((x) => x.plan.itemNo), pendingItems: run.pending, totalItems: run.plans.length };
   } catch {
     return { ok: false, reason: "run_failed" };
   }

@@ -34,17 +34,17 @@ export interface JudgeStep {
  *  - audit_sample: 検証済みの登録・除外から一定の割合を抽出して監査する（保留だけを見る偏りを防ぐ）
  * 情報そのものが無い（取得できない）場合はモデルを変えても解決しないため、根拠のページが1つも無い暫定は上げない。
  */
-export function escalationReason(a: { output: JudgeOutput | null; verified: boolean; evidence: readonly Evidence[]; caseId: string; auditRate: number; /** 隔離評価（CAPABILITY_CEILING）: ページなし・人の確認でも、暫定なら上位で判断し直す */ broad?: boolean }): string | null {
+export function escalationReason(a: { output: JudgeOutput | null; verified: boolean; evidence: readonly Evidence[]; caseId: string; auditRate: number; /** 互換（以前の隔離評価の拡大。AUTONOMY_RESTORATION で既定の条件に統合） */ broad?: boolean }): string | null {
   const pages = a.evidence.filter((e) => e.kind === "page");
-  if (!a.output) return pages.length || a.broad ? "primary_failed" : null;
+  // AUTONOMY_RESTORATION（V22）: 上位に上げるかを、ページの有無や人の確認の自己申告といった固定の条件で決めない。
+  // 上位は同じ証拠を読み直すだけでなく、自ら検索・取得して追加の調査ができる（runResearch の上位の調査の回）ため、ページが無い・人の確認を挙げた暫定でも上げる
+  if (!a.output) return "primary_failed";
   if (!a.verified) return "verification_failed";
+  if (a.output.review) return "ai_requested"; // AI自身が、より能力の高いモデルによる追加の調査・判断を求めた
   const unit = Object.entries(a.output.fields).find(([k]) => /apply_?unit|応募単位/i.test(k))?.[1];
   const multiSlot = pages.some((e) => (e.structure?.slots?.length ?? 0) >= 2);
-  if (a.broad && a.output.decision === "tentative") return "tentative_broad";
   if (a.output.decision === "tentative") {
-    if (pages.length === 0) return null;
-    // 不明が「公開情報では確定できず、利用者が確かめれば確定できる」（askHuman）ものだけなら、同じ証拠を上位モデルに読ませても解決しない（費用だけ掛かる）。上位は使わず人の確認へ回す（INTENSIVE_EVALUATION §5）
-    if (a.output.unresolvedImpact === "material" && !a.output.askHuman) return "material_unknown";
+    if (a.output.unresolvedImpact === "material") return "material_unknown";
     if (multiSlot) return "complex_structure";
     return null;
   }
@@ -221,6 +221,8 @@ export interface AgentView {
 }
 export interface AgentTurnInput {
   caseId: string;
+  /** この呼び出しに使える残りの予算（円）。AIの部品が最大出力をこの範囲に合わせる（AUTONOMY_RESTORATION: 最悪費用の予約が上限を超えて呼べなくなるのを防ぐ） */
+  budgetJpy?: number;
   evidence: AgentView[];
   history: { url: string; outcome: string; progress: boolean }[];
   remaining: { turns: number; fetches: number; costJpy: number; elapsedMs: number; searches?: number };
@@ -254,6 +256,8 @@ export interface RegisteredField {
 }
 export interface JudgeInput {
   caseId: string;
+  /** この呼び出しに使える残りの予算（円） */
+  budgetJpy?: number;
   evidence: AgentView[];
   lastTurn: AgentTurnOutput | null;
   investigationEnd: EndReason;
@@ -277,7 +281,17 @@ export interface JudgeOutput {
   absent?: Record<string, "not_stated" | "not_announced" | "anytime" | "unreadable">;
   /** 人の確認が必要な理由（公開情報を調べても確定できず、利用者が確かめれば確定できるときだけ） */
   askHuman?: { why: string; fields: string[] };
+  /** AUTONOMY_RESTORATION: 除外の理由の種類（AIの申告。検証層は語彙で推測しない） */
+  excludeKind?: ExcludeKind;
+  /** この機会の商品の種類（AIの申告。管理の対象＝ポケモンカードと、それを含む福袋・セット） */
+  productKind?: ProductKind;
+  /** より能力の高いモデルによる追加の調査と判断を求めるか（AIの自己評価） */
+  review?: { why: string };
 }
+export const EXCLUDE_KINDS = ["closed", "sold_out", "not_lottery", "not_managed_product", "out_of_area", "ineligible", "other"] as const;
+export type ExcludeKind = (typeof EXCLUDE_KINDS)[number];
+export const PRODUCT_KINDS = ["pokemon_card", "bundle_with_pokemon_card", "non_card_goods", "other_tcg", "unknown"] as const;
+export type ProductKind = (typeof PRODUCT_KINDS)[number];
 export type RegistrationJudge = (input: JudgeInput) => Promise<JudgeOutput | null>;
 
 export type EndReason = "sufficient" | "no_progress" | "unreachable" | "limit_turns" | "limit_fetches" | "limit_time" | "limit_cost" | "limit_calls" | "agent_failed" | "agent_stopped" | "no_action";
@@ -552,10 +566,12 @@ export const isBlockingIssue = (issue: string): boolean => {
   return k < 0 || CRITICAL_FIELDS.has(issue.slice(k + 1));
 };
 
-export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[]; /** 本登録を止める指摘（重要項目・全体） */ blocking: string[]; /** 任意項目の指摘（その項目だけ不採用。登録は止めない） */ nonBlocking: string[]; /** AIへ返す訂正用の指摘文（原因・原文の近い箇所つき） */ details: string[]; /** 通ったが機械的には完全に確認できていない点（検証済みと称さない） */ unconfirmed: string[] } {
+export function verifyRegistration(i: VerifyInput): { issues: string[]; proposals: FieldProposal[]; /** 本登録を止める指摘（重要項目・全体） */ blocking: string[]; /** 任意項目の指摘（その項目だけ不採用。登録は止めない） */ nonBlocking: string[]; /** AIへ返す訂正用の指摘文（原因・原文の近い箇所つき） */ details: string[]; /** 通ったが機械的には完全に確認できていない点（検証済みと称さない） */ unconfirmed: string[]; /** 意味の疑い（止めない。AIに一度だけ確かめ直しを求める） */ advisories: string[] } {
   const issues: string[] = [];
   const reasonOf = new Map<string, string>();
   const unconfirmed: string[] = [];
+  /** 意味の疑い（AUTONOMY_RESTORATION: 止める条件にしない。AIに一度だけ確かめ直しを求める材料） */
+  const advisories: string[] = [];
   const sem = (code: string, v: SemanticVerdict, name: string): void => {
     if (!v.ok) { issues.push(code); reasonOf.set(code, v.reason); }
     else for (const u of v.unconfirmed ?? []) unconfirmed.push(`${name}: ${u}`);
@@ -583,7 +599,12 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       const vd = dateTokens(f.value!);
       const qd = dateTokens(f.quote!);
       if (vd.length > 0 && !vd.some((d) => qd.includes(d))) issues.push("value_not_in_quote:" + name);
-      else sem("deadline_role_mismatch:" + name, checkDeadlineRole(f.value!, f.quote!), name); // 値の日付が、当選発表など別の事象の日付ではなく、応募の締切の記載にあること
+      else {
+        // 締切の役割（当選発表など別の事象の日付でないか）は意味の判断（AUTONOMY_RESTORATION: 語の有無で止めない）。語から読み取れないときは「未確認」として示すだけ
+        const r = checkDeadlineRole(f.value!, f.quote!);
+        if (!r.ok) { unconfirmed.push(`${name}: ${r.reason}`); advisories.push(`deadline_role_doubt:${name} — ${r.reason}。引用の日付が応募の締切か（当選発表・発送など別の事象の日付でないか）を原文で確かめる。締切で正しければ、そのまま提出し根拠を rationale に書く`); }
+        else for (const u of r.unconfirmed ?? []) unconfirmed.push(`${name}: ${u}`);
+      }
     } else if (grounded && name !== "deadline" && DATE_FIELDS.has(name)) {
       // 締切以外の日付の項目（応募開始・当選発表・購入・受取）も、値の日付が引用に書かれていること（別の箇所の日付の取り違えを検証済みにしない）。任意項目なので、通らなければその項目だけ不採用
       const vd = dateTokens(f.value!);
@@ -598,8 +619,11 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
         if (role && !role.re.test(q)) unconfirmed.push(`${name}: 日付の用途（${role.label}）を引用の語から確認できていない`);
       }
     } else if (grounded && (name === "store" || name === "product")) sem("value_not_in_quote:" + name, checkValueCorrespondence(f.value!, f.quote!), name);
-    // 応募単位: 観察（observed）は、引用が応募の権利の単位（人数・回数・店舗・フォーム等）を述べていること。推定（inferred）は、受付枠・応募ボタンなど構造からの推定で、確定値として扱わない（登録案でも推定と表示される）ため、引用の実在と対応の検査だけにする（RUNTIME_CORRECTNESS: 単一の受付枠からの推定が、語の正規表現で一律に拒否されていた）
-    else if (grounded && f.basis === "observed" && /apply_?unit|応募単位/i.test(name)) sem("unit_quote_unsupported:" + name, checkUnitQuote(f.quote!), name);
+    // 応募単位の意味（引用が応募の権利の単位を述べているか）はAIが判断する（AUTONOMY_RESTORATION: 語の正規表現で止めない）。引用の実在・構造との矛盾（下）だけを確かめる
+    else if (grounded && f.basis === "observed" && /apply_?unit|応募単位/i.test(name)) {
+      const r = checkUnitQuote(f.quote!);
+      if (!r.ok) { unconfirmed.push(`${name}: ${r.reason}`); advisories.push(`unit_quote_doubt:${name} — ${r.reason}。引用が応募の単位（人数・回数・店舗・フォーム）を述べているかを確かめる。述べていなければ basis を inferred か unknown にする`); }
+    }
     // 推定の応募単位にも構造の根拠を要する（ADAPTIVE_REVIEW のレビュー）: 引用・証拠が無い推定は根拠にならない／単一応募（one_form_one）の推定が、受付枠が複数あるページを根拠にしていれば構造と矛盾する
     if (/apply_?unit|応募単位/i.test(name) && f.basis === "inferred" && f.value) {
       if (!f.quote || !f.evidenceId) { if (i.registerRequiresUnit && i.output.decision === "register") issues.push("unit_inferred_without_quote:" + name); } // 本登録案の根拠にするときだけ（暫定・従来の経路の推論は推論のまま残す）
@@ -617,7 +641,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   // 本登録案なのに応募単位が未確定: 重複応募・応募漏れの被害が大きいため、検証の指摘にする（AIは根拠があれば確定、無ければ暫定にできる。結論は書き換えない）
   if (i.registerRequiresUnit && i.output.decision === "register") {
     const u = Object.entries(i.output.fields).find(([k]) => /apply_?unit|応募単位|applicationunit|^unit$/i.test(k))?.[1];
-    if (!u || u.basis === "unknown" || u.value === null || u.value.trim() === "") issues.push("register_unit_unresolved");
+    // AUTONOMY_RESTORATION: 応募単位の形式を本登録の必須条件にしない（登録案は人が確認する。未確定は確認事項として示す）
+    if (!u || u.basis === "unknown" || u.value === null || u.value.trim() === "") unconfirmed.push("apply_unit: 応募単位が未確定（登録案の確認で人が確かめる）");
   }
   // 締切を過ぎた機会の本登録案を止める（EVIDENCE_UTILIZATION: 評価時点より前の締切のまま register とし、検証を通った例があった）。年つきの日付の締切だけを機械的に照らす（年が無い・解釈できない日付は止めない）
   if (i.output.decision === "register" && i.now) {
@@ -634,33 +659,33 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   }
   // 根拠のない「除外」は、応募の機会を失わせる被害が大きい。観察（引用つきで検証済み）の項目が1つも無いのに exclude としたものは、保留（検証の指摘）にする。AIの結論は書き換えない（再評価でAIが直す／人が確認する）
   if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
-  // 取得したページ（応募先の公開ページ）の証拠が無いまま「除外」とするのは、取得できなかっただけの可能性があり、応募の機会を失わせる。人の確認に回す（投稿の原文だけで除外が妥当な場合も、人が確認する側に倒す）。AIの結論は書き換えない
-  // ただし「抽選の応募機会ではない」（先着・通常販売・まとめ等）と「他のTCGだけ」（引用が他のTCGの名称を明示。意味検証は下で行う）は、投稿そのものが根拠になる（応募先のページが無いのが普通）
-  // CAPABILITY_CEILING（利用者の決定 2026-11-27）: 受付終了も、投稿元の信頼性・締切の明確さ・対象の抽選との整合・延長の告知の有無を踏まえてAIが判断する。
-  // 検証層は客観的な整合（引用の実在・締切の役割・評価時点より前・未来の締切との矛盾なし）だけを確かめ、通った受付終了は応募先のページが無くても止めない（固定の日数の規則は設けない）
-  const closedOk = { v: false };
-  const pageExempt = (): boolean => ["not_lottery", "other_tcg"].includes(claimClassOf(String(i.output.fields["exclude_reason"]?.value ?? ""))) || closedOk.v;
-  const needsPageCheck = i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page");
-  // 除外は、応募できない・対象外であることを示す根拠（exclude_reason・引用つき・検証済み）が要る。店舗や商品を観察できただけでは、除外の根拠にならない（応募の機会を失わせるため）
+  // AUTONOMY_RESTORATION（V22）: 除外の意味（理由の種類・投稿元の信頼性・混在かどうか・応募先のページが要るか）はAIが判断する。
+  // 以前の固定の規則（応募先のページが無い除外を一律に保留／語彙に無い理由を判別不能として保留／混在の告知で単語があれば保留）は撤廃した。
+  // 検証層が確かめるのは、除外の根拠（exclude_reason）の引用が原文に実在すること、AIが申告した理由の種類（excludeKind）に応じた客観的な整合（受付終了＝締切の日付と評価時点・未来の締切との矛盾なし、地域外＝利用者の設定）、申告どうしの矛盾だけ
   if (i.output.decision === "exclude") {
     const r = i.output.fields["exclude_reason"];
     const ev = r?.evidenceId ? byId.get(r.evidenceId) : undefined;
     if (!r || r.basis !== "observed" || !r.value || !ev || !r.quote || !norm(ev.text).includes(norm(r.quote))) issues.push("exclude_reason_missing");
     else {
-      // 引用が実在するだけでは除外の根拠にならない。理由の種類と引用の意味・評価時点の対応を検証し、支持されない・矛盾・判別不能なら保留にする（応募の機会を消さない）
-      const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
-      const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others, ...(i.userRegion ? { userRegion: i.userRegion } : {}), ...(() => { const d = i.output.fields["deadline"]; const dev = d?.evidenceId ? byId.get(d.evidenceId) : undefined; return d && d.basis === "observed" && d.quote && dev && norm(dev.text).includes(norm(d.quote)) ? { deadlineQuote: d.quote } : {}; })() });
-      if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
-      // 他のTCGだけ: 引用（局所）が他のTCGでも、同じ証拠の別の箇所にポケモンカードがあれば混在の可能性がある（CAPABILITY_CEILING: 局所の引用だけで混在の告知を除外しない）。混在なら対象の商品の機会を拾うべきなので、保留にして判断し直す
-      else if (claimClassOf(r.value) === "other_tcg" && /ポケモン|ポケカ|ポケットモンスター|pok[eé]mon/i.test(ev.text.normalize("NFKC"))) { issues.push("exclude_reason_mixed_products"); reasonOf.set("exclude_reason_mixed_products", "同じ証拠にポケモンカードの記載もあり、他のTCGだけとは言えない（混在なら対象の商品の機会を拾う）"); }
-      else {
-        for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
-        const cls = claimClassOf(r.value);
-        if (cls === "closed" || (cls === "unknown" && /受付終了|締切/.test(v.reason))) closedOk.v = true; // 受付終了として客観的な整合を通った
+      // 理由の種類: AIの申告（excludeKind）。申告が無い旧い出力だけ、受付終了・地域外の客観的な検査の対象かを理由の文から補う（意味の結論は作らない）
+      const legacy = claimClassOf(r.value);
+      const kind: ExcludeKind = i.output.excludeKind ?? (legacy === "closed" ? "closed" : legacy === "out_of_area" ? "out_of_area" : "other");
+      if (kind === "closed" || kind === "out_of_area") {
+        const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
+        const v = checkExcludeSemantics({ claim: kind === "closed" ? "受付終了" : "対象地域外", quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others, ...(i.userRegion ? { userRegion: i.userRegion } : {}), ...(() => { const d = i.output.fields["deadline"]; const dev = d?.evidenceId ? byId.get(d.evidenceId) : undefined; return d && d.basis === "observed" && d.quote && dev && norm(dev.text).includes(norm(d.quote)) ? { deadlineQuote: d.quote } : {}; })() });
+        if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
+        else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
       }
+      // 申告どうしの矛盾: 対象外の商品として除外したのに、商品の種類をポケモンカードと申告している
+      if (kind === "not_managed_product" && (i.output.productKind === "pokemon_card" || i.output.productKind === "bundle_with_pokemon_card")) { issues.push("exclude_kind_conflicts_product"); reasonOf.set("exclude_kind_conflicts_product", "対象外の商品として除外したが、商品の種類はポケモンカード（を含む）と申告している。商品そのものを確かめ直す"); }
     }
   }
-  if (needsPageCheck && !pageExempt()) issues.push("exclude_without_page_evidence");
+  // 管理の対象（利用者の確定方針: ポケモンカードと、それを含む福袋・セット）: 本登録案なのに、AI自身が商品の種類を対象外・不明と申告している（申告どうしの矛盾）。商品そのものの調査に戻す
+  if (i.output.decision === "register" && i.output.productKind && i.output.productKind !== "pokemon_card" && i.output.productKind !== "bundle_with_pokemon_card") {
+    const code = i.output.productKind === "unknown" ? "register_product_unknown" : "register_product_not_managed";
+    issues.push(code);
+    reasonOf.set(code, i.output.productKind === "unknown" ? "商品の種類が不明のまま本登録案にしている。商品そのもの（カードか、カードを含むか）を原文・公式の商品ページで確かめる" : "商品の種類を管理の対象外（カード以外だけ・他のTCGだけ）と申告したまま本登録案にしている");
+  }
   // 重要項目の失敗は本登録を止める。任意項目の失敗は、その項目の提案だけを採用しない
   const blocking = issues.filter(isBlockingIssue);
   const nonBlocking = issues.filter((x) => !isBlockingIssue(x));
@@ -678,7 +703,7 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
     if (!f || !ev) return x;
     return describeQuoteIssue(x, diagnoseQuote(f.quote, ev.text));
   });
-  return { issues, proposals: kept, blocking, nonBlocking, details, unconfirmed };
+  return { issues, proposals: kept, blocking, nonBlocking, details, unconfirmed, advisories };
 }
 
 // ------------------------------------------------------------------ 本体
@@ -687,8 +712,11 @@ export async function runResearch(args: {
   seed: Evidence;
   agent: ResearchAgent;
   judge: RegistrationJudge;
-  /** 適応型判断（ADAPTIVE_REVIEW）: 既定の判断で根拠が足りない・検証に通らない・応募構造が複雑などのとき、同じ証拠で上位のモデルに判断させる（調査はやり直さない）。無ければ従来どおり1段 */
-  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
+  /**
+   * 適応型判断（ADAPTIVE_REVIEW）: 既定の判断で根拠が足りない・検証に通らない・AIが求めた等のとき、上位のモデルで判断し直す。
+   * AUTONOMY_RESTORATION: agent（上位の調査AI）があれば、上位は同じ証拠の読み直しだけでなく、自ら検索・取得・原文の読み戻しをする追加の調査の回を行ってから判断する
+   */
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 互換 */ broad?: boolean; agent?: ResearchAgent };
   tools: ResearchTools;
   budget: CallBudget;
   limits?: Partial<ResearchLimits>;
@@ -765,15 +793,20 @@ export async function runResearch(args: {
   let warnings: string[] = [];
   const quoteAudit: ResearchResult["quoteAudit"] = [];
   let firstRound: { output: JudgeOutput; verified: boolean; held: { reasons: string[] } | null; proposals: FieldProposal[]; warnings: string[]; end: EndReason | null } | null = null;
+  // AUTONOMY_RESTORATION: 調査と判断の統合。2回目の調査の回は、上位の調査AI（あれば）が担い、判断も上位が行う（upperRound）
+  let agentNow: ResearchAgent = args.agent;
+  let judgeNow: RegistrationJudge = args.judge;
+  let upperRound: { why: string } | null = null;
+  let turnCap = L.maxTurns;
   for (let round = 0; round < 2; round++) {
   while (end === null) {
-    if (turn >= L.maxTurns) { end = "limit_turns"; break; }
+    if (turn >= turnCap) { end = "limit_turns"; break; }
     if (elapsed() >= L.maxElapsedMs || (args.tools.researchDeadlineMs !== undefined && wall().getTime() >= args.tools.researchDeadlineMs)) { end = "limit_time"; break; }
     // 調査の1回分＋判断の1回分が残っているときだけ調査する
     const c = args.budget.check(L.agentReserveJpy + L.judgeReserveJpy);
     if (!c.ok) { end = c.reason === "calls" ? "limit_calls" : "limit_cost"; break; }
     turn++;
-    const ar = await callAi(args.budget, "research_turn", L.agentReserveJpy, args.agent, { caseId: args.caseId, evidence: evidence.map(toAgentView), history: history.map((h) => ({ url: h.key, outcome: h.outcome, progress: h.progress })), remaining: remaining(), searchResults: searchLog.slice(-12), searchAvailable: !!args.tools.search && L.maxSearches > 0, basisAt: args.tools.now().toISOString(), ...(judgeFeedback ? { judgeFeedback } : {}) }, (ok) => trace.push({ turn, kind: "agent", detail: ok ? "retry_recovered" : "retry_failed" }));
+    const ar: { out: AgentTurnOutput | null; noBudget?: string } = await callAi(args.budget, upperRound ? "research_turn_upper" : "research_turn", L.agentReserveJpy, agentNow, { caseId: args.caseId, budgetJpy: args.budget.remainingJpy, evidence: evidence.map(toAgentView), history: history.map((h) => ({ url: h.key, outcome: h.outcome, progress: h.progress })), remaining: remaining(), searchResults: searchLog.slice(-12), searchAvailable: !!args.tools.search && L.maxSearches > 0, basisAt: args.tools.now().toISOString(), ...(judgeFeedback ? { judgeFeedback } : {}) }, (ok) => trace.push({ turn, kind: "agent", detail: ok ? "retry_recovered" : "retry_failed" }));
     if (ar.noBudget) { end = ar.noBudget === "calls" ? "limit_calls" : "limit_cost"; break; }
     const out: AgentTurnOutput | null = ar.out;
     if (!out) { trace.push({ turn, kind: "agent", detail: "agent_failed" }); end = "agent_failed"; break; }
@@ -883,7 +916,7 @@ export async function runResearch(args: {
   // 応募単位が未確定の暫定のとき、証拠にある応募単位の記載を読み直させる再確認（1回。AIの判断は書き換えない。再確認の結果が検証に通らなければ、最初の検証済みの出力に戻す）
   let advisoryPrev: { output: JudgeOutput; proposals: FieldProposal[]; warnings: string[] } | null = null;
   for (let rev = 0; rev <= L.maxRevisions; rev++) {
-    const jr = await callAi(args.budget, "registration_judge", L.judgeReserveJpy, args.judge, { caseId: args.caseId, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: issues, basisAt: args.tools.now().toISOString() }, (ok) => trace.push({ turn, kind: "judge", detail: ok ? "retry_recovered" : "retry_failed" }));
+    const jr: { out: JudgeOutput | null; noBudget?: string } = await callAi(args.budget, upperRound ? "registration_judge_upper" : "registration_judge", L.judgeReserveJpy, judgeNow, { caseId: args.caseId, budgetJpy: args.budget.remainingJpy, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: issues, basisAt: args.tools.now().toISOString() }, (ok) => trace.push({ turn, kind: "judge", detail: ok ? "retry_recovered" : "retry_failed" }));
     if (jr.noBudget) {
       if (advisoryPrev) { output = advisoryPrev.output; proposals = advisoryPrev.proposals; warnings = advisoryPrev.warnings; verified = true; held = null; trace.push({ turn, kind: "verify", detail: "unit_recheck_no_budget_reverted" }); break; }
       held = { reasons: [`budget_${jr.noBudget}`] }; trace.push({ turn, kind: "judge", detail: `no_budget:${jr.noBudget}` }); break;
@@ -899,6 +932,13 @@ export async function runResearch(args: {
     if (v.blocking.length === 0) {
       verified = true; held = null;
       if (v.nonBlocking.length) trace.push({ turn, kind: "verify", detail: `non_blocking:${v.nonBlocking.join(",")}` });
+      // 意味の疑い（締切の役割・応募単位の引用など）: 止めずに、AIに一度だけ確かめ直しを求める。直した結果が客観的な整合を通らなければ、最初の結果に戻す（AIが根拠をもって維持してよい）
+      if (v.advisories.length && !advisoryPrev && rev < L.maxRevisions) {
+        advisoryPrev = { output, proposals, warnings };
+        issues = v.advisories.map((x) => `確認の指摘（データ。誤りでなければ変えずに提出してよい）: ${x}`);
+        trace.push({ turn, kind: "verify", detail: `advisory_recheck:${v.advisories.map((x) => x.split(" ")[0]).join(",")}` });
+        continue;
+      }
       const unitF = Object.entries(output.fields).find(([k]) => /apply_?unit|応募単位|applicationunit|^unit$/i.test(k))?.[1];
       const unitOpen = !unitF || unitF.basis === "unknown" || unitF.value === null || unitF.value.trim() === "";
       if (args.registerRequiresUnit && !advisoryPrev && rev < L.maxRevisions && output.decision === "tentative" && unitOpen) {
@@ -917,27 +957,37 @@ export async function runResearch(args: {
     issues = v.details; // 原因と原文の近い箇所つきで、AIに訂正させる（回数は maxRevisions の範囲。無限に繰り返さない）
     held = { reasons: v.blocking }; // 限定的な再評価でも解消しなければ、実行不可として理由を残す（AIの判断は書き換えず、最終の扱いは finalDecision で保留に下げる）
   }
-  if (round === 1 && !output && firstRound) { ({ output, verified, held, proposals, warnings } = firstRound); end = firstRound.end; trace.push({ turn, kind: "judge", detail: "resume_judge_failed_reverted" }); }
-  const canResume = round === 0 && !!output && verified && output.decision === "tentative" && output.unresolvedImpact === "material" && (end === "sufficient" || end === "agent_stopped" || end === "no_progress" || end === "unreachable" || end === "limit_fetches") && turn < L.maxTurns && elapsed() < L.maxElapsedMs && (args.tools.researchDeadlineMs === undefined || wall().getTime() < args.tools.researchDeadlineMs) && args.budget.check(L.agentReserveJpy + L.judgeReserveJpy * 2).ok;
-  if (!canResume || !output) break;
+  // 2回目の結果が得られない、または検証に通らず1回目は通っていたときは、1回目の結果に戻す（追加の調査で判断を失わない）
+  if (round === 1 && firstRound && (!output || (!verified && firstRound.verified))) { ({ output, verified, held, proposals, warnings } = firstRound); end = firstRound.end; trace.push({ turn, kind: "judge", detail: "resume_judge_failed_reverted" }); upperRound = upperRound ? { why: `${upperRound.why}:reverted` } : null; }
+  // AUTONOMY_RESTORATION: 判断から調査へ戻る条件を広げた。以前は「検証を通った暫定で、重大な不足があるとき」だけ（同じ資料の読み直しで終わっていた）。
+  // いまは、検証で矛盾が出た・重要な不明が残る・AI自身が追加の検討を求めた、のいずれかで、時間・回数・予算が残っていれば調査へ戻る（上位の調査AIがあれば上位が調査・判断する）
+  const resumeOk = end !== "limit_time" && end !== "limit_cost" && end !== "limit_calls" && elapsed() < L.maxElapsedMs && (args.tools.researchDeadlineMs === undefined || wall().getTime() < args.tools.researchDeadlineMs) && args.budget.check(L.agentReserveJpy + L.judgeReserveJpy * 2).ok;
+  const wantResume = !!output && (!verified || !!output.review || (output.decision === "tentative" && output.unresolvedImpact === "material"));
+  if (round !== 0 || !output || !wantResume || !resumeOk) break;
   firstRound = { output, verified, held, proposals, warnings, end };
+  const upWhy: string | null = args.escalation?.agent ? escalationReason({ output, verified, evidence, caseId: args.caseId, auditRate: 0 }) : null;
+  if (upWhy && args.escalation?.agent) { upperRound = { why: upWhy }; agentNow = args.escalation.agent; judgeNow = args.escalation.judge; }
+  turnCap = turn + L.maxTurns; // 追加の調査の回にも、最初と同じだけの回数の外枠を与える（費用・時間の外枠は共通）
   const unk = (lastTurn?.unknown ?? []).filter((u) => u.importance === "high").map((u) => u.what).slice(0, 4);
-  judgeFeedback = `${output.rationale.slice(0, 300)}${unk.length ? ` ／調査側の重要な不明点: ${unk.join(" / ")}` : ""}`;
-  trace.push({ turn, kind: "agent", detail: "resume_research" });
+  judgeFeedback = `${output.rationale.slice(0, 300)}${unk.length ? ` ／調査側の重要な不明点: ${unk.join(" / ")}` : ""}${!verified && held?.reasons.length ? ` ／検証で解消できなかった点: ${held.reasons.slice(0, 4).join(", ")}（引用・日付・対象を原文で確かめ直す。必要なら追加で取得・検索する）` : ""}${output.review ? ` ／前の判断者が求めた追加の検討: ${output.review.why}` : ""}`;
+  trace.push({ turn, kind: "agent", detail: upperRound ? `resume_research_upper:${upperRound.why}` : "resume_research" });
   end = null;
   noProgress = 0;
   output = null; verified = false; held = null; proposals = []; warnings = [];
   }
   // ---- 適応型判断（ADAPTIVE_REVIEW）。上位の判断は同じ証拠で行い、調査・取得・検索をやり直さない（再課金しない）。上位が失敗・予算不足・検証に通らないときは、既定の判断（検証済みならそのまま）を消さない
-  const judgeTrail: JudgeStep[] = [{ stage: "primary", model: args.escalation?.primaryModel ?? null, reason: null, decision: output ? output.decision : "none", verified }];
+  const judgeTrail: JudgeStep[] = upperRound && firstRound
+    ? [{ stage: "primary", model: args.escalation?.primaryModel ?? null, reason: null, decision: firstRound.output.decision, verified: firstRound.verified }, { stage: "escalated", model: args.escalation?.model ?? null, reason: upperRound.why, decision: output ? output.decision : "none", verified, adopted: !upperRound.why.endsWith(":reverted"), note: "upper_research" }]
+    : [{ stage: "primary", model: args.escalation?.primaryModel ?? null, reason: null, decision: output ? output.decision : "none", verified }];
   let disagreement = false;
-  if (args.escalation) {
+  // 上位の調査の回を行ったときは、同じ証拠の読み直しだけの上位の判断はしない（上位は追加の調査をしたうえで判断済み）
+  if (args.escalation && !upperRound) {
     const why = escalationReason({ output, verified, evidence, caseId: args.caseId, auditRate: args.escalation.auditRate ?? 0, ...(args.escalation.broad ? { broad: true } : {}) });
     if (why) {
       let eIssues: string[] | undefined;
       let adopted = false;
       for (let r = 0; r <= 1; r++) {
-        const er = await callAi(args.budget, "registration_judge_escalated", L.judgeReserveJpy, args.escalation.judge, { caseId: args.caseId, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: eIssues, basisAt: args.tools.now().toISOString() });
+        const er = await callAi(args.budget, "registration_judge_escalated", L.judgeReserveJpy, args.escalation.judge, { caseId: args.caseId, budgetJpy: args.budget.remainingJpy, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: eIssues, basisAt: args.tools.now().toISOString() });
         if (er.noBudget || !er.out) { judgeTrail.push({ stage: "escalated", model: args.escalation.model, reason: why, decision: "none", verified: false, note: er.noBudget ? `no_budget:${er.noBudget}` : "failed" }); break; }
         const v = verifyRegistration({ output: er.out, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now(), ...(args.userRegion ? { userRegion: args.userRegion } : {}) });
         quoteAudit.push({ round: 10 + r, rows: auditQuotes(er.out, evidence) });

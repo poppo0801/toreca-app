@@ -96,17 +96,17 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 P2 原因: 検索の配線・未確定
       const { data } = await u1.from("collection_candidates").insert({ household_id: hid, dedupe_key: url, source_url: url, x_post_id: String(930000000 + n), title: `rc-${n}`, status: "pending", job_state: "review", reasons: [], last_good: { evidence: stored } as never, draft: {} as never }).select("id,x_post_id,source_url,last_good").single();
       return data as CandidateRow;
     };
-    // register・応募単位なし → 検証の指摘 → 再評価でも register のまま → 保存は要確認
+    // AUTONOMY_RESTORATION（V22）: 応募単位の形式を本登録の必須条件にしない。register・応募単位なしは、そのまま登録案（応募単位の未確定は確認事項として人が確かめる）
     const a = await withUrl();
     const ra = await run(a, { judgeDecisions: ["register", "register"] }, false);
-    expect(ra.calls.filter((x) => x.kind === "submit_registration_judgment")).toHaveLength(2); // 指摘を受けて、限定的に再評価が1回
+    expect(ra.calls.filter((x) => x.kind === "submit_registration_judgment")).toHaveLength(1); // 止める指摘が無いので再評価しない
     const pa = (await rows(a.id))[0];
-    expect(pa).toMatchObject({ decision: "tentative", verified: false }); // AIはregisterとしたが、検証を通らないため最終の扱いは暫定（根拠が無効・欠落した断定で本登録を通さない）
-    expect(pa.held_reasons).toContain("register_unit_unresolved");
-    // register → 再評価で暫定に直す（AIが自分で直せる）
+    expect(pa).toMatchObject({ decision: "register", verified: true });
+    expect(pa.held_reasons ?? []).not.toContain("register_unit_unresolved");
+    // 応募単位の未確定では再評価を求めないため、最初の判断（register）がそのまま採用される（以前は「再評価で暫定に直す」の経路だった）
     const b = await withUrl();
     await run(b, { judgeDecisions: ["register", "tentative"] }, false);
-    expect(await rows(b.id)).toMatchObject([{ decision: "tentative", verified: true }]);
+    expect(await rows(b.id)).toMatchObject([{ decision: "register", verified: true }]);
     // register・応募単位を推定（inferred）→ 指摘なし（再評価も不要）
     const c = await withUrl();
     const rc = await run(c, { judgeDecisions: ["register"], judgeUnit: "one_form_one" }, false);
