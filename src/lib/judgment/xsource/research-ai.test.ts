@@ -26,6 +26,22 @@ describe("調査のAI（アダプタ）", () => {
     expect(RESEARCH_SYSTEM).toContain("関連イベント"); // ページ自身の受付枠と別
     expect(RESEARCH_SYSTEM).toMatch(/被害.*重要性.*見込み.*締切.*費用/s); // 追加調査の必要性の観点（点数ではなく理由）
   });
+  it("思考を使う設定（CAPABILITY_CEILING）: 強制ツール選択では思考が働かないため auto＋adaptive にし、道具の使用を指示し、出力上限と時間を広げる。既定は従来どおり", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const client = { messages: { create: vi.fn(async (req: Record<string, unknown>, opt: Record<string, unknown>) => (calls.push({ ...req, _timeout: opt?.timeout }), { content: [{ type: "thinking", thinking: "" }, { type: "tool_use", name: "submit_research_turn", input: { observed: [], unknown: [], next: { kind: "stop", reason: "sufficient", why: "十分" } } }], usage: { input_tokens: 100, output_tokens: 100 } })) } } as never;
+    const reasons: string[] = [];
+    await makeAnthropicResearchAgent(client, { thinking: true, effort: "medium", strict: false, onDiagnostic: (d) => reasons.push(d.reason) })(turnInput);
+    const req = calls[0] as { tool_choice: unknown; thinking: unknown; max_tokens: number; messages: { content: string }[]; _timeout: number };
+    expect(req.tool_choice).toEqual({ type: "auto" });
+    expect(req.thinking).toEqual({ type: "adaptive" });
+    expect(req.max_tokens).toBe(3000 * 2 + 12_000);
+    expect(req.messages[0].content).toContain("必ず道具 submit_research_turn を1回呼んで提出");
+    expect(req._timeout).toBe(240_000);
+    expect(reasons).toContain("thinking:used");
+    const { client: c2, calls: k2 } = fake({ observed: [], unknown: [], next: { kind: "stop", reason: "sufficient", why: "十分" } });
+    await makeAnthropicResearchAgent(c2)(turnInput);
+    expect((k2[0] as { thinking?: unknown }).thinking).toBeUndefined();
+  });
   it("出力の上限で途切れたら、1回だけ上限を2倍にして再試行できる（拡大した再試行でも途切れたら再試行しない）", async () => {
     const calls: Record<string, unknown>[] = [];
     const replies = [
@@ -131,7 +147,7 @@ describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクラ
   });
   it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
     const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
-    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-14");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-15");
   });
   it("管理の対象は確定済みの方針として渡す（カード以外を管理するかを人に聞く例を残さない）", () => {
     expect(JUDGE_SYSTEM).toContain("ポケモンカードを含む福袋・セットは対象");

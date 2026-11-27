@@ -104,7 +104,9 @@ export async function loadBestDocument(db: Db, householdId: string, candidateId:
     const key = canonUrl(url).key.slice(0, 300);
     let q = t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,created_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key);
     if (contentHash) q = q.like("content_hash", `${contentHash}%`);
-    const r = (await q.order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(asOf ? 12 : 1)) as { data: Record<string, unknown>[] | null };
+    // CAPABILITY_CEILING: 以前は「長い版」を優先して12件だけ読み、評価時点に近い新しい版が候補から漏れることがあった（長さ優先）。
+    // 時点の指定があれば新しい順に最大50版を読み、pickVersion で時点の規則どおりに選ぶ。指定が無ければ、切り詰めの無い最新の版（長さより新しさ）
+    const r = (asOf ? await q.order("fetched_at", { ascending: false }).limit(50) : await q.order("truncated", { ascending: true }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
     const rows = r.data ?? [];
     const iso = (s: string): string => (Number.isFinite(new Date(s).getTime()) ? new Date(s).toISOString() : s);
     const x = asOf ? pickVersion(rows.map((row) => ({ row, fetchedAt: iso(actualFetchedAt(String(row.origin), String(row.fetched_at), row.created_at as string | undefined)), truncated: !!row.truncated, chars: Number(row.text_chars) })), iso(asOf))?.row : rows[0];

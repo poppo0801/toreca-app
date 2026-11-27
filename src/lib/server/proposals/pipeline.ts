@@ -43,7 +43,7 @@ export function assembleGenerateDeps(a: {
   now?: () => Date;
   shouldStop?: () => boolean;
   learn?: boolean;
-  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
   /** 記録するモデルの識別（調査と判断で別のモデルを使うときは両方）。省略時は許可証のモデル */
   modelId?: string;
   researchDeadlineMs?: number;

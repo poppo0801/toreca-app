@@ -88,6 +88,12 @@ export interface RealRunOptions {
   judgeModel?: string;
   /** 推論の度合い（調査・判断。既定 low）。PRODUCTION_PARITY の比較用。上位モデルの判断にも judge を使う */
   effort?: { agent?: import("@/lib/judgment/xsource/research-ai").AiEffort; judge?: import("@/lib/judgment/xsource/research-ai").AiEffort };
+  /** 思考を使うか（調査・判断。既定は使わない）。CAPABILITY_CEILING の比較用（隔離評価のみ） */
+  thinking?: { agent?: boolean; judge?: boolean };
+  /** 1候補の調査の時間枠（既定 RESEARCH_WINDOW_MS＝本番の関数時間に合わせた45秒）。隔離評価では十分な時間を与えて能力を測る */
+  researchWindowMs?: number;
+  /** 上位モデルの判断の条件を広げる（暫定・ページなし・人の確認でも上げる）。隔離評価のみ */
+  broadEscalation?: boolean;
   /** 関門の1件上限（関門 checkJudgmentRealRun に渡した caps と同じ値。既定は従来の候補上限） */
   gatePerCaseCapJpy?: number;
   lockPath?: string;
@@ -160,9 +166,9 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       if (c === "auth") fatal = "auth_error"; // 認証・権限エラーは再試行しない
       else if (c === "rate") fatal = "rate_limited"; // 利用上限に当たったら、叩き続けない
     };
-    const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic, ...(o.effort?.agent ? { effort: o.effort.agent } : {}) });
-    const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic, ...(o.effort?.judge ? { effort: o.effort.judge } : {}) });
-    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(o.effort?.judge ? { effort: o.effort.judge } : {}) }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate } : undefined;
+    const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic, ...(o.effort?.agent ? { effort: o.effort.agent } : {}), ...(o.thinking?.agent ? { thinking: true } : {}) });
+    const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic, ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) });
+    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate, ...(o.broadEscalation ? { broad: true } : {}) } : undefined;
     const searchTool = o.search ? makeSearchTool(o.search.provider) : undefined;
     const visionHandle = o.visionFactory ? o.visionFactory({ ticket, budget }) : o.vision ? { vision: o.vision } : undefined;
     const maxConsecutive = o.maxConsecutiveFailures ?? 3;
@@ -184,7 +190,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         deps: (() => {
           const dd = o.depsFor?.(c);
           // 共通の組み立て（pipeline.ts）。本番シャドーと同じ形の依存を作る
-          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, researchDeadlineMs: Date.now() + RESEARCH_WINDOW_MS, perItemCapJpy: ticket.perCaseCapJpy, ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
+          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, researchDeadlineMs: Date.now() + (o.researchWindowMs ?? RESEARCH_WINDOW_MS), perItemCapJpy: ticket.perCaseCapJpy, ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
         })(),
       });
       base.processed++;

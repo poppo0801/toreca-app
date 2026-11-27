@@ -56,7 +56,7 @@ export interface GenerateDeps {
   /** 調査経験の反映と蓄積（既定 true）。false で、経験を読まず・書かない（比較実験の対照群） */
   learn?: boolean;
   /** 適応型判断の2段目（上位モデルの判断）。無ければ1段 */
-  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
 }
 
 /** 費用ゼロのモード（既定）。実AIではない */

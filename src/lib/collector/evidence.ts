@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { redact } from "@/lib/case-model/redact";
+import { normalizeForHash } from "./queue";
 
 /**
  * Stage 9Z: 初回収集で実際に取得した原文（投稿本文・一覧のカード・ページの要点）の保存形式。
@@ -74,7 +75,7 @@ export interface StoredEvidence {
    * Stage 10J（追加の項目）: 投稿内のリンク先の公開ページ本文（収集時に既に取得していたもの。最大2件・各3,000字・伏せ字済み）。
    * 投稿本文（text）とは**別の出典**として分けて保存する（混同しない）。本文が無い・取得できなかった場合は付けない。
    */
-  linkedPages?: { url: string; text: string; fetchedAt: string; /** 取得時の全文の字数。text が抜粋のとき fullChars > text.length */ fullChars?: number; /** 抜粋または取得元が切れている（後半は未確認） */ truncated?: boolean; depth?: 0 | 1; fromUrl?: string; origins?: string[]; shortUrl?: string }[];
+  linkedPages?: { url: string; text: string; fetchedAt: string; /** 取得時の全文の字数。text が抜粋のとき fullChars > text.length */ fullChars?: number; /** 全文（抜粋の外を含む）の正規化ハッシュ16桁。抜粋の外の更新も検知する（CAPABILITY_CEILING） */ fullHash?: string; /** 抜粋または取得元が切れている（後半は未確認） */ truncated?: boolean; depth?: 0 | 1; fromUrl?: string; origins?: string[]; shortUrl?: string }[];
   /** Phase 2: 発見した全リンクの台帳（取得できた／できなかった／選ばなかった理由）。無言の欠落を防ぐ（取得できなかったリンクを「無い」と扱わない） */
   linkLedger?: { url: string; key: string; host: string; order: number; origins: string[]; shortUrl?: string; status: string; reason?: string; chars?: number; truncated?: boolean; at?: string }[];
   /**
@@ -201,7 +202,7 @@ export function buildEvidence(src: EvidenceSource, nowIso: string): StoredEviden
       const full = clean(String(l.text));
       const text = full.slice(0, MAX_LINKED_PAGE_CHARS);
       const fullChars = Math.max(full.length, l.fullChars ?? 0);
-      return { url: String(l.url).slice(0, 500), text, fetchedAt: nowIso, fullChars, truncated: text.length < fullChars || !!l.truncated, ...(l.depth !== undefined ? { depth: l.depth } : {}), ...(l.fromUrl ? { fromUrl: l.fromUrl.slice(0, 500) } : {}), ...(l.origins?.length ? { origins: l.origins.slice(0, 4) } : {}), ...(l.shortUrl ? { shortUrl: l.shortUrl.slice(0, 40) } : {}) };
+      return { url: String(l.url).slice(0, 500), text, fetchedAt: nowIso, fullChars, fullHash: createHash("sha256").update(normalizeForHash(full)).digest("hex").slice(0, 16), truncated: text.length < fullChars || !!l.truncated, ...(l.depth !== undefined ? { depth: l.depth } : {}), ...(l.fromUrl ? { fromUrl: l.fromUrl.slice(0, 500) } : {}), ...(l.origins?.length ? { origins: l.origins.slice(0, 4) } : {}), ...(l.shortUrl ? { shortUrl: l.shortUrl.slice(0, 40) } : {}) };
     })
     ;
   const linkedPagesOk = linkedPagesAll.filter((l) => l.url.startsWith("https://") && l.text.length >= 30);
