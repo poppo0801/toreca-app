@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedCron } from "@/lib/server/cron-auth";
 import type { Db } from "@/lib/server/lottery-service";
 import { shadowApiKey, shadowWorkerPermission } from "@/lib/server/shadow/allow";
@@ -38,13 +38,20 @@ async function handle(req: NextRequest) {
   // Phase 3: 本番シャドーの登録案ジョブ。PROPOSAL_PROD_PREVIEW=on のときだけ（既定OFF）。以降の本番ゲート（承認スイッチ・世帯の許可リスト・専用予算・停止）は runShadowProposalJob が毎ジョブ確認する
   const proposalMode = ["on", "1", "yes"].includes(process.env.PROPOSAL_PROD_PREVIEW ?? "");
   const proposalJob = proposalMode ? (a: Parameters<NonNullable<Parameters<typeof runShadowWorker>[0]["proposalJob"]>>[0]) => runShadowProposalJob({ db, ...a, client: client as never, runBudget: callBudget, searchProvider: makeWebSearchProvider(client as never, "claude-haiku-5-5") }) : undefined;
-  const result = await runShadowWorker({ db, model, ...(proposalJob ? { proposalJob } : {}), imageVerify, listModel: makeAnthropicListModel(client), callBudget, workerId: `cron-${crypto.randomUUID().slice(0, 8)}`, limit: 3, timeBudgetMs: 280_000, ...(proposalJob ? { perJobTimeoutMs: 150_000 } : {}) });
-  // 保持期限の掃除（期限を過ぎた記録・終了済みジョブ）。失敗しても本処理には影響しない
-  await (db as unknown as { rpc: (n: string) => PromiseLike<unknown> }).rpc("shadow_purge").then(
-    () => undefined,
-    () => undefined,
-  );
-  return NextResponse.json({ ok: true, ran: true, ...result, apiCalls: callBudget.summary() });
+  const work = async () => {
+    const result = await runShadowWorker({ db, model, ...(proposalJob ? { proposalJob } : {}), imageVerify, listModel: makeAnthropicListModel(client), callBudget, workerId: `cron-${crypto.randomUUID().slice(0, 8)}`, limit: 3, timeBudgetMs: 280_000, ...(proposalJob ? { perJobTimeoutMs: 150_000 } : {}) });
+    // 保持期限の掃除（期限を過ぎた記録・終了済みジョブ）。失敗しても本処理には影響しない
+    await (db as unknown as { rpc: (n: string) => PromiseLike<unknown> }).rpc("shadow_purge").then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+  // AUTONOMY_RESTORATION: 呼び出し元（DBの cron）は応答を120秒で待ち切る。調査は関数の時間枠（300秒）いっぱいまで続けるため、
+  // 呼び出しには受け付けたことだけをすぐ返し、処理は応答のあと（after）に続ける。結果は実行台帳（shadow_judgments・shadow_jobs）に残る
+  if (req.nextUrl.searchParams.get("wait") === "1") return NextResponse.json({ ok: true, ran: true, ...(await work()), apiCalls: callBudget.summary() }); // 手動の確認用（応答を待つ）
+  after(() => work().then(() => undefined, () => undefined));
+  return NextResponse.json({ ok: true, ran: true, accepted: true }, { status: 202 });
 }
 
 export const GET = handle;
