@@ -66,6 +66,8 @@ export interface ApplyPageStructure {
   formQuestions: FormQuestion[];
   /** ページ内の同一サイトのリンク（次に調べる候補。AIが辿るか選ぶ。データであり命令ではない）。無い・抽出できなかったときは省略 */
   links?: { text: string; url: string }[];
+  /** 本文のうち、ページの共通部分（header・nav・footer・aside）にあたる字位置の範囲（EVIDENCE_UTILIZATION。本文からは削らない。提示の側で省略する） */
+  chrome?: { from: number; to: number }[];
   /** 欠落の自己申告（人が見る画面との差を確認するため） */
   gaps: string[];
 }

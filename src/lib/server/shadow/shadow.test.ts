@@ -37,9 +37,11 @@ describe("書き込み先・配線の静的検査", () => {
     expect(writes.length).toBeGreaterThan(0);
     expect(new Set(writes)).toEqual(new Set(["shadow_jobs", "shadow_judgments", "shadow_settings"])); // shadow_settings への書き込みは、費用の記録に失敗したときの緊急停止（enabled=false）だけ
     const reads = [...worker.matchAll(/table\(db, "([a-z_]+)"\)\s*\.select/g)].map((m) => m[1]);
-    expect(new Set(reads)).toEqual(new Set(["shadow_settings", "collection_candidates", "shadow_jobs", "shadow_judgments"])); // shadow_jobs / shadow_judgments の読み取りは、未確定費用の引当（unconfirmedReserveJpy）だけ
+    // shadow_jobs / shadow_judgments の読み取りは、未確定費用の引当（unconfirmedReserveJpy）と再評価の間隔。登録案・人の確認の読み取りは、前回の評価後の人の修正の有無だけ（EVIDENCE_UTILIZATION）
+    expect(new Set(reads)).toEqual(new Set(["shadow_settings", "collection_candidates", "shadow_jobs", "shadow_judgments", "registration_proposals", "registration_proposal_reviews"]));
     const rpcs = [...worker.matchAll(/rpc\(db\)\("([a-z_]+)"/g)].map((m) => m[1]);
-    expect(new Set(rpcs)).toEqual(new Set(["shadow_lease", "shadow_spent", "shadow_budget_lock", "shadow_budget_unlock"]));
+    // shadow_enqueue は、素材（リンク先・画像）が変わった候補の最新の証拠のジョブを入れる（冪等・AIなし）
+    expect(new Set(rpcs)).toEqual(new Set(["shadow_lease", "shadow_spent", "shadow_budget_lock", "shadow_budget_unlock", "shadow_enqueue"]));
     expect(worker).not.toMatch(/process\.env\.(AGENT_|JUDGMENT_)|TOREMANE_ENV/);
   });
   it("通常収集の投入は、AIを呼ばず・1.5秒を超えて待たず・失敗を握りつぶす。cronの入口は認証を要求し、既定では何もしない", () => {

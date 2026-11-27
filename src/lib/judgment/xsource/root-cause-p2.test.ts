@@ -118,7 +118,7 @@ describe("P2 原因: 応募単位の保存（列挙値の注釈）・未確定�
     const { JUDGE_SYSTEM, RESEARCH_SYSTEM } = await import("./research-ai");
     for (const t of ["one_form_one:", "store_select:", "per_store:", "per_product:", "実際のフォーム上の、応募できる権利の単位", "確定できないなら暫定（tentative）"]) expect(JUDGE_SYSTEM, t).toContain(t);
     expect(RESEARCH_SYSTEM).toContain("検索しない（そのページを取得して確認する）");
-    expect(JUDGE_SYSTEM.length).toBeLessThan(7600); // INTENSIVE_EVALUATION で全項目の定義・記載の状態・人の確認・条件・抽選でない投稿（約2,000字）を追加 →7600 // 入力の増加は小さい（費用への影響は §対照で試算）。Phase 3 基盤立て直しで応募単位と上限の分離（約430字）を追加し、4000→4600、RUNTIME_CORRECTNESS で地域適合・受付時刻の根拠（約350字）を追加し→5200
+    expect(JUDGE_SYSTEM.length).toBeLessThan(8400); // EVIDENCE_UTILIZATION で管理の対象の方針・除外/暫定でも全項目（約700字）を追加 →8400 // INTENSIVE_EVALUATION で全項目の定義・記載の状態・人の確認・条件・抽選でない投稿（約2,000字）を追加 →7600 // 入力の増加は小さい（費用への影響は §対照で試算）。Phase 3 基盤立て直しで応募単位と上限の分離（約430字）を追加し、4000→4600、RUNTIME_CORRECTNESS で地域適合・受付時刻の根拠（約350字）を追加し→5200
   });
 });
 

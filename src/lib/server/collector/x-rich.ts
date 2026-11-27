@@ -1,5 +1,6 @@
 import "server-only";
 import { extractPageText } from "@/lib/ai/page-text";
+import { researchViewOf, type PageView } from "@/lib/server/collector/page-view";
 import { type HostGate, RunFetchBudget, type FetchOutcomeKind } from "@/lib/collector/fetch-control";
 import { discoverLinks, ledgerFromPlan, looksLikeLoginWall, planLinkFetches, RECHECKABLE_REASONS, type LinkLedgerEntry, type LinkOrigin } from "@/lib/collector/link-plan";
 import type { ExtractRequest } from "@/lib/ai/provider";
@@ -104,6 +105,8 @@ export interface FetchedLinkPage {
   fromUrl?: string;
   origins: LinkOrigin[];
   shortUrl?: string;
+  /** 新AIの調査と同じ整形の本文・ページの構造（EVIDENCE_UTILIZATION。保存用。収集の解析には使わない） */
+  view?: PageView;
 }
 
 /** 合計予算を、各項目の必要量へ公平に配分する（少なくて済む項目は全量、残りを均等に。先頭の長いページが後続を押し出さない） */
@@ -220,7 +223,8 @@ export async function enrichXPost(
     entry.chars = t2.text.length;
     entry.truncated = pg.truncated || t2.truncated;
     delete entry.reason;
-    const page: FetchedLinkPage = { url: url.slice(0, 500), finalUrl: pg.finalUrl.slice(0, 500), title: t2.title.slice(0, 200), text: t2.text, truncated: pg.truncated || t2.truncated, fetchedAt: entry.at, depth: meta.depth, ...(meta.fromUrl ? { fromUrl: meta.fromUrl } : {}), origins: meta.origins, ...(meta.shortUrl ? { shortUrl: meta.shortUrl } : {}) };
+    const view = researchViewOf(pg.body, pg.finalUrl, t2.text, new Date(entry.at));
+    const page: FetchedLinkPage = { url: url.slice(0, 500), finalUrl: pg.finalUrl.slice(0, 500), title: t2.title.slice(0, 200), text: t2.text, truncated: pg.truncated || t2.truncated, fetchedAt: entry.at, depth: meta.depth, ...(meta.fromUrl ? { fromUrl: meta.fromUrl } : {}), origins: meta.origins, ...(meta.shortUrl ? { shortUrl: meta.shortUrl } : {}), ...(view ? { view } : {}) };
     // 深さ1: 応募案内の先にある正式フォーム等の候補（案内的なリンク文言のものだけ。取得は呼び出し元の追跡ループで）
     pageLinks.set(page, t2.links);
     return page;

@@ -13,14 +13,19 @@ const hashOf = (s: string): string => createHash("sha256").update(s).digest("hex
 /** 取得した全文（個人情報・鍵は伏せ字）から保存用の文書を作る。整形のみ。意味の要約・抽出はしない */
 export function documentsFromCollected(a: { pages: readonly FetchedLinkPage[]; postUrl: string; postText: string | null; postFetchedAt: string }): StoredDocument[] {
   const out: StoredDocument[] = [];
-  const mk = (url: string, raw: string, o: { origin: string; kind: "page" | "post"; fetchedAt: string; truncated: boolean; reason: string | null }): StoredDocument => {
+  const mk = (url: string, raw: string, o: { origin: string; kind: "page" | "post"; fetchedAt: string; truncated: boolean; reason: string | null; structure?: StoredDocument["structure"]; textLoss?: string[] }): StoredDocument => {
     const clean = redact(raw);
     const cut = clean.length > MAX_DOC_CHARS;
     const text = cut ? clean.slice(0, MAX_DOC_CHARS) : clean;
-    return { url: url.slice(0, 500), urlKey: canonUrl(url).key.slice(0, 300), origin: o.origin, kind: o.kind, contentHash: hashOf(text), fetchedAt: o.fetchedAt, text, textChars: text.length, sourceChars: cut ? clean.length : o.truncated ? null : clean.length, truncated: cut || o.truncated, truncatedReason: cut ? "doc_max_chars" : o.reason, structure: null, textLoss: null };
+    return { url: url.slice(0, 500), urlKey: canonUrl(url).key.slice(0, 300), origin: o.origin, kind: o.kind, contentHash: hashOf(text), fetchedAt: o.fetchedAt, text, textChars: text.length, sourceChars: cut ? clean.length : o.truncated ? null : clean.length, truncated: cut || o.truncated, truncatedReason: cut ? "doc_max_chars" : o.reason, structure: o.structure ?? null, textLoss: o.textLoss?.length ? o.textLoss : null };
   };
   if (a.postText && a.postText.trim().length >= 8) out.push(mk(a.postUrl, a.postText, { origin: "collector_post", kind: "post", fetchedAt: a.postFetchedAt, truncated: false, reason: null }));
-  for (const p of a.pages) if (p.text.length >= 30) out.push(mk(p.url, p.text, { origin: p.depth === 1 ? "collector_followed" : "collector", kind: "page", fetchedAt: p.fetchedAt, truncated: p.truncated, reason: p.truncated ? "fetch_limit" : null }));
+  for (const p of a.pages) {
+    if (p.text.length < 30) continue;
+    // EVIDENCE_UTILIZATION: 新AIの調査と同じ整形の本文とページの構造があれば、それを保存する（実取得と同じ形。再取得しなくても構造・時刻を失わない）
+    const v = p.view;
+    out.push(mk(p.url, v?.text ?? p.text, { origin: p.depth === 1 ? "collector_followed" : "collector", kind: "page", fetchedAt: p.fetchedAt, truncated: p.truncated, reason: p.truncated ? "fetch_limit" : null, ...(v ? { structure: v.structure, ...(v.textLoss ? { textLoss: v.textLoss } : {}) } : {}) }));
+  }
   return out;
 }
 

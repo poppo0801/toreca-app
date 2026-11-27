@@ -210,7 +210,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
   it("⑪判断モデルはDBの設定（judge_model）で調査と別にできる。調査は従来のモデルのまま・判断だけが指定モデル・記録に両方・料金不明のモデルは採用しない（切り戻しはNULL）", async () => {
     const run = async (judge: string | null, tag: string) => {
       await clean();
-      await setSettings({ judge_model: judge, per_case_cap_jpy: 10, daily_budget_jpy: 30, total_budget_jpy: 100, monthly_budget_jpy: 100 });
+      // 1件上限: 上位モデルの判断の最悪費用（指示の追加で約10円）が収まる額（EVIDENCE_UTILIZATION で 10→12。本番の1件上限は25円）
+      await setSettings({ judge_model: judge, per_case_cap_jpy: 12, daily_budget_jpy: 36, total_budget_jpy: 100, monthly_budget_jpy: 100 });
       const c = await mkCandidate(0, tag);
       await enqueue(c);
       const s = recording();
@@ -245,8 +246,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const c = await mkCandidate(0, "nolf");
     await enqueue(c);
     const s = recording();
-    const r = await runShadow(s.client, shadowEnv({ SHADOW_LIVE_FETCH: "" }));
-    expect(r.done).toBe(1);
+    const r = await runShadow(s.client, shadowEnv({ SHADOW_LIVE_FETCH: "" }));    expect(r.done).toBe(1);
     expect(fetched.length).toBe(before); // 外部アクセスなし
     const j = (await admin.from("shadow_judgments").select("record").eq("candidate_id", c.id)).data?.[0] as { record: { trace: { tools: Record<string, string> }; liveFetch: boolean } };
     expect(j.record.trace.tools.liveFetch).toBe("unavailable:not_permitted");

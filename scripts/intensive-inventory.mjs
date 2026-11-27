@@ -107,8 +107,14 @@ if (EXPORT) {
   const evBy = new Map(cands.map((c) => [c.id, c.last_good?.evidence ?? null]));
   for (const r of rows) r.evidence = evBy.get(r.id);
   const st = (await db.from("collection_settings").select("prefectures,include_online").limit(1).maybeSingle()).data;
-  writeFileSync("eval/intensive/region.local.json", JSON.stringify(st ?? {}, null, 1));
-  writeFileSync("eval/intensive/documents.local.json", JSON.stringify(full, null, 1));
-  writeFileSync("eval/intensive/cases.local.json", JSON.stringify({ exportedAt: new Date().toISOString(), rows }, null, 1));
-  console.log(`書き出し: eval/intensive/cases.local.json（${rows.length}件・Git管理外）`);
+  // EVIDENCE_UTILIZATION: --suffix=<名前> で別のファイルへ（既存の評価の入力を上書きしない）、--since=<ISO> で指定時刻以降に作られた候補だけ（新しい未見の案件）
+  const suffix = process.argv.find((a) => a.startsWith("--suffix="))?.slice(9);
+  const sinceOpt = process.argv.find((a) => a.startsWith("--since="))?.slice(8);
+  const pickRows = sinceOpt ? rows.filter((r) => String(r.createdAt) >= sinceOpt) : rows;
+  const pickIds = new Set(pickRows.map((r) => r.id));
+  const name = (base) => (suffix && /^[a-z0-9-]{1,30}$/.test(suffix) ? `eval/intensive/${base}.${suffix}.local.json` : `eval/intensive/${base}.local.json`);
+  if (!suffix) writeFileSync("eval/intensive/region.local.json", JSON.stringify(st ?? {}, null, 1));
+  writeFileSync(name("documents"), JSON.stringify(full.filter((d) => pickIds.has(d.candidate_id)), null, 1));
+  writeFileSync(name("cases"), JSON.stringify({ exportedAt: new Date().toISOString(), rows: pickRows }, null, 1));
+  console.log(`書き出し: ${name("cases")}（${pickRows.length}件・Git管理外）`);
 }

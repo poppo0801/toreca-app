@@ -124,37 +124,65 @@ function aiFieldsOf(rec) {
 /** 正解の応募機会（無ければ案件の決定・項目を1件の機会として） */
 function goldOpps(g) {
   const norm = (fields) => Object.fromEntries(Object.entries(fields ?? {}).map(([k, v]) => [GOLD_KEY[k] ?? k, v]));
-  if (Array.isArray(g.opportunities) && g.opportunities.length) return g.opportunities.map((o, i) => ({ id: o.id ?? String(i + 1), match: o.match ?? null, decision: o.decision ?? g.decision, fields: norm(o.fields) }));
-  return [{ id: "1", match: null, decision: g.decision, fields: norm(g.fields) }];
+  // split: "allowed" … 同じ機会を商品ごとに分けて登録してもよい（商品ごとに独立した抽選の可能性があり、正解で分割の可否を確定できない場合）
+  if (Array.isArray(g.opportunities) && g.opportunities.length) return g.opportunities.map((o, i) => ({ id: o.id ?? String(i + 1), match: o.match ?? null, decision: o.decision ?? g.decision, fields: norm(o.fields), split: o.split ?? null }));
+  return [{ id: "1", match: null, decision: g.decision, fields: norm(g.fields), split: g.split ?? null }];
 }
-const tokensOf = (o) => o.match ?? [...(o.fields.store?.t ?? (o.fields.store?.v ? [o.fields.store.v] : [])), ...(o.fields.product?.t ?? [])];
-function matchScore(o, rec) {
+// 機会の照合語（2字以上だけ。1字の語は別の店舗・商品にも含まれ、部分一致で誤って対応させる）
+const tokensOf = (o) => (o.match ?? [...(o.fields.store?.t ?? (o.fields.store?.v ? [o.fields.store.v] : [])), ...(o.fields.product?.t ?? [])]).filter((t) => nf(t).length >= 2);
+/**
+ * 正解の機会とAIの項目の一致度（0〜1）。EVIDENCE_UTILIZATION §4 の修正:
+ *  - 照合語の一致率（店舗・商品・見出し）に加え、両方に締切があり日付が違えば別の受付回として0（同じ店舗・商品の別の回を対応させない）
+ */
+function matchScore(o, rec, basis) {
   const toks = tokensOf(o);
   if (!toks.length) return 0;
   const f = aiFieldsOf(rec);
   const hay = nf([f.store?.value, f.product?.value, rec.label, rec.itemLabel].filter(Boolean).join(" "));
-  return toks.filter((t) => hay.includes(nf(t))).length / toks.length;
+  const s = toks.filter((t) => hay.includes(nf(t))).length / toks.length;
+  const gd = o.fields.deadline?.v ? parseDate(o.fields.deadline.v, basis, "end") : null;
+  const ad = f.deadline?.value ? parseDate(f.deadline.value, basis, "end") : null;
+  if (s > 0 && gd && ad && (gd.mo !== ad.mo || gd.d !== ad.d)) return 0;
+  return s;
 }
-/** 正解の機会とAIの項目の対応（貪欲・語の一致率の高い順）。単一機会の案件は最も一致する1件（同率なら項目番号の小さい方） */
-function align(opps, recs) {
+/** AIの項目に店舗・商品の値が無い（照合の手掛かりが無い）。単一機会の案件では、この場合だけ一致0でも対応させる（不確実な対応として数える） */
+const noIdentity = (rec) => {
+  const f = aiFieldsOf(rec);
+  return !f.store?.value && !f.product?.value;
+};
+/**
+ * 正解の機会とAIの項目の対応（貪欲・一致度の高い順）。EVIDENCE_UTILIZATION §4 の修正:
+ *  - 単一機会でも、店舗・商品の値があるのに一致0の項目は対応させない（以前は一致0でも対応させていた）。値が無い項目は「不確実な対応」として対応させる
+ *  - 複数機会は照合語がすべて一致したものだけ。1つの項目が複数の機会に同じ一致度で当たるときは「不確実な対応」として数える
+ *  - 同じ機会を商品ごとに分けた項目（sameOpp）は、無条件に許容せず、登録なら重複の登録として数える（呼び出し側）
+ */
+function align(opps, recs, basis) {
   const pairs = [];
-  for (const o of opps) for (const [ri, r] of recs.entries()) pairs.push({ o, ri, s: matchScore(o, r) });
+  for (const o of opps) for (const [ri, r] of recs.entries()) pairs.push({ o, ri, s: matchScore(o, r, basis) });
   pairs.sort((a, b) => b.s - a.s || a.ri - b.ri);
   const usedO = new Set();
   const usedR = new Set();
   const out = [];
   const single = opps.length === 1;
+  let uncertain = 0;
   for (const p of pairs) {
     if (usedO.has(p.o.id) || usedR.has(p.ri)) continue;
-    if (!single && p.s < 1) continue; // 複数機会は語がすべて一致したものだけ対応させる
+    const r = recs[p.ri];
+    if (single) {
+      if (p.s === 0 && !(noIdentity(r) || !tokensOf(p.o).length)) continue;
+      if (p.s === 0) uncertain++;
+    } else {
+      if (p.s < 1) continue;
+      if (pairs.filter((q) => q.ri === p.ri && q.s === p.s && q.o.id !== p.o.id && !usedO.has(q.o.id)).length) uncertain++;
+    }
     usedO.add(p.o.id);
     usedR.add(p.ri);
-    out.push({ o: p.o, rec: recs[p.ri] });
+    out.push({ o: p.o, rec: r });
   }
-  // 対応しなかった項目のうち、対応済みの機会と語がすべて一致するもの＝同じ機会を商品ごとに分けた項目（誤分割とは別に数える）
+  // 対応しなかった項目のうち、対応済みの機会と語がすべて一致するもの＝同じ機会を商品ごとに分けた項目（誤分割）
   const rest = recs.filter((_, i) => !usedR.has(i));
-  const sameOpp = single ? [] : rest.filter((r) => opps.some((o) => usedO.has(o.id) && matchScore(o, r) >= 1));
-  return { matched: out, missedOpps: opps.filter((o) => !usedO.has(o.id)), extraRecs: rest.filter((r) => !sameOpp.includes(r)), sameOppRecs: sameOpp };
+  const sameOpp = rest.filter((r) => opps.some((o) => usedO.has(o.id) && matchScore(o, r, basis) >= 1));
+  return { matched: out, missedOpps: opps.filter((o) => !usedO.has(o.id)), extraRecs: rest.filter((r) => !sameOpp.includes(r)), sameOppRecs: sameOpp, uncertain };
 }
 
 const report = {};
@@ -174,7 +202,7 @@ for (const run of runs) {
     byCase.set(l.caseId, l); // 判断・項目は最後の試行（全試行の費用は合計）
   }
   const z = () => ({ 分母: 0, 正解: 0, 誤登録: 0, 誤除外: 0, 不要な保留: 0 });
-  const out = { 案件: 0, 試行: lines.length, 失敗した試行: lines.filter((l) => !l.ok).length, 費用_円: 0, 時間_秒: [], 候補単位: { ...z(), 確定不能: 0 }, 機会単位: { ...z(), 確定不能: 0, 正解の機会: 0, 対応: 0, 漏れ: 0, 余分: 0 }, 組別: {}, 項目: {}, 項目_公式のみ: {}, 記載なし: { 正しい記載なし: 0, 捏造_観察: 0, 根拠のない推定: 0, 未判定: 0, 捏造の項目: {} }, 重要項目: { 分母: 0, 正しい: 0 }, 段別: {}, 上位: { 使用: 0, 採用: 0, 理由: {} }, 案件別: [] };
+  const out = { 案件: 0, 試行: lines.length, 失敗した試行: lines.filter((l) => !l.ok).length, 費用_円: 0, 時間_秒: [], 候補単位: { ...z(), 確定不能: 0 }, 機会単位: { ...z(), 確定不能: 0, 正解の機会: 0, 対応: 0, 漏れ: 0, 余分: 0 }, 組別: {}, 項目: {}, 項目_公式のみ: {}, 記載なし: { 正しい記載なし: 0, 捏造_観察: 0, 根拠のない推定: 0, 未判定: 0, 捏造の項目: {} }, 重要項目: { 分母: 0, 正しい: 0 }, 取得率: { 分母: 0, 正しい: 0 }, 誤値: { 観察: 0, 推定: 0 }, 段別: {}, 上位: { 使用: 0, 採用: 0, 理由: {} }, 案件別: [] };
   const tally = (m, allowed, ai) => {
     m.分母++;
     if (allowed.includes(ai)) m.正解++;
@@ -191,8 +219,19 @@ for (const run of runs) {
     const basis = basisOf(caseId) ?? goldFile.at;
     const recs = (l.records ?? []).filter((r) => r.decision !== undefined);
     const opps = goldOpps(g);
-    const { matched, missedOpps, extraRecs, sameOppRecs } = align(opps, recs);
+    const { matched, missedOpps, extraRecs, sameOppRecs, uncertain } = align(opps, recs, basis);
     out.機会単位.商品別の分割 = (out.機会単位.商品別の分割 ?? 0) + sameOppRecs.length;
+    out.機会単位.不確実な対応 = (out.機会単位.不確実な対応 ?? 0) + uncertain;
+    // §4: 正解に無い機会の登録（余分な項目の登録）と、同じ機会の商品別の分割の登録（重複の登録）は、判断の誤り（誤登録）として分母に入れる
+    const splitOk = (r) => opps.some((o) => o.split === "allowed" && matchScore(o, r, basis) >= 1);
+    for (const r of [...extraRecs, ...sameOppRecs]) {
+      if (finalOf(r) !== "register" || (sameOppRecs.includes(r) && splitOk(r))) continue;
+      out.機会単位.分母++;
+      out.機会単位.誤登録++;
+      out.機会単位[sameOppRecs.includes(r) ? "重複の登録" : "追加の誤登録"] = (out.機会単位[sameOppRecs.includes(r) ? "重複の登録" : "追加の誤登録"] ?? 0) + 1;
+    }
+    // §4: 漏れた機会の記載あり項目も、全体の取得率の分母に入れる（取得できなかった＝missing）
+    for (const o of missedOpps) for (const gf of Object.values(o.fields)) if (gf.s !== "not_stated") out.取得率.分母++;
     // 判断の段別（同じ証拠での既定モデルと上位モデル。dual・適応型の記録から）。最終の規則とは別に、各段の判断そのものを正解と照合する
     for (const { o, rec } of matched) {
       if (o.decision.conf === "undetermined") continue;
@@ -242,6 +281,11 @@ for (const run of runs) {
           continue;
         }
         const r = scoreField(k, gf, a, basis);
+        out.取得率.分母++;
+        if (r === "correct") out.取得率.正しい++;
+        // 記載ありの項目の誤った値（観察として書いた誤値／推定の誤り）。捏造（記載なしへの観察値）とは別に数える
+        if (r === "wrong" && a?.basis === "observed") out.誤値.観察++;
+        else if (r === "wrong" && a?.basis === "inferred") out.誤値.推定++;
         if (opps.length === 1) fieldRes[k] = r;
         const bucket = (m) => ((m[k] ??= { 分母: 0, correct: 0, partial: 0, wrong: 0, wrong_absent: 0, missing: 0 }), m[k].分母++, m[k][r]++);
         bucket(out.項目);
@@ -273,7 +317,10 @@ for (const run of runs) {
     fc += v.correct;
     fd += v.分母;
   }
+  // 対応した機会の項目だけの正確さ（項目_全体）と、漏れた機会を含む全体の取得率（取得率）を区別する
   out.項目_全体 = { 分母: fd, 正しい: fc, 率: fd ? Math.round((fc / fd) * 1000) / 10 : null };
+  out.取得率.率 = out.取得率.分母 ? Math.round((out.取得率.正しい / out.取得率.分母) * 1000) / 10 : null;
+  out.重要項目.率 = out.重要項目.分母 ? Math.round((out.重要項目.正しい / out.重要項目.分母) * 1000) / 10 : null;
   const rate = (m) => (m.分母 ? Math.round((m.正解 / m.分母) * 1000) / 10 : null);
   out.候補単位.率 = rate(out.候補単位);
   out.機会単位.率 = rate(out.機会単位);
@@ -290,7 +337,7 @@ else
     console.log("候補単位", JSON.stringify(o.候補単位));
     console.log("機会単位", JSON.stringify(o.機会単位));
     console.log("組別", JSON.stringify(o.組別));
-    console.log("項目全体", JSON.stringify(o.項目_全体), "重要項目", JSON.stringify(o.重要項目), "記載なし", JSON.stringify(o.記載なし));
+    console.log("項目（対応した機会）", JSON.stringify(o.項目_全体), "全体の取得率", JSON.stringify(o.取得率), "重要項目", JSON.stringify(o.重要項目), "記載なし", JSON.stringify(o.記載なし), "記載ありの誤値", JSON.stringify(o.誤値));
     for (const [k, v] of Object.entries(o.項目)) console.log(`  ${k.padEnd(16)} n=${v.分母} ○${v.correct} △${v.partial} ×${v.wrong} 無${v.wrong_absent} －${v.missing}`);
     console.log("上位", JSON.stringify(o.上位), "段別", JSON.stringify(o.段別));
     for (const c of o.案件別) console.log(`  ${c.caseId} [${c.set}] ${c.verdict} ai=${c.ai}(${c.aiDecision}${c.verified ? "" : ",未検証"}) 許容=${c.allowed} 機会${c.機会} ¥${c.円} ${c.秒}s ${c.上位 ? "上位:" + c.上位 : ""} | ${c.項目}`);

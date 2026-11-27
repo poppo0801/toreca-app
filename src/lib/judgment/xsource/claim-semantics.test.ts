@@ -104,6 +104,12 @@ describe("検証層への接続（実在と意味を別に扱い、安全側に�
     expect(v(out({ fields: { exclude_reason: F("受付終了", "当選発表： 12月2日(水)予定") } })).blocking).toEqual(["exclude_reason_unsupported"]);
     expect(v(out({ fields: { exclude_reason: F("受付終了", "11月30 日(月)22：59まで") } })).blocking).toEqual(["exclude_reason_contradicted"]);
   });
+  it("締切が評価時点より前の本登録案は止める（EVIDENCE_UTILIZATION）。年の無い・解釈できない締切は止めない", () => {
+    const late = new Date("2026-12-05T00:00:00Z");
+    expect(v(out({ decision: "register", fields: { deadline: F("2026-11-30 22:59", "11月30 日(月)22：59まで") } }), late).blocking).toContain("register_deadline_passed");
+    expect(v(out({ decision: "register", fields: { deadline: F("2026-11-30 22:59", "11月30 日(月)22：59まで") } })).blocking).not.toContain("register_deadline_passed");
+    expect(v(out({ decision: "tentative", fields: { deadline: F("2026-11-30 22:59", "11月30 日(月)22：59まで") } }), late).blocking).not.toContain("register_deadline_passed");
+  });
   it("締切の値が当選発表の日付なら本登録を止める（deadline は重要項目）", () => {
     const r = v(out({ decision: "register", fields: { deadline: F("2026-12-02", "当選発表： 12月2日(水)予定") } }));
     expect(r.blocking).toEqual(["deadline_role_mismatch:deadline"]);
