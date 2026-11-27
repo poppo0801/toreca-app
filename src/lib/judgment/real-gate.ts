@@ -28,7 +28,8 @@ export type JudgmentRealGate = { ok: true; apiKey: string; keySource: KeySource;
  * 1回の実行の総額は250円まで（PRODUCTION_PARITY: 利用者が評価枠 +800円・日次400円を承認 2026-11-26。モデル・推論設定の比較を同じ母数で行うため。以前は60円で、最終評価の後半が未実行になった）。
  * 通算・日次は利用者の承認額の範囲に収める（起動側で管理）。この上限は集中評価の入口（intensive-eval.real.test.ts）だけが渡す。
  */
-export const INTENSIVE_CAPS = { totalJpy: 250, perCaseJpy: 25 } as const;
+// CAPABILITY_CEILING（2026-11-27 利用者承認: 評価の通算¥3,700・日次¥1,200・1件¥100）: Sonnet の高推論・緩和した調査を比較するため、1回の総額¥500・1件¥100 まで
+export const INTENSIVE_CAPS = { totalJpy: 500, perCaseJpy: 100 } as const;
 
 export function checkJudgmentRealRun(input: { env: Record<string, string | undefined>; confirm: boolean; approvedTotalJpy: number; approvedPerCaseJpy: number; caps?: { totalJpy: number; perCaseJpy: number } }): JudgmentRealGate {
   const CANDIDATE_CAP_TOTAL_JPY = input.caps?.totalJpy ?? CANDIDATE_CAP_TOTAL_JPY_DEFAULT;

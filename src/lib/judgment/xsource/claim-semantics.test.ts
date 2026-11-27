@@ -22,6 +22,16 @@ const sequence = (outs: JudgeOutput[]): RegistrationJudge & { inputs: unknown[] 
 };
 const ex = (claim: string, quote: string, extra: Partial<Parameters<typeof checkExcludeSemantics>[0]> = {}) => checkExcludeSemantics({ claim, quote, now: NOW, ...extra });
 
+describe("除外理由: 理由の種類の語が無く、受付期間だけを書いた除外（CAPABILITY_CEILING）", () => {
+  it("締切の役割の語つきで評価時点より前なら受付終了として支持（種類は未確認として残す）。未来・別の事象の日時は支持しない", () => {
+    const r = ex("応募期間 11月20日(金)まで", "応募期間 11月20日(金)まで");
+    expect(r).toMatchObject({ ok: true });
+    expect(r.unconfirmed?.join(" ")).toContain("機械的に読んだ");
+    expect(ex("応募期間 11月30日(月)まで", "応募期間 11月30日(月)まで")).toMatchObject({ ok: false });
+    expect(ex("当選発表 11月20日", "当選発表 11月20日(金)")).toMatchObject({ ok: false });
+  });
+});
+
 describe("除外理由: 他のTCGだけ（EVIDENCE_UTILIZATION の未見で、正しい除外が保留になっていた）", () => {
   it("引用が他のTCGの名称を明示すれば支持。商品名だけ・ポケモンカードとの混在は支持しない", () => {
     expect(claimClassOf("対象外の商品（他のTCG）")).toBe("other_tcg");
@@ -35,6 +45,11 @@ describe("除外理由: 他のTCGだけ（EVIDENCE_UTILIZATION の未見で、�
     expect(verifyRegistration({ output: o, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).issues).toEqual([]);
     const pk = out({ fields: { product: { value: "拡張パック 架空", basis: "observed", evidenceId: "s1", quote: "架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "架空パック 抽選" } } });
     expect(verifyRegistration({ output: pk, evidence: [seed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("exclude_reason_unsupported");
+  });
+  it("引用は他のTCGでも、同じ証拠にポケモンカードの記載があれば混在として保留（局所の引用で混在の告知を除外しない）", () => {
+    const mixed = { id: "s1", kind: "seed", url: null, fetchedAt: "x", contentHash: "h", text: "・ONE PIECEカードゲーム 架空パック 抽選 12/1〆\n・ポケモンカードゲーム 架空BOX 抽選 12/1〆", structure: null, independent: true };
+    const o = out({ fields: { product: { value: "ONE PIECEカードゲーム 架空パック", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" }, exclude_reason: { value: "対象外の商品（他のTCG）", basis: "observed", evidenceId: "s1", quote: "ONE PIECEカードゲーム 架空パック" } } });
+    expect(verifyRegistration({ output: o, evidence: [mixed as never], protectedFields: {}, registerRequiresUnit: true, now: NOW }).blocking).toContain("exclude_reason_mixed_products");
   });
 });
 

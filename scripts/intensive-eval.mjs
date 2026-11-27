@@ -46,6 +46,10 @@ start({
   INTENSIVE_AGENT_EFFORT: arg("agent-effort") ?? "",
   INTENSIVE_JUDGE_EFFORT: arg("judge-effort") ?? "",
   INTENSIVE_MAX_SEARCHES: arg("searches") ?? "",
+  // CAPABILITY_CEILING: --profile=relaxed（調査の上限を広げる）・--thinking=agent,judge|all（思考を使う）・--page-view=full|related|legacy
+  INTENSIVE_PROFILE: arg("profile") ?? "",
+  INTENSIVE_THINKING: arg("thinking") ?? "",
+  ...(arg("page-view") ? { PAGE_VIEW_MODE: arg("page-view") } : {}),
   JUDGMENT_REAL_EVAL: "allow",
   JUDGMENT_REUSE_EXISTING_KEY: "allow",
   JUDGMENT_REUSE_FALLBACK_KEY: process.env.AGENT_ANTHROPIC_API_KEY ?? "",

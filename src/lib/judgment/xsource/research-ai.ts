@@ -46,7 +46,7 @@ export const JUDGE_SYSTEM = `あなたは、調査が終わった時点の証拠
 - **抽選の管理に必要な全項目を、原文に書かれている限り取得する**（登録・除外の判断に関係しない項目も。発表日・発表方法・購入期間・受取期間・受取方法・受取場所・応募方法・応募条件・価格など）。応募の期間・当選発表・購入（支払い）の期間・受取（引き渡し）の期間を混同しない（「お渡し・お支払い期間」のように同じ期間なら、購入と受取の両方に同じ値を書く）。日付は YYYY-MM-DD、時刻が書かれていれば YYYY-MM-DD HH:mm（年が無ければ評価時点に最も近い年）。「〜まで」だけなら終了の項目に書き、開始は書かない。引用は原文のまま。
 - 値が無い項目は fields に入れず、absent に記載の状態を書く: not_stated（読んだ範囲に記載が無い）／not_announced（「後日」「未定」と書かれている）／anytime（随時・期限なし）／unreadable（ページを取得できない・読んでいない範囲がある）。**値を推測で補わない**。告知に書かれていない任意の項目が無いことだけを理由に、暫定にしない。
 - **応募の条件（会員登録・アプリ会員・購入実績・フォロー・本人確認・年齢など）を利用者が満たすかは、AIは判断しない**。条件は conditions に原文のとおり書き、条件があることだけを理由に暫定にしない（応募の機会が実在し、地域・受取が利用者に合い、店舗・商品・締切が確認できれば register。条件を満たすかは利用者が決める）。
-- **抽選の応募機会ではない**投稿（先着・通常販売・予約開始・在庫の案内・商品やカードの情報・複数の抽選のまとめや件数の集計・グッズの紹介）は、原文からそう読み取れれば exclude とし、exclude_reason に「抽選ではない（先着販売）」「抽選ではない（まとめ・件数）」のように書き、引用は販売の方式・まとめを示す原文にする（応募先のページは不要）。まとめの投稿を1件の抽選として登録しない。
+- **抽選の応募機会ではない**投稿（先着・通常販売・予約開始・在庫の案内・**販売や抽選が無い・中止のお知らせ（「○日の店頭販売はなし」等）**・商品やカードの情報・複数の抽選のまとめや件数の集計・グッズの紹介）は、原文からそう読み取れれば exclude とし、exclude_reason に「抽選ではない（先着販売）」「抽選ではない（まとめ・件数）」のように書き、引用は販売の方式・まとめを示す原文にする（応募先のページは不要）。まとめの投稿を1件の抽選として登録しない。
 - 店舗が1つ（または通販の1サイト）で商品が1つの抽選は、応募の機会が1つと読めるので、応募ページを読めなくても apply_unit を one_form_one と推定してよい（basis=inferred、引用はその店舗・商品・受付の記載）。複数の店舗・商品・受付枠がある場合は、この推定をしない。
 - ページを取得した時刻（基準時刻より後）に「応募期間が終了しました」等と表示されていても、ページの応募期間が基準時刻を含むなら、基準時刻では受付中として扱う（取得時の終了表示だけで暫定にしない）。
 - 応募の方法がアプリ・公式LINE・DM・店頭のQRコード・店頭の掲示など、URLで示されない方法のときは、応募先URLが無いこと自体は不足ではない（応募方法として書く）。
@@ -258,7 +258,15 @@ function withCallRecord<I, O extends { costJpy: number | null }>(once: (input: I
 /** 推論の度合い（output_config.effort。公式: low/medium/high/xhigh/max。思考の有無に関わらず全出力に効く）。既定は従来どおり low（PRODUCTION_PARITY で比較）。思考は max_tokens に含まれるため、度合いに応じて出力上限と費用の予約を広げる */
 export type AiEffort = "low" | "medium" | "high";
 export const EFFORT_MAX_TOKENS_SCALE: Record<AiEffort, number> = { low: 1, medium: 2, high: 4 };
-type AiOpts = { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void; strict?: boolean; effort?: AiEffort };
+/**
+ * 思考（thinking）を使うか（CAPABILITY_CEILING）。実測（2026-11-27）: Haiku 5.5 は強制ツール選択（tool_choice: tool）だと effort を上げても思考しない（出力が low と同じ量）。
+ * 思考を使うときは tool_choice を auto にして適応型の思考（thinking: adaptive）を明示し、提出の道具を必ず使うよう指示する（道具を使わない応答は従来どおり形の不備）。
+ * 思考は max_tokens に含まれるため、出力上限に思考の余裕を足し、時間の上限も延ばす。既定は従来どおり（使わない）。
+ */
+export const THINKING_EXTRA_TOKENS = 12_000;
+type AiOpts = { model?: string; rate?: number; onDiagnostic?: (d: AiDiagnostic) => void; strict?: boolean; effort?: AiEffort; thinking?: boolean };
+const thinkingParams = (on: boolean | undefined, tool: string): Partial<Anthropic.MessageCreateParamsNonStreaming> => (on ? { thinking: { type: "adaptive" }, tool_choice: { type: "auto" } } : { tool_choice: { type: "tool", name: tool } });
+const thinkingNote = (on: boolean | undefined, tool: string): string => (on ? `\n\n必ず道具 ${tool} を1回呼んで提出してください（文章だけで答えない）。` : "");
 /** 呼び出しの診断を、再試行の判断（直前の失敗の種類）にも使えるよう束ねる */
 function bindOpts(rawClient: ClientLike, role: AiDiagnostic["role"], o0: AiOpts): { client: ClientLike; opts: AiOpts & { onDiagnostic: (d: AiDiagnostic) => void }; probe: Probe } {
   const probe: Probe = { last: "" };
@@ -275,7 +283,7 @@ export function makeAnthropicResearchAgent(rawClient: ClientLike, o0: AiOpts = {
   const { client, opts, probe } = bindOpts(rawClient, "agent", o0);
   const model = opts.model ?? DEFAULT_AI_MODEL;
   const effort: AiEffort = opts.effort ?? "low";
-  const agentMax0 = OUTPUT_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort];
+  const agentMax0 = OUTPUT_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort] + (opts.thinking ? THINKING_EXTRA_TOKENS : 0);
   const maxFor = (): number => (probe.enlarge ? agentMax0 * 2 : agentMax0);
   return withCallRecord<AgentTurnInput, AgentTurnOutput>(async (input) => {
     let res: Anthropic.Message;
@@ -283,8 +291,8 @@ export function makeAnthropicResearchAgent(rawClient: ClientLike, o0: AiOpts = {
     const retryNote = probe.enlarge ? "\n\n（前回の提出は長すぎて途中で途切れました。observed・inferred・unknown は重要なものだけ各5件以内にし、next を必ず含めてください。）" : "";
     try {
       res = await client.messages.create(
-        { model, max_tokens: agentMax, system: RESEARCH_SYSTEM, messages: [{ role: "user", content: `${renderTurnInput(input)}\n\n調査の結果を提出してください。${retryNote}` }], output_config: { effort }, tools: [{ name: TURN_TOOL, description: "調査の整理と次の行動を提出する", input_schema: TURN_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: TURN_TOOL } },
-        { timeout: 60_000, maxRetries: 0 },
+        { model, max_tokens: agentMax, system: RESEARCH_SYSTEM, messages: [{ role: "user", content: `${renderTurnInput(input)}\n\n調査の結果を提出してください。${retryNote}${thinkingNote(opts.thinking, TURN_TOOL)}` }], output_config: { effort }, tools: [{ name: TURN_TOOL, description: "調査の整理と次の行動を提出する", input_schema: TURN_SCHEMA as Anthropic.Tool["input_schema"] }], ...thinkingParams(opts.thinking, TURN_TOOL) } as Anthropic.MessageCreateParamsNonStreaming,
+        { timeout: opts.thinking ? 240_000 : 60_000, maxRetries: 0 },
       );
     } catch (e) {
       opts.onDiagnostic?.({ role: "agent", reason: apiReason(e) });
@@ -292,6 +300,7 @@ export function makeAnthropicResearchAgent(rawClient: ClientLike, o0: AiOpts = {
     }
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     probe.lastCost = cost; // 出力を受け取った（不備でも課金あり）。料金不明なら null
+    if (opts.thinking) opts.onDiagnostic({ role: "agent", reason: res.content.some((b) => b.type === "thinking" || b.type === "redacted_thinking") ? "thinking:used" : "thinking:none" }); // 思考が実際に使われたか（モデル名だけで仮定しない）
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === TURN_TOOL);
     const a = use?.input as { observed?: unknown; inferred?: unknown; unknown?: unknown; counterHypotheses?: unknown; next?: { kind?: string; url?: string; evidenceId?: string; from?: number; chars?: number; query?: string; reason?: string; why?: string } } | undefined;
     if (!a?.next || (a.next.kind !== "fetch" && a.next.kind !== "stop" && a.next.kind !== "search" && a.next.kind !== "read")) {
@@ -310,7 +319,7 @@ export function makeAnthropicRegistrationJudge(rawClient: ClientLike, o0: AiOpts
   const { client, opts, probe } = bindOpts(rawClient, "judge", o0);
   const model = opts.model ?? DEFAULT_AI_MODEL;
   const effort: AiEffort = opts.effort ?? "low";
-  const judgeMax0 = JUDGE_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort];
+  const judgeMax0 = JUDGE_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort] + (opts.thinking ? THINKING_EXTRA_TOKENS : 0);
   const maxFor = (): number => (probe.enlarge ? judgeMax0 * 2 : judgeMax0);
   return withCallRecord<JudgeInput, JudgeOutput>(async (input) => {
     let res: Anthropic.Message;
@@ -318,8 +327,8 @@ export function makeAnthropicRegistrationJudge(rawClient: ClientLike, o0: AiOpts
     const retryNote = probe.enlarge ? "\n\n（前回の提出は長すぎて途中で途切れました。各項目の値・引用・理由を短くし、項目は省かずに提出してください。）" : "";
     try {
       res = await client.messages.create(
-        { model, max_tokens: judgeMax, system: JUDGE_SYSTEM, messages: [{ role: "user", content: `${renderJudgeInput(input)}\n\n登録判断を提出してください。${retryNote}` }], output_config: { effort }, tools: [{ name: JUDGE_TOOL, description: "登録判断を提出する", input_schema: JUDGE_SCHEMA as Anthropic.Tool["input_schema"] }], tool_choice: { type: "tool", name: JUDGE_TOOL } },
-        { timeout: 60_000, maxRetries: 0 },
+        { model, max_tokens: judgeMax, system: JUDGE_SYSTEM, messages: [{ role: "user", content: `${renderJudgeInput(input)}\n\n登録判断を提出してください。${retryNote}${thinkingNote(opts.thinking, JUDGE_TOOL)}` }], output_config: { effort }, tools: [{ name: JUDGE_TOOL, description: "登録判断を提出する", input_schema: JUDGE_SCHEMA as Anthropic.Tool["input_schema"] }], ...thinkingParams(opts.thinking, JUDGE_TOOL) } as Anthropic.MessageCreateParamsNonStreaming,
+        { timeout: opts.thinking ? 240_000 : 60_000, maxRetries: 0 },
       );
     } catch (e) {
       opts.onDiagnostic?.({ role: "judge", reason: apiReason(e) });
@@ -327,6 +336,7 @@ export function makeAnthropicRegistrationJudge(rawClient: ClientLike, o0: AiOpts
     }
     const cost = estimateCostJpy(model, res.usage?.input_tokens, res.usage?.output_tokens, opts.rate);
     probe.lastCost = cost; // 出力を受け取った（不備でも課金あり）。料金不明なら null
+    if (opts.thinking) opts.onDiagnostic({ role: "judge", reason: res.content.some((b) => b.type === "thinking" || b.type === "redacted_thinking") ? "thinking:used" : "thinking:none" });
     const use = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === JUDGE_TOOL);
     // モデルが入れ子のオブジェクト（fields）を JSON 文字列で返すことがある（形式の揺れ）。文字列なら一度だけ解釈する（内容の検証は従来どおり。解釈できなければ不備として型を記録）
     const rawIn = use?.input as Record<string, unknown> | undefined;

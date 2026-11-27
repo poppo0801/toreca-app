@@ -18,7 +18,8 @@ type Ev = Pick<StoredEvidence, "hash" | "linkedPages" | "imageRefs">;
 
 /** リンク先ページ（URL・正規化した本文・全文の字数）と画像の参照の集合から、16桁の素材ハッシュを作る。並び順には依存しない */
 export function materialHashOf(ev: Pick<StoredEvidence, "linkedPages" | "imageRefs">): string {
-  const pages = (ev.linkedPages ?? []).map((p) => `${p.url}\u0000${h(normalizeForHash(p.text)).slice(0, 16)}\u0000${p.fullChars ?? p.text.length}`).sort();
+  // 全文のハッシュ（fullHash）があればそれを使う（CAPABILITY_CEILING: 抜粋だけのハッシュでは、抜粋の外＝後半の更新を検知できなかった）。無い旧い証拠は従来どおり抜粋のハッシュ
+  const pages = (ev.linkedPages ?? []).map((p) => `${p.url}\u0000${(p as { fullHash?: string }).fullHash ?? h(normalizeForHash(p.text)).slice(0, 16)}\u0000${p.fullChars ?? p.text.length}`).sort();
   const images = [...new Set(ev.imageRefs ?? [])].sort();
   return h(JSON.stringify({ pages, images })).slice(0, 16);
 }

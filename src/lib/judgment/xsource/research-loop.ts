@@ -34,12 +34,13 @@ export interface JudgeStep {
  *  - audit_sample: 検証済みの登録・除外から一定の割合を抽出して監査する（保留だけを見る偏りを防ぐ）
  * 情報そのものが無い（取得できない）場合はモデルを変えても解決しないため、根拠のページが1つも無い暫定は上げない。
  */
-export function escalationReason(a: { output: JudgeOutput | null; verified: boolean; evidence: readonly Evidence[]; caseId: string; auditRate: number }): string | null {
+export function escalationReason(a: { output: JudgeOutput | null; verified: boolean; evidence: readonly Evidence[]; caseId: string; auditRate: number; /** 隔離評価（CAPABILITY_CEILING）: ページなし・人の確認でも、暫定なら上位で判断し直す */ broad?: boolean }): string | null {
   const pages = a.evidence.filter((e) => e.kind === "page");
-  if (!a.output) return pages.length ? "primary_failed" : null;
+  if (!a.output) return pages.length || a.broad ? "primary_failed" : null;
   if (!a.verified) return "verification_failed";
   const unit = Object.entries(a.output.fields).find(([k]) => /apply_?unit|応募単位/i.test(k))?.[1];
   const multiSlot = pages.some((e) => (e.structure?.slots?.length ?? 0) >= 2);
+  if (a.broad && a.output.decision === "tentative") return "tentative_broad";
   if (a.output.decision === "tentative") {
     if (pages.length === 0) return null;
     // 不明が「公開情報では確定できず、利用者が確かめれば確定できる」（askHuman）ものだけなら、同じ証拠を上位モデルに読ませても解決しない（費用だけ掛かる）。上位は使わず人の確認へ回す（INTENSIVE_EVALUATION §5）
@@ -646,6 +647,8 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       const others = Object.entries(i.output.fields).filter(([k, x]) => /deadline|締切/i.test(k) && x.value).map(([, x]) => x.value as string);
       const v = checkExcludeSemantics({ claim: r.value, quote: r.quote, ...(i.now ? { now: i.now } : {}), otherDeadlines: others, ...(i.userRegion ? { userRegion: i.userRegion } : {}), ...(() => { const d = i.output.fields["deadline"]; const dev = d?.evidenceId ? byId.get(d.evidenceId) : undefined; return d && d.basis === "observed" && d.quote && dev && norm(dev.text).includes(norm(d.quote)) ? { deadlineQuote: d.quote } : {}; })() });
       if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
+      // 他のTCGだけ: 引用（局所）が他のTCGでも、同じ証拠の別の箇所にポケモンカードがあれば混在の可能性がある（CAPABILITY_CEILING: 局所の引用だけで混在の告知を除外しない）。混在なら対象の商品の機会を拾うべきなので、保留にして判断し直す
+      else if (claimClassOf(r.value) === "other_tcg" && /ポケモン|ポケカ|ポケットモンスター|pok[eé]mon/i.test(ev.text.normalize("NFKC"))) { issues.push("exclude_reason_mixed_products"); reasonOf.set("exclude_reason_mixed_products", "同じ証拠にポケモンカードの記載もあり、他のTCGだけとは言えない（混在なら対象の商品の機会を拾う）"); }
       else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
     }
   }
@@ -676,7 +679,7 @@ export async function runResearch(args: {
   agent: ResearchAgent;
   judge: RegistrationJudge;
   /** 適応型判断（ADAPTIVE_REVIEW）: 既定の判断で根拠が足りない・検証に通らない・応募構造が複雑などのとき、同じ証拠で上位のモデルに判断させる（調査はやり直さない）。無ければ従来どおり1段 */
-  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
   tools: ResearchTools;
   budget: CallBudget;
   limits?: Partial<ResearchLimits>;
@@ -920,7 +923,7 @@ export async function runResearch(args: {
   const judgeTrail: JudgeStep[] = [{ stage: "primary", model: args.escalation?.primaryModel ?? null, reason: null, decision: output ? output.decision : "none", verified }];
   let disagreement = false;
   if (args.escalation) {
-    const why = escalationReason({ output, verified, evidence, caseId: args.caseId, auditRate: args.escalation.auditRate ?? 0 });
+    const why = escalationReason({ output, verified, evidence, caseId: args.caseId, auditRate: args.escalation.auditRate ?? 0, ...(args.escalation.broad ? { broad: true } : {}) });
     if (why) {
       let eIssues: string[] | undefined;
       let adopted = false;

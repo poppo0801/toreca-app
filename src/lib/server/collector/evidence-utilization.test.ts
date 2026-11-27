@@ -72,8 +72,15 @@ describe("再評価の間隔（意味のある更新は12時間を待たない�
 
 describe("シャドーの待ち行列の優先度（AIなし）", () => {
   const now = new Date("2026-11-27T03:00:00Z");
-  it("締切を過ぎた候補は閉じる。締切が3日以内・確認待ち・未評価は先、旧方式で除外済みかつ評価済みは後", () => {
+  it("締切を過ぎた候補は閉じる。締切が3日以内・確認待ち・未評価は先、旧方式で除外済みかつ評価済みは後", async () => {
     expect(queueDecision({ status: "excluded", deadline: "2026-11-26", evaluatedBefore: true }, now)).toEqual({ action: "skip", reason: "deadline_passed" });
+    // 旧方式の締切は誤りのことがある（下の行）。全文のハッシュがあれば、抜粋の外（後半）の更新も素材の変化として検知する（CAPABILITY_CEILING）
+    const { materialHashOf } = await import("@/lib/collector/shadow-hash");
+    const pg = (fullHash?: string) => ({ linkedPages: [{ url: "https://a.example.invalid/e", text: "抜粋は同じ", fetchedAt: "x", fullChars: 20000, ...(fullHash ? { fullHash } : {}) }], imageRefs: [] });
+    expect(materialHashOf(pg("aaaaaaaaaaaaaaaa") as never)).not.toBe(materialHashOf(pg("bbbbbbbbbbbbbbbb") as never));
+    expect(materialHashOf(pg() as never)).toBe(materialHashOf(pg() as never));
+    // 旧方式の締切は誤りのことがある: 新AIで未評価なら閉じず、後回しにして1回は評価する（CAPABILITY_CEILING）
+    expect(queueDecision({ status: "excluded", deadline: "2026-11-26", evaluatedBefore: false }, now)).toEqual({ action: "keep", tier: 2 });
     expect(queueDecision({ status: "excluded", deadline: "2026-11-27", evaluatedBefore: true }, now)).toEqual({ action: "keep", tier: 0 });
     expect(queueDecision({ status: "auto_registered", deadline: null, evaluatedBefore: false }, now)).toEqual({ action: "keep", tier: 0 });
     expect(queueDecision({ status: "pending", deadline: null, evaluatedBefore: true }, now)).toEqual({ action: "keep", tier: 0 });

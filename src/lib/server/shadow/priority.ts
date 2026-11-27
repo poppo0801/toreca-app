@@ -2,7 +2,7 @@
  * シャドーの待ち行列の優先順位（EVIDENCE_UTILIZATION。AIは呼ばない・費用0）。
  *  - 日次の予算（1日に処理できるのは十数件）に対して待ちが増え続けると、古い順の処理では締切直前・新規の候補が後回しになる。
  *  - リース（DB関数 shadow_lease）は next_run_at の順に確保する。ここでは、待ちのジョブの next_run_at を優先度に合わせて動かすだけで、DBの移行は要らない。
- *  - 締切を過ぎた候補（旧方式の登録値の締切が日本時間の今日より前）のジョブは、AIを呼ばずに skipped（deadline_passed）にする。候補・抽選のデータは変えない（シャドーのジョブだけ）。
+ *  - 締切を過ぎた候補（旧方式の登録値の締切が日本時間の今日より前）のジョブは、新AIで評価済みならAIを呼ばずに skipped（deadline_passed）にし、未評価なら後回しにして1回は評価する。候補・抽選のデータは変えない（シャドーのジョブだけ）。
  *  - 一律の再実行・削除はしない。判別できない（締切が不明）ものは通常の順番のまま。
  */
 export type QueueTier = 0 | 1 | 2;
@@ -22,7 +22,9 @@ const daysBetween = (a: string, b: string): number => Math.round((new Date(`${b}
 /** 1件の判定（純関数） */
 export function queueDecision(c: QueueCandidateView, now: Date): QueueDecision {
   const today = jstDay(now);
-  if (c.deadline && /^\d{4}-\d{2}-\d{2}$/.test(c.deadline) && c.deadline < today) return { action: "skip", reason: "deadline_passed" };
+  // 旧方式の締切は誤りのことがある（CAPABILITY_CEILING: 旧方式の締切だけでシャドーを閉じると、新AIとの比較が歪む）。
+  // 新AIで一度も評価していない候補は閉じず、後回し（1回だけ）にして必ず1回は評価する。評価済みの候補だけを閉じる
+  if (c.deadline && /^\d{4}-\d{2}-\d{2}$/.test(c.deadline) && c.deadline < today) return c.evaluatedBefore ? { action: "skip", reason: "deadline_passed" } : { action: "keep", tier: 2 };
   const left = c.deadline ? daysBetween(today, c.deadline) : null;
   // 締切が3日以内・旧方式で確認待ち（人の判断を待っている）・まだ一度も新AIで評価していない候補を先に
   if ((left !== null && left <= 3) || c.status === "pending" || !c.evaluatedBefore) return { action: "keep", tier: 0 };

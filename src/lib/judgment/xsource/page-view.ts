@@ -9,8 +9,11 @@
  */
 export type PageViewMode = "legacy" | "full" | "related";
 
-/** 既定の方式。同一の証拠での比較（EVIDENCE_UTILIZATION の報告書 §2）の結果で決める */
-export const DEFAULT_PAGE_VIEW_MODE: PageViewMode = "related";
+/**
+ * 既定の方式。CAPABILITY_CEILING（利用者の方針 2026-11-27: 不要な文字の削減は後回し。AIへの提示も原則は全文＋必要時の read）により full に戻した。
+ * related（関連情報ビュー）は比較用に残す（PAGE_VIEW_MODE=related）。共通部分の範囲の記録（structure.chrome）は保存を続ける
+ */
+export const DEFAULT_PAGE_VIEW_MODE: PageViewMode = "full";
 
 export function pageViewMode(env: Record<string, string | undefined> | undefined = typeof process !== "undefined" ? process.env : undefined): PageViewMode {
   const v = env?.PAGE_VIEW_MODE;

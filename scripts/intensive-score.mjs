@@ -109,7 +109,18 @@ export function scoreField(key, g, ai, basis) {
   const gl = nf(toks.join("")).length;
   return nf(v).length > Math.max(60, gl * 4) ? "partial" : "correct";
 }
-const finalOf = (r) => (r.decision === "register" || r.decision === "exclude" ? (r.verified ? r.decision : "hold") : "hold");
+const finalOfVerified = (r) => (r.decision === "register" || r.decision === "exclude" ? (r.verified ? r.decision : "hold") : "hold");
+/**
+ * CAPABILITY_CEILING: --raw は、検証層を通す前のAIの結論（生の判断）で採点する（検証の影響を無課金で測る。本番の登録には使わない）。
+ * 生の結論 = 判断の段（judgeTrail）の最後の結論（上位があれば上位）。段が無ければ「AIは○○としたが…暫定」の記録、それも無ければ検証後の結論。
+ */
+const RAW = process.argv.includes("--raw");
+const rawOf = (r) => {
+  const steps = (r.judgeTrail ?? []).filter((s) => s.decision && s.decision !== "none");
+  const d = steps.length ? steps[steps.length - 1].decision : (/AIは(register|exclude|tentative)とした/.exec((r.unknowns ?? []).map((u) => u.why).join(" ")) ?? [])[1] ?? r.decision;
+  return d === "register" || d === "exclude" ? d : "hold";
+};
+const finalOf = (r) => (RAW ? rawOf(r) : finalOfVerified(r));
 
 /** AIの項目（record）の正規化した項目 */
 function aiFieldsOf(rec) {

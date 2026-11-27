@@ -201,7 +201,7 @@ export async function runXPostReplay(a: {
   /** 登録案の経路: 応募単位が未確定の本登録案を検証の指摘にする */
   registerRequiresUnit?: boolean;
   /** 適応型判断（同じ証拠で上位モデルに判断させる条件つきの2段目） */
-  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number };
+  escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
   /** 利用者の対象地域（既存の収集設定）。検証層が、地域外を理由とする除外の事実を確認する */
   userRegion?: import("./claim-semantics").UserRegion;
 }): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean }> {

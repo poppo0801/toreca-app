@@ -81,6 +81,11 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
     const effortOf = (v: string | undefined): "low" | "medium" | "high" | undefined => (v === "medium" || v === "high" || v === "low" ? v : undefined);
     const effort = { ...(effortOf(env.INTENSIVE_AGENT_EFFORT) ? { agent: effortOf(env.INTENSIVE_AGENT_EFFORT) } : {}), ...(effortOf(env.INTENSIVE_JUDGE_EFFORT) ? { judge: effortOf(env.INTENSIVE_JUDGE_EFFORT) } : {}) };
     const upper = "claude-sonnet-5-5";
+    const relaxed = env.INTENSIVE_PROFILE === "relaxed";
+    const thinkSet = (env.INTENSIVE_THINKING || "").split(",");
+    const thinking = { agent: thinkSet.includes("agent") || thinkSet.includes("all"), judge: thinkSet.includes("judge") || thinkSet.includes("all") };
+    // 緩和の上限（固定の新しい規則ではなく、能力を測るための外枠）。検索4・取得8・ターン10・自己修正2・読み取り16回/6万字・連続の空振り3
+    const RELAXED_LIMITS = { maxTurns: 10, maxFetches: 8, maxSearches: Number(env.INTENSIVE_MAX_SEARCHES) || 4, maxRevisions: 2, maxReads: 16, maxReadChars: 60_000, maxElapsedMs: 15 * 60_000, maxNoProgressTurns: 3 };
     const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY), caps: INTENSIVE_CAPS });
     if (!gate.ok) throw new Error(`実行しません: ${gate.reason}`);
     const db = admin();
@@ -106,7 +111,10 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
       gate,
       gatePerCaseCapJpy: INTENSIVE_CAPS.perCaseJpy,
       env: { ...env, PROPOSAL_PREVIEW: "on" },
-      limits: shadowProposalLimits(true, judgeMode === "haiku" || judgeMode === "single" ? undefined : upper, Number(env.INTENSIVE_MAX_SEARCHES) || undefined), // 本番シャドーと同じ上限（判断の予約は上位モデルに合わせる）
+      // 本番シャドーと同じ上限（判断の予約は上位モデルに合わせる）。CAPABILITY_CEILING: INTENSIVE_PROFILE=relaxed は、AIが必要な情報へ到達できる程度に調査の上限を広げる（隔離評価のみ。費用・時間・ループの外枠は残す）
+      limits: { ...shadowProposalLimits(true, judgeMode === "haiku" || judgeMode === "single" ? undefined : upper, Number(env.INTENSIVE_MAX_SEARCHES) || undefined), ...(relaxed ? RELAXED_LIMITS : {}) },
+      ...(relaxed ? { researchWindowMs: 30 * 60_000, broadEscalation: true } : {}),
+      ...(thinking.agent || thinking.judge ? { thinking } : {}),
       search: { provider: makeWebSearchProvider(client as never, "claude-haiku-5-5"), worstJpy: SHADOW_SEARCH_WORST_JPY, reserveJpy: SHADOW_SEARCH_WORST_JPY },
       ...(lf ? { liveFetch: lf.fetchPage } : {}),
       ...(judgeMode === "adaptive" ? { escalation: { model: upper, auditRate: SHADOW_AUDIT_RATE } } : judgeMode === "dual" ? { escalation: { model: upper, auditRate: 1 } } : judgeMode === "sonnet" ? { judgeModel: upper } : {}),
@@ -115,7 +123,7 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
       onEvent,
       afterCandidate: async ({ candidate, ok, costJpy, reason, records, ms, diagnostics }) => {
         const s = caseOf.get(candidate.id)!;
-        appendFileSync(journal, JSON.stringify({ run, judgeMode, agentModel: gate.model, effort, maxSearches: Number(env.INTENSIVE_MAX_SEARCHES) || 1, at: new Date().toISOString(), caseId: s.caseId, set: s.set, ok, reason: reason ?? null, costJpy, ms, diagnostics, records: (records ?? []).map((r) => ({ itemNo: r.itemNo, itemLabel: r.itemLabel, decision: r.decision, verified: r.verified, heldReasons: r.heldReasons, fields: r.fields, applyUnit: r.applyUnit, applyUnitBasis: r.applyUnitBasis, judgeTrail: r.judgeTrail ?? null, modelId: r.modelId, promptVersion: r.promptVersion, costJpy: r.costJpy, turns: r.turns, stopReason: r.stopReason, endReason: r.endReason, urlStatus: r.urlStatus, pages: r.pages, unknowns: r.unknowns, inputHash: r.inputHash })) }) + "\n");
+        appendFileSync(journal, JSON.stringify({ run, judgeMode, agentModel: gate.model, effort, thinking, profile: relaxed ? "relaxed" : "production", pageView: env.PAGE_VIEW_MODE || "default", maxSearches: relaxed ? RELAXED_LIMITS.maxSearches : Number(env.INTENSIVE_MAX_SEARCHES) || 1, at: new Date().toISOString(), caseId: s.caseId, set: s.set, ok, reason: reason ?? null, costJpy, ms, diagnostics, records: (records ?? []).map((r) => ({ itemNo: r.itemNo, itemLabel: r.itemLabel, decision: r.decision, verified: r.verified, heldReasons: r.heldReasons, fields: r.fields, applyUnit: r.applyUnit, applyUnitBasis: r.applyUnitBasis, judgeTrail: r.judgeTrail ?? null, modelId: r.modelId, promptVersion: r.promptVersion, costJpy: r.costJpy, turns: r.turns, stopReason: r.stopReason, endReason: r.endReason, urlStatus: r.urlStatus, pages: r.pages, unknowns: r.unknowns, inputHash: r.inputHash })) }) + "\n");
       },
     });
     console.log("RESULT", JSON.stringify({ run, judgeMode, stopReason: summary.stopReason, processed: summary.processed, proposals: summary.proposals, costJpy: summary.costJpy, overruns: summary.overruns, searchJpyEach: Math.round(WEB_SEARCH_JPY_PER_SEARCH * 100) / 100, journal: createHash("sha256").update(journal).digest("hex").slice(0, 6) }));
