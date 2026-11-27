@@ -1,4 +1,5 @@
 import { buildEvidence, carryOverRechecked, evidenceFromLastGood, imageReadingsFromExtraction, MAX_EVIDENCE_LINKS, MAX_IMAGE_REFS, type StoredEvidence } from "@/lib/collector/evidence";
+import { shadowJobHash } from "@/lib/collector/shadow-hash";
 import { ONLINE_STORE_NAME, isOnlineStore } from "@/lib/store-online";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -22,6 +23,7 @@ import { fetchXImage, type XClient } from "@/lib/server/collector/x-client";
 import { enrichXPost, LINKED_PAGE_MAX_CHARS, makeXRichFetcher, type FetchControl } from "@/lib/server/collector/x-rich";
 import { DEFAULT_RUN_LIMITS, HostThrottle, RunFetchBudget } from "@/lib/collector/fetch-control";
 import { addFullPage, carryFullPages, rememberFullPages, toQueuedPage } from "@/lib/server/collector/collected-docs";
+import { researchViewOf } from "@/lib/server/collector/page-view";
 import { MAX_ATTEMPTS as QUEUE_MAX_ATTEMPTS, backoffMs, budgetCallsLeft, reserveEstimateJpy, isoToFlex, jstDayString, priorityScore, detectCancel, diffAgainstLottery, hashNormalized, normalizeForHash, isNewRound, classifyFailure, FAIL_KIND_LABEL, shouldReanalyzeOnListChange, type FailKind, type FieldChange } from "@/lib/collector/queue";
 import { runMemoPass } from "@/lib/server/collector/memos";
 import { saveCandidateRows } from "@/lib/server/collector/save-rows";
@@ -596,7 +598,11 @@ async function extractFor(deps: CollectDeps, q: QueuedPayload["queued"]): Promis
           if (t.trim().length >= 8) {
             q.evidenceText = t;
             q.evidenceVia = "web_fetch";
-            if (t.length >= 30) addFullPage(q, { url: u.slice(0, 500), finalUrl: r.finalUrl.slice(0, 500), title: ex.title.slice(0, 200), text: t, truncated: r.truncated || ex.truncated, fetchedAt: deps.now.toISOString(), depth: 0, origins: ["post"] });
+            if (t.length >= 30) {
+              // 新AIの調査と同じ整形の本文・ページの構造（受付枠・見出し・リンク・フォーム）も控える（EVIDENCE_UTILIZATION）
+              const view = researchViewOf(r.body, r.finalUrl, t, deps.now);
+              addFullPage(q, { url: u.slice(0, 500), finalUrl: r.finalUrl.slice(0, 500), title: ex.title.slice(0, 200), text: t, truncated: r.truncated || ex.truncated, fetchedAt: deps.now.toISOString(), depth: 0, origins: ["post"], ...(view ? { view } : {}) });
+            }
           }
         } catch {
           /* 保存用の控えに失敗しても解析は続ける */
@@ -735,7 +741,9 @@ async function processCandidate(deps: CollectDeps, data: AppData, cond: Collecti
   const priorEvidence = evidenceFromLastGood((await db.from("collection_candidates").select("last_good").eq("id", c.id).maybeSingle()).data?.last_good);
   const evSaved = evidenceFields(c.source_url ?? q.url, q, nowIso, priorEvidence, result.ok ? result.extraction : undefined);
   // シャドーの投入は、保存した証拠のハッシュで行う（前回から実質的に変わっていなければ同じハッシュ＝二重に投入されない）
-  if (evSaved.evidence?.hash) (q as { savedEvidenceHash?: string }).savedEvidenceHash = evSaved.evidence.hash;
+  // EVIDENCE_UTILIZATION: 本文に加え、リンク先ページ・画像の参照の変化でも新しいジョブになる（本文が同じでも新しい証拠が新AIへ届く）
+  const jobHash = shadowJobHash(evSaved.evidence);
+  if (jobHash) (q as { savedEvidenceHash?: string }).savedEvidenceHash = jobHash;
   const trace: Record<string, unknown> = { fetch_methods: methods, origin_host: originHost, service_host: hostRole(originHost) === "apply_service" ? originHost : null, last_good: { title: q.title.slice(0, 120), context: (q.card ?? q.context).slice(0, 300), hints: q.hints ?? null, ...evSaved } };
   // この候補で使ったAI回数・費用（収集結果の集計に使う。logAi のあとで設定）
   let acct: Record<string, unknown> = { ...trace };
@@ -1818,7 +1826,7 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
       // 新AIシャドーのキューへの投入（Stage 10K。既定OFF）。1回のDB呼び出しだけで、AIは呼ばない。失敗しても旧方式は変わらない
       if (deps.shadowEnqueue) {
         try {
-          const evH = (it.q as { savedEvidenceHash?: string }).savedEvidenceHash ?? evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence?.hash;
+          const evH = (it.q as { savedEvidenceHash?: string }).savedEvidenceHash ?? shadowJobHash(evidenceFields(it.c.source_url ?? it.q.url, it.q, now.toISOString(), null).evidence);
           if (evH) await Promise.race([deps.shadowEnqueue(it.c.id, evH), new Promise<void>((res) => setTimeout(res, 1500))]); // 1.5秒を超えて待たない（投入口が止まっても収集を遅らせない）
         } catch {
           /* 投入の失敗は無視する */

@@ -126,6 +126,25 @@ export function postFromCandidate(c: CandidateRow): StoredXPost | null {
 /** 保存済みの全文（整形後）から取得結果を作る。HTMLは保存しないため、本文と構造化の観察をそのまま使う */
 const fromDocument = (d: StoredDocument): Extract<FetchOutcome, { ok: true }> => ({ ok: true, finalUrl: d.url, fetchedAt: d.fetchedAt, html: "", text: d.text, cleaned: true, structure: d.structure, ...(refineTextLoss(d.textLoss ?? undefined, d.text).length ? { textLoss: refineTextLoss(d.textLoss ?? undefined, d.text) } : {}), ...(d.truncated ? { notice: `保存済みの本文も切り詰められている（${d.truncatedReason ?? "上限"}）。後半は確認できない` } : {}) });
 
+/** 投稿本文の抜粋が切れていれば、保存済みの投稿の全文に置き換える（無ければそのまま） */
+export async function withFullPostText(db: Db, householdId: string, c: CandidateRow, post: StoredXPost): Promise<StoredXPost> {
+  if (!post.notes?.includes(NOTE_TRUNCATED)) return post;
+  const e = evidenceFromLastGood(c.last_good);
+  const url = c.source_url ?? e?.url ?? null;
+  if (!url) return post;
+  const d = await loadBestDocument(db, householdId, c.id, url);
+  if (!d || d.origin !== "collector_post" || d.truncated || d.text.length <= post.text.length) return post;
+  const notes = (post.notes ?? []).filter((n) => n !== NOTE_TRUNCATED);
+  const { notes: _old, ...rest } = post; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return notes.length ? { ...rest, text: d.text, notes } : { ...rest, text: d.text };
+}
+
+/** 保存済みの全文を使うときの注記（由来・取得時刻・字数。取得時刻の時点の内容で、現在の状態ではない） */
+export function savedNotice(d: StoredDocument, withStructure: boolean): string {
+  const from = d.origin.startsWith("collector") ? "収集時に取得" : d.origin === "prefetch" ? "調査の前に事前取得" : "以前の調査で取得";
+  return `保存済みのページ全文（${from}・取得時刻 ${d.fetchedAt}・${d.textChars}字${withStructure ? "" : "・ページ内リンクの記録なし"}）。この取得時刻の時点のページの内容。評価の基準時刻（収集時刻）での状態は、このページの記載（受付期間・受付中の表示）と基準時刻を照らして判断する`;
+}
+
 const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** 失敗の分類（内容・機密を含めない）。無言で握りつぶさず、呼び出し側が記録できる */
@@ -186,8 +205,10 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   if (!proposalPreviewEnabled(env) && !shadowTicket) return { ok: false, reason: "disabled" };
   // 本番シャドーの道具: 実取得・画像解析は、本番の許可（承認済みの入口）を通して作った印つきのものだけ。検索も同じく、本番の入口が印をつけたもの（makeSearchTool を通した部品）だけ
   if (shadowTicket && ((a.deps?.search && !isShadowTool(a.deps.search)) || (a.deps?.liveFetch && !isShadowTool(a.deps.liveFetch)) || (a.deps?.vision && !isShadowTool(a.deps.vision)))) return { ok: false, reason: "real_not_permitted" };
-  const post0 = postFromCandidate(a.candidate);
-  if (!post0) return { ok: false, reason: "no_evidence" };
+  const postRaw = postFromCandidate(a.candidate);
+  if (!postRaw) return { ok: false, reason: "no_evidence" };
+  // EVIDENCE_UTILIZATION: 候補の行の投稿本文が抜粋の上限で切れているとき、収集時に保存した投稿の全文（collector_post）を種に使う（「後半は未確認」の注記を外す）
+  const post0 = await withFullPostText(a.db, a.householdId, a.candidate, postRaw);
   const deps = a.deps ?? mockDeps();
   const real = deps.mode === "real";
   if (real && !isRealRunTicket(deps.ticket)) return { ok: false, reason: "real_not_permitted" }; // 実AIは、承認済みの関門を通った評価入口の許可証がある場合だけ
@@ -243,19 +264,30 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       : {}),
     ...(deps.search ? { search: deps.search } : {}),
     fetchPage: async (u: string): Promise<FetchOutcome> => {
-      // 順序: ①収集時の保存本文（上限に達していなければ全文）②最新の取得（許可されている場合）③以前に保存した全文（evidence_documents）④切り詰められた収集時の本文（切り詰めを明示）
+      // 順序（EVIDENCE_UTILIZATION）: ①保存済みの全文（収集時・事前取得・以前の調査。構造つき・基準時刻に近い版）②収集時の保存本文（上限に達していなければ全文）
+      //   ③最新の取得（許可されている場合）④以前に保存した全文 ⑤切り詰められた収集時の本文（切り詰めを明示）
       const hit = linked.get(canonUrl(u).key);
       // 抜粋が全文より短い（収集時に fullChars を記録）ページは切り詰め。記録が無い古い保存は、抜粋の上限に達していれば切り詰めとみなす
       const truncated = !!hit && (hit.truncated === true || (hit.fullChars !== undefined && hit.fullChars > hit.text.length) || (hit.fullChars === undefined && hit.text.length >= 3000));
-      if (hit && !truncated) return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
+      // ① 取得元ページ以外（投稿のリンク先・たどったページ）も、保存済みの全文を先に使う。以前はリンク先の短い抜粋を構造なしの擬似HTMLで返し、
+      //    抜粋が切れていれば保存済みの全文があっても再取得していた（取得時点の構造・時刻を失い、外部アクセスと時間を使っていた）
+      const isSource = !!post0.sourcePage && canonUrl(u).key === canonUrl(post0.sourcePage.url).key;
+      if (!isSource) {
+        const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u, undefined, clock().toISOString());
+        const withStructure = saved?.structure?.links !== undefined;
+        // 収集時（collector*）・調査前の事前取得（prefetch）の全文だけ。以前の調査が保存した文書は、後段の規則（抜粋より長いときだけ）で使う（同じ入力の再評価で版が増えないように）
+        const fromCollection = !!saved && (saved.origin.startsWith("collector") || saved.origin === "prefetch");
+        if (saved && fromCollection && !saved.truncated && (withStructure || !deps.liveFetch || saved.textChars > (hit?.text.length ?? 0))) return { ...fromDocument(saved), notice: savedNotice(saved, withStructure) };
+      }
+      if (hit && !truncated) return { ok: true, finalUrl: hit.url, html: `<html><body>${escapeHtml(hit.text)}</body></html>`, text: hit.text, ...(hit.fetchedAt ? { fetchedAt: hit.fetchedAt } : {}) }; // 収集時に保存した公開ページ本文の再生（外部アクセスなし）
       // 取得元ページ: すでに保存した全文（取得時刻つき）があれば、それを最優先で使う。再取得より確実（ページの変化・消失・終了表示に左右されず、同じ証拠で比較・再現できる）で、外部アクセスも要らない。
       // 取得時刻は**実際に取得した時刻**で、評価の基準時刻（収集時刻）とは別。由来も区別する（収集時に取得／以前の調査で取得）。現在の状態ではない。保存が無い・切り詰められているときだけ、実取得へ進む。
-      if (!hit && post0.sourcePage && canonUrl(u).key === canonUrl(post0.sourcePage.url).key) {
-        const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
+      if (!hit && isSource) {
+        const saved = await loadBestDocument(a.db, a.householdId, a.candidate.id, u, undefined, clock().toISOString());
         // ページ内リンク（次に調べる候補）を持たない旧い保存文書は、実取得できるなら取得し直して、リンクつきで保存し直す（実取得が無ければ保存全文を使う）
         const hasLinks = saved?.structure?.links !== undefined;
         // 収集時に取得したページ全文（origin=collector。PRODUCTION_PARITY で本番でも保存）は、候補の行の抜粋と同じ長さでも全文であることが確認できるので採用する
-        if (saved && !saved.truncated && (saved.origin === "prefetch" || saved.origin.startsWith("collector") || saved.text.length > (stored?.text.length ?? 0)) && (hasLinks || !deps.liveFetch || saved.origin === "prefetch")) return { ...fromDocument(saved), notice: `保存済みのページ全文（${saved.origin.startsWith("collector") ? "収集時に取得" : saved.origin === "prefetch" ? "調査の前に事前取得" : "以前の調査で取得"}・取得時刻 ${saved.fetchedAt}・${saved.textChars}字）。この取得時刻の時点のページの内容。評価の基準時刻（収集時刻）での状態は、このページの記載（受付期間・受付中の表示）と基準時刻を照らして判断する` };
+        if (saved && !saved.truncated && (saved.origin === "prefetch" || saved.origin.startsWith("collector") || saved.text.length > (stored?.text.length ?? 0)) && (hasLinks || !deps.liveFetch || saved.origin === "prefetch")) return { ...fromDocument(saved), notice: savedNotice(saved, hasLinks) };
       }
       if (deps.liveFetch) {
         const live = await deps.liveFetch(u).catch(() => null);

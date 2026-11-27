@@ -24,6 +24,40 @@ export function pageText(html: string, o: { keepChrome?: boolean } = {}): string
     .trim();
 }
 
+/**
+ * 原文を保ったまま、ページの共通部分（header・nav・footer・aside）の位置を記録する（EVIDENCE_UTILIZATION）。
+ *  - 本文 text は除かない整形（keepChrome）と同じ内容。共通部分を削らない（フッターの店舗の所在地・注意、メニュー内の応募リンクを失わない）。
+ *  - chrome は、その本文の中で共通部分にあたる字位置の範囲。AIへの提示の側で、関連する行を残して省略し、位置で原文へ戻れるようにする（不可逆に削除しない）。
+ */
+export function pageTextSections(html: string): { text: string; chrome: { from: number; to: number }[] } {
+  const OPEN = "\u0001";
+  const CLOSE = "\u0002";
+  const marked = html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<head\b[\s\S]*?<\/head\s*>/gi, " ")
+    .replace(/<(?:header|nav|footer|aside)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, `${OPEN}\n`)
+    .replace(/<\/(?:header|nav|footer|aside)\s*>/gi, `\n${CLOSE}`);
+  const t = pageText(marked, { keepChrome: true });
+  let out = "";
+  const chrome: { from: number; to: number }[] = [];
+  let depth = 0;
+  let start = 0;
+  for (const ch of t) {
+    if (ch === OPEN) {
+      if (depth++ === 0) start = out.length;
+      continue;
+    }
+    if (ch === CLOSE) {
+      if (depth > 0 && --depth === 0 && out.length > start) chrome.push({ from: start, to: out.length });
+      continue;
+    }
+    out += ch;
+  }
+  if (depth > 0 && out.length > start) chrome.push({ from: start, to: out.length });
+  return { text: out, chrome };
+}
+
 const keyOf = (x: string): string => x.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
 
 /**
@@ -48,6 +82,13 @@ export function refineTextLoss(loss: readonly string[] | undefined, text: string
  * 既定の整形（メニュー・フッター等を除く）で欠けたら、除かない整形で再度取り出し、欠落の少ない方を使う。それでも欠けるものは `loss` に返す（呼び出し側は保留にする）。
  * 検証の基準は緩めない（引用の実在は、この本文に対して確認する）。
  */
+/** 構造として認識できた語のうち、本文に無いもの（pageTextChecked と同じ規則） */
+export function missingTerms(text: string, required: string[]): string[] {
+  const need = [...new Set(required.map((r) => titleCore(r.trim())).filter((r) => keyOf(r).length >= 3))].slice(0, 40);
+  const k = keyOf(text);
+  return need.filter((r) => !k.includes(keyOf(r)));
+}
+
 export function pageTextChecked(html: string, required: string[]): { text: string; variant: "trimmed" | "full"; loss: string[] } {
   const need = [...new Set(required.map((r) => titleCore(r.trim())).filter((r) => keyOf(r).length >= 3))].slice(0, 40);
   const missing = (t: string): string[] => {

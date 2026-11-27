@@ -26,6 +26,26 @@ describe("調査のAI（アダプタ）", () => {
     expect(RESEARCH_SYSTEM).toContain("関連イベント"); // ページ自身の受付枠と別
     expect(RESEARCH_SYSTEM).toMatch(/被害.*重要性.*見込み.*締切.*費用/s); // 追加調査の必要性の観点（点数ではなく理由）
   });
+  it("出力の上限で途切れたら、1回だけ上限を2倍にして再試行できる（拡大した再試行でも途切れたら再試行しない）", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const replies = [
+      { content: [], stop_reason: "max_tokens", usage: { input_tokens: 100, output_tokens: 3000 } },
+      { content: [], stop_reason: "max_tokens", usage: { input_tokens: 100, output_tokens: 6000 } },
+      { content: [], stop_reason: "max_tokens", usage: { input_tokens: 100, output_tokens: 3000 } },
+    ];
+    const client = { messages: { create: vi.fn(async (req: Record<string, unknown>) => (calls.push(req), replies.shift())) } } as never;
+    const agent = makeAnthropicResearchAgent(client);
+    expect(await agent(turnInput)).toBeNull();
+    expect(lastCallOf(agent)?.retryable).toBe(true);
+    const w1 = (agent as unknown as { worstCostJpy: (i: unknown) => number }).worstCostJpy(turnInput);
+    expect(await agent(turnInput)).toBeNull();
+    expect(calls[1].max_tokens).toBe(2 * (calls[0].max_tokens as number));
+    expect(String((calls[1].messages as { content: string }[])[0].content)).toContain("途中で途切れました");
+    expect(lastCallOf(agent)?.retryable).toBe(false);
+    expect(w1).toBeGreaterThan(0);
+    await agent(turnInput);
+    expect(calls[2].max_tokens).toBe(calls[0].max_tokens); // 次の入力は通常の上限に戻る
+  });
   it("個人情報（メールアドレス等）は redact して渡す", () => {
     expect(renderTurnInput(turnInput)).not.toContain("test@example.com");
   });
@@ -111,7 +131,13 @@ describe("取得元ページの扱い（Phase 3 RUNTIME_PARITY。台本のクラ
   });
   it("プロンプト版は、この変更（取得元ページの扱い）で上がっている（版別に比較できる）", async () => {
     const { PROPOSAL_PROMPT_VERSION } = await import("./proposal");
-    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-13");
+    expect(PROPOSAL_PROMPT_VERSION).toBe("10z-14");
+  });
+  it("管理の対象は確定済みの方針として渡す（カード以外を管理するかを人に聞く例を残さない）", () => {
+    expect(JUDGE_SYSTEM).toContain("ポケモンカードを含む福袋・セットは対象");
+    expect(JUDGE_SYSTEM).toContain("対象外の商品（カード以外のみ）");
+    expect(JUDGE_SYSTEM).not.toContain("カード以外のグッズを管理対象にするか");
+    expect(RESEARCH_SYSTEM).toContain("ポケモンカードを含む福袋・セット");
   });
 });
 

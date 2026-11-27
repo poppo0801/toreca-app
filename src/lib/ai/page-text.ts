@@ -58,9 +58,12 @@ export function extractPageText(html: string, baseUrl: string, maxChars = 20_000
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style|noscript|svg|template|iframe|head)\b[\s\S]*?<\/\1>/gi, " ");
 
+  // タグの終わりは、引用符の中の「>」を無視して探す（EVIDENCE_UTILIZATION: data-action="click->header#menuopen" のような属性値の「>」でタグを終えると、
+  // 属性の残り（header#layout"> など）が本文に混ざり、応募サイトの全ページの本文の先頭がメニューの断片で埋まっていた）
+  const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
   const links: { text: string; href: string }[] = [];
-  body = body.replace(/<a\b[^>]*?href=["']([^"'#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, inner: string) => {
-    const text = decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  body = body.replace(/<a\b(?:[^>"']|"[^"]*"|'[^']*')*?href=["']([^"'#][^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/a>/gi, (_m, href: string, inner: string) => {
+    const text = decodeEntities(inner.replace(TAG, " ")).replace(/\s+/g, " ").trim();
     try {
       const abs = new URL(decodeEntities(href), baseUrl);
       if ((abs.protocol === "http:" || abs.protocol === "https:") && text && links.length < maxLinks) links.push({ text: text.slice(0, 80), href: abs.toString() });
@@ -73,8 +76,8 @@ export function extractPageText(html: string, baseUrl: string, maxChars = 20_000
   body = body
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|section|article|dt|dd|table|ul|ol|header|footer|form)>/gi, "\n")
-    .replace(/<(li|dt|dd|h[1-6])\b[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ");
+    .replace(/<(li|dt|dd|h[1-6])\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, "\n")
+    .replace(TAG, " ");
   let text = decodeEntities(body)
     .replace(/[ \t　 ]+/g, " ")
     .replace(/ *\n */g, "\n")

@@ -9,6 +9,8 @@
  *  - 機密: 送信前に伏せ字・秘密の実値の検査・公開告知の確認（input.ts）。通らなければ外部へ送らず skipped（理由コードのみ記録）。
  */
 import { evidenceFromLastGood } from "@/lib/collector/evidence";
+import { jobEvidenceRelation, jobHashDiff, shadowJobHash } from "@/lib/collector/shadow-hash";
+import { prioritizeShadowQueue } from "./priority";
 import { buildJudgmentInput } from "@/lib/judgment/build-input";
 import type { JudgmentModel } from "@/lib/judgment/model";
 import type { ShadowConfig } from "@/lib/judgment/shadow/config";
@@ -106,6 +108,36 @@ const table = (db: Db, t: string): any => (db as unknown as { from: (t: string) 
 const H = 3_600_000;
 /** 同じ候補の登録案を有料で作り直す最短の間隔（PRODUCTION_PARITY） */
 export const REEVAL_MIN_INTERVAL_MS = 12 * H;
+/** 意味のある更新（本文・素材の変化・締切が近い・人の修正）の再評価の最短間隔（EVIDENCE_UTILIZATION）。無制限には再評価しない */
+export const REEVAL_URGENT_INTERVAL_MS = 2 * H;
+
+/**
+ * 前回の評価からの更新が、短い間隔で再評価する価値のあるものか（純関数）。理由のコード、または null（通常の12時間）。
+ *  - content: 本文（正規化後）が変わった ／ material: 本文は同じでリンク先・画像が変わった（ハッシュは shadow-hash.ts）
+ *  - deadline: 旧方式の締切が日本時間で2日以内 ／ human: 前回の評価のあとに人の確認・修正がある
+ */
+export function reevalUrgency(a: { lastHash: string; jobHash: string; deadline: string | null; reviewedAfter: boolean; now: Date }): "content" | "material" | "deadline" | "human" | null {
+  if (a.reviewedAfter) return "human";
+  if (a.deadline && /^\d{4}-\d{2}-\d{2}$/.test(a.deadline)) {
+    const today = new Date(a.now.getTime() + 9 * H).toISOString().slice(0, 10);
+    const left = (new Date(`${a.deadline}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / (24 * H);
+    if (left >= 0 && left <= 2) return "deadline";
+  }
+  // 旧形式（本文のハッシュそのもの）と新形式は素材を比べられないので、素材の変化とはみなさない
+  return jobHashDiff(a.lastHash, a.jobHash);
+}
+
+async function humanReviewAfter(db: Db, householdId: string, candidateId: string, sinceIso: string): Promise<boolean> {
+  try {
+    const ps = await table(db, "registration_proposals").select("id").eq("household_id", householdId).eq("candidate_id", candidateId).limit(200);
+    const ids = ((ps.data ?? []) as { id: string }[]).map((x) => x.id);
+    if (!ids.length) return false;
+    const r = await table(db, "registration_proposal_reviews").select("id").eq("household_id", householdId).in("proposal_id", ids).gt("created_at", sinceIso).limit(1);
+    return ((r.data ?? []) as unknown[]).length > 0;
+  } catch {
+    return false;
+  }
+}
 /** 日本時間の日・月の開始（UTCの時刻） */
 export function jstDayStart(now: Date): Date {
   const j = new Date(now.getTime() + 9 * H);
@@ -180,10 +212,11 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
   const budgetMs = deps.timeBudgetMs ?? 100_000;
   const jobTimeout = deps.perJobTimeoutMs ?? 45_000;
 
+  // 待ち行列の優先順位（EVIDENCE_UTILIZATION。AIなし・費用0）: 締切を過ぎた候補は閉じ、締切が近い・確認待ち・未評価の候補を先に
+  if (deps.proposalJob) await prioritizeShadowQueue(db, now());
   const leased = await rpc(db)("shadow_lease", { p_worker: workerId, p_limit: deps.limit ?? 3, p_lease_seconds: Math.ceil((jobTimeout * 2 + 15_000) / 1000) });
   if (leased.error) return { ...res, stoppedBy: "lease_error" };
-  const jobs = (leased.data ?? []) as Job[];
-  res.leased = jobs.length;
+  const jobs = (leased.data ?? []) as Job[];  res.leased = jobs.length;
   if (!jobs.length) return { ...res, stoppedBy: "no_jobs" };
 
   const requeue = async (j: Job, at: Date, error: string | null, penalty: boolean): Promise<void> => {
@@ -228,8 +261,16 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
         continue;
       }
       const stored = evidenceFromLastGood(cand.last_good);
-      if (stored && !stored.hash.startsWith(j.evidence_hash)) {
+      const relation = stored ? jobEvidenceRelation(j.evidence_hash, stored) : "same";
+      if (relation === "stale") {
         await finish(j, "skipped", "stale_evidence");
+        continue;
+      }
+      if (relation === "material_changed" && stored) {
+        // 本文は同じで、リンク先・画像がこのジョブの作成後に変わった: 最新の証拠のジョブを確実に入れて（冪等）、このジョブは閉じる
+        const cur = shadowJobHash(stored);
+        if (cur) await rpc(db)("shadow_enqueue", { p_household: j.household_id, p_candidate: j.candidate_id, p_hash: cur }).then(() => undefined, () => undefined);
+        await finish(j, "skipped", "stale_material");
         continue;
       }
       const prep = prepareShadowEvidence(stored);
@@ -242,12 +283,20 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
       if (deps.proposalJob) {
         // 同じ候補の再評価の間隔（PRODUCTION_PARITY: 証拠の小さな変化のたびに有料で再評価し、3候補で予算の半分を使っていた）。
         // 直近 REEVAL_MIN_INTERVAL_MS 以内に同じ候補のジョブが完了していれば、このジョブ（最新の証拠）はその間隔のあとへ回す（捨てない＝最新の証拠は必ず評価される）
-        const recent = await table(db, "shadow_jobs").select("updated_at").eq("household_id", j.household_id).eq("candidate_id", j.candidate_id).eq("status", "done").neq("id", j.id).gte("updated_at", new Date(now().getTime() - REEVAL_MIN_INTERVAL_MS).toISOString()).order("updated_at", { ascending: false }).limit(1);
-        const lastDone = (recent.data as { updated_at: string }[] | null)?.[0]?.updated_at;
-        if (lastDone) {
-          await requeue(j, new Date(new Date(lastDone).getTime() + REEVAL_MIN_INTERVAL_MS), "reeval_interval", false);
-          bump(res.byReason, "reeval_interval");
-          continue;
+        const recent = await table(db, "shadow_jobs").select("updated_at,evidence_hash").eq("household_id", j.household_id).eq("candidate_id", j.candidate_id).eq("status", "done").neq("id", j.id).gte("updated_at", new Date(now().getTime() - REEVAL_MIN_INTERVAL_MS).toISOString()).order("updated_at", { ascending: false }).limit(1);
+        const last = (recent.data as { updated_at: string; evidence_hash: string }[] | null)?.[0];
+        if (last) {
+          // EVIDENCE_UTILIZATION: 意味のある更新（本文・リンク先・画像の変化、締切が近い、前回の評価後の人の修正）は、12時間を待たず短い間隔（2時間）で評価する
+          const reviewedAfter = await humanReviewAfter(db, j.household_id, j.candidate_id, last.updated_at);
+          const why = reevalUrgency({ lastHash: last.evidence_hash, jobHash: j.evidence_hash, deadline: (cand.draft as { input?: { applyDeadline?: { date?: string | null } } } | null)?.input?.applyDeadline?.date ?? null, reviewedAfter, now: now() });
+          const wait = why ? REEVAL_URGENT_INTERVAL_MS : REEVAL_MIN_INTERVAL_MS;
+          const at = new Date(last.updated_at).getTime() + wait;
+          if (at > now().getTime()) {
+            await requeue(j, new Date(at), why ? `reeval_wait_${why}`.slice(0, 40) : "reeval_interval", false);
+            bump(res.byReason, why ? `reeval_wait_${why}` : "reeval_interval");
+            continue;
+          }
+          if (why) bump(res.byReason, `reeval_${why}`);
         }
         if (st.valid_until && now().getTime() >= new Date(st.valid_until).getTime()) {
           await requeue(j, new Date(now().getTime() + 6 * 60 * 60_000), "expired", false); // 試行期間が過ぎた（以降のジョブはDB側で確保されない）
@@ -277,16 +326,14 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
         if (!totalErr) {
           unconfirmed = await unconfirmedReserveJpy(db, j.household_id, st.per_case_cap_jpy, jobs.map((x) => x.id)); // この実行で確保したジョブは対象外（実行中）
           left1 -= unconfirmed;
-        }
-        if (day1.error || month1.error || totalErr || !(left1 > 0.5)) {
+        }        if (day1.error || month1.error || totalErr || !(left1 > 0.5)) {
           await requeue(j, day1.error || month1.error || totalErr ? new Date(d1.getTime() + 10 * 60_000) : nextJstDay(d1), "budget", false);
           bump(res.byReason, "budget");
           continue;
         }
         const t1 = now().getTime();
         const pr = await deps.proposalJob({ householdId: j.household_id, candidate: { id: cand.id, x_post_id: cand.x_post_id ?? null, source_url: cand.source_url ?? null, last_good: cand.last_good }, settings: st, spentTodayJpy: spentDay, remainingJpy: left1 });
-        if (!pr.ok) {
-          bump(res.byReason, pr.reason.slice(0, 40));
+        if (!pr.ok) {          bump(res.byReason, pr.reason.slice(0, 40));
           // 失敗でも、すでにかかった費用・実行の痕跡は記録する（記録しないと予算から漏れる）。AIを呼んでいない失敗（費用0）は記録しない
           if ((pr.costJpy ?? 0) > 0) {
             const failRow = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: "error", attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: 0, record: { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: "error", reason: pr.reason.slice(0, 40), costJpy: pr.costJpy, ...(pr.trace ? { trace: pr.trace } : {}) } };
@@ -311,8 +358,7 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           else if (j.attempts >= j.max_attempts) await finish(j, "failed", pr.reason.slice(0, 60));
           else await requeue(j, new Date(now().getTime() + Math.min(60, 2 ** j.attempts) * 60_000), pr.reason.slice(0, 60), true);
           continue;
-        }
-        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace, ...(pr.items?.length ? { items: pr.items } : {}) };
+        }        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace, ...(pr.items?.length ? { items: pr.items } : {}) };
         // 実行台帳の行の上限（8,000バイト）を超えるときは、試行の要約を減らす（費用の記録自体は失わない）
         while (JSON.stringify(recP).length > 7000 && (recP as { items?: unknown[] }).items?.length) (recP as { items?: unknown[] }).items!.pop();
         const rowP = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: pr.status, attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: pr.decisions.register ?? 0, record: recP };

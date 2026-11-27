@@ -4,10 +4,13 @@ import { evidenceFromLastGood, MAX_LINK_LEDGER, MAX_LINKED_PAGE_CHARS, MAX_LINKE
 import type { HostGate } from "@/lib/collector/fetch-control";
 import { looksLikeLoginWall, pendingRecheck, type LinkLedgerEntry } from "@/lib/collector/link-plan";
 import { rememberFullPages } from "@/lib/server/collector/collected-docs";
+import { researchViewOf } from "@/lib/server/collector/page-view";
 import type { Db } from "@/lib/server/lottery-service";
 import { fetchRespectingRobots, type SafeFetchResult } from "@/lib/server/safe-fetch";
 import { linkRecheckEnabled } from "@/lib/server/proposals/flag";
 import { proposalAfterCandidate, storeCollectedEvidence } from "./proposal-hook";
+import { shadowJobHash } from "@/lib/collector/shadow-hash";
+import { makeShadowEnqueuer, type ShadowEnqueuer } from "@/lib/server/shadow/queue";
 import { LINKED_PAGE_MAX_CHARS, outcomeOf, type FetchedLinkPage } from "./x-rich";
 
 /**
@@ -86,6 +89,8 @@ export async function runLinkRechecks(a: {
   /** 証拠へ戻した後の再解析（登録案の再生成）。既定は新AIの自動生成の接続口（開発限定・費用0） */
   onUpdated?: (candidateId: string) => Promise<void>;
   shouldCancel?: () => boolean;
+  /** シャドーのキューへの投入（既定は環境の許可に従う通常の投入口。null で投入しない） */
+  enqueue?: ShadowEnqueuer | null;
 }): Promise<RecheckSummary> {
   const out: RecheckSummary = { claimed: 0, done: 0, retried: 0, gaveUp: 0, deferred: 0, regenerated: 0 };
   const now = a.now ?? (() => new Date());
@@ -140,7 +145,9 @@ export async function runLinkRechecks(a: {
       out.gaveUp++;
       continue;
     }
-    const page: FetchedLinkPage = { url: task.url, finalUrl: pg.finalUrl, title: ex.title.slice(0, 200), text: ex.text, truncated: pg.truncated || ex.truncated, fetchedAt: now().toISOString(), depth: 0, origins: task.origins as FetchedLinkPage["origins"] };
+    const at = now();
+    const view = researchViewOf(pg.body, pg.finalUrl, ex.text, at);
+    const page: FetchedLinkPage = { url: task.url, finalUrl: pg.finalUrl, title: ex.title.slice(0, 200), text: ex.text, truncated: pg.truncated || ex.truncated, fetchedAt: at.toISOString(), depth: 0, origins: task.origins as FetchedLinkPage["origins"], ...(view ? { view } : {}) };
     // 候補の証拠へ戻す（版による楽観的排他。競合したら再試行）
     const row = await t("collection_candidates").select("id,source_url,last_good").eq("id", task.candidate_id).eq("household_id", a.householdId).maybeSingle();
     const ev = row.data ? evidenceFromLastGood(row.data.last_good) : null;
@@ -171,6 +178,11 @@ export async function runLinkRechecks(a: {
     const queued = {};
     rememberFullPages(queued, [page]);
     await storeCollectedEvidence({ db: a.db, householdId: a.householdId, candidateId: task.candidate_id, queued, postUrl: row.data.source_url ?? task.url, postText: null, nowIso: page.fetchedAt });
+    // EVIDENCE_UTILIZATION: 本文が同じでも、取得できたリンク先は新しい証拠。新AIシャドーのキューへ（素材つきのハッシュ。同じ証拠は二重に入らない・費用は使わない）。
+    // 以前は本番で、再調査の結果が新AIへ届く経路が無かった（登録案の再生成は開発限定のモックだけ）
+    const enq = a.enqueue === undefined ? makeShadowEnqueuer(a.db, a.householdId) : a.enqueue;
+    const jh = shadowJobHash(merged);
+    if (enq && jh) await enq(task.candidate_id, jh).catch(() => false);
     await finish(task.id, "done", null);
     out.done++;
     regen.add(task.candidate_id);

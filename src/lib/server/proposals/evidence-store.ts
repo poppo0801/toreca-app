@@ -93,18 +93,37 @@ export async function saveDocuments(db: Db, householdId: string, candidateId: st
 
 /** 候補に保存された、そのURLの最も完全な本文（切り詰めのないもの・字数が多いもの・新しいものを優先）。無ければ null */
 /** contentHash を渡すと、その内容の版だけを返す（人の確認を、登録案が実際に根拠にした版に結び付けるため。無ければ null） */
-export async function loadBestDocument(db: Db, householdId: string, candidateId: string, url: string, contentHash?: string): Promise<StoredDocument | null> {
+/**
+ * asOf（評価の基準時刻）を渡すと、その時刻に最も近い版を選ぶ（EVIDENCE_UTILIZATION）。以前は字数の多い版を優先しており、
+ * 受付終了などでページが短くなった新しい版より、古い長い版が選ばれることがあった（過去時点の評価と現在の鮮度確認が混ざる）。
+ *  - 切り詰めのない版を優先 → 基準時刻（＋15分）以前で最も新しい版 → 無ければ基準時刻より後で最も早い版 → 同時刻なら字数の多い版
+ *  - asOf が無ければ従来どおり（切り詰めなし → 字数 → 新しさ）
+ */
+export async function loadBestDocument(db: Db, householdId: string, candidateId: string, url: string, contentHash?: string, asOf?: string): Promise<StoredDocument | null> {
   try {
     const key = canonUrl(url).key.slice(0, 300);
     let q = t(db, "evidence_documents").select("url,url_key,origin,content_hash,fetched_at,created_at,text,text_chars,source_chars,truncated,truncated_reason,structure,text_loss").eq("household_id", householdId).eq("candidate_id", candidateId).eq("url_key", key);
     if (contentHash) q = q.like("content_hash", `${contentHash}%`);
-    const r = (await q.order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(1)) as { data: Record<string, unknown>[] | null };
-    const x = r.data?.[0];
+    const r = (await q.order("truncated", { ascending: true }).order("text_chars", { ascending: false }).order("fetched_at", { ascending: false }).limit(asOf ? 12 : 1)) as { data: Record<string, unknown>[] | null };
+    const rows = r.data ?? [];
+    const iso = (s: string): string => (Number.isFinite(new Date(s).getTime()) ? new Date(s).toISOString() : s);
+    const x = asOf ? pickVersion(rows.map((row) => ({ row, fetchedAt: iso(actualFetchedAt(String(row.origin), String(row.fetched_at), row.created_at as string | undefined)), truncated: !!row.truncated, chars: Number(row.text_chars) })), iso(asOf))?.row : rows[0];
     if (!x) return null;
     return { url: String(x.url), urlKey: String(x.url_key), origin: String(x.origin), contentHash: String(x.content_hash), fetchedAt: actualFetchedAt(String(x.origin), String(x.fetched_at), x.created_at as string | undefined), text: String(x.text), textChars: Number(x.text_chars), sourceChars: x.source_chars === null ? null : Number(x.source_chars), truncated: !!x.truncated, truncatedReason: (x.truncated_reason as string | null) ?? null, structure: normalizeStructure(x.structure), textLoss: (x.text_loss as string[] | null) ?? null };
   } catch {
     return null;
   }
+}
+
+/** 版の選択（純関数。loadBestDocument の asOf の規則） */
+export function pickVersion<T extends { fetchedAt: string; truncated: boolean; chars: number }>(vs: readonly T[], asOf: string): T | null {
+  if (!vs.length) return null;
+  const pool = vs.some((v) => !v.truncated) ? vs.filter((v) => !v.truncated) : [...vs];
+  const limit = new Date(new Date(asOf).getTime() + 15 * 60_000).toISOString();
+  const byTime = (a: T, b: T) => a.fetchedAt.localeCompare(b.fetchedAt) || a.chars - b.chars;
+  const before = pool.filter((v) => v.fetchedAt <= limit).sort(byTime);
+  if (before.length) return before[before.length - 1];
+  return [...pool].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || b.chars - a.chars)[0];
 }
 
 // ------------------------------------------------------------------ 取得網羅性の計測（原文・URLを含まない）
