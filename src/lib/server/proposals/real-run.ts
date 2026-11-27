@@ -21,7 +21,7 @@ import type { Db } from "@/lib/server/lottery-service";
 import { generateProposalsForCandidate, type CandidateRow } from "./generate";
 import { prefetchSourcePage } from "./source-prefetch";
 import { issueRealRunTicket, type RealRunTicket } from "./real-gate";
-import { assembleGenerateDeps, basisClock, researchLimits, RESEARCH_WINDOW_MS } from "./pipeline";
+import { assembleGenerateDeps, basisClock, researchLimits } from "./pipeline";
 
 type Client = Parameters<typeof makeAnthropicResearchAgent>[0];
 
@@ -90,7 +90,7 @@ export interface RealRunOptions {
   effort?: { agent?: import("@/lib/judgment/xsource/research-ai").AiEffort; judge?: import("@/lib/judgment/xsource/research-ai").AiEffort };
   /** 思考を使うか（調査・判断。既定は使わない）。CAPABILITY_CEILING の比較用（隔離評価のみ） */
   thinking?: { agent?: boolean; judge?: boolean };
-  /** 1候補の調査の時間枠（既定 RESEARCH_WINDOW_MS＝本番の関数時間に合わせた45秒）。隔離評価では十分な時間を与えて能力を測る */
+  /** 1回の実行の時間枠（本番の関数の時間枠を再現するとき）。指定すると、間に合わない項目は未完了として残す（AUTONOMY_RESTORATION。以前の候補全体45秒の締切は廃止） */
   researchWindowMs?: number;
   /** 上位モデルの判断の条件を広げる（暫定・ページなし・人の確認でも上げる）。隔離評価のみ */
   broadEscalation?: boolean;
@@ -168,7 +168,9 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
     };
     const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic, ...(o.effort?.agent ? { effort: o.effort.agent } : {}), ...(o.thinking?.agent ? { thinking: true } : {}) });
     const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic, ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) });
-    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate, ...(o.broadEscalation ? { broad: true } : {}) } : undefined;
+    // 上位: 判断に加え、自ら追加の調査をする調査AI（AUTONOMY_RESTORATION。本番シャドーと同じ構造）
+    const upperOpts = { onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) };
+    const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, ...upperOpts }), agent: makeAnthropicResearchAgent(o.client, { model: o.escalation.model, ...upperOpts }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate, ...(o.broadEscalation ? { broad: true } : {}) } : undefined;
     const searchTool = o.search ? makeSearchTool(o.search.provider) : undefined;
     const visionHandle = o.visionFactory ? o.visionFactory({ ticket, budget }) : o.vision ? { vision: o.vision } : undefined;
     const maxConsecutive = o.maxConsecutiveFailures ?? 3;
@@ -182,7 +184,8 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
       const costBefore = budget.costJpy; // 失敗した試行でも、すでにかかった費用を記録する（以前は失敗時0円として記録され、評価の費用から漏れていた）
       const diagBefore = { ...base.diagnostics };
       if (o.liveFetch) await prefetchSourcePage({ db: o.db, householdId: o.householdId, candidate: c, fetchPage: o.liveFetch, ...(o.now ? { now: o.now } : {}) }); // 本番シャドーと同じ事前取得・保存（共通の前処理）
-      const r = await generateProposalsForCandidate({
+      // AUTONOMY_RESTORATION: 1回の実行の時間枠（researchWindowMs）を与えたときは、本番シャドーと同じく、間に合わない項目を次の実行で続ける（再開。上限 8回）
+      const runOnce = (skip?: ReadonlySet<number>) => generateProposalsForCandidate({
         db: o.db,
         householdId: o.householdId,
         candidate: c,
@@ -190,9 +193,23 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         deps: (() => {
           const dd = o.depsFor?.(c);
           // 共通の組み立て（pipeline.ts）。本番シャドーと同じ形の依存を作る
-          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, researchDeadlineMs: Date.now() + (o.researchWindowMs ?? RESEARCH_WINDOW_MS), perItemCapJpy: ticket.perCaseCapJpy, ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
+          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, ...(o.researchWindowMs !== undefined ? { runDeadlineMs: Date.now() + o.researchWindowMs } : {}), ...(skip?.size ? { skipItems: skip } : {}), perItemCapJpy: ticket.perCaseCapJpy, ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
         })(),
       });
+      let r = await runOnce();
+      if (r.ok && o.researchWindowMs !== undefined) {
+        const done = new Set<number>(r.processedItems ?? []);
+        let merged = r;
+        for (let k = 0; k < 8 && merged.ok && (merged.pendingItems?.length ?? 0) > 0 && !fatal && !o.shouldStop?.(); k++) {
+          base.diagnostics["run:resume"] = (base.diagnostics["run:resume"] ?? 0) + 1;
+          emit({ kind: "candidate_resume", candidate: short(c.id), pending: merged.pendingItems!.length } as never);
+          const next = await runOnce(done);
+          if (!next.ok) break;
+          for (const n of next.processedItems ?? []) done.add(n);
+          merged = { ...next, records: [...merged.records, ...next.records], save: { inserted: merged.save.inserted + next.save.inserted, unchanged: merged.save.unchanged + next.save.unchanged, superseded: merged.save.superseded + next.save.superseded, failed: merged.save.failed + next.save.failed }, storage: { ...next.storage, documents: { saved: merged.storage.documents.saved + next.storage.documents.saved, existing: merged.storage.documents.existing + next.storage.documents.existing, failed: merged.storage.documents.failed + next.storage.documents.failed }, stats: { saved: merged.storage.stats.saved + next.storage.stats.saved, failed: merged.storage.stats.failed + next.storage.stats.failed } }, costJpy: Math.round((merged.costJpy + next.costJpy) * 10_000) / 10_000, processedItems: [...done] };
+        }
+        r = merged;
+      }
       base.processed++;
       const vh = visionHandle?.halted?.();
       if (vh === "auth_error") fatal = "auth_error";

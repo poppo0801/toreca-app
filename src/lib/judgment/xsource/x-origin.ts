@@ -204,18 +204,32 @@ export async function runXPostReplay(a: {
   escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean };
   /** 利用者の対象地域（既存の収集設定）。検証層が、地域外を理由とする除外の事実を確認する */
   userRegion?: import("./claim-semantics").UserRegion;
-}): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean }> {
+  /**
+   * AUTONOMY_RESTORATION（再開可能な実行）: 以前の実行で完了した項目（この実行では調べない）。
+   * 実行環境の上限は1回の実行の外枠であり、調査の締切ではない。完了していない項目は次の実行で続きから調べる
+   */
+  skipItems?: ReadonlySet<number>;
+  /** 次の項目を始めてよいか（1回の実行の残り時間で、調査と判断を完了できるか）。false なら、その項目以降を次の実行へ回す（未完了。保留・除外ではない） */
+  canStartItem?: () => boolean;
+  /** 項目ごとの調査の締切（エポックミリ秒）。項目を始めるときに評価する。候補全体の共通の締切にしない */
+  itemDeadline?: () => number | undefined;
+}): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean; /** まだ調べていない項目（次の実行で再開する） */ pending: number[] }> {
   const { items } = planXPost(a.post);
   const tools = cachedTools(a.tools);
   const results: { plan: ItemPlan; result: ResearchResult }[] = [];
+  const pending: number[] = [];
   let stopped = false;
   for (const plan of items) {
-    if (a.shouldStop?.()) {
+    if (a.skipItems?.has(plan.itemNo)) continue;
+    if (stopped || a.shouldStop?.() || (a.canStartItem && !a.canStartItem())) {
       stopped = true;
-      break;
+      pending.push(plan.itemNo);
+      continue;
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && (plan.scopedUrls.length === 0 || (a.post.sourceIsAnnouncement && plan.scopedUrls.includes(a.post.sourcePage.url))) ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const dl = a.itemDeadline?.();
+    const itemTools: ResearchTools = dl !== undefined ? Object.assign(Object.create(tools) as ResearchTools, { researchDeadlineMs: dl }) : tools;
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools: itemTools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && (plan.scopedUrls.length === 0 || (a.post.sourceIsAnnouncement && plan.scopedUrls.includes(a.post.sourcePage.url))) ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({
@@ -232,5 +246,5 @@ export async function runXPostReplay(a: {
     fieldBasis: Object.fromEntries(Object.entries(result.registration.output?.fields ?? {}).map(([k, f]) => [k, f.basis])),
     turns: result.investigation.turns,
   }));
-  return { plans: items, results, trace, cacheHits: tools.hits, stopped };
+  return { plans: items, results, trace, cacheHits: tools.hits, stopped, pending };
 }

@@ -55,19 +55,24 @@ describe("INTENSIVE_EVALUATION: 抽選ではない投稿の除外", () => {
     expect(checkExcludeSemantics({ claim: "受付終了（締切済み）", quote: "抽選応募受け付け期間", now, deadlineQuote: "応募期間 11月6日(金)16時00分~11月10日(火)16時59分まで" }).ok).toBe(true);
     expect(checkExcludeSemantics({ claim: "受付終了", quote: "抽選応募受け付け期間", now, deadlineQuote: "応募期間 11月30日(月)まで" }).ok).toBe(false); // 締切が先なら終了ではない
   });
-  it("抽選ではない除外は、応募先のページの証拠が無くても投稿を根拠にできる（他の理由は従来どおりページが必要）", () => {
+  it("除外は応募先のページの有無で止めない（AUTONOMY_RESTORATION）。受付終了と申告したなら、引用の日付と評価時点の客観的な整合だけを確かめる", () => {
     const seed = ev("s1", "【ポケカ販売情報】ポケモンセンターオンラインで販売開始⚡ 一人1点まで購入可能！", "seed");
-    const ok = verifyRegistration({ output: out({ decision: "exclude", fields: { exclude_reason: { value: "抽選ではない（先着販売）", basis: "observed", evidenceId: "s1", quote: "販売開始⚡ 一人1点まで購入可能！" } } }), evidence: [seed], protectedFields: {}, registerRequiresUnit: true });
-    expect(ok.issues).not.toContain("exclude_without_page_evidence");
-    const ng = verifyRegistration({ output: out({ decision: "exclude", fields: { exclude_reason: { value: "受付終了", basis: "observed", evidenceId: "s1", quote: "販売開始⚡ 一人1点まで購入可能！" } } }), evidence: [seed], protectedFields: {}, registerRequiresUnit: true });
-    expect(ng.issues).toContain("exclude_without_page_evidence");
+    const ok = verifyRegistration({ output: out({ decision: "exclude", excludeKind: "not_lottery", fields: { exclude_reason: { value: "抽選ではない（先着販売）", basis: "observed", evidenceId: "s1", quote: "販売開始⚡ 一人1点まで購入可能！" } } }), evidence: [seed], protectedFields: {}, registerRequiresUnit: true });
+    expect(ok.issues).toEqual([]);
+    // 受付終了と申告したのに、引用に締切の日付が無い: 客観的に確かめられない（日付と評価時点の整合）
+    const ng = verifyRegistration({ output: out({ decision: "exclude", excludeKind: "closed", fields: { exclude_reason: { value: "受付終了", basis: "observed", evidenceId: "s1", quote: "販売開始⚡ 一人1点まで購入可能！" } } }), evidence: [seed], protectedFields: {}, registerRequiresUnit: true, now: new Date("2026-11-27T00:00:00Z") });
+    expect(ng.blocking).toContain("exclude_reason_unsupported");
+    expect(ng.issues).not.toContain("exclude_without_page_evidence");
   });
 });
 
 describe("INTENSIVE_EVALUATION: 上位モデルの費用対効果", () => {
   const pages = [ev("p1", "本文")];
-  it("重大な不明が、人が確かめれば分かること（askHuman）だけなら上位を使わない", () => {
+  it("上位に上げるかを、人の確認の自己申告（askHuman）やページの有無の固定の条件で決めない（AUTONOMY_RESTORATION: 上位は自ら追加の調査ができる）。AIが求めれば上げる", () => {
     expect(escalationReason({ output: out({ decision: "tentative", unresolvedImpact: "material" }), verified: true, evidence: pages, caseId: "a", auditRate: 0 })).toBe("material_unknown");
-    expect(escalationReason({ output: out({ decision: "tentative", unresolvedImpact: "material", askHuman: { why: "LINEのトークだけ", fields: [] } }), verified: true, evidence: pages, caseId: "a", auditRate: 0 })).toBeNull();
+    expect(escalationReason({ output: out({ decision: "tentative", unresolvedImpact: "material", askHuman: { why: "LINEのトークだけ", fields: [] } }), verified: true, evidence: pages, caseId: "a", auditRate: 0 })).toBe("material_unknown");
+    expect(escalationReason({ output: out({ decision: "tentative", unresolvedImpact: "material" }), verified: true, evidence: [], caseId: "a", auditRate: 0 })).toBe("material_unknown");
+    expect(escalationReason({ output: out({ decision: "register", unresolvedImpact: "none", review: { why: "情報源の信頼性が分からない" } }), verified: true, evidence: pages, caseId: "a", auditRate: 0 })).toBe("ai_requested");
+    expect(escalationReason({ output: out({ decision: "tentative", unresolvedImpact: "minor" }), verified: true, evidence: pages, caseId: "a", auditRate: 0 })).toBeNull(); // 軽微な不明は上げない（AIの評価）
   });
 });

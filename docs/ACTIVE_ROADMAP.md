@@ -2,6 +2,12 @@
 
 更新日: 2026-11-20。これは**優先課題の整理**であり、未承認の新Stageを確定するものではない。進捗はPR・デプロイ・実機検証で更新する。
 
+## 現在の段階（2026-11-27 更新）
+- **Phase 3 AUTONOMY_RESTORATION**（`docs/implementation/PHASE_3_AUTONOMY_RESTORATION.md`）を実施中です。内容は、設計思想の是正（V22）と、本番シャドーでのAIの調査・推論・判断の能力の回復です。
+- それ以前の Phase 3（RUNTIME_CORRECTNESS 〜 CAPABILITY_CEILING）の報告書は `docs/reports/2026-11-2*-phase3-*.md` にあります。
+- 新AIの本登録・自動登録・削除・応募・通知は、別の承認によります（未解禁）。
+- 下の Stage 10C〜10H の表は、2026-11-20時点の計画（履歴）です。現在の段階の名前と順序は、上の Phase 3 の指示書に従います。
+
 ## 現行計画：AI主体の収集・判断エンジンの再設計（Stage 10C〜10H。2026-11-20更新）
 詳細な目標は `docs/AI_REDESIGN_SPEC.md`、現状との対応は `docs/AI_REDESIGN_IMPLEMENTATION_MAP.md`、評価は `docs/AI_REDESIGN_ACCEPTANCE_PLAN.md`、各Stageの指示は `docs/implementation/`（10D〜10Hは**ドラフト・未承認**）。
 過去: Stage 9X〜9Z（収集の改善・再検証・原文保存。9Zは本番反映済み）、10A/10B（調査のみ）を完了。工程の統合・分割は提案可だが、実装に先行して勝手に変えない。

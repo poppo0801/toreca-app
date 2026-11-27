@@ -82,8 +82,10 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
     const effort = { ...(effortOf(env.INTENSIVE_AGENT_EFFORT) ? { agent: effortOf(env.INTENSIVE_AGENT_EFFORT) } : {}), ...(effortOf(env.INTENSIVE_JUDGE_EFFORT) ? { judge: effortOf(env.INTENSIVE_JUDGE_EFFORT) } : {}) };
     const upper = "claude-sonnet-5-5";
     const relaxed = env.INTENSIVE_PROFILE === "relaxed";
-    const thinkSet = (env.INTENSIVE_THINKING || "").split(",");
+    // AUTONOMY_RESTORATION: 既定は本番シャドーと同じ（思考あり）。比較のときだけ INTENSIVE_THINKING=none（なし）・agent・judge を指定する
+    const thinkSet = (env.INTENSIVE_THINKING || "all").split(",");
     const thinking = { agent: thinkSet.includes("agent") || thinkSet.includes("all"), judge: thinkSet.includes("judge") || thinkSet.includes("all") };
+    const runWindowMs = Number(env.INTENSIVE_RUN_WINDOW_MS) || undefined; // 本番の1回の実行の時間枠を再現する（間に合わない項目は再開）
     // 緩和の上限（固定の新しい規則ではなく、能力を測るための外枠）。検索4・取得8・ターン10・自己修正2・読み取り16回/6万字・連続の空振り3
     const RELAXED_LIMITS = { maxTurns: 10, maxFetches: 8, maxSearches: Number(env.INTENSIVE_MAX_SEARCHES) || 4, maxRevisions: 2, maxReads: 16, maxReadChars: 60_000, maxElapsedMs: 15 * 60_000, maxNoProgressTurns: 3 };
     const gate = checkJudgmentRealRun({ env, confirm: env.JUDGMENT_REAL_CONFIRM === "yes", approvedTotalJpy: Number(env.JUDGMENT_APPROVED_TOTAL_JPY), approvedPerCaseJpy: Number(env.JUDGMENT_APPROVED_PER_CASE_JPY), caps: INTENSIVE_CAPS });
@@ -113,7 +115,8 @@ describe.skipIf(env.JUDGMENT_INTENSIVE !== "1" || !["prepare", "run"].includes(M
       env: { ...env, PROPOSAL_PREVIEW: "on" },
       // 本番シャドーと同じ上限（判断の予約は上位モデルに合わせる）。CAPABILITY_CEILING: INTENSIVE_PROFILE=relaxed は、AIが必要な情報へ到達できる程度に調査の上限を広げる（隔離評価のみ。費用・時間・ループの外枠は残す）
       limits: { ...shadowProposalLimits(true, judgeMode === "haiku" || judgeMode === "single" ? undefined : upper, Number(env.INTENSIVE_MAX_SEARCHES) || undefined), ...(relaxed ? RELAXED_LIMITS : {}) },
-      ...(relaxed ? { researchWindowMs: 30 * 60_000, broadEscalation: true } : {}),
+      ...(runWindowMs ? { researchWindowMs: runWindowMs } : {}),
+      ...(relaxed ? { broadEscalation: true } : {}),
       ...(thinking.agent || thinking.judge ? { thinking } : {}),
       search: { provider: makeWebSearchProvider(client as never, "claude-haiku-5-5"), worstJpy: SHADOW_SEARCH_WORST_JPY, reserveJpy: SHADOW_SEARCH_WORST_JPY },
       ...(lf ? { liveFetch: lf.fetchPage } : {}),

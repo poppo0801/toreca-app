@@ -184,7 +184,7 @@ describe("登録案の集計（引用の実在と値の導出を別に数える�
   });
 });
 
-describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server action・cron・収集は実AIを動かせない", () => {
+describe("Phase 2 静的確認: 実AIの入口は評価だけ。画面・server action・cron・収集は実AIを動かせない", { timeout: 30_000 }, () => { // ソース全体を読む静的確認。並行実行の負荷で5秒を超えることがあるため（判定の内容は変えない）
   const walk2 = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = `${d}/${n}`; return statSync(p).isDirectory() ? walk2(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
   const nonTest = walk2("src").filter((f) => !/\.test\.tsx?$/.test(f)).map((f) => f.split("\\").join("/"));
   const importers = (re: RegExp, self: string[]): string[] => nonTest.filter((f) => !self.includes(f) && re.test(readFileSync(f, "utf8")));
@@ -317,8 +317,9 @@ describe("根拠のない除外は検証の指摘にする（P2: 取得できな
     // 除外には、応募できない・対象外を示す根拠（exclude_reason・引用つき）が要る。店舗を観察できただけでは除外できない（Stage A: 応募できる機会を除外した例）
     expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_missing"]);
     expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "会員限定のため対象外" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
-    // 引用が実在しても、除外の理由を支えない（11/30までは対象外の根拠でも、受付終了の根拠でもない）なら、保留にする
-    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual(["exclude_reason_unsupported"]);
+    // AUTONOMY_RESTORATION: 「対象外」などの理由が引用の意味を支えるかは、語彙で判定しない（AIの判断）。受付終了と申告したときだけ、引用の日付と評価時点の客観的な整合を確かめる
+    expect(verifyRegistration({ output: out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "対象外", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }), evidence: ev, protectedFields: {} }).issues).toEqual([]);
+    expect(verifyRegistration({ output: { ...(out({ store: { value: "A店", basis: "observed", evidenceId: "s1", quote: "【A店】拡張パック" }, exclude_reason: { value: "受付終了", basis: "observed", evidenceId: "s1", quote: "11/30まで" } }) as object), excludeKind: "closed" } as never, evidence: ev, protectedFields: {}, now: new Date("2026-11-25T03:00:00Z") }).issues).toEqual(["exclude_reason_contradicted"]); // 締切が評価時点より先なら、受付終了とは言えない（客観的な整合）
     expect(verifyRegistration({ output: out({}, "tentative"), evidence: ev, protectedFields: {} }).issues).toEqual([]); // 暫定は対象外
   });
 });
