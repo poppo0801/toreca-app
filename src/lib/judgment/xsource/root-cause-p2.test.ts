@@ -129,7 +129,11 @@ describe("P2 原因: ページ証拠なしの除外（r10:2）は人の確認に
     const pageEv = { id: "p1", kind: "page", url: "https://a.example.invalid/e", fetchedAt: "x", contentHash: "h2", text: "受付は終了しました 拡張パック", structure: null, independent: true };
     const out = (ev: string) => ({ decision: "exclude", fields: { product: { value: "拡張パック", basis: "observed", evidenceId: ev, quote: "拡張パック" }, exclude_reason: { value: "受付終了", basis: "observed", evidenceId: ev, quote: ev === "s1" ? "11/22(日)22:00〆" : "受付は終了しました" } }, rationale: "", unresolvedImpact: "none", monitor: { continue: false, why: "" }, costJpy: 0 }) as never;
     const v = (o: never, evs: unknown[], flag = true) => verifyRegistration({ output: o, evidence: evs as never, protectedFields: {}, registerRequiresUnit: flag, now: new Date("2026-11-25T03:00:00Z") }).issues;
-    expect(v(out("s1"), [seed])).toEqual(["exclude_without_page_evidence"]); // P2 の r10:2: 原文の項目は観察できたが、応募先のページが無い
+    // CAPABILITY_CEILING（利用者の決定 2026-11-27）: 受付終了は、締切の役割・評価時点より前・矛盾なしの客観的な整合を通れば、応募先のページが無くても止めない（AIが投稿元・延長の有無も踏まえて判断する）
+    expect(v(out("s1"), [seed])).toEqual([]);
+    // 受付終了以外（例: 対象外の条件）は、従来どおりページ証拠が無ければ人の確認へ
+    const inel = { ...(out("s1") as unknown as Record<string, unknown>), fields: { product: { value: "拡張パック", basis: "observed", evidenceId: "s1", quote: "拡張パック" }, exclude_reason: { value: "対象外（会員限定）", basis: "observed", evidenceId: "s1", quote: "拡張パック抽選" } } } as never;
+    expect(v(inel, [seed])).toContain("exclude_without_page_evidence");
     expect(v(out("p1"), [seed, pageEv])).toEqual([]); // 受付終了のページを確認して除外
     expect(v(out("s1"), [seed], false)).toEqual([]); // 従来の経路は変えない
   });

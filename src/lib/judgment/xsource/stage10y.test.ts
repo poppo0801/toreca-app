@@ -93,7 +93,7 @@ describe("出力の途切れ対策（課金なし）", () => {
     const src = readFileSync("src/lib/judgment/xsource/research-ai.ts", "utf8");
     expect(src).not.toContain("max_tokens: 1800");
     // PRODUCTION_PARITY: 推論の度合い（effort）に応じて出力上限を広げる（low は従来どおり OUTPUT_MAX_TOKENS）
-    expect(src).toContain("const agentMax0 = OUTPUT_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort]"); // EVIDENCE_UTILIZATION: 途切れた直後の1回だけ2倍（maxFor）
+    expect(src).toContain("OUTPUT_MAX_TOKENS * EFFORT_MAX_TOKENS_SCALE[effort] + (think ? THINKING_EXTRA_TOKENS : 0)"); // EVIDENCE_UTILIZATION: 途切れた直後の1回だけ2倍（maxFor）／CAPABILITY_CEILING: 思考するときは思考の余裕を足す
     expect(src).toContain("max_tokens: agentMax");
   });
   it("stop_reason=max_tokens で出力が途切れても、失敗として理由を記録し、費用は実費（使用トークン）で計上される形にする", async () => {

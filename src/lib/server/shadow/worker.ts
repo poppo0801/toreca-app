@@ -171,8 +171,12 @@ class CaptureSink implements ShadowSink {
  * 実行が途中で打ち切られた（Vercelの停止・クラッシュ）試行は、費用が記録されないことがあるため、記録が追いつくまでは使ったものとして扱う（過少計上で上限を超えない）。
  * 読み取りに失敗したら、保守的に1件上限ぶんを引く。
  */
-async function unconfirmedReserveInner(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[]): Promise<number> {
-  const jobs = await table(db, "shadow_jobs").select("id,attempts,status,lease_until").eq("household_id", householdId).gt("attempts", 0).in("status", ["queued", "leased", "failed", "done"]).limit(500);
+async function unconfirmedReserveInner(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[], sinceIso?: string): Promise<number> {
+  // sinceIso: その時刻以降に更新されたジョブだけ（日次の残額の引当用。CAPABILITY_CEILING: 過去の日の未確定の試行を毎日の残額から引き続け、シャドーが止まっていた）
+  let q = table(db, "shadow_jobs").select("id,attempts,status,lease_until").eq("household_id", householdId).gt("attempts", 0).in("status", ["queued", "leased", "failed", "done"]);
+  // 予算で戻しただけのジョブ（AIを呼んでいない。戻すと updated_at が今日になる）の以前の未確定の試行は、日次には数えない（月次・通算では数える）
+  if (sinceIso) q = q.gte("updated_at", sinceIso).or("last_error.is.null,last_error.not.in.(budget,budget_locked)");
+  const jobs = await q.limit(500);
   const rec = await table(db, "shadow_judgments").select("job_id").eq("household_id", householdId).not("job_id", "is", null).limit(2000);
   if (jobs.error || rec.error) return perCaseCapJpy;
   const recorded = new Map<string, number>();
@@ -188,9 +192,9 @@ async function unconfirmedReserveInner(db: Db, householdId: string, perCaseCapJp
   }
   return Math.round(n * perCaseCapJpy * 100) / 100;
 }
-export async function unconfirmedReserveJpy(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[]): Promise<number> {
+export async function unconfirmedReserveJpy(db: Db, householdId: string, perCaseCapJpy: number, exceptJobIds: string[], sinceIso?: string): Promise<number> {
   try {
-    return await unconfirmedReserveInner(db, householdId, perCaseCapJpy, exceptJobIds);
+    return await unconfirmedReserveInner(db, householdId, perCaseCapJpy, exceptJobIds, sinceIso);
   } catch {
     return perCaseCapJpy; // 読み取りの例外でも止めず、保守的に1件上限ぶんを引き当てる
   }
@@ -314,18 +318,17 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
         const d1 = now();
         const [day1, month1] = await Promise.all([rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstDayStart(d1).toISOString() }), rpc(db)("shadow_spent", { p_household: j.household_id, p_since: jstMonthStart(d1).toISOString() })]);
         const spentDay = Number(day1.data ?? 0);
-        let left1 = Math.min(st.daily_budget_jpy - spentDay, st.monthly_budget_jpy - Number(month1.data ?? 0));
+        // 未確定費用の保守的な引当: 開始した試行（attempts）より記録（shadow_judgments）が少ないジョブ＝実行が途中で打ち切られ、費用が記録されていない可能性。1試行あたり1件上限を残額から差し引く。
+        // 日次の残額には今日（日本時間）に更新されたジョブの分だけ、月次・通算には全部を引き当てる（過去の日の未確定を毎日の残額から引き続けない）
+        const exceptIds = jobs.map((x) => x.id); // この実行で確保したジョブは対象外（実行中）
+        const uncDay = await unconfirmedReserveJpy(db, j.household_id, st.per_case_cap_jpy, exceptIds, jstDayStart(d1).toISOString());
+        const uncAll = await unconfirmedReserveJpy(db, j.household_id, st.per_case_cap_jpy, exceptIds);
+        let left1 = Math.min(st.daily_budget_jpy - spentDay - uncDay, st.monthly_budget_jpy - Number(month1.data ?? 0) - uncAll);
         let totalErr = false;
         if (st.total_budget_jpy !== null && st.total_budget_jpy !== undefined) {
           const tot = await rpc(db)("shadow_spent", { p_household: j.household_id, p_since: st.total_since ?? "1970-01-01T00:00:00Z" });
           if (tot.error) totalErr = true;
-          else left1 = Math.min(left1, st.total_budget_jpy - Number(tot.data ?? 0)); // 通算の上限
-        }
-        // 未確定費用の保守的な引当: 開始した試行（attempts）より記録（shadow_judgments）が少ないジョブ＝実行が途中で打ち切られ、費用が記録されていない可能性。1試行あたり1件上限を残額から差し引く
-        let unconfirmed = 0;
-        if (!totalErr) {
-          unconfirmed = await unconfirmedReserveJpy(db, j.household_id, st.per_case_cap_jpy, jobs.map((x) => x.id)); // この実行で確保したジョブは対象外（実行中）
-          left1 -= unconfirmed;
+          else left1 = Math.min(left1, st.total_budget_jpy - Number(tot.data ?? 0) - uncAll); // 通算の上限
         }        if (day1.error || month1.error || totalErr || !(left1 > 0.5)) {
           await requeue(j, day1.error || month1.error || totalErr ? new Date(d1.getTime() + 10 * 60_000) : nextJstDay(d1), "budget", false);
           bump(res.byReason, "budget");

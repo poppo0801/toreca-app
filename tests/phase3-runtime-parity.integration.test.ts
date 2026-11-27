@@ -72,7 +72,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3 RUNTIME_PARITY: 評価入口と本番�
     const { error } = await admin.from("shadow_settings").upsert({ household_id: hid, enabled: true, enqueue_enabled: true, daily_budget_jpy: 15, monthly_budget_jpy: 45, per_case_cap_jpy: 3, max_jobs_per_run: 3, retention_days: 30, total_budget_jpy: 45, total_since: new Date(Date.now() - 3600_000).toISOString(), valid_until: new Date(Date.now() + 72 * 3600_000).toISOString(), run_lock_by: null, run_lock_until: null, ...over });
     expect(error).toBeNull();
   };
-  const shadowEnv = (extra: Record<string, string> = {}): Record<string, string> => ({ ...SHADOW_ENV, PROPOSAL_PROD_PREVIEW: "on", PROPOSAL_PROD_APPROVED: "yes", PROPOSAL_PROD_HOUSEHOLDS: hid, SHADOW_ANTHROPIC_API_KEY: "scripted-shadow-key-not-real-0000", SHADOW_LIVE_FETCH: "allow", ...extra });
+  const shadowEnv = (extra: Record<string, string> = {}): Record<string, string> => ({ ...SHADOW_ENV, PROPOSAL_PROD_PREVIEW: "on", PROPOSAL_PROD_APPROVED: "yes", PROPOSAL_PROD_HOUSEHOLDS: hid, SHADOW_ANTHROPIC_API_KEY: "scripted-shadow-key-not-real-0000", SHADOW_LIVE_FETCH: "allow", SHADOW_THINKING: "off", ...extra }); // CAPABILITY_CEILING: 本番シャドーは既定で思考を使う（時間の枠つき）。ここでは評価入口（思考なし）と同じ入力・道具・費用であることを比べるため、思考を止めて比べる（思考の設定は単体テストで確認）
   const enqueue = async (c: CandidateRow) => {
     const h = ((c.last_good as { evidence: { hash: string } }).evidence.hash).slice(0, 32);
     const r = await (u1 as unknown as { rpc: (n: string, a: object) => PromiseLike<{ data: unknown }> }).rpc("shadow_enqueue", { p_household: hid, p_candidate: c.id, p_hash: h });

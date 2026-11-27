@@ -161,3 +161,16 @@ describe("配線（本番の経路）", () => {
     expect(g).toMatch(/withFullPostText/);
   });
 });
+
+describe("本番シャドーの思考（CAPABILITY_CEILING・利用者承認 2026-11-27）", () => {
+  it("既定で有効・SHADOW_THINKING=off で停止。調査と既定の判断だけ、ジョブ開始から一定時間内の呼び出しだけ思考する（実行時間の外枠）", async () => {
+    const { shadowThinkingEnabled, SHADOW_THINKING_WINDOW_MS, SHADOW_THINKING_EFFORT } = await import("@/lib/server/shadow/proposal-job");
+    expect(shadowThinkingEnabled({})).toBe(true);
+    expect(shadowThinkingEnabled({ SHADOW_THINKING: "off" })).toBe(false);
+    expect(SHADOW_THINKING_EFFORT).toBe("medium");
+    expect(SHADOW_THINKING_WINDOW_MS).toBeLessThan(45_000);
+    const src = readFileSync("src/lib/server/shadow/proposal-job.ts", "utf8");
+    expect(src).toMatch(/Date\.now\(\) - jobStartMs < SHADOW_THINKING_WINDOW_MS/);
+    expect(src).toMatch(/think && !judgeModel \? \{ thinking: think/); // 上位・別モデルの判断には付けない
+  });
+});
