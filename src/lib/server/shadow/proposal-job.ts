@@ -40,6 +40,14 @@ export const SHADOW_SEARCH_WORST_JPY = 3.7;
 export const SHADOW_AUDIT_RATE = 0.2;
 /** 判断（既定・上位とも）の推論の度合い（PRODUCTION_PARITY の比較で決める。評価入口と同じ値を使う） */
 export const SHADOW_JUDGE_EFFORT: import("@/lib/judgment/xsource/research-ai").AiEffort = "low";
+/**
+ * CAPABILITY_CEILING（利用者承認 2026-11-27: 本番シャドーで Haiku の思考を有効にする）。調査と既定の判断（Haiku）は effort medium＋思考。
+ * 関数の実行時間（ジョブ70秒・呼び出し全体100秒）に収めるため、ジョブの開始から SHADOW_THINKING_WINDOW_MS を過ぎた呼び出しは思考しない（実行時の外枠。意味の判断ではない）。
+ * 上位（Sonnet）の判断は従来どおり。停止: 環境変数 SHADOW_THINKING=off
+ */
+export const SHADOW_THINKING_EFFORT: import("@/lib/judgment/xsource/research-ai").AiEffort = "medium";
+export const SHADOW_THINKING_WINDOW_MS = 35_000;
+export const shadowThinkingEnabled = (env: Record<string, string | undefined> = process.env): boolean => env.SHADOW_THINKING !== "off";
 export { RESEARCH_WINDOW_MS as SHADOW_RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 import { RESEARCH_WINDOW_MS } from "@/lib/server/proposals/pipeline";
 /** 判断の呼び出し1回の予約（円）。調査用の既定（¥0.6）か、判断モデルの実測に近い想定（入力9,000・出力1,500トークン）の大きい方 */
@@ -198,8 +206,10 @@ export async function runShadowProposalJob(a: {
     else if (c === "rate") state.fatal = "rate_limited";
   };
   const basisAt = stored?.fetchedAt ?? null; // 収集時刻（評価の基準時刻）
-  const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, onDiagnostic });
-  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic, effort: SHADOW_JUDGE_EFFORT });
+  // 思考（CAPABILITY_CEILING）: 調査と、調査と同じモデルでの既定の判断だけ。ジョブ開始から一定時間内の呼び出しだけ思考する（実行時間の外枠）
+  const think = shadowThinkingEnabled(env) ? (): boolean => Date.now() - jobStartMs < SHADOW_THINKING_WINDOW_MS : null;
+  const agent = makeAnthropicResearchAgent(a.client, { model: t.ticket.model, onDiagnostic, ...(think ? { thinking: think, effort: SHADOW_THINKING_EFFORT } : {}) });
+  const judge = makeAnthropicRegistrationJudge(a.client, { model: judgeModel ?? t.ticket.model, onDiagnostic, ...(think && !judgeModel ? { thinking: think, effort: SHADOW_THINKING_EFFORT } : { effort: SHADOW_JUDGE_EFFORT }) });
   const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), effort: SHADOW_JUDGE_EFFORT }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
   const budget = new CallBudget({ maxCalls: 24, maxCostJpy: caseCap });
   if (useVision) {

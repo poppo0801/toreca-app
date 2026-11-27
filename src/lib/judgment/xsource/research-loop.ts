@@ -636,7 +636,11 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
   if (i.output.decision === "exclude" && !Object.values(i.output.fields).some((f) => f.basis === "observed" && f.value !== null && f.value.trim() !== "")) issues.push("exclude_without_evidence");
   // 取得したページ（応募先の公開ページ）の証拠が無いまま「除外」とするのは、取得できなかっただけの可能性があり、応募の機会を失わせる。人の確認に回す（投稿の原文だけで除外が妥当な場合も、人が確認する側に倒す）。AIの結論は書き換えない
   // ただし「抽選の応募機会ではない」（先着・通常販売・まとめ等）と「他のTCGだけ」（引用が他のTCGの名称を明示。意味検証は下で行う）は、投稿そのものが根拠になる（応募先のページが無いのが普通）
-  if (i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page") && !["not_lottery", "other_tcg"].includes(claimClassOf(String(i.output.fields["exclude_reason"]?.value ?? "")))) issues.push("exclude_without_page_evidence");
+  // CAPABILITY_CEILING（利用者の決定 2026-11-27）: 受付終了も、投稿元の信頼性・締切の明確さ・対象の抽選との整合・延長の告知の有無を踏まえてAIが判断する。
+  // 検証層は客観的な整合（引用の実在・締切の役割・評価時点より前・未来の締切との矛盾なし）だけを確かめ、通った受付終了は応募先のページが無くても止めない（固定の日数の規則は設けない）
+  const closedOk = { v: false };
+  const pageExempt = (): boolean => ["not_lottery", "other_tcg"].includes(claimClassOf(String(i.output.fields["exclude_reason"]?.value ?? ""))) || closedOk.v;
+  const needsPageCheck = i.registerRequiresUnit && i.output.decision === "exclude" && !i.evidence.some((e) => e.kind === "page");
   // 除外は、応募できない・対象外であることを示す根拠（exclude_reason・引用つき・検証済み）が要る。店舗や商品を観察できただけでは、除外の根拠にならない（応募の機会を失わせるため）
   if (i.output.decision === "exclude") {
     const r = i.output.fields["exclude_reason"];
@@ -649,9 +653,14 @@ export function verifyRegistration(i: VerifyInput): { issues: string[]; proposal
       if (!v.ok) { const code = `exclude_reason_${v.code}`; issues.push(code); reasonOf.set(code, v.reason); }
       // 他のTCGだけ: 引用（局所）が他のTCGでも、同じ証拠の別の箇所にポケモンカードがあれば混在の可能性がある（CAPABILITY_CEILING: 局所の引用だけで混在の告知を除外しない）。混在なら対象の商品の機会を拾うべきなので、保留にして判断し直す
       else if (claimClassOf(r.value) === "other_tcg" && /ポケモン|ポケカ|ポケットモンスター|pok[eé]mon/i.test(ev.text.normalize("NFKC"))) { issues.push("exclude_reason_mixed_products"); reasonOf.set("exclude_reason_mixed_products", "同じ証拠にポケモンカードの記載もあり、他のTCGだけとは言えない（混在なら対象の商品の機会を拾う）"); }
-      else for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
+      else {
+        for (const u of v.unconfirmed ?? []) unconfirmed.push(`exclude_reason: ${u}`);
+        const cls = claimClassOf(r.value);
+        if (cls === "closed" || (cls === "unknown" && /受付終了|締切/.test(v.reason))) closedOk.v = true; // 受付終了として客観的な整合を通った
+      }
     }
   }
+  if (needsPageCheck && !pageExempt()) issues.push("exclude_without_page_evidence");
   // 重要項目の失敗は本登録を止める。任意項目の失敗は、その項目の提案だけを採用しない
   const blocking = issues.filter(isBlockingIssue);
   const nonBlocking = issues.filter((x) => !isBlockingIssue(x));
