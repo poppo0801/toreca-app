@@ -208,13 +208,14 @@ describe("ADAPTIVE_REVIEW 適応型判断", () => {
     expect(r.registration.verified).toBe(true);
     expect(r.judgeTrail?.[1]).toMatchObject({ stage: "escalated", decision: "none", note: "failed" });
   });
-  it("検証済みの登録・除外は上げない（監査の抽出の割合が0のとき）。監査で両方検証済みかつ結論が食い違えば、どちらも正解扱いせず保留にする", async () => {
+  it("検証済みの登録・除外は上げない（監査の抽出の割合が0のとき）。監査で両方検証済みかつ結論が食い違えば、両方の根拠で調停させ（F3）、決めきれなければ保留にする", async () => {
     const reg = jo({ decision: "register", unresolvedImpact: "none", fields: { fit_region: { value: "適合", basis: "observed", evidenceId: "p1", quote: "応募期間 11月24日〜11月26日" } } });
     const a = await run(reg, [jo({})]);
     expect(a.calls.upper).toBe(0);
     const b = await run(reg, [jo({ decision: "tentative", unresolvedImpact: "minor" })], { auditRate: 1 });
-    expect(b.calls.upper).toBe(1);
+    expect(b.calls.upper).toBe(2); // 上位の判断＋調停（調停も決めきれない＝暫定）
     expect(b.r.registration.finalDecision).toBe("tentative");
+    expect(b.r.judgeTrail?.some((x) => x.stage === "reconciled" && x.adopted === false)).toBe(true);
     expect(b.r.registration.held?.reasons).toContain("model_disagreement");
   });
   it("既定が暫定で、上位が根拠つきで除外・登録と決めて検証を通れば、食い違いではなく採用する（本番の回帰）", async () => {

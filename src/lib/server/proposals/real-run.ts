@@ -13,6 +13,7 @@ import { CallBudget } from "@/lib/judgment/call-budget";
 import { CANDIDATE_CAP_PER_CASE_JPY, type JudgmentRealGate } from "@/lib/judgment/real-gate";
 import { preflightRun, type PreflightResult } from "@/lib/judgment/xsource/cost-preflight";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, OUTPUT_MAX_TOKENS, type AiDiagnostic } from "@/lib/judgment/xsource/research-ai";
+import { makeAnthropicIdentityJudge } from "@/lib/judgment/xsource/opportunity-identity";
 import type { FetchOutcome, ResearchLimits } from "@/lib/judgment/xsource/research-loop";
 import type { VisionClient } from "@/lib/judgment/xsource/image-evidence";
 import { worstCaseVisionCallJpy } from "@/lib/judgment/xsource/vision-real";
@@ -83,7 +84,7 @@ export interface RealRunOptions {
    */
   afterCandidate?: (a: { candidate: CandidateRow; ok: boolean; costJpy: number; reason?: string; /** この実行で作った登録案（保存の省略に関わらず、この試行の結果。評価記録用） */ records?: import("@/lib/judgment/xsource/proposal").ProposalRecord[]; ms?: number; diagnostics?: Record<string, number> }) => Promise<void>;
   /** 適応型判断（本番シャドーと同じ方式）: 既定のモデルで判断し、必要なときだけ同じ証拠で上位モデルに判断させる。評価で本番と同じ判断構成を測るため */
-  escalation?: { model: string; auditRate: number };
+  escalation?: { model: string; auditRate: number; /** 上位の推論の度合い（既定は判断と同じ） */ effort?: "low" | "medium" | "high" };
   /** 判断だけ別のモデル（1段）。本番シャドーの judge_mode=single・judge_model と同じ構成を測るため */
   judgeModel?: string;
   /** 推論の度合い（調査・判断。既定 low）。PRODUCTION_PARITY の比較用。上位モデルの判断にも judge を使う */
@@ -94,6 +95,8 @@ export interface RealRunOptions {
   researchWindowMs?: number;
   /** 上位モデルの判断の条件を広げる（暫定・ページなし・人の確認でも上げる）。隔離評価のみ */
   broadEscalation?: boolean;
+  /** 同一性の判断（登録済みの抽選・他の候補との照合。JUDGMENT_IDENTITY_EFFICIENCY §2）。既定 true、false で照合しない */
+  identity?: boolean;
   /** 関門の1件上限（関門 checkJudgmentRealRun に渡した caps と同じ値。既定は従来の候補上限） */
   gatePerCaseCapJpy?: number;
   lockPath?: string;
@@ -169,7 +172,10 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
     const agent = makeAnthropicResearchAgent(o.client, { model: ticket.model, onDiagnostic, ...(o.effort?.agent ? { effort: o.effort.agent } : {}), ...(o.thinking?.agent ? { thinking: true } : {}) });
     const judge = makeAnthropicRegistrationJudge(o.client, { model: o.judgeModel ?? ticket.model, onDiagnostic, ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) });
     // 上位: 判断に加え、自ら追加の調査をする調査AI（AUTONOMY_RESTORATION。本番シャドーと同じ構造）
-    const upperOpts = { onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(o.effort?.judge ? { effort: o.effort.judge } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) };
+    const upperEffort = o.escalation?.effort ?? o.effort?.judge; // JUDGMENT_IDENTITY_EFFICIENCY §4: 上位を同じモデルの高い推論（Haiku high）にする比較用
+    const upperOpts = { onDiagnostic: (d: AiDiagnostic) => onDiagnostic({ ...d, reason: `upper:${d.reason}` }), ...(upperEffort ? { effort: upperEffort } : {}), ...(o.thinking?.judge ? { thinking: true } : {}) };
+    // 同一性（§2）: 既定は調査と同じモデル・同じ思考の設定で照合する（o.identity === false で照合しない）
+    const identity = o.identity === false ? undefined : { judge: makeAnthropicIdentityJudge(o.client, { model: ticket.model, onDiagnostic, effort: o.effort?.judge ?? "medium", ...(o.thinking?.judge ? { thinking: true } : {}) }), model: ticket.model };
     const escalation = o.escalation ? { judge: makeAnthropicRegistrationJudge(o.client, { model: o.escalation.model, ...upperOpts }), agent: makeAnthropicResearchAgent(o.client, { model: o.escalation.model, ...upperOpts }), model: o.escalation.model, primaryModel: ticket.model, auditRate: o.escalation.auditRate, ...(o.broadEscalation ? { broad: true } : {}) } : undefined;
     const searchTool = o.search ? makeSearchTool(o.search.provider) : undefined;
     const visionHandle = o.visionFactory ? o.visionFactory({ ticket, budget }) : o.vision ? { vision: o.vision } : undefined;
@@ -193,7 +199,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
         deps: (() => {
           const dd = o.depsFor?.(c);
           // 共通の組み立て（pipeline.ts）。本番シャドーと同じ形の依存を作る
-          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, ...(o.researchWindowMs !== undefined ? { runDeadlineMs: Date.now() + o.researchWindowMs } : {}), ...(skip?.size ? { skipItems: skip } : {}), perItemCapJpy: ticket.perCaseCapJpy, ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
+          return assembleGenerateDeps({ agent, judge, ticket, budget, limits, ...(o.researchWindowMs !== undefined ? { runDeadlineMs: Date.now() + o.researchWindowMs } : {}), ...(skip?.size ? { skipItems: skip } : {}), perItemCapJpy: ticket.perCaseCapJpy, ...(identity ? { identity } : {}), ...(escalation ? { escalation, modelId: `${ticket.model}+adaptive:${escalation.model}` } : o.judgeModel && o.judgeModel !== ticket.model ? { modelId: `${ticket.model}+judge:${o.judgeModel}` } : {}), tools: { ...(searchTool ? { search: searchTool } : {}), ...(o.liveFetch ? { liveFetch: o.liveFetch } : {}), ...(visionHandle && dd?.vision !== false ? { vision: visionHandle.vision } : {}) }, ...(dd?.learn !== undefined ? { learn: dd.learn } : {}), now: o.now ?? basisClock(c, () => new Date()), shouldStop: () => !!fatal || !!o.shouldStop?.() });
         })(),
       });
       let r = await runOnce();
@@ -206,7 +212,7 @@ export async function runRealProposals(o: RealRunOptions): Promise<RealRunSummar
           const next = await runOnce(done);
           if (!next.ok) break;
           for (const n of next.processedItems ?? []) done.add(n);
-          merged = { ...next, records: [...merged.records, ...next.records], save: { inserted: merged.save.inserted + next.save.inserted, unchanged: merged.save.unchanged + next.save.unchanged, superseded: merged.save.superseded + next.save.superseded, failed: merged.save.failed + next.save.failed }, storage: { ...next.storage, documents: { saved: merged.storage.documents.saved + next.storage.documents.saved, existing: merged.storage.documents.existing + next.storage.documents.existing, failed: merged.storage.documents.failed + next.storage.documents.failed }, stats: { saved: merged.storage.stats.saved + next.storage.stats.saved, failed: merged.storage.stats.failed + next.storage.stats.failed } }, costJpy: Math.round((merged.costJpy + next.costJpy) * 10_000) / 10_000, processedItems: [...done] };
+          merged = { ...next, records: [...merged.records.filter((x) => !next.records.some((y) => y.itemNo === x.itemNo)), ...next.records].sort((x, y) => x.itemNo - y.itemNo) /* F1: 中断した項目を続きから調べ直した版で置き換える（同じ項目を二重に数えない） */, save: { inserted: merged.save.inserted + next.save.inserted, unchanged: merged.save.unchanged + next.save.unchanged, superseded: merged.save.superseded + next.save.superseded, failed: merged.save.failed + next.save.failed }, storage: { ...next.storage, documents: { saved: merged.storage.documents.saved + next.storage.documents.saved, existing: merged.storage.documents.existing + next.storage.documents.existing, failed: merged.storage.documents.failed + next.storage.documents.failed }, stats: { saved: merged.storage.stats.saved + next.storage.stats.saved, failed: merged.storage.stats.failed + next.storage.stats.failed } }, costJpy: Math.round((merged.costJpy + next.costJpy) * 10_000) / 10_000, processedItems: [...done] };
         }
         r = merged;
       }

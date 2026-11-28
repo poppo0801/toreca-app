@@ -250,7 +250,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 3: 本番シャドーの登録案ジョ�
     await addCandidate();
     const failing = new Proxy(admin as object, {
       get: (t, p) => {
-        if (p === "from") return (name: string) => (name === "shadow_judgments" ? { insert: async () => ({ error: { message: "simulated" } }) } : (t as { from: (n: string) => unknown }).from(name));
+        // 書き込み（insert）だけ失敗させる。読み取り（再開の台帳）は実DBのまま（F2: 台帳を読めないときは実行しない＝別の検査）
+        if (p === "from") return (name: string) => { const real = (t as { from: (n: string) => object }).from(name); return name === "shadow_judgments" ? new Proxy(real, { get: (b, k) => (k === "insert" ? async () => ({ error: { message: "simulated" } }) : typeof (b as Record<string | symbol, unknown>)[k] === "function" ? ((b as Record<string | symbol, (...x: unknown[]) => unknown>)[k]).bind(b) : (b as Record<string | symbol, unknown>)[k]) }) : real; };
         const v = (t as Record<string | symbol, unknown>)[p];
         return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
       },
@@ -259,7 +260,7 @@ describe.skipIf(!dbTestsEnabled)("Phase 3: 本番シャドーの登録案ジョ�
     const r = await runShadowWorker({ db: failing as unknown as Db, model: null, env: WORKER_ENV, workerId: "w-fail", limit: 3, proposalJob: (a) => runShadowProposalJob({ db: admin as unknown as Db, ...a, client: client as never, env: envOn() }) });
     expect(r.stoppedBy).toBe("record_failed");
     expect(calls.length).toBeGreaterThan(0);
-    expect(calls.length).toBeLessThanOrEqual(6); // 1件目だけ。2件目は呼ばない
+    expect(calls.length).toBeLessThanOrEqual(8); // 1件目だけ（調査・判断＋同一性の照合）。2件目は呼ばない
     expect((await admin.from("shadow_settings").select("enabled").eq("household_id", hid).single()).data).toMatchObject({ enabled: false });
   });
 

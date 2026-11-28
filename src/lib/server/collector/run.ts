@@ -1789,7 +1789,9 @@ export async function processQueue(deps: CollectDeps, ctx: QueueCtx): Promise<Qu
 
     // 実行時間の上限(60秒)を超えて実行が打ち切られないよう、バッチごとに残り時間で打ち切る
     const limit = Math.max(5_000, ctx.timeLeft() - 6_000);
-    const timedOut = (): ExtractResult => ({ ok: false, kind: "url", code: "ai_failed", message: "時間切れのため解析できませんでした" });
+    // 実行の時間枠での打ち切りは、AI側の失敗ではない（timed_out）。以前は ai_failed として連続失敗に数え、6時間の一時停止を11/26〜27に4回起こしていた（収集の解析が計24時間止まった）。
+    // AI側の障害（API の失敗・SDK の時間切れ・利用上限）は従来どおり ai_failed / rate_limited として数える
+    const timedOut = (): ExtractResult => ({ ok: false, kind: "url", code: "timed_out", message: "時間切れのため解析できませんでした" });
     // 月額予算の予約: 実際の呼び出しの直前に、並列実行を含めて予算内かを確認する。取れなかった候補は解析せず、待機に戻す
     const snap = await budgetSnapshot(deps);
     const denied = new Set<string>();

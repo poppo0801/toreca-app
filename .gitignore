@@ -62,3 +62,5 @@ eval/intensive/*.local.json
 eval/intensive/*.local.jsonl
 eval/intensive/*.local.md
 eval/intensive/runs/
+eval/identity/*.local.json
+eval/identity/runs/

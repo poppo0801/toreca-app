@@ -231,4 +231,19 @@ test("実AIの登録案の表示（モード・費用）・再評価後の差分
   const rg = p3.getByTestId("proposal-card").filter({ has: page.getByTestId("proposal-decision").filter({ hasText: "本登録案" }) });
   await expect(rg.getByTestId("proposal-held")).toContainText("本登録案なのに応募単位が未確定");
   await page.screenshot({ path: "test-results/phase2-root-cause-held-390.png" });
+
+  // JUDGMENT_IDENTITY_EFFICIENCY §2: 同一性（既存の抽選との照合）の結果が、照合先・予定の操作・理由・差として見える（抽選は変えていない）
+  const idf = { ...f("大宮店"), _identity: { value: "既存の更新・補足（登録済みの抽選）", basis: "inferred", quote: null, evidence: null, support: "no_value", identity: { relation: "update", targetId: "00000000-0000-4000-8000-000000000001", action: "update_existing", why: "同じ店舗・同じ受付期間。締切が延長された", verified: true, needsHuman: false, retrieved: 3, judgments: [{ targetId: "00000000-0000-4000-8000-000000000001", diffs: ["締切 11/30 → 12/2"] }] } } };
+  await a.from("registration_proposals").insert({ ...base, item_no: 4, proposal_key: "0123456789abcdef01234567", version: 1, input_hash: "5555555555555555", decision: "register", verified: true, fields: idf as never });
+  await page.goto("/lotteries/candidates");
+  await page.getByTestId("candidate-card").first().getByRole("button").first().click();
+  const p4 = page.getByTestId("candidate-detail").getByTestId("proposal-preview");
+  const idLine = p4.getByTestId("proposal-identity").first();
+  await expect(idLine).toContainText("照合: 既存の更新・補足");
+  await expect(idLine).toContainText("予定: 既存を更新・補足する");
+  await expect(idLine).toContainText("締切 11/30 → 12/2");
+  await expect(idLine.getByRole("link", { name: "登録済みの抽選" })).toHaveAttribute("href", "/lotteries?focus=00000000-0000-4000-8000-000000000001");
+  await idLine.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/jie-identity-390.png" });
+  expect((await counts(a, hid)).lotteries).toBe(0);
 });

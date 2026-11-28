@@ -13,6 +13,7 @@ import { evidenceFromLastGood } from "@/lib/collector/evidence";
 import { MODEL_PRICES } from "@/lib/ai-cost";
 import { preflightRun, worstCaseCallJpy } from "@/lib/judgment/xsource/cost-preflight";
 import { makeAnthropicRegistrationJudge, makeAnthropicResearchAgent, OUTPUT_MAX_TOKENS, type AiDiagnostic } from "@/lib/judgment/xsource/research-ai";
+import { makeAnthropicIdentityJudge } from "@/lib/judgment/xsource/opportunity-identity";
 import type { ResearchLimits } from "@/lib/judgment/xsource/research-loop";
 import { prefetchSourcePage } from "@/lib/server/proposals/source-prefetch";
 import { makeSearchTool, type SearchProviderLike } from "@/lib/judgment/xsource/research-search";
@@ -109,8 +110,20 @@ export function trialItems(records: readonly { proposalKey: string; decision: st
 }
 
 export type ProposalJobResult =
-  | { ok: true; fatal?: "auth_error" | "rate_limited"; status: "accepted" | "partial" | "error"; proposals: number; inserted: number; costJpy: number; stopped: boolean; diagnostics: Record<string, number>; revisions: { rounds: number; verified: number; held: number }; basisAt: string | null; decisions: Record<string, number>; trace: ProposalTrace; items: TrialItem[]; /** 再開用（AUTONOMY_RESTORATION）: この実行で調べた項目・まだ調べていない項目・項目の総数 */ doneItems?: number[]; pendingItems?: number[]; totalItems?: number }
+  | { ok: true; fatal?: "auth_error" | "rate_limited"; status: "accepted" | "partial" | "error"; proposals: number; inserted: number; costJpy: number; stopped: boolean; diagnostics: Record<string, number>; revisions: { rounds: number; verified: number; held: number }; basisAt: string | null; decisions: Record<string, number>; trace: ProposalTrace; items: TrialItem[]; /** 再開用（AUTONOMY_RESTORATION）: この実行で調べた項目・まだ調べていない項目・項目の総数 */ doneItems?: number[]; pendingItems?: number[]; totalItems?: number; /** F1: 調査途中で中断した項目（未着手とは別） */ interruptedItems?: number[] }
   | { ok: false; reason: string; fatal?: "auth_error" | "rate_limited"; /** 失敗でも、すでにかかった費用（円）。記録して予算から差し引く */ costJpy?: number; trace?: ProposalTrace };
+
+/**
+ * この実行で1候補に使える額（F2）。1候補の承認額（再開をまたいだ合算）・日次/月次/通算の残額・実行全体の残りを区別して理由を返す。
+ * budget_per_case_exhausted: 候補の承認額を使い切った（完了扱い。未完了の項目は記録に残る）／budget: 日次などの残額が無い（翌日に再開）／budget_run: この実行の枠が無い（少し後に再開）
+ */
+export function caseBudget(a: { perCaseCapJpy: number; spentOnJobJpy: number; remainingJpy: number; runLeftJpy: number }): { ok: true; capJpy: number } | { ok: false; reason: "budget_per_case_exhausted" | "budget" | "budget_run" } {
+  const caseLeft = a.perCaseCapJpy - a.spentOnJobJpy;
+  if (!(caseLeft > 0.5)) return { ok: false, reason: "budget_per_case_exhausted" };
+  if (!(a.remainingJpy > 0.5)) return { ok: false, reason: "budget" };
+  if (!(a.runLeftJpy > 0.5)) return { ok: false, reason: "budget_run" };
+  return { ok: true, capJpy: Math.min(caseLeft, a.remainingJpy, a.runLeftJpy) };
+}
 
 const classify = (reason: string): "auth" | "rate" | "other" => (/api_error:(401|403)\b/.test(reason) ? "auth" : /api_error:429\b/.test(reason) ? "rate" : "other");
 
@@ -153,9 +166,12 @@ export async function runShadowProposalJob(a: {
   const upperModel = a.settings.judge_model && MODEL_PRICES[a.settings.judge_model] ? a.settings.judge_model : null; // 料金が分からないモデルは採用しない（費用を保証できない）
   const adaptive = a.settings.judge_mode === "adaptive" && !!upperModel;
   const judgeModel = adaptive ? null : upperModel; // 適応型: 1段目は調査と同じ（安価な）モデル、上位は必要なときだけ
-  // 1候補の上限（承認額）は、再開をまたいで合算する（再開で上限を回避しない）
-  const caseCap = Math.min(a.settings.per_case_cap_jpy - (a.spentOnJobJpy ?? 0), 25 - (a.spentOnJobJpy ?? 0), a.remainingJpy, a.runBudget ? a.runBudget.remainingJpy : Infinity);
-  if (!(caseCap > 0.5)) return { ok: false, reason: "budget_per_case_exhausted" };
+  // 1候補の上限（承認額＝DBの設定 per_case_cap_jpy）は、再開をまたいで合算する（再開で上限を回避しない）。
+  // JUDGMENT_IDENTITY_EFFICIENCY F2: コードに直書きした25円（承認値と二重の値）を撤去し、承認値はDBの設定だけにした。
+  // また、日次・実行の残額不足を「1候補の上限に達した」と混同して完了扱いにしていた経路を分けた（残額不足は翌日・少し後に再開する）
+  const cb = caseBudget({ perCaseCapJpy: a.settings.per_case_cap_jpy, spentOnJobJpy: a.spentOnJobJpy ?? 0, remainingJpy: a.remainingJpy, runLeftJpy: a.runBudget ? a.runBudget.remainingJpy : Infinity });
+  if (!cb.ok) return { ok: false, reason: cb.reason };
+  const caseCap = cb.capJpy;
   const t = issueProductionShadowTicket(decision, { model: env.SHADOW_PROPOSAL_MODEL?.trim() || "claude-haiku-5-5", totalCapJpy: caseCap, perCaseCapJpy: caseCap });
   if (!t.ok) return { ok: false, reason: `ticket:${t.reason}` };
   if (a.runBudget && a.runBudget.remainingCalls < 8) return { ok: false, reason: "run_call_limit" };
@@ -226,6 +242,8 @@ export async function runShadowProposalJob(a: {
   const upperTag = { reason: (d: AiDiagnostic): AiDiagnostic => ({ ...d, reason: `upper:${d.reason}` }) };
   const escalation = adaptive && upperModel ? { judge: makeAnthropicRegistrationJudge(a.client, { model: upperModel, ...ai(upperTag) }), agent: makeAnthropicResearchAgent(a.client, { model: upperModel, ...ai(upperTag) }), model: upperModel, primaryModel: t.ticket.model, auditRate: SHADOW_AUDIT_RATE } : undefined;
   const budget = new CallBudget({ maxCalls: 60, maxCostJpy: caseCap }); // 呼び出しの回数は暴走防止の外枠（費用は caseCap が縛る）
+  // 同一性（JUDGMENT_IDENTITY_EFFICIENCY §2）: 登録済みの抽選・他の候補の登録案との照合を、登録案の中に保存する（抽選は変えない）。停止: 環境変数 SHADOW_IDENTITY=off
+  const identity = env.SHADOW_IDENTITY === "off" ? undefined : { judge: makeAnthropicIdentityJudge(a.client, { model: t.ticket.model, onDiagnostic: (d) => onDiagnostic({ ...d, reason: d.reason }), effort: think ? SHADOW_THINKING_EFFORT : SHADOW_JUDGE_EFFORT, ...(think ? { thinking: true } : {}) }), model: t.ticket.model };
   if (useVision) {
     // 画像解析も同じ予算（budget）を共有する。1件あたり最大1枚。取得は既存の安全な画像取得（SSRF・サイズ・時間の検査）
     const v = makeRealVisionClient({ client: a.client as never, ticket: t.ticket, budget, fetchImage: (u) => fetchPublicImage(u), splitImage: splitPublicImage, model: t.ticket.model, maxImages: 1 });
@@ -237,7 +255,7 @@ export async function runShadowProposalJob(a: {
     householdId: a.householdId,
     candidate: a.candidate,
     env,
-    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, ...(a.runDeadlineMs !== undefined ? { runDeadlineMs: a.runDeadlineMs } : {}), ...(a.doneItems?.length ? { skipItems: new Set(a.doneItems) } : {}), ...(escalation ? { escalation, modelId: `${t.ticket.model}+adaptive:${upperModel}` } : {}), ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
+    deps: assembleGenerateDeps({ agent, judge, ticket: t.ticket, budget, limits, perItemCapJpy: caseCap, tools, ...(identity ? { identity } : {}), ...(a.runDeadlineMs !== undefined ? { runDeadlineMs: a.runDeadlineMs } : {}), ...(a.doneItems?.length ? { skipItems: new Set(a.doneItems) } : {}), ...(escalation ? { escalation, modelId: `${t.ticket.model}+adaptive:${upperModel}` } : {}), ...(judgeModel && judgeModel !== t.ticket.model ? { modelId: `${t.ticket.model}+judge:${judgeModel}` } : {}), now: clock, learn: true, shouldStop: () => state.fatal !== null }),
   });
   if (a.runBudget) absorbBudget(a.runBudget, budget);
   const spent = Math.round(budget.costJpy * 10_000) / 10_000;
@@ -271,6 +289,7 @@ export async function runShadowProposalJob(a: {
     doneItems: [...(a.doneItems ?? []), ...(r.processedItems ?? [])],
     pendingItems,
     ...(r.totalItems !== undefined ? { totalItems: r.totalItems } : {}),
+    ...(r.interruptedItems?.length ? { interruptedItems: r.interruptedItems } : {}),
     proposals: r.records.length,
     inserted: r.save.inserted,
     costJpy: spent,

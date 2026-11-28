@@ -254,6 +254,23 @@ describe.skipIf(!dbTestsEnabled)("Stage 4C: ジョブキュー・ワーカー・
     await clearJobs();
   });
 
+  it("JUDGMENT_IDENTITY_EFFICIENCY F4: 実行の時間枠での打ち切り（AI側の失敗ではない）は、連続失敗に数えず一時停止しない。候補は再試行待ちに残る", async () => {
+    await admin.from("collection_runs").delete().eq("household_id", hid);
+    await admin.from("collection_daily_stats").delete().eq("household_id", hid);
+    await setSettings({ worker_batch: 8, worker_daily_ai_limit: 100, paused_until: null, consecutive_failures: 4 }); // あと1回で停止する状態から
+    await u1.from("collection_candidates").insert(Array.from({ length: 6 }, (_, i) => job(`t${i}`)) as never);
+    const hanging: LotteryExtractor = { engine: "mock", extract: () => new Promise(() => undefined) }; // 時間枠を越えて返らない
+    const r = await runWorker(deps({ extractor: hanging, budgetMs: 12_000 }));
+    expect(r.ok && "stopReason" in r ? r.stopReason ?? "" : "").not.toContain("連続");
+    const st = (await u1.from("collection_settings").select("paused_until,consecutive_failures").single()).data!;
+    expect(st.paused_until).toBeNull();
+    const left = ((await u1.from("collection_candidates").select("job_state,status").like("dedupe_key", "https://w.example.invalid/t%")).data ?? []) as { job_state: string; status: string }[];
+    expect(left.length).toBe(6);
+    expect(left.every((x) => x.status !== "excluded")).toBe(true);
+    await setSettings({ consecutive_failures: 0 });
+    await clearJobs();
+  }, 60_000);
+
   it("差分検出: 変更なし・広告/カウントダウンの変化はAIを呼ばない。締切延長は更新の提案になり、利用者が編集した抽選は自動で上書きしない。新しい抽選回は別の抽選。中止は状態の更新を提案", async () => {
     await admin.from("collection_runs").delete().eq("household_id", hid);
     await admin.from("collection_daily_stats").delete().eq("household_id", hid);

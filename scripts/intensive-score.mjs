@@ -105,7 +105,8 @@ export function scoreField(key, g, ai, basis) {
   }
   if (key === "apply_unit") return nf(v).startsWith(g.v) ? "correct" : "wrong";
   const toks = g.t ?? [g.v];
-  if (!toks.every((t) => nf(v).includes(nf(t)))) return "wrong";
+  // 表記の候補（alt）: 略称・正式名など、どれか1組の語がすべて含まれれば一致（JUDGMENT_IDENTITY_EFFICIENCY: 「ポケセン」と「ポケモンセンター」）
+  if (!toks.every((t) => nf(v).includes(nf(t))) && !(g.alt ?? []).some((set) => set.every((t) => nf(v).includes(nf(t))))) return "wrong";
   const gl = nf(toks.join("")).length;
   return nf(v).length > Math.max(60, gl * 4) ? "partial" : "correct";
 }

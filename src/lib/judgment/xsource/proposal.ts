@@ -19,7 +19,7 @@ export function effectiveDecision(r: { decision: ProposalRecord["decision"]; ver
   return (r.decision === "register" || r.decision === "exclude") && !r.verified ? "tentative" : r.decision;
 }
 
-export const PROPOSAL_PROMPT_VERSION = "10z-17"; // AUTONOMY_RESTORATION（17: 除外の種類・商品の種類・追加の検討をAIが申告／商品そのものを確かめる調査／上限は外枠）／CAPABILITY_CEILING（16: 受付終了は投稿元の信頼性・締切の明確さ・対象との整合・延長の有無からAIが判断／15: 販売・抽選が無いお知らせは抽選の応募機会ではない）／ EVIDENCE_UTILIZATION（14: 除外・暫定でも全項目を書く・「項目は判断に必要なものだけ」の矛盾した指示を削除・種の値も引用可。管理の対象の方針＝ポケモンカードを含む福袋・セットは対象・カード以外のみ/他TCGのみは除外・人に確認しない。共通部分の関連情報ビュー）／PRODUCTION_PARITY（13: 本登録に要るものと任意項目の不明の扱いを明示／12）: 一覧の見出し（店舗）を種へ・告知ページそのものの取得元を項目のリンクに・受付期間の見出しと日付の照合（10z-11: 全項目・記載の状態・基準時刻・人の確認・条件・抽選でない投稿）
+export const PROPOSAL_PROMPT_VERSION = "10z-18"; // JUDGMENT_IDENTITY_EFFICIENCY（18: 受付開始前も登録案にしてよい・当選数の配分の区分は応募単位を増やさない・前回の開催回の構造は推定の根拠）／AUTONOMY_RESTORATION（17: 除外の種類・商品の種類・追加の検討をAIが申告／商品そのものを確かめる調査／上限は外枠）／CAPABILITY_CEILING（16: 受付終了は投稿元の信頼性・締切の明確さ・対象との整合・延長の有無からAIが判断／15: 販売・抽選が無いお知らせは抽選の応募機会ではない）／ EVIDENCE_UTILIZATION（14: 除外・暫定でも全項目を書く・「項目は判断に必要なものだけ」の矛盾した指示を削除・種の値も引用可。管理の対象の方針＝ポケモンカードを含む福袋・セットは対象・カード以外のみ/他TCGのみは除外・人に確認しない。共通部分の関連情報ビュー）／PRODUCTION_PARITY（13: 本登録に要るものと任意項目の不明の扱いを明示／12）: 一覧の見出し（店舗）を種へ・告知ページそのものの取得元を項目のリンクに・受付期間の見出しと日付の照合（10z-11: 全項目・記載の状態・基準時刻・人の確認・条件・抽選でない投稿）
 export type ProposalMode = "mock" | "replay" | "real";
 export type ApplyUnit = "one_form_one" | "store_select" | "per_store" | "per_product" | "unknown";
 /** near_match: 言い換え・書式・括弧の違いを除くと、値の語が本文にほぼ含まれる（数字は完全一致が条件）。enum_value: 応募単位のような**列挙値**（語の一致では確認できない。人が確認する） */

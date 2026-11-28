@@ -51,6 +51,26 @@ const RECV_LABEL: Record<string, string> = { store: "店頭", shipping: "発送"
 const showValue = (k: string, v: string | null | undefined): string => (!v ? "" : k === "apply_unit" ? UNIT_LABEL[v] ?? v : k === "receive_method" ? RECV_LABEL[v] ?? v : v);
 const truthFieldLabel = (k: string): string => (k.endsWith("__none") ? `${FIELD_LABEL[k.slice(0, -6)] ?? k.slice(0, -6)}（記載なし）` : FIELD_LABEL[k] ?? k);
 
+/** 同一性（登録済みの抽選・他の候補との照合）の結果。照合先・理由・差・予定の操作。抽選は変えていない（人が決める） */
+const IDENTITY_ACTION: Record<string, string> = { link_existing: "既存に情報源を結び付ける", update_existing: "既存を更新・補足する", create_new: "新規に登録する", ask_human: "人が確認する" };
+function IdentityLine({ field }: { field: unknown }) {
+  const id = (field as { value?: string; identity?: { relation: string; targetId: string | null; action: string; why: string; verified: boolean; needsHuman: boolean; retrieved: number; judgments?: { targetId: string; diffs: string[] }[] } } | undefined)?.identity;
+  if (!id) return null;
+  const v = (field as { value?: string }).value;
+  const diffs = id.judgments?.find((j) => j.targetId === id.targetId)?.diffs ?? [];
+  const target = id.targetId ? (id.targetId.startsWith("p:") ? "別の候補の登録案" : <a className="underline" href={`/lotteries?focus=${id.targetId}`}>登録済みの抽選</a>) : null;
+  return (
+    <p className={id.needsHuman || id.relation === "same" || id.relation === "update" ? "text-warn" : "text-muted-foreground"} data-testid="proposal-identity">
+      照合: {(v ?? "").replace(/（[^）]*）$/, "")}
+      {target && <> ・{target}</>}・予定: {IDENTITY_ACTION[id.action] ?? id.action}
+      {id.why && <span className="text-muted-foreground">（{id.why}）</span>}
+      {diffs.length > 0 && <> ・差: {diffs.join("／")}</>}
+      {!id.verified && "・照合の根拠が未確認"}
+      {id.retrieved === 0 && "（比べる相手なし）"}
+    </p>
+  );
+}
+
 function SupportMark({ support, basis }: { support: string; basis: string }) {
   if (basis !== "observed" || support === "literal_in_quote" || support === "no_value") return null;
   return (
@@ -234,6 +254,7 @@ function ProposalCard({ p, onDone }: { p: ProposalView; onDone: () => void }) {
         </p>
       )}
       {p.possibly_same.length > 0 && <p className="text-warn">同じ応募機会の可能性がある別の登録案が {p.possibly_same.length} 件あります（統合はしていません）</p>}
+      <IdentityLine field={p.fields._identity} />
       {p.reviewOutdated && p.reviewedVersion && (
         <div className="rounded border border-warn p-1.5 text-warn" data-testid="proposal-diff">
           <p className="font-medium">再評価で変わった点（前回レビューは v{p.reviewedVersion.version}・現行は v{p.version}）</p>

@@ -15,7 +15,7 @@ import { CallBudget } from "../call-budget";
 import { canonUrl } from "./normalize";
 
 export interface JudgeStep {
-  stage: "primary" | "escalated";
+  stage: "primary" | "escalated" | "reconciled";
   /** 上位の結果を最終の判断として採用したか（escalated のときだけ。検証を通っても食い違いで保留にしたら false） */
   adopted?: boolean;
   model: string | null;
@@ -295,6 +295,19 @@ export type ProductKind = (typeof PRODUCT_KINDS)[number];
 export type RegistrationJudge = (input: JudgeInput) => Promise<JudgeOutput | null>;
 
 export type EndReason = "sufficient" | "no_progress" | "unreachable" | "limit_turns" | "limit_fetches" | "limit_time" | "limit_cost" | "limit_calls" | "agent_failed" | "agent_stopped" | "no_action";
+/** 外部の事情（時間・予算・呼び出しの枠・AI呼び出しの障害）で調査が打ち切られた終了。AIが情報十分と判断した終了とは別 */
+export const INTERRUPTED_ENDS: ReadonlySet<string> = new Set(["limit_time", "limit_cost", "limit_calls", "agent_failed"]);
+/**
+ * 項目が未完了か（JUDGMENT_IDENTITY_EFFICIENCY F1）。調査が外部の事情で打ち切られ、かつ判断が確定していない（判断が無い・検証を通らない・暫定・判断の呼び出しが予算で断られた）。
+ * 打ち切られても、AIが検証済みの登録・除外を出したもの（その時点の情報で十分と判断した）は完了。未完了の項目は保留・除外として数えず、次の実行で続きから調べる
+ */
+export function isInterrupted(r: Pick<ResearchResult, "investigation" | "registration">): boolean {
+  const g = r.registration;
+  if (!g.output) return true;
+  if ((g.held?.reasons ?? []).some((x) => x.startsWith("budget_") || x === "judge_failed")) return true;
+  if (!INTERRUPTED_ENDS.has(r.investigation.reason)) return false;
+  return !(g.verified && (g.finalDecision === "register" || g.finalDecision === "exclude"));
+}
 
 export interface FetchRecord {
   key: string;
@@ -733,6 +746,11 @@ export async function runResearch(args: {
   autoFetch?: string[];
   /** 取得したページの出所・対応の検査（X起点の接続で、項目ごとのリンクの出所と10Sの link-scope を使う）。未指定なら検査なし */
   scoper?: (url: string, page: Evidence) => EvidenceScope | undefined;
+  /**
+   * JUDGMENT_IDENTITY_EFFICIENCY F1（調査途中の項目の再開）: 以前の実行が時間・予算・障害で中断した項目の続き。
+   * urls: 前回読んだページ（保存済みの全文から読み戻す。取得の回数には数えない）、feedback: 前回の暫定の判断・残りの問い（調査AIへの最初の手がかり）
+   */
+  carry?: { urls: string[]; feedback: string };
 }): Promise<ResearchResult> {
   const L: ResearchLimits = { ...DEFAULT_RESEARCH_LIMITS, ...args.limits };
   // 時計の分離（Phase 3 RUNTIME_CORRECTNESS F1）: 基準時刻（now）は判断用、経過時間・取得時刻は実際の時刻（wallNow）
@@ -755,10 +773,31 @@ export async function runResearch(args: {
   let searches = 0;
   let readCalls = 0;
   let readChars = 0;
-  const remaining = (): AgentTurnInput["remaining"] => ({ turns: L.maxTurns - turn, fetches: L.maxFetches - fetches, costJpy: args.budget.remainingJpy, elapsedMs: Math.max(0, Math.min(L.maxElapsedMs - elapsed(), args.tools.researchDeadlineMs !== undefined ? args.tools.researchDeadlineMs - wall().getTime() : Number.POSITIVE_INFINITY)), searches: Math.max(0, L.maxSearches - searches) });
+  // 追加の調査の回（上位を含む）にも、最初と同じだけの取得・検索・読み戻しの外枠を与える（F3: 1回目で外枠を使い切ると、上位の調査の回で取得・検索ができなかった）。費用・時間の外枠は共通
+  let fetchCap = L.maxFetches;
+  let searchCap = L.maxSearches;
+  let readCap = L.maxReads;
+  let readCharCap = L.maxReadChars;
+  let turnCapR = L.maxTurns;
+  const remaining = (): AgentTurnInput["remaining"] => ({ turns: turnCapR - turn, fetches: fetchCap - fetches, costJpy: args.budget.remainingJpy, elapsedMs: Math.max(0, Math.min(L.maxElapsedMs - elapsed(), args.tools.researchDeadlineMs !== undefined ? args.tools.researchDeadlineMs - wall().getTime() : Number.POSITIVE_INFINITY)), searches: Math.max(0, searchCap - searches) });
 
   // 調査AIに検索が提示されたか（Phase 2: P2 で検索ツールが消えていたことを、入力ログなしでは確認できなかったため、事実として記録する）
   const searchOffered = !!args.tools.search && L.maxSearches > 0;
+  // 再開（F1）: 前回読んだページを保存済みの全文から読み戻す（外部への再取得ではない。取得の回数に数えない＝前回の調査の続き）
+  for (const cu0 of (args.carry?.urls ?? []).slice(0, 8)) {
+    const cu = canonUrl(cu0);
+    if (cu.cls === "invalid" || history.some((h) => h.key === cu.key && h.outcome === "ok")) continue;
+    const r = await args.tools.fetchPage(cu0).catch(() => ({ ok: false as const, reason: "failed" as const }));
+    if (!r.ok) continue;
+    const hash = sha(r.text);
+    if (evidence.some((e) => e.contentHash === hash)) continue;
+    const pe = pageEvidence(evidence.length, cu0, r, wall());
+    const sc = args.scoper?.(cu0, pe);
+    if (sc) pe.scope = sc;
+    evidence.push(pe);
+    history.push({ key: cu.key, host: cu.host, outcome: "ok", contentHash: hash, at: wall().toISOString(), progress: true });
+    trace.push({ turn: 0, kind: "fetch", detail: `carry_ok:${cu.host}` });
+  }
   // 判断用の予算を先に確保して、調査で使い切らない
   for (const au of (args.autoFetch ?? []).slice(0, 1)) {
     const cu = canonUrl(au);
@@ -784,7 +823,7 @@ export async function runResearch(args: {
     }
   }
   // 判断と調査の往復（F4）: 判断が「重大な不足（material）」を挙げて暫定にしたとき、調査AIへその不足を渡して1回だけ調査へ戻る（時間・回数・予算が残るときだけ）。戻った後の判断が得られなければ、最初の判断を使う
-  let judgeFeedback: string | undefined;
+  let judgeFeedback: string | undefined = args.carry?.feedback ? `前回の調査は時間・予算・障害で中断した（完了ではない）。その続きから調べる。${args.carry.feedback.slice(0, 600)}` : undefined;
   let output: JudgeOutput | null = null;
   let verified = false;
   let held: { reasons: string[] } | null = null;
@@ -821,11 +860,11 @@ export async function runResearch(args: {
       const ev = evidence.find((e) => e.id === nx.evidenceId);
       const from = Math.max(0, Math.floor(nx.from || 0));
       const want = Math.min(READ_CHARS_MAX, Math.max(1, Math.floor(nx.chars || READ_CHARS_MAX)));
-      if (!ev || from >= ev.text.length || readCalls >= L.maxReads || readChars >= L.maxReadChars) {
+      if (!ev || from >= ev.text.length || readCalls >= readCap || readChars >= readCharCap) {
         trace.push({ turn, kind: "fetch", detail: !ev ? "read_unknown_evidence" : from >= ev.text.length ? "read_out_of_range" : "read_limit" });
         noProgress++;
       } else {
-        const to = Math.min(ev.text.length, from + want, from + Math.max(0, L.maxReadChars - readChars));
+        const to = Math.min(ev.text.length, from + want, from + Math.max(0, readCharCap - readChars));
         const before = shownRanges(ev);
         const had = before.some((r) => r.from <= from && r.to >= to);
         ev.reads = mergeRanges([...(ev.reads ?? []), { from, to }]);
@@ -842,8 +881,8 @@ export async function runResearch(args: {
     if (out.next.kind === "search") {
       // 検索（読み取り専用・上限つき）。同じ検索語の再実行・上限超過・ツール無しは実行せず進展なしとして数える。検索語は個人情報を除いて渡す（redact は呼び出し側のツールが担う）
       const q = out.next.query.trim().slice(0, 120);
-      if (!args.tools.search || searches >= L.maxSearches || !q || queries.has(norm(q))) {
-        trace.push({ turn, kind: "fetch", detail: !args.tools.search ? "search_unavailable" : searches >= L.maxSearches ? "search_limit" : "search_duplicate" });
+      if (!args.tools.search || searches >= searchCap || !q || queries.has(norm(q))) {
+        trace.push({ turn, kind: "fetch", detail: !args.tools.search ? "search_unavailable" : searches >= searchCap ? "search_limit" : "search_duplicate" });
         noProgress++;
       } else {
         const ss = args.budget.start("search", L.searchReserveJpy);
@@ -878,7 +917,7 @@ export async function runResearch(args: {
     if (cu.cls === "invalid" || !/^https:\/\//.test(url)) { history.push({ key, host: cu.host, outcome: "blocked", at: wall().toISOString(), progress: false }); trace.push({ turn, kind: "fetch", detail: `rejected_url:${cu.host}` }); noProgress++; }
     else if (history.some((h) => h.key === key && h.outcome === "ok")) { history.push({ key, host: cu.host, outcome: "duplicate_url", at: wall().toISOString(), progress: false }); trace.push({ turn, kind: "fetch", detail: `duplicate_url:${cu.host}` }); noProgress++; }
     else if ((hostFail.get(cu.host) ?? 0) >= L.maxConsecutiveFailuresPerHost) { history.push({ key, host: cu.host, outcome: "blocked", at: wall().toISOString(), progress: false }); trace.push({ turn, kind: "fetch", detail: `host_given_up:${cu.host}` }); noProgress++; }
-    else if (fetches >= L.maxFetches) { end = "limit_fetches"; break; }
+    else if (fetches >= fetchCap) { end = "limit_fetches"; break; }
     else {
       fetches++;
       const r = await args.tools.fetchPage(url);
@@ -967,7 +1006,12 @@ export async function runResearch(args: {
   firstRound = { output, verified, held, proposals, warnings, end };
   const upWhy: string | null = args.escalation?.agent ? escalationReason({ output, verified, evidence, caseId: args.caseId, auditRate: 0 }) : null;
   if (upWhy && args.escalation?.agent) { upperRound = { why: upWhy }; agentNow = args.escalation.agent; judgeNow = args.escalation.judge; }
-  turnCap = turn + L.maxTurns; // 追加の調査の回にも、最初と同じだけの回数の外枠を与える（費用・時間の外枠は共通）
+  turnCap = turn + L.maxTurns;
+  turnCapR = turnCap;
+  fetchCap = fetches + L.maxFetches;
+  searchCap = searches + L.maxSearches;
+  readCap = readCalls + L.maxReads;
+  readCharCap = readChars + L.maxReadChars; // 追加の調査の回にも、最初と同じだけの回数の外枠を与える（費用・時間の外枠は共通）
   const unk = (lastTurn?.unknown ?? []).filter((u) => u.importance === "high").map((u) => u.what).slice(0, 4);
   judgeFeedback = `${output.rationale.slice(0, 300)}${unk.length ? ` ／調査側の重要な不明点: ${unk.join(" / ")}` : ""}${!verified && held?.reasons.length ? ` ／検証で解消できなかった点: ${held.reasons.slice(0, 4).join(", ")}（引用・日付・対象を原文で確かめ直す。必要なら追加で取得・検索する）` : ""}${output.review ? ` ／前の判断者が求めた追加の検討: ${output.review.why}` : ""}`;
   trace.push({ turn, kind: "agent", detail: upperRound ? `resume_research_upper:${upperRound.why}` : "resume_research" });
@@ -995,9 +1039,24 @@ export async function runResearch(args: {
           // 採用したか（adopted）を段に記録する: 検証を通っても、既定の判断と食い違って保留にしたときは採用ではない（INTENSIVE_EVALUATION: 検証通過を採用と数えていた）
           const conflict = verified && !!output && output.decision !== "tentative" && output.decision !== er.out.decision;
           judgeTrail.push({ stage: "escalated", model: args.escalation.model, reason: why, decision: er.out.decision, verified: true, adopted: !conflict, ...(conflict ? { note: "disagreement" } : {}) });
-          // 既定の判断が登録・除外と決めていた（監査の抽出・複雑な構造の登録）のに、上位が別の結論で検証を通った: どちらも正解扱いせず、保留にして人の確認へ回す。
-          // 既定の判断が暫定（決めきれなかった）のときは、上位が根拠つきで決めた結論（検証済み）を採用する（それが上位を使う目的。本番の初回評価で、暫定→除外を食い違いとして保留にしていた不具合を是正）
-          if (verified && output && output.decision !== "tentative" && output.decision !== er.out.decision) { disagreement = true; trace.push({ turn, kind: "verify", detail: `model_disagreement:${output.decision}/${er.out.decision}` }); break; }
+          // 既定の判断が登録・除外と決めていた（監査の抽出・複雑な構造の登録）のに、上位が別の結論で検証を通った。
+          // JUDGMENT_IDENTITY_EFFICIENCY F3: 以前は機械的に保留にしていた。いまは、両方の判断と理由をAIに渡し、どちらも無条件に正しいとせず原文の根拠で調停させる（1回）。
+          // 調停が根拠つきで決め（検証を通り、追加の検討を求めない）れば採用する。決めきれない・検証を通らない・予算が無いときだけ保留にして人の確認へ回す
+          // 既定の判断が暫定（決めきれなかった）のときは、上位が根拠つきで決めた結論（検証済み）を採用する（それが上位を使う目的）
+          if (verified && output && output.decision !== "tentative" && output.decision !== er.out.decision) {
+            const issue = `reconcile — 2つの判断が食い違っています（データ。どちらも無条件に正しいとしない）。判断A: ${output.decision}・理由「${output.rationale.slice(0, 300)}」。判断B: ${er.out.decision}・理由「${er.out.rationale.slice(0, 300)}」。原文の根拠（引用）を照らして、どちらが正しいか（どちらも誤りか）を判断し、最終の判断を提出する。相手の理由のどこが原文と合わないかを rationale に短く書く。根拠で決めきれないなら tentative にして review に理由を書く`;
+            const rc = await callAi(args.budget, "registration_judge_reconcile", L.judgeReserveJpy, args.escalation.judge, { caseId: args.caseId, budgetJpy: args.budget.remainingJpy, evidence: evidence.map(toAgentView), lastTurn, investigationEnd: end ?? "no_action", protectedFields, verificationIssues: [issue], basisAt: args.tools.now().toISOString() });
+            const rv = rc.out ? verifyRegistration({ output: rc.out, evidence, protectedFields, registerRequiresUnit: args.registerRequiresUnit, now: args.tools.now(), ...(args.userRegion ? { userRegion: args.userRegion } : {}) }) : null;
+            if (rc.out && rv && rv.blocking.length === 0 && rc.out.decision !== "tentative" && !rc.out.review) {
+              judgeTrail.push({ stage: "reconciled", model: args.escalation.model, reason: `${output.decision}/${er.out.decision}`, decision: rc.out.decision, verified: true, adopted: true, note: "reconcile" });
+              trace.push({ turn, kind: "verify", detail: `model_disagreement_reconciled:${output.decision}/${er.out.decision}->${rc.out.decision}` });
+              output = rc.out; verified = true; held = null; proposals = rv.proposals; warnings = [...rv.nonBlocking, ...rv.unconfirmed.map((u) => "unconfirmed:" + u)];
+              adopted = true;
+              break;
+            }
+            judgeTrail.push({ stage: "reconciled", model: args.escalation.model, reason: `${output.decision}/${er.out.decision}`, decision: rc.out ? rc.out.decision : "none", verified: !!rv && rv.blocking.length === 0, adopted: false, note: rc.noBudget ? `no_budget:${rc.noBudget}` : !rc.out ? "failed" : "unresolved" });
+            disagreement = true; trace.push({ turn, kind: "verify", detail: `model_disagreement:${output.decision}/${er.out.decision}` }); break;
+          }
           output = er.out; verified = true; held = null; proposals = v.proposals; warnings = [...v.nonBlocking, ...v.unconfirmed.map((u) => "unconfirmed:" + u)];
           adopted = true;
           break;
