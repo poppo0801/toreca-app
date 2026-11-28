@@ -85,6 +85,8 @@ export function assembleGenerateDeps(a: {
   runDeadlineMs?: number;
   /** 以前の実行で完了した項目（再開） */
   skipItems?: ReadonlySet<number>;
+  /** 同一性の判断（JUDGMENT_IDENTITY_EFFICIENCY §2）。登録済みの抽選・他の候補との照合。無ければ照合しない */
+  identity?: GenerateDeps["identity"];
 }): GenerateDeps {
   const timing = itemTiming(a.runDeadlineMs);
   return {
@@ -107,6 +109,7 @@ export function assembleGenerateDeps(a: {
     ...(a.learn !== undefined ? { learn: a.learn } : {}),
     ...(a.now ? { now: a.now } : {}),
     ...(a.shouldStop ? { shouldStop: a.shouldStop } : {}),
+    ...(a.identity ? { identity: a.identity } : {}),
   };
 }
 

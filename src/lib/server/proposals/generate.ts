@@ -14,15 +14,16 @@ import { canonUrl } from "@/lib/judgment/xsource/normalize";
 import { isShadowTool } from "@/lib/judgment/xsource/shadow-tool-mark";
 import type { UserRegion } from "@/lib/judgment/xsource/claim-semantics";
 import { refineTextLoss } from "@/lib/judgment/xsource/html-text";
-import { itemFingerprint, proposalKey, toProposalRecords, type ProposalMode, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
+import { itemFingerprint, PROPOSAL_PROMPT_VERSION, proposalKey, toProposalRecords, type ProposalMode, type ProposalRecord } from "@/lib/judgment/xsource/proposal";
 import { mockRegistrationJudge, mockResearchAgent } from "@/lib/judgment/xsource/proposal-mock";
-import type { FetchOutcome, RegistrationJudge, ResearchAgent, ResearchLimits, ResearchTools } from "@/lib/judgment/xsource/research-loop";
-import { runXPostReplay, type StoredXPost } from "@/lib/judgment/xsource/x-origin";
+import { INTERRUPTED_ENDS, isInterrupted, type FetchOutcome, type RegistrationJudge, type ResearchAgent, type ResearchLimits, type ResearchTools } from "@/lib/judgment/xsource/research-loop";import { runXPostReplay, type StoredXPost } from "@/lib/judgment/xsource/x-origin";
 import type { Db } from "@/lib/server/lottery-service";
 import { proposalPreviewEnabled } from "./flag";
 import { isRealRunTicket, type RealRunTicket } from "./real-gate";
 import { coverageStatsOf, documentFromEvidence, loadBestDocument, saveCoverageStats, saveDocuments, type StoredDocument } from "./evidence-store";
 import { saveProposals, type SaveSummary } from "./store";
+import { judgeIdentity, opportunityFromRecord, type ExistingOpportunity, type IdentityJudge } from "@/lib/judgment/xsource/opportunity-identity";
+import { attachIdentity, loadExistingOpportunities } from "./identity-store";
 import { advise, discoverFeatures, type ReadHint } from "@/lib/judgment/xsource/experience";
 import { analyzeImages, type ImageAnalysisResult, type VisionClient } from "@/lib/judgment/xsource/image-evidence";
 import { experiencesFromResult, loadExperiences, loadImageObservation, loadIntakeObservations, saveExperience, saveImageObservation } from "./experience-store";
@@ -59,6 +60,10 @@ export interface GenerateDeps {
   escalation?: { judge: RegistrationJudge; model: string; primaryModel?: string; auditRate?: number; /** 上位の判断の条件を広げる（隔離評価のみ） */ broad?: boolean; agent?: import("@/lib/judgment/xsource/research-loop").ResearchAgent };
   /** AUTONOMY_RESTORATION（再開可能な実行）: 以前の実行で完了した項目番号（この実行では調べない） */
   skipItems?: ReadonlySet<number>;
+  /** F1: 調査途中で中断した項目を、前回の続き（読んだページ・暫定の判断・残りの問い）から調べる（既定 true） */
+  resumeCarry?: boolean;
+  /** 同一性の判断（JUDGMENT_IDENTITY_EFFICIENCY §2）: 登録済みの抽選・他の候補の登録案と照合し、結果を登録案（fields._identity）に保存する。抽選には書かない */
+  identity?: { judge: IdentityJudge; model: string };
   /** 次の項目を始めてよいか（1回の実行の残り時間）。false なら以降の項目は次の実行へ（未完了） */
   canStartItem?: () => boolean;
   /** 項目ごとの調査の締切（項目を始めるときに評価） */
@@ -115,7 +120,21 @@ export async function loadUserRegion(db: Db, householdId: string): Promise<UserR
 export function regionFitNote(region: UserRegion | null): string | null {
   if (!region) return null;
   const prefs = region.prefectures;
-  return `利用者の対象地域の設定（既存の収集設定）: ${prefs.length ? prefs.join("・") : "都道府県の指定なし（全国）"}／オンライン抽選: ${region.includeOnline ? "対象" : "対象外"}。応募機会の実在と利用者への適合は別の軸。適合は fit_region に適合・不適合・不明と根拠を書く。店舗の所在地が設定の地域外で、通販・発送・オンライン応募など地域外から応募・受取できる記載が無いと根拠で確認できたときは exclude とし、exclude_reason に「対象地域外」と所在地が書かれた原文の引用を書き、応募機会の実在は別に記録する。地域の表示だけで機会の実在を否定しない。曖昧・未確認なら追加で調べるか暫定`.slice(0, 700);
+  return `利用者の対象地域の設定（既存の収集設定）: ${prefs.length ? prefs.join("・") : "都道府県の指定なし（全国）"}／オンライン抽選: ${region.includeOnline ? "対象" : "対象外"}。応募機会の実在と利用者への適合は別の軸。適合は fit_region に適合・不適合・不明と根拠を書く。適合は「利用者が応募して受け取れるか」。応募がオンラインでも、受取が地域外の店頭だけ（発送なし）なら受け取れない（不適合）。店舗の所在地が設定の地域外で、通販・発送など地域外から受け取れる記載が無いと根拠で確認できたときは exclude とし、exclude_reason に「対象地域外」と所在地が書かれた原文の引用を書き、応募機会の実在は別に記録する。地域の表示だけで機会の実在を否定しない。曖昧・未確認なら追加で調べるか暫定`.slice(0, 800);
+}
+
+/**
+ * 利用者が管理している商品（商品マスター。既存の蓄積データ）。新しい弾・セットの名前（発売直後の拡張パックなど）はAIが知らないことがあるため、
+ * 「ポケモンカードの商品か」の判断の材料として渡す（データ。名前が一致しても、フィギュア・グッズ等の別商品の可能性は原文で確かめる）。固定の判定には使わない
+ */
+export async function loadProductMasterNote(db: Db, householdId: string): Promise<string | null> {
+  try {
+    const r = (await (db as unknown as Loose).from("products").select("official_name").eq("household_id", householdId).order("created_at", { ascending: false }).limit(80)) as { data: { official_name: string }[] | null };
+    const names = [...new Set((r.data ?? []).map((x) => x.official_name).filter(Boolean))].slice(0, 60);
+    return names.length ? `利用者が管理しているポケモンカードの商品の名前（商品マスター・データ）: ${names.join("／")}。この名前の商品はポケモンカードの商品として扱ってよい（ただし同じ名前を使ったフィギュア・サプライ等の別商品でないかは原文で確かめる）`.slice(0, 1500) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function postFromCandidate(c: CandidateRow): StoredXPost | null {
@@ -155,7 +174,33 @@ const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g,
 
 /** 失敗の分類（内容・機密を含めない）。無言で握りつぶさず、呼び出し側が記録できる */
 export type FailReason = "disabled" | "no_evidence" | "run_failed" | "real_not_permitted" | "no_budget" | "save_failed";
-export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSummary; storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number }; experiences?: { saved: number; hinted: number }; images?: ImageAnalysisResult["counts"] }; stopped: boolean; costJpy: number; /** この実行で調べた項目・まだ調べていない項目（再開用）・項目の総数 */ processedItems?: number[]; pendingItems?: number[]; totalItems?: number } | { ok: false; reason: FailReason };
+export type GenerateResult = { ok: true; records: ProposalRecord[]; save: SaveSummary; storage: { documents: { saved: number; existing: number; failed: number }; stats: { saved: number; failed: number }; experiences?: { saved: number; hinted: number }; images?: ImageAnalysisResult["counts"] }; stopped: boolean; costJpy: number; /** この実行で完了した項目・まだ完了していない項目（未着手＋調査途中で中断＋保存失敗。再開用）・項目の総数 */ processedItems?: number[]; pendingItems?: number[]; totalItems?: number; /** 調査途中で中断した項目（F1。未着手とは別に数える） */ interruptedItems?: number[]; /** 前回の続きから調べた項目 */ carriedItems?: number[] } | { ok: false; reason: FailReason };
+
+/** 保存済みの登録案の行が「調査途中で中断した」ものか（isInterrupted と同じ基準を、保存した列で判定する） */
+export function storedRowInterrupted(r: { end_reason: string | null; decision: string; verified: boolean; held_reasons: string[] | null }): boolean {
+  if (r.decision === "none") return true;
+  if ((r.held_reasons ?? []).some((x) => x.startsWith("budget_") || x === "judge_failed")) return true;
+  if (!INTERRUPTED_ENDS.has(r.end_reason ?? "")) return false;
+  return !(r.verified && (r.decision === "register" || r.decision === "exclude"));
+}
+
+/** 中断した項目の続き（前回読んだページ・前回の暫定の判断と残りの問い）。同じプロンプト版の現行の行だけ（版の違う古い調査は引き継がない） */
+export async function loadCarry(db: Db, householdId: string, candidateId: string): Promise<Map<number, { urls: string[]; feedback: string }>> {
+  const out = new Map<number, { urls: string[]; feedback: string }>();
+  try {
+    const r = (await (db as unknown as Loose).from("registration_proposals").select("item_no,end_reason,decision,verified,held_reasons,pages,unknowns,fields,prompt_version").eq("household_id", householdId).eq("candidate_id", candidateId).is("superseded_at", null).limit(60)) as { data: { item_no: number; end_reason: string | null; decision: string; verified: boolean; held_reasons: string[] | null; pages: { url?: string }[] | null; unknowns: { what: string; why: string }[] | null; fields: Record<string, { value?: string | null }> | null; prompt_version: string | null }[] | null };
+    for (const x of r.data ?? []) {
+      if (x.prompt_version !== PROPOSAL_PROMPT_VERSION || !storedRowInterrupted(x)) continue;
+      const urls = (x.pages ?? []).map((p) => p.url).filter((u): u is string => typeof u === "string" && u.startsWith("https://")).slice(0, 8);
+      const why = String(x.fields?._rationale?.value ?? "").slice(0, 300);
+      const unk = (x.unknowns ?? []).map((u) => u.what).filter((w) => !w.startsWith("任意項目の根拠が未確認")).slice(0, 5);
+      out.set(x.item_no, { urls, feedback: `中断の理由: ${x.end_reason ?? "不明"}${(x.held_reasons ?? []).length ? `・${(x.held_reasons ?? []).slice(0, 3).join(",")}` : ""}。前回の暫定の判断: ${x.decision}${why ? `（${why}）` : ""}${unk.length ? `。前回の残りの問い: ${unk.join(" / ")}` : ""}` });
+    }
+  } catch {
+    /* 引き継げなくても最初から調べる（費用は予算が縛る） */
+  }
+  return out;
+}
 
 type Loose = { from: (n: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -249,12 +294,17 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
   // 利用者の対象地域（既存の収集設定）: 「応募機会の実在」とは別軸の「適合」として渡す。地域が合わないことだけを除外の根拠にしない
   const userRegion = await loadUserRegion(a.db, a.householdId);
   const fitNote = regionFitNote(userRegion);
-  const post = fitNote ? { ...post1, notes: [...(post1.notes ?? []), fitNote].slice(0, 16) } : post1;
+  const productNote = await loadProductMasterNote(a.db, a.householdId);
+  const extraNotes = [fitNote, productNote].filter((x): x is string => !!x);
+  const post = extraNotes.length ? { ...post1, notes: [...(post1.notes ?? []), ...extraNotes].slice(0, 16) } : post1;
   // 調査経験: 類似ページの検証済みの経験があれば、最初に見せる位置の提案（仮説）を作る。位置の優先だけで、全文の参照可能性は変わらない
   const experiences = deps.learn === false ? [] : await loadExperiences(a.db, a.householdId, 400, deps.mode); // 同じモードの経験だけ（モック・旧経路の経験を実AIの材料にしない）
   const hintsByUrl = new Map<string, ReadHint[]>();
   const linked = new Map((stored?.linkedPages ?? []).map((l) => [canonUrl(l.url).key, l]));
   const clock = deps.now ?? (() => new Date());
+  // F1: 調査途中で中断した項目の続き。前回読んだページは、保存済みの全文から読み戻す（外部へ取り直さない・同じ版で続ける）
+  const carry = deps.resumeCarry === false ? new Map<number, { urls: string[]; feedback: string }>() : await loadCarry(a.db, a.householdId, a.candidate.id);
+  const carryKeys = new Set([...carry.values()].flatMap((c) => c.urls.map((u) => canonUrl(u).key)));
   const tools: ResearchTools = {
     now: clock,
     wallNow: () => new Date(), // 経過時間・取得時刻は実際の時刻（基準時刻 clock は収集時刻に固定されうる）
@@ -272,6 +322,10 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
     fetchPage: async (u: string): Promise<FetchOutcome> => {
       // 順序（EVIDENCE_UTILIZATION）: ①保存済みの全文（収集時・事前取得・以前の調査。構造つき・基準時刻に近い版）②収集時の保存本文（上限に達していなければ全文）
       //   ③最新の取得（許可されている場合）④以前に保存した全文 ⑤切り詰められた収集時の本文（切り詰めを明示）
+      if (carryKeys.has(canonUrl(u).key)) {
+        const prevDoc = await loadBestDocument(a.db, a.householdId, a.candidate.id, u);
+        if (prevDoc && !prevDoc.truncated) return { ...fromDocument(prevDoc), notice: savedNotice(prevDoc, prevDoc.structure?.links !== undefined) };
+      }
       const hit = linked.get(canonUrl(u).key);
       // 抜粋が全文より短い（収集時に fullChars を記録）ページは切り詰め。記録が無い古い保存は、抜粋の上限に達していれば切り詰めとみなす
       const truncated = !!hit && (hit.truncated === true || (hit.fullChars !== undefined && hit.fullChars > hit.text.length) || (hit.fullChars === undefined && hit.text.length >= 3000));
@@ -347,8 +401,25 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
       ...(deps.skipItems ? { skipItems: deps.skipItems } : {}),
       ...(deps.canStartItem ? { canStartItem: deps.canStartItem } : {}),
       ...(deps.itemDeadline ? { itemDeadline: deps.itemDeadline } : {}),
+      ...(carry.size ? { carryFor: (n: number) => carry.get(n) } : {}),
     });
     const records = toProposalRecords({ candidateId: a.candidate.id, post, run, mode: deps.mode, modelId: deps.modelId, fetchedAt: stored?.fetchedAt ?? null, protectedFor, correctionSkipped });
+    // 同一性（§2）: 機会の抽出（上の調査・判断）とは別の段で、登録済みの抽選・他の候補・同じ投稿の前の項目と照合する。照合先・根拠・差・予定の操作を登録案に保存する（抽選は変えない）
+    if (deps.identity) {
+      const basisAt = stored?.fetchedAt ?? clock().toISOString();
+      const existing = await loadExistingOpportunities(a.db, a.householdId, { basisAt, candidateId: a.candidate.id, mode: deps.mode });
+      const postUrls = [a.candidate.source_url, a.candidate.x_post_id ? `https://x.com/i/status/${a.candidate.x_post_id}` : null].filter((u): u is string => !!u);
+      for (const [i, r] of records.entries()) {
+        const res = run.results.find((x) => x.plan.itemNo === r.itemNo)?.result;
+        if (r.decision === "none" || !res || isInterrupted(res)) continue; // 未完了の項目は照合しない（続きを調べてから）
+        const siblings: ExistingOpportunity[] = records.slice(0, i).filter((x) => x.decision === "register" || x.decision === "tentative").map((x) => ({ id: `p:${x.proposalKey}`, kind: "proposal", chain: "", store: x.fields.store?.value ?? "", storeMode: x.fields.apply_unit?.value ?? "unknown", selectableStores: [], products: x.fields.product?.value ? [x.fields.product.value] : [], applyStart: x.fields.apply_start?.value ?? null, applyDeadline: x.fields.deadline?.value ?? null, result: x.fields.result_at?.value ?? null, sourceUrls: x.sourceUrls, createdAt: basisAt, humanConfirmed: false, decision: x.decision }));
+        // 1回の実行の時間枠に照合の呼び出しが収まらないときは呼ばない（未照合として人の確認へ。費用・時間の外枠を越えない）
+        const noTime = !!deps.canStartItem && !deps.canStartItem();
+        const id = await judgeIdentity({ opportunity: opportunityFromRecord(r, postUrls, res.evidence.find((e) => e.kind === "seed")?.text), existing: [...existing, ...siblings], ...(noTime ? {} : { judge: deps.identity.judge }), budget, ...(deps.mode === "real" ? {} : { reserveJpy: 0 }), basisAt, model: deps.identity.model }); // モック・再生は費用0（予約しない）
+        attachIdentity(r, id);
+        if (id.costJpy) r.costJpy = Math.round(((r.costJpy ?? 0) + id.costJpy) * 10_000) / 10_000; // 照合の費用も、その登録案の費用に含める（保存した費用の合計＝実行の計上）
+      }
+    }
     const save = a.persist === false ? { inserted: 0, unchanged: 0, superseded: 0, failed: 0 } : await saveProposals(a.db, a.householdId, records);
     if (save.failed > 0 && save.inserted === 0 && save.unchanged === 0) return { ok: false, reason: "save_failed" };
     // 取得した全文と、取得網羅性の計測を保存する（失敗しても登録案は失わない。失敗は件数で返す）
@@ -374,7 +445,14 @@ export async function generateProposalsForCandidate(a: { db: Db; householdId: st
         storage.experiences = { saved, hinted };
       }
     }
-    return { ok: true, records, save, storage, stopped: run.stopped, costJpy: Math.round((budget.costJpy - before) * 10_000) / 10_000, processedItems: run.results.map((x) => x.plan.itemNo), pendingItems: run.pending, totalItems: run.plans.length };
+    // F1: 完了＝AIが調査・判断を終え、保存もできた項目だけ。時間・予算・障害で中断した項目と保存に失敗した項目は、未着手の項目と同じく次の実行で続ける
+    const failedKeys = new Set(save.failedKeys ?? []);
+    const interruptedItems = run.results.filter((x) => isInterrupted(x.result)).map((x) => x.plan.itemNo);
+    const unsaved = records.filter((r) => failedKeys.has(r.proposalKey)).map((r) => r.itemNo);
+    const notDone = new Set([...interruptedItems, ...unsaved]);
+    const processedItems = run.results.map((x) => x.plan.itemNo).filter((n) => !notDone.has(n));
+    const pendingItems = [...new Set([...run.pending, ...notDone])].sort((x, y) => x - y);
+    return { ok: true, records, save, storage, stopped: run.stopped, costJpy: Math.round((budget.costJpy - before) * 10_000) / 10_000, processedItems, pendingItems, totalItems: run.plans.length, interruptedItems, carriedItems: run.results.filter((x) => carry.has(x.plan.itemNo)).map((x) => x.plan.itemNo) };
   } catch {
     return { ok: false, reason: "run_failed" };
   }

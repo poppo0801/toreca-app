@@ -95,8 +95,8 @@ describe.skipIf(!dbTestsEnabled)("Phase 2 E2E監査: 項目の対応・人の修
     }
     expect(of(1).some((x) => x.text.includes("MARKER-A-7731"))).toBe(true); // 自分のページは届いている
     expect(of(2).some((x) => x.text.includes("MARKER-B-9914"))).toBe(true);
-    // ツール: 許可された提出用の1つだけ（書き込み・実行・投稿のツールが混ざらない）
-    for (const x of sent) expect(["submit_research_turn", "submit_registration_judgment"]).toContain(x.tools.join(","));
+    // ツール: 許可された提出用の1つだけ（書き込み・実行・投稿のツールが混ざらない）。同一性の照合（JUDGMENT_IDENTITY_EFFICIENCY）も提出用のツールだけ
+    for (const x of sent) expect(["submit_research_turn", "submit_registration_judgment", "submit_identity_judgment"]).toContain(x.tools.join(","));
     // 保存された登録案も項目どおり
     const r = await rows(c.id, true);
     expect(r.map((x) => (x.fields as Record<string, { value: string }>).store.value)).toEqual(["新宿本店", "渋谷西口店"]);

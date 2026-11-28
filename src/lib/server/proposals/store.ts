@@ -15,6 +15,8 @@ export interface SaveSummary {
   unchanged: number;
   superseded: number;
   failed: number;
+  /** 保存に失敗した登録案の proposal_key（JUDGMENT_IDENTITY_EFFICIENCY F1: 保存できなかった項目を完了扱いにしない） */
+  failedKeys?: string[];
 }
 
 /** キーの順序に依らない比較用の JSON（DBの jsonb はキーの順序を保たない） */
@@ -53,8 +55,9 @@ const rowOf = (householdId: string, r: ProposalRecord, version: number) => ({
 });
 
 export async function saveProposals(db: Db, householdId: string, records: ProposalRecord[]): Promise<SaveSummary> {
-  const s: SaveSummary = { inserted: 0, unchanged: 0, superseded: 0, failed: 0 };
+  const s: SaveSummary = { inserted: 0, unchanged: 0, superseded: 0, failed: 0, failedKeys: [] };
   for (const r of records) {
+    const failedBefore = s.failed;
     try {
       const cur = (await t(db, "registration_proposals").select("id,version,input_hash,decision,verified,apply_unit,apply_unit_basis,held_reasons,fields").eq("household_id", householdId).eq("proposal_key", r.proposalKey).is("superseded_at", null).maybeSingle()) as Rows;
       if (cur.error) {
@@ -99,6 +102,7 @@ export async function saveProposals(db: Db, householdId: string, records: Propos
     } catch {
       s.failed++;
     }
+    if (s.failed > failedBefore) s.failedKeys!.push(r.proposalKey);
   }
   return s;
 }

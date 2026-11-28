@@ -2,8 +2,9 @@
 
 更新日: 2026-11-20。これは**優先課題の整理**であり、未承認の新Stageを確定するものではない。進捗はPR・デプロイ・実機検証で更新する。
 
-## 現在の段階（2026-11-27 更新）
-- **Phase 3 AUTONOMY_RESTORATION**（`docs/implementation/PHASE_3_AUTONOMY_RESTORATION.md`）を実施中です。内容は、設計思想の是正（V22）と、本番シャドーでのAIの調査・推論・判断の能力の回復です。
+## 現在の段階（2026-11-28 更新）
+- **Phase 3 JUDGMENT_IDENTITY_EFFICIENCY**（`docs/implementation/PHASE_3_JUDGMENT_IDENTITY_EFFICIENCY.md`）を実施中です。優先順位（V23）: ①判断の精度 ②同一性（既存の登録・他の候補との照合、重複・誤統合・誤分割の削減）③性能を保てる範囲での1候補の費用の削減。収集の強みは維持し、未知の情報元の探索は後順位（計画には残す）、不要な文字の削減は蓄積の後。
+- 直前の段階 **Phase 3 AUTONOMY_RESTORATION**（設計思想の是正 V22・本番シャドーの能力の回復）は完了（`docs/reports/2026-11-28-phase3-autonomy-restoration.md`）。
 - それ以前の Phase 3（RUNTIME_CORRECTNESS 〜 CAPABILITY_CEILING）の報告書は `docs/reports/2026-11-2*-phase3-*.md` にあります。
 - 新AIの本登録・自動登録・削除・応募・通知は、別の承認によります（未解禁）。
 - 下の Stage 10C〜10H の表は、2026-11-20時点の計画（履歴）です。現在の段階の名前と順序は、上の Phase 3 の指示書に従います。

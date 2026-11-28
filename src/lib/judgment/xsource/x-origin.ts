@@ -213,6 +213,8 @@ export async function runXPostReplay(a: {
   canStartItem?: () => boolean;
   /** 項目ごとの調査の締切（エポックミリ秒）。項目を始めるときに評価する。候補全体の共通の締切にしない */
   itemDeadline?: () => number | undefined;
+  /** JUDGMENT_IDENTITY_EFFICIENCY F1: 以前の実行で中断した項目の続き（前回読んだページ・前回の暫定の判断と残りの問い） */
+  carryFor?: (itemNo: number) => { urls: string[]; feedback: string } | undefined;
 }): Promise<{ plans: ItemPlan[]; results: { plan: ItemPlan; result: ResearchResult }[]; trace: XTraceRow[]; cacheHits: number; stopped: boolean; /** まだ調べていない項目（次の実行で再開する） */ pending: number[] }> {
   const { items } = planXPost(a.post);
   const tools = cachedTools(a.tools);
@@ -228,8 +230,9 @@ export async function runXPostReplay(a: {
     }
     const scoper = makeScoper(plan, items, storeFromGroupLabel);
     const dl = a.itemDeadline?.();
+    const carry = a.carryFor?.(plan.itemNo);
     const itemTools: ResearchTools = dl !== undefined ? Object.assign(Object.create(tools) as ResearchTools, { researchDeadlineMs: dl }) : tools;
-    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools: itemTools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && (plan.scopedUrls.length === 0 || (a.post.sourceIsAnnouncement && plan.scopedUrls.includes(a.post.sourcePage.url))) ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }) });
+    const result = await runResearch({ caseId: `${a.post.postId}#${plan.itemNo}`, seed: seedEvidence(`s${plan.itemNo}`, plan.seedText, a.now, null, plan.notes), agent: a.agent, judge: a.judge, tools: itemTools, budget: a.budgetFor?.(plan.itemNo) ?? a.budget, limits: a.limits, protectedFields: a.protectedFor?.(plan.itemNo, plan), registerRequiresUnit: a.registerRequiresUnit, ...(a.escalation ? { escalation: a.escalation } : {}), ...(a.userRegion ? { userRegion: a.userRegion } : {}), ...(a.post.sourcePage && (plan.scopedUrls.length === 0 || (a.post.sourceIsAnnouncement && plan.scopedUrls.includes(a.post.sourcePage.url))) ? { autoFetch: [a.post.sourcePage.url] } : {}), scoper: (u, p) => scoper(u, { text: p.text, structure: p.structure }), ...(carry ? { carry } : {}) });
     results.push({ plan, result });
   }
   const trace: XTraceRow[] = results.map(({ plan, result }) => ({

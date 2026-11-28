@@ -26,7 +26,8 @@ export type ExtractInput =
   | { kind: "url"; url: string }
   | { kind: "x_url"; url: string };
 
-export type ExtractFailCode = "not_configured" | "empty_input" | "fetch_failed" | "ai_failed" | "rate_limited" | "not_lottery" | "nothing_found";
+/** timed_out: 収集の実行の時間枠（呼び出し側の打ち切り）で結果を待てなかった。AI側の失敗ではない（連続失敗の一時停止に数えない。JUDGMENT_IDENTITY_EFFICIENCY F4） */
+export type ExtractFailCode = "not_configured" | "empty_input" | "fetch_failed" | "ai_failed" | "rate_limited" | "not_lottery" | "nothing_found" | "timed_out";
 
 export type ExtractResult =
   | {

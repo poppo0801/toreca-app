@@ -337,14 +337,21 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
         }
         const t1 = now().getTime();
         // AUTONOMY_RESTORATION（再開）: 同じジョブの以前の実行（部分完了）で調べた項目と使った費用を、実行台帳から引き継ぐ
-        // 読み取りに失敗しても止めない（再開の情報なし＝最初から。費用は日次・通算の予算が縛る）
-        const prev = await (async () => {
+        // JUDGMENT_IDENTITY_EFFICIENCY F2: 読み取りに失敗したら実行しない（以前は「再開の情報なし＝0円・最初から」として進み、1候補の上限を再開で回避し、完了済みの項目を再課金しうた）。少し後に罰なしで戻す
+        type PrevRow = { cost_jpy: number | null; record: { doneItems?: number[]; status?: string } | null };
+        const prev = await (async (): Promise<PrevRow[] | null> => {
           try {
-            return ((await table(db, "shadow_judgments").select("cost_jpy,record").eq("household_id", j.household_id).eq("job_id", j.id).limit(50)).data ?? []) as { cost_jpy: number | null; record: { doneItems?: number[]; status?: string } | null }[];
+            const r = (await table(db, "shadow_judgments").select("cost_jpy,record").eq("household_id", j.household_id).eq("job_id", j.id).limit(200)) as { data: PrevRow[] | null; error?: unknown };
+            return r.error ? null : (r.data ?? []);
           } catch {
-            return [] as { cost_jpy: number | null; record: { doneItems?: number[]; status?: string } | null }[];
+            return null;
           }
         })();
+        if (prev === null) {
+          await requeue(j, new Date(now().getTime() + 10 * 60_000), "ledger_read_failed", false);
+          bump(res.byReason, "ledger_read_failed");
+          continue;
+        }
         const doneItems = [...new Set(prev.flatMap((x) => (Array.isArray(x.record?.doneItems) ? x.record!.doneItems! : [])))];
         const spentOnJobJpy = prev.reduce((s, x) => s + Number(x.cost_jpy ?? 0), 0);
         const resumes = prev.filter((x) => x.record?.status === "partial").length;
@@ -372,11 +379,12 @@ export async function runShadowWorker(deps: ShadowWorkerDeps): Promise<ShadowWor
           if (pr.reason.startsWith("gate:") || pr.reason.startsWith("ticket:")) await finish(j, "skipped", pr.reason.slice(0, 60)); // 許可されていない: AIは1回も呼んでいない
           else if (pr.reason === "budget_per_case_exhausted") await finish(j, "done", "budget_per_case_exhausted"); // 再開をまたいで1候補の上限に達した（未完了の項目は記録に残る）
           else if (pr.reason === "budget") await requeue(j, nextJstDay(now()), "budget", false);
+          else if (pr.reason === "budget_run") await requeue(j, new Date(now().getTime() + 10 * 60_000), "budget_run", false); // この実行の残りの枠が無いだけ（候補の上限ではない）
           else if (pr.reason === "run_call_limit") await requeue(j, new Date(now().getTime() + 10 * 60_000), "run_call_limit", false);
           else if (j.attempts >= j.max_attempts) await finish(j, "failed", pr.reason.slice(0, 60));
           else await requeue(j, new Date(now().getTime() + Math.min(60, 2 ** j.attempts) * 60_000), pr.reason.slice(0, 60), true);
           continue;
-        }        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace, ...(pr.items?.length ? { items: pr.items } : {}), ...(pr.doneItems ? { doneItems: pr.doneItems } : {}), ...(pr.pendingItems?.length ? { pendingItems: pr.pendingItems } : {}), ...(pr.totalItems !== undefined ? { totalItems: pr.totalItems } : {}), ...(resumes ? { resumes } : {}) };
+        }        const recP = { v: 1, kind: "proposal_shadow", at: now().toISOString(), status: pr.status, proposals: pr.proposals, inserted: pr.inserted, costJpy: pr.costJpy, stopped: pr.stopped, decisions: pr.decisions, revisions: pr.revisions, diagnostics: pr.diagnostics, basisAt: pr.basisAt, search: pr.trace.tools.search === "offered", liveFetch: pr.trace.tools.liveFetch === "offered", trace: pr.trace, ...(pr.items?.length ? { items: pr.items } : {}), ...(pr.doneItems ? { doneItems: pr.doneItems } : {}), ...(pr.pendingItems?.length ? { pendingItems: pr.pendingItems } : {}), ...(pr.totalItems !== undefined ? { totalItems: pr.totalItems } : {}), ...(pr.interruptedItems?.length ? { interruptedItems: pr.interruptedItems } : {}), ...(resumes ? { resumes } : {}) };
         // 実行台帳の行の上限（8,000バイト）を超えるときは、試行の要約を減らす（費用の記録自体は失わない）
         while (JSON.stringify(recP).length > 7000 && (recP as { items?: unknown[] }).items?.length) (recP as { items?: unknown[] }).items!.pop();
         const rowP = { household_id: j.household_id, job_id: j.id, candidate_id: j.candidate_id, prompt_version: "proposal-shadow", model_id: "proposal-shadow", status: pr.status, attempts: 1, cost_jpy: pr.costJpy, latency_ms: now().getTime() - t1, structure_new: "proposal_shadow", structure_legacy: null, opportunity_count: pr.decisions.register ?? 0, record: recP };

@@ -41,6 +41,8 @@ if (!(total > 0) || !(per > 0) || confirm !== `APPROVE INTENSIVE ${total}JPY`) {
 start({
   INTENSIVE_MODE: "run",
   INTENSIVE_JUDGE: arg("judge") ?? "adaptive",
+  INTENSIVE_UPPER: arg("upper") ?? "",
+  INTENSIVE_IDENTITY: arg("identity") ?? "",
   // PRODUCTION_PARITY: 調査モデル（--agent=haiku|sonnet）・推論の度合い（--agent-effort / --judge-effort = low|medium|high）の比較
   AGENT_MODEL: arg("agent") === "sonnet" ? "claude-sonnet-5-5" : "claude-haiku-5-5",
   INTENSIVE_AGENT_EFFORT: arg("agent-effort") ?? "",
